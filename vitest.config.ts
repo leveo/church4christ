@@ -33,7 +33,12 @@ export default defineConfig(async () => {
           ],
           test: {
             name: 'workers',
-            include: ['test/security-headers.test.ts', 'test/schema.test.ts'],
+            include: [
+              'test/security-headers.test.ts',
+              'test/schema.test.ts',
+              'test/db.test.ts',
+              'test/settings.test.ts',
+            ],
             setupFiles: ['./test/setup.ts'],
           },
         },
