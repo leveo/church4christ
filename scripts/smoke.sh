@@ -59,6 +59,29 @@ echo "$my_headers" | grep -iq '^HTTP/1.1 303' || fail "/en/my expected 303 for a
 echo "$my_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/en/my redirect not to /en/signin"
 echo "$my_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/my redirect missing nosniff header"
 
+# Sign-in page renders its form, honeypot field included (anti-bot).
+signin_status=$(status "$BASE/en/signin")
+[ "$signin_status" = "200" ] || fail "/en/signin expected 200, got $signin_status"
+signin_body=$(curl -sf "$BASE/en/signin")
+echo "$signin_body" | grep -q '<form method="post"' || fail "/en/signin missing form"
+echo "$signin_body" | grep -q 'name="website"' || fail "/en/signin missing honeypot input"
+echo "$signin_body" | grep -q 'name="email"' || fail "/en/signin missing email input"
+
+# Anti-enumeration: two POSTs with different emails must yield byte-identical
+# "check your email" HTML — the page must not reveal whether an account exists.
+post_a=$(curl -s -X POST -H "Origin: $BASE" --data-urlencode "email=probe-a@example.com" "$BASE/en/signin")
+post_b=$(curl -s -X POST -H "Origin: $BASE" --data-urlencode "email=probe-b@example.com" "$BASE/en/signin")
+echo "$post_a" | grep -q 'Check your email' || fail "signin POST missing success state"
+[ "$post_a" = "$post_b" ] || fail "signin POST not anti-enumeration-safe (bodies differ by email)"
+
+# POST /signout without a session: no work to do, just bounce home (303). Send a
+# same-origin Origin header like a real browser form post would, so it clears
+# both Astro's built-in and our middleware CSRF checks.
+signout_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: $BASE" "$BASE/signout")
+{ [ "$signout_status" = "303" ] || [ "$signout_status" = "405" ]; } || fail "POST /signout expected 303/405, got $signout_status"
+signout_get=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/signout")
+[ "$signout_get" = "405" ] || fail "GET /signout expected 405, got $signout_get"
+
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
 echo "$en_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/ missing x-content-type-options"

@@ -1,0 +1,80 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { t } from '../../lib/i18n';
+import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
+import { consumeToken, peekToken } from '../../lib/auth';
+import { getPersonById } from '../../lib/db';
+import { mintSession, sessionCookie } from '../../lib/session';
+
+// Two-step consumption: GET only *peeks* (mail scanners prefetch links and would
+// otherwise burn a single-use token); the explicit POST consumes and signs in.
+// This route is locale-free, so the page renders bilingually (en + zh stacked).
+const raw = Astro.params.token ?? '';
+const vars = env as unknown as { DB: D1Database; SESSION_SECRET?: string };
+let state: 'confirm' | 'error' = 'error';
+
+if (Astro.request.method === 'POST') {
+  const consumed = vars.SESSION_SECRET ? await consumeToken(vars.DB, raw, 'login') : null;
+  const person = consumed ? await getPersonById(vars.DB, consumed.person_id) : null;
+  if (person && person.active === 1 && vars.SESSION_SECRET) {
+    const jwt = await mintSession(vars.SESSION_SECRET, {
+      id: person.id,
+      email: person.email,
+      sessionEpoch: person.session_epoch,
+    });
+    const target = person.lang === 'en' || person.lang === 'zh' ? person.lang : DEFAULT_LOCALE;
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: `/${target}/my`,
+        'set-cookie': sessionCookie(jwt, import.meta.env.PROD),
+      },
+    });
+  }
+  // fall through to the error state
+} else {
+  state = (await peekToken(vars.DB, raw, 'login')) !== null ? 'confirm' : 'error';
+}
+
+const title = LOCALES.map((l) => t(l, state === 'confirm' ? 'auth.confirm.title' : 'auth.error.title')).join(' · ');
+---
+<Base title={title} locale={DEFAULT_LOCALE} noindex>
+  <section class="container-narrow py-16 text-center">
+    {
+      state === 'confirm' ? (
+        <>
+          {LOCALES.map((l) => (
+            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.confirm.title')}</h1>
+              <p class="mt-2 text-ink-muted">{t(l, 'auth.confirm.body', { site: t(l, 'site.name') })}</p>
+            </div>
+          ))}
+          <form method="post" class="mt-4">
+            <button
+              type="submit"
+              class="rounded-full bg-primary text-on-primary font-semibold px-8 py-3 hover:bg-primary-hover"
+            >
+              {LOCALES.map((l) => t(l, 'auth.confirm.button')).join(' / ')}
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          {LOCALES.map((l) => (
+            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.error.title')}</h1>
+              <p class="mt-2 text-ink-muted">{t(l, 'auth.error.body')}</p>
+            </div>
+          ))}
+          <a
+            href={`/${DEFAULT_LOCALE}/signin`}
+            class="inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
+          >
+            {LOCALES.map((l) => t(l, 'auth.error.retry')).join(' / ')}
+          </a>
+        </>
+      )
+    }
+  </section>
+</Base>

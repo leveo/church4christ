@@ -66,4 +66,34 @@ export default {
   'notFound.home': 'Return home',
 
   'admin.title': 'Church4Christ Admin',
+
+  'signin.title': 'Sign in',
+  'signin.intro': 'Enter your email and we’ll send you a secure sign-in link. That’s all you need.',
+  'signin.emailLabel': 'Email address',
+  'signin.emailPlaceholder': 'you@example.com',
+  'signin.submit': 'Send me a sign-in link',
+  'signin.sentTitle': 'Check your email',
+  'signin.sentBody': 'If that address is registered, a sign-in link is on its way. The link expires in 15 minutes.',
+
+  'auth.confirm.title': 'Confirm sign-in',
+  'auth.confirm.body': 'You’re about to sign in to {site}. Click the button below to continue.',
+  'auth.confirm.button': 'Sign in',
+  'auth.error.title': 'This link is no longer valid',
+  'auth.error.body': 'Sign-in links expire after 15 minutes and can be used only once.',
+  'auth.error.retry': 'Request a new link',
+
+  'auth.email.subject': 'Your sign-in link for {site}',
+  'auth.email.body': 'Click the link below to sign in. It expires in 15 minutes and can be used once. If you didn’t request this, you can ignore this email.',
+
+  'respond.title': 'Your serving request',
+  'respond.summary': 'You’ve been asked to serve as {position} for {service} on {date}.',
+  'respond.accept': 'Accept',
+  'respond.decline': 'Decline',
+  'respond.reasonLabel': 'Reason (optional)',
+  'respond.reasonPlaceholder': 'Let the team know why, if you’d like.',
+  'respond.accepted': 'Thanks! Your acceptance has been recorded.',
+  'respond.declined': 'Thanks for letting us know. Your response has been recorded.',
+  'respond.past': 'This request is for a service that has already passed.',
+  'respond.invalid': 'This link is no longer valid.',
+  'respond.retry': 'Go to sign-in',
 } satisfies Record<string, string>;

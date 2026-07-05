@@ -65,4 +65,34 @@ export default {
   'notFound.home': '返回首页',
 
   'admin.title': '四方基督教会 管理后台',
+
+  'signin.title': '登录',
+  'signin.intro': '输入你的电子邮箱，我们会给你发送一个安全登录链接，仅此而已。',
+  'signin.emailLabel': '电子邮箱',
+  'signin.emailPlaceholder': 'you@example.com',
+  'signin.submit': '给我发送登录链接',
+  'signin.sentTitle': '请查收邮件',
+  'signin.sentBody': '如果该邮箱已注册，登录链接正在发送途中。链接将在 15 分钟后失效。',
+
+  'auth.confirm.title': '确认登录',
+  'auth.confirm.body': '你即将登录 {site}，请点击下方按钮继续。',
+  'auth.confirm.button': '登录',
+  'auth.error.title': '此链接已失效',
+  'auth.error.body': '登录链接在 15 分钟后失效，且仅可使用一次。',
+  'auth.error.retry': '重新获取链接',
+
+  'auth.email.subject': '你在 {site} 的登录链接',
+  'auth.email.body': '请点击下方链接登录。链接将在 15 分钟后失效，且仅可使用一次。如果这不是你本人的操作，可忽略此邮件。',
+
+  'respond.title': '你的服事邀请',
+  'respond.summary': '诚邀你于 {date} 的 {service} 担任 {position} 服事。',
+  'respond.accept': '接受',
+  'respond.decline': '婉拒',
+  'respond.reasonLabel': '原因（可选）',
+  'respond.reasonPlaceholder': '如果方便，请告诉团队原因。',
+  'respond.accepted': '感谢！你的接受已记录。',
+  'respond.declined': '感谢你的告知，你的回复已记录。',
+  'respond.past': '此邀请对应的聚会已经结束。',
+  'respond.invalid': '此链接已失效。',
+  'respond.retry': '前往登录',
 } satisfies Record<string, string>;

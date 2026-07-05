@@ -1,0 +1,89 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { t } from '../../lib/i18n';
+import { parseLocale } from '../../lib/locales';
+import { getPersonByEmail } from '../../lib/db';
+import { sendMagicLink } from '../../lib/notify';
+import type { EmailEnv } from '../../lib/email';
+
+// `[locale]` matches any single segment; reject non-locales so `/foo/signin`
+// 404s instead of rendering the form under a bogus locale.
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const vars = env as unknown as EmailEnv & { DB: D1Database };
+// `next` is carried through a form re-render only. DECISION (slice 3): the
+// magic-link flow always lands on /{locale}/my, so we never propagate it into
+// the emailed link.
+const next = Astro.url.searchParams.get('next');
+let sent = false;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const honeypot = String(form.get('website') ?? '').trim();
+  const email = String(form.get('email') ?? '').trim().toLowerCase();
+  if (honeypot) {
+    // A bot filled the hidden field. Pretend success; do nothing.
+    sent = true;
+  } else if (email) {
+    // Anti-enumeration: whether or not the person exists (or is rate limited),
+    // we always fall through to the identical "check your email" state.
+    try {
+      const person = await getPersonByEmail(vars.DB, email);
+      if (person) await sendMagicLink(vars, vars.DB, person, locale);
+    } catch (e) {
+      console.error('signin failure', e);
+    }
+    sent = true;
+  }
+}
+---
+<Base title={t(locale, 'signin.title')} locale={locale} noindex>
+  <section class="container-narrow py-16">
+    {
+      sent ? (
+        <div class="bg-surface-raised border border-border rounded-lg p-6">
+          <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'signin.sentTitle')}</h1>
+          <p class="mt-3 text-ink-muted">{t(locale, 'signin.sentBody')}</p>
+        </div>
+      ) : (
+        <>
+          <h1 class="font-display text-heading-md font-bold">{t(locale, 'signin.title')}</h1>
+          <p class="mt-3 text-ink-muted">{t(locale, 'signin.intro')}</p>
+          <form method="post" class="mt-6 space-y-4">
+            {next && <input type="hidden" name="next" value={next} />}
+            {/* Honeypot: hidden from humans, tempting to bots. A filled value is
+                treated as spam. Off-screen rather than display:none so more bots trip it. */}
+            <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
+              <label>
+                Website
+                <input type="text" name="website" tabindex="-1" autocomplete="off" />
+              </label>
+            </div>
+            <label class="block">
+              <span class="block text-sm font-semibold">{t(locale, 'signin.emailLabel')}</span>
+              <input
+                type="email"
+                name="email"
+                required
+                autocomplete="email"
+                placeholder={t(locale, 'signin.emailPlaceholder')}
+                class="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2"
+              />
+            </label>
+            <button
+              type="submit"
+              class="w-full rounded-full bg-primary text-on-primary font-semibold px-4 py-2.5 hover:bg-primary-hover"
+            >
+              {t(locale, 'signin.submit')}
+            </button>
+          </form>
+        </>
+      )
+    }
+  </section>
+</Base>

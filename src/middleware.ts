@@ -25,7 +25,7 @@ function forbidden(locale: string): Response {
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>403 Forbidden</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; text-align: center;">
+<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; text-align: center;"> <!-- /* tokens-ok */ intentional system-font fallback: this minimal 403 renders without the token CSS bundle -->
 <h1>403</h1><p>You do not have access to this page.</p><p><a href="/${locale}/">Home</a></p>
 </body></html>`;
   const res = new Response(html, {
@@ -55,6 +55,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
   context.locals.locale = locale ?? DEFAULT_LOCALE;
   context.locals.theme = THEME_DEFAULT; // settings-driven in slice 5
   context.locals.user = null;
+
+  // CSRF: reject cross-origin state-changing requests before doing any work. When
+  // the Origin header is present it must match this origin; when it is absent,
+  // fall back to Sec-Fetch-Site (a forged cross-site POST cannot set it to
+  // same-origin). SameSite=Lax on the session cookie is the backstop. The 403 is
+  // hardened like every other early return (baseline headers + no-store).
+  const method = context.request.method;
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const origin = context.request.headers.get('origin');
+    const site = context.request.headers.get('sec-fetch-site');
+    const sameOrigin = origin
+      ? origin === context.url.origin
+      : site === null || site === 'same-origin' || site === 'none';
+    if (!sameOrigin) {
+      const res = new Response('Forbidden', {
+        status: 403,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+      });
+      applySecurityHeaders(res.headers);
+      return res;
+    }
+  }
 
   // Session: reload the person row every request so deactivation / soft-delete /
   // epoch bumps take effect immediately. Fail closed — a missing SESSION_SECRET
@@ -98,8 +120,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pathname === '/robots.txt';
   if (!isAsset) {
     applySecurityHeaders(res.headers);
-    // Any page rendered with a user is personal — never store it in a shared cache.
-    if (context.locals.user) res.headers.set('cache-control', 'no-store');
+    // Any page rendered with a user is personal — never store it in a shared
+    // cache. /media/ and /cal/ are long-cacheable public assets (R2 media, iCal
+    // feed) that set their own caching even when a user is attached, so exempt
+    // them from the personal no-store (those routes land in a later slice).
+    const isCacheable = pathname.startsWith('/media/') || pathname.startsWith('/cal/');
+    if (context.locals.user && !isCacheable) res.headers.set('cache-control', 'no-store');
   }
   return res;
 });
