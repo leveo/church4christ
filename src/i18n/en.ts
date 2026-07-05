@@ -52,6 +52,15 @@ export default {
   'home.card3Title': 'Find a place to serve',
   'home.card3Body': 'Use your gifts to bless others and grow alongside the family.',
 
+  'errors.required': 'This field is required.',
+  'errors.dateFormat': 'Enter a date as YYYY-MM-DD.',
+  'errors.urlInvalid': 'Enter a link starting with http:// or https://.',
+  'errors.datetimeInvalid': 'Enter a valid date and time.',
+  'errors.youtubeInvalid': 'Enter a valid YouTube link or video ID.',
+  'errors.integerInvalid': 'Enter a whole number.',
+  'errors.emailInvalid': 'Enter a valid email address.',
+  'errors.invalidOption': 'Choose one of the available options.',
+
   'notFound.title': 'Page not found',
   'notFound.body': 'The page you are looking for may have moved or no longer exists.',
   'notFound.home': 'Return home',

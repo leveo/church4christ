@@ -1,0 +1,462 @@
+// FormData parsers for the admin surfaces. Every parser returns either
+// { ok: true, data } or { ok: false, errors }, where each error value is a
+// dictionary KEY (e.g. 'errors.dateFormat') rendered through t() at display
+// time — never localized prose. Repeatable rows arrive as parallel getAll()
+// arrays (program_item / program_content / program_person, …); rows where every
+// field is blank are silently skipped (never an error). All user-entered URLs
+// are http(s)-only; dates are strict YYYY-MM-DD; datetime-local values are
+// converted to UTC SQL strings.
+import { isValidDateStr, datetimeLocalToUtc } from './dates';
+import { extractYouTubeId } from './youtube';
+import { LOCALES, type Locale } from './locales';
+
+export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
+
+// Error dictionary keys (defined in src/i18n/{en,zh}.ts, parity-enforced).
+const ERR = {
+  required: 'errors.required',
+  date: 'errors.dateFormat',
+  url: 'errors.urlInvalid',
+  datetime: 'errors.datetimeInvalid',
+  youtube: 'errors.youtubeInvalid',
+  integer: 'errors.integerInvalid',
+  email: 'errors.emailInvalid',
+  option: 'errors.invalidOption',
+} as const;
+
+const ROLES = ['member', 'editor', 'admin'] as const;
+type Role = (typeof ROLES)[number];
+
+/** http(s) only — carry-over security requirement for every user-entered URL. */
+export function isHttpUrl(s: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  return u.protocol === 'http:' || u.protocol === 'https:';
+}
+
+function isEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function str(fd: FormData, name: string): string {
+  return String(fd.get(name) ?? '').trim();
+}
+function strs(fd: FormData, name: string): string[] {
+  return fd.getAll(name).map((v) => String(v).trim());
+}
+function statusOf(fd: FormData): 'draft' | 'published' {
+  return fd.get('status') === 'published' ? 'published' : 'draft';
+}
+function checkbox(fd: FormData, name: string): boolean {
+  return fd.get(name) !== null;
+}
+
+/** Required positive integer id (e.g. a <select> of service types). */
+function requiredId(fd: FormData, name: string, errors: Record<string, string>): number {
+  const raw = str(fd, name);
+  if (/^\d+$/.test(raw)) return Number(raw);
+  errors[name] = ERR.required;
+  return 0;
+}
+
+function sortOf(fd: FormData, errors: Record<string, string>): number {
+  const raw = str(fd, 'sort');
+  if (raw === '') return 0;
+  if (!/^-?\d+$/.test(raw)) {
+    errors.sort = ERR.integer;
+    return 0;
+  }
+  return Number(raw);
+}
+
+function optionalDate(fd: FormData, name: string, errors: Record<string, string>): string | null {
+  const raw = str(fd, name);
+  if (raw === '') return null;
+  if (!isValidDateStr(raw)) {
+    errors[name] = ERR.date;
+    return null;
+  }
+  return raw;
+}
+
+function publishAtOf(fd: FormData, errors: Record<string, string>): string | null {
+  const raw = str(fd, 'publish_at');
+  if (raw === '') return null;
+  const utc = datetimeLocalToUtc(raw);
+  if (utc === null) {
+    errors.publish_at = ERR.datetime;
+    return null;
+  }
+  return utc;
+}
+
+/** label/value row pairs → array; rows blank in BOTH fields are skipped. */
+function pairRows(fd: FormData, labelName: string, valueName: string): { label: string; value: string }[] {
+  const labels = strs(fd, labelName);
+  const values = strs(fd, valueName);
+  const out: { label: string; value: string }[] = [];
+  for (let i = 0; i < Math.max(labels.length, values.length); i++) {
+    const label = labels[i] ?? '';
+    const value = values[i] ?? '';
+    if (label || value) out.push({ label, value });
+  }
+  return out;
+}
+
+/** Collect per-locale text from `${base}_en` / `${base}_zh`; only non-empty locales are kept. */
+function localeTexts(fd: FormData, base: string): Partial<Record<Locale, string>> {
+  const out: Partial<Record<Locale, string>> = {};
+  for (const loc of LOCALES) {
+    const v = str(fd, `${base}_${loc}`);
+    if (v) out[loc] = v;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Bulletin
+// ---------------------------------------------------------------------------
+export interface ProgramRow {
+  item: string;
+  content: string;
+  person: string;
+}
+export interface OfferingRow {
+  label: string;
+  amount: string;
+}
+export interface AttendanceRow {
+  label: string;
+  count: string;
+}
+export interface BulletinAnnouncementInput {
+  title: string;
+  body: string;
+  linkUrl: string | null;
+  linkLabel: string | null;
+}
+export interface BulletinInput {
+  serviceTypeId: number;
+  bulletinDate: string;
+  serviceTimeLabel: string | null;
+  program: ProgramRow[];
+  offering: OfferingRow[];
+  attendance: AttendanceRow[];
+  memoryVerse: string | null;
+  flowers: string | null;
+  status: 'draft' | 'published';
+  publishAt: string | null;
+  announcements: BulletinAnnouncementInput[];
+}
+
+export function parseBulletinForm(fd: FormData): FormResult<BulletinInput> {
+  const errors: Record<string, string> = {};
+  const serviceTypeId = requiredId(fd, 'service_type_id', errors);
+  const bulletinDate = str(fd, 'bulletin_date');
+  if (!isValidDateStr(bulletinDate)) errors.bulletin_date = ERR.date;
+  const serviceTimeLabel = str(fd, 'service_time_label') || null;
+
+  const items = strs(fd, 'program_item');
+  const contents = strs(fd, 'program_content');
+  const persons = strs(fd, 'program_person');
+  const program: ProgramRow[] = [];
+  for (let i = 0; i < Math.max(items.length, contents.length, persons.length); i++) {
+    const row = { item: items[i] ?? '', content: contents[i] ?? '', person: persons[i] ?? '' };
+    if (row.item || row.content || row.person) program.push(row);
+  }
+
+  const offering = pairRows(fd, 'offering_label', 'offering_amount').map((r) => ({ label: r.label, amount: r.value }));
+  const attendance = pairRows(fd, 'attendance_label', 'attendance_count').map((r) => ({ label: r.label, count: r.value }));
+
+  const annTitles = strs(fd, 'ann_title');
+  const annBodies = strs(fd, 'ann_body');
+  const annUrls = strs(fd, 'ann_url');
+  const annLabels = strs(fd, 'ann_label');
+  const announcements: BulletinAnnouncementInput[] = [];
+  const annLen = Math.max(annTitles.length, annBodies.length, annUrls.length, annLabels.length);
+  for (let i = 0; i < annLen; i++) {
+    const title = annTitles[i] ?? '';
+    const body = annBodies[i] ?? '';
+    const url = annUrls[i] ?? '';
+    const label = annLabels[i] ?? '';
+    if (!title && !body && !url && !label) continue;
+    if (!body) errors[`ann_body_${i}`] = ERR.required;
+    if (url && !isHttpUrl(url)) errors[`ann_url_${i}`] = ERR.url;
+    announcements.push({ title, body, linkUrl: url || null, linkLabel: label || null });
+  }
+
+  const status = statusOf(fd);
+  const publishAt = publishAtOf(fd, errors);
+  const memoryVerse = str(fd, 'memory_verse') || null;
+  const flowers = str(fd, 'flowers') || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return {
+    ok: true,
+    data: {
+      serviceTypeId,
+      bulletinDate,
+      serviceTimeLabel,
+      program,
+      offering,
+      attendance,
+      memoryVerse,
+      flowers,
+      status,
+      publishAt,
+      announcements,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sermon
+// ---------------------------------------------------------------------------
+export interface SermonInput {
+  serviceTypeId: number;
+  sermonDate: string;
+  title: string;
+  speaker: string;
+  scripture: string | null;
+  youtubeId: string | null;
+  series: string | null;
+  status: 'draft' | 'published';
+}
+
+export function parseSermonForm(fd: FormData): FormResult<SermonInput> {
+  const errors: Record<string, string> = {};
+  const serviceTypeId = requiredId(fd, 'service_type_id', errors);
+  const sermonDate = str(fd, 'sermon_date');
+  if (!isValidDateStr(sermonDate)) errors.sermon_date = ERR.date;
+  const title = str(fd, 'title');
+  if (!title) errors.title = ERR.required;
+  const speaker = str(fd, 'speaker');
+
+  // youtube optional; when supplied it must resolve to a valid id.
+  const youtubeRaw = str(fd, 'youtube');
+  let youtubeId: string | null = null;
+  if (youtubeRaw) {
+    youtubeId = extractYouTubeId(youtubeRaw);
+    if (!youtubeId) errors.youtube = ERR.youtube;
+  }
+
+  const scripture = str(fd, 'scripture') || null;
+  const series = str(fd, 'series') || null;
+  const status = statusOf(fd);
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { serviceTypeId, sermonDate, title, speaker, scripture, youtubeId, series, status } };
+}
+
+// ---------------------------------------------------------------------------
+// Prayer sheet
+// ---------------------------------------------------------------------------
+export interface PrayerSection {
+  heading: string;
+  items: string[];
+}
+export interface PrayerSheetInput {
+  sheetDate: string;
+  locale: Locale | null;
+  sections: PrayerSection[];
+  status: 'draft' | 'published';
+  publishAt: string | null;
+}
+
+export function parsePrayerSheetForm(fd: FormData): FormResult<PrayerSheetInput> {
+  const errors: Record<string, string> = {};
+  const sheetDate = str(fd, 'sheet_date');
+  if (!isValidDateStr(sheetDate)) errors.sheet_date = ERR.date;
+
+  const localeRaw = str(fd, 'locale');
+  let locale: Locale | null = null;
+  if (localeRaw) {
+    if ((LOCALES as readonly string[]).includes(localeRaw)) locale = localeRaw as Locale;
+    else errors.locale = ERR.option;
+  }
+
+  const headings = strs(fd, 'section_heading');
+  const itemBlocks = fd.getAll('section_items').map((v) => String(v));
+  const sections: PrayerSection[] = [];
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i] ?? '';
+    const items = (itemBlocks[i] ?? '')
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!heading && items.length === 0) continue; // fully-empty section → skipped
+    if (!heading) errors[`section_heading_${i}`] = ERR.required;
+    sections.push({ heading, items });
+  }
+
+  const status = statusOf(fd);
+  const publishAt = publishAtOf(fd, errors);
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { sheetDate, locale, sections, status, publishAt } };
+}
+
+// ---------------------------------------------------------------------------
+// Home announcements (i18n titles)
+// ---------------------------------------------------------------------------
+export interface AnnouncementInput {
+  titles: Partial<Record<Locale, string>>;
+  url: string | null;
+  sort: number;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+export function parseAnnouncementForm(fd: FormData): FormResult<AnnouncementInput> {
+  const errors: Record<string, string> = {};
+  const titles = localeTexts(fd, 'title');
+  if (Object.keys(titles).length === 0) errors.title = ERR.required;
+  const url = str(fd, 'url');
+  if (url && !isHttpUrl(url)) errors.url = ERR.url;
+  const sort = sortOf(fd, errors);
+  const active = checkbox(fd, 'active');
+  const startsAt = optionalDate(fd, 'starts_at', errors);
+  const endsAt = optionalDate(fd, 'ends_at', errors);
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { titles, url: url || null, sort, active, startsAt, endsAt } };
+}
+
+// ---------------------------------------------------------------------------
+// Events (i18n title + blurb)
+// ---------------------------------------------------------------------------
+export interface EventInput {
+  titles: Partial<Record<Locale, string>>;
+  blurbs: Partial<Record<Locale, string>>;
+  imageKey: string | null;
+  url: string | null;
+  sort: number;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+export function parseEventForm(fd: FormData): FormResult<EventInput> {
+  const errors: Record<string, string> = {};
+  const titles = localeTexts(fd, 'title');
+  if (Object.keys(titles).length === 0) errors.title = ERR.required;
+  // Blurbs are stored only for locales that actually carry a title.
+  const blurbs: Partial<Record<Locale, string>> = {};
+  for (const loc of LOCALES) {
+    if (titles[loc] === undefined) continue;
+    const b = str(fd, `blurb_${loc}`);
+    if (b) blurbs[loc] = b;
+  }
+  const url = str(fd, 'url');
+  if (url && !isHttpUrl(url)) errors.url = ERR.url;
+  const sort = sortOf(fd, errors);
+  const active = checkbox(fd, 'active');
+  const startsAt = optionalDate(fd, 'starts_at', errors);
+  const endsAt = optionalDate(fd, 'ends_at', errors);
+  // image_key is a hidden field carrying the CURRENT key; the events page
+  // overwrites it after a successful upload or on removal.
+  const imageKey = str(fd, 'image_key') || null;
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { titles, blurbs, imageKey, url: url || null, sort, active, startsAt, endsAt } };
+}
+
+// ---------------------------------------------------------------------------
+// People (member / editor / admin superset)
+// ---------------------------------------------------------------------------
+export interface PersonInput {
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  email: string;
+  phone: string | null;
+  role: Role;
+  active: boolean;
+  lang: Locale | null;
+}
+
+export function parsePersonForm(fd: FormData): FormResult<PersonInput> {
+  const errors: Record<string, string> = {};
+  const firstName = str(fd, 'first_name');
+  const lastName = str(fd, 'last_name');
+  const displayName = str(fd, 'display_name');
+  if (!displayName) errors.display_name = ERR.required;
+
+  // people.email is stored lowercased/trimmed and is required + valid.
+  const email = str(fd, 'email').toLowerCase();
+  if (!email) errors.email = ERR.required;
+  else if (!isEmail(email)) errors.email = ERR.email;
+
+  const phone = str(fd, 'phone') || null;
+
+  const roleRaw = str(fd, 'role');
+  let role: Role = 'member';
+  if ((ROLES as readonly string[]).includes(roleRaw)) role = roleRaw as Role;
+  else errors.role = ERR.option;
+
+  const active = checkbox(fd, 'active');
+
+  const langRaw = str(fd, 'lang');
+  let lang: Locale | null = null;
+  if (langRaw) {
+    if ((LOCALES as readonly string[]).includes(langRaw)) lang = langRaw as Locale;
+    else errors.lang = ERR.option;
+  }
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { firstName, lastName, displayName, email, phone, role, active, lang } };
+}
+
+// ---------------------------------------------------------------------------
+// Settings (fixed allowlist of dotted keys)
+// ---------------------------------------------------------------------------
+const SETTINGS_KEYS = [
+  'site.name.en',
+  'site.name.zh',
+  'site.tagline.en',
+  'site.tagline.zh',
+  'site.address',
+  'site.email',
+  'site.phone',
+  'site.map_url',
+  'site.giving_url',
+  'site.youtube_url',
+  'site.service_times.en',
+  'site.service_times.zh',
+  'theme.name',
+  'theme.default_mode',
+  'locale.default',
+] as const;
+const SETTINGS_URL_KEYS = new Set(['site.map_url', 'site.giving_url', 'site.youtube_url']);
+const THEME_NAMES = ['sanctuary', 'harvest', 'midnight'];
+const THEME_MODES = ['light', 'dark'];
+
+/**
+ * Parse the settings admin form. Only allowlisted keys present in the form are
+ * read (partial updates are fine); URL / email / enum keys are validated, all
+ * others pass through as trimmed free text.
+ */
+export function parseSettingsForm(fd: FormData): FormResult<Record<string, string>> {
+  const errors: Record<string, string> = {};
+  const data: Record<string, string> = {};
+  for (const key of SETTINGS_KEYS) {
+    if (!fd.has(key)) continue;
+    const value = str(fd, key);
+    if (SETTINGS_URL_KEYS.has(key)) {
+      if (value && !isHttpUrl(value)) errors[key] = ERR.url;
+    } else if (key === 'site.email') {
+      if (value && !isEmail(value)) errors[key] = ERR.email;
+    } else if (key === 'theme.name') {
+      if (!THEME_NAMES.includes(value)) errors[key] = ERR.option;
+    } else if (key === 'theme.default_mode') {
+      if (!THEME_MODES.includes(value)) errors[key] = ERR.option;
+    } else if (key === 'locale.default') {
+      if (!(LOCALES as readonly string[]).includes(value)) errors[key] = ERR.option;
+    }
+    data[key] = value;
+  }
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data };
+}

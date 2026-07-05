@@ -18,7 +18,14 @@ export default defineConfig(async () => {
         {
           test: {
             name: 'node',
-            include: ['test/tokens.test.ts', 'test/locales.test.ts', 'test/i18n.test.ts'],
+            include: [
+              'test/tokens.test.ts',
+              'test/locales.test.ts',
+              'test/i18n.test.ts',
+              'test/validate.test.ts',
+              'test/dates.test.ts',
+              'test/youtube.test.ts',
+            ],
             environment: 'node',
           },
         },

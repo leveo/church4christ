@@ -51,6 +51,15 @@ export default {
   'home.card3Title': '找到服事的岗位',
   'home.card3Body': '用你的恩赐祝福他人，在大家庭中一同成长。',
 
+  'errors.required': '此栏必填。',
+  'errors.dateFormat': '日期格式须为 YYYY-MM-DD。',
+  'errors.urlInvalid': '链接须以 http:// 或 https:// 开头。',
+  'errors.datetimeInvalid': '请输入有效的日期和时间。',
+  'errors.youtubeInvalid': '请输入有效的 YouTube 链接或视频 ID。',
+  'errors.integerInvalid': '请输入整数。',
+  'errors.emailInvalid': '请输入有效的电子邮箱。',
+  'errors.invalidOption': '请选择一个可用选项。',
+
   'notFound.title': '页面未找到',
   'notFound.body': '你要访问的页面可能已经移动或不存在。',
   'notFound.home': '返回首页',
