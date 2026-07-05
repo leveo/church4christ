@@ -52,10 +52,12 @@ curl -sf "$BASE/healthz" | grep -q '{"ok":true}' || fail "/healthz not {\"ok\":t
 unknown_status=$(status "$BASE/totally-unknown")
 [ "$unknown_status" = "404" ] || fail "/totally-unknown expected 404, got $unknown_status"
 
-# A protected namespace still fails closed for anon: /en/my → 303 to signin.
+# A protected namespace still fails closed for anon: /en/my → 303 to signin,
+# and the gate's redirect itself carries the baseline security headers.
 my_headers=$(curl -s -D - -o /dev/null "$BASE/en/my")
 echo "$my_headers" | grep -iq '^HTTP/1.1 303' || fail "/en/my expected 303 for anon"
 echo "$my_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/en/my redirect not to /en/signin"
+echo "$my_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/my redirect missing nosniff header"
 
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")

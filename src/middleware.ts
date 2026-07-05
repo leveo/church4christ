@@ -17,7 +17,9 @@ import { canAccess, classifyRoute } from './lib/routePolicy';
 // the Worker env with a cast — same technique as dcfc-serve's middleware.
 type AuthEnv = { DB: D1Database; SESSION_SECRET?: string; AUTH_DEV_BYPASS_EMAIL?: string };
 
-/** Minimal 403 page. Deliberately unstyled this slice; visual polish lands later. */
+/** Minimal 403 page. Deliberately unstyled this slice; visual polish lands later.
+ *  Hardened like every other response: baseline security headers + no-store
+ *  (this branch can be reached with a user attached — insufficient role). */
 function forbidden(locale: string): Response {
   const html = `<!doctype html>
 <html lang="${locale}">
@@ -26,10 +28,12 @@ function forbidden(locale: string): Response {
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; text-align: center;">
 <h1>403</h1><p>You do not have access to this page.</p><p><a href="/${locale}/">Home</a></p>
 </body></html>`;
-  return new Response(html, {
+  const res = new Response(html, {
     status: 403,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
   });
+  applySecurityHeaders(res.headers);
+  return res;
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
@@ -72,11 +76,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   // Route policy gate: the policy classifies BEFORE route existence, so a
   // not-yet-built protected page (e.g. /my) still redirects rather than 404s.
+  // Both early returns are hardened — no response leaves without the baseline
+  // security headers (the 303 branch is anonymous-only, so no no-store needed).
   const cls = classifyRoute(rest);
   if (!canAccess(cls, context.locals.user)) {
     if (!context.locals.user && context.request.method === 'GET') {
       const nextPath = encodeURIComponent(pathname + context.url.search);
-      return context.redirect(`/${context.locals.locale}/signin?next=${nextPath}`, 303);
+      const redirect = context.redirect(`/${context.locals.locale}/signin?next=${nextPath}`, 303);
+      applySecurityHeaders(redirect.headers);
+      return redirect;
     }
     return forbidden(context.locals.locale);
   }
