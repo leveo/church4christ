@@ -1,0 +1,57 @@
+---
+// Stub home: hero band + three feature cards. Links point at routes that land
+// in later slices; copy comes entirely from the dictionaries.
+import Base from '../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../lib/locales';
+import { t } from '../../lib/i18n';
+
+// `[locale]` matches any single path segment, so `/foo` would otherwise render
+// the home page. Reject anything that is not a real locale so it 404s instead.
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  return Astro.rewrite('/404');
+}
+
+const cards: { title: string; body: string; path: string }[] = [
+  { title: 'home.card1Title', body: 'home.card1Body', path: '/visit' },
+  { title: 'home.card2Title', body: 'home.card2Body', path: '/sermons' },
+  { title: 'home.card3Title', body: 'home.card3Body', path: '/serve' },
+];
+---
+
+<Base title={t(locale, 'home.welcome')} locale={locale}>
+  <section class="bg-primary text-on-primary">
+    <div class="container-content py-20 text-center">
+      <h1 class="font-display text-display-xl font-bold">{t(locale, 'home.heroTitle')}</h1>
+      <p class="mt-4 text-lg max-w-narrow mx-auto">{t(locale, 'home.heroSubtitle')}</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a
+          href={localePath(locale, '/visit')}
+          class="px-6 py-3 rounded-full bg-accent text-on-accent font-semibold hover:bg-accent-hover"
+        >
+          {t(locale, 'nav.visit')}
+        </a>
+        <a
+          href={localePath(locale, '/sermons')}
+          class="px-6 py-3 rounded-full border border-border hover:bg-primary-hover"
+        >
+          {t(locale, 'nav.sermons')}
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="container-content py-16 grid gap-6 sm:grid-cols-3">
+    {
+      cards.map((card) => (
+        <a
+          href={localePath(locale, card.path)}
+          class="block bg-surface-raised border border-border rounded-lg shadow-sm p-6 hover:shadow-md"
+        >
+          <h2 class="font-display text-heading-sm font-semibold">{t(locale, card.title)}</h2>
+          <p class="mt-2 text-ink-muted">{t(locale, card.body)}</p>
+        </a>
+      ))
+    }
+  </section>
+</Base>

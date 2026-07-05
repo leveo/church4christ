@@ -1,0 +1,45 @@
+---
+// Minimal admin shell (fleshed out in slice 5): shared theme/mode wiring and a
+// single top bar. Admin renders in English for now.
+import '../styles/base.css';
+import { THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { t } from '../lib/i18n';
+
+interface Props {
+  title?: string;
+}
+
+const { title } = Astro.props;
+const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
+const mode = THEME_DEFAULT_MODE[theme] ?? 'light';
+const appName = t('en', 'admin.title');
+const fullTitle = title ? `${title} · ${appName}` : appName;
+---
+
+<!doctype html>
+<html lang="en" data-theme={theme} data-mode={mode}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="robots" content="noindex" />
+    <script is:inline>
+      (function () {
+        var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
+        var el = document.documentElement;
+        var saved = localStorage.getItem('c4c-mode');
+        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
+      })();
+    </script>
+  </head>
+  <body class="min-h-screen bg-surface text-ink">
+    <header class="bg-header-bg text-header-ink border-b border-border">
+      <div class="container-wide h-14 flex items-center">
+        <span class="font-display font-semibold">{appName}</span>
+      </div>
+    </header>
+    <main class="container-wide py-8">
+      <slot />
+    </main>
+  </body>
+</html>

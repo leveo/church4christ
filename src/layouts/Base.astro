@@ -1,0 +1,73 @@
+---
+// Public shell: full <head> (SEO + hreflang), theme/mode wiring, and the
+// header/main/footer scaffold. Theme comes from Astro.locals.theme (settings in
+// slice 5); the inline no-flash script reconciles data-mode with localStorage
+// before first paint.
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/space-grotesk';
+import '../styles/base.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
+import { THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { t } from '../lib/i18n';
+
+interface Props {
+  title: string;
+  description?: string;
+  locale: Locale;
+}
+
+const { title, locale } = Astro.props;
+const description = Astro.props.description ?? t(locale, 'site.tagline');
+
+const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
+const mode = THEME_DEFAULT_MODE[theme] ?? 'light';
+
+const siteName = t(locale, 'site.name');
+const fullTitle = `${title} · ${siteName}`;
+
+// Canonical + hreflang alternates: strip the locale prefix, then re-prefix each
+// locale against the configured site origin. x-default points at English.
+const site = Astro.site ?? new URL(Astro.url.origin);
+const { rest } = pathWithoutLocale(Astro.url.pathname);
+const canonical = new URL(localePath(locale, rest), site).href;
+const alternates = [
+  { hreflang: 'en', href: new URL(localePath('en', rest), site).href },
+  { hreflang: 'zh-Hans', href: new URL(localePath('zh', rest), site).href },
+  { hreflang: 'x-default', href: new URL(localePath('en', rest), site).href },
+];
+---
+
+<!doctype html>
+<html lang={locale === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={mode}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline>
+      // No-flash mode: honor a saved choice, else fall back to the theme default.
+      (function () {
+        var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
+        var el = document.documentElement;
+        var saved = localStorage.getItem('c4c-mode');
+        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
+      })();
+    </script>
+  </head>
+  <body class="min-h-screen flex flex-col">
+    <a href="#main" class="skip-link">{t(locale, 'common.skipToContent')}</a>
+    <Header />
+    <main id="main" class="flex-1">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

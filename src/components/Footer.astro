@@ -1,0 +1,58 @@
+---
+// Site footer: identity + address, service times, quick links, and a rights
+// line with the current year and the light/dark toggle.
+import { localePath } from '../lib/locales';
+import { t } from '../lib/i18n';
+import ModeToggle from './ModeToggle.astro';
+
+const locale = Astro.locals.locale;
+const year = new Date().getFullYear();
+
+const quickLinks: { key: string; path: string }[] = [
+  { key: 'nav.about', path: '/about' },
+  { key: 'nav.sermons', path: '/sermons' },
+  { key: 'nav.events', path: '/events' },
+  { key: 'nav.give', path: '/give' },
+];
+---
+
+<footer class="bg-footer-bg text-footer-ink">
+  <div class="container-wide py-12 grid gap-8 sm:grid-cols-3">
+    <div>
+      <p class="font-display font-bold text-lg">{t(locale, 'site.name')}</p>
+      <p class="mt-2 text-sm">{t(locale, 'site.tagline')}</p>
+      <p class="mt-4 text-sm font-semibold">{t(locale, 'footer.address')}</p>
+      <p class="text-sm">{t(locale, 'footer.addressLine')}</p>
+    </div>
+
+    <div>
+      <p class="font-semibold">{t(locale, 'footer.serviceTimes')}</p>
+      <p class="mt-2 text-sm">{t(locale, 'footer.serviceLine1')}</p>
+      <p class="text-sm">{t(locale, 'footer.serviceLine2')}</p>
+    </div>
+
+    <div>
+      <p class="font-semibold">{t(locale, 'footer.quickLinks')}</p>
+      <ul class="mt-2 flex flex-col gap-1 text-sm">
+        {
+          quickLinks.map((link) => (
+            <li>
+              <a href={localePath(locale, link.path)} class="hover:underline">
+                {t(locale, link.key)}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+
+  <div class="border-t border-border">
+    <div
+      class="container-wide py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm"
+    >
+      <p>© {year} {t(locale, 'site.name')} · {t(locale, 'footer.rights')}</p>
+      <ModeToggle />
+    </div>
+  </div>
+</footer>
