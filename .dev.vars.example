@@ -1,0 +1,15 @@
+# Copy to .dev.vars (gitignored) and fill in real values.
+
+# HS256 secret for the session JWT cookie. Any long random string locally;
+# production uses `npx wrangler secret put SESSION_SECRET`.
+SESSION_SECRET=dev-only-secret-change-me
+
+# When set, outgoing mail (including magic links) is logged to the console
+# instead of sent. Leave on for local development.
+EMAIL_DEV_LOG=1
+
+# When set, local dev auto-authenticates as this admin address (no magic link).
+AUTH_DEV_BYPASS_EMAIL=admin@example.com
+
+# Token guarding the D1 export/backup endpoint. Wired in a later slice.
+# D1_EXPORT_TOKEN=

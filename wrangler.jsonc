@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "church4christ",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  // Keep these cron strings in sync with the switch in src/worker.ts.
+  "triggers": { "crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *"] },
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["serve@church.yunfei-song.com"] }],
+  "vars": {
+    "APP_ORIGIN": "https://church.yunfei-song.com",
+    "EMAIL_FROM": "serve@church.yunfei-song.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "church4christ-db",
+      "database_id": "YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "church4christ-media" }
+  ],
+  "observability": { "enabled": true }
+}
