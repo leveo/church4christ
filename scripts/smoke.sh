@@ -45,9 +45,13 @@ echo "$zh_body" | grep -q 'lang="zh-Hans"' || fail "/zh/ missing lang=\"zh-Hans\
 # `/healthz` → liveness JSON.
 curl -sf "$BASE/healthz" | grep -q '{"ok":true}' || fail "/healthz not {\"ok\":true}"
 
-# Unknown leading segment → real 404 (guard in [locale]/index.astro).
+# Unknown segment for an anonymous visitor → the auth gate (slice 3) classifies
+# unknown paths as `authed` and redirects to signin BEFORE route resolution, so a
+# would-be 404 never renders. (Signed-in users fall through to the real 404.)
 unknown_status=$(status "$BASE/totally-unknown")
-[ "$unknown_status" = "404" ] || fail "/totally-unknown expected 404, got $unknown_status"
+[ "$unknown_status" = "303" ] || fail "/totally-unknown expected 303 (auth gate), got $unknown_status"
+unknown_headers=$(curl -s -D - -o /dev/null "$BASE/totally-unknown")
+echo "$unknown_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/totally-unknown redirect not to /en/signin"
 
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
