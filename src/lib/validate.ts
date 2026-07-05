@@ -9,6 +9,7 @@
 import { isValidDateStr, datetimeLocalToUtc } from './dates';
 import { extractYouTubeId } from './youtube';
 import { LOCALES, type Locale } from './locales';
+import { THEMES } from './theme';
 
 export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
 
@@ -430,7 +431,6 @@ const SETTINGS_KEYS = [
   'locale.default',
 ] as const;
 const SETTINGS_URL_KEYS = new Set(['site.map_url', 'site.giving_url', 'site.youtube_url']);
-const THEME_NAMES = ['sanctuary', 'harvest', 'midnight'];
 const THEME_MODES = ['light', 'dark'];
 
 /**
@@ -449,7 +449,7 @@ export function parseSettingsForm(fd: FormData): FormResult<Record<string, strin
     } else if (key === 'site.email') {
       if (value && !isEmail(value)) errors[key] = ERR.email;
     } else if (key === 'theme.name') {
-      if (!THEME_NAMES.includes(value)) errors[key] = ERR.option;
+      if (!(THEMES as readonly string[]).includes(value)) errors[key] = ERR.option;
     } else if (key === 'theme.default_mode') {
       if (!THEME_MODES.includes(value)) errors[key] = ERR.option;
     } else if (key === 'locale.default') {
