@@ -19,9 +19,10 @@ interface Props {
   title: string;
   description?: string;
   locale: Locale;
+  noindex?: boolean;
 }
 
-const { title, locale } = Astro.props;
+const { title, locale, noindex = false } = Astro.props;
 const description = Astro.props.description ?? t(locale, 'site.tagline');
 
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
@@ -49,6 +50,7 @@ const alternates = [
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonical} />
     {alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -57,7 +59,12 @@ const alternates = [
       (function () {
         var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
         var el = document.documentElement;
-        var saved = localStorage.getItem('c4c-mode');
+        var saved = null;
+        try {
+          saved = localStorage.getItem('c4c-mode');
+        } catch (e) {
+          /* private mode / storage disabled — use the theme default */
+        }
         el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
       })();
     </script>

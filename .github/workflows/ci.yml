@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Cloudflare Worker types
+        run: npx wrangler types
+
+      - name: Build design tokens
+        run: npm run tokens
+
+      - name: Check token contrast + no hardcoded values
+        run: npm run tokens:check
+
+      - name: Run tests (node + workers projects)
+        run: npm test
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test
+        run: bash scripts/smoke.sh
+
+  deploy:
+    needs: build-test
+    runs-on: ubuntu-latest
+    # Deploy only on pushes to main. Secrets cannot be used in a job-level `if`,
+    # so the CLOUDFLARE_API_TOKEN presence check is a step below (dcfc-website
+    # pattern) — a fork/PR without the secret simply no-ops the deploy step.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Cloudflare Worker types
+        run: npx wrangler types
+
+      - name: Check deploy secret
+        id: check
+        run: echo "has_token=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and deploy to Cloudflare Workers
+        if: steps.check.outputs.has_token == 'true'
+        run: |
+          npm run build
+          npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

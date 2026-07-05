@@ -7,8 +7,11 @@ import { t } from '../../lib/i18n';
 
 // `[locale]` matches any single path segment, so `/foo` would otherwise render
 // the home page. Reject anything that is not a real locale so it 404s instead.
+// Set the status explicitly so the rewritten response is a real 404 rather than
+// relying on Astro's rewrite carrying the not-found route's status.
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
+  Astro.response.status = 404;
   return Astro.rewrite('/404');
 }
 

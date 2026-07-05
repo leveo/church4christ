@@ -1,0 +1,16 @@
+{
+  // Test-only Worker config for the vitest pool. Uses local placeholder values
+  // (never the real production database_id from wrangler.jsonc) so the pool spins
+  // up an isolated miniflare D1. migrations_dir is relative to this file.
+  "name": "church4christ-test",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "church4christ-db-test",
+      "database_id": "test",
+      "migrations_dir": "../migrations"
+    }
+  ]
+}

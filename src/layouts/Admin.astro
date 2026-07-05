@@ -27,7 +27,12 @@ const fullTitle = title ? `${title} · ${appName}` : appName;
       (function () {
         var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
         var el = document.documentElement;
-        var saved = localStorage.getItem('c4c-mode');
+        var saved = null;
+        try {
+          saved = localStorage.getItem('c4c-mode');
+        } catch (e) {
+          /* private mode / storage disabled — use the theme default */
+        }
         el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
       })();
     </script>

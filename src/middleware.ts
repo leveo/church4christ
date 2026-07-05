@@ -1,23 +1,23 @@
 import { defineMiddleware } from 'astro:middleware';
 import { DEFAULT_LOCALE, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
 import { THEME_DEFAULT } from './lib/theme';
+import { applySecurityHeaders } from './lib/securityHeaders';
 
-// Baseline security headers set on every HTML/JSON response (spec §14). Static
-// assets are served by the ASSETS binding before middleware runs; the isAsset
-// guard below is a dev-time safety net.
-const SECURITY_HEADERS: Record<string, string> = {
-  'x-content-type-options': 'nosniff',
-  'x-frame-options': 'DENY',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-};
+// Baseline security headers (spec §14) live in ./lib/securityHeaders so the
+// values are unit-tested independently of Astro. Static assets are served by
+// the ASSETS binding before middleware runs; the isAsset guard below is a
+// dev-time safety net.
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
-  // Bare root: content-negotiate a locale and 302 to its localized home.
+  // Bare root: content-negotiate a locale and 302 to its localized home. The
+  // redirect carries the security headers too, so no response leaves unhardened.
   if (pathname === '/') {
     const locale = pickLocaleFromHeader(context.request.headers.get('accept-language'));
-    return context.redirect(`/${locale}/`, 302);
+    const redirect = context.redirect(`/${locale}/`, 302);
+    applySecurityHeaders(redirect.headers);
+    return redirect;
   }
 
   // Locale comes from the leading path segment when it is a known locale;
@@ -36,7 +36,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pathname === '/favicon.svg' ||
     pathname === '/robots.txt';
   if (!isAsset) {
-    for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.headers.set(key, value);
+    applySecurityHeaders(res.headers);
   }
   return res;
 });
