@@ -10,15 +10,18 @@ npx astro preview --port 4322 &
 PID=$!
 trap 'kill "$PID" 2>/dev/null || true' EXIT
 
-# Wait for the server to accept connections (healthz needs no DB/session).
-for _ in $(seq 1 30); do
-  curl -sf -o /dev/null "http://localhost:4322/healthz" && break
-  sleep 1
-done
-
 BASE=http://localhost:4322
 fail() { echo "SMOKE FAIL: $1" >&2; exit 1; }
 status() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+
+# Wait for the server to accept connections (healthz needs no DB/session), and
+# fail with a clear message if it never comes up instead of tripping errexit
+# on the first assertion curl below.
+for _ in $(seq 1 30); do
+  curl -sf -o /dev/null "$BASE/healthz" && break
+  sleep 1
+done
+curl -sf "$BASE/healthz" >/dev/null || fail "server never became reachable at $BASE"
 
 # `/` → 302 to a localized home, with the nosniff header on the redirect itself.
 root_status=$(status "$BASE/")

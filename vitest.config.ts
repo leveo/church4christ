@@ -6,9 +6,11 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-worker
 
 // Two projects in one config:
 //  - `node`:    pure logic tests (tokens, locales, i18n) in a plain node env.
-//  - `workers`: runs in workerd via the pool. `migrations/` is empty in slice 1,
-//               so readD1Migrations returns [] and test/setup.ts is a no-op — but
-//               the D1-migration wiring is proven end-to-end for later slices.
+//  - `workers`: runs in workerd via the pool with a live D1 binding (asserted
+//               queryable in test/security-headers.test.ts). `migrations/` is
+//               empty in slice 1, so readD1Migrations returns [] and
+//               test/setup.ts's applyD1Migrations call is a no-op; applying a
+//               real migration is only exercised once later slices add SQL.
 export default defineConfig(async () => {
   const migrations = await readD1Migrations('./migrations');
   return {
