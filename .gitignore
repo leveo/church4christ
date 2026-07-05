@@ -6,3 +6,4 @@ dist/
 worker-configuration.d.ts
 src/styles/tokens.generated.css
 .DS_Store
+.superpowers/
