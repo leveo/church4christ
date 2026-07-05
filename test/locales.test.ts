@@ -30,24 +30,23 @@ describe('parseLocale', () => {
 });
 
 describe('localePath', () => {
-  it('prefixes non-default locales', () => {
+  it('prefixes every locale — all pages live under /{locale}/ (spec §6)', () => {
     expect(localePath('zh', '/sermons')).toBe('/zh/sermons');
     expect(localePath('zh', '/sermons/2026')).toBe('/zh/sermons/2026');
+    expect(localePath('en', '/sermons')).toBe('/en/sermons');
+    expect(localePath('en', '/about')).toBe('/en/about');
   });
 
   it('maps the root path to a clean localized root', () => {
     expect(localePath('zh', '/')).toBe('/zh/');
-    expect(localePath('en', '/')).toBe('/');
-  });
-
-  it('leaves the default locale unprefixed', () => {
-    expect(localePath('en', '/sermons')).toBe('/sermons');
+    expect(localePath('en', '/')).toBe('/en/');
   });
 });
 
 describe('pathWithoutLocale', () => {
   it('strips a leading locale segment', () => {
     expect(pathWithoutLocale('/zh/sermons/2026')).toEqual({ locale: 'zh', rest: '/sermons/2026' });
+    expect(pathWithoutLocale('/en/sermons')).toEqual({ locale: 'en', rest: '/sermons' });
     expect(pathWithoutLocale('/en/about')).toEqual({ locale: 'en', rest: '/about' });
   });
 

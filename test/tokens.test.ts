@@ -2,9 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-// @ts-expect-error — plain-node ESM script without type declarations
 import { contrastViolations, generateCss } from '../scripts/build-tokens.mjs';
-// @ts-expect-error — plain-node ESM script without type declarations
 import { findViolations } from '../scripts/check-tokens.mjs';
 import foundation from '../design/foundation.json';
 import harvest from '../design/themes/harvest.json';

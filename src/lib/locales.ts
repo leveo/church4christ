@@ -1,6 +1,7 @@
 // Locale core: the set of supported UI locales and the URL/header helpers that
-// route between them. `en` is the default and is served without a path prefix;
-// `zh` (Simplified Chinese) is served under `/zh/...`.
+// route between them. Every page lives under a locale prefix (`/en/...`,
+// `/zh/...`) per spec §6 — the bare `/` is 302-redirected by the router.
+// `en` is the default only for content-negotiation fallbacks.
 
 export const LOCALES = ['en', 'zh'] as const;
 export type Locale = (typeof LOCALES)[number];
@@ -12,13 +13,12 @@ export function parseLocale(seg: string): Locale | null {
 }
 
 /**
- * Build an in-app href for `path` under `locale`. The default locale is
- * unprefixed; other locales get a `/{locale}` prefix. The root path stays
- * clean: `localePath('zh', '/') === '/zh/'`, `localePath('en', '/') === '/'`.
+ * Build an in-app href for `path` under `locale`. Every locale is prefixed
+ * (spec §6: all pages live under `/{locale}/...`). The root path stays clean:
+ * `localePath('zh', '/') === '/zh/'`, `localePath('en', '/') === '/en/'`.
  */
 export function localePath(locale: Locale, path: string): string {
   const normalized = path.startsWith('/') ? path : `/${path}`;
-  if (locale === DEFAULT_LOCALE) return normalized;
   return normalized === '/' ? `/${locale}/` : `/${locale}${normalized}`;
 }
 
