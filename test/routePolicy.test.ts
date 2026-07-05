@@ -1,8 +1,9 @@
 // Pure route-policy tests (node project): the classification table for every
 // access class plus the tricky boundaries (`/serve` public vs `/serve/plans`
 // team; `/profile` authed vs `/profile/7` team; `/admin` console vs
-// `/admin/people` admin-only; unknown → authed), and canAccess for each class
-// against anon / member / team / leader / editor / admin users.
+// `/admin/people` admin-only), the namespace-scoped unknown-path fallbacks
+// (protected namespaces fail closed, everything else falls open to the 404),
+// and canAccess for each class against anon / member / leader / editor / admin.
 import { describe, expect, it } from 'vitest';
 import { canAccess, classifyRoute, type RouteClass } from '../src/lib/routePolicy';
 import type { SessionUser } from '../src/lib/types';
@@ -72,9 +73,16 @@ describe('classifyRoute', () => {
     ['/admin/settings', 'adminOnly'],
     ['/admin/reports', 'adminOnly'],
     ['/admin/teams', 'adminOnly'],
-    // ── unknown → authed (fail safe) ──
-    ['/xyz', 'authed'],
-    ['/totally-unknown', 'authed'],
+    // ── unknown paths: namespace-scoped fail-closed hybrid ──
+    // Protected namespaces fail closed at their tier…
+    ['/admin/xyz', 'adminOnly'],
+    ['/my/xyz', 'authed'],
+    ['/settings/xyz', 'authed'],
+    ['/serve/xyz', 'team'],
+    ['/profile/xyz', 'team'], // explicit /profile/<id> rule, not the fallback
+    // …everything else fails open so anon typo URLs reach the natural 404.
+    ['/xyz', 'public'],
+    ['/totally-unknown', 'public'],
   ];
 
   for (const [path, expected] of cases) {
@@ -104,8 +112,15 @@ describe('classifyRoute', () => {
   it('the /admin boundary: console root vs admin-only people', () => {
     expect(classifyRoute('/admin')).toBe('console');
     expect(classifyRoute('/admin/people')).toBe('adminOnly');
-    // an unlisted /admin sub-path stays console (never falls below to authed)
-    expect(classifyRoute('/admin/whatever')).toBe('console');
+    // an unlisted /admin sub-path fails closed to the strictest tier
+    expect(classifyRoute('/admin/whatever')).toBe('adminOnly');
+  });
+
+  it('namespace fallbacks are segment-aware: lookalike prefixes stay public', () => {
+    expect(classifyRoute('/mystery')).toBe('public'); // not /my
+    expect(classifyRoute('/serveware')).toBe('public'); // not /serve
+    expect(classifyRoute('/administrator')).toBe('public'); // not /admin
+    expect(classifyRoute('/settingsx')).toBe('public'); // not /settings
   });
 });
 

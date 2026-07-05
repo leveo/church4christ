@@ -2,8 +2,16 @@
 // pure and unit-testable. `classifyRoute` takes a pathname with the locale prefix
 // ALREADY stripped (the middleware does that via pathWithoutLocale) and buckets
 // it into the minimum access class; `canAccess` decides whether a given user
-// clears that class. The only dependency is the SessionUser type. Adapted from
-// dcfc-serve/src/lib/routePolicy.ts to the plan's five-class model.
+// clears that class. The only dependency is the SessionUser type.
+//
+// Fallback model (namespace-scoped fail-closed hybrid): explicit classifications
+// come first; a path matching nothing explicit is then judged by its namespace.
+// Protected namespaces fail CLOSED — an unknown /admin path is adminOnly (the
+// strictest tier), unknown /my|/profile|/settings paths are authed, unknown
+// /serve paths are team — so a typo or not-yet-built page in a private area
+// never leaks below its tier. Every OTHER unknown path is public: this is a
+// public church website, and a mistyped URL (/sermon, /abut) must fall through
+// to Astro's natural 404 for anonymous visitors, not bounce them to signin.
 import type { SessionUser } from './types';
 
 export type RouteClass = 'public' | 'authed' | 'team' | 'console' | 'adminOnly';
@@ -42,8 +50,23 @@ const PUBLIC_PREFIXES = [
   '/media/',
 ];
 
-// Site-admin-only areas under /admin. Checked BEFORE the /admin console catch-all.
+// Site-admin-only areas under /admin. Checked BEFORE the console list.
 const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams'];
+
+// Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).
+// Any /admin path in NEITHER list fails closed to adminOnly.
+const ADMIN_CONSOLE = [
+  '/admin/bulletins',
+  '/admin/sermons',
+  '/admin/prayer-sheets',
+  '/admin/announcements',
+  '/admin/events',
+  '/admin/prayer-wall',
+  '/admin/revisions',
+  '/admin/ministries',
+  '/admin/availability',
+  '/admin/applications',
+];
 
 /** Strip a single trailing slash (but keep the bare root `/`). */
 function norm(pathname: string): string {
@@ -61,18 +84,21 @@ function isPublic(p: string): boolean {
 }
 
 /**
- * Classify a locale-stripped pathname into the access it requires. Order matters:
- * the admin-only areas are tested before the /admin console catch-all, and the
- * team scheduling consoles before the public `/serve` exact match. Any /admin
- * path not explicitly admin-only falls to `console` (never below), and every
- * other unknown path defaults to `authed` — fail safe, never accidentally public.
+ * Classify a locale-stripped pathname into the access it requires. Explicit
+ * rules first (admin-only areas before the console list; the team scheduling
+ * consoles and `/profile/<id>` before the public `/serve` and authed `/profile`
+ * exact matches), then the namespace fallbacks: unknown /admin → adminOnly,
+ * unknown /my|/profile|/settings → authed, unknown /serve → team, and anything
+ * else → public so it reaches the natural 404. See the module comment.
  */
 export function classifyRoute(pathname: string): RouteClass {
   const p = norm(pathname);
 
-  // Admin: site-admin-only areas first, then the console catch-all.
+  // /admin namespace: admin-only areas, then the console root + explicit console
+  // list, then fail closed — an unlisted /admin path is adminOnly, never weaker.
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
-  if (under(p, '/admin')) return 'console';
+  if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
+  if (under(p, '/admin')) return 'adminOnly';
 
   // Team: serving consoles and a specific person's profile (`/profile/<id>`).
   if (p.startsWith('/serve/plans') || p.startsWith('/serve/matrix') || p.startsWith('/serve/teams')) return 'team';
@@ -80,12 +106,15 @@ export function classifyRoute(pathname: string): RouteClass {
 
   if (isPublic(p)) return 'public';
 
-  // Authed: personal areas.
-  if (p.startsWith('/my')) return 'authed';
+  // Protected namespaces fail closed on unknown sub-paths. `under` is
+  // segment-aware, so /mystery or /serveware do NOT match /my or /serve.
+  if (under(p, '/my')) return 'authed';
   if (p === '/profile') return 'authed';
-  if (p.startsWith('/settings/')) return 'authed';
+  if (under(p, '/settings')) return 'authed';
+  if (under(p, '/serve')) return 'team';
 
-  return 'authed';
+  // Everything else fails open: anonymous typo URLs get the real 404 page.
+  return 'public';
 }
 
 /** Whether `user` (null = anonymous) may access a route of the given class. */
