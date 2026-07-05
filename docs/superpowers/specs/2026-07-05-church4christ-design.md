@@ -110,6 +110,10 @@ swap marketplace, DB-template-driven cron emails.
   - editor∪admin∪leader: `/admin` console (leader sees scoped tabs)
   - editor∪admin: CMS content sections; admin-only: people, service-types, users/roles,
     settings, reports
+  - unknown-path fallback is namespace-scoped (public site ≠ internal tool): unknown
+    under /admin → adminOnly, under /my|/profile|/settings → authed, under /serve →
+    team; everywhere else → public (falls through to a natural 404 rather than a
+    signin redirect)
 - CSRF: Origin (fallback Sec-Fetch-Site) check on non-GET → 403. Honeypots on public forms.
 - Headers on non-asset responses: `x-content-type-options: nosniff`, `x-frame-options: DENY`,
   `referrer-policy: strict-origin-when-cross-origin`; `cache-control: no-store` when session attached.
