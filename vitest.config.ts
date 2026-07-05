@@ -45,6 +45,7 @@ export default defineConfig(async () => {
               'test/schema.test.ts',
               'test/db.test.ts',
               'test/settings.test.ts',
+              'test/seed.test.ts',
             ],
             setupFiles: ['./test/setup.ts'],
           },

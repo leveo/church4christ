@@ -17,3 +17,10 @@ declare global {
     }
   }
 }
+
+// Vite's `?raw` import suffix yields the file's text; test/seed.test.ts loads
+// seed/dev-seed.sql this way (works in both the node and workers vitest pools).
+declare module '*.sql?raw' {
+  const content: string;
+  export default content;
+}
