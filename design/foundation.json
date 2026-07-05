@@ -1,0 +1,47 @@
+{
+  "$comment": "Theme-independent design foundation. Themes (design/themes/*.json) may not override these. Consumed by scripts/build-tokens.mjs.",
+  "version": 1,
+  "type": {
+    "scale": {
+      "xs": "0.75rem",
+      "sm": "0.875rem",
+      "base": "1rem",
+      "lg": "1.125rem",
+      "xl": "1.25rem",
+      "heading-sm": "clamp(1.2rem, 1.1rem + 0.5vw, 1.4rem)",
+      "heading-md": "clamp(1.35rem, 1.2rem + 0.8vw, 1.75rem)",
+      "display-lg": "clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem)",
+      "display-xl": "clamp(2rem, 1.5rem + 2.2vw, 3.5rem)",
+      "display-2xl": "clamp(2.5rem, 1.8rem + 3vw, 4.5rem)"
+    },
+    "leading": {
+      "tight": "1.15",
+      "snug": "1.3",
+      "normal": "1.6",
+      "relaxed": "1.75",
+      "cjk": "1.85"
+    },
+    "tracking": {
+      "display": "-0.015em",
+      "caps": "0.08em"
+    }
+  },
+  "container": {
+    "narrow": "42rem",
+    "content": "72rem",
+    "wide": "80rem"
+  },
+  "z": {
+    "header": "40",
+    "dropdown": "50",
+    "modal": "60",
+    "toast": "70"
+  },
+  "motion": {
+    "duration-fast": "120ms",
+    "duration-base": "200ms",
+    "duration-slow": "320ms",
+    "ease-out": "cubic-bezier(0.25, 1, 0.5, 1)",
+    "ease-in-out": "cubic-bezier(0.45, 0, 0.55, 1)"
+  }
+}

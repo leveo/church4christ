@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+.dev.vars
+worker-configuration.d.ts
+src/styles/tokens.generated.css
+.DS_Store
