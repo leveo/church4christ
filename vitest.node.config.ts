@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['test/tokens.test.ts'],
+    include: ['test/tokens.test.ts', 'test/locales.test.ts', 'test/i18n.test.ts'],
     environment: 'node',
   },
 });
