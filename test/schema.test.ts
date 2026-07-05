@@ -141,6 +141,96 @@ describe('team_applications partial unique index on pending status', () => {
   });
 });
 
+describe('migration 0002: table presence', () => {
+  it('creates the email tables', async () => {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ).all<{ name: string }>();
+    const names = results.map((r) => r.name);
+    for (const table of ['email_rules', 'email_templates', 'email_log']) {
+      expect(names).toContain(table);
+    }
+  });
+});
+
+describe('email_rules seed defaults', () => {
+  it('seeds remind7=1, remind3=0, digestAM=1', async () => {
+    const { results } = await env.DB.prepare(
+      'SELECT rule_key, enabled FROM email_rules ORDER BY rule_key',
+    ).all<{ rule_key: string; enabled: number }>();
+    const byKey = Object.fromEntries(results.map((r) => [r.rule_key, r.enabled]));
+    expect(byKey).toEqual({ remind7: 1, remind3: 0, digestAM: 1 });
+  });
+});
+
+describe('email_templates seed', () => {
+  const KEYS = ['remind', 'request', 'appResult', 'digestAM'];
+  const LOCALES = ['en', 'zh'];
+
+  it('has exactly one row per template_key x locale pair (8 rows)', async () => {
+    const { results } = await env.DB.prepare(
+      'SELECT template_key, locale FROM email_templates',
+    ).all<{ template_key: string; locale: string }>();
+    expect(results.length).toBe(8);
+    const pairs = new Set(results.map((r) => `${r.template_key}:${r.locale}`));
+    for (const key of KEYS) {
+      for (const locale of LOCALES) {
+        expect(pairs.has(`${key}:${locale}`)).toBe(true);
+      }
+    }
+  });
+
+  it("zh 'remind' template body contains {date}", async () => {
+    const row = await env.DB.prepare(
+      "SELECT body FROM email_templates WHERE template_key = 'remind' AND locale = 'zh'",
+    ).first<{ body: string }>();
+    expect(row?.body).toContain('{date}');
+  });
+
+  it('uses the identical placeholder set across the en/zh pair of every key', async () => {
+    const placeholdersOf = (text: string) => {
+      const matches = text.match(/\{[a-zA-Z]+\}/g) ?? [];
+      return new Set(matches);
+    };
+
+    for (const key of KEYS) {
+      const rows = await env.DB.prepare(
+        'SELECT locale, subject, body FROM email_templates WHERE template_key = ?',
+      )
+        .bind(key)
+        .all<{ locale: string; subject: string; body: string }>();
+      expect(rows.results.length).toBe(2);
+
+      const [en] = rows.results.filter((r) => r.locale === 'en');
+      const [zh] = rows.results.filter((r) => r.locale === 'zh');
+      expect(en).toBeDefined();
+      expect(zh).toBeDefined();
+
+      const enPlaceholders = placeholdersOf(en.subject + en.body);
+      const zhPlaceholders = placeholdersOf(zh.subject + zh.body);
+      expect(zhPlaceholders).toEqual(enPlaceholders);
+    }
+  });
+});
+
+describe('email_log status CHECK constraint', () => {
+  it('rejects a status outside the allowed set', async () => {
+    await expect(
+      env.DB.prepare(
+        "INSERT INTO email_log (to_email, kind, status) VALUES ('a@example.com', 'remind', 'queued')",
+      ).run(),
+    ).rejects.toThrow();
+  });
+
+  it('accepts a valid status', async () => {
+    await expect(
+      env.DB.prepare(
+        "INSERT INTO email_log (to_email, kind, status) VALUES ('b@example.com', 'remind', 'sent')",
+      ).run(),
+    ).resolves.not.toThrow();
+  });
+});
+
 describe('settings upsert', () => {
   it('round-trips an INSERT ... ON CONFLICT(key) DO UPDATE', async () => {
     const db = env.DB;
