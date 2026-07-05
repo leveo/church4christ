@@ -58,13 +58,19 @@ function encodeHeader(value: string): string {
   return /^[\x00-\x7F]*$/.test(value) ? value : `=?UTF-8?B?${b64utf8(value)}?=`;
 }
 
+/** Collapse CR/LF in a value interpolated into a MIME header — header-injection
+ *  hardening so no future caller can smuggle extra headers through to/subject. */
+function headerSafe(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ');
+}
+
 /** Build a multipart/alternative MIME message (base64 text + html parts). */
 function buildMime(from: string, msg: SendEmailInput): string {
   const boundary = `b_${crypto.randomUUID().replace(/-/g, '')}`;
   const lines = [
-    `From: ${FROM_NAME} <${from}>`,
-    `To: ${msg.to}`,
-    `Subject: ${encodeHeader(msg.subject)}`,
+    `From: ${FROM_NAME} <${headerSafe(from)}>`,
+    `To: ${headerSafe(msg.to)}`,
+    `Subject: ${encodeHeader(headerSafe(msg.subject))}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',

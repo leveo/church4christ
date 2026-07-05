@@ -51,16 +51,20 @@ const langOf = (lang: string | null): Locale => (lang === 'zh' ? 'zh' : 'en');
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const raw_action = form.get('action');
-  const action = raw_action === 'accept' ? 'accept' : raw_action === 'decline' ? 'decline' : null;
-  const reason = String(form.get('reason') ?? '').trim() || null;
-  const consumed = await consumeToken(db, raw, 'respond');
-  if (consumed?.assignment_id && action) {
-    const person = await getPersonById(db, consumed.person_id);
-    locale = langOf(person?.lang ?? null);
-    const result = await respondToAssignment(db, consumed.assignment_id, consumed.person_id, action, reason);
-    if (result.ok) state = action === 'accept' ? 'accepted' : 'declined';
-    else state = result.reason === 'past' ? 'past' : 'invalid';
+  const rawAction = form.get('action');
+  const action = rawAction === 'accept' ? 'accept' : rawAction === 'decline' ? 'decline' : null;
+  // Validate the action BEFORE touching the token: a malformed POST (missing or
+  // unknown action) must not burn a still-valid single-use token to no effect.
+  if (action) {
+    const reason = String(form.get('reason') ?? '').trim() || null;
+    const consumed = await consumeToken(db, raw, 'respond');
+    if (consumed?.assignment_id) {
+      const person = await getPersonById(db, consumed.person_id);
+      locale = langOf(person?.lang ?? null);
+      const result = await respondToAssignment(db, consumed.assignment_id, consumed.person_id, action, reason);
+      if (result.ok) state = action === 'accept' ? 'accepted' : 'declined';
+      else state = result.reason === 'past' ? 'past' : 'invalid';
+    }
   }
 } else {
   const peeked = await peekToken(db, raw, 'respond');
