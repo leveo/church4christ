@@ -356,6 +356,44 @@ INSERT INTO prayer_activity (request_id, author, kind, body) VALUES
   (3, 'Alex Admin', 'prayed', NULL),
   (5, 'Alex Admin', 'moved', 'Answered — praise God for a good recovery.');
 
+-- People module (Slice 9). membership_status spreads across all four values and
+-- joined_on is set for every 'member'; both are ADMIN-SET fields. Person 5 (Mark)
+-- is intentionally left at the default 'visitor' with no joined_on so the
+-- self-service privilege-strip e2e still proves those columns are not editable
+-- from /profile. birthday/address add profile depth for the Chen household demo.
+UPDATE people SET membership_status = 'member', joined_on = '2017-03-05' WHERE id = 1;
+UPDATE people SET membership_status = 'member', joined_on = '2015-01-11', birthday = '1978-04-12', address = '88 Cornerstone Way, Springfield, TX 75000' WHERE id = 2;
+UPDATE people SET membership_status = 'member', joined_on = '2019-06-16' WHERE id = 3;
+UPDATE people SET membership_status = 'regular' WHERE id = 4;
+UPDATE people SET membership_status = 'member', joined_on = '2018-09-02' WHERE id = 6;
+UPDATE people SET membership_status = 'member', joined_on = '2016-05-22', birthday = '1981-09-30', address = '88 Cornerstone Way, Springfield, TX 75000' WHERE id = 7;
+UPDATE people SET membership_status = 'regular' WHERE id = 8;
+UPDATE people SET membership_status = 'visitor' WHERE id = 9;
+UPDATE people SET membership_status = 'inactive' WHERE id = 10;
+
+-- Three households: (1) the Chen family — two real adults (David primary + Amy)
+-- and a name-only child dependent (person_id NULL); (2) the Lin sisters — two
+-- real adults; (3) a single-adult household. Member display_name mirrors what the
+-- createHousehold path copies from the people row.
+INSERT INTO households (id, name, address, phone) VALUES
+  (1, 'Chen Family 陈家', '88 Cornerstone Way, Springfield, TX 75000', '(555) 010-2000'),
+  (2, 'Lin Family 林家', '12 Riverbend Road, Springfield, TX 75000', '(555) 010-4040'),
+  (3, 'Zhao Household 赵家', '5 Maple Court, Springfield, TX 75000', NULL);
+
+INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES
+  (1, 1, 2, '陈大卫 David Chen', 'adult', 1),
+  (2, 1, 7, 'Amy Chen 陈爱美', 'adult', 0),
+  (3, 1, NULL, 'Ethan Chen 陈以恒', 'child', 0),
+  (4, 2, 4, 'Grace Lin 林恩慈', 'adult', 1),
+  (5, 2, 9, 'Esther Lin 林以斯帖', 'adult', 0),
+  (6, 3, 10, 'Joshua Zhao 赵约书亚', 'adult', 1);
+
+-- Two admin-authored pastoral notes on two different people. Notes are an
+-- admin-only surface and never render on any public or leader page.
+INSERT INTO person_notes (id, person_id, author_email, body) VALUES
+  (1, 2, 'admin@example.com', 'Met with David to plan the fall newcomers class and the visitation rota. He has been mentoring two newer volunteers and is a real encouragement to the team.'),
+  (2, 9, 'admin@example.com', 'Esther visited for the first time this month and joined the college fellowship. Follow up with a welcome call and an invite to the next newcomers lunch.');
+
 -- Site settings. Localized keys carry a .locale suffix and fall back to .en.
 INSERT INTO settings (key, value) VALUES
   ('site.name.en', 'Church4Christ'),

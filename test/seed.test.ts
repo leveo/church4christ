@@ -118,6 +118,87 @@ describe('demo seed: settings cover every reader key', () => {
   });
 });
 
+describe('demo seed: people module — households, notes, statuses', () => {
+  it('seeds three live households (Chen, Lin, Zhao)', async () => {
+    const { results } = await env.DB.prepare(
+      'SELECT name FROM households WHERE deleted_at IS NULL ORDER BY id',
+    ).all<{ name: string }>();
+    expect(results.map((r) => r.name)).toEqual(['Chen Family 陈家', 'Lin Family 林家', 'Zhao Household 赵家']);
+  });
+
+  it('seeds six household members with exactly one primary per household', async () => {
+    const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM household_members').first<{ n: number }>();
+    expect(total?.n).toBe(6);
+    const notPrimaryExactlyOne = await env.DB
+      .prepare(
+        `SELECT COUNT(*) AS n FROM households h
+         WHERE h.deleted_at IS NULL
+           AND (SELECT COUNT(*) FROM household_members WHERE household_id = h.id AND is_primary = 1) != 1`,
+      )
+      .first<{ n: number }>();
+    expect(notPrimaryExactlyOne?.n).toBe(0);
+  });
+
+  it('gives the Chen household two real adults plus a name-only child dependent', async () => {
+    const { results } = await env.DB
+      .prepare('SELECT person_id, role, is_primary FROM household_members WHERE household_id = 1 ORDER BY id')
+      .all<{ person_id: number | null; role: string; is_primary: number }>();
+    expect(results).toEqual([
+      { person_id: 2, role: 'adult', is_primary: 1 }, // David Chen, primary
+      { person_id: 7, role: 'adult', is_primary: 0 }, // Amy Chen
+      { person_id: null, role: 'child', is_primary: 0 }, // Ethan — name-only dependent
+    ]);
+    const dependents = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM household_members WHERE person_id IS NULL`)
+      .first<{ n: number }>();
+    expect(dependents?.n).toBe(1);
+  });
+
+  it('never assigns a real person to more than one household', async () => {
+    const dupes = await env.DB
+      .prepare(
+        `SELECT person_id, COUNT(*) AS n FROM household_members
+         WHERE person_id IS NOT NULL GROUP BY person_id HAVING n > 1`,
+      )
+      .all();
+    expect(dupes.results).toEqual([]);
+  });
+
+  it('seeds two admin-authored pastoral notes on two different people', async () => {
+    const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM person_notes WHERE deleted_at IS NULL').first<{ n: number }>();
+    expect(total?.n).toBe(2);
+    const distinctPeople = await env.DB
+      .prepare('SELECT COUNT(DISTINCT person_id) AS n FROM person_notes WHERE deleted_at IS NULL')
+      .first<{ n: number }>();
+    expect(distinctPeople?.n).toBe(2);
+    const nonAdmin = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM person_notes WHERE author_email != 'admin@example.com'")
+      .first<{ n: number }>();
+    expect(nonAdmin?.n).toBe(0);
+  });
+
+  it('spreads membership_status across all four enum values', async () => {
+    const { results } = await env.DB
+      .prepare('SELECT membership_status AS s, COUNT(*) AS n FROM people GROUP BY membership_status')
+      .all<{ s: string; n: number }>();
+    const byStatus = new Map(results.map((r) => [r.s, r.n]));
+    for (const status of ['visitor', 'regular', 'member', 'inactive']) {
+      expect(byStatus.get(status) ?? 0).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('gives every member a joined_on date and leaves non-members without one', async () => {
+    const membersMissing = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM people WHERE membership_status = 'member' AND joined_on IS NULL")
+      .first<{ n: number }>();
+    expect(membersMissing?.n).toBe(0);
+    const nonMembersWith = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM people WHERE membership_status != 'member' AND joined_on IS NOT NULL")
+      .first<{ n: number }>();
+    expect(nonMembersWith?.n).toBe(0);
+  });
+});
+
 describe('demo seed: referential integrity', () => {
   it('has no foreign-key violations', async () => {
     const { results } = await env.DB.prepare('PRAGMA foreign_key_check').all();

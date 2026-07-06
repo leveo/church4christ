@@ -305,7 +305,9 @@ describe('/en/profile household card (self-service)', () => {
   });
 
   it('rejects a second household for someone already in one', async () => {
-    const cookie = await sessionCookie(7, 'amy.chen@example.com');
+    // Person 8 (Ben Wu) is not seeded into any household, so the first create
+    // succeeds and only the second is rejected.
+    const cookie = await sessionCookie(8, 'ben.wu@example.com');
     expect((await post('/en/profile', '_action=createHousehold&name=First+Home', { cookie })).status).toBe(303);
     // A second create surfaces the localized "already in a household" error (no redirect).
     const dupe = await post('/en/profile', '_action=createHousehold&name=Second+Home', { cookie });
@@ -314,11 +316,25 @@ describe('/en/profile household card (self-service)', () => {
     const count = await env.DB
       .prepare(
         `SELECT COUNT(*) AS n FROM households h
-         JOIN household_members hm ON hm.household_id = h.id AND hm.person_id = 7
+         JOIN household_members hm ON hm.household_id = h.id AND hm.person_id = 8
          WHERE h.deleted_at IS NULL`,
       )
       .first<{ n: number }>();
     expect(count?.n).toBe(1);
+  });
+
+  it('renders the seeded Chen household card with live member names for David', async () => {
+    // Person 2 (David Chen) is the primary adult of the seeded Chen household.
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const page = await get('/en/profile', { cookie });
+    expect(page.status).toBe(200);
+    const body = await page.text();
+    expect(body).toContain('Chen Family 陈家'); // the household name
+    expect(body).toContain('Amy Chen 陈爱美'); // fellow real adult, live people.display_name
+    expect(body).toContain('Ethan Chen 陈以恒'); // name-only child dependent
+    expect(body).toContain('88 Cornerstone Way'); // seeded household address
+    // David is an adult member, so the manage-dependents form renders for him.
+    expect(body).toContain('value="addDependent"');
   });
 });
 
@@ -327,8 +343,16 @@ describe('/en/serve/opportunities (public board)', () => {
     const page = await get('/en/serve/opportunities');
     expect(page.status).toBe(200);
     const body = await page.text();
-    expect(body).toContain('Worship Team'); // teams-accepting-applications section
-    expect(body).toContain('Vocalist'); // an open self-signup slot (plan 1, position 2)
+    // Section (a) — teams accepting applications is non-empty (all three seeded
+    // teams appear).
+    expect(body).toContain('Worship Team');
+    expect(body).toContain('AV Team');
+    expect(body).toContain('Hospitality Team');
+    // Section (b) — future open self-signup slots is non-empty. The slot dates
+    // (e.g. 2026-07-12) render ONLY in this section, so their presence proves the
+    // open-signup aggregation returned rows rather than an empty state.
+    expect(body).toContain('Vocalist');
+    expect(body).toContain('2026-07-12');
     expect(body).toContain('/en/serve/apply?team=1'); // Apply CTA carries the team
 
     // Following the CTA lands on the apply form with team 1 preselected.
