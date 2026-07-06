@@ -21,13 +21,25 @@ if (!found) {
 const { entry, translated } = found;
 const { Content } = await render(entry);
 const { name, meetingTime, location, audience, leaders } = entry.data;
+
+// Locale-specific punctuation: zh uses the enumeration comma 、 and fullwidth
+// parentheses for leader roles; en uses ', ' and ASCII parentheses.
+const sep = locale === 'zh' ? '、' : ', ';
+const withRole = (l: { name: string; role?: string }) =>
+  l.role ? (locale === 'zh' ? `${l.name}（${l.role}）` : `${l.name} (${l.role})`) : l.name;
 ---
 
 <ContentPage title={name} description={audience} locale={locale} translated={translated}>
-  <span slot="subtitle">{audience}</span>
-
   <div slot="before" class="bg-surface-sunken border border-border rounded-lg p-5">
     <dl class="text-sm flex flex-col gap-2">
+      {
+        audience && (
+          <div class="flex gap-2">
+            <dt class="font-semibold shrink-0">{t(locale, 'fellowships.audience')}:</dt>
+            <dd class="text-ink-muted">{audience}</dd>
+          </div>
+        )
+      }
       <div class="flex gap-2">
         <dt class="font-semibold shrink-0">{t(locale, 'fellowships.meets')}:</dt>
         <dd class="text-ink-muted">{meetingTime}</dd>
@@ -40,9 +52,7 @@ const { name, meetingTime, location, audience, leaders } = entry.data;
         leaders.length > 0 && (
           <div class="flex gap-2">
             <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
-            <dd class="text-ink-muted">
-              {leaders.map((l) => (l.role ? `${l.name}（${l.role}）` : l.name)).join('、')}
-            </dd>
+            <dd class="text-ink-muted">{leaders.map(withRole).join(sep)}</dd>
           </div>
         )
       }

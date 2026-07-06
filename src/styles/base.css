@@ -183,6 +183,12 @@
     line-height: var(--leading-relaxed);
     max-width: var(--container-narrow);
   }
+  /* CJK prose needs the roomier leading — without this, .prose's relaxed
+   * line-height would override the body:lang(zh) CJK rule above. */
+  .prose:lang(zh),
+  :lang(zh) .prose {
+    line-height: var(--leading-cjk);
+  }
   .prose > :first-child {
     margin-top: 0;
   }

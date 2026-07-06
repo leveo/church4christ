@@ -15,6 +15,9 @@ if (!locale) {
 const fellowships = (await listLocalized('fellowships', locale)).sort(
   (a, b) => a.entry.data.order - b.entry.data.order,
 );
+
+// Name-list separator is locale-specific: zh uses the enumeration comma 、.
+const sep = locale === 'zh' ? '、' : ', ';
 ---
 
 <Base title={t(locale, 'fellowships.title')} locale={locale}>
@@ -50,7 +53,7 @@ const fellowships = (await listLocalized('fellowships', locale)).sort(
                 {entry.data.leaders.length > 0 && (
                   <div class="flex gap-2">
                     <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
-                    <dd class="text-ink-muted">{entry.data.leaders.map((l) => l.name).join('、')}</dd>
+                    <dd class="text-ink-muted">{entry.data.leaders.map((l) => l.name).join(sep)}</dd>
                   </div>
                 )}
               </dl>
