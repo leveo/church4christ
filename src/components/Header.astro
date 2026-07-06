@@ -23,8 +23,8 @@ const nav: { key: string; path: string }[] = [
 ];
 
 // A nav item hides when its owning module is disabled. Build navKey → module
-// from the registry; items with no owning module (visit/about/ministries/give)
-// are core and always show.
+// from the registry; items with no owning module (visit/about/give) are core
+// and always show — ministries is owned by serve via nav.ministries.
 const navKeyModule = new Map<string, string>();
 for (const key of MODULE_KEYS) for (const nk of MODULES[key].navKeys) navKeyModule.set(nk, key);
 const modules = Astro.locals.modules;
