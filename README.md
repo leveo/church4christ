@@ -143,12 +143,18 @@ development — no link needed. Remove that line to test the real sign-in flow.)
 
 ## Putting it online
 
-When you are ready to publish, [**`docs/deploy.md`**](docs/deploy.md) is a full,
-step-by-step walkthrough. In short: create a **free Cloudflare account**, create the
-database and storage bucket, paste their IDs into one config file, set one secret, and
-run **`npm run deploy`**. You can point your own domain (for example,
-`church.yourname.com`) at it in a few more clicks. The guide covers the first-admin
-setup and email so a real congregation can start using the site the same day.
+New to this? Start with [**`docs/cloudflare-setup.md`**](docs/cloudflare-setup.md) — a
+plain-language guide that explains what Cloudflare is, why hosting is free, and the two
+ways to get online (including letting an AI assistant do it for you). When you want the
+exact commands, [**`docs/deploy.md`**](docs/deploy.md) is the full step-by-step
+walkthrough.
+
+In short: create a **free Cloudflare account**, create the database and storage bucket,
+paste their IDs into one config file, set one secret, and run **`npm run deploy`**. You
+can point your own domain (for example, `church.yourname.com`) at it in a few more
+clicks. The guide covers the first-admin setup and email so a real congregation can start
+using the site the same day. Deployment is manual on purpose — your Cloudflare keys never
+have to touch a public repo.
 
 ---
 

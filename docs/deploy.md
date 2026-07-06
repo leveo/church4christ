@@ -5,6 +5,10 @@ free tier, with your own domain. It takes most people under an hour the first ti
 would rather have an AI assistant do it, hand it this file (see the README's "Build it with
 an AI assistant").
 
+> **Not sure what any of this means?** Read [`cloudflare-setup.md`](./cloudflare-setup.md)
+> first — it explains, in plain language, what Cloudflare is, what it costs, and the two
+> ways to set it up. Then come back here for the exact commands.
+
 > **Cost.** A typical church site fits inside Cloudflare's **free tier** — Workers, D1, and
 > R2 all have free allowances. A custom domain is the only thing you might pay for, and only
 > if you do not already own one.
@@ -158,8 +162,11 @@ Trust dashboard as a self-hosted application covering the `/admin*` path.
 
 ## Keeping it running
 
-- **Redeploy** after any change with `npm run deploy`. The GitHub Actions workflow in
-  `.github/workflows/ci.yml` can also deploy automatically on push to `main` if you add a
-  `CLOUDFLARE_API_TOKEN` secret to the repository.
+- **Redeploy** after any change with `npm run deploy`. That is the whole update loop:
+  change something, run one command, it is live.
+- **Deployment is intentionally manual.** This public repo's CI builds and tests every
+  change but never deploys — so no Cloudflare credentials ever live in a public repo. If
+  you want push-to-deploy, keep a **private** copy of the repo and add a deploy step there
+  with a scoped `CLOUDFLARE_API_TOKEN` secret; your keys stay off the public internet.
 - **Update dependencies** periodically and run `npm audit` (see [`SECURITY.md`](../SECURITY.md)).
 - **Never commit** `.dev.vars` or any secret — verify before every commit.

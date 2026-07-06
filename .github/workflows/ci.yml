@@ -1,5 +1,13 @@
 name: CI
 
+# Continuous integration for the open-source demo: install, build, and run the
+# full test suite (unit + type-check + smoke + end-to-end). It never deploys and
+# needs no secrets — anyone can fork this repo and get a green build.
+#
+# Deployment is intentionally NOT automated here. Keep your Cloudflare
+# credentials out of this public repo: deploy your own instance manually with
+# `npm run deploy` (or from a separate private repo). See docs/deploy.md.
+
 on:
   push:
     branches: [main]
@@ -41,45 +49,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The smoke test drives a real preview server, so its local D1 needs the
+      # schema and the demo data — the same two commands from the quickstart.
+      - name: Apply D1 migrations (local)
+        run: npm run db:migrate:local
+
+      - name: Seed demo data (local)
+        run: npm run db:seed:local
+
       - name: Smoke test
         run: bash scripts/smoke.sh
 
       - name: End-to-end tests (built worker)
         run: npm run test:e2e
-
-  deploy:
-    needs: build-test
-    runs-on: ubuntu-latest
-    # Deploy only on pushes to main. Secrets cannot be used in a job-level `if`,
-    # so the CLOUDFLARE_API_TOKEN presence check is a step below (the reference stack
-    # pattern) — a fork/PR without the secret simply no-ops the deploy step.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Generate Cloudflare Worker types
-        run: npx wrangler types
-
-      - name: Check deploy secret
-        id: check
-        run: echo "has_token=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and deploy to Cloudflare Workers
-        if: steps.check.outputs.has_token == 'true'
-        run: |
-          npm run build
-          npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
