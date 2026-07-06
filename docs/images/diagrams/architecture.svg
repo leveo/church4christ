@@ -29,11 +29,12 @@
   <!-- Middleware -->
   <rect x="268" y="134" width="316" height="152" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
   <text x="284" y="156" font-size="13" font-weight="700" fill="#232630">Middleware (every request)</text>
-  <text x="284" y="180" font-size="12.5" fill="#565B6B">Locale routing — / picks /en or /zh</text>
-  <text x="284" y="200" font-size="12.5" fill="#565B6B">Session — reload the signed-in person</text>
-  <text x="284" y="220" font-size="12.5" fill="#565B6B">CSRF — reject cross-origin writes</text>
-  <text x="284" y="240" font-size="12.5" fill="#565B6B">Route policy — role gate, fails closed</text>
-  <text x="284" y="260" font-size="12.5" fill="#565B6B">Security headers + active theme</text>
+  <text x="284" y="178" font-size="12.5" fill="#565B6B">Locale routing — / picks /en or /zh</text>
+  <text x="284" y="197" font-size="12.5" fill="#565B6B">Active theme — from the saved setting</text>
+  <text x="284" y="216" font-size="12.5" fill="#565B6B">CSRF — reject cross-origin writes</text>
+  <text x="284" y="235" font-size="12.5" fill="#565B6B">Session — reload the signed-in person</text>
+  <text x="284" y="254" font-size="12.5" fill="#565B6B">Route policy — role gate, fails closed</text>
+  <text x="284" y="273" font-size="12.5" fill="#565B6B">Security headers on every response</text>
 
   <!-- Render -->
   <rect x="268" y="300" width="316" height="56" rx="8" fill="#C29A5B"/>

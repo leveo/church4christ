@@ -10,7 +10,7 @@ explains those rules.
 You need [Node.js](https://nodejs.org/) 22+. Then:
 
 ```bash
-git clone https://github.com/YOUR-ORG/church4christ.git
+git clone https://github.com/leveo/church4christ.git
 cd church4christ
 npm install
 cp .dev.vars.example .dev.vars      # safe local demo values

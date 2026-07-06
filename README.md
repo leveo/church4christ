@@ -39,7 +39,9 @@ site costs **nothing per month** to host.
 | **Drag-and-drop page builder** | No | Yes (plugins) | Yes | Varies |
 
 **The honest trade-offs.** Church4Christ has **no drag-and-drop page builder** — you
-edit content through clear admin forms, not by dragging boxes around a canvas. And the
+edit content through clear admin forms, not by dragging boxes around a canvas. WordPress's
+huge plugin ecosystem can also extend a site in thousands of ready-made directions that
+this project simply does not try to match. And the
 **initial setup** (creating the free account, deploying once, entering your church's
 details) needs someone comfortable with a few commands **or** an AI assistant to do it
 for you. After that, the day-to-day — writing bulletins, adding sermons, scheduling
@@ -110,7 +112,7 @@ to anything. You will need [Node.js](https://nodejs.org/) 22 or newer installed.
 
 ```bash
 # 1. Get the code and install it
-git clone https://github.com/YOUR-ORG/church4christ.git
+git clone https://github.com/leveo/church4christ.git
 cd church4christ
 npm install
 
