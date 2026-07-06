@@ -5,6 +5,7 @@ import {
   addDays,
   nextWeekday,
   formatDate,
+  formatMonth,
   datetimeLocalToUtc,
   utcToDatetimeLocal,
 } from '../src/lib/dates';
@@ -55,6 +56,15 @@ describe('formatDate', () => {
     expect(formatDate('2026-07-05', 'en')).toBe('July 5, 2026');
     expect(formatDate('2026-07-05', 'zh')).toBe('2026年7月5日');
     expect(formatDate('2026-12-30', 'en')).toBe('December 30, 2026');
+  });
+});
+
+describe('formatMonth', () => {
+  it('formats a YYYY-MM key per locale', () => {
+    expect(formatMonth('2026-07', 'en')).toBe('July 2026');
+    expect(formatMonth('2026-07', 'zh')).toBe('2026年7月');
+    expect(formatMonth('2026-12', 'en')).toBe('December 2026');
+    expect(formatMonth('2025-01', 'zh')).toBe('2025年1月');
   });
 });
 

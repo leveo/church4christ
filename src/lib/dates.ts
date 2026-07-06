@@ -53,6 +53,17 @@ export function formatDate(dateStr: string, locale: Locale): string {
   }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/** Month heading from a 'YYYY-MM' key: en → 'July 2026', zh → '2026年7月'. */
+export function formatMonth(yearMonth: string, locale: Locale): string {
+  const [y, m] = yearMonth.split('-').map(Number);
+  if (locale === 'zh') return `${y}年${m}月`;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'long',
+  }).format(new Date(Date.UTC(y, m - 1, 1)));
+}
+
 const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 
 function wallClock(instant: Date, tz: string): string {

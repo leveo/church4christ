@@ -4,18 +4,47 @@
 // drafts/soft-deletes while picking the newest sermon_date.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { listActiveAnnouncements, listActiveEvents, latestPublishedSermon } from '../src/lib/publicDb';
+import {
+  listActiveAnnouncements,
+  listActiveEvents,
+  latestPublishedSermon,
+  listSermonYears,
+  listSermonsByYear,
+  latestBulletins,
+  getBulletin,
+  listBulletinDates,
+  listBulletinServicesForDate,
+  getBulletinAnnouncements,
+  bulletinRoster,
+  latestPrayerSheet,
+  getPrayerSheet,
+  listPrayerSheetDates,
+} from '../src/lib/publicDb';
+import { parseJsonArray } from '../src/lib/json';
 
 const TODAY = '2026-07-05';
 
 beforeEach(async () => {
+  // Child rows before parents so FK-enforced deletes stay clean.
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM roster_assignments'),
+    env.DB.prepare('DELETE FROM plan_positions'),
+    env.DB.prepare('DELETE FROM plans'),
+    env.DB.prepare('DELETE FROM bulletin_announcements'),
+    env.DB.prepare('DELETE FROM bulletins'),
+    env.DB.prepare('DELETE FROM sermons'),
+    env.DB.prepare('DELETE FROM position_i18n'),
+    env.DB.prepare('DELETE FROM positions'),
+    env.DB.prepare('DELETE FROM team_i18n'),
+    env.DB.prepare('DELETE FROM teams'),
+    env.DB.prepare('DELETE FROM prayer_sheets'),
+    env.DB.prepare('DELETE FROM service_type_i18n'),
+    env.DB.prepare('DELETE FROM service_types'),
     env.DB.prepare('DELETE FROM announcement_i18n'),
     env.DB.prepare('DELETE FROM announcements'),
     env.DB.prepare('DELETE FROM event_i18n'),
     env.DB.prepare('DELETE FROM events'),
-    env.DB.prepare('DELETE FROM sermons'),
-    env.DB.prepare('DELETE FROM service_types'),
+    env.DB.prepare('DELETE FROM people'),
   ]);
 });
 
@@ -113,5 +142,163 @@ describe('latestPublishedSermon', () => {
       .prepare("INSERT INTO sermons (id, service_type_id, sermon_date, title, status) VALUES (1, 1, '2026-06-28', 'Draft only', 'draft')")
       .run();
     expect(await latestPublishedSermon(db)).toBeNull();
+  });
+});
+
+describe('listSermonYears / listSermonsByYear', () => {
+  it('lists distinct published years desc and groups a year newest-first with localized service type', async () => {
+    const db = env.DB;
+    await db.prepare('INSERT INTO service_types (id, sort) VALUES (1, 1), (2, 2)').run();
+    await db
+      .prepare(
+        "INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (1,'en','English Service'),(1,'zh','英文堂'),(2,'en','Chinese Service')",
+      )
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, deleted_at) VALUES
+          (1, 1, '2026-06-28', 'Newest 2026', 'A', 'John 1', 'zzDEMO00001', 'S', 'published', NULL),
+          (2, 1, '2026-05-31', 'Older 2026',  'B', NULL,     'zzDEMO00002', 'S', 'published', NULL),
+          (3, 2, '2025-12-14', 'Year 2025',   'C', NULL,     'zzDEMO00003', 'S', 'published', NULL),
+          (4, 1, '2026-07-05', 'Draft',       'D', NULL,     'zzDEMO00004', 'S', 'draft',     NULL),
+          (5, 1, '2024-01-07', 'Deleted',     'E', NULL,     'zzDEMO00005', 'S', 'published', datetime('now'))`,
+      )
+      .run();
+
+    expect(await listSermonYears(db)).toEqual([2026, 2025]); // draft counts under existing 2026; deleted 2024 excluded
+
+    const y2026 = await listSermonsByYear(db, 2026, 'zh');
+    expect(y2026.map((s) => s.title)).toEqual(['Newest 2026', 'Older 2026']); // newest first, draft excluded
+    expect(y2026[0].serviceTypeName).toBe('英文堂'); // localized
+
+    const y2025 = await listSermonsByYear(db, 2025, 'zh');
+    expect(y2025[0].serviceTypeName).toBe('Chinese Service'); // en fallback (no zh row)
+  });
+});
+
+describe('latestBulletins / getBulletin / listBulletinDates', () => {
+  async function seedBulletins(db: D1Database) {
+    await db.prepare('INSERT INTO service_types (id, sort) VALUES (1, 1)').run();
+    await db
+      .prepare("INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (1,'en','English Service'),(1,'zh','英文堂')")
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO bulletins (id, service_type_id, bulletin_date, service_time_label, program_json, status, publish_at, deleted_at) VALUES
+          (1, 1, '2026-06-21', '9:30', '[]', 'published', '2026-06-19 12:00:00', NULL),
+          (2, 1, '2026-06-28', '9:30', '[]', 'published', NULL, NULL),
+          (3, 1, '2026-07-05', '9:30', '[]', 'published', '2999-01-01 00:00:00', NULL),
+          (4, 1, '2026-07-12', '9:30', '[]', 'draft', NULL, NULL)`,
+      )
+      .run();
+  }
+
+  it('picks the latest published bulletin per service type, hiding future-publish and draft', async () => {
+    const db = env.DB;
+    await seedBulletins(db);
+    const latest = await latestBulletins(db, 'zh');
+    expect(latest.map((b) => b.bulletin_date)).toEqual(['2026-06-28']); // 07-05 not yet published, 07-12 draft
+    expect(latest[0].serviceTypeName).toBe('英文堂');
+  });
+
+  it('getBulletin enforces the publish rule and listBulletinDates lists only visible dates', async () => {
+    const db = env.DB;
+    await seedBulletins(db);
+    expect(await getBulletin(db, 1, '2026-07-05', 'en')).toBeNull(); // publish_at in the future
+    expect((await getBulletin(db, 1, '2026-06-21', 'en'))?.bulletin_date).toBe('2026-06-21');
+    expect((await listBulletinDates(db, 'en')).map((d) => d.bulletin_date)).toEqual(['2026-06-28', '2026-06-21']);
+    expect((await listBulletinServicesForDate(db, '2026-06-28', 'en')).map((s) => s.service_type_id)).toEqual([1]);
+  });
+});
+
+describe('bulletinRoster', () => {
+  it('groups confirmed + unconfirmed by position (sort order); excludes declined and deleted', async () => {
+    const db = env.DB;
+    await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await db.prepare('INSERT INTO teams (id) VALUES (1)').run();
+    await db.prepare("INSERT INTO plans (id, service_type_id, plan_date) VALUES (1, 1, '2026-06-28')").run();
+    await db.prepare('INSERT INTO positions (id, team_id, sort) VALUES (1, 1, 2), (2, 1, 1)').run();
+    await db
+      .prepare("INSERT INTO position_i18n (position_id, locale, name) VALUES (1,'en','Vocalist'),(1,'zh','歌手'),(2,'en','Sound')")
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO people (id, display_name, email) VALUES
+          (1, 'Amy', 'amy@example.com'), (2, 'Mark', 'mark@example.com'),
+          (3, 'Dan', 'dan@example.com'), (4, 'Sam', 'sam@example.com')`,
+      )
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO roster_assignments (id, plan_id, position_id, person_id, status, deleted_at) VALUES
+          (1, 1, 1, 1, 'C', NULL),
+          (2, 1, 1, 2, 'U', NULL),
+          (3, 1, 1, 3, 'D', NULL),
+          (4, 1, 2, 4, 'C', NULL),
+          (5, 1, 2, 1, 'U', datetime('now'))`,
+      )
+      .run();
+
+    const roster = await bulletinRoster(db, 1, '2026-06-28', 'zh');
+    // position 2 (sort 1) then position 1 (sort 2); pos2 en-fallback, pos1 zh
+    expect(roster.map((r) => r.position)).toEqual(['Sound', '歌手']);
+    expect(roster.find((r) => r.position === '歌手')!.people).toEqual(['Amy', 'Mark']); // declined Dan excluded
+    expect(roster.find((r) => r.position === 'Sound')!.people).toEqual(['Sam']); // deleted assignment excluded
+  });
+
+  it('returns [] when no plan matches the service type + date', async () => {
+    const db = env.DB;
+    await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    expect(await bulletinRoster(db, 1, '2026-06-28', 'en')).toEqual([]);
+  });
+});
+
+describe('bulletin announcements', () => {
+  it('returns a bulletin\'s announcements in seq order', async () => {
+    const db = env.DB;
+    await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await db
+      .prepare("INSERT INTO bulletins (id, service_type_id, bulletin_date, status) VALUES (1, 1, '2026-06-28', 'published')")
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO bulletin_announcements (bulletin_id, seq, title, body, link_url, link_label) VALUES
+          (1, 2, 'Second', 'b2', NULL, NULL),
+          (1, 1, 'First',  'b1', 'https://x/1', 'Go')`,
+      )
+      .run();
+    const rows = await getBulletinAnnouncements(db, 1);
+    expect(rows.map((r) => r.title)).toEqual(['First', 'Second']);
+    expect(rows[0].link_label).toBe('Go');
+  });
+});
+
+describe('prayer sheets', () => {
+  it('latestPrayerSheet + getPrayerSheet enforce the publish rule; listPrayerSheetDates lists visible dates', async () => {
+    const db = env.DB;
+    await db
+      .prepare(
+        `INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status, publish_at, deleted_at) VALUES
+          (1, '2026-06-21', 'zh', '[]', 'published', '2026-06-19 08:00:00', NULL),
+          (2, '2026-06-28', 'zh', '[]', 'published', NULL, NULL),
+          (3, '2026-07-05', 'zh', '[]', 'published', '2999-01-01 00:00:00', NULL),
+          (4, '2026-07-12', 'zh', '[]', 'draft', NULL, NULL)`,
+      )
+      .run();
+    expect((await latestPrayerSheet(db))?.sheet_date).toBe('2026-06-28');
+    expect(await getPrayerSheet(db, '2026-07-05')).toBeNull(); // future publish
+    expect(await getPrayerSheet(db, '2026-07-12')).toBeNull(); // draft
+    expect(await listPrayerSheetDates(db)).toEqual(['2026-06-28', '2026-06-21']);
+  });
+});
+
+describe('parseJsonArray', () => {
+  it('returns [] for null/empty/invalid/non-array and parses real arrays', () => {
+    expect(parseJsonArray(null)).toEqual([]);
+    expect(parseJsonArray(undefined)).toEqual([]);
+    expect(parseJsonArray('')).toEqual([]);
+    expect(parseJsonArray('not json')).toEqual([]);
+    expect(parseJsonArray('{"a":1}')).toEqual([]); // object, not array
+    expect(parseJsonArray('[{"x":1},{"y":2}]')).toEqual([{ x: 1 }, { y: 2 }]);
   });
 });

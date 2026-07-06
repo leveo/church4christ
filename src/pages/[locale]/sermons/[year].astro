@@ -1,0 +1,79 @@
+---
+// A single year's published sermons (month-grouped), with year-nav pills. The
+// year is validated as a 4-digit number in 2000-2100; anything else 404s.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import SermonMonthGrid from '../../../components/SermonMonthGrid.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listSermonYears, listSermonsByYear, type SermonRow } from '../../../lib/publicDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const raw = Astro.params.year ?? '';
+const year = Number(raw);
+if (!/^\d{4}$/.test(raw) || year < 2000 || year > 2100) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let years: number[] = [];
+let sermons: SermonRow[] = [];
+try {
+  const db = (env as { DB: D1Database }).DB;
+  [years, sermons] = await Promise.all([listSermonYears(db), listSermonsByYear(db, year, locale)]);
+} catch (err) {
+  console.error('sermons year: load failed', err);
+}
+const title = t(locale, 'sermons.titleYear', { year });
+---
+
+<Base title={title} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{title}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'sermons.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      sermons.length > 0 ? (
+        <SermonMonthGrid sermons={sermons} locale={locale} />
+      ) : (
+        <p class="py-12 text-center text-ink-muted">{t(locale, 'sermons.emptyYear')}</p>
+      )
+    }
+    {
+      years.length > 0 && (
+        <nav class="mt-8 border-t border-border pt-6" aria-label={t(locale, 'sermons.archive')}>
+          <div class="flex flex-wrap gap-3">
+            {years.map((y) => (
+              <a
+                href={localePath(locale, `/sermons/${y}`)}
+                class:list={[
+                  'inline-flex min-h-11 items-center rounded-full border px-4 py-2 text-sm font-semibold',
+                  y === year
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-border hover:border-border-strong hover:bg-surface-raised',
+                ]}
+                aria-current={y === year ? 'page' : undefined}
+              >
+                {t(locale, 'sermons.yearLabel', { year: y })}
+              </a>
+            ))}
+          </div>
+        </nav>
+      )
+    }
+    <nav class="mt-8">
+      <a href={localePath(locale, '/sermons')} class="text-sm font-semibold text-accent hover:text-accent-hover">
+        {t(locale, 'sermons.back')}
+      </a>
+    </nav>
+  </div>
+</Base>

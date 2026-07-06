@@ -266,16 +266,16 @@ INSERT INTO bulletin_announcements (bulletin_id, seq, title, body, link_url, lin
 
 -- Ten sermons across both service types. Nine published and one draft.
 INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, updated_by) VALUES
-  (1, 1, '2026-06-28', 'The Beatitudes', 'Sarah Johnson', 'Matthew 5:1-12', 'dQw4w9WgXcQ', 'Sermon on the Mount', 'published', 'admin@example.com'),
-  (2, 1, '2026-06-21', 'You Are the Light of the World', 'Sarah Johnson', 'Matthew 5:13-16', 'M7lc1UVf-VE', 'Sermon on the Mount', 'published', 'admin@example.com'),
-  (3, 1, '2026-06-14', 'Teach Us to Pray', 'Grace Lin', 'Matthew 6:5-15', 'ScMzIvxBSi4', 'Sermon on the Mount', 'published', 'admin@example.com'),
-  (4, 1, '2026-06-07', 'Treasures in Heaven', 'Sarah Johnson', 'Matthew 6:19-24', 'aqz-KE-bpKQ', 'Sermon on the Mount', 'published', 'admin@example.com'),
-  (5, 1, '2026-05-31', 'Build on the Rock', 'Mark Liu', 'Matthew 7:24-29', '9bZkp7q19f0', 'Sermon on the Mount', 'published', 'admin@example.com'),
-  (6, 2, '2026-06-28', '向高山举目', '陈大卫牧师', '诗篇 121 篇', 'kJQP7kiw5Fk', '上行之诗', 'published', 'admin@example.com'),
-  (7, 2, '2026-06-21', '耶和华看守你', '陈大卫牧师', '诗篇 121:5-8', 'fLexgOxsZu0', '上行之诗', 'published', 'admin@example.com'),
-  (8, 2, '2026-06-14', '和睦同居', '林恩慈传道', '诗篇 133 篇', 'hT_nvWreIhg', '上行之诗', 'published', 'admin@example.com'),
-  (9, 2, '2026-06-07', '在患难中求告', '刘马可', '诗篇 120 篇', 'e-ORhEE9VVg', '上行之诗', 'published', 'admin@example.com'),
-  (10, 2, '2026-07-05', '上行之诗预告', '陈大卫牧师', NULL, 'OPf0YbXqDm0', '上行之诗', 'draft', 'admin@example.com');
+  (1, 1, '2026-06-28', 'The Beatitudes', 'Sarah Johnson', 'Matthew 5:1-12', 'zzDEMO00001', 'Sermon on the Mount', 'published', 'admin@example.com'),
+  (2, 1, '2026-06-21', 'You Are the Light of the World', 'Sarah Johnson', 'Matthew 5:13-16', 'zzDEMO00002', 'Sermon on the Mount', 'published', 'admin@example.com'),
+  (3, 1, '2026-06-14', 'Teach Us to Pray', 'Grace Lin', 'Matthew 6:5-15', 'zzDEMO00003', 'Sermon on the Mount', 'published', 'admin@example.com'),
+  (4, 1, '2026-06-07', 'Treasures in Heaven', 'Sarah Johnson', 'Matthew 6:19-24', 'zzDEMO00004', 'Sermon on the Mount', 'published', 'admin@example.com'),
+  (5, 1, '2026-05-31', 'Build on the Rock', 'Mark Liu', 'Matthew 7:24-29', 'zzDEMO00005', 'Sermon on the Mount', 'published', 'admin@example.com'),
+  (6, 2, '2026-06-28', '向高山举目', '陈大卫牧师', '诗篇 121 篇', 'zzDEMO00006', '上行之诗', 'published', 'admin@example.com'),
+  (7, 2, '2026-06-21', '耶和华看守你', '陈大卫牧师', '诗篇 121:5-8', 'zzDEMO00007', '上行之诗', 'published', 'admin@example.com'),
+  (8, 2, '2026-06-14', '和睦同居', '林恩慈传道', '诗篇 133 篇', 'zzDEMO00008', '上行之诗', 'published', 'admin@example.com'),
+  (9, 2, '2026-06-07', '在患难中求告', '刘马可', '诗篇 120 篇', 'zzDEMO00009', '上行之诗', 'published', 'admin@example.com'),
+  (10, 2, '2026-07-05', '上行之诗预告', '陈大卫牧师', NULL, 'zzDEMO00010', '上行之诗', 'draft', 'admin@example.com');
 
 -- Two published prayer sheets in Chinese.
 INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status, publish_at, updated_by) VALUES

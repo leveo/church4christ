@@ -1,0 +1,60 @@
+---
+// Click-to-load YouTube facade (privacy-friendly, no third-party request until
+// the visitor opts in). Renders the video thumbnail with a play button; on
+// click JS swaps in a youtube-nocookie iframe. Two graceful fallbacks:
+//   - no JS: the whole card is a link to the YouTube watch page.
+//   - thumbnail 404 (demo/placeholder ids never resolve): onerror hides the
+//     <img> and reveals a token-styled music-note placeholder that looks
+//     intentional rather than broken.
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+
+interface Props {
+  videoId: string;
+  title: string;
+  locale: Locale;
+}
+const { videoId, title, locale } = Astro.props;
+const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+const embed = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`;
+const watch = `https://www.youtube.com/watch?v=${videoId}`;
+---
+
+<div class="yt-facade group relative aspect-video overflow-hidden rounded-lg bg-primary-soft" data-embed={embed}>
+  <a href={watch} target="_blank" rel="noopener" class="absolute inset-0" aria-label={t(locale, 'sermons.play', { title })}>
+    <img
+      src={thumb}
+      alt=""
+      loading="lazy"
+      class="h-full w-full object-cover"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+    />
+    <div class="hidden h-full w-full items-center justify-center bg-primary-soft text-on-primary-soft" aria-hidden="true">
+      <svg viewBox="0 0 24 24" class="h-16 w-16 opacity-40" fill="currentColor" aria-hidden="true">
+        <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
+      </svg>
+    </div>
+    <span class="absolute inset-0 grid place-items-center">
+      <span
+        class="grid h-14 w-14 place-items-center rounded-full bg-accent text-on-accent shadow-md transition-colors group-hover:bg-accent-hover"
+      >
+        <svg viewBox="0 0 24 24" class="h-6 w-6 fill-current" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+      </span>
+    </span>
+  </a>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.yt-facade').forEach((el) => {
+    el.querySelector('a')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      const iframe = document.createElement('iframe');
+      iframe.src = el.dataset.embed ?? '';
+      iframe.title = 'YouTube video player';
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      iframe.allowFullscreen = true;
+      iframe.className = 'absolute inset-0 h-full w-full border-0';
+      el.replaceChildren(iframe);
+    });
+  });
+</script>

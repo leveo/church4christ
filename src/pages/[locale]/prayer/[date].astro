@@ -1,0 +1,47 @@
+---
+// A specific dated prayer sheet. The date param must be a real YYYY-MM-DD;
+// anything else, or a date with no published sheet, 404s.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import PrayerSheetView from '../../../components/PrayerSheetView.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, isValidDateStr } from '../../../lib/dates';
+import { getPrayerSheet, type PrayerSheetRow } from '../../../lib/publicDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const date = Astro.params.date ?? '';
+if (!isValidDateStr(date)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let sheet: PrayerSheetRow | null = null;
+try {
+  const db = (env as { DB: D1Database }).DB;
+  sheet = await getPrayerSheet(db, date);
+} catch (err) {
+  console.error('prayer date: load failed', err);
+}
+
+if (!sheet) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+---
+
+<Base title={`${t(locale, 'prayer.sheetTitle')} · ${formatDate(date, locale)}`} locale={locale}>
+  <div class="container-content max-w-content py-12">
+    <PrayerSheetView sheet={sheet} locale={locale} />
+    <nav class="mt-14 border-t border-border pt-6">
+      <a href={localePath(locale, '/prayer')} class="text-sm font-semibold text-accent hover:text-accent-hover">
+        {t(locale, 'prayer.back')}
+      </a>
+    </nav>
+  </div>
+</Base>

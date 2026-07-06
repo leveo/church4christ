@@ -122,6 +122,26 @@ echo "$home_en" | grep -q 'name="website"' || fail "/en/ missing prayer honeypot
 prayer_get=$(status "$BASE/api/prayer-request")
 { [ "$prayer_get" = "405" ] || [ "$prayer_get" = "404" ]; } || fail "GET /api/prayer-request expected 405/404, got $prayer_get"
 
+# Slice 4 Task 3: sermons / bulletin / prayer / events public pages render 200
+# against the seeded DB; /en/bulletin carries a seeded bulletin marker (the
+# rendered "Order of Worship" heading); an out-of-range sermon year 404s.
+sermons_status=$(status "$BASE/en/sermons")
+[ "$sermons_status" = "200" ] || fail "/en/sermons expected 200, got $sermons_status"
+
+bulletin_status=$(status "$BASE/en/bulletin")
+[ "$bulletin_status" = "200" ] || fail "/en/bulletin expected 200, got $bulletin_status"
+bulletin_en=$(curl -sf "$BASE/en/bulletin")
+echo "$bulletin_en" | grep -q 'Order of Worship' || fail "/en/bulletin missing seeded bulletin marker"
+
+prayer_status=$(status "$BASE/zh/prayer")
+[ "$prayer_status" = "200" ] || fail "/zh/prayer expected 200, got $prayer_status"
+
+events_status=$(status "$BASE/en/events")
+[ "$events_status" = "200" ] || fail "/en/events expected 200, got $events_status"
+
+sermons_bad_year=$(status "$BASE/en/sermons/1999")
+[ "$sermons_bad_year" = "404" ] || fail "/en/sermons/1999 expected 404, got $sermons_bad_year"
+
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
 echo "$en_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/ missing x-content-type-options"

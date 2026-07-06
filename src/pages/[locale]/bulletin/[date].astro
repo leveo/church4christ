@@ -1,0 +1,95 @@
+---
+// A specific dated bulletin. The date param must be a real YYYY-MM-DD; anything
+// else 404s. An optional ?service=<id> picks which service type's bulletin to
+// show when a date has more than one; it defaults to the first (by type sort).
+// A no-match date (or DB hiccup) 404s.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import BulletinView from '../../../components/BulletinView.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, isValidDateStr } from '../../../lib/dates';
+import {
+  listBulletinServicesForDate,
+  getBulletin,
+  getBulletinAnnouncements,
+  bulletinRoster,
+  type BulletinRow,
+  type BulletinAnnouncementRow,
+  type RosterGroup,
+} from '../../../lib/publicDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const date = Astro.params.date ?? '';
+if (!isValidDateStr(date)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const serviceParam = Number(Astro.url.searchParams.get('service')) || null;
+
+let services: { service_type_id: number; serviceTypeName: string }[] = [];
+let bulletin: BulletinRow | null = null;
+let announcements: BulletinAnnouncementRow[] = [];
+let roster: RosterGroup[] = [];
+try {
+  const db = (env as { DB: D1Database }).DB;
+  services = await listBulletinServicesForDate(db, date, locale);
+  if (services.length > 0) {
+    const chosen = services.find((s) => s.service_type_id === serviceParam)?.service_type_id ?? services[0].service_type_id;
+    bulletin = await getBulletin(db, chosen, date, locale);
+    if (bulletin) {
+      [announcements, roster] = await Promise.all([
+        getBulletinAnnouncements(db, bulletin.id),
+        bulletinRoster(db, bulletin.service_type_id, bulletin.bulletin_date, locale),
+      ]);
+    }
+  }
+} catch (err) {
+  console.error('bulletin date: load failed', err);
+}
+
+if (!bulletin) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const selectedId = bulletin.service_type_id;
+---
+
+<Base title={`${t(locale, 'bulletin.title')} · ${formatDate(date, locale)}`} locale={locale}>
+  <div class="container-content max-w-content py-12">
+    {
+      services.length > 1 && (
+        <nav class="mb-8 flex flex-wrap gap-2" aria-label={t(locale, 'bulletin.serviceLabel')}>
+          {services.map((s) => (
+            <a
+              href={`${localePath(locale, `/bulletin/${date}`)}?service=${s.service_type_id}`}
+              class:list={[
+                'inline-flex min-h-11 items-center rounded-full border px-4 py-2 text-sm font-semibold',
+                s.service_type_id === selectedId
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-border hover:border-border-strong hover:bg-surface-raised',
+              ]}
+              aria-current={s.service_type_id === selectedId ? 'page' : undefined}
+            >
+              {s.serviceTypeName}
+            </a>
+          ))}
+        </nav>
+      )
+    }
+
+    <BulletinView bulletin={bulletin} announcements={announcements} roster={roster} locale={locale} />
+
+    <nav class="mt-14 border-t border-border pt-6">
+      <a href={localePath(locale, '/bulletin')} class="text-sm font-semibold text-accent hover:text-accent-hover">
+        {t(locale, 'bulletin.back')}
+      </a>
+    </nav>
+  </div>
+</Base>
