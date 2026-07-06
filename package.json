@@ -28,7 +28,8 @@
     "@fontsource-variable/nunito": "^5.2.7",
     "@fontsource-variable/space-grotesk": "^5.2.10",
     "astro": "^7.0.5",
-    "jose": "^6.2.3"
+    "jose": "^6.2.3",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
