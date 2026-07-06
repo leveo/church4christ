@@ -156,7 +156,8 @@ export async function savePerson(
   return { ok: true, id: input.id };
 }
 
-function isUniqueViolation(e: unknown): boolean {
+/** Shared D1 UNIQUE-constraint detector (also used by householdDb's race mapping). */
+export function isUniqueViolation(e: unknown): boolean {
   return String(e).includes('UNIQUE constraint failed');
 }
 

@@ -15,6 +15,7 @@
 // Deletion model: leaveHousehold removes the caller's own row; when the last
 // REAL member leaves, the household is soft-deleted (deleted_at) and its
 // remaining name-only dependent rows are hard-deleted (they cannot outlive it).
+import { isUniqueViolation } from './adminDb';
 
 export const HOUSEHOLD_ROLES = ['adult', 'child'] as const;
 export type HouseholdRole = (typeof HOUSEHOLD_ROLES)[number];
@@ -117,13 +118,25 @@ export async function createHousehold(
     .run();
   const householdId = created.meta.last_row_id as number;
 
-  await db
-    .prepare(
-      `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
-       VALUES (?, ?, ?, 'adult', 1)`,
-    )
-    .bind(householdId, creatorPersonId, person.display_name)
-    .run();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
+         VALUES (?, ?, ?, 'adult', 1)`,
+      )
+      .bind(householdId, creatorPersonId, person.display_name)
+      .run();
+  } catch (e) {
+    // Pre-check ↔ INSERT race: the creator joined another household between the
+    // SELECT and this INSERT, so the partial UNIQUE(person_id) index fired.
+    // Remove the just-created (member-less) household and surface the same
+    // clean error the pre-check would have.
+    if (isUniqueViolation(e)) {
+      await db.prepare(`DELETE FROM households WHERE id = ?`).bind(householdId).run();
+      throw new Error('already_in_household');
+    }
+    throw e;
+  }
   return householdId;
 }
 
@@ -235,8 +248,11 @@ export async function removeDependent(
 /**
  * A person leaves their household: their own membership row is removed. When no
  * REAL member remains, the household is soft-deleted and its leftover name-only
- * dependents are hard-deleted (a dependent cannot outlive its household). Returns
- * true when the person had a membership to remove.
+ * dependents are hard-deleted (a dependent cannot outlive its household). When
+ * real members DO remain and the departing member was the primary contact, the
+ * oldest remaining adult REAL member is promoted to primary — a household with
+ * adults always keeps a primary (no-op when only child-role real members
+ * remain). Returns true when the person had a membership to remove.
  */
 export async function leaveHousehold(db: D1Database, personId: number): Promise<boolean> {
   const membership = await memberRowForPerson(db, personId);
@@ -259,6 +275,20 @@ export async function leaveHousehold(db: D1Database, personId: number): Promise<
         .bind(householdId),
       db.prepare(`DELETE FROM household_members WHERE household_id = ? AND person_id IS NULL`).bind(householdId),
     ]);
+  } else if (membership.is_primary === 1) {
+    // The departing member was primary: hand it to the oldest remaining adult
+    // real member so the household keeps a primary contact.
+    const next = await db
+      .prepare(
+        `SELECT id FROM household_members
+         WHERE household_id = ? AND person_id IS NOT NULL AND role = 'adult'
+         ORDER BY created_at, id LIMIT 1`,
+      )
+      .bind(householdId)
+      .first<{ id: number }>();
+    if (next) {
+      await db.prepare(`UPDATE household_members SET is_primary = 1 WHERE id = ?`).bind(next.id).run();
+    }
   }
   return true;
 }
@@ -270,7 +300,10 @@ export async function leaveHousehold(db: D1Database, personId: number): Promise<
 /**
  * Link an existing real person into a household as a member (default role
  * 'adult', non-primary; display_name copied from the people row). Throws
- * 'already_in_household' if they already belong to one. Returns the new member id.
+ * 'household_not_found' when the household is missing or soft-deleted, and
+ * 'already_in_household' if the person already belongs to one (including the
+ * pre-check ↔ INSERT race, mapped from the partial UNIQUE(person_id) index).
+ * Returns the new member id.
  */
 export async function linkPersonToHousehold(
   db: D1Database,
@@ -278,20 +311,30 @@ export async function linkPersonToHousehold(
   personId: number,
   role: HouseholdRole = 'adult',
 ): Promise<number> {
+  const household = await db
+    .prepare(`SELECT 1 FROM households WHERE id = ? AND deleted_at IS NULL`)
+    .bind(householdId)
+    .first();
+  if (!household) throw new Error('household_not_found');
   if (await memberRowForPerson(db, personId)) throw new Error('already_in_household');
   const person = await db
     .prepare(`SELECT display_name FROM people WHERE id = ?`)
     .bind(personId)
     .first<{ display_name: string }>();
   if (!person) throw new Error('person_not_found');
-  const r = await db
-    .prepare(
-      `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
-       VALUES (?, ?, ?, ?, 0)`,
-    )
-    .bind(householdId, personId, person.display_name, role)
-    .run();
-  return r.meta.last_row_id as number;
+  try {
+    const r = await db
+      .prepare(
+        `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
+         VALUES (?, ?, ?, ?, 0)`,
+      )
+      .bind(householdId, personId, person.display_name, role)
+      .run();
+    return r.meta.last_row_id as number;
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new Error('already_in_household'); // pre-check ↔ INSERT race
+    throw e;
+  }
 }
 
 /** Remove a real person's membership row (admin surgical unlink). Returns true when removed. */

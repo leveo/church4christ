@@ -143,6 +143,60 @@ describe('leaveHousehold', () => {
   it('returns false when the person is in no household', async () => {
     expect(await leaveHousehold(env.DB, 3)).toBe(false);
   });
+
+  it('promotes the oldest remaining adult real member to primary when the primary leaves', async () => {
+    const id = await createHousehold(env.DB, HH, 1); // Person 1: adult + primary
+    await linkPersonToHousehold(env.DB, id, 2, 'adult');
+    await linkPersonToHousehold(env.DB, id, 3, 'adult');
+    expect(await leaveHousehold(env.DB, 1)).toBe(true);
+
+    const hh = await getHousehold(env.DB, id);
+    const primaries = hh!.members.filter((m) => m.is_primary === 1);
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0].person_id).toBe(2); // oldest remaining adult wins
+  });
+});
+
+// Deterministic double-submit simulation, same shape as savePerson's race test:
+// blind the FIRST membership pre-check (memberRowForPerson's join query) so the
+// member INSERT hits the partial UNIQUE(person_id) index on real D1 and the
+// catch must map the constraint error to the clean 'already_in_household'.
+function blindPrecheckDb(): D1Database {
+  let blinded = false;
+  return {
+    prepare(sql: string) {
+      if (!blinded && sql.includes('FROM household_members hm')) {
+        blinded = true;
+        return { bind: () => ({ first: async () => null }) } as unknown as D1PreparedStatement;
+      }
+      return env.DB.prepare(sql);
+    },
+    batch: (stmts: D1PreparedStatement[]) => env.DB.batch(stmts),
+  } as unknown as D1Database;
+}
+
+describe('pre-check ↔ INSERT race mapping', () => {
+  it('createHousehold maps the race to already_in_household and removes the orphan household', async () => {
+    await createHousehold(env.DB, { name: 'First', address: null, phone: null }, 1);
+    const before = await env.DB.prepare('SELECT COUNT(*) AS n FROM households').first<{ n: number }>();
+
+    await expect(
+      createHousehold(blindPrecheckDb(), { name: 'Second', address: null, phone: null }, 1),
+    ).rejects.toThrow('already_in_household');
+
+    const after = await env.DB.prepare('SELECT COUNT(*) AS n FROM households').first<{ n: number }>();
+    expect(after?.n).toBe(before?.n); // orphan household row cleaned up
+    expect((await getHouseholdForPerson(env.DB, 1))!.name).toBe('First'); // original untouched
+  });
+
+  it('linkPersonToHousehold maps the race to already_in_household', async () => {
+    await createHousehold(env.DB, { name: 'A', address: null, phone: null }, 1);
+    const b = await createHousehold(env.DB, { name: 'B', address: null, phone: null }, 2);
+
+    await expect(linkPersonToHousehold(blindPrecheckDb(), b, 1)).rejects.toThrow('already_in_household');
+    // No stray membership row was created.
+    expect((await getHouseholdForPerson(env.DB, 1))!.name).toBe('A');
+  });
 });
 
 describe('admin link / unlink', () => {
@@ -151,6 +205,13 @@ describe('admin link / unlink', () => {
     const b = await createHousehold(env.DB, { name: 'B', address: null, phone: null }, 2);
     await expect(linkPersonToHousehold(env.DB, b, 1)).rejects.toThrow('already_in_household');
     void a;
+  });
+
+  it('rejects linking into a soft-deleted (or missing) household', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    await leaveHousehold(env.DB, 1); // last real member → household soft-deleted
+    await expect(linkPersonToHousehold(env.DB, id, 2)).rejects.toThrow('household_not_found');
+    await expect(linkPersonToHousehold(env.DB, 99999, 2)).rejects.toThrow('household_not_found');
   });
 
   it('unlinks a real person, freeing them to join elsewhere', async () => {
