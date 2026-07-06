@@ -38,7 +38,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | Community | **Events** | Event cards and the home-page announcement ticker. |
 | Community | **Prayer Wall** | The public prayer-request form and the staff prayer board. |
 | Community | **Testimonies** | Member testimonies, with staff review before publishing. |
-| Community | **People** | Member profiles, households, and pastoral notes. The full People feature ships in the next release; today the toggle only hides its admin menu entry and dashboard card — page-level enforcement arrives with the feature. |
+| Community | **People** | Member profiles, households, pastoral notes, and invite-to-serve. Turning it off hides those panels and tools everywhere; the basic people directory that powers sign-in stays. |
 | Volunteering | **Serve** | Ministries, teams, scheduling, applications, and reminders. |
 | Volunteering | **Gifts Quiz** | The spiritual-gifts quiz with ministry recommendations. |
 

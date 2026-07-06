@@ -59,6 +59,9 @@ or fat-fingers a date, open the item's revision history and restore an earlier v
   pages — so most people only ever sign in, glance at their serving, and leave.
 - Settings has a **Modules** panel where an admin can switch off any feature the church does not
   use — the pages and links vanish but nothing is deleted (see [Modules](modules.md)).
+- Managing a person — their household, membership status, serving applications, and private
+  pastoral notes — happens on their page in the people directory (see
+  [People & households](people-households.md)).
 
 ## How it fits together
 

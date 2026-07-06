@@ -5,7 +5,7 @@
 Church4Christ is a full church website and admin system: a bilingual public site
 (home, sermons, weekly bulletins, events, ministries, staff, articles, a prayer
 form) plus a private area where your staff and volunteers update content, care for
-prayer requests, and schedule people to serve. It runs on a free hosting plan, loads
+prayer requests, schedule people to serve, and manage members and households. It runs on a free hosting plan, loads
 fast anywhere in the world, and is yours to keep — the site and the code both.
 
 |  |  |  |
@@ -117,6 +117,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/public/sermons.png)](docs/features/sermons.md) | **[Sermon archive](docs/features/sermons.md)** | Paste a YouTube link; get a searchable, fast-loading library of past messages. |
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
+| [![](docs/images/admin/person-detail.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Give everyone a profile — families, membership status, private pastoral notes, and a board that connects members to serving. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and a weekly digest that send themselves. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |

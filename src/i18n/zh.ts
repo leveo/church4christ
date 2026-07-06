@@ -531,10 +531,10 @@ export default {
   'admin.people.filterNo': '否',
   'admin.people.filterApply': '应用筛选',
 
-  'membership.visitor': '访客',
-  'membership.regular': '慕道友',
-  'membership.member': '会友',
-  'membership.inactive': '未活跃',
+  'membership.visitor': '新朋友',
+  'membership.regular': '稳定参加',
+  'membership.member': '正式会友',
+  'membership.inactive': '不活跃',
 
   'admin.person.newTitle': '新增会众',
   'admin.person.editTitle': '编辑会众',
