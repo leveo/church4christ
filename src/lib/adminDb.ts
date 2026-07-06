@@ -81,6 +81,9 @@ export async function getPerson(db: D1Database, id: number): Promise<AdminPerson
  *    with UNIQUE(email); a LIVE holder → { email: 'errors.emailTaken' }.
  *  - Update: block moving onto another LIVE person's email; a soft-deleted
  *    occupant still holds the UNIQUE index, so we surface that as taken too.
+ * Every write is additionally guarded against a UNIQUE-constraint throw — a
+ * double-submit can insert the email between the pre-check SELECT and the
+ * write — and the race maps to the same field error, never a raw 500.
  * `editedBy` is accepted for API symmetry with the content writers; people
  * carry no updated_by column and no revisions in v1, so nothing records it.
  */
@@ -95,41 +98,53 @@ export async function savePerson(
     .bind(input.email)
     .first<{ id: number; deleted_at: string | null }>();
 
+  const emailTaken: SavePersonResult = { ok: false, errors: { email: 'errors.emailTaken' } };
+
   if (input.id === null) {
     if (existing) {
-      if (existing.deleted_at === null) return { ok: false, errors: { email: 'errors.emailTaken' } };
+      if (existing.deleted_at === null) return emailTaken;
       await writePerson(db, existing.id, input); // revive: clears deleted_at
       return { ok: true, id: existing.id };
     }
-    const r = await db
-      .prepare(
-        `INSERT INTO people (first_name, last_name, display_name, email, phone, role, active, lang)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        input.firstName,
-        input.lastName,
-        input.displayName,
-        input.email,
-        input.phone,
-        input.role,
-        input.active ? 1 : 0,
-        input.lang,
-      )
-      .run();
-    return { ok: true, id: r.meta.last_row_id as number };
+    try {
+      const r = await db
+        .prepare(
+          `INSERT INTO people (first_name, last_name, display_name, email, phone, role, active, lang)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.firstName,
+          input.lastName,
+          input.displayName,
+          input.email,
+          input.phone,
+          input.role,
+          input.active ? 1 : 0,
+          input.lang,
+        )
+        .run();
+      return { ok: true, id: r.meta.last_row_id as number };
+    } catch (e) {
+      if (isUniqueViolation(e)) return emailTaken; // pre-check ↔ INSERT race
+      throw e;
+    }
   }
 
   if (existing && existing.id !== input.id && existing.deleted_at === null) {
-    return { ok: false, errors: { email: 'errors.emailTaken' } };
+    return emailTaken;
   }
   try {
     await writePerson(db, input.id, input);
   } catch (e) {
-    if (String(e).includes('UNIQUE constraint failed')) return { ok: false, errors: { email: 'errors.emailTaken' } };
+    // Soft-deleted occupant still holding UNIQUE(email), or the same race.
+    if (isUniqueViolation(e)) return emailTaken;
     throw e;
   }
   return { ok: true, id: input.id };
+}
+
+function isUniqueViolation(e: unknown): boolean {
+  return String(e).includes('UNIQUE constraint failed');
 }
 
 // One UPDATE serves both a normal edit and a revive: deleted_at = NULL is a

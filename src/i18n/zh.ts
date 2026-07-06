@@ -91,6 +91,7 @@ export default {
   'admin.people.colActive': '状态',
   'admin.people.empty': '暂无会众。',
   'admin.people.saved': '已保存。',
+  'admin.people.deleted': '已删除。',
   'admin.people.active': '在册',
   'admin.people.inactive': '停用',
 

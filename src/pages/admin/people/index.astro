@@ -15,6 +15,7 @@ const db = (env as { DB: D1Database }).DB;
 
 const q = Astro.url.searchParams.get('q')?.trim() ?? '';
 const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
 const people = await listPeople(db, { q: q || undefined });
 ---
 
@@ -25,6 +26,7 @@ const people = await listPeople(db, { q: q || undefined });
   </div>
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.deleted')}</p>}
 
   <form method="get" class="mt-6 flex max-w-md gap-2">
     <input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={tin} />

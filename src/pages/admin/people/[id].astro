@@ -12,7 +12,7 @@ import { t } from '../../../lib/i18n';
 import { getPerson, savePerson, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
 import { parsePersonForm } from '../../../lib/validate';
 import { LOCALES, type Locale } from '../../../lib/locales';
-import { tin, lab, card, errorText, btn, btnDanger, noticeOk } from '../../../lib/adminUi';
+import { tin, lab, card, errorText, btn, btnDanger, noticeOk, noticeErr } from '../../../lib/adminUi';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
@@ -36,7 +36,7 @@ if (Astro.request.method === 'POST') {
 
   if (action === 'delete' && id !== null) {
     await softDeletePerson(db, id);
-    return Astro.redirect('/admin/people/?saved=1', 303);
+    return Astro.redirect('/admin/people/?deleted=1', 303);
   }
 
   if (action === 'flags' && id !== null) {
@@ -75,6 +75,14 @@ const v = {
 };
 
 const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person.editTitle');
+
+// Only display_name and email carry inline error slots; anything else the
+// parser can reject (role/lang option errors) surfaces in one summary banner
+// so a failed save is never silent. Field labels resolve via admin.person.*.
+const INLINE_ERROR_FIELDS = new Set(['display_name', 'email']);
+const summaryErrors = Object.entries(errors)
+  .filter(([field]) => !INLINE_ERROR_FIELDS.has(field))
+  .map(([field, key]) => `${t(lang, `admin.person.${field}`)}: ${t(lang, key)}`);
 ---
 
 <Admin title={heading}>
@@ -84,6 +92,7 @@ const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person
   </div>
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
+  {summaryErrors.length > 0 && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{summaryErrors.join(' ')}</p>}
 
   <form method="post" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
     <input type="hidden" name="action" value="save" />

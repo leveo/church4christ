@@ -92,6 +92,7 @@ export default {
   'admin.people.colActive': 'Status',
   'admin.people.empty': 'No people found.',
   'admin.people.saved': 'Saved.',
+  'admin.people.deleted': 'Deleted.',
   'admin.people.active': 'Active',
   'admin.people.inactive': 'Inactive',
 

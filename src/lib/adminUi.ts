@@ -41,3 +41,5 @@ export const badgeInactive = 'bg-surface-sunken text-ink-muted';
 
 /** Success banner (e.g. the ?saved=1 confirmation). */
 export const noticeOk = 'rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success';
+/** Error banner (e.g. the form-wide validation summary). */
+export const noticeErr = 'rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger';
