@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="Modules: the Settings Modules panel switches a capability on or off, and its navigation, pages, and crons react; nothing is deleted, and cross-links soft-degrade with it">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="560" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">How modules switch features on and off</text>
+
+  <!-- Left: the Settings > Modules panel (a switchboard) -->
+  <rect x="30" y="72" width="240" height="250" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M40,72 H260 Q270,72 270,82 V106 H30 V82 Q30,72 40,72 Z" fill="#31487A"/>
+  <text x="46" y="94" font-size="14" font-weight="700" fill="#FFFFFF">Settings &#8594; Modules</text>
+
+  <!-- toggle rows: two on, one off, one on -->
+  <rect x="46" y="122" width="40" height="20" rx="10" fill="#2F7A4D"/>
+  <circle cx="76" cy="132" r="7" fill="#FFFFFF"/>
+  <text x="98" y="137" font-size="14" fill="#232630">Events</text>
+  <text x="254" y="137" font-size="12" fill="#2F7A4D" text-anchor="end">on</text>
+
+  <rect x="46" y="158" width="40" height="20" rx="10" fill="#2F7A4D"/>
+  <circle cx="76" cy="168" r="7" fill="#FFFFFF"/>
+  <text x="98" y="173" font-size="14" fill="#232630">Sermons</text>
+  <text x="254" y="173" font-size="12" fill="#2F7A4D" text-anchor="end">on</text>
+
+  <rect x="46" y="194" width="40" height="20" rx="10" fill="#DDD9CF"/>
+  <circle cx="56" cy="204" r="7" fill="#FFFFFF"/>
+  <text x="98" y="209" font-size="14" fill="#565B6B">Serve</text>
+  <text x="254" y="209" font-size="12" fill="#565B6B" text-anchor="end">off</text>
+
+  <rect x="46" y="230" width="40" height="20" rx="10" fill="#2F7A4D"/>
+  <circle cx="76" cy="240" r="7" fill="#FFFFFF"/>
+  <text x="98" y="245" font-size="14" fill="#232630">Fellowships</text>
+  <text x="254" y="245" font-size="12" fill="#2F7A4D" text-anchor="end">on</text>
+
+  <text x="46" y="278" font-size="12" fill="#565B6B">Absent = on (the default).</text>
+  <text x="46" y="296" font-size="12" fill="#565B6B">Uncheck one to switch it off.</text>
+
+  <!-- Arrows from the panel into the on / off lanes -->
+  <line x1="272" y1="140" x2="326" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="300" y="120" font-size="12" font-weight="600" fill="#2F7A4D" text-anchor="middle">on</text>
+  <line x1="272" y1="232" x2="326" y2="244" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="300" y="266" font-size="12" font-weight="600" fill="#565B6B" text-anchor="middle">off</text>
+
+  <!-- ON lane: what an enabled module shows -->
+  <rect x="330" y="88" width="460" height="92" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <rect x="330" y="88" width="96" height="92" rx="10" fill="#2F7A4D"/>
+  <text x="378" y="128" font-size="13" fill="#FFFFFF" text-anchor="middle">Module</text>
+  <text x="378" y="148" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">ENABLED</text>
+  <rect x="438" y="106" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="490" y="130" font-size="13" fill="#232630" text-anchor="middle">Nav link</text>
+  <text x="490" y="148" font-size="13" fill="#232630" text-anchor="middle">shown</text>
+  <rect x="556" y="106" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="608" y="130" font-size="13" fill="#232630" text-anchor="middle">Pages</text>
+  <text x="608" y="148" font-size="13" fill="#232630" text-anchor="middle">open</text>
+  <rect x="674" y="106" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="726" y="130" font-size="13" fill="#232630" text-anchor="middle">Crons</text>
+  <text x="726" y="148" font-size="13" fill="#232630" text-anchor="middle">run</text>
+
+  <!-- OFF lane: what a disabled module hides -->
+  <rect x="330" y="198" width="460" height="92" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <rect x="330" y="198" width="96" height="92" rx="10" fill="#565B6B"/>
+  <text x="378" y="238" font-size="13" fill="#FFFFFF" text-anchor="middle">Module</text>
+  <text x="378" y="258" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle">DISABLED</text>
+  <rect x="438" y="216" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="490" y="240" font-size="13" fill="#565B6B" text-anchor="middle">Nav link</text>
+  <text x="490" y="258" font-size="13" fill="#565B6B" text-anchor="middle">hidden</text>
+  <rect x="556" y="216" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="608" y="240" font-size="13" fill="#565B6B" text-anchor="middle">Pages</text>
+  <text x="608" y="258" font-size="13" fill="#565B6B" text-anchor="middle">&#8594; 404</text>
+  <rect x="674" y="216" width="104" height="56" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="726" y="240" font-size="13" fill="#565B6B" text-anchor="middle">Crons</text>
+  <text x="726" y="258" font-size="13" fill="#565B6B" text-anchor="middle">skip</text>
+
+  <!-- Data-kept reassurance band -->
+  <rect x="30" y="330" width="760" height="60" rx="10" fill="#FFFFFF" stroke="#C29A5B" stroke-width="2"/>
+  <rect x="46" y="346" width="8" height="28" rx="2" fill="#C29A5B"/>
+  <text x="70" y="358" font-size="14" font-weight="700" fill="#232630">Nothing is deleted.</text>
+  <text x="70" y="378" font-size="13" fill="#565B6B">Rows, images, and history stay. Switch a module back on and its pages, links, and crons all return.</text>
+
+  <!-- Soft-degrade band -->
+  <rect x="30" y="406" width="760" height="124" rx="10" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="46" y="432" font-size="14" font-weight="600" fill="#565B6B">Soft-degrade &#8212; a module takes its cross-links with it</text>
+  <text x="46" y="462" font-size="13" fill="#232630">&#8226; Events off &#8594; the home page's announcements strip and events section disappear too.</text>
+  <text x="46" y="488" font-size="13" fill="#232630">&#8226; Serve off &#8594; the ministries directory and its navigation link go with it.</text>
+  <text x="46" y="514" font-size="13" fill="#232630">&#8226; Gifts off &#8594; the serve landing page stops showing the gifts-quiz call to action.</text>
+</svg>

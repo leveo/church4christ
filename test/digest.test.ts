@@ -7,6 +7,8 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { sendReminders, sendWeeklyDigest } from '../src/lib/digest';
 import { sendEmail } from '../src/lib/email';
 import { setRule } from '../src/lib/emailSettingsDb';
+import { setSetting } from '../src/lib/settings';
+import { clearModuleCache } from '../src/lib/modules';
 
 // Spy on sendEmail (keeping the real devlog implementation) so the HTML body of
 // each dev-sent message can be asserted — email_log does not store the body.
@@ -91,5 +93,25 @@ describe('sendReminders', () => {
     await setRule(env.DB, 'remind7', false);
     await setRule(env.DB, 'remind3', false);
     expect(await sendReminders(ENV, env.DB, NOW)).toBe(0);
+  });
+});
+
+describe('serve module gate (short-circuits before the rule checks)', () => {
+  it('skips both the digest and reminders entirely when module.serve is off', async () => {
+    // Enable every rule so a non-gated pass WOULD send — proving the module gate
+    // wins. (`clearModuleCache` busts the per-isolate enabled-set cache each way.)
+    await setRule(env.DB, 'digestAM', true);
+    await setRule(env.DB, 'remind7', true);
+    await setRule(env.DB, 'remind3', true);
+    await setSetting(env.DB, 'module.serve', '0');
+    clearModuleCache();
+
+    expect(await sendWeeklyDigest(ENV, env.DB, NOW)).toEqual([]);
+    expect(await sendReminders(ENV, env.DB, NOW)).toBe(0);
+
+    // Re-enabling serve restores normal sending on the next fresh read.
+    await setSetting(env.DB, 'module.serve', '1');
+    clearModuleCache();
+    expect((await sendWeeklyDigest(ENV, env.DB, NOW)).length).toBeGreaterThan(0);
   });
 });

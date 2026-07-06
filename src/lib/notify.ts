@@ -270,6 +270,76 @@ export async function sendApplicationReceived(env: EmailEnv, db: D1Database, app
   }
 }
 
+// ── Outreach (people module: "proactively reach out") ──
+
+interface InviteRecipient {
+  name: string;
+  email: string | null;
+  lang: string | null;
+  active: number;
+}
+
+/**
+ * Invite a person to serve on a team (people-module outreach). Best-effort: reads
+ * the recipient from the people row and no-ops (returns false) when the person is
+ * inactive, soft-deleted, or has no email, or when the team is gone. The mail is
+ * written in the person's saved language (otherwise both stacked) and links the
+ * team's apply flow; it is logged in email_log as kind 'outreach' (its detail
+ * records the team and the inviting leader/admin for the audit trail). The
+ * caller (admin page / leader surface) is responsible for the authorization to
+ * invite for THIS team; this function only derives the recipient. Returns whether
+ * a mail was sent (or dev-logged).
+ */
+export async function sendServeInvite(
+  env: EmailEnv,
+  db: D1Database,
+  args: { personId: number; teamId: number; invitedByEmail: string },
+): Promise<boolean> {
+  try {
+    const person = await db
+      .prepare(
+        `SELECT display_name AS name, email, lang, active FROM people
+         WHERE id = ? AND deleted_at IS NULL`,
+      )
+      .bind(args.personId)
+      .first<InviteRecipient>();
+    if (!person || person.active !== 1 || !person.email) return false;
+
+    // Resolve the team name in the RECIPIENT's language (i18nJoin COALESCEs to
+    // en when no localized row exists); no saved lang → en name inside the
+    // bilingual stacked body.
+    const only = toLang(person.lang);
+    const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], only ?? 'en');
+    const team = await db
+      .prepare(
+        `SELECT tm.id AS id, COALESCE(tm_l.name, tm_d.name) AS name
+         FROM teams tm ${tmJ.joins}
+         WHERE tm.id = ? AND tm.deleted_at IS NULL`,
+      )
+      .bind(args.teamId)
+      .first<{ id: number; name: string }>();
+    if (!team) return false;
+    const link = `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/serve/apply?team=${team.id}`;
+    const built = bilingualEmail({
+      subjectKey: 'invite.email.subject',
+      bodyKey: 'invite.email.body',
+      vars: { name: person.name, team: team.name },
+      link,
+      only,
+    });
+    return await sendEmail(env, db, {
+      to: person.email,
+      toName: person.name,
+      kind: 'outreach',
+      detail: `${team.name} · ${args.invitedByEmail}`,
+      ...built,
+    });
+  } catch (e) {
+    console.error(`serve invite failed for person ${args.personId} team ${args.teamId}`, e);
+    return false;
+  }
+}
+
 /** Tell the applicant whether their serving application was approved or rejected. */
 export async function sendApplicationResult(
   env: EmailEnv,

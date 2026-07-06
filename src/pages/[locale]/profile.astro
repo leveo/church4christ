@@ -24,8 +24,17 @@ import {
 } from '../../lib/myDb';
 import { MINISTRY_CATEGORIES } from '../../lib/ministryMeta';
 import { giftLabel } from '../../lib/giftQuiz';
-import { parsePersonForm } from '../../lib/validate';
-import { btn, lab, noticeErr, noticeOk, tin } from '../../lib/adminUi';
+import { parsePersonForm, parseHouseholdForm, parseDependentForm } from '../../lib/validate';
+import {
+  getLiveHouseholdForPerson,
+  createHousehold,
+  updateHousehold,
+  addDependent,
+  removeDependent,
+  leaveHousehold,
+  type HouseholdWithMembers,
+} from '../../lib/householdDb';
+import { btn, btnDanger, lab, noticeErr, noticeOk, tin } from '../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -34,14 +43,39 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = (env as { DB: D1Database }).DB;
+// People module gates the membership-profile depth (birthday/address) and the
+// household card; the auth basics (name/phone/lang, teams, gifts, interests,
+// history) always render.
+const hasPeople = Astro.locals.modules.has('people');
+// Soft-degrade cross-module links: `/my` is serve-owned and `/serve/gifts` is
+// gifts-owned, so both 404 when their module is off. Gate the links (not the
+// whole page — /profile is core auth surface) to avoid dead-ends.
+const hasServe = Astro.locals.modules.has('serve');
+const hasGifts = Astro.locals.modules.has('gifts');
 
 const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
 
+// Household actions (self-service). All lib mutations pass the signed-in
+// person's id with isAdmin=false, so the lib re-verifies the actor is an adult
+// member of the target household — a crafted household_id can never touch a
+// household the user isn't in.
+const HOUSEHOLD_ACTIONS = new Set(['createHousehold', 'updateHousehold', 'addDependent', 'removeDependent', 'leaveHousehold']);
+const HH_ERR: Record<string, string> = {
+  already_in_household: 'profile.household.errAlreadyIn',
+  not_authorized: 'profile.household.errNotAuthorized',
+  not_a_dependent: 'profile.household.errNotDependent',
+};
+const mapHouseholdError = (e: unknown): string =>
+  HH_ERR[e instanceof Error ? e.message : ''] ?? 'profile.household.errGeneric';
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
 let errorKeys: string[] = [];
+let householdErrorKeys: string[] = [];
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData();
+  const action = String(fd.get('_action') ?? '');
 
-  if (fd.get('_action') === 'saveInterests') {
+  if (action === 'saveInterests') {
     const chosen = fd
       .getAll('interest')
       .map((v) => String(v))
@@ -50,27 +84,85 @@ if (Astro.request.method === 'POST') {
     return Astro.redirect(localePath(locale, '/profile?interests=1'), 303);
   }
 
-  const current = await getPerson(db, user.id);
-  if (!current) return new Response(null, { status: 404 });
-  // Strip the privileged fields: whatever the form posted, the row keeps its
-  // current email/role/active. Volunteers edit names, phone, and language only.
-  fd.set('email', current.email);
-  fd.set('role', current.role);
-  if (current.active === 1) fd.set('active', 'on');
-  else fd.delete('active');
+  // Household card mutations (gated by the people module — the forms only render
+  // when it is on, and a crafted POST while off is a silent no-op).
+  if (hasPeople && HOUSEHOLD_ACTIONS.has(action)) {
+    const done = () => Astro.redirect(localePath(locale, '/profile?household=1'), 303);
+    try {
+      if (action === 'createHousehold') {
+        const parsed = parseHouseholdForm(fd);
+        if (!parsed.ok) householdErrorKeys = [...new Set(Object.values(parsed.errors))];
+        else {
+          await createHousehold(db, parsed.data, user.id);
+          return done();
+        }
+      } else if (action === 'leaveHousehold') {
+        await leaveHousehold(db, user.id);
+        return done();
+      } else if (action === 'removeDependent') {
+        const memberId = idOf(fd.get('member_id'));
+        if (memberId !== null) await removeDependent(db, memberId, user.id, false);
+        return done();
+      } else {
+        // update / addDependent both need the caller's current household.
+        const hh = await getLiveHouseholdForPerson(db, user.id);
+        if (!hh) householdErrorKeys = ['profile.household.errGeneric'];
+        else if (action === 'updateHousehold') {
+          const parsed = parseHouseholdForm(fd);
+          if (!parsed.ok) householdErrorKeys = [...new Set(Object.values(parsed.errors))];
+          else {
+            await updateHousehold(db, hh.id, parsed.data, user.id, false);
+            return done();
+          }
+        } else if (action === 'addDependent') {
+          const parsed = parseDependentForm(fd);
+          if (!parsed.ok) householdErrorKeys = [...new Set(Object.values(parsed.errors))];
+          else {
+            await addDependent(db, hh.id, parsed.data.displayName, parsed.data.role, user.id, false);
+            return done();
+          }
+        }
+      }
+    } catch (e) {
+      householdErrorKeys = [mapHouseholdError(e)];
+    }
+  } else if (action === '') {
+    // Identity form (no _action). Strip the privileged fields: whatever the form
+    // posted, the row keeps its current email/role/active. Volunteers edit names,
+    // phone, and language only.
+    const current = await getPerson(db, user.id);
+    if (!current) return new Response(null, { status: 404 });
+    fd.set('email', current.email);
+    fd.set('role', current.role);
+    if (current.active === 1) fd.set('active', 'on');
+    else fd.delete('active');
 
-  const parsed = parsePersonForm(fd);
-  if (parsed.ok) {
-    const result = await savePerson(db, { id: user.id, ...parsed.data }, user.email);
-    if (result.ok) return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
-    errorKeys = [...new Set(Object.values(result.errors))];
-  } else {
-    errorKeys = [...new Set(Object.values(parsed.errors))];
+    const parsed = parsePersonForm(fd);
+    if (parsed.ok) {
+      const result = await savePerson(db, { id: user.id, ...parsed.data }, user.email);
+      if (result.ok) {
+        // birthday/address are self-service membership fields that savePerson does
+        // not touch (membership_status/joined_on are admin-only and never parsed
+        // here). Persist just these two columns, scoped to the signed-in person,
+        // only while the people module is on.
+        if (hasPeople) {
+          await db
+            .prepare(`UPDATE people SET birthday = ?, address = ?, updated_at = datetime('now') WHERE id = ?`)
+            .bind(parsed.data.birthday, parsed.data.address, user.id)
+            .run();
+        }
+        return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
+      }
+      errorKeys = [...new Set(Object.values(result.errors))];
+    } else {
+      errorKeys = [...new Set(Object.values(parsed.errors))];
+    }
   }
 }
 
 const saved = Astro.url.searchParams.has('saved');
 const interestsSaved = Astro.url.searchParams.has('interests');
+const householdSaved = Astro.url.searchParams.has('household');
 
 const [person, teams, history, blockouts, gift, myInterests] = await Promise.all([
   getPerson(db, user.id),
@@ -82,15 +174,33 @@ const [person, teams, history, blockouts, gift, myInterests] = await Promise.all
 ]);
 if (!person) return new Response(null, { status: 404 });
 const interestSet = new Set(myInterests);
+
+// Membership-profile depth + household card (people module only).
+let household: HouseholdWithMembers | null = null;
+let personExtra = { birthday: '', address: '' };
+if (hasPeople) {
+  const [hh, extra] = await Promise.all([
+    getLiveHouseholdForPerson(db, user.id),
+    db.prepare(`SELECT birthday, address FROM people WHERE id = ?`).bind(user.id).first<{ birthday: string | null; address: string | null }>(),
+  ]);
+  household = hh;
+  personExtra = { birthday: extra?.birthday ?? '', address: extra?.address ?? '' };
+}
+// Adults (real members) may edit the shared card / manage dependents; the lib
+// re-verifies this, but hiding the forms for a child-role member keeps the UI honest.
+const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.role === 'adult') ?? false;
 ---
 
 <Base title={t(locale, 'profile.title')} locale={locale} noindex>
   <div class="container-content max-w-content py-12">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    {hasServe && (
+      <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    )}
     <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'profile.title')}</h1>
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.saved')}</p>}
     {interestsSaved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.interestsSaved')}</p>}
+    {householdSaved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.household.saved')}</p>}
     {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
 
     <form method="post" class="mt-6 grid gap-4 rounded-lg border border-border bg-surface-raised p-6 sm:grid-cols-2">
@@ -123,10 +233,170 @@ const interestSet = new Set(myInterests);
           ))}
         </select>
       </label>
+      {
+        hasPeople && (
+          <>
+            <label class="block">
+              <span class={lab}>{t(locale, 'profile.birthday')}</span>
+              <input type="date" name="birthday" value={personExtra.birthday} class={tin} />
+            </label>
+            <label class="block">
+              <span class={lab}>{t(locale, 'profile.address')}</span>
+              <input name="address" value={personExtra.address} class={tin} />
+            </label>
+          </>
+        )
+      }
       <div class="sm:col-span-2">
         <button type="submit" class={btn}>{t(locale, 'profile.save')}</button>
       </div>
     </form>
+
+    {
+      hasPeople && (
+        <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.household.title')}</h2>
+          {householdErrorKeys.map((key) => (
+            <p class={`mt-3 ${noticeErr}`}>{t(locale, key)}</p>
+          ))}
+
+          {!household ? (
+            <div class="mt-3">
+              <p class="text-sm text-ink-muted">{t(locale, 'profile.household.none')}</p>
+              <form method="post" class="mt-4 grid gap-3 sm:grid-cols-2">
+                <input type="hidden" name="_action" value="createHousehold" />
+                <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'profile.household.createTitle')}</p>
+                <p class="text-sm text-ink-muted sm:col-span-2">{t(locale, 'profile.household.createHint')}</p>
+                <label class="block sm:col-span-2">
+                  <span class={lab}>{t(locale, 'profile.household.name')}</span>
+                  <input name="name" required class={tin} />
+                </label>
+                <label class="block">
+                  <span class={lab}>{t(locale, 'profile.household.address')}</span>
+                  <input name="address" class={tin} />
+                </label>
+                <label class="block">
+                  <span class={lab}>{t(locale, 'profile.household.phone')}</span>
+                  <input name="phone" class={tin} />
+                </label>
+                <div class="sm:col-span-2">
+                  <button type="submit" class={btn}>
+                    {t(locale, 'profile.household.create')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <div class="mt-3 flex flex-col gap-6">
+              <div>
+                <p class="font-semibold">{household.name}</p>
+                {household.address && <p class="mt-0.5 text-sm text-ink-muted">{household.address}</p>}
+                {household.phone && <p class="text-sm text-ink-muted">{household.phone}</p>}
+              </div>
+
+              <div>
+                <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">
+                  {t(locale, 'profile.household.members')}
+                </p>
+                <ul class="mt-2 flex flex-col gap-1.5">
+                  {household.members.map((m) => (
+                    <li class="flex flex-wrap items-center gap-2 text-sm">
+                      <span class="font-medium">{m.display_name}</span>
+                      <span class="rounded-full bg-surface-sunken px-2 py-0.5 text-xs text-ink-muted">
+                        {t(locale, m.role === 'child' ? 'profile.household.roleChild' : 'profile.household.roleAdult')}
+                      </span>
+                      {m.is_primary === 1 && (
+                        <span class="rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                          {t(locale, 'profile.household.primary')}
+                        </span>
+                      )}
+                      {m.person_id === user.id && (
+                        <span class="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-on-accent-soft">
+                          {t(locale, 'profile.household.you')}
+                        </span>
+                      )}
+                      {iAmAdult && m.person_id === null && (
+                        <form
+                          method="post"
+                          class="inline"
+                          onsubmit={`return confirm(${JSON.stringify(t(locale, 'profile.household.removeConfirm'))})`}
+                        >
+                          <input type="hidden" name="_action" value="removeDependent" />
+                          <input type="hidden" name="member_id" value={m.id} />
+                          <button type="submit" class="text-xs font-semibold text-danger hover:underline">
+                            {t(locale, 'profile.household.remove')}
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {iAmAdult && (
+                <>
+                  <form method="post" class="grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+                    <input type="hidden" name="_action" value="updateHousehold" />
+                    <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'profile.household.editTitle')}</p>
+                    <label class="block sm:col-span-2">
+                      <span class={lab}>{t(locale, 'profile.household.name')}</span>
+                      <input name="name" required value={household.name} class={tin} />
+                    </label>
+                    <label class="block">
+                      <span class={lab}>{t(locale, 'profile.household.address')}</span>
+                      <input name="address" value={household.address ?? ''} class={tin} />
+                    </label>
+                    <label class="block">
+                      <span class={lab}>{t(locale, 'profile.household.phone')}</span>
+                      <input name="phone" value={household.phone ?? ''} class={tin} />
+                    </label>
+                    <div class="sm:col-span-2">
+                      <button type="submit" class={btn}>
+                        {t(locale, 'profile.household.save')}
+                      </button>
+                    </div>
+                  </form>
+
+                  <form method="post" class="grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+                    <input type="hidden" name="_action" value="addDependent" />
+                    <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'profile.household.addTitle')}</p>
+                    <p class="text-sm text-ink-muted sm:col-span-2">{t(locale, 'profile.household.addHint')}</p>
+                    <label class="block">
+                      <span class={lab}>{t(locale, 'profile.household.dependentName')}</span>
+                      <input name="display_name" required class={tin} />
+                    </label>
+                    <label class="block">
+                      <span class={lab}>{t(locale, 'profile.household.role')}</span>
+                      <select name="role" class={tin}>
+                        <option value="adult">{t(locale, 'profile.household.roleAdult')}</option>
+                        <option value="child">{t(locale, 'profile.household.roleChild')}</option>
+                      </select>
+                    </label>
+                    <div class="sm:col-span-2">
+                      <button type="submit" class={btn}>
+                        {t(locale, 'profile.household.add')}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
+
+              <form
+                method="post"
+                class="border-t border-border pt-5"
+                onsubmit={`return confirm(${JSON.stringify(t(locale, 'profile.household.leaveConfirm'))})`}
+              >
+                <input type="hidden" name="_action" value="leaveHousehold" />
+                <p class="text-sm text-ink-muted">{t(locale, 'profile.household.leaveHint')}</p>
+                <button type="submit" class={`mt-3 ${btnDanger}`}>
+                  {t(locale, 'profile.household.leave')}
+                </button>
+              </form>
+            </div>
+          )}
+        </section>
+      )
+    }
 
     <section class="mt-8">
       <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.myTeams')}</h2>
@@ -179,9 +449,11 @@ const interestSet = new Set(myInterests);
         ) : (
           <p class="mt-2 text-sm text-ink-muted">
             {t(locale, 'profile.noGift')}
-            <a href={localePath(locale, '/serve/gifts')} class="ml-1 font-semibold text-primary hover:underline">
-              {t(locale, 'profile.takeTest')} →
-            </a>
+            {hasGifts && (
+              <a href={localePath(locale, '/serve/gifts')} class="ml-1 font-semibold text-primary hover:underline">
+                {t(locale, 'profile.takeTest')} →
+              </a>
+            )}
           </p>
         )
       }

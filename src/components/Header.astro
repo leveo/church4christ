@@ -3,6 +3,7 @@
 // screens a checkbox-hack disclosure menu (no JS required for open/close).
 import { localePath } from '../lib/locales';
 import { t } from '../lib/i18n';
+import { MODULE_KEYS, MODULES } from '../lib/modules';
 import LocaleSwitch from './LocaleSwitch.astro';
 
 const locale = Astro.locals.locale;
@@ -17,9 +18,21 @@ const nav: { key: string; path: string }[] = [
   { key: 'nav.events', path: '/events' },
   { key: 'nav.ministries', path: '/ministries' },
   { key: 'nav.serve', path: '/serve' },
+  { key: 'nav.opportunities', path: '/serve/opportunities' },
   { key: 'nav.fellowships', path: '/fellowships' },
   { key: 'nav.articles', path: '/articles' },
 ];
+
+// A nav item hides when its owning module is disabled. Build navKey → module
+// from the registry; items with no owning module (visit/about/give) are core
+// and always show — ministries is owned by serve via nav.ministries.
+const navKeyModule = new Map<string, string>();
+for (const key of MODULE_KEYS) for (const nk of MODULES[key].navKeys) navKeyModule.set(nk, key);
+const modules = Astro.locals.modules;
+const visibleNav = nav.filter((item) => {
+  const owner = navKeyModule.get(item.key);
+  return !owner || modules.has(owner);
+});
 ---
 
 <header class="sticky top-0 z-40 bg-header-bg text-header-ink border-b border-border">
@@ -33,7 +46,7 @@ const nav: { key: string; path: string }[] = [
       aria-label={t(locale, 'common.menu')}
     >
       {
-        nav.map((item) => (
+        visibleNav.map((item) => (
           <a href={localePath(locale, item.path)} class="px-3 py-2 rounded-md hover:bg-surface-raised">
             {t(locale, item.key)}
           </a>
@@ -81,7 +94,7 @@ const nav: { key: string; path: string }[] = [
     >
       <div class="container-wide py-4 flex flex-col gap-1">
         {
-          nav.map((item) => (
+          visibleNav.map((item) => (
             <a href={localePath(locale, item.path)} class="block py-2.5">
               {t(locale, item.key)}
             </a>

@@ -2,6 +2,7 @@ import { defineMiddleware } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import { DEFAULT_LOCALE, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
+import { MODULE_KEYS, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
@@ -63,6 +64,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
     context.locals.theme = (await getActiveTheme(vars.DB)).theme;
   } catch {
     context.locals.theme = THEME_DEFAULT;
+  }
+
+  // Module gating (spec addendum §A): the single choke point. A path owned by a
+  // disabled module 404s — public and admin alike, anon or authed — before the
+  // route policy runs (the module check is orthogonal). locals.modules is ALWAYS
+  // set: an empty DB / missing settings table (fresh install) fails safe to
+  // all-enabled rather than 500ing. The 404 renders the real /404 page via the
+  // rewrite pattern, reconstructed with a 404 status and the baseline headers.
+  let modules: Set<string>;
+  try {
+    modules = await getEnabledModules(vars.DB);
+  } catch {
+    modules = new Set(MODULE_KEYS);
+  }
+  context.locals.modules = modules;
+
+  const mod = moduleForPath(rest);
+  if (mod && !modules.has(mod)) {
+    const rendered = await context.rewrite('/404');
+    const res = new Response(rendered.body, { status: 404, headers: rendered.headers });
+    applySecurityHeaders(res.headers);
+    return res;
   }
 
   // CSRF: reject cross-origin state-changing requests before doing any work. When

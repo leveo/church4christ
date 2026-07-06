@@ -5,6 +5,7 @@ import { t } from '../../lib/i18n';
 import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
 import { consumeToken, peekToken } from '../../lib/auth';
 import { getPersonById } from '../../lib/db';
+import { getEnabledModules } from '../../lib/modules';
 import { mintSession, sessionCookie } from '../../lib/session';
 
 // Two-step consumption: GET only *peeks* (mail scanners prefetch links and would
@@ -24,10 +25,16 @@ if (Astro.request.method === 'POST') {
       sessionEpoch: person.session_epoch,
     });
     const target = person.lang === 'en' || person.lang === 'zh' ? person.lang : DEFAULT_LOCALE;
+    // Module-aware landing: `/my` is serve-owned and 404s when the serve module
+    // is disabled, which would strand the member. Land on their own /profile
+    // instead when serve is off. The middleware sets locals.modules on every
+    // request; fall back to the lib if it is somehow absent.
+    const modules = Astro.locals.modules ?? (await getEnabledModules(vars.DB));
+    const landing = modules.has('serve') ? 'my' : 'profile';
     return new Response(null, {
       status: 303,
       headers: {
-        location: `/${target}/my`,
+        location: `/${target}/${landing}`,
         'set-cookie': sessionCookie(jwt, import.meta.env.PROD),
       },
     });

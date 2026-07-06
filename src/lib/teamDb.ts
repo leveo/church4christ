@@ -407,6 +407,42 @@ export async function listPendingApplicationsForTeams(
   return results;
 }
 
+export interface PersonApplicationRow {
+  id: number;
+  team_id: number;
+  team_name: string;
+  position_name: string | null;
+  status: 'P' | 'A' | 'R';
+  created_at: string;
+}
+
+/** Every application a person has made (any status), newest first, with localized
+ *  team/position names — the person-centric list on the admin person page. */
+export async function listApplicationsForPerson(
+  db: D1Database,
+  personId: number,
+  locale: Locale,
+): Promise<PersonApplicationRow[]> {
+  const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
+  const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
+  const { results } = await db
+    .prepare(
+      `SELECT ta.id AS id, ta.team_id AS team_id, COALESCE(tm_l.name, tm_d.name) AS team_name,
+              COALESCE(pos_l.name, pos_d.name) AS position_name, ta.status AS status,
+              ta.created_at AS created_at
+       FROM team_applications ta
+       JOIN teams tm ON tm.id = ta.team_id
+       ${tmJ.joins}
+       LEFT JOIN positions pos ON pos.id = ta.position_id
+       ${posJ.joins}
+       WHERE ta.person_id = ?
+       ORDER BY ta.created_at DESC, ta.id DESC`,
+    )
+    .bind(personId)
+    .all<PersonApplicationRow>();
+  return results;
+}
+
 /** All non-deleted team ids (for admin-scope application review). */
 export async function listAllTeamIds(db: D1Database): Promise<number[]> {
   const { results } = await db.prepare(`SELECT id FROM teams WHERE deleted_at IS NULL`).all<{ id: number }>();

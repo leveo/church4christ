@@ -71,7 +71,9 @@ which they can add to their interests so leaders know they are open to serving t
 
 **Applying to serve.** When someone wants to join a team, they apply from the site. The team's
 leaders get an email, review the application, and approve or decline it; the applicant is
-emailed the result either way.
+emailed the result either way. Every open team and serving date is also gathered onto one
+**opportunity board** at `/serve/opportunities` that anyone can browse and apply from — see
+[People & households](people-households.md).
 
 **My schedule and calendar.** Every volunteer has a personal schedule and a month calendar,
 plus a private subscribe link that adds their serving dates to Apple Calendar, Google Calendar,

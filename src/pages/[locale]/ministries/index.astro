@@ -37,12 +37,20 @@ const sections = MINISTRY_GROUPS.map((group) => ({
     <div class="container-content py-12">
       <h1 class="font-display text-display-lg font-bold">{t(locale, 'ministries.title')}</h1>
       <p class="mt-3 max-w-narrow text-lg">{t(locale, 'ministries.intro')}</p>
-      <a
-        href={localePath(locale, '/serve')}
-        class="mt-6 inline-flex min-h-11 items-center rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-      >
-        {t(locale, 'ministries.serveCta')} →
-      </a>
+      <div class="mt-6 flex flex-wrap items-center gap-4">
+        <a
+          href={localePath(locale, '/serve')}
+          class="inline-flex min-h-11 items-center rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+        >
+          {t(locale, 'ministries.serveCta')} →
+        </a>
+        <a
+          href={localePath(locale, '/serve/opportunities')}
+          class="text-sm font-semibold underline hover:no-underline"
+        >
+          {t(locale, 'opportunities.boardLink')} →
+        </a>
+      </div>
     </div>
   </div>
 

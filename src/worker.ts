@@ -2,6 +2,7 @@ import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
+import { clearModuleCache } from './lib/modules';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -14,6 +15,9 @@ const BACKUP_CRON = '0 9 * * *'; // daily D1 backup (slice 7)
 export default {
   fetch: (request, env, ctx) => handle(request, env, ctx),
   scheduled(controller, env, ctx) {
+    // Crons can run in a warm isolate whose module cache predates an admin
+    // toggle; clear it so the serve-gate in the mail passes reads fresh state.
+    clearModuleCache();
     // Each mail pass gates itself on the email_rules toggles; kick it off with
     // waitUntil so the scheduled invocation stays alive until the mail is sent.
     const vars = env as unknown as EmailEnv & { DB: D1Database };

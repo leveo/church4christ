@@ -17,7 +17,15 @@ import {
 } from '../src/lib/adminDb';
 
 beforeEach(async () => {
-  await env.DB.prepare('DELETE FROM people').run();
+  // Clear FK children (some tests link people into teams/households) before the
+  // people rows, or the DELETE trips the foreign-key constraint.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM team_members'),
+    env.DB.prepare('DELETE FROM household_members'),
+    env.DB.prepare('DELETE FROM households'),
+    env.DB.prepare('DELETE FROM teams'),
+    env.DB.prepare('DELETE FROM people'),
+  ]);
 });
 
 function input(overrides: Partial<SavePersonInput> = {}): SavePersonInput {
@@ -31,6 +39,8 @@ function input(overrides: Partial<SavePersonInput> = {}): SavePersonInput {
     role: 'member',
     active: true,
     lang: null,
+    birthday: null,
+    address: null,
     ...overrides,
   };
 }
@@ -136,6 +146,82 @@ describe('setPersonFlags', () => {
 
     await setPersonFlags(env.DB, id, {}); // nothing to change
     expect(await getPerson(env.DB, id)).toMatchObject({ role: 'editor', active: 1 });
+  });
+});
+
+describe('savePerson — membership depth (admin variant)', () => {
+  it('persists birthday/address/membership_status/joined_on on create', async () => {
+    const r = await savePerson(
+      env.DB,
+      input({
+        email: 'depth@example.com',
+        birthday: '1990-05-15',
+        address: '42 Grace St',
+        membershipStatus: 'member',
+        joinedOn: '2020-01-01',
+      }),
+      'admin@example.com',
+    );
+    expect(await getPerson(env.DB, idOf(r))).toMatchObject({
+      birthday: '1990-05-15',
+      address: '42 Grace St',
+      membership_status: 'member',
+      joined_on: '2020-01-01',
+    });
+  });
+
+  it('updates membership fields on edit', async () => {
+    const id = idOf(await savePerson(env.DB, input({ email: 'u@example.com', membershipStatus: 'visitor' }), 'x'));
+    await savePerson(
+      env.DB,
+      input({ id, email: 'u@example.com', membershipStatus: 'member', joinedOn: '2021-02-02', birthday: '1985-01-01' }),
+      'x',
+    );
+    expect(await getPerson(env.DB, id)).toMatchObject({
+      membership_status: 'member',
+      joined_on: '2021-02-02',
+      birthday: '1985-01-01',
+    });
+  });
+
+  it('a non-admin save (no membershipStatus) never clobbers the admin-set fields', async () => {
+    const id = idOf(
+      await savePerson(
+        env.DB,
+        input({ email: 'keep@example.com', membershipStatus: 'member', joinedOn: '2019-03-03', birthday: '1970-07-07', address: 'Old Addr' }),
+        'x',
+      ),
+    );
+    // Self-service style save: membershipStatus absent (undefined) → the four
+    // membership-depth columns must be left exactly as the admin set them.
+    await savePerson(env.DB, input({ id, email: 'keep@example.com', displayName: 'Renamed' }), 'x');
+    expect(await getPerson(env.DB, id)).toMatchObject({
+      display_name: 'Renamed',
+      membership_status: 'member',
+      joined_on: '2019-03-03',
+      birthday: '1970-07-07',
+      address: 'Old Addr',
+    });
+  });
+});
+
+describe('listPeople — people-module filters', () => {
+  it('filters by status, serving (team_members), and household, and reads the household name', async () => {
+    const alice = idOf(await savePerson(env.DB, input({ email: 'alice@x.com', displayName: 'Alice', membershipStatus: 'member' }), 'x'));
+    const bob = idOf(await savePerson(env.DB, input({ email: 'bob@x.com', displayName: 'Bob', membershipStatus: 'visitor' }), 'x'));
+    await env.DB.prepare('INSERT INTO teams (id) VALUES (1)').run();
+    await env.DB.prepare('INSERT INTO team_members (team_id, person_id) VALUES (1, ?)').bind(alice).run();
+    await env.DB.prepare("INSERT INTO households (id, name) VALUES (1, 'Bob Home')").run();
+    await env.DB.prepare("INSERT INTO household_members (household_id, person_id, display_name) VALUES (1, ?, 'Bob')").bind(bob).run();
+
+    const names = (opts: Parameters<typeof listPeople>[1]) =>
+      listPeople(env.DB, opts).then((rows) => rows.map((p) => p.display_name));
+    expect(await names({ status: 'member' })).toEqual(['Alice']);
+    expect(await names({ serving: true })).toEqual(['Alice']);
+    expect(await names({ serving: false })).toEqual(['Bob']);
+    expect(await names({ household: true })).toEqual(['Bob']);
+    expect(await names({ household: false })).toEqual(['Alice']);
+    expect((await listPeople(env.DB, { household: true }))[0].household_name).toBe('Bob Home');
   });
 });
 
