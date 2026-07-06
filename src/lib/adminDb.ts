@@ -1258,32 +1258,52 @@ export async function getRevision(db: D1Database, id: number): Promise<{ entity:
     .first<{ entity: string; entity_id: number; snapshot_json: string }>();
 }
 
-export type RestoreResult = { ok: true } | { ok: false; error: 'not_found' | 'date_taken' };
+export type RestoreResult =
+  | { ok: true }
+  | { ok: false; error: 'not_found' | 'date_taken' | 'id_occupied' | 'bad_snapshot' };
 
 /**
  * Restore a past revision by re-saving its snapshot through the entity's OWN save
  * function — which appends a NEW revision, so history is never rewritten. Handles
  * both a normal {v:1,input} snapshot and a {v:1,deleted} one (identical content
  * shape). Announcements/events are hard-deleted, so their save recreates the row
- * under the original id (saveAnnouncement/saveEvent upsert by id). A snapshot
- * whose UNIQUE date now collides with another live row surfaces as `date_taken`,
- * never a 500. A revision that doesn't exist or doesn't match `entity` → not_found.
+ * under the original id (saveAnnouncement/saveEvent upsert by id). Failure modes,
+ * never a 500:
+ *  - not_found: no such revision, or it belongs to a different entity;
+ *  - bad_snapshot: corrupt JSON or an unknown snapshot version (only v:1 is known);
+ *  - id_occupied: a {v:1,deleted} announcement/event restore whose original id has
+ *    been REUSED by a newer live row (SQLite rowids are max(id)+1, so deleting the
+ *    highest-id row lets the next insert take its id) — refuse rather than clobber;
+ *  - date_taken: the snapshot's UNIQUE date now collides with another live row.
  */
 export async function restoreRevision(db: D1Database, entity: string, revisionId: number, editedBy: string): Promise<RestoreResult> {
   const rev = await getRevision(db, revisionId);
   if (!rev || rev.entity !== entity) return { ok: false, error: 'not_found' };
 
   let content: Record<string, unknown> | undefined;
+  let fromDeleted = false;
   try {
-    const parsed = JSON.parse(rev.snapshot_json) as { input?: unknown; deleted?: unknown };
+    const parsed = JSON.parse(rev.snapshot_json) as { v?: unknown; input?: unknown; deleted?: unknown };
+    if (parsed.v !== 1) return { ok: false, error: 'bad_snapshot' };
     const c = parsed.input ?? parsed.deleted;
+    fromDeleted = parsed.input === undefined && parsed.deleted !== undefined;
     if (c && typeof c === 'object') content = c as Record<string, unknown>;
   } catch {
-    /* corrupt snapshot — treat as not restorable */
+    return { ok: false, error: 'bad_snapshot' }; // corrupt JSON
   }
-  if (!content) return { ok: false, error: 'not_found' };
+  if (!content) return { ok: false, error: 'bad_snapshot' };
 
   const id = rev.entity_id;
+
+  // Rowid-reuse guard: restoring a deleted-item snapshot would upsert under the
+  // original id, but that id may now belong to a NEWER live announcement/event.
+  // A deleted snapshot means "this row was removed" — if something live sits at
+  // the id now, it is a different item, so refuse instead of overwriting it.
+  if (fromDeleted && (entity === 'announcement' || entity === 'event')) {
+    const table = entity === 'announcement' ? 'announcements' : 'events';
+    const live = await db.prepare(`SELECT 1 AS x FROM ${table} WHERE id = ?1`).bind(id).first<{ x: number }>();
+    if (live) return { ok: false, error: 'id_occupied' };
+  }
   switch (entity) {
     case 'bulletin': {
       const r = await saveBulletin(db, { ...(content as unknown as BulletinInput), id }, editedBy);

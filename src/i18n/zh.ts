@@ -535,6 +535,8 @@ export default {
   'admin.revisions.deletedBadge': '删除快照',
   'admin.revisions.restored': '已还原，并已保存为新版本。',
   'admin.revisions.restoreError': '还原失败：该日期已被另一条记录占用。',
+  'admin.revisions.idOccupied': '无法恢复：该编号已被较新的条目使用。',
+  'admin.revisions.badSnapshot': '无法恢复：不支持此快照格式。',
 
   // 网站设置
   'admin.settings.title': '网站设置',

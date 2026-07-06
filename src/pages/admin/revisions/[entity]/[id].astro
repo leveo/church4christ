@@ -36,7 +36,14 @@ if (!(entity in EDITOR_URL) || !/^\d+$/.test(rawId)) return new Response(null, {
 const entityId = Number(rawId);
 const HERE = `/admin/revisions/${entity}/${entityId}`;
 
-let restoreError = false;
+// Dictionary key for the restore-failure banner (null = no failure). not_found
+// stays a 404 (tampered id); the other errors re-render with a localized banner.
+let restoreErrorKey: string | null = null;
+const RESTORE_ERROR_KEYS: Record<string, string> = {
+  date_taken: 'admin.revisions.restoreError',
+  id_occupied: 'admin.revisions.idOccupied',
+  bad_snapshot: 'admin.revisions.badSnapshot',
+};
 
 if (Astro.request.method === 'POST') {
   let fd: FormData | null = null;
@@ -53,8 +60,8 @@ if (Astro.request.method === 'POST') {
     if (!rev || rev.entity !== entity || rev.entity_id !== entityId) return new Response(null, { status: 404 });
     const result = await restoreRevision(db, entity, revisionId, user.email);
     if (result.ok) return Astro.redirect(`${HERE}?restored=1`, 303);
-    if (result.error === 'date_taken') restoreError = true;
-    else return new Response(null, { status: 404 });
+    if (result.error === 'not_found') return new Response(null, { status: 404 });
+    restoreErrorKey = RESTORE_ERROR_KEYS[result.error];
   }
 }
 
@@ -87,7 +94,7 @@ const editorHref = EDITOR_URL[entity](entityId);
   </div>
 
   {restored && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.revisions.restored')}</p>}
-  {restoreError && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.revisions.restoreError')}</p>}
+  {restoreErrorKey && <p class={`mt-4 ${noticeErr}`}>{t(lang, restoreErrorKey)}</p>}
   {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
 
   {

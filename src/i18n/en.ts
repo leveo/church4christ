@@ -537,6 +537,8 @@ export default {
   'admin.revisions.deletedBadge': 'Deleted snapshot',
   'admin.revisions.restored': 'Restored — a new version was saved.',
   'admin.revisions.restoreError': 'Restore failed: that date is already used by another live record.',
+  'admin.revisions.idOccupied': 'Cannot restore: a newer item now uses this ID.',
+  'admin.revisions.badSnapshot': 'Cannot restore: this snapshot format is not supported.',
 
   // Site settings
   'admin.settings.title': 'Site Settings',

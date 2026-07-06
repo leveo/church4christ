@@ -127,4 +127,43 @@ describe('restoreRevision — guards', () => {
     const rev = oldest(await listRevisions(env.DB, 'bulletin', id));
     expect(await restoreRevision(env.DB, 'sermon', rev.id, 'admin')).toEqual({ ok: false, error: 'not_found' });
   });
+
+  it('id_occupied when a rowid-reused live announcement sits at the deleted snapshot’s id — live row untouched', async () => {
+    // Delete the HIGHEST-id announcement: SQLite assigns rowids as max(id)+1, so
+    // the next insert reuses the freed id — the exact clobber hazard the guard
+    // exists for.
+    const { id: oldId } = await saveAnnouncement(env.DB, aInput({ titles: { en: 'Old item' } }), 'ed');
+    await deleteAnnouncement(env.DB, oldId, 'ed');
+    const { id: newId } = await saveAnnouncement(env.DB, aInput({ titles: { en: 'Newer item' } }), 'ed');
+    expect(newId).toBe(oldId); // premise: the id really was reused
+
+    const revs = await listRevisions(env.DB, 'announcement', oldId);
+    const deletedRev = revs.find((r) => 'deleted' in JSON.parse(r.snapshot_json))!;
+    expect(await restoreRevision(env.DB, 'announcement', deletedRev.id, 'admin')).toEqual({ ok: false, error: 'id_occupied' });
+
+    // The newer live row is untouched and no extra revision was appended.
+    expect((await listAnnouncements(env.DB)).find((r) => r.id === newId)!.title_en).toBe('Newer item');
+    expect((await listRevisions(env.DB, 'announcement', oldId)).length).toBe(revs.length);
+  });
+
+  it('bad_snapshot for an unknown snapshot version (only v:1 is restorable)', async () => {
+    const id = idOf(await saveBulletin(env.DB, bInput(), 'ed'));
+    const r = await env.DB
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('bulletin', ?1, ?2, 'ed')`)
+      .bind(id, JSON.stringify({ v: 2, input: { future: 'shape' } }))
+      .run();
+    const revId = r.meta.last_row_id as number;
+    expect(await restoreRevision(env.DB, 'bulletin', revId, 'admin')).toEqual({ ok: false, error: 'bad_snapshot' });
+    // The bulletin was not touched by the refused restore.
+    expect((await getBulletinForEdit(env.DB, id))!.memoryVerse).toBe('First verse');
+  });
+
+  it('bad_snapshot for corrupt snapshot JSON', async () => {
+    const id = idOf(await saveBulletin(env.DB, bInput(), 'ed'));
+    const r = await env.DB
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('bulletin', ?1, 'not json{{', 'ed')`)
+      .bind(id)
+      .run();
+    expect(await restoreRevision(env.DB, 'bulletin', r.meta.last_row_id as number, 'admin')).toEqual({ ok: false, error: 'bad_snapshot' });
+  });
 });

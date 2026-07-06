@@ -14,7 +14,7 @@ import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
 import { THEME_META } from '../../../lib/themeMeta.generated';
-import { tin, lab, card, errorText, btn, noticeOk } from '../../../lib/adminUi';
+import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -68,7 +68,7 @@ const h2 = 'font-display text-heading-sm font-bold';
 <Admin title={t(lang, 'admin.settings.title')}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.settings.title')}</h1>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.settings.saved')}</p>}
-  {badRequest && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.badRequest')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
   <form method="post" class="mt-6 max-w-2xl space-y-6">
