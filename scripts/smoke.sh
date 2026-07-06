@@ -30,10 +30,15 @@ root_headers=$(curl -s -D - -o /dev/null "$BASE/")
 echo "$root_headers" | grep -iqE '^location: /(en|zh)/' || fail "/ redirect location not /en/ or /zh/"
 echo "$root_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/ redirect missing nosniff header"
 
-# `/en/` → 200 rendering the English brand name.
+# `/en/` → 200 rendering the English brand name. Capture the body into a variable
+# before grepping: the home page streams a chunked response, so piping curl
+# straight into `grep -q` lets grep close the pipe on its first match and trip
+# curl's SIGPIPE under `pipefail`. Buffering the whole body first (as the /zh/
+# check below already does) avoids that false failure.
 en_status=$(status "$BASE/en/")
 [ "$en_status" = "200" ] || fail "/en/ expected 200, got $en_status"
-curl -sf "$BASE/en/" | grep -q 'Church4Christ' || fail "/en/ missing Church4Christ"
+en_body=$(curl -sf "$BASE/en/")
+echo "$en_body" | grep -q 'Church4Christ' || fail "/en/ missing Church4Christ"
 
 # `/zh/` → 200 with the Chinese brand name and the zh-Hans lang attribute.
 zh_status=$(status "$BASE/zh/")
@@ -104,6 +109,18 @@ for path in /en/about/staff /en/articles /en/fellowships /en/give; do
   s=$(status "$BASE$path")
   [ "$s" = "200" ] || fail "$path expected 200, got $s"
 done
+
+# Slice 4 Task 2: the home page renders the hero heading + its section landmarks
+# (events strip, anchored prayer section with its honeypot), and the locale-free
+# prayer-request API is POST-only (a bare GET must not render anything).
+home_en=$(curl -sf "$BASE/en/")
+echo "$home_en" | grep -q 'Find your place in God' || fail "/en/ missing hero title"
+echo "$home_en" | grep -q 'Upcoming Events' || fail "/en/ missing events section landmark"
+echo "$home_en" | grep -q 'id="prayer"' || fail "/en/ missing prayer section landmark"
+echo "$home_en" | grep -q 'name="website"' || fail "/en/ missing prayer honeypot field"
+
+prayer_get=$(status "$BASE/api/prayer-request")
+{ [ "$prayer_get" = "405" ] || [ "$prayer_get" = "404" ]; } || fail "GET /api/prayer-request expected 405/404, got $prayer_get"
 
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")

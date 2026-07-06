@@ -1,0 +1,84 @@
+---
+// Prayer-request section for the home page. Anchored #prayer so the API's
+// post-submit redirect (?prayer=sent|error#prayer) lands here and shows the
+// matching localized banner. name/email are optional; only the message and the
+// consent checkbox are required client-side. A hidden `website` honeypot lets the
+// API silently drop bots. Posts to the locale-free /api/prayer-request endpoint.
+import SectionTitle from './SectionTitle.astro';
+import { localePath, type Locale } from '../lib/locales';
+import { t } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+  status: 'sent' | 'error' | null;
+}
+const { locale, status } = Astro.props;
+const privacyHref = localePath(locale, '/privacy');
+
+const fieldClass =
+  'w-full rounded-md border border-border bg-surface-raised px-4 py-3 text-ink placeholder:text-ink-subtle focus:border-border-strong';
+---
+
+<section id="prayer" class="bg-surface-sunken">
+  <div class="container-content grid items-start gap-10 py-16 md:grid-cols-2 md:py-24">
+    <div>
+      <SectionTitle
+        eyebrow={t(locale, 'home.prayerEyebrow')}
+        title={t(locale, 'home.prayerTitle')}
+        subtitle={t(locale, 'home.prayerIntro')}
+      />
+      {
+        status === 'sent' && (
+          <p role="status" class="mt-6 rounded-md border border-border bg-success-soft px-4 py-3 text-success">
+            {t(locale, 'home.prayerSuccess')}
+          </p>
+        )
+      }
+      {
+        status === 'error' && (
+          <p role="alert" class="mt-6 rounded-md border border-border bg-danger-soft px-4 py-3 text-danger">
+            {t(locale, 'home.prayerError')}
+          </p>
+        )
+      }
+    </div>
+
+    <form method="POST" action="/api/prayer-request" class="flex flex-col gap-4">
+      <input type="text" name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
+
+      <label class="flex flex-col gap-1.5">
+        <span class="text-sm font-medium text-ink-muted">{t(locale, 'home.prayerName')}</span>
+        <input type="text" name="name" maxlength="100" autocomplete="name" class={fieldClass} />
+      </label>
+
+      <label class="flex flex-col gap-1.5">
+        <span class="text-sm font-medium text-ink-muted">{t(locale, 'home.prayerEmail')}</span>
+        <input type="email" name="email" maxlength="200" autocomplete="email" class={fieldClass} />
+      </label>
+
+      <label class="flex flex-col gap-1.5">
+        <span class="text-sm font-medium text-ink-muted">
+          {t(locale, 'home.prayerMessage')} <span class="text-danger">*</span>
+        </span>
+        <textarea name="message" required rows="5" maxlength="4000" class={`${fieldClass} resize-y`}></textarea>
+      </label>
+
+      <label class="flex cursor-pointer items-start gap-3 text-sm text-ink-muted">
+        <input type="checkbox" name="consent" required class="mt-0.5 size-5 accent-primary" />
+        <span>
+          {t(locale, 'home.prayerConsent')}{' '}
+          <a href={privacyHref} class="underline decoration-accent underline-offset-2 hover:text-accent">
+            {t(locale, 'home.prayerConsentLink')}
+          </a>
+        </span>
+      </label>
+
+      <button
+        type="submit"
+        class="self-start rounded-full bg-primary px-8 py-3 font-semibold text-on-primary hover:bg-primary-hover"
+      >
+        {t(locale, 'home.prayerSubmit')}
+      </button>
+    </form>
+  </div>
+</section>

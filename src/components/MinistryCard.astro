@@ -1,0 +1,24 @@
+---
+// Compact ministry card for the home-page preview grid: emoji icon, localized
+// name, and a two-line-clamped intro, linking to the ministry detail page (which
+// lands in Task 4). Token utilities only.
+import { localePath, type Locale } from '../lib/locales';
+
+interface Props {
+  icon: string;
+  name: string;
+  intro: string;
+  slug: string;
+  locale: Locale;
+}
+const { icon, name, intro, slug, locale } = Astro.props;
+---
+
+<a
+  href={localePath(locale, `/ministries/${slug}`)}
+  class="block rounded-lg border border-border bg-surface-raised p-5 transition-shadow hover:border-border-strong hover:shadow-md"
+>
+  <span class="text-3xl" aria-hidden="true">{icon}</span>
+  <h3 class="mt-3 font-display text-lg font-semibold">{name}</h3>
+  {intro && <p class="mt-1 line-clamp-2 text-sm text-ink-muted">{intro}</p>}
+</a>

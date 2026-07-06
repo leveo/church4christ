@@ -1,0 +1,65 @@
+---
+// Deterministic decorative placeholder for a card that has no image. A stable
+// hash of `seed` picks one of four token soft/solid palettes and one of four
+// motif variants, so the same event always renders the same tile while a grid of
+// them stays varied. All fills are CSS vars — no color literals — so tiles
+// re-tint per theme. Purely decorative: aria-hidden, empty alt at the call site.
+interface Props {
+  seed: string;
+  /** Sizing/shape utilities from the parent (e.g. "w-full aspect-video"). */
+  class?: string;
+}
+const { seed, class: className = '' } = Astro.props;
+
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+const h = hash(seed);
+
+const palettes = [
+  { bg: 'var(--color-primary-soft)', fg: 'var(--color-primary)' },
+  { bg: 'var(--color-accent-soft)', fg: 'var(--color-accent)' },
+  { bg: 'var(--color-info-soft)', fg: 'var(--color-info)' },
+  { bg: 'var(--color-success-soft)', fg: 'var(--color-success)' },
+];
+const { bg, fg } = palettes[h % palettes.length];
+const variant = (h >>> 3) % 4;
+
+// A small deterministic scatter of motif shapes over a 4x3 grid, offset by the
+// hash so variants differ. Shape kind alternates circle / diamond by variant.
+const cells = Array.from({ length: 12 }, (_, i) => {
+  const col = i % 4;
+  const row = Math.floor(i / 4);
+  const cx = 50 + col * 100;
+  const cy = 45 + row * 90;
+  const bit = (h >>> i) & 1;
+  const r = 14 + ((h >>> (i + 2)) % 20);
+  const opacity = bit ? 0.5 : 0.22;
+  return { cx, cy, r, opacity, show: ((i + variant) % 3 !== 0) };
+});
+---
+
+<div class={`relative overflow-hidden ${className}`} style={`background-color:${bg}`} aria-hidden="true">
+  <svg class="absolute inset-0 h-full w-full" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" fill={fg}>
+    {
+      cells.map((c) =>
+        c.show ? (
+          variant % 2 === 0 ? (
+            <circle cx={c.cx} cy={c.cy} r={c.r} opacity={c.opacity} />
+          ) : (
+            <rect
+              x={c.cx - c.r}
+              y={c.cy - c.r}
+              width={c.r * 2}
+              height={c.r * 2}
+              opacity={c.opacity}
+              transform={`rotate(45 ${c.cx} ${c.cy})`}
+            />
+          )
+        ) : null,
+      )
+    }
+  </svg>
+</div>

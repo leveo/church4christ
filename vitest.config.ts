@@ -55,6 +55,8 @@ export default defineConfig(async () => {
               'test/authFlow.test.ts',
               'test/planDb.test.ts',
               'test/adminDb.people.test.ts',
+              'test/publicDb.test.ts',
+              'test/prayer-request.test.ts',
             ],
             setupFiles: ['./test/setup.ts'],
           },

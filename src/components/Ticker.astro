@@ -1,0 +1,37 @@
+---
+// Announcement ticker: a soft brand-tinted bar listing active announcements.
+// Links are optional per item. Renders nothing when there are no active
+// announcements, so the home page can drop it in unconditionally.
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { AnnouncementRow } from '../lib/publicDb';
+
+interface Props {
+  announcements: AnnouncementRow[];
+  locale: Locale;
+}
+const { announcements, locale } = Astro.props;
+---
+
+{
+  announcements.length > 0 && (
+    <div class="border-y border-border bg-primary-soft text-on-primary-soft">
+      <div class="container-wide flex flex-wrap items-center gap-x-6 gap-y-1 py-3 text-sm">
+        <span class="shrink-0 text-xs font-semibold uppercase tracking-caps">{t(locale, 'home.announcements')}</span>
+        {announcements.map((a) =>
+          a.url ? (
+            <a
+              href={a.url}
+              rel="noopener"
+              class="underline decoration-accent underline-offset-2 hover:text-primary"
+            >
+              {a.title}
+            </a>
+          ) : (
+            <span>{a.title}</span>
+          ),
+        )}
+      </div>
+    </div>
+  )
+}
