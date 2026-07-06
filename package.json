@@ -11,7 +11,7 @@
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:check": "node scripts/check-tokens.mjs",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "echo \"e2e tests land in slice 2\"",
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:seed:local": "wrangler d1 execute DB --local --file=./seed/dev-seed.sql",

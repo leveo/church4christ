@@ -44,6 +44,9 @@ jobs:
       - name: Smoke test
         run: bash scripts/smoke.sh
 
+      - name: End-to-end tests (built worker)
+        run: npm run test:e2e
+
   deploy:
     needs: build-test
     runs-on: ubuntu-latest
