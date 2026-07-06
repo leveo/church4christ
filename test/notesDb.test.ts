@@ -1,9 +1,9 @@
 // notesDb (workers project, live D1). Pastoral notes CRUD: add (with body
-// validation), newest-first list, soft-delete hiding + idempotence, count. The
+// validation), newest-first list, soft-delete hiding + idempotence. The
 // lib does no visibility gating — that is the admin page's job.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addNote, countNotes, listNotes, NOTE_MAX_LEN, softDeleteNote } from '../src/lib/notesDb';
+import { addNote, listNotes, NOTE_MAX_LEN, softDeleteNote } from '../src/lib/notesDb';
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -32,7 +32,7 @@ describe('addNote', () => {
   });
 });
 
-describe('listNotes / countNotes / softDeleteNote', () => {
+describe('listNotes / softDeleteNote', () => {
   it('lists newest first', async () => {
     await env.DB
       .prepare("INSERT INTO person_notes (person_id, author_email, body, created_at) VALUES (1, 'a@x', 'older', '2026-01-01 00:00:00')")
@@ -42,14 +42,12 @@ describe('listNotes / countNotes / softDeleteNote', () => {
       .run();
     const notes = await listNotes(env.DB, 1);
     expect(notes.map((n) => n.body)).toEqual(['newer', 'older']);
-    expect(await countNotes(env.DB, 1)).toBe(2);
   });
 
   it('soft-delete hides a note and is idempotent', async () => {
     const id = await addNote(env.DB, 1, 'a@x', 'private note');
     expect(await softDeleteNote(env.DB, id)).toBe(true);
     expect(await listNotes(env.DB, 1)).toHaveLength(0);
-    expect(await countNotes(env.DB, 1)).toBe(0);
     expect(await softDeleteNote(env.DB, id)).toBe(false); // already deleted
   });
 });

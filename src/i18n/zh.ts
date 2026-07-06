@@ -602,6 +602,7 @@ export default {
   'invite.selectTeam': '选择团队',
   'invite.send': '发送邀请',
   'invite.sent': '邀请已发送。',
+  'invite.failed': '邀请未能发送——此人未登记邮箱，或帐号已停用。',
   'invite.button': '邀请服事',
   'invite.email.subject': '诚邀您加入 {team} 服事',
   'invite.email.body':

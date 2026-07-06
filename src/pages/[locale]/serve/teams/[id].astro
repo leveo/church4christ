@@ -41,6 +41,7 @@ const db = (env as { DB: D1Database }).DB;
 // leader can only ever invite for a team they already lead (canEdit gate).
 const hasPeople = Astro.locals.modules.has('people');
 const invited = Astro.url.searchParams.get('invited') === '1';
+const inviteFailed = Astro.url.searchParams.get('invited') === '0';
 
 const idOf = (v: string | FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
@@ -88,13 +89,15 @@ if (Astro.request.method === 'POST') {
   }
   if (action === 'invite') {
     // Outreach invite for THIS team (people module only). canEdit already
-    // guarantees the actor is an admin or a leader of this team.
+    // guarantees the actor is an admin or a leader of this team. Honest outcome:
+    // false (inactive/no-email invitee) → ?invited=0.
     if (!hasPeople) return new Response(null, { status: 404 });
     const personId = idOf(fd.get('person_id'));
+    let sent = false;
     if (personId) {
-      await sendServeInvite(env as unknown as EmailEnv, db, { personId, teamId, invitedByEmail: user.email });
+      sent = await sendServeInvite(env as unknown as EmailEnv, db, { personId, teamId, invitedByEmail: user.email });
     }
-    return Astro.redirect(localePath(locale, `/serve/teams/${teamId}?invited=1`), 303);
+    return Astro.redirect(localePath(locale, `/serve/teams/${teamId}?invited=${sent ? '1' : '0'}`), 303);
   }
 }
 
@@ -133,6 +136,7 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
     }
 
     {invited && <p class="mt-4 rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success">{t(locale, 'invite.sent')}</p>}
+    {inviteFailed && <p class="mt-4 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(locale, 'invite.failed')}</p>}
 
     {
       pendingApps.length > 0 && (

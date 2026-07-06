@@ -603,6 +603,7 @@ export default {
   'invite.selectTeam': 'Choose a team',
   'invite.send': 'Send invitation',
   'invite.sent': 'Invitation sent.',
+  'invite.failed': 'Could not send the invitation — this person has no email on file or their account is inactive.',
   'invite.button': 'Invite to serve',
   'invite.email.subject': 'An invitation to serve at {team}',
   'invite.email.body':

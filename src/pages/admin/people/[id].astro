@@ -147,11 +147,15 @@ if (Astro.request.method === 'POST') {
       if (noteId !== null) await softDeleteNote(db, noteId);
       return back();
     } else if (action === 'invite') {
+      // Honest outcome: sendServeInvite returns false for an inactive/no-email
+      // invitee (or a missing team) — surface that as ?invited=0, not a fake
+      // success.
       const teamId = idOf(fd.get('team_id'));
+      let sent = false;
       if (teamId !== null) {
-        await sendServeInvite(env as unknown as EmailEnv, db, { personId: id, teamId, invitedByEmail: user.email });
+        sent = await sendServeInvite(env as unknown as EmailEnv, db, { personId: id, teamId, invitedByEmail: user.email });
       }
-      return Astro.redirect(`/admin/people/${id}?invited=1`, 303);
+      return Astro.redirect(`/admin/people/${id}?invited=${sent ? '1' : '0'}`, 303);
     }
   }
 
@@ -172,6 +176,7 @@ if (Astro.request.method === 'POST') {
 
 const saved = Astro.url.searchParams.get('saved') === '1';
 const invited = Astro.url.searchParams.get('invited') === '1';
+const inviteFailed = Astro.url.searchParams.get('invited') === '0';
 const echoed = Object.keys(values).length > 0; // a failed save re-render
 
 // Failed save echoes submitted values; otherwise the stored row (or blank/new).
@@ -210,11 +215,17 @@ const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person
 
 // Only display_name and email carry inline error slots; anything else the
 // parser can reject (role/lang option errors) surfaces in one summary banner
-// so a failed save is never silent. Field labels resolve via admin.person.*.
+// so a failed save is never silent. Field labels resolve via admin.person.*;
+// the snake_case fields whose dictionary keys are camelCase map explicitly so a
+// crafted POST (e.g. a bogus membership_status) never leaks a raw key.
 const INLINE_ERROR_FIELDS = new Set(['display_name', 'email']);
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  membership_status: 'admin.person.membershipStatus',
+  joined_on: 'admin.person.joinedOn',
+};
 const summaryErrors = Object.entries(errors)
   .filter(([field]) => !INLINE_ERROR_FIELDS.has(field))
-  .map(([field, key]) => `${t(lang, `admin.person.${field}`)}: ${t(lang, key)}`);
+  .map(([field, key]) => `${t(lang, FIELD_LABEL_KEYS[field] ?? `admin.person.${field}`)}: ${t(lang, key)}`);
 ---
 
 <Admin title={heading}>
@@ -490,6 +501,7 @@ const summaryErrors = Object.entries(errors)
               <h2 class="font-semibold">{t(lang, 'invite.title')}</h2>
               <p class="mt-1 text-sm text-ink-muted">{t(lang, 'invite.hint')}</p>
               {invited && <p class={`mt-3 ${noticeOk}`}>{t(lang, 'invite.sent')}</p>}
+              {inviteFailed && <p class={`mt-3 ${noticeErr}`}>{t(lang, 'invite.failed')}</p>}
               {allTeams.length > 0 && (
                 <form method="post" class="mt-3 flex flex-wrap items-end gap-2">
                   <input type="hidden" name="action" value="invite" />

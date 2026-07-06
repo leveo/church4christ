@@ -305,7 +305,11 @@ export async function sendServeInvite(
       .first<InviteRecipient>();
     if (!person || person.active !== 1 || !person.email) return false;
 
-    const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], 'en');
+    // Resolve the team name in the RECIPIENT's language (i18nJoin COALESCEs to
+    // en when no localized row exists); no saved lang → en name inside the
+    // bilingual stacked body.
+    const only = toLang(person.lang);
+    const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], only ?? 'en');
     const team = await db
       .prepare(
         `SELECT tm.id AS id, COALESCE(tm_l.name, tm_d.name) AS name
@@ -315,8 +319,6 @@ export async function sendServeInvite(
       .bind(args.teamId)
       .first<{ id: number; name: string }>();
     if (!team) return false;
-
-    const only = toLang(person.lang);
     const link = `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/serve/apply?team=${team.id}`;
     const built = bilingualEmail({
       subjectKey: 'invite.email.subject',

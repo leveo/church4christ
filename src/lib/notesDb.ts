@@ -3,7 +3,7 @@
 // notes (their outreach tool is the logged invite email). This library performs
 // NO visibility/authorization logic: every function assumes the calling page has
 // already gated the request to an admin. Notes are soft-deleted (deleted_at) so
-// history is retained; listNotes/countNotes exclude soft-deleted rows.
+// history is retained; listNotes excludes soft-deleted rows.
 
 export const NOTE_MAX_LEN = 4000;
 
@@ -57,13 +57,4 @@ export async function listNotes(db: D1Database, personId: number): Promise<Perso
     .bind(personId)
     .all<PersonNote>();
   return results;
-}
-
-/** How many live notes a person has (admin person-page badge). */
-export async function countNotes(db: D1Database, personId: number): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM person_notes WHERE person_id = ? AND deleted_at IS NULL`)
-    .bind(personId)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
 }

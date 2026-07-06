@@ -71,15 +71,31 @@ describe('sendApplicationResult', () => {
 
 describe('sendServeInvite', () => {
   beforeAll(async () => {
-    await env.DB.prepare(`INSERT INTO people (id, display_name, email, lang, active) VALUES
-      (20, 'Invitee', 'invitee@example.com', 'en', 1),
-      (21, 'Inactive', 'inactive@example.com', 'en', 0),
-      (22, 'NoEmail', '', 'zh', 1)`).run();
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO people (id, display_name, email, lang, active) VALUES
+        (20, 'Invitee', 'invitee@example.com', 'en', 1),
+        (21, 'Inactive', 'inactive@example.com', 'en', 0),
+        (22, 'NoEmail', '', 'zh', 1),
+        (23, '恩慈', 'zh.invitee@example.com', 'zh', 1)`),
+      env.DB.prepare(`INSERT INTO team_i18n (team_id, locale, name) VALUES (1, 'zh', '敬拜队')`),
+    ]);
   });
 
   it('emails an active invitee and logs an outreach devlog row', async () => {
     expect(await sendServeInvite(ENV, env.DB, { personId: 20, teamId: 1, invitedByEmail: 'admin@example.com' })).toBe(true);
     expect(await logCount('invitee@example.com', 'outreach')).toBe(1);
+  });
+
+  it('resolves the team name in the recipient language (zh)', async () => {
+    // Devlog mode prints the full mail via console.log (mocked in beforeAll) —
+    // capture it to assert the zh team name reached the zh recipient's body.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logSpy.mockClear();
+    expect(await sendServeInvite(ENV, env.DB, { personId: 23, teamId: 1, invitedByEmail: 'x' })).toBe(true);
+    const logged = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(logged).toContain('zh.invitee@example.com');
+    expect(logged).toContain('敬拜队'); // zh team name, not the en fallback
+    expect(logged).not.toContain('Worship');
   });
 
   it('returns false and sends nothing for an inactive person', async () => {

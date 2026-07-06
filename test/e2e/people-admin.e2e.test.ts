@@ -104,6 +104,25 @@ describe('leader outreach invites', () => {
     expect(res.status).toBe(403);
     expect(await outreachCount()).toBe(before); // the guard runs before any send
   });
+
+  it('reports an unsendable invite honestly (?invited=0 + failure notice, no fake success)', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    // Person 9 (Esther) deactivated → sendServeInvite returns false.
+    await env.DB.prepare('UPDATE people SET active = 0 WHERE id = 9').run();
+
+    const res = await post('/admin/people/9', 'action=invite&team_id=1', { cookie: admin });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/admin/people/9?invited=0');
+
+    const body = await (await get('/admin/people/9?invited=0', { cookie: admin })).text();
+    expect(body).toContain('Could not send the invitation');
+    expect(body).not.toContain('Invitation sent.');
+
+    const row = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM email_log WHERE to_email = 'esther.lin@example.com' AND kind = 'outreach'`)
+      .first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
 });
 
 describe('people module off', () => {
