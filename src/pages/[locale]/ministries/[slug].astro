@@ -1,0 +1,128 @@
+---
+// A single ministry: hero band (icon, name, intro, meeting time), its serving
+// teams (leaders, member count, position chips, open-slots badge), the named
+// lead's card, and a CTA panel (apply to serve + gifts quiz). Unknown/inactive
+// slugs 404. Reads run inside the getMinistryBySlug call; a null result 404s.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { getMinistryBySlug, type MinistryDetail } from '../../../lib/ministryDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const slug = Astro.params.slug ?? '';
+let ministry: MinistryDetail | null = null;
+try {
+  ministry = await getMinistryBySlug((env as { DB: D1Database }).DB, slug, locale);
+} catch (err) {
+  console.error('ministry detail: load failed', err);
+}
+if (!ministry) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const sep = locale === 'zh' ? '、' : ', ';
+---
+
+<Base title={ministry.name} description={ministry.intro} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <a href={localePath(locale, '/ministries')} class="text-sm font-semibold hover:underline">
+        {t(locale, 'ministries.back')}
+      </a>
+      <div class="mt-4 flex items-center gap-4">
+        <span class="text-5xl" aria-hidden="true">{ministry.icon}</span>
+        <h1 class="font-display text-display-lg font-bold">{ministry.name}</h1>
+      </div>
+      {ministry.intro && <p class="mt-4 max-w-narrow text-lg">{ministry.intro}</p>}
+      {
+        ministry.meetingTime && (
+          <p class="mt-4 text-sm font-semibold uppercase tracking-caps">
+            {t(locale, 'ministries.meetingTime')}: <span class="font-normal">{ministry.meetingTime}</span>
+          </p>
+        )
+      }
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      ministry.leaderName && (
+        <section class="mb-10 flex items-center gap-4 rounded-lg border border-border bg-surface-raised p-5">
+          <AvatarInitials name={ministry.leaderName} />
+          <div>
+            <p class="text-sm font-semibold uppercase tracking-caps text-accent">
+              {t(locale, 'ministries.leadTitle')}
+            </p>
+            <p class="mt-1 font-display text-lg font-semibold">{ministry.leaderName}</p>
+          </div>
+        </section>
+      )
+    }
+
+    <section>
+      <h2 class="font-display text-heading-md font-bold">{t(locale, 'ministries.teamsTitle')}</h2>
+      {
+        ministry.teams.length === 0 ? (
+          <p class="mt-4 text-ink-muted">{t(locale, 'ministries.noTeams')}</p>
+        ) : (
+          <div class="mt-6 grid gap-5 sm:grid-cols-2">
+            {ministry.teams.map((team) => (
+              <div class="rounded-lg border border-border bg-surface-raised p-5">
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h3 class="font-display text-lg font-semibold">{team.name}</h3>
+                  <span class="text-sm text-ink-subtle">{t(locale, 'ministries.members', { count: team.memberCount })}</span>
+                </div>
+                {team.leaderNames.length > 0 && (
+                  <p class="mt-1 text-sm text-ink-muted">
+                    {t(locale, 'ministries.leaderLabel')}: {team.leaderNames.join(sep)}
+                  </p>
+                )}
+                {team.positions.length > 0 && (
+                  <ul class="mt-4 flex flex-wrap gap-2">
+                    {team.positions.map((p) => (
+                      <li class="rounded-full bg-primary-soft px-3 py-1 text-xs font-semibold text-on-primary-soft">
+                        {p.name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p class:list={['mt-4 text-xs font-semibold', team.openSignupCount > 0 ? 'text-accent' : 'text-success']}>
+                  {team.openSignupCount > 0
+                    ? t(locale, 'ministries.teamOpenRoles', { count: team.openSignupCount })
+                    : t(locale, 'ministries.fullyStaffed')}
+                </p>
+              </div>
+            ))}
+          </div>
+        )
+      }
+    </section>
+
+    <section class="mt-12 rounded-lg bg-primary p-8 text-center text-on-primary">
+      <h2 class="font-display text-heading-md font-bold">{t(locale, 'ministries.applyTitle')}</h2>
+      <p class="mx-auto mt-3 max-w-narrow">{t(locale, 'ministries.applyBody')}</p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <a
+          href={localePath(locale, `/serve/apply?ministry=${ministry.slug}`)}
+          class="inline-flex min-h-11 items-center rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+        >
+          {t(locale, 'ministries.applyCta')}
+        </a>
+        <a
+          href={localePath(locale, '/serve/gifts')}
+          class="inline-flex min-h-11 items-center rounded-full border border-on-primary px-6 py-2.5 text-sm font-semibold hover:bg-primary-hover"
+        >
+          {t(locale, 'ministries.giftsCta')}
+        </a>
+      </div>
+    </section>
+  </div>
+</Base>

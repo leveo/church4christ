@@ -142,6 +142,28 @@ events_status=$(status "$BASE/en/events")
 sermons_bad_year=$(status "$BASE/en/sermons/1999")
 [ "$sermons_bad_year" = "404" ] || fail "/en/sermons/1999 expected 404, got $sermons_bad_year"
 
+# Slice 4 Task 4: ministries directory + serve landing. The directory index lists
+# a seeded ministry; the detail page renders in both locales (zh carries the
+# localized name 敬拜); the serve landing shows its how-it-works heading (which is
+# DB-independent, so it holds on an empty DB too).
+ministries_status=$(status "$BASE/en/ministries")
+[ "$ministries_status" = "200" ] || fail "/en/ministries expected 200, got $ministries_status"
+ministries_en=$(curl -sf "$BASE/en/ministries")
+echo "$ministries_en" | grep -q 'Worship' || fail "/en/ministries missing seeded ministry name"
+
+min_detail_en=$(status "$BASE/en/ministries/worship")
+[ "$min_detail_en" = "200" ] || fail "/en/ministries/worship expected 200, got $min_detail_en"
+
+min_detail_zh_status=$(status "$BASE/zh/ministries/worship")
+[ "$min_detail_zh_status" = "200" ] || fail "/zh/ministries/worship expected 200, got $min_detail_zh_status"
+min_detail_zh=$(curl -sf "$BASE/zh/ministries/worship")
+echo "$min_detail_zh" | grep -q '敬拜' || fail "/zh/ministries/worship missing localized name 敬拜"
+
+serve_status=$(status "$BASE/en/serve")
+[ "$serve_status" = "200" ] || fail "/en/serve expected 200, got $serve_status"
+serve_en=$(curl -sf "$BASE/en/serve")
+echo "$serve_en" | grep -q 'Three simple steps' || fail "/en/serve missing how-it-works heading"
+
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
 echo "$en_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/ missing x-content-type-options"
