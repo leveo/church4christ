@@ -11,6 +11,7 @@
     "check": "astro check",
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:check": "node scripts/check-tokens.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
