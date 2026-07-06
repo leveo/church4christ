@@ -1,8 +1,8 @@
 ---
 // Volunteer landing: hero, a three-step "how it works", the full ministry grid
 // (with open-role badges), a published-testimonies strip, and a closing CTA
-// band. Every DB read fails soft to empty so the page degrades gracefully (empty
-// grid, hidden testimonies strip) instead of 500ing; all copy is dictionary-driven.
+// band. Every DB read fails soft to empty so the page degrades gracefully (grid
+// empty-state, hidden testimonies strip) instead of 500ing; all copy is dictionary-driven.
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import SectionTitle from '../../../components/SectionTitle.astro';
@@ -87,7 +87,11 @@ const steps = [1, 2, 3].map((n) => ({
       subtitle={t(locale, 'serve.ministriesSub')}
     />
     {
-      ministries.length > 0 && (
+      ministries.length === 0 ? (
+        <p class="mt-10 rounded-md border border-border bg-surface-raised px-4 py-10 text-center text-ink-muted">
+          {t(locale, 'ministries.empty')}
+        </p>
+      ) : (
         <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {ministries.map((m) => (
             <MinistryCard
@@ -130,7 +134,7 @@ const steps = [1, 2, 3].map((n) => ({
                   </span>
                 )}
                 <h3 class="mt-2 font-display text-lg font-semibold">{ti.title}</h3>
-                <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{ti.body}</p>
+                <p class="mt-2 line-clamp-4 flex-1 text-sm leading-relaxed text-ink-muted">{ti.body}</p>
                 <div class="mt-4 flex items-center gap-3">
                   <AvatarInitials name={ti.authorName} sizeClass="w-9 h-9 text-sm" />
                   <p class="text-sm font-semibold">{ti.authorName}</p>
