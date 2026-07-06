@@ -9,6 +9,7 @@ import { escapeHtml, sendEmail, type EmailEnv } from './email';
 import { isRuleEnabled } from './emailSettingsDb';
 import { t } from './i18n';
 import { type Locale } from './locales';
+import { getEnabledModules } from './modules';
 import { sendSchedulingRequest } from './notify';
 
 const TZ = 'America/Chicago';
@@ -31,6 +32,12 @@ interface DigestRow {
  * recipient emails (for logging/tests). One bad recipient never stops the rest.
  */
 export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date = new Date()): Promise<string[]> {
+  // Serving mail belongs to the `serve` module — skip the whole pass when it is
+  // off (before any rule check), so a church without volunteering sends nothing.
+  if (!(await getEnabledModules(db)).has('serve')) {
+    console.log('digest: serve module disabled — skipping');
+    return [];
+  }
   if (!(await isRuleEnabled(db, 'digestAM'))) return [];
 
   const start = todayInTz(TZ, now);
@@ -117,6 +124,10 @@ export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date 
  * days before the service. Returns the number of reminders sent.
  */
 export async function sendReminders(env: EmailEnv, db: D1Database, now: Date = new Date()): Promise<number> {
+  if (!(await getEnabledModules(db)).has('serve')) {
+    console.log('reminders: serve module disabled — skipping');
+    return 0;
+  }
   const today = todayInTz(TZ, now);
   const offsets: number[] = [];
   if (await isRuleEnabled(db, 'remind7')) offsets.push(7);

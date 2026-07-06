@@ -36,6 +36,9 @@ const steps = [1, 2, 3].map((n) => ({
   title: t(locale, `serve.step${n}Title`),
   body: t(locale, `serve.step${n}Body`),
 }));
+
+// Soft-degrade: hide the gifts-quiz CTA when the gifts module is off.
+const modules = Astro.locals.modules;
 ---
 
 <Base title={t(locale, 'serve.title')} locale={locale}>
@@ -51,12 +54,16 @@ const steps = [1, 2, 3].map((n) => ({
         >
           {t(locale, 'serve.ctaApply')}
         </a>
-        <a
-          href={localePath(locale, '/serve/gifts')}
-          class="inline-flex min-h-11 items-center rounded-full border border-on-primary px-6 py-2.5 text-sm font-semibold hover:bg-primary-hover"
-        >
-          {t(locale, 'serve.ctaGifts')}
-        </a>
+        {
+          modules.has('gifts') && (
+            <a
+              href={localePath(locale, '/serve/gifts')}
+              class="inline-flex min-h-11 items-center rounded-full border border-on-primary px-6 py-2.5 text-sm font-semibold hover:bg-primary-hover"
+            >
+              {t(locale, 'serve.ctaGifts')}
+            </a>
+          )
+        }
       </div>
     </div>
   </section>

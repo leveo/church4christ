@@ -320,6 +320,14 @@ describe('parseSettingsForm', () => {
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors['theme.name']).toBe('errors.invalidOption');
   });
+  it('accepts module.<key> toggles with a 0/1 value and rejects anything else', () => {
+    const ok = parseSettingsForm(fdOf({ 'module.sermons': '1', 'module.serve': '0' }));
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.data).toEqual({ 'module.sermons': '1', 'module.serve': '0' });
+    const bad = parseSettingsForm(fdOf({ 'module.sermons': '2' }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors['module.sermons']).toBe('errors.invalidOption');
+  });
 });
 
 describe('parseBlockoutForm', () => {

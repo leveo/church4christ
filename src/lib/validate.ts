@@ -10,6 +10,7 @@ import { isValidDateStr, datetimeLocalToUtc } from './dates';
 import { extractYouTubeId } from './youtube';
 import { LOCALES, type Locale } from './locales';
 import { THEMES } from './theme';
+import { MODULE_KEYS } from './modules';
 
 export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
 
@@ -528,19 +529,26 @@ const SETTINGS_KEYS = [
 ] as const;
 const SETTINGS_URL_KEYS = new Set(['site.map_url', 'site.giving_url', 'site.youtube_url']);
 const THEME_MODES = ['light', 'dark'];
+// `module.<key>` toggles ('0' | '1') — the Modules panel checkboxes. Present in
+// the allowlist so a checked box (posts '1') validates; unchecked boxes are
+// absent and the panel's save handler writes '0' for them (full 11-key write).
+const MODULE_SETTING_KEYS = new Set(MODULE_KEYS.map((k) => `module.${k}`));
+const MODULE_VALUES = ['0', '1'];
 
 /**
  * Parse the settings admin form. Only allowlisted keys present in the form are
- * read (partial updates are fine); URL / email / enum keys are validated, all
- * others pass through as trimmed free text.
+ * read (partial updates are fine); URL / email / enum / module-toggle keys are
+ * validated, all others pass through as trimmed free text.
  */
 export function parseSettingsForm(fd: FormData): FormResult<Record<string, string>> {
   const errors: Record<string, string> = {};
   const data: Record<string, string> = {};
-  for (const key of SETTINGS_KEYS) {
+  for (const key of [...SETTINGS_KEYS, ...MODULE_SETTING_KEYS]) {
     if (!fd.has(key)) continue;
     const value = str(fd, key);
-    if (SETTINGS_URL_KEYS.has(key)) {
+    if (MODULE_SETTING_KEYS.has(key)) {
+      if (!MODULE_VALUES.includes(value)) errors[key] = ERR.option;
+    } else if (SETTINGS_URL_KEYS.has(key)) {
       if (value && !isHttpUrl(value)) errors[key] = ERR.url;
     } else if (key === 'site.email') {
       if (value && !isEmail(value)) errors[key] = ERR.email;

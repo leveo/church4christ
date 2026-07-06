@@ -66,6 +66,10 @@ try {
   console.error('home: data load failed', err);
 }
 const ministriesPreview = ministries.slice(0, 6);
+// Each section below is wrapped on its owning module so a disabled capability
+// leaves no cross-link on the home page. Sections are self-contained (own
+// padding + background), so an omitted one simply drops out — no empty gap.
+const modules = Astro.locals.modules;
 
 const rawPrayer = Astro.url.searchParams.get('prayer');
 const prayerStatus = rawPrayer === 'sent' || rawPrayer === 'error' ? rawPrayer : null;
@@ -80,7 +84,7 @@ const infoCards = [
 <Base title={t(locale, 'home.welcome')} locale={locale}>
   <Hero locale={locale} />
 
-  <Ticker announcements={announcements} locale={locale} />
+  {modules.has('events') && <Ticker announcements={announcements} locale={locale} />}
 
   {
     infoCards.length > 0 && (
@@ -105,60 +109,66 @@ const infoCards = [
     )
   }
 
-  <section class="bg-surface-sunken py-16 md:py-20">
-    <div class="container-content">
-      <SectionTitle eyebrow={t(locale, 'home.eventsEyebrow')} title={t(locale, 'home.upcomingEvents')} />
-      <div class="mt-10">
-        {
-          events.length > 0 ? (
-            <EventGrid events={events} locale={locale} />
+  {
+    modules.has('events') && (
+      <section class="bg-surface-sunken py-16 md:py-20">
+        <div class="container-content">
+          <SectionTitle eyebrow={t(locale, 'home.eventsEyebrow')} title={t(locale, 'home.upcomingEvents')} />
+          <div class="mt-10">
+            {events.length > 0 ? (
+              <EventGrid events={events} locale={locale} />
+            ) : (
+              <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
+                {t(locale, 'home.eventsEmpty')}
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    modules.has('sermons') && (
+      <section class="container-content py-16">
+        <SectionTitle eyebrow={t(locale, 'home.sermonEyebrow')} title={t(locale, 'home.latestSermon')} />
+        <div class="mt-10 max-w-content">
+          {latestSermon ? (
+            <SermonCard sermon={latestSermon} locale={locale} />
           ) : (
             <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
-              {t(locale, 'home.eventsEmpty')}
+              {t(locale, 'home.sermonEmpty')}
             </p>
-          )
-        }
-      </div>
-    </div>
-  </section>
+          )}
+        </div>
+      </section>
+    )
+  }
 
-  <section class="container-content py-16">
-    <SectionTitle eyebrow={t(locale, 'home.sermonEyebrow')} title={t(locale, 'home.latestSermon')} />
-    <div class="mt-10 max-w-content">
-      {
-        latestSermon ? (
-          <SermonCard sermon={latestSermon} locale={locale} />
-        ) : (
-          <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
-            {t(locale, 'home.sermonEmpty')}
-          </p>
-        )
-      }
-    </div>
-  </section>
-
-  <section class="bg-surface-sunken py-16">
-    <div class="container-content">
-      <SectionTitle eyebrow={t(locale, 'home.ministriesEyebrow')} title={t(locale, 'home.ministriesTitle')} />
-      {
-        ministriesPreview.length > 0 && (
-          <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {ministriesPreview.map((m) => (
-              <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} />
-            ))}
+  {
+    modules.has('serve') && (
+      <section class="bg-surface-sunken py-16">
+        <div class="container-content">
+          <SectionTitle eyebrow={t(locale, 'home.ministriesEyebrow')} title={t(locale, 'home.ministriesTitle')} />
+          {ministriesPreview.length > 0 && (
+            <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {ministriesPreview.map((m) => (
+                <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} />
+              ))}
+            </div>
+          )}
+          <div class="mt-8 text-center">
+            <a
+              href={localePath(locale, '/ministries')}
+              class="text-sm font-semibold text-accent hover:text-accent-hover"
+            >
+              {t(locale, 'home.allMinistries')} →
+            </a>
           </div>
-        )
-      }
-      <div class="mt-8 text-center">
-        <a
-          href={localePath(locale, '/ministries')}
-          class="text-sm font-semibold text-accent hover:text-accent-hover"
-        >
-          {t(locale, 'home.allMinistries')} →
-        </a>
-      </div>
-    </div>
-  </section>
+        </div>
+      </section>
+    )
+  }
 
-  <PrayerForm locale={locale} status={prayerStatus} />
+  {modules.has('prayer-wall') && <PrayerForm locale={locale} status={prayerStatus} />}
 </Base>

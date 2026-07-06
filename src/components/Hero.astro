@@ -28,6 +28,9 @@ const beams = Array.from({ length: 9 }, (_, i) => {
 // (larger, more opaque) ones, each topped by a "head" circle.
 const backRow = Array.from({ length: 7 }, (_, i) => 110 + i * 165);
 const frontRow = Array.from({ length: 8 }, (_, i) => 40 + i * 158);
+
+// The sermons CTA is a cross-link into the sermons module — hide it when off.
+const sermonsOn = Astro.locals.modules.has('sermons');
 ---
 
 <section class="relative isolate overflow-hidden bg-primary text-on-primary">
@@ -70,12 +73,16 @@ const frontRow = Array.from({ length: 8 }, (_, i) => 40 + i * 158);
       >
         {t(locale, 'nav.visit')}
       </a>
-      <a
-        href={localePath(locale, '/sermons')}
-        class="rounded-full border border-on-primary/50 px-6 py-3 font-semibold hover:bg-primary-hover"
-      >
-        {t(locale, 'home.heroCtaSermons')}
-      </a>
+      {
+        sermonsOn && (
+          <a
+            href={localePath(locale, '/sermons')}
+            class="rounded-full border border-on-primary/50 px-6 py-3 font-semibold hover:bg-primary-hover"
+          >
+            {t(locale, 'home.heroCtaSermons')}
+          </a>
+        )
+      }
     </div>
   </div>
 </section>

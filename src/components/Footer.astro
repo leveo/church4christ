@@ -4,6 +4,7 @@
 import { env } from 'cloudflare:workers';
 import { localePath } from '../lib/locales';
 import { t } from '../lib/i18n';
+import { MODULE_KEYS, MODULES } from '../lib/modules';
 import { getSiteIdentity } from '../lib/settings';
 import ModeToggle from './ModeToggle.astro';
 
@@ -34,6 +35,16 @@ const quickLinks: { key: string; path: string }[] = [
   { key: 'nav.events', path: '/events' },
   { key: 'nav.give', path: '/give' },
 ];
+
+// Hide a quick link when its owning module is off (sermons/events); about/give
+// are core. Same navKey → module reverse map the header uses.
+const navKeyModule = new Map<string, string>();
+for (const key of MODULE_KEYS) for (const nk of MODULES[key].navKeys) navKeyModule.set(nk, key);
+const modules = Astro.locals.modules;
+const visibleQuickLinks = quickLinks.filter((link) => {
+  const owner = navKeyModule.get(link.key);
+  return !owner || modules.has(owner);
+});
 ---
 
 <footer class="bg-footer-bg text-footer-ink">
@@ -61,7 +72,7 @@ const quickLinks: { key: string; path: string }[] = [
       <p class="font-semibold">{t(locale, 'footer.quickLinks')}</p>
       <ul class="mt-2 flex flex-col gap-1 text-sm">
         {
-          quickLinks.map((link) => (
+          visibleQuickLinks.map((link) => (
             <li>
               <a href={localePath(locale, link.path)} class="hover:underline">
                 {t(locale, link.key)}
