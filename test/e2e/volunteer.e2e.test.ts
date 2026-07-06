@@ -5,11 +5,13 @@
 // session lib for seeded people (session_epoch 0) — no mail round-trip.
 //
 // Seed anchors (seed/dev-seed.sql): person 5 (mark.liu, Worship Team member)
-// holds the only pending 'U' assignment (plan 1, Vocalist, 2026-07-12);
-// person 3 (sarah) has a confirmed assignment on the same plan.
+// holds the only pending 'U' assignment (plan 1, Vocalist, the first upcoming
+// Sunday = sunday(0)); person 3 (sarah) has a confirmed assignment on the same
+// plan. Plan/bulletin dates are relative (see seed header), so date assertions
+// use the sunday() helper rather than a pinned calendar date.
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { get, post } from './helpers';
+import { get, icalDate, post, sunday } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
@@ -77,7 +79,7 @@ describe('/cal/[token].ics (public token feed)', () => {
     expect(ics).toMatch(/UID:c4c-assignment-\d+@church\.example/);
     // Sarah's seeded assignment: Worship Leader on the English service (timed).
     expect(ics).toContain('SUMMARY:Worship Leader — Sunday Worship (English)');
-    expect(ics).toContain('DTSTART:20260712T093000');
+    expect(ics).toContain(`DTSTART:${icalDate(0)}T093000`);
     expect(ics).toContain('\r\n');
   });
 
@@ -349,10 +351,11 @@ describe('/en/serve/opportunities (public board)', () => {
     expect(body).toContain('AV Team');
     expect(body).toContain('Hospitality Team');
     // Section (b) — future open self-signup slots is non-empty. The slot dates
-    // (e.g. 2026-07-12) render ONLY in this section, so their presence proves the
-    // open-signup aggregation returned rows rather than an empty state.
+    // (the first upcoming Sunday = sunday(0)) render ONLY in this section, so
+    // their presence proves the open-signup aggregation returned rows rather than
+    // an empty state.
     expect(body).toContain('Vocalist');
-    expect(body).toContain('2026-07-12');
+    expect(body).toContain(sunday(0));
     expect(body).toContain('/en/serve/apply?team=1'); // Apply CTA carries the team
 
     // Following the CTA lands on the apply form with team 1 preselected.

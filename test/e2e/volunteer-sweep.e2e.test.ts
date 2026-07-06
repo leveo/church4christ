@@ -11,14 +11,17 @@
 // team, 'U' on plan 9), 5 mark (team-1 member, 'U' on plan 1 Vocalist), 6
 // faithful (leads team 3), 7 amy (team-1 member, 'D' on plan 1), 8 ben (leads
 // team 2, 'C' on plan 1 Sound), 9 esther (team-3 member, pending application to
-// team 1, app id 1). Plans 1/9 are 2026-07-12; plan 2 is 2026-07-19.
+// team 1, app id 1). Plans 1/9 fall on the first upcoming Sunday = sunday(0);
+// plan 2 on the next Sunday = sunday(1). The seed's dates are relative (see seed
+// header), so fake cron clocks and date assertions derive from the sunday()
+// helper instead of pinned calendar dates.
 //
 // Tests that revisit rows an earlier test may have touched reset them first (or
 // assert via id-deltas / kind-scoped counts), so the file passes whether the
 // pool rolls storage back per test or per file.
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { cookiePair, get, post } from './helpers';
+import { cookiePair, get, icalDate, post, sunday } from './helpers';
 import { createLoginToken } from '../../src/lib/auth';
 import { sendReminders, sendWeeklyDigest } from '../../src/lib/digest';
 import { type EmailEnv } from '../../src/lib/email';
@@ -46,9 +49,10 @@ const maxEmailLogId = async (): Promise<number> =>
 
 // ── Checklist 9: cron functions invoked DIRECTLY against the e2e DB ──
 describe('cron functions against the e2e DB (rule-gated)', () => {
-  // 2026-07-05 in America/Chicago; +7d = 2026-07-12, the seeded plan date with
-  // two still-'U' assignments (mark on plan 1, grace on plan 9).
-  const remindersNow = new Date('2026-07-05T12:00:00Z');
+  // The Sunday before the first upcoming Sunday; +7d = sunday(0), the seeded plan
+  // date with two still-'U' assignments (mark on plan 1, grace on plan 9). Noon
+  // UTC so the America/Chicago wall date the reminder pass reads equals sunday(-1).
+  const remindersNow = new Date(`${sunday(-1)}T12:00:00Z`);
 
   it('sendReminders: disabled rule → 0; enabled remind7 re-nudges every still-U 7 days out', async () => {
     await env.DB.prepare(`UPDATE email_rules SET enabled = 0 WHERE rule_key = 'remind7'`).run();
@@ -78,8 +82,9 @@ describe('cron functions against the e2e DB (rule-gated)', () => {
   });
 
   it('sendWeeklyDigest: gated by digestAM; one devlog row per person with next-7d assignments', async () => {
-    // Window [today, today+7): anchor on 07-06 so the 07-12 plans fall inside.
-    const digestNow = new Date('2026-07-06T12:00:00Z');
+    // Window [today, today+7): anchor on sunday(0) so plans 1/9 fall inside while
+    // plan 2/10 (sunday(1)) stays out. Noon UTC → the wall date reads sunday(0).
+    const digestNow = new Date(`${sunday(0)}T12:00:00Z`);
 
     await env.DB.prepare(`UPDATE email_rules SET enabled = 0 WHERE rule_key = 'digestAM'`).run();
     expect(await sendWeeklyDigest(emailEnv, env.DB, digestNow)).toEqual([]);
@@ -87,7 +92,7 @@ describe('cron functions against the e2e DB (rule-gated)', () => {
     await env.DB.prepare(`UPDATE email_rules SET enabled = 1 WHERE rule_key = 'digestAM'`).run();
     const before = await maxEmailLogId();
     const sent = await sendWeeklyDigest(emailEnv, env.DB, digestNow);
-    // Non-declined 07-12 assignees: sarah C, mark U, ben C, pastor david C,
+    // Non-declined sunday(0) assignees: sarah C, mark U, ben C, pastor david C,
     // grace U. Amy's 'D' must NOT get a digest. Exactly one mail per person.
     const expected = [
       'sarah.johnson@example.com',
@@ -150,7 +155,7 @@ describe('full volunteer journey (magic link → pending → accept → iCal)', 
     const ics = await (await get(`/cal/${TOKEN}.ics`)).text();
     expect(ics).toContain('SUMMARY:Vocalist — Sunday Worship (English)');
     expect(ics).not.toContain('Vocalist — Sunday Worship (English) (?)');
-    expect(ics).toContain('DTSTART:20260712T093000');
+    expect(ics).toContain(`DTSTART:${icalDate(0)}T093000`);
   });
 });
 
@@ -184,15 +189,17 @@ describe('open-slot claim journey', () => {
 // ── Checklists 3 + 10: member blockout → leader assign conflict → force ──
 describe('blockout → conflict → force flow (leader session)', () => {
   it('member-added blockout blocks the assign with a rendered warning; force creates U + request devlog', async () => {
-    // Mark blocks out plan 2's date (2026-07-19) through his own page.
+    // Mark blocks out plan 2's date (the second upcoming Sunday) through his own page.
     const markCookie = await sessionCookie(5, 'mark.liu@example.com');
-    const add = await post('/en/my/blockouts', '_action=add&start_date=2026-07-19&reason=Camping', {
+    const add = await post('/en/my/blockouts', `_action=add&start_date=${sunday(1)}&reason=Camping`, {
       cookie: markCookie,
     });
     expect(add.status).toBe(303);
     expect(
       await count(
-        `SELECT COUNT(*) AS n FROM blockout_dates WHERE person_id = 5 AND start_date = '2026-07-19' AND end_date = '2026-07-19'`,
+        `SELECT COUNT(*) AS n FROM blockout_dates WHERE person_id = 5 AND start_date = ? AND end_date = ?`,
+        sunday(1),
+        sunday(1),
       ),
     ).toBe(1);
 
@@ -230,8 +237,9 @@ describe('blockout → conflict → force flow (leader session)', () => {
       await count(
         `SELECT COUNT(*) AS n FROM email_log
          WHERE id > ? AND kind = 'request' AND status = 'devlog'
-           AND to_email = 'mark.liu@example.com' AND detail LIKE '2026-07-19%'`,
+           AND to_email = 'mark.liu@example.com' AND detail LIKE ?`,
         before,
+        `${sunday(1)}%`,
       ),
     ).toBe(1);
   });

@@ -5,7 +5,7 @@
 // whose session_epoch is the default 0 — no mail round-trip needed.
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { get, post, ORIGIN } from './helpers';
+import { get, post, ORIGIN, sunday } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { uploadKey } from '../../src/lib/upload';
 
@@ -369,8 +369,8 @@ describe('editor-created content reaches the public site (publish lifecycles)', 
 describe('revision restore round-trips public content', () => {
   it('restoring an earlier bulletin revision brings its public content back', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
-    const id = 1; // seeded published English bulletin (2026-06-21)
-    const date = '2026-06-21';
+    const id = 1; // seeded published English bulletin (its own -3-week Sunday)
+    const date = sunday(-3); // re-save on bulletin 1's own seeded date — never collides with siblings
 
     // A full, valid bulletin save carrying one distinctive program line. saveBulletin
     // snapshots the NEW state on every save (snapshot-after), so we first save a
