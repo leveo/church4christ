@@ -23,6 +23,9 @@ export const btnSecondary =
 /** Destructive button (soft delete). */
 export const btnDanger =
   'inline-flex items-center rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-soft';
+/** Compact control for repeat-row add / remove / move. */
+export const rowBtn =
+  'inline-flex items-center rounded-md border border-border px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-surface-sunken';
 
 /** Table header cell. */
 export const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-caps text-ink-subtle';
@@ -38,6 +41,22 @@ export const badgeRole: Record<'member' | 'editor' | 'admin', string> = {
 };
 export const badgeActive = 'bg-success-soft text-success';
 export const badgeInactive = 'bg-surface-sunken text-ink-muted';
+export const badgeScheduled = 'bg-accent-soft text-on-accent-soft';
+
+/**
+ * Content status → { key (dictionary key for the label), cls (badge variant) }.
+ * draft → neutral; published in the future (publish_at > now) → scheduled;
+ * otherwise → live/published. Sermons carry no publish_at, so pass null.
+ */
+export function statusBadge(
+  status: string,
+  publishAt: string | null,
+  nowSql: string,
+): { key: string; cls: string } {
+  if (status !== 'published') return { key: 'admin.status.draft', cls: badgeInactive };
+  if (publishAt && publishAt > nowSql) return { key: 'admin.status.scheduled', cls: badgeScheduled };
+  return { key: 'admin.status.published', cls: badgeActive };
+}
 
 /** Success banner (e.g. the ?saved=1 confirmation). */
 export const noticeOk = 'rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success';

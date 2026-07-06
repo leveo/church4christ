@@ -1,65 +1,176 @@
 ---
-// Admin console landing (fleshed out in slice 5). Reachable by editors, admins,
-// and team leaders (console class). Shows a stat row — a live people count for
-// admins, placeholder cards for content wired later — plus role-gated nav cards.
+// Admin console landing (console class — editors, admins, and team leaders).
+// For staff (editor∪admin) it shows real content counts, a "this week prep"
+// checklist (next Sunday: bulletin + sermon per service type), and the most
+// recent revisions. People count is admin-only. Every DB read fails soft so a
+// hiccup never 500s the dashboard.
 import Admin from '../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import { t } from '../../lib/i18n';
-import { countPeople } from '../../lib/adminDb';
-import { card } from '../../lib/adminUi';
+import {
+  countPeople,
+  countContentByStatus,
+  listWeekPrep,
+  listRecentRevisions,
+  type StatusCounts,
+  type WeekPrepRow,
+  type RecentRevisionRow,
+} from '../../lib/adminDb';
+import { badge, badgeActive, badgeInactive, card, th, td, btn, btnSecondary } from '../../lib/adminUi';
+import { todayInTz, nextWeekday, formatDate } from '../../lib/dates';
 import type { Locale } from '../../lib/locales';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const db = (env as { DB: D1Database }).DB;
+const isStaff = user.isEditor || user.isAdmin;
 
-// People count is admin-only data; fail soft to a placeholder so a DB hiccup
-// never 500s the dashboard.
+const sunday = nextWeekday(todayInTz(), 0);
+
 let peopleCount: number | null = null;
-if (user.isAdmin) {
-  try {
-    peopleCount = await countPeople(db);
-  } catch (e) {
-    console.error('admin dashboard people count failed', e);
+let bulletinCounts: StatusCounts = { published: 0, draft: 0 };
+let sermonCounts: StatusCounts = { published: 0, draft: 0 };
+let prayerCounts: StatusCounts = { published: 0, draft: 0 };
+let weekPrep: WeekPrepRow[] = [];
+let revisions: RecentRevisionRow[] = [];
+
+try {
+  if (user.isAdmin) peopleCount = await countPeople(db);
+  if (isStaff) {
+    [bulletinCounts, sermonCounts, prayerCounts, weekPrep, revisions] = await Promise.all([
+      countContentByStatus(db, 'bulletins'),
+      countContentByStatus(db, 'sermons'),
+      countContentByStatus(db, 'prayer_sheets'),
+      listWeekPrep(db, sunday, lang),
+      listRecentRevisions(db, 5),
+    ]);
   }
+} catch (e) {
+  console.error('admin dashboard load failed', e);
 }
 
 const stats = [
   ...(user.isAdmin ? [{ label: t(lang, 'admin.nav.people'), value: peopleCount === null ? '—' : String(peopleCount) }] : []),
-  { label: t(lang, 'admin.dashboard.bulletins'), value: '—' },
-  { label: t(lang, 'admin.dashboard.sermons'), value: '—' },
+  ...(isStaff
+    ? [
+        { label: t(lang, 'admin.dashboard.bulletins'), value: `${bulletinCounts.published} / ${bulletinCounts.draft}` },
+        { label: t(lang, 'admin.dashboard.sermons'), value: `${sermonCounts.published} / ${sermonCounts.draft}` },
+        { label: t(lang, 'admin.dashboard.prayerSheets'), value: `${prayerCounts.published} / ${prayerCounts.draft}` },
+      ]
+    : []),
 ];
 
-const cards = user.isAdmin
-  ? [{ href: '/admin/people', title: t(lang, 'admin.nav.people'), body: t(lang, 'admin.dashboard.peopleCardBody') }]
-  : [];
+// Revision entity → edit-page href (announcement/event have no per-id editor yet).
+const REV_BASE: Record<string, string> = {
+  bulletin: '/admin/bulletins',
+  sermon: '/admin/sermons',
+  prayer_sheet: '/admin/prayer-sheets',
+  announcement: '/admin/announcements',
+  event: '/admin/events',
+};
+function revHref(r: RecentRevisionRow): string {
+  const base = REV_BASE[r.entity] ?? '/admin';
+  const perId = r.entity === 'bulletin' || r.entity === 'sermon' || r.entity === 'prayer_sheet';
+  return perId ? `${base}/${r.entity_id}` : base;
+}
 ---
 
 <Admin title={t(lang, 'admin.dashboard.title')}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.dashboard.title')}</h1>
   <p class="mt-1 text-ink-muted">{t(lang, 'admin.dashboard.welcome', { name: user.displayName })}</p>
 
-  <div class="mt-6 grid gap-4 sm:grid-cols-3">
-    {
-      stats.map((s) => (
-        <div class={card}>
-          <div class="text-display-lg font-bold">{s.value}</div>
-          <div class="mt-1 text-sm text-ink-muted">{s.label}</div>
-        </div>
-      ))
-    }
-  </div>
-
   {
-    cards.length > 0 && (
-      <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {cards.map((c) => (
-          <a href={c.href} class={`${card} block hover:border-border-strong`}>
-            <h2 class="font-semibold">{c.title}</h2>
-            <p class="mt-1 text-sm text-ink-muted">{c.body}</p>
-          </a>
+    stats.length > 0 && (
+      <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((s) => (
+          <div class={card}>
+            <div class="text-display-lg font-bold">{s.value}</div>
+            <div class="mt-1 text-sm text-ink-muted">
+              {s.label} <span class="text-ink-subtle">({t(lang, 'admin.dashboard.published')} / {t(lang, 'admin.dashboard.drafts')})</span>
+            </div>
+          </div>
         ))}
       </div>
+    )
+  }
+
+  {
+    isStaff && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.dashboard.weekPrepTitle')}</h2>
+        <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.dashboard.weekPrepIntro', { date: formatDate(sunday, lang) })}</p>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          {weekPrep.map((row) => (
+            <div class={card}>
+              <h3 class="font-semibold">{row.name}</h3>
+              <div class="mt-3 space-y-2 text-sm">
+                <div class="flex items-center justify-between gap-2">
+                  <span>
+                    {t(lang, 'admin.dashboard.bulletin')}{' '}
+                    <span class={`${badge} ${row.bulletin_id ? badgeActive : badgeInactive}`}>
+                      {row.bulletin_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                    </span>
+                  </span>
+                  {row.bulletin_id ? (
+                    <a href={`/admin/bulletins/${row.bulletin_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
+                  ) : (
+                    <a href={`/admin/bulletins/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
+                  )}
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <span>
+                    {t(lang, 'admin.dashboard.sermon')}{' '}
+                    <span class={`${badge} ${row.sermon_id ? badgeActive : badgeInactive}`}>
+                      {row.sermon_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                    </span>
+                  </span>
+                  {row.sermon_id ? (
+                    <a href={`/admin/sermons/${row.sermon_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
+                  ) : (
+                    <a href={`/admin/sermons/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  {
+    isStaff && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.dashboard.recentTitle')}</h2>
+        {revisions.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.dashboard.recentEmpty')}</p>
+        ) : (
+          <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+            <table class="w-full border-collapse">
+              <thead class="bg-surface-sunken">
+                <tr>
+                  <th class={th}>{t(lang, 'admin.dashboard.colContent')}</th>
+                  <th class={th}>{t(lang, 'admin.dashboard.colEditor')}</th>
+                  <th class={th}>{t(lang, 'admin.dashboard.colWhen')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {revisions.map((r) => (
+                  <tr class="border-t border-border hover:bg-surface-sunken">
+                    <td class={td}>
+                      <a href={revHref(r)} class="font-medium text-primary hover:underline">
+                        {t(lang, `admin.entity.${r.entity}`)} #{r.entity_id}
+                      </a>
+                    </td>
+                    <td class={td}>{r.edited_by}</td>
+                    <td class={`${td} text-ink-muted`}>{r.edited_at}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     )
   }
 </Admin>

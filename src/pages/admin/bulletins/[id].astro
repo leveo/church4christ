@@ -1,0 +1,321 @@
+---
+// Create / edit a bulletin (console class — re-checks editor∪admin, 403s a bare
+// team leader). `id='new'` creates; a numeric id edits. Two POST actions (an
+// `action` field, no JS required): save → parseBulletinForm → saveBulletin
+// (single db.batch: upsert + announcements rewrite + revision snapshot; a
+// duplicate live date re-renders with errors.dateTaken); delete → soft delete.
+// Repeatable rows (program / offering / attendance / announcements) post as
+// parallel arrays; the Admin repeat-row island is pure enhancement and the
+// server skips fully-blank rows.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { parseBulletinForm } from '../../../lib/validate';
+import {
+  getBulletinForEdit,
+  saveBulletin,
+  softDeleteBulletin,
+  listServiceTypeOptions,
+} from '../../../lib/adminDb';
+import { todayInTz, nextWeekday, utcToDatetimeLocal } from '../../../lib/dates';
+import { localePath, type Locale } from '../../../lib/locales';
+import { tin, lab, card, errorText, btn, btnDanger, rowBtn, noticeErr } from '../../../lib/adminUi';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const rawId = Astro.params.id ?? '';
+const isNew = rawId === 'new';
+if (!isNew && !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const id = isNew ? null : Number(rawId);
+
+const existing = id !== null ? await getBulletinForEdit(db, id) : null;
+if (id !== null && !existing) return new Response(null, { status: 404 });
+
+const serviceTypes = await listServiceTypeOptions(db, lang);
+
+type ProgRow = { item: string; content: string; person: string };
+type PairRow = { label: string; value: string };
+type AnnRow = { title: string; body: string; url: string; label: string };
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const action = fd.get('action');
+  if (action === 'delete' && id !== null) {
+    await softDeleteBulletin(db, id, user.email);
+    return Astro.redirect('/admin/bulletins?deleted=1', 303);
+  }
+  if (action === 'save') {
+    const parsed = parseBulletinForm(fd);
+    if (parsed.ok) {
+      const result = await saveBulletin(db, { ...parsed.data, id }, user.email);
+      if (result.ok) return Astro.redirect('/admin/bulletins?saved=1', 303);
+      errors = result.errors;
+    } else {
+      errors = parsed.errors;
+    }
+  }
+}
+
+// View model: a failed POST echoes the submitted values; edit loads the record;
+// new prefills the next Sunday with one blank row per section.
+const ga = (n: string) => fd!.getAll(n).map((v) => String(v));
+let v: {
+  serviceTypeId: string;
+  bulletinDate: string;
+  serviceTimeLabel: string;
+  program: ProgRow[];
+  offering: PairRow[];
+  attendance: PairRow[];
+  announcements: AnnRow[];
+  memoryVerse: string;
+  flowers: string;
+  status: string;
+  publishAtLocal: string;
+};
+
+if (fd) {
+  const g = (n: string) => String(fd!.get(n) ?? '');
+  v = {
+    serviceTypeId: g('service_type_id'),
+    bulletinDate: g('bulletin_date'),
+    serviceTimeLabel: g('service_time_label'),
+    program: ga('program_item').map((item, i) => ({ item, content: ga('program_content')[i] ?? '', person: ga('program_person')[i] ?? '' })),
+    offering: ga('offering_label').map((label, i) => ({ label, value: ga('offering_amount')[i] ?? '' })),
+    attendance: ga('attendance_label').map((label, i) => ({ label, value: ga('attendance_count')[i] ?? '' })),
+    announcements: ga('ann_body').map((body, i) => ({ title: ga('ann_title')[i] ?? '', body, url: ga('ann_url')[i] ?? '', label: ga('ann_label')[i] ?? '' })),
+    memoryVerse: g('memory_verse'),
+    flowers: g('flowers'),
+    status: g('status') || 'draft',
+    publishAtLocal: g('publish_at'),
+  };
+} else if (existing) {
+  v = {
+    serviceTypeId: String(existing.serviceTypeId),
+    bulletinDate: existing.bulletinDate,
+    serviceTimeLabel: existing.serviceTimeLabel ?? '',
+    program: existing.program.map((r) => ({ item: r.item, content: r.content, person: r.person })),
+    offering: existing.offering.map((r) => ({ label: r.label, value: r.amount })),
+    attendance: existing.attendance.map((r) => ({ label: r.label, value: r.count })),
+    announcements: existing.announcements.map((a) => ({ title: a.title, body: a.body, url: a.linkUrl ?? '', label: a.linkLabel ?? '' })),
+    memoryVerse: existing.memoryVerse ?? '',
+    flowers: existing.flowers ?? '',
+    status: existing.status,
+    publishAtLocal: utcToDatetimeLocal(existing.publishAt),
+  };
+} else {
+  const svcParam = Astro.url.searchParams.get('service');
+  const preService = svcParam && /^\d+$/.test(svcParam) ? svcParam : serviceTypes.length ? String(serviceTypes[0].id) : '';
+  v = {
+    serviceTypeId: preService,
+    bulletinDate: nextWeekday(todayInTz(), 0),
+    serviceTimeLabel: '',
+    program: [{ item: '', content: '', person: '' }],
+    offering: [{ label: '', value: '' }],
+    attendance: [{ label: '', value: '' }],
+    announcements: [{ title: '', body: '', url: '', label: '' }],
+    memoryVerse: '',
+    flowers: '',
+    status: 'draft',
+    publishAtLocal: '',
+  };
+}
+
+const heading = isNew ? t(lang, 'admin.bulletins.newTitle') : t(lang, 'admin.bulletins.editTitle');
+const hasErrors = Object.keys(errors).length > 0;
+const h2 = 'font-display text-heading-sm font-bold';
+const publishedNow = !isNew && existing?.status === 'published';
+const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}`)}?service=${v.serviceTypeId}` : null;
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <div class="flex items-center gap-4 text-sm">
+      {viewHref && <a href={viewHref} class="text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
+      <a href="/admin/bulletins" class="text-primary hover:underline">&larr; {t(lang, 'admin.bulletins.back')}</a>
+    </div>
+  </div>
+
+  {hasErrors && <p class={`mt-4 max-w-3xl ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+  <form method="post" class="mt-6 max-w-3xl space-y-6">
+    <input type="hidden" name="action" value="save" />
+
+    <section class={`${card} grid gap-4 sm:grid-cols-2`}>
+      <h2 class={`${h2} sm:col-span-2`}>{t(lang, 'admin.bulletins.basics')}</h2>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.bulletins.serviceType')} *</span>
+        <select name="service_type_id" class={tin}>
+          {serviceTypes.map((s) => (
+            <option value={s.id} selected={String(s.id) === v.serviceTypeId}>{s.name}</option>
+          ))}
+        </select>
+        {errors.service_type_id && <span class={errorText}>{t(lang, errors.service_type_id)}</span>}
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.bulletins.date')} *</span>
+        <input type="date" name="bulletin_date" value={v.bulletinDate} class={tin} />
+        {errors.bulletin_date && <span class={errorText}>{t(lang, errors.bulletin_date)}</span>}
+      </label>
+      <label class="block sm:col-span-2">
+        <span class={lab}>{t(lang, 'admin.bulletins.serviceTimeLabel')}</span>
+        <input type="text" name="service_time_label" value={v.serviceTimeLabel} class={tin} />
+      </label>
+    </section>
+
+    <section class={card} data-repeat>
+      <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.program')}</h2>
+      {v.program.map((row) => (
+        <div class="mb-2 flex flex-wrap items-start gap-2" data-repeat-row>
+          <input name="program_item" value={row.item} placeholder={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
+          <input name="program_content" value={row.content} placeholder={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
+          <input name="program_person" value={row.person} placeholder={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
+          <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+          <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+          <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+        </div>
+      ))}
+      <template data-repeat-template>
+        <div class="mb-2 flex flex-wrap items-start gap-2" data-repeat-row>
+          <input name="program_item" placeholder={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
+          <input name="program_content" placeholder={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
+          <input name="program_person" placeholder={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
+          <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+          <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+          <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+        </div>
+      </template>
+      <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
+    </section>
+
+    <div class="grid gap-6 sm:grid-cols-2">
+      <section class={card} data-repeat>
+        <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.offering')}</h2>
+        {v.offering.map((row) => (
+          <div class="mb-2 flex items-start gap-2" data-repeat-row>
+            <input name="offering_label" value={row.label} placeholder={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
+            <input name="offering_amount" value={row.value} placeholder={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+        ))}
+        <template data-repeat-template>
+          <div class="mb-2 flex items-start gap-2" data-repeat-row>
+            <input name="offering_label" placeholder={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
+            <input name="offering_amount" placeholder={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+        </template>
+        <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
+      </section>
+
+      <section class={card} data-repeat>
+        <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.attendance')}</h2>
+        {v.attendance.map((row) => (
+          <div class="mb-2 flex items-start gap-2" data-repeat-row>
+            <input name="attendance_label" value={row.label} placeholder={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
+            <input name="attendance_count" value={row.value} placeholder={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+        ))}
+        <template data-repeat-template>
+          <div class="mb-2 flex items-start gap-2" data-repeat-row>
+            <input name="attendance_label" placeholder={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
+            <input name="attendance_count" placeholder={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+        </template>
+        <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
+      </section>
+    </div>
+
+    <section class={`${card} space-y-4`}>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.bulletins.memoryVerse')}</span>
+        <textarea name="memory_verse" rows="2" class={tin}>{v.memoryVerse}</textarea>
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.bulletins.flowers')}</span>
+        <input type="text" name="flowers" value={v.flowers} class={tin} />
+      </label>
+    </section>
+
+    <section class={card} data-repeat>
+      <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.announcements')}</h2>
+      {v.announcements.map((a, i) => (
+        <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
+          <div class="flex items-start gap-2">
+            <input name="ann_title" value={a.title} placeholder={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
+            <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+            <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} class={tin}>{a.body}</textarea>
+          {errors[`ann_body_${i}`] && <span class={errorText}>{t(lang, errors[`ann_body_${i}`])}</span>}
+          <div class="flex gap-2">
+            <input name="ann_url" value={a.url} placeholder={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
+            <input name="ann_label" value={a.label} placeholder={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
+          </div>
+          {errors[`ann_url_${i}`] && <span class={errorText}>{t(lang, errors[`ann_url_${i}`])}</span>}
+        </div>
+      ))}
+      <template data-repeat-template>
+        <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
+          <div class="flex items-start gap-2">
+            <input name="ann_title" placeholder={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
+            <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+            <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} class={tin}></textarea>
+          <div class="flex gap-2">
+            <input name="ann_url" placeholder={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
+            <input name="ann_label" placeholder={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
+          </div>
+        </div>
+      </template>
+      <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.form.publishTitle')}</h2>
+      <div class="flex gap-6 text-sm">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="status" value="draft" checked={v.status !== 'published'} />
+          {t(lang, 'admin.form.statusDraft')}
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="status" value="published" checked={v.status === 'published'} />
+          {t(lang, 'admin.form.statusPublished')}
+        </label>
+      </div>
+      <label class="block max-w-sm">
+        <span class={lab}>{t(lang, 'admin.form.publishAt')}</span>
+        <input type="datetime-local" name="publish_at" value={v.publishAtLocal} class={tin} />
+        {errors.publish_at && <span class={errorText}>{t(lang, errors.publish_at)}</span>}
+      </label>
+    </section>
+
+    <div class="flex items-center gap-4">
+      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+    </div>
+  </form>
+
+  {
+    !isNew && (
+      <form
+        method="post"
+        class="mt-6 max-w-3xl"
+        onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.bulletins.deleteConfirm'))})`}
+      >
+        <input type="hidden" name="action" value="delete" />
+        <button type="submit" class={btnDanger}>{t(lang, 'admin.form.delete')}</button>
+      </form>
+    )
+  }
+</Admin>

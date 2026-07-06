@@ -1,0 +1,186 @@
+---
+// Create / edit a prayer sheet (console class — re-checks editor∪admin).
+// `id='new'` creates; a numeric id edits. save → parsePrayerSheetForm →
+// savePrayerSheet (upsert + revision snapshot in one db.batch; duplicate live
+// date → errors.dateTaken); delete → soft delete. Sections are repeat-rows: a
+// heading plus a textarea whose non-blank lines become the section's items.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { parsePrayerSheetForm } from '../../../lib/validate';
+import { getPrayerSheetForEdit, savePrayerSheet, softDeletePrayerSheet } from '../../../lib/adminDb';
+import { todayInTz, nextWeekday, utcToDatetimeLocal } from '../../../lib/dates';
+import { LOCALES, localePath, type Locale } from '../../../lib/locales';
+import { tin, lab, card, errorText, btn, btnDanger, rowBtn, noticeErr } from '../../../lib/adminUi';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const rawId = Astro.params.id ?? '';
+const isNew = rawId === 'new';
+if (!isNew && !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const id = isNew ? null : Number(rawId);
+
+const existing = id !== null ? await getPrayerSheetForEdit(db, id) : null;
+if (id !== null && !existing) return new Response(null, { status: 404 });
+
+type SectionVals = { heading: string; items: string };
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const action = fd.get('action');
+  if (action === 'delete' && id !== null) {
+    await softDeletePrayerSheet(db, id, user.email);
+    return Astro.redirect('/admin/prayer-sheets?deleted=1', 303);
+  }
+  if (action === 'save') {
+    const parsed = parsePrayerSheetForm(fd);
+    if (parsed.ok) {
+      const result = await savePrayerSheet(db, { ...parsed.data, id }, user.email);
+      if (result.ok) return Astro.redirect('/admin/prayer-sheets?saved=1', 303);
+      errors = result.errors;
+    } else {
+      errors = parsed.errors;
+    }
+  }
+}
+
+let v: { sheetDate: string; locale: string; sections: SectionVals[]; status: string; publishAtLocal: string };
+if (fd) {
+  const g = (n: string) => String(fd!.get(n) ?? '');
+  const headings = fd.getAll('section_heading').map((s) => String(s));
+  const items = fd.getAll('section_items').map((s) => String(s));
+  v = {
+    sheetDate: g('sheet_date'),
+    locale: g('locale'),
+    sections: headings.map((heading, i) => ({ heading, items: items[i] ?? '' })),
+    status: g('status') || 'draft',
+    publishAtLocal: g('publish_at'),
+  };
+} else if (existing) {
+  v = {
+    sheetDate: existing.sheetDate,
+    locale: existing.locale ?? '',
+    sections: existing.sections.map((s) => ({ heading: s.heading, items: s.items.join('\n') })),
+    status: existing.status,
+    publishAtLocal: utcToDatetimeLocal(existing.publishAt),
+  };
+} else {
+  v = {
+    sheetDate: nextWeekday(todayInTz(), 3),
+    locale: '',
+    sections: [{ heading: '', items: '' }],
+    status: 'draft',
+    publishAtLocal: '',
+  };
+}
+
+const heading = isNew ? t(lang, 'admin.prayerSheets.newTitle') : t(lang, 'admin.prayerSheets.editTitle');
+const hasErrors = Object.keys(errors).length > 0;
+const h2 = 'font-display text-heading-sm font-bold';
+const publishedNow = !isNew && existing?.status === 'published';
+const viewHref = publishedNow ? localePath(lang, `/prayer/${v.sheetDate}`) : null;
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <div class="flex items-center gap-4 text-sm">
+      {viewHref && <a href={viewHref} class="text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
+      <a href="/admin/prayer-sheets" class="text-primary hover:underline">&larr; {t(lang, 'admin.prayerSheets.back')}</a>
+    </div>
+  </div>
+
+  {hasErrors && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl space-y-6">
+    <input type="hidden" name="action" value="save" />
+
+    <section class={`${card} grid gap-4 sm:grid-cols-2`}>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.prayerSheets.date')} *</span>
+        <input type="date" name="sheet_date" value={v.sheetDate} class={tin} />
+        {errors.sheet_date && <span class={errorText}>{t(lang, errors.sheet_date)}</span>}
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.prayerSheets.locale')}</span>
+        <select name="locale" class={tin}>
+          <option value="" selected={v.locale === ''}>{t(lang, 'admin.prayerSheets.localeNone')}</option>
+          {LOCALES.map((loc) => (
+            <option value={loc} selected={v.locale === loc}>{t(lang, `locale.${loc}`)}</option>
+          ))}
+        </select>
+        {errors.locale && <span class={errorText}>{t(lang, errors.locale)}</span>}
+      </label>
+    </section>
+
+    <section class={card} data-repeat>
+      <h2 class={`${h2} mb-4`}>{t(lang, 'admin.prayerSheets.sections')}</h2>
+      {v.sections.map((s, i) => (
+        <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
+          <div class="flex items-start gap-2">
+            <input name="section_heading" value={s.heading} placeholder={t(lang, 'admin.prayerSheets.heading')} class={`${tin} flex-1`} />
+            <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+            <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+          {errors[`section_heading_${i}`] && <span class={errorText}>{t(lang, errors[`section_heading_${i}`])}</span>}
+          <textarea name="section_items" rows="4" placeholder={t(lang, 'admin.prayerSheets.items')} class={tin}>{s.items}</textarea>
+        </div>
+      ))}
+      <template data-repeat-template>
+        <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
+          <div class="flex items-start gap-2">
+            <input name="section_heading" placeholder={t(lang, 'admin.prayerSheets.heading')} class={`${tin} flex-1`} />
+            <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
+            <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
+            <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
+          </div>
+          <textarea name="section_items" rows="4" placeholder={t(lang, 'admin.prayerSheets.items')} class={tin}></textarea>
+        </div>
+      </template>
+      <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.prayerSheets.addSection')}</button>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.form.publishTitle')}</h2>
+      <div class="flex gap-6 text-sm">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="status" value="draft" checked={v.status !== 'published'} />
+          {t(lang, 'admin.form.statusDraft')}
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="status" value="published" checked={v.status === 'published'} />
+          {t(lang, 'admin.form.statusPublished')}
+        </label>
+      </div>
+      <label class="block max-w-sm">
+        <span class={lab}>{t(lang, 'admin.form.publishAt')}</span>
+        <input type="datetime-local" name="publish_at" value={v.publishAtLocal} class={tin} />
+        {errors.publish_at && <span class={errorText}>{t(lang, errors.publish_at)}</span>}
+      </label>
+    </section>
+
+    <div class="flex items-center gap-4">
+      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+    </div>
+  </form>
+
+  {
+    !isNew && (
+      <form
+        method="post"
+        class="mt-6 max-w-2xl"
+        onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.prayerSheets.deleteConfirm'))})`}
+      >
+        <input type="hidden" name="action" value="delete" />
+        <button type="submit" class={btnDanger}>{t(lang, 'admin.form.delete')}</button>
+      </form>
+    )
+  }
+</Admin>
