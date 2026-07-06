@@ -322,12 +322,26 @@ no stock-photo license ambiguity; README documents swapping in real photography.
 
 ## 13. Docs & DX
 
-README (features, screenshots, architecture diagram, 5-minute local quickstart:
-`npm i && npm run db:migrate:local && npm run db:seed:local && npm run dev`, deploy
-guide incl. D1/R2/Email/domain setup with `church.yunfei-song.com` example, theme
-customization tutorial: copy a theme JSON → edit → set in admin). docs/: architecture,
-design-system, i18n, deploy, features. CONTRIBUTING.md, MIT LICENSE, `.dev.vars.example`,
-`wrangler.jsonc` with `<PLACEHOLDER>` ids + setup script hints.
+README suite (ALL ENGLISH, per owner directive 2026-07-05): a non-technical **landing
+README.md** written for church staff/volunteers (minimal jargon) that (a) states the
+mission — the simplest, fastest, cheapest way for churches and nonprofits to run a
+website, easy to maintain especially with AI assistance; (b) compares honestly with
+WordPress / Wix / paid SaaS ($0 hosting on Cloudflare's free tier, fast global edge,
+full data ownership and control, no vendor lock-in, no plugin treadmill); (c) actively
+encourages building and maintaining the site with Claude Code or Codex, including
+pointing the AI at this repo's docs and code; (d) explains the GPL v3 copyleft in one
+friendly paragraph; (e) links to per-feature docs. Per-feature docs live in
+`docs/features/*.md` (public site & themes, CMS admin, bulletins, sermons, prayer wall,
+volunteer/serve module, i18n, email & automation) — each with SCREENSHOTS and an
+original SVG (or HTML) structure diagram explaining how the feature works. Technical
+docs: architecture, design-system, i18n, deploy (quickstart:
+`npm i && npm run db:migrate:local && npm run db:seed:local && npm run dev`; deploy
+guide incl. D1/R2/Email/domain setup with `church.yunfei-song.com` example; theme
+customization tutorial). CONTRIBUTING.md, **GPL v3 LICENSE** (derivative works must
+remain open source; no closed-source commercialization), `.dev.vars.example`,
+`wrangler.jsonc` with `<PLACEHOLDER>` ids. Screenshots are captured during execution
+(dev server, seeded) — not deferred to the end. Final acceptance review is performed
+by Fable (the most capable model), with Opus subagents executing.
 
 ## 14. Execution slices (each gets its own implementation plan)
 
