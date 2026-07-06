@@ -14,6 +14,7 @@ import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { getSiteIdentity } from '../lib/settings';
 import { t } from '../lib/i18n';
 
 interface Props {
@@ -37,7 +38,16 @@ try {
   /* keep the theme's intrinsic default mode */
 }
 
-const siteName = t(locale, 'site.name');
+// Site name comes from the admin-editable `site.name.<locale>` setting (with an
+// `.en` fallback inside getSiteIdentity); an unset setting or a DB hiccup falls
+// back to the built-in i18n default rather than blanking the title.
+let siteName = t(locale, 'site.name');
+try {
+  const identity = await getSiteIdentity((env as { DB: D1Database }).DB, locale);
+  if (identity.name) siteName = identity.name;
+} catch {
+  /* keep the i18n default when settings are unavailable */
+}
 const fullTitle = `${title} · ${siteName}`;
 
 // Canonical + hreflang alternates: strip the locale prefix, then re-prefix each

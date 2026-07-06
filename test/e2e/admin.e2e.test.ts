@@ -17,26 +17,42 @@ async function sessionCookie(id: number, email: string): Promise<string> {
   return `${SESSION_COOKIE}=${jwt}`;
 }
 
-describe('/admin/people role matrix', () => {
-  it('anonymous GET → 303 to signin', async () => {
-    const res = await get('/admin/people');
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toContain('/signin');
-  });
+// Full admin role matrix (table-driven), the authoritative access sweep that
+// supersedes the earlier scattered per-page status cells: for every admin
+// section index page, anonymous → 303 signin, a member → 403, an editor → 200 on
+// content consoles but 403 on the admin-only areas (people, settings), and an
+// admin → 200 everywhere. Seed people: 1 admin, 2 editor (pastor.david), 3 member.
+describe('admin role matrix (anon 303 / member 403 / editor content-only / admin all)', () => {
+  type Section = { path: string; kind: 'content' | 'adminOnly' };
+  const SECTIONS: Section[] = [
+    { path: '/admin/bulletins', kind: 'content' },
+    { path: '/admin/sermons', kind: 'content' },
+    { path: '/admin/prayer-sheets', kind: 'content' },
+    { path: '/admin/announcements', kind: 'content' },
+    { path: '/admin/events', kind: 'content' },
+    { path: '/admin/prayer-wall', kind: 'content' },
+    { path: '/admin/revisions/bulletin/1', kind: 'content' }, // seeded bulletin id 1
+    { path: '/admin/people', kind: 'adminOnly' },
+    { path: '/admin/settings', kind: 'adminOnly' },
+  ];
 
-  it('member session GET → 403', async () => {
-    // Seed person 3 (sarah.johnson) is a member, not an admin.
-    const cookie = await sessionCookie(3, 'sarah.johnson@example.com');
-    const res = await get('/admin/people', { cookie });
-    expect(res.status).toBe(403);
-  });
+  for (const { path, kind } of SECTIONS) {
+    const editorExpect = kind === 'content' ? 200 : 403;
+    it(`${path}: anon→303, member→403, editor→${editorExpect}, admin→200`, async () => {
+      const anon = await get(path);
+      expect(anon.status).toBe(303);
+      expect(anon.headers.get('location')).toContain('/signin');
 
-  it('admin session GET → 200', async () => {
-    // Seed person 1 (admin@example.com) is the site admin.
-    const cookie = await sessionCookie(1, 'admin@example.com');
-    const res = await get('/admin/people', { cookie });
-    expect(res.status).toBe(200);
-  });
+      const member = await sessionCookie(3, 'sarah.johnson@example.com');
+      expect((await get(path, { cookie: member })).status).toBe(403);
+
+      const editor = await sessionCookie(2, 'pastor.david@example.com');
+      expect((await get(path, { cookie: editor })).status).toBe(editorExpect);
+
+      const admin = await sessionCookie(1, 'admin@example.com');
+      expect((await get(path, { cookie: admin })).status).toBe(200);
+    });
+  }
 });
 
 describe('/admin/bulletins (console class)', () => {
@@ -254,5 +270,186 @@ describe('prayer wall — no-JS move + revisions + settings theme', () => {
   it('a member cannot save settings (adminOnly re-checked on the page → 403)', async () => {
     const member = await sessionCookie(3, 'sarah.johnson@example.com');
     expect((await get('/admin/settings', { cookie: member })).status).toBe(403);
+  });
+});
+
+describe('editor-created content reaches the public site (publish lifecycles)', () => {
+  it('a PUBLISHED bulletin appears on its public dated page (draft-not-public is proven elsewhere)', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const date = '2026-11-01'; // a date absent from the seed
+    const marker = 'Living Water Message E2E';
+
+    const body = new URLSearchParams();
+    body.append('action', 'save');
+    body.append('service_type_id', '1'); // English service → shows under /en
+    body.append('bulletin_date', date);
+    body.append('service_time_label', '9:30 AM');
+    body.append('program_item', 'Message');
+    body.append('program_content', marker);
+    body.append('program_person', 'Pastor David');
+    body.append('status', 'published');
+    body.append('publish_at', ''); // empty → published now (publish_at NULL)
+
+    const created = await post('/admin/bulletins/new', body.toString(), { cookie });
+    expect(created.status).toBe(303);
+
+    const publicPage = await get(`/en/bulletin/${date}?service=1`);
+    expect(publicPage.status).toBe(200);
+    expect(await publicPage.text()).toContain(marker);
+  });
+
+  it('a PUBLISHED sermon (pasted full YouTube URL) appears on /en/sermons/<year> with the extracted id in the embed facade', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+
+    const body = new URLSearchParams();
+    body.append('action', 'save');
+    body.append('service_type_id', '1');
+    body.append('sermon_date', '2027-01-10'); // a year not in the seed
+    body.append('title', 'The Living Water E2E');
+    body.append('speaker', 'Pastor David');
+    body.append('youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'); // full URL
+    body.append('status', 'published');
+
+    const created = await post('/admin/sermons/new', body.toString(), { cookie });
+    expect(created.status).toBe(303);
+
+    const page = await get('/en/sermons/2027');
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('The Living Water E2E');
+    // youtube_id was extracted from the URL and drives the click-to-load facade.
+    expect(html).toContain('youtube-nocookie.com/embed/dQw4w9WgXcQ');
+  });
+
+  it('an ACTIVE announcement (both locale titles) shows in the home ticker in BOTH locales', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const enTitle = 'Bell Choir Signup E2E';
+    const zhTitle = '钟乐团报名 E2E';
+
+    const body = new URLSearchParams();
+    body.append('action', 'save');
+    body.append('title_en', enTitle);
+    body.append('title_zh', zhTitle);
+    body.append('url', '');
+    body.append('sort', '0');
+    body.append('starts_at', ''); // no window → always on
+    body.append('ends_at', '');
+    body.append('active', 'on');
+
+    const created = await post('/admin/announcements', body.toString(), { cookie });
+    expect(created.status).toBe(303);
+
+    expect(await (await get('/en/')).text()).toContain(enTitle);
+    expect(await (await get('/zh/')).text()).toContain(zhTitle);
+  });
+
+  it('a PUBLISHED zh prayer sheet on a new date renders on /zh/prayer/<date>', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const date = '2026-12-02';
+    const heading = '感恩 E2E';
+
+    const body = new URLSearchParams();
+    body.append('action', 'save');
+    body.append('sheet_date', date);
+    body.append('locale', 'zh');
+    body.append('section_heading', heading);
+    body.append('section_items', '为测试的顺利感恩');
+    body.append('status', 'published');
+    body.append('publish_at', '');
+
+    const created = await post('/admin/prayer-sheets/new', body.toString(), { cookie });
+    expect(created.status).toBe(303);
+
+    const page = await get(`/zh/prayer/${date}`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain(heading);
+  });
+});
+
+describe('revision restore round-trips public content', () => {
+  it('restoring an earlier bulletin revision brings its public content back', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const id = 1; // seeded published English bulletin (2026-06-21)
+    const date = '2026-06-21';
+
+    // A full, valid bulletin save carrying one distinctive program line. saveBulletin
+    // snapshots the NEW state on every save (snapshot-after), so we first save a
+    // baseline (→ revision R1), then change it, then restore R1.
+    const saveBody = (content: string) => {
+      const b = new URLSearchParams();
+      b.append('action', 'save');
+      b.append('service_type_id', '1');
+      b.append('bulletin_date', date);
+      b.append('service_time_label', '9:30 AM');
+      b.append('program_item', 'Message');
+      b.append('program_content', content);
+      b.append('program_person', 'Sarah Johnson');
+      b.append('status', 'published');
+      b.append('publish_at', '');
+      return b.toString();
+    };
+
+    const baseline = 'Baseline Headline E2E';
+    expect((await post(`/admin/bulletins/${id}`, saveBody(baseline), { cookie })).status).toBe(303);
+    const r1 = await env.DB
+      .prepare(`SELECT id FROM revisions WHERE entity = 'bulletin' AND entity_id = ? ORDER BY id DESC LIMIT 1`)
+      .bind(id)
+      .first<{ id: number }>();
+    expect(r1).not.toBeNull();
+
+    // Change the headline → the public page now shows the new content, not the baseline.
+    const changed = 'Changed Headline E2E';
+    expect((await post(`/admin/bulletins/${id}`, saveBody(changed), { cookie })).status).toBe(303);
+    let pub = await (await get(`/en/bulletin/${date}?service=1`)).text();
+    expect(pub).toContain(changed);
+    expect(pub).not.toContain(baseline);
+
+    // Restore R1 → the public page shows the baseline content again.
+    const restore = new URLSearchParams({ _action: 'restore', revision_id: String(r1!.id) });
+    const restored = await post(`/admin/revisions/bulletin/${id}`, restore.toString(), { cookie });
+    expect(restored.status).toBe(303);
+    expect(restored.headers.get('location')).toContain('restored=1');
+    pub = await (await get(`/en/bulletin/${date}?service=1`)).text();
+    expect(pub).toContain(baseline);
+    expect(pub).not.toContain(changed);
+  });
+});
+
+describe('settings identity flows to the public site', () => {
+  it('admin updates site.name.en → the public home <title> reflects it, then restores', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const newName = 'Living Water Community E2E';
+
+    const upd = await post('/admin/settings', new URLSearchParams({ 'site.name.en': newName }).toString(), { cookie });
+    expect(upd.status).toBe(303);
+
+    const home = await get('/en/');
+    expect(home.status).toBe(200);
+    // fullTitle is `${pageTitle} · ${siteName}`, so the site name is the tail of <title>.
+    expect(await home.text()).toContain(`${newName}</title>`);
+
+    // Restore the seeded identity so later tests/files see the original name.
+    const back = await post('/admin/settings', new URLSearchParams({ 'site.name.en': 'Church4Christ' }).toString(), { cookie });
+    expect(back.status).toBe(303);
+    expect(await (await get('/en/')).text()).toContain('Church4Christ</title>');
+  });
+});
+
+describe('deactivation locks a session out immediately', () => {
+  it('setting the editor active=0 makes their still-valid cookie 303 to signin on the next request', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    // The cookie works while the person is active.
+    expect((await get('/admin/bulletins', { cookie })).status).toBe(200);
+
+    await env.DB.prepare(`UPDATE people SET active = 0 WHERE id = 2`).run();
+    try {
+      // loadSessionUser filters active = 1, so the user is now null → anonymous GET
+      // to a protected page redirects to signin (immediate lockout, no cache).
+      const res = await get('/admin/bulletins', { cookie });
+      expect(res.status).toBe(303);
+      expect(res.headers.get('location')).toContain('/signin');
+    } finally {
+      await env.DB.prepare(`UPDATE people SET active = 1 WHERE id = 2`).run();
+    }
   });
 });
