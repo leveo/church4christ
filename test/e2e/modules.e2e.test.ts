@@ -89,6 +89,8 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     expect((await get('/en/my', { cookie: member })).status).toBe(404);
     expect((await get('/en/ministries')).status).toBe(404);
     expect((await get('/en/ministries/worship')).status).toBe(404);
+    // The opportunity board lives under /serve, so it 404s with the module too.
+    expect((await get('/en/serve/opportunities')).status).toBe(404);
 
     // Home still renders but every serve cross-link is gone: the Ministries nav
     // item (nav.ministries now belongs to serve) and the ministries preview
@@ -102,7 +104,37 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     expect(on.status).toBe(303);
     expect((await get('/en/serve')).status).toBe(200);
     expect((await get('/en/ministries')).status).toBe(200);
+    expect((await get('/en/serve/opportunities')).status).toBe(200);
     expect(await (await get('/en/')).text()).toContain('/en/ministries');
+  });
+
+  it('disabling people hides the profile household card while the auth basics still render', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const member = await sessionCookie(5, 'mark.liu@example.com');
+
+    // Baseline: people on → the profile carries the household card (person 5 has
+    // no household, so the create-household form renders) and the birthday input.
+    const on = await (await get('/en/profile', { cookie: member })).text();
+    expect(on).toContain('value="createHousehold"');
+    expect(on).toContain('name="birthday"');
+
+    const off = await post('/admin/settings', modulesBody(['people']), { cookie: admin });
+    expect(off.status).toBe(303);
+
+    // People off → /profile still serves (it is a core auth route, not people-owned)
+    // and the basics render, but the household card + membership fields are gone.
+    const page = await get('/en/profile', { cookie: member });
+    expect(page.status).toBe(200);
+    const body = await page.text();
+    expect(body).toContain('name="display_name"'); // identity form basics
+    expect(body).toContain('My teams'); // pre-existing section
+    expect(body).not.toContain('value="createHousehold"'); // household card absent
+    expect(body).not.toContain('name="birthday"'); // membership fields absent
+
+    // Restore → card returns.
+    const restore = await post('/admin/settings', modulesBody([]), { cookie: admin });
+    expect(restore.status).toBe(303);
+    expect(await (await get('/en/profile', { cookie: member })).text()).toContain('value="createHousehold"');
   });
 
   it('a general settings POST cannot smuggle module.* writes (stripped server-side)', async () => {

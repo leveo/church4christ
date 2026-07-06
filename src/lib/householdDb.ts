@@ -154,6 +154,42 @@ export async function getHouseholdForPerson(
   return getHousehold(db, membership.household_id);
 }
 
+/**
+ * Like {@link getHouseholdForPerson} but each member's `display_name` is the
+ * LIVE `people.display_name` for real members (person_id set) and the stored
+ * name for dependents. This is the self-service surface's read — a real member
+ * who later renames their account shows the current name, and no member's email
+ * is ever selected (privacy rule: never render another member's email).
+ */
+export async function getLiveHouseholdForPerson(
+  db: D1Database,
+  personId: number,
+): Promise<HouseholdWithMembers | null> {
+  const membership = await memberRowForPerson(db, personId);
+  if (!membership) return null;
+  const h = await db
+    .prepare(
+      `SELECT id, name, address, phone, created_at, updated_at
+       FROM households WHERE id = ? AND deleted_at IS NULL`,
+    )
+    .bind(membership.household_id)
+    .first<Omit<HouseholdWithMembers, 'members'>>();
+  if (!h) return null;
+  const { results } = await db
+    .prepare(
+      `SELECT hm.id AS id, hm.household_id AS household_id, hm.person_id AS person_id,
+              COALESCE(p.display_name, hm.display_name) AS display_name,
+              hm.role AS role, hm.is_primary AS is_primary, hm.created_at AS created_at
+       FROM household_members hm
+       LEFT JOIN people p ON p.id = hm.person_id AND p.deleted_at IS NULL
+       WHERE hm.household_id = ?
+       ORDER BY hm.is_primary DESC, hm.role ASC, hm.created_at, hm.id`,
+    )
+    .bind(membership.household_id)
+    .all<HouseholdMember>();
+  return { ...h, members: results };
+}
+
 /** A household by id with its ordered members, or null if missing/soft-deleted. */
 export async function getHousehold(db: D1Database, householdId: number): Promise<HouseholdWithMembers | null> {
   const h = await db

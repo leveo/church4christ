@@ -26,6 +26,7 @@ const PUBLIC_EXACT = new Set([
   '/serve',
   '/serve/gifts',
   '/serve/apply',
+  '/serve/opportunities',
   '/serve/testimonies',
   '/signin',
   '/api/prayer-request',

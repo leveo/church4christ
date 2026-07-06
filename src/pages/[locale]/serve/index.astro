@@ -113,12 +113,18 @@ const modules = Astro.locals.modules;
         </div>
       )
     }
-    <div class="mt-8">
+    <div class="mt-8 flex flex-wrap gap-x-6 gap-y-2">
       <a
         href={localePath(locale, '/ministries')}
         class="text-sm font-semibold text-accent hover:text-accent-hover"
       >
         {t(locale, 'ministries.title')} →
+      </a>
+      <a
+        href={localePath(locale, '/serve/opportunities')}
+        class="text-sm font-semibold text-accent hover:text-accent-hover"
+      >
+        {t(locale, 'opportunities.boardLink')} →
       </a>
     </div>
   </section>

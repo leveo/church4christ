@@ -32,6 +32,7 @@ describe('classifyRoute', () => {
     ['/serve', 'public'],
     ['/serve/gifts', 'public'],
     ['/serve/apply', 'public'],
+    ['/serve/opportunities', 'public'],
     ['/serve/testimonies', 'public'],
     ['/signin', 'public'],
     ['/auth/abc123', 'public'],
