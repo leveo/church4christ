@@ -1,9 +1,9 @@
 // Registry purity (runs in the workers project by default — this file is pure and
 // imports only modules.ts, so it needs no D1). Table-drives moduleForPath over
 // every module's own public + admin prefix, the /serve overlap (gifts/testimonies
-// win over serve by longest prefix), the serve-family aliases (/my, /cal), and the
-// always-on CORE paths that must resolve to null (/, /profile, /ministries,
-// /admin/people, unknown, and segment-aware lookalikes).
+// win over serve by longest prefix), the serve-family aliases (/my, /cal,
+// /ministries), and the always-on CORE paths that must resolve to null (/,
+// /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
 import { MODULE_KEYS, MODULES, moduleForPath } from '../src/lib/modules';
 
@@ -52,6 +52,8 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/my/blockouts', 'serve'],
     ['/cal', 'serve'],
     ['/cal/feed.ics', 'serve'],
+    ['/ministries', 'serve'], // spec §A: the ministries directory belongs to serve
+    ['/ministries/worship', 'serve'],
     ['/serve/gifts', 'gifts'], // longest prefix wins over serve
     ['/serve/testimonies', 'testimonies'], // longest prefix wins over serve
     ['/articles', 'articles'],
@@ -79,7 +81,6 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/give', null],
     ['/privacy', null],
     ['/signin', null],
-    ['/ministries', null], // public ministries list is core per the brief's prefixes
     ['/admin', null],
     ['/admin/settings', null],
     ['/admin/people', null], // predates the module — core

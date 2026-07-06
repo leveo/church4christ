@@ -72,9 +72,9 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     uses: [],
   },
   serve: {
-    publicPrefixes: ['/serve', '/my', '/cal'],
+    publicPrefixes: ['/serve', '/my', '/cal', '/ministries'],
     adminPrefixes: ['/admin/ministries', '/admin/service-types', '/admin/teams', '/admin/reports'],
-    navKeys: ['nav.serve'],
+    navKeys: ['nav.serve', 'nav.ministries'],
     uses: [],
   },
   gifts: {

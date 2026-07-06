@@ -56,7 +56,11 @@ if (Astro.request.method === 'POST') {
       // next request in this isolate (this redirect's GET already reflects it).
       clearModuleCache();
     } else {
-      await setSettings(db, parsed.data);
+      // Server-side hardening: module.* keys are ONLY writable through the
+      // modules form above — a general save that smuggled them in would flip
+      // toggles while busting the wrong (theme) cache, so strip them here.
+      const data = Object.fromEntries(Object.entries(parsed.data).filter(([k]) => !k.startsWith('module.')));
+      await setSettings(db, data);
       // The theme may have changed — drop the per-isolate cache so the next render
       // (this redirect's GET) already reflects the new theme.name / default_mode.
       clearThemeCache();
