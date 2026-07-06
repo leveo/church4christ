@@ -26,8 +26,10 @@ export default {
         break;
       case BACKUP_CRON:
         // Log-and-skips when the D1 export vars/secret are unset (demo deploy);
-        // otherwise exports D1 and writes backups/YYYY-MM-DD.sql to R2.
-        ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv));
+        // otherwise exports D1 and writes backups/YYYY-MM-DD.sql to R2. The key
+        // date comes from the cron's scheduledTime, not wall clock, so execution
+        // jitter can't shift the backup onto the wrong date.
+        ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv, new Date(controller.scheduledTime)));
         break;
       default:
         console.warn(`unhandled cron trigger: ${controller.cron}`);
