@@ -11,6 +11,12 @@
   "vars": {
     "APP_ORIGIN": "https://church.yunfei-song.com",
     "EMAIL_FROM": "serve@church.yunfei-song.com"
+    // Nightly D1→R2 backup (src/lib/backup.ts): uncomment and fill both vars
+    // below, then run `wrangler secret put D1_EXPORT_TOKEN`. All three must be
+    // set together; if any is missing the backup cron logs "backup skipped: not
+    // configured" and no-ops, so the demo deploy runs fine without them.
+    // "CF_ACCOUNT_ID": "your-cloudflare-account-id",
+    // "D1_DATABASE_ID": "your-d1-database-id"
   },
   "d1_databases": [
     {

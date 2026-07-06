@@ -1,6 +1,7 @@
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
 import { type EmailEnv } from './lib/email';
+import { runBackup, type MaybeBackupEnv } from './lib/backup';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -24,7 +25,9 @@ export default {
         ctx.waitUntil(sendWeeklyDigest(vars, vars.DB));
         break;
       case BACKUP_CRON:
-        console.log('cron not implemented: backup');
+        // Log-and-skips when the D1 export vars/secret are unset (demo deploy);
+        // otherwise exports D1 and writes backups/YYYY-MM-DD.sql to R2.
+        ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv));
         break;
       default:
         console.warn(`unhandled cron trigger: ${controller.cron}`);

@@ -433,6 +433,28 @@ describe('settings identity flows to the public site', () => {
     expect(back.status).toBe(303);
     expect(await (await get('/en/')).text()).toContain('Church4Christ</title>');
   });
+
+  it('a zh site.name set via SQL surfaces in the /zh/ <title>, then restores', async () => {
+    const zhName = '活水社区教会 E2E';
+    const setName = (value: string) =>
+      env.DB.prepare(
+        `INSERT INTO settings (key, value) VALUES ('site.name.zh', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+        .bind(value)
+        .run();
+
+    await setName(zhName);
+    try {
+      const home = await get('/zh/');
+      expect(home.status).toBe(200);
+      // getSiteIdentity resolves site.name.zh for the zh locale, so the localized
+      // name is the tail of <title> on the Chinese home page.
+      expect(await home.text()).toContain(`${zhName}</title>`);
+    } finally {
+      // Restore the seeded zh identity for later files sharing this baseline.
+      await setName('四方基督教会');
+    }
+  });
 });
 
 describe('deactivation locks a session out immediately', () => {

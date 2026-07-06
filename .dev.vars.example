@@ -11,5 +11,8 @@ EMAIL_DEV_LOG=1
 # When set, local dev auto-authenticates as this admin address (no magic link).
 AUTH_DEV_BYPASS_EMAIL=admin@example.com
 
-# Token guarding the D1 export/backup endpoint. Wired in a later slice.
+# Token for the nightly D1→R2 backup (src/lib/backup.ts). Set this plus the
+# CF_ACCOUNT_ID + D1_DATABASE_ID vars in wrangler.jsonc to enable backups; if
+# any is unset the backup cron skips gracefully. Production uses
+# `wrangler secret put D1_EXPORT_TOKEN`.
 # D1_EXPORT_TOKEN=

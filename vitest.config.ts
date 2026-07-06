@@ -70,6 +70,7 @@ export default defineConfig(async () => {
               'test/adminDb.revisions.test.ts',
               'test/settingsSave.test.ts',
               'test/media.test.ts',
+              'test/backup.test.ts',
               'test/publicDb.test.ts',
               'test/ministryDb.test.ts',
               'test/prayer-request.test.ts',
