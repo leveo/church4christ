@@ -169,11 +169,13 @@ export async function setPlanPosition(
  * given plan. (a) Blockout overlap: the plan_date falls inside [start_date,
  * end_date]; when both the blockout and the plan's service type carry a time
  * range, a non-overlapping blockout auto-resolves (no conflict) — a whole-day
- * blockout always conflicts. (b) Double-booking: any OTHER non-declined,
- * non-deleted assignment the person holds on a same-date plan of ANY service
- * type (the current plan is excluded so it never flags itself). Double-booking
- * labels use the English (default) name — callers needing the viewer's locale
- * re-localize from the ids.
+ * blockout always conflicts. (b) Double-booking: any non-declined, non-deleted
+ * assignment the person holds on a same-date plan of ANY service type —
+ * including a different position on this same plan. The exact target slot never
+ * self-flags because assignPerson/claimOpenSlot return 'duplicate'/'taken'
+ * before conflicts are checked, and declined/deleted rows are filtered here.
+ * Double-booking labels use the English (default) name — callers needing the
+ * viewer's locale re-localize from the ids.
  */
 export async function getConflicts(db: D1Database, personId: number, planId: number): Promise<Conflict[]> {
   const plan = await db
@@ -217,9 +219,9 @@ export async function getConflicts(db: D1Database, personId: number, planId: num
        JOIN positions pos ON pos.id = ra.position_id
        ${posJ.joins}
        WHERE ra.person_id = ?1 AND p.plan_date = ?2
-         AND ra.status != 'D' AND ra.deleted_at IS NULL AND p.id != ?3`,
+         AND ra.status != 'D' AND ra.deleted_at IS NULL`,
     )
-    .bind(personId, plan.plan_date, planId)
+    .bind(personId, plan.plan_date)
     .all<{ st_name: string; pos_name: string }>();
   for (const d of doubles) conflicts.push({ kind: 'double', detail: `${d.st_name} — ${d.pos_name}` });
   return conflicts;

@@ -155,14 +155,18 @@ describe('planDb engine', () => {
       expect(await getConflicts(env.DB, 2, outside)).toHaveLength(0); // outside
     });
 
-    it('detects same-date double booking, excluding declined and the current plan', async () => {
+    it('detects same-date double booking, including same-plan other positions, excluding declined', async () => {
       expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
       // Viewing from plan 2 (English, same date) surfaces the plan-1 (Chinese) booking.
       expect(await getConflicts(env.DB, 3, 2)).toEqual([{ kind: 'double', detail: 'Chinese — Pianist' }]);
+      // Viewing from plan 1 itself: a DIFFERENT position on the SAME plan is still
+      // a double (the exact target slot is guarded by duplicate/taken upstream).
+      expect(await getConflicts(env.DB, 3, 1)).toEqual([{ kind: 'double', detail: 'Chinese — Pianist' }]);
 
       const id = await assignmentIdOf(1, 2, 3);
       await respondToAssignment(env.DB, id, 3, 'decline', 'busy');
       expect(await getConflicts(env.DB, 3, 2)).toEqual([]); // declined ≠ conflict
+      expect(await getConflicts(env.DB, 3, 1)).toEqual([]);
     });
 
     it('auto-resolves a partial blockout that does not overlap the service time', async () => {
@@ -202,6 +206,13 @@ describe('planDb engine', () => {
       expect(await assignPerson(env.DB, { planId: 1, positionId: 1, personId: 3, assignedBy: 1, force: true })).toBe('duplicate');
     });
 
+    it('flags a same-plan different-position double as "conflicts" unless forced', async () => {
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
+      // Same plan, different position: a double-booking warning, not a duplicate.
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 1, personId: 3, assignedBy: 1 })).toBe('conflicts');
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 1, personId: 3, assignedBy: 1, force: true })).toBe('ok');
+    });
+
     it('revives a soft-deleted assignment on re-assign (status back to U)', async () => {
       expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
       const id = await assignmentIdOf(1, 2, 3);
@@ -212,6 +223,19 @@ describe('planDb engine', () => {
         .bind(id)
         .first<{ status: string; deleted_at: string | null }>();
       expect(row).toEqual({ status: 'U', deleted_at: null });
+    });
+
+    it('revives a declined assignment on re-assign (status back to U, reason cleared)', async () => {
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
+      const id = await assignmentIdOf(1, 2, 3);
+      expect(await respondToAssignment(env.DB, id, 3, 'decline', 'busy')).toEqual({ ok: true });
+      // Declined is not 'duplicate' — re-assign revives the same row as a fresh request.
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
+      const row = await env.DB
+        .prepare('SELECT status, decline_reason, deleted_at FROM roster_assignments WHERE id = ?')
+        .bind(id)
+        .first<{ status: string; decline_reason: string | null; deleted_at: string | null }>();
+      expect(row).toEqual({ status: 'U', decline_reason: null, deleted_at: null });
     });
   });
 
@@ -245,6 +269,13 @@ describe('planDb engine', () => {
       // person 2 is blocked 06-01..06-03; put them on team 2 so they clear membership.
       await env.DB.prepare(`INSERT INTO team_members (team_id, person_id) VALUES (2, 2)`).run();
       expect(await claimOpenSlot(env.DB, { planId: 2, positionId: 3, personId: 2 })).toBe('conflict');
+    });
+
+    it('rejects a claim for a different position on a plan the person already serves', async () => {
+      // person 3 already Pianist on plan 1 → claiming the open Vocalist slot on
+      // the SAME plan is a double-booking conflict (claims never force).
+      expect(await assignPerson(env.DB, { planId: 1, positionId: 2, personId: 3, assignedBy: 1 })).toBe('ok');
+      expect(await claimOpenSlot(env.DB, { planId: 1, positionId: 1, personId: 3 })).toBe('conflict');
     });
   });
 
