@@ -31,6 +31,8 @@ function input(overrides: Partial<SavePersonInput> = {}): SavePersonInput {
     role: 'member',
     active: true,
     lang: null,
+    birthday: null,
+    address: null,
     ...overrides,
   };
 }

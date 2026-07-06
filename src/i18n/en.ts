@@ -414,6 +414,8 @@ export default {
 
   'errors.required': 'This field is required.',
   'errors.dateFormat': 'Enter a date as YYYY-MM-DD.',
+  'errors.dateFuture': 'Enter a date that is not in the future.',
+  'errors.tooLong': 'This value is too long.',
   'errors.urlInvalid': 'Enter a link starting with http:// or https://.',
   'errors.datetimeInvalid': 'Enter a valid date and time.',
   'errors.youtubeInvalid': 'Enter a valid YouTube link or video ID.',

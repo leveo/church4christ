@@ -6,7 +6,7 @@
 // field is blank are silently skipped (never an error). All user-entered URLs
 // are http(s)-only; dates are strict YYYY-MM-DD; datetime-local values are
 // converted to UTC SQL strings.
-import { isValidDateStr, datetimeLocalToUtc } from './dates';
+import { isValidDateStr, datetimeLocalToUtc, todayInTz } from './dates';
 import { extractYouTubeId } from './youtube';
 import { LOCALES, type Locale } from './locales';
 import { THEMES } from './theme';
@@ -18,6 +18,8 @@ export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<
 const ERR = {
   required: 'errors.required',
   date: 'errors.dateFormat',
+  dateFuture: 'errors.dateFuture',
+  tooLong: 'errors.tooLong',
   url: 'errors.urlInvalid',
   datetime: 'errors.datetimeInvalid',
   youtube: 'errors.youtubeInvalid',
@@ -29,6 +31,10 @@ const ERR = {
 
 const ROLES = ['member', 'editor', 'admin'] as const;
 type Role = (typeof ROLES)[number];
+
+/** Membership lifecycle statuses (people.membership_status). Admin-set only. */
+export const MEMBERSHIP_STATUSES = ['visitor', 'regular', 'member', 'inactive'] as const;
+export type MembershipStatus = (typeof MEMBERSHIP_STATUSES)[number];
 
 /** http(s) only — carry-over security requirement for every user-entered URL. */
 export function isHttpUrl(s: string): boolean {
@@ -81,6 +87,21 @@ function optionalDate(fd: FormData, name: string, errors: Record<string, string>
   if (raw === '') return null;
   if (!isValidDateStr(raw)) {
     errors[name] = ERR.date;
+    return null;
+  }
+  return raw;
+}
+
+/** Optional YYYY-MM-DD that must be a real date and not in the future (e.g. a birthday). */
+function optionalPastDate(fd: FormData, name: string, errors: Record<string, string>): string | null {
+  const raw = str(fd, name);
+  if (raw === '') return null;
+  if (!isValidDateStr(raw)) {
+    errors[name] = ERR.date;
+    return null;
+  }
+  if (raw > todayInTz()) {
+    errors[name] = ERR.dateFuture;
     return null;
   }
   return raw;
@@ -378,9 +399,21 @@ export interface PersonInput {
   role: Role;
   active: boolean;
   lang: Locale | null;
+  birthday: string | null;
+  address: string | null;
+  // Admin-only fields — present only when parsePersonForm is called with
+  // { admin: true }. membership_status/joined_on are never self-service.
+  membershipStatus?: MembershipStatus;
+  joinedOn?: string | null;
 }
 
-export function parsePersonForm(fd: FormData): FormResult<PersonInput> {
+/**
+ * Parse the person form. Both variants read birthday (optional, not future) and
+ * address (≤200 chars). With `{ admin: true }` it additionally reads
+ * membership_status (enum, defaults 'visitor') and joined_on (optional date) —
+ * these are admin-set only and must stay absent on the self-service surface.
+ */
+export function parsePersonForm(fd: FormData, opts: { admin?: boolean } = {}): FormResult<PersonInput> {
   const errors: Record<string, string> = {};
   const firstName = str(fd, 'first_name');
   const lastName = str(fd, 'last_name');
@@ -408,8 +441,71 @@ export function parsePersonForm(fd: FormData): FormResult<PersonInput> {
     else errors.lang = ERR.option;
   }
 
+  const birthday = optionalPastDate(fd, 'birthday', errors);
+  const addressRaw = str(fd, 'address');
+  if (addressRaw.length > 200) errors.address = ERR.tooLong;
+  const address = addressRaw || null;
+
+  const data: PersonInput = { firstName, lastName, displayName, email, phone, role, active, lang, birthday, address };
+
+  if (opts.admin) {
+    const statusRaw = str(fd, 'membership_status');
+    if (statusRaw === '') data.membershipStatus = 'visitor';
+    else if ((MEMBERSHIP_STATUSES as readonly string[]).includes(statusRaw)) {
+      data.membershipStatus = statusRaw as MembershipStatus;
+    } else errors.membership_status = ERR.option;
+    data.joinedOn = optionalDate(fd, 'joined_on', errors);
+  }
+
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, data: { firstName, lastName, displayName, email, phone, role, active, lang } };
+  return { ok: true, data };
+}
+
+// ---------------------------------------------------------------------------
+// Households (self-service + admin household cards)
+// ---------------------------------------------------------------------------
+export interface HouseholdFormInput {
+  name: string;
+  address: string | null;
+  phone: string | null;
+}
+
+/** Household card form: name required (≤80), address (≤200) and phone (≤40) optional. */
+export function parseHouseholdForm(fd: FormData): FormResult<HouseholdFormInput> {
+  const errors: Record<string, string> = {};
+  const name = str(fd, 'name');
+  if (!name) errors.name = ERR.required;
+  else if (name.length > 80) errors.name = ERR.tooLong;
+
+  const addressRaw = str(fd, 'address');
+  if (addressRaw.length > 200) errors.address = ERR.tooLong;
+
+  const phoneRaw = str(fd, 'phone');
+  if (phoneRaw.length > 40) errors.phone = ERR.tooLong;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { name, address: addressRaw || null, phone: phoneRaw || null } };
+}
+
+export interface DependentFormInput {
+  displayName: string;
+  role: 'adult' | 'child';
+}
+
+/** Name-only dependent form: display_name required (≤80), role adult/child (defaults adult). */
+export function parseDependentForm(fd: FormData): FormResult<DependentFormInput> {
+  const errors: Record<string, string> = {};
+  const displayName = str(fd, 'display_name');
+  if (!displayName) errors.display_name = ERR.required;
+  else if (displayName.length > 80) errors.display_name = ERR.tooLong;
+
+  const roleRaw = str(fd, 'role');
+  let role: 'adult' | 'child' = 'adult';
+  if (roleRaw === 'child') role = 'child';
+  else if (roleRaw !== '' && roleRaw !== 'adult') errors.role = ERR.option;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { displayName, role } };
 }
 
 // ---------------------------------------------------------------------------

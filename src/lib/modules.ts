@@ -39,7 +39,11 @@ export interface ModuleDef {
 // is absent here; `gifts` owns `/serve/gifts` and `testimonies` owns
 // `/serve/testimonies`, which win over `serve`'s `/serve` by longest-prefix match;
 // `events` also owns `/admin/announcements` (the homepage ticker admin);
-// `people` has no prefixes yet (slice 9 fills them).
+// `people` deliberately owns NO route prefixes: its surfaces live inside
+// pre-existing CORE routes (`/profile`, `/admin/people`) and its opportunity
+// board is under `/serve` (the `serve` module). The People module therefore
+// gates only its added panels/sections via `locals.modules.has('people')` in
+// those pages (slice 9), never whole routes.
 export const MODULES: Record<ModuleKey, ModuleDef> = {
   bulletins: {
     publicPrefixes: ['/bulletin'],

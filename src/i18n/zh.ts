@@ -413,6 +413,8 @@ export default {
 
   'errors.required': '此栏必填。',
   'errors.dateFormat': '日期格式须为 YYYY-MM-DD。',
+  'errors.dateFuture': '日期不可晚于今天。',
+  'errors.tooLong': '内容过长。',
   'errors.urlInvalid': '链接须以 http:// 或 https:// 开头。',
   'errors.datetimeInvalid': '请输入有效的日期和时间。',
   'errors.youtubeInvalid': '请输入有效的 YouTube 链接或视频 ID。',
