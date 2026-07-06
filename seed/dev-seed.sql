@@ -303,9 +303,12 @@ INSERT INTO announcement_i18n (announcement_id, locale, title) VALUES
   (4, 'en', 'Spring cleanup day (past)'),
   (4, 'zh', '春季大扫除（已结束）');
 
--- Three events. Two active around 2026-07-05, one windowed to the past.
+-- Three events. starts_at/ends_at are PROMOTION WINDOWS (when the card shows on
+-- the public site), not the event's own start/end times. Events 1-2 have windows
+-- spanning 2026-07-05 so they show on the seeded home page, and event 3 is the
+-- past-expired windowing demo (also inactive).
 INSERT INTO events (id, image_key, url, sort, active, starts_at, ends_at) VALUES
-  (1, NULL, 'https://church.yunfei-song.com/en/events', 1, 1, '2026-07-26 09:00:00', '2026-07-26 15:00:00'),
+  (1, NULL, 'https://church.yunfei-song.com/en/events', 1, 1, '2026-07-01 00:00:00', '2026-07-26 23:59:00'),
   (2, NULL, NULL, 2, 1, '2026-07-01 00:00:00', '2026-07-31 23:59:00'),
   (3, NULL, NULL, 3, 0, '2026-05-10 09:00:00', '2026-05-10 12:00:00');
 
