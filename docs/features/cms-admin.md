@@ -57,6 +57,8 @@ or fat-fingers a date, open the item's revision history and restore an earlier v
   the link that a scanner in your mail app "peeks" at is not the same click that logs you in.
 - Volunteers never need the admin area for their own schedule — that lives under their personal
   pages — so most people only ever sign in, glance at their serving, and leave.
+- Settings has a **Modules** panel where an admin can switch off any feature the church does not
+  use — the pages and links vanish but nothing is deleted (see [Modules](modules.md)).
 
 ## How it fits together
 

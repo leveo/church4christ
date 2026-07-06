@@ -119,6 +119,14 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and a weekly digest that send themselves. |
+| [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
+
+**Pick your modules.** Every capability above is a **module** you can switch off from one
+panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling, and more.
+Everything starts on (which is why the demo shows it all), but a church that only wants
+service times and sermons can hide the rest in a click: the module's pages, links, and
+emails disappear together, and nothing is ever deleted, so you can turn any of it back on
+later. See [**`docs/features/modules.md`**](docs/features/modules.md).
 
 ---
 
