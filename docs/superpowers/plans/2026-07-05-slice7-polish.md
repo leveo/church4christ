@@ -46,7 +46,10 @@ deploy — or hand the repo to Claude Code / Codex and ask for changes.
   deploy.md (full walkthrough incl. church.yunfei-song.com custom-domain example,
   first-admin bootstrap via wrangler d1 execute), CONTRIBUTING.md (dev setup, token
   rules, i18n parity rules, PR checklist). `.github/` issue/PR templates.
-- docs/superpowers/ stays in-repo as design history with a README note.
+- docs/superpowers/ is INTERNAL design history (owner directive): it stays in the LOCAL
+  repo only and is EXCLUDED from the public GitHub repo, which is published as a fresh
+  clean history (filtered export, no internal metadata). No public doc may reference
+  docs/superpowers/.
 - Commits per task; `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 
 ## Tasks
