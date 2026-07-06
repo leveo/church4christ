@@ -943,8 +943,15 @@ export async function saveAnnouncement(db: D1Database, input: SaveAnnouncementIn
     return { id: results[0].meta.last_row_id as number };
   }
   await db.batch([
+    // Upsert by id: a normal edit UPDATEs the live row; restoring a revision of a
+    // HARD-DELETED announcement recreates it under the SAME id (the row is gone,
+    // so the ON CONFLICT never fires) — see restoreRevision. Runs first in the
+    // batch so the i18n inserts below always have a parent row.
     db
-      .prepare(`UPDATE announcements SET url = ?1, sort = ?2, active = ?3, starts_at = ?4, ends_at = ?5 WHERE id = ?6`)
+      .prepare(
+        `INSERT INTO announcements (id, url, sort, active, starts_at, ends_at) VALUES (?6, ?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET url = ?1, sort = ?2, active = ?3, starts_at = ?4, ends_at = ?5`,
+      )
       .bind(input.url, input.sort, active, input.startsAt, input.endsAt, input.id),
     db.prepare(`DELETE FROM announcement_i18n WHERE announcement_id = ?1`).bind(input.id),
     ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '?', input.id, input.titles),
@@ -1048,8 +1055,13 @@ export async function saveEvent(db: D1Database, input: SaveEventInput, editedBy:
     return { id: results[0].meta.last_row_id as number };
   }
   await db.batch([
+    // Upsert by id — same recreate-under-same-id behavior as saveAnnouncement, so
+    // restoring a revision of a hard-deleted event brings it back under its id.
     db
-      .prepare(`UPDATE events SET image_key = ?1, url = ?2, sort = ?3, active = ?4, starts_at = ?5, ends_at = ?6 WHERE id = ?7`)
+      .prepare(
+        `INSERT INTO events (id, image_key, url, sort, active, starts_at, ends_at) VALUES (?7, ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET image_key = ?1, url = ?2, sort = ?3, active = ?4, starts_at = ?5, ends_at = ?6`,
+      )
       .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt, input.id),
     db.prepare(`DELETE FROM event_i18n WHERE event_id = ?1`).bind(input.id),
     ...i18nInserts(db, 'event_i18n', 'event_id', '?', input.id, input.titles, input.blurbs),
@@ -1095,4 +1107,203 @@ export async function deleteEvent(db: D1Database, id: number, editedBy: string):
 /** Flip an event's active flag (quick list action, no snapshot). */
 export async function toggleEventActive(db: D1Database, id: number): Promise<void> {
   await db.prepare(`UPDATE events SET active = 1 - active WHERE id = ?1`).bind(id).run();
+}
+
+// ===========================================================================
+// Prayer wall (editor ∪ admin; kanban triage of public prayer_requests). Ported
+// from dcfc-website. prayer_requests has no updated_at column — cards order by
+// created_at DESC and derive recency from prayer_activity, where every move /
+// pray / comment is logged with the acting staff email. Public message text is
+// ALWAYS escaped by the page (never set:html).
+// ===========================================================================
+
+export const PRAYER_STATUSES = ['new', 'praying', 'long_term', 'waiting', 'answered', 'cancelled'] as const;
+export type PrayerStatus = (typeof PRAYER_STATUSES)[number];
+
+export interface PrayerRequestRow {
+  id: number;
+  name: string;
+  email: string;
+  message: string;
+  status: PrayerStatus;
+  created_at: string;
+  activity_count: number;
+}
+export interface PrayerActivityRow {
+  id: number;
+  request_id: number;
+  author: string;
+  kind: 'prayed' | 'comment' | 'moved';
+  body: string | null;
+  created_at: string;
+}
+/** The six kanban columns; every status key is always present (empty array when
+ *  no cards), so the page can iterate PRAYER_STATUSES without guarding. */
+export type PrayerBoard = Record<PrayerStatus, PrayerRequestRow[]>;
+
+/**
+ * All prayer requests grouped into the six kanban columns, newest first, each
+ * carrying its prayer_activity count for the card badge. Active columns are
+ * always complete; the two TERMINAL columns (answered/cancelled) hide cards
+ * older than 90 days unless `all` is set — that's the '显示全部' toggle.
+ */
+export async function listPrayerRequests(db: D1Database, opts: { all?: boolean } = {}): Promise<PrayerBoard> {
+  const where = opts.all
+    ? ''
+    : `WHERE r.status NOT IN ('answered','cancelled') OR r.created_at >= datetime('now','-90 days') `;
+  const { results } = await db
+    .prepare(
+      `SELECT r.id, r.name, r.email, r.message, r.status, r.created_at,
+              (SELECT COUNT(*) FROM prayer_activity a WHERE a.request_id = r.id) AS activity_count
+       FROM prayer_requests r ${where}ORDER BY r.created_at DESC, r.id DESC`,
+    )
+    .all<PrayerRequestRow>();
+  const board = Object.fromEntries(PRAYER_STATUSES.map((s) => [s, [] as PrayerRequestRow[]])) as PrayerBoard;
+  for (const row of results) (board[row.status] ?? board.new).push(row);
+  return board;
+}
+
+/** One request's full activity log (all kinds), oldest-first for the card details. */
+export async function listPrayerActivity(db: D1Database, id: number): Promise<PrayerActivityRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, request_id, author, kind, body, created_at FROM prayer_activity
+       WHERE request_id = ?1 ORDER BY created_at, id`,
+    )
+    .bind(id)
+    .all<PrayerActivityRow>();
+  return results;
+}
+
+/** Move a request to `newStatus`, logging a 'moved' activity row (body = the new
+ *  status). A no-op move (same status) logs nothing; a vanished id is a silent
+ *  no-op. An unknown status is rejected — the page pre-checks the enum too. */
+export async function movePrayerRequest(db: D1Database, id: number, newStatus: string, author: string): Promise<void> {
+  if (!(PRAYER_STATUSES as readonly string[]).includes(newStatus)) throw new Error(`invalid prayer status: ${newStatus}`);
+  const r = await db
+    .prepare(`UPDATE prayer_requests SET status = ?1 WHERE id = ?2 AND status IS NOT ?1`)
+    .bind(newStatus, id)
+    .run();
+  if (r.meta.changes > 0) {
+    await db
+      .prepare(`INSERT INTO prayer_activity (request_id, author, kind, body) VALUES (?1, ?2, 'moved', ?3)`)
+      .bind(id, author, newStatus)
+      .run();
+  }
+}
+
+/** Log that `author` prayed for this request (🙏). */
+export async function markPrayed(db: D1Database, id: number, author: string): Promise<void> {
+  await db
+    .prepare(`INSERT INTO prayer_activity (request_id, author, kind, body) VALUES (?1, ?2, 'prayed', NULL)`)
+    .bind(id, author)
+    .run();
+}
+
+/** Log a staff comment (💬). Body is trimmed + clamped to 2000 chars; empty
+ *  comments are rejected (the page also guards before calling). */
+export async function addPrayerComment(db: D1Database, id: number, author: string, body: string): Promise<void> {
+  const text = body.trim().slice(0, 2000);
+  if (!text) throw new Error('prayer comment body required');
+  await db
+    .prepare(`INSERT INTO prayer_activity (request_id, author, kind, body) VALUES (?1, ?2, 'comment', ?3)`)
+    .bind(id, author, text)
+    .run();
+}
+
+/** Hard-delete a request and its activity in ONE batch (activity first — the FK
+ *  has no cascade). Removed permanently; there is no revision for prayer rows. */
+export async function deletePrayerRequest(db: D1Database, id: number): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM prayer_activity WHERE request_id = ?1`).bind(id),
+    db.prepare(`DELETE FROM prayer_requests WHERE id = ?1`).bind(id),
+  ]);
+}
+
+/** Count of untriaged ('new') requests — the dashboard badge + intro line. */
+export async function countNewPrayerRequests(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM prayer_requests WHERE status = 'new'`).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+// ===========================================================================
+// Revisions (read + restore). The WRITE side lives inside each content save
+// (a {v:1,input} snapshot) and each hard delete (a {v:1,deleted} snapshot).
+// ===========================================================================
+
+export interface RevisionRow {
+  id: number;
+  edited_by: string;
+  edited_at: string;
+  snapshot_json: string;
+}
+
+/** The most recent revisions for one entity row, newest first, capped at 50. */
+export async function listRevisions(db: D1Database, entity: string, entityId: number): Promise<RevisionRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, edited_by, edited_at, snapshot_json FROM revisions
+       WHERE entity = ?1 AND entity_id = ?2 ORDER BY edited_at DESC, id DESC LIMIT 50`,
+    )
+    .bind(entity, entityId)
+    .all<RevisionRow>();
+  return results;
+}
+
+/** One revision by id (used to validate + read a snapshot before restoring). */
+export async function getRevision(db: D1Database, id: number): Promise<{ entity: string; entity_id: number; snapshot_json: string } | null> {
+  return db
+    .prepare(`SELECT entity, entity_id, snapshot_json FROM revisions WHERE id = ?1`)
+    .bind(id)
+    .first<{ entity: string; entity_id: number; snapshot_json: string }>();
+}
+
+export type RestoreResult = { ok: true } | { ok: false; error: 'not_found' | 'date_taken' };
+
+/**
+ * Restore a past revision by re-saving its snapshot through the entity's OWN save
+ * function — which appends a NEW revision, so history is never rewritten. Handles
+ * both a normal {v:1,input} snapshot and a {v:1,deleted} one (identical content
+ * shape). Announcements/events are hard-deleted, so their save recreates the row
+ * under the original id (saveAnnouncement/saveEvent upsert by id). A snapshot
+ * whose UNIQUE date now collides with another live row surfaces as `date_taken`,
+ * never a 500. A revision that doesn't exist or doesn't match `entity` → not_found.
+ */
+export async function restoreRevision(db: D1Database, entity: string, revisionId: number, editedBy: string): Promise<RestoreResult> {
+  const rev = await getRevision(db, revisionId);
+  if (!rev || rev.entity !== entity) return { ok: false, error: 'not_found' };
+
+  let content: Record<string, unknown> | undefined;
+  try {
+    const parsed = JSON.parse(rev.snapshot_json) as { input?: unknown; deleted?: unknown };
+    const c = parsed.input ?? parsed.deleted;
+    if (c && typeof c === 'object') content = c as Record<string, unknown>;
+  } catch {
+    /* corrupt snapshot — treat as not restorable */
+  }
+  if (!content) return { ok: false, error: 'not_found' };
+
+  const id = rev.entity_id;
+  switch (entity) {
+    case 'bulletin': {
+      const r = await saveBulletin(db, { ...(content as unknown as BulletinInput), id }, editedBy);
+      return r.ok ? { ok: true } : { ok: false, error: 'date_taken' };
+    }
+    case 'sermon': {
+      const r = await saveSermon(db, { ...(content as unknown as SermonInput), id }, editedBy);
+      return r.ok ? { ok: true } : { ok: false, error: 'date_taken' };
+    }
+    case 'prayer_sheet': {
+      const r = await savePrayerSheet(db, { ...(content as unknown as PrayerSheetInput), id }, editedBy);
+      return r.ok ? { ok: true } : { ok: false, error: 'date_taken' };
+    }
+    case 'announcement':
+      await saveAnnouncement(db, { ...(content as unknown as AnnouncementInput), id }, editedBy);
+      return { ok: true };
+    case 'event':
+      await saveEvent(db, { ...(content as unknown as EventInput), id }, editedBy);
+      return { ok: true };
+    default:
+      return { ok: false, error: 'not_found' };
+  }
 }

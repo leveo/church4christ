@@ -138,6 +138,7 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
     <h1 class="font-display text-heading-md font-bold">{heading}</h1>
     <div class="flex items-center gap-4 text-sm">
       {viewHref && <a href={viewHref} class="text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
+      {!isNew && <a href={`/admin/revisions/bulletin/${id}`} class="text-primary hover:underline">{t(lang, 'admin.form.history')}</a>}
       <a href="/admin/bulletins" class="text-primary hover:underline">&larr; {t(lang, 'admin.bulletins.back')}</a>
     </div>
   </div>

@@ -251,6 +251,7 @@ const h2 = 'font-display text-heading-sm font-bold';
                 <td class={td}>
                   <div class="flex flex-wrap gap-2">
                     <a href={`/admin/events?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <a href={`/admin/revisions/event/${r.id}`} class={rowBtn}>{t(lang, 'admin.form.history')}</a>
                     <form method="post">
                       <input type="hidden" name="action" value="toggle" />
                       <input type="hidden" name="id" value={r.id} />

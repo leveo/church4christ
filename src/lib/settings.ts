@@ -31,6 +31,20 @@ export async function setSetting(db: D1Database, key: string, value: string): Pr
     .run();
 }
 
+/** Upsert several settings in ONE atomic batch — the admin settings form save,
+ *  so a partial write can never leave identity/theme half-applied. */
+export async function setSettings(db: D1Database, values: Record<string, string>): Promise<void> {
+  const keys = Object.keys(values);
+  if (keys.length === 0) return;
+  await db.batch(
+    keys.map((key) =>
+      db
+        .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .bind(key, values[key]),
+    ),
+  );
+}
+
 interface SiteIdentity {
   name: string;
   tagline: string;

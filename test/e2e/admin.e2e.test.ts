@@ -198,3 +198,61 @@ describe('announcements + events console + media upload loop', () => {
     expect(await res.text()).toContain('提交的表单无法读取，请重试。');
   });
 });
+
+describe('prayer wall — no-JS move + revisions + settings theme', () => {
+  it('editor moves a seeded request via the no-JS form POST → 303 → status changed + moved activity logged', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    // Seed prayer request 1 starts in the 'new' column.
+    const body = new URLSearchParams({ _action: 'move', id: '1', status: 'praying' });
+    const res = await post('/admin/prayer-wall', body.toString(), { cookie });
+    expect(res.status).toBe(303);
+
+    const row = await env.DB.prepare(`SELECT status FROM prayer_requests WHERE id = 1`).first<{ status: string }>();
+    expect(row!.status).toBe('praying');
+    const act = await env.DB
+      .prepare(`SELECT author, kind, body FROM prayer_activity WHERE request_id = 1 AND kind = 'moved' ORDER BY id DESC`)
+      .first<{ author: string; kind: string; body: string }>();
+    expect(act).toMatchObject({ kind: 'moved', body: 'praying', author: 'pastor.david@example.com' });
+
+    // A member cannot reach the wall (console gate re-checked on the page).
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    expect((await get('/admin/prayer-wall', { cookie: member })).status).toBe(403);
+  });
+
+  it('the revisions page renders the history of a bulletin the editor just saved', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const date = '2026-10-04';
+    const body = new URLSearchParams({ action: 'save', service_type_id: '1', bulletin_date: date, status: 'draft', publish_at: '' });
+    const created = await post('/admin/bulletins/new', body.toString(), { cookie });
+    expect(created.status).toBe(303);
+
+    const row = await env.DB.prepare(`SELECT id FROM bulletins WHERE bulletin_date = ? AND service_type_id = 1`).bind(date).first<{ id: number }>();
+    const id = row!.id;
+
+    const hist = await get(`/admin/revisions/bulletin/${id}`, { cookie });
+    expect(hist.status).toBe(200);
+    const html = await hist.text();
+    expect(html).toContain('pastor.david@example.com'); // the revision's edited_by
+    expect(html).toContain(`/admin/bulletins/${id}`); // back-to-editor link
+  });
+
+  it('admin saves a theme change → clearThemeCache path flips the public home data-theme, then restores', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+
+    const toHarvest = await post('/admin/settings', new URLSearchParams({ 'theme.name': 'harvest' }).toString(), { cookie });
+    expect(toHarvest.status).toBe(303);
+    const home = await get('/en/');
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain('data-theme="harvest"');
+
+    // Restore the seeded theme + bust the cache again so later files see sanctuary.
+    const back = await post('/admin/settings', new URLSearchParams({ 'theme.name': 'sanctuary' }).toString(), { cookie });
+    expect(back.status).toBe(303);
+    expect(await (await get('/en/')).text()).toContain('data-theme="sanctuary"');
+  });
+
+  it('a member cannot save settings (adminOnly re-checked on the page → 403)', async () => {
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    expect((await get('/admin/settings', { cookie: member })).status).toBe(403);
+  });
+});

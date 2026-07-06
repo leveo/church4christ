@@ -1,0 +1,123 @@
+---
+// Revision history + restore for one content row (console class — editors AND
+// admins may view/restore content history). Lists the last 50 revisions (who /
+// when / a snapshot summary line, full JSON behind a details toggle) and offers
+// a Restore action: POST → restoreRevision, which re-saves the snapshot through
+// the entity's own save function (announcements/events recreate under the SAME
+// id after a hard delete) and appends a NEW revision — history is never
+// rewritten. A snapshot whose UNIQUE date now collides with a live row
+// re-renders with an error banner instead of 500ing.
+export const prerender = false;
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { t } from '../../../../lib/i18n';
+import { listRevisions, getRevision, restoreRevision } from '../../../../lib/adminDb';
+import { card, btnSecondary, noticeOk, noticeErr, badge, badgeInactive } from '../../../../lib/adminUi';
+import type { Locale } from '../../../../lib/locales';
+
+// entity → its editor page. bulletin/sermon/prayer_sheet have per-id editors;
+// announcements/events are managed inline on their list page.
+const EDITOR_URL: Record<string, (id: number) => string> = {
+  bulletin: (id) => `/admin/bulletins/${id}`,
+  sermon: (id) => `/admin/sermons/${id}`,
+  prayer_sheet: (id) => `/admin/prayer-sheets/${id}`,
+  announcement: () => '/admin/announcements',
+  event: () => '/admin/events',
+};
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const entity = Astro.params.entity ?? '';
+const rawId = Astro.params.id ?? '';
+if (!(entity in EDITOR_URL) || !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const entityId = Number(rawId);
+const HERE = `/admin/revisions/${entity}/${entityId}`;
+
+let restoreError = false;
+
+if (Astro.request.method === 'POST') {
+  let fd: FormData | null = null;
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    return Astro.redirect(`${HERE}?err=1`, 303);
+  }
+  if (fd.get('_action') === 'restore') {
+    const revisionIdRaw = String(fd.get('revision_id') ?? '');
+    const revisionId = /^\d+$/.test(revisionIdRaw) ? Number(revisionIdRaw) : 0;
+    // The revision must exist AND belong to this page's entity/id — reject tampered ids.
+    const rev = revisionId > 0 ? await getRevision(db, revisionId) : null;
+    if (!rev || rev.entity !== entity || rev.entity_id !== entityId) return new Response(null, { status: 404 });
+    const result = await restoreRevision(db, entity, revisionId, user.email);
+    if (result.ok) return Astro.redirect(`${HERE}?restored=1`, 303);
+    if (result.error === 'date_taken') restoreError = true;
+    else return new Response(null, { status: 404 });
+  }
+}
+
+const restored = Astro.url.searchParams.get('restored') === '1';
+const showErr = Astro.url.searchParams.get('err') === '1';
+
+const revisions = await listRevisions(db, entity, entityId);
+
+// Precompute per revision: is it a {v:1,deleted} snapshot, and a pretty-printed
+// JSON for the details toggle (safe-parsed so a corrupt row never 500s).
+function safePretty(json: string): { pretty: string; deleted: boolean } {
+  try {
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    return { pretty: JSON.stringify(parsed, null, 2), deleted: 'deleted' in parsed };
+  } catch {
+    return { pretty: json, deleted: false };
+  }
+}
+const rows = revisions.map((r) => ({ ...r, ...safePretty(r.snapshot_json) }));
+
+const label = t(lang, `admin.entity.${entity}`);
+const heading = t(lang, 'admin.revisions.title', { label, id: entityId });
+const editorHref = EDITOR_URL[entity](entityId);
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <a href={editorHref} class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.revisions.back')}</a>
+  </div>
+
+  {restored && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.revisions.restored')}</p>}
+  {restoreError && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.revisions.restoreError')}</p>}
+  {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
+
+  {
+    rows.length === 0 ? (
+      <p class="mt-6 text-ink-muted">{t(lang, 'admin.revisions.empty')}</p>
+    ) : (
+      <ul class="mt-6 space-y-4">
+        {rows.map((r) => (
+          <li class={card}>
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-sm font-medium text-ink">{r.edited_by}</span>
+              <span class="text-sm text-ink-subtle">{r.edited_at} (UTC)</span>
+              {r.deleted && <span class={`${badge} ${badgeInactive}`}>{t(lang, 'admin.revisions.deletedBadge')}</span>}
+              <form
+                method="post"
+                class="ml-auto"
+                onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.revisions.restoreConfirm'))})`}
+              >
+                <input type="hidden" name="_action" value="restore" />
+                <input type="hidden" name="revision_id" value={r.id} />
+                <button type="submit" class={btnSecondary}>{t(lang, 'admin.revisions.restore')}</button>
+              </form>
+            </div>
+            <details class="mt-2">
+              <summary class="cursor-pointer text-sm text-primary">{t(lang, 'admin.revisions.view')}</summary>
+              <pre class="mt-2 overflow-x-auto rounded-md bg-surface-sunken p-3 text-xs text-ink-muted">{r.pretty}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Admin>

@@ -1,0 +1,254 @@
+---
+// Prayer wall (console class — re-checks editor∪admin, 403s a bare team leader).
+// A six-column kanban over the public prayer_requests: new / praying / long_term
+// / waiting / answered / cancelled. Four no-JS POST actions on an `_action`
+// field (move / pray / comment / delete), each logged to prayer_activity with
+// the acting staff email. Moving works with JS OFF via a per-card <select>+Move
+// button; a drag-and-drop island (progressive enhancement) POSTs the same move.
+// The two terminal columns fold cards older than 90 days unless ?all=1.
+// PUBLIC MESSAGE TEXT IS ALWAYS ESCAPED — rendered as {expr}, never set:html.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import {
+  PRAYER_STATUSES,
+  listPrayerRequests,
+  listPrayerActivity,
+  movePrayerRequest,
+  markPrayed,
+  addPrayerComment,
+  deletePrayerRequest,
+  type PrayerBoard,
+  type PrayerRequestRow,
+  type PrayerActivityRow,
+} from '../../../lib/adminDb';
+import { tin, badge, badgeActive, badgeInactive, btn, rowBtn, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const WALL = '/admin/prayer-wall';
+const MAX_COMMENT = 2000;
+
+if (Astro.request.method === 'POST') {
+  let fd: FormData | null = null;
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    return Astro.redirect(`${WALL}?err=1`, 303);
+  }
+  try {
+    const action = String(fd.get('_action') ?? '');
+    const idRaw = String(fd.get('id') ?? '');
+    if (/^\d+$/.test(idRaw)) {
+      const id = Number(idRaw);
+      if (action === 'move') {
+        const status = String(fd.get('status') ?? '');
+        if ((PRAYER_STATUSES as readonly string[]).includes(status)) await movePrayerRequest(db, id, status, user.email);
+      } else if (action === 'pray') {
+        await markPrayed(db, id, user.email);
+      } else if (action === 'comment') {
+        const body = String(fd.get('comment') ?? '').trim().slice(0, MAX_COMMENT);
+        if (body) await addPrayerComment(db, id, user.email, body);
+      } else if (action === 'delete') {
+        await deletePrayerRequest(db, id);
+        return Astro.redirect(`${WALL}?deleted=1`, 303);
+      }
+    }
+    return Astro.redirect(WALL, 303);
+  } catch (e) {
+    console.error('prayer-wall action failure', e);
+    return Astro.redirect(`${WALL}?err=1`, 303);
+  }
+}
+
+const showAll = Astro.url.searchParams.get('all') === '1';
+const showErr = Astro.url.searchParams.get('err') === '1';
+const showDeleted = Astro.url.searchParams.get('deleted') === '1';
+
+// Empty board so a DB hiccup renders the columns (soft-fail) instead of 500ing.
+let board: PrayerBoard = Object.fromEntries(PRAYER_STATUSES.map((s) => [s, [] as PrayerRequestRow[]])) as PrayerBoard;
+const activityById = new Map<number, PrayerActivityRow[]>();
+let dbFailed = false;
+try {
+  board = await listPrayerRequests(db, { all: showAll });
+  const ids = PRAYER_STATUSES.flatMap((s) => board[s]).map((r) => r.id);
+  const logs = await Promise.all(ids.map((id) => listPrayerActivity(db, id)));
+  ids.forEach((id, i) => activityById.set(id, logs[i]));
+} catch (e) {
+  console.error('admin prayer-wall D1 failure', e);
+  dbFailed = true;
+}
+
+const newCount = board.new.length;
+const statusLabel = (s: string) => t(lang, `admin.prayerWall.status.${s}`);
+const cardDate = (utc: string) => utc.slice(0, 10);
+const actTime = (utc: string) => utc.slice(0, 16);
+const preview = (msg: string) => [...msg].slice(0, 90).join('');
+const isLong = (msg: string) => [...msg].length > 120;
+---
+
+<Admin title={t(lang, 'admin.prayerWall.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.prayerWall.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.prayerWall.intro', { count: newCount })}</p>
+  {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.dbError')}</p>}
+  {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.actionError')}</p>}
+  {showDeleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.prayerWall.deleted')}</p>}
+
+  <div id="kanban" class="mt-6 flex gap-4 overflow-x-auto pb-4" data-move-error={t(lang, 'admin.prayerWall.moveError')}>
+    {
+      PRAYER_STATUSES.map((status) => {
+        const cards = board[status];
+        return (
+          <div data-col={status} class="w-[288px] min-w-[288px] shrink-0 rounded-xl bg-surface-sunken p-3">
+            <div class="mb-3 flex items-center justify-between">
+              <h2 class="font-semibold text-ink">{statusLabel(status)}</h2>
+              <span class={`${badge} ${badgeInactive}`}>{cards.length}</span>
+            </div>
+            <div class="space-y-3">
+              {cards.length === 0 && <p class="py-4 text-center text-xs text-ink-subtle">{t(lang, 'admin.prayerWall.empty')}</p>}
+              {cards.map((r) => (
+                <article data-card={r.id} draggable="true" class="cursor-grab rounded-lg border border-border bg-surface-raised p-3 shadow-sm">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <span class="min-w-0 truncate">
+                      <span class="font-semibold text-ink">{r.name || '—'}</span>
+                      {r.email && (
+                        <a href={`mailto:${r.email}`} draggable="false" class="ml-1 text-xs text-primary hover:underline" aria-label={t(lang, 'admin.prayerWall.mailAria', { name: r.name || r.email })}>
+                          ✉️
+                        </a>
+                      )}
+                    </span>
+                    <span class="flex shrink-0 items-baseline gap-2">
+                      <span class="text-xs text-ink-subtle">{cardDate(r.created_at)}</span>
+                      <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.prayerWall.deleteConfirm'))})`}>
+                        <input type="hidden" name="_action" value="delete" />
+                        <input type="hidden" name="id" value={r.id} />
+                        <button type="submit" class="rounded border border-danger px-1.5 py-0.5 text-xs text-danger hover:bg-danger-soft">
+                          {t(lang, 'admin.prayerWall.delete')}
+                        </button>
+                      </form>
+                    </span>
+                  </div>
+
+                  {isLong(r.message) ? (
+                    <details class="group mt-1">
+                      <summary class="cursor-pointer text-sm text-ink-muted">
+                        <span class="group-open:hidden">{preview(r.message)}… </span>
+                        <span class="text-xs text-primary group-open:hidden">{t(lang, 'admin.prayerWall.expand')}</span>
+                        <span class="hidden text-xs text-primary group-open:inline">{t(lang, 'admin.prayerWall.collapse')}</span>
+                      </summary>
+                      <p class="mt-1 whitespace-pre-wrap text-sm text-ink-muted">{r.message}</p>
+                    </details>
+                  ) : (
+                    <p class="mt-1 whitespace-pre-wrap text-sm text-ink-muted">{r.message}</p>
+                  )}
+
+                  {r.activity_count > 0 && (
+                    <details class="mt-2 border-t border-border pt-2">
+                      <summary class="cursor-pointer text-xs text-ink-subtle">{t(lang, 'admin.prayerWall.activity', { count: r.activity_count })}</summary>
+                      <ul class="mt-1 space-y-0.5 text-xs text-ink-subtle">
+                        {(activityById.get(r.id) ?? []).map((a) => (
+                          <li>
+                            {a.kind === 'prayed'
+                              ? `🙏 ${a.author} · ${actTime(a.created_at)}`
+                              : a.kind === 'comment'
+                                ? `💬 ${a.author} · ${actTime(a.created_at)}: ${a.body ?? ''}`
+                                : `➡️ ${a.author} · ${actTime(a.created_at)} — ${t(lang, 'admin.prayerWall.actMoved', { status: statusLabel(a.body ?? '') })}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
+                  <form method="post" class="mt-3 flex items-center gap-2">
+                    <input type="hidden" name="_action" value="move" />
+                    <input type="hidden" name="id" value={r.id} />
+                    <select name="status" aria-label={t(lang, 'admin.prayerWall.moveAria', { name: r.name || String(r.id) })} class={`${tin} py-1 text-sm`}>
+                      {PRAYER_STATUSES.map((s) => (
+                        <option value={s} selected={s === r.status}>{statusLabel(s)}</option>
+                      ))}
+                    </select>
+                    <button type="submit" class={`${rowBtn} shrink-0`}>{t(lang, 'admin.prayerWall.move')}</button>
+                  </form>
+
+                  <form method="post" class="mt-2">
+                    <input type="hidden" name="_action" value="pray" />
+                    <input type="hidden" name="id" value={r.id} />
+                    <button type="submit" aria-label={t(lang, 'admin.prayerWall.prayedAria', { name: r.name || String(r.id) })} class="w-full rounded border border-primary px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-soft">
+                      {t(lang, 'admin.prayerWall.prayed')}
+                    </button>
+                  </form>
+
+                  <details class="mt-2">
+                    <summary class="cursor-pointer text-xs text-ink-subtle">{t(lang, 'admin.prayerWall.commentToggle')}</summary>
+                    <form method="post" class="mt-1 space-y-1">
+                      <input type="hidden" name="_action" value="comment" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <textarea name="comment" rows="2" required maxlength={MAX_COMMENT} placeholder={t(lang, 'admin.prayerWall.commentPlaceholder')} aria-label={t(lang, 'admin.prayerWall.commentAria', { name: r.name || String(r.id) })} class={`${tin} py-1 text-sm`} />
+                      <button type="submit" class={btn}>{t(lang, 'admin.prayerWall.commentSubmit')}</button>
+                    </form>
+                  </details>
+                </article>
+              ))}
+            </div>
+          </div>
+        );
+      })
+    }
+  </div>
+
+  <p class="mt-2 text-xs">
+    {
+      showAll ? (
+        <a href={WALL} class="text-ink-muted hover:underline">{t(lang, 'admin.prayerWall.showRecent')}</a>
+      ) : (
+        <a href={`${WALL}?all=1`} class="text-ink-muted hover:underline">{t(lang, 'admin.prayerWall.showAll')}</a>
+      )
+    }
+  </p>
+
+  <script>
+    // Kanban drag-and-drop: progressive enhancement over the no-JS move form.
+    // On drop, POST a move for the dragged card to the target column's status,
+    // then reload. redirect:'manual' avoids following the 303 (a success surfaces
+    // as an opaqueredirect). Ported from dcfc-website's island.
+    const board = document.getElementById('kanban');
+    const moveError = board?.dataset.moveError ?? 'Move failed.';
+    let draggingId: string | null = null;
+    document.querySelectorAll<HTMLElement>('[data-card]').forEach((c) => {
+      c.addEventListener('dragstart', () => {
+        draggingId = c.getAttribute('data-card');
+        c.classList.add('opacity-50');
+      });
+      c.addEventListener('dragend', () => {
+        draggingId = null;
+        c.classList.remove('opacity-50');
+      });
+    });
+    document.querySelectorAll<HTMLElement>('[data-col]').forEach((col) => {
+      col.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        col.classList.add('ring-2', 'ring-primary');
+      });
+      col.addEventListener('dragleave', () => col.classList.remove('ring-2', 'ring-primary'));
+      col.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        col.classList.remove('ring-2', 'ring-primary');
+        if (!draggingId) return;
+        const status = col.getAttribute('data-col')!;
+        const body = new URLSearchParams({ _action: 'move', id: draggingId, status });
+        try {
+          const res = await fetch(location.pathname, { method: 'POST', body, redirect: 'manual' });
+          if (res.type !== 'opaqueredirect' && !res.ok) throw new Error(String(res.status));
+          location.reload();
+        } catch {
+          alert(moveError);
+        }
+      });
+    });
+  </script>
+</Admin>
