@@ -1,0 +1,73 @@
+---
+// Server-rendered month grid for /my and /my/calendar: assignment status dots
+// (U warn / C success / D danger) and blockout shading per day, plus a legend.
+// Ported from dcfc-serve/src/components/MonthCalendar.astro, restyled with
+// design tokens only and given an explicit locale prop (no Astro.locals.lang).
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { DayMark } from '../lib/calendar';
+
+interface Props {
+  locale: Locale;
+  year: number;
+  month: number; // 1-12
+  marks: Map<string, DayMark>;
+  today: string;
+}
+const { locale, year, month, marks, today } = Astro.props;
+
+const first = new Date(Date.UTC(year, month - 1, 1));
+const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+const leading = first.getUTCDay(); // 0 = Sunday
+const cells: (number | null)[] = [
+  ...Array.from({ length: leading }, () => null),
+  ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+];
+while (cells.length % 7 !== 0) cells.push(null);
+
+const dayNames =
+  locale === 'zh' ? ['日', '一', '二', '三', '四', '五', '六'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dateStr = (d: number) => `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
+---
+
+<div class="overflow-hidden rounded-lg border border-border bg-surface-raised">
+  <div class="grid grid-cols-7 bg-primary-soft text-center text-xs font-bold text-on-primary-soft">
+    {dayNames.map((d) => <div class="py-2">{d}</div>)}
+  </div>
+  <div class="grid grid-cols-7 text-sm">
+    {
+      cells.map((d) => {
+        const mark = d ? marks.get(dateStr(d)) : undefined;
+        const isToday = d !== null && dateStr(d) === today;
+        return (
+          <div class:list={['min-h-16 border-t border-l border-border p-1.5 first:border-l-0', mark?.blocked && 'bg-surface-sunken']}>
+            {d && (
+              <>
+                <span
+                  class:list={[
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs',
+                    isToday ? 'bg-primary font-bold text-on-primary' : 'text-ink-muted',
+                  ]}
+                >
+                  {d}
+                </span>
+                <div class="mt-1 flex flex-wrap gap-1">
+                  {mark?.statuses.map((s) => (
+                    <span class={`h-2 w-2 rounded-full ${dot[s]}`} title={t(locale, `serve.status.${s}`)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })
+    }
+  </div>
+</div>
+<div class="mt-2 flex flex-wrap gap-4 text-xs text-ink-muted">
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span>{t(locale, 'serve.status.C')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn"></span>{t(locale, 'serve.status.U')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-danger"></span>{t(locale, 'serve.status.D')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded border border-border bg-surface-sunken"></span>{t(locale, 'my.cal.blockedOut')}</span>
+</div>

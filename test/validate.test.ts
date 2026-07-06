@@ -8,6 +8,8 @@ import {
   parseEventForm,
   parsePersonForm,
   parseSettingsForm,
+  parseBlockoutForm,
+  parseApplicationForm,
 } from '../src/lib/validate';
 
 const fdOf = (entries: Record<string, string>) => {
@@ -317,5 +319,102 @@ describe('parseSettingsForm', () => {
     const bad = parseSettingsForm(fdOf({ 'theme.name': '' }));
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors['theme.name']).toBe('errors.invalidOption');
+  });
+});
+
+describe('parseBlockoutForm', () => {
+  it('accepts an all-day range; end date defaults to start', () => {
+    const r = parseBlockoutForm(fdOf({ start_date: '2030-01-10', end_date: '2030-01-12' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toMatchObject({
+      startDate: '2030-01-10', endDate: '2030-01-12',
+      startTime: null, endTime: null, reason: null, repeat: 'none', count: 1,
+    });
+    const single = parseBlockoutForm(fdOf({ start_date: '2030-01-10' }));
+    expect(single.ok && single.data.endDate).toBe('2030-01-10');
+  });
+
+  it('accepts a full valid time pair', () => {
+    const r = parseBlockoutForm(fdOf({ start_date: '2030-01-10', start_time: '09:00', end_time: '11:30' }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toMatchObject({ startTime: '09:00', endTime: '11:30' });
+  });
+
+  it('rejects a half-filled, malformed, or inverted time pair with errors.timePair', () => {
+    const cases: Record<string, string>[] = [
+      { start_time: '09:00' }, // only start
+      { end_time: '11:00' }, // only end
+      { start_time: '9am', end_time: '11:00' }, // malformed
+      { start_time: '11:00', end_time: '09:00' }, // inverted
+      { start_time: '11:00', end_time: '11:00' }, // zero-length
+    ];
+    for (const times of cases) {
+      const r = parseBlockoutForm(fdOf({ start_date: '2030-01-10', ...times }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.start_time).toBe('errors.timePair');
+    }
+  });
+
+  it('rejects bad or inverted dates', () => {
+    const cases: Record<string, string>[] = [
+      { start_date: 'nope' },
+      { start_date: '2030-02-30' },
+      { start_date: '2030-01-10', end_date: '2030-01-09' },
+    ];
+    for (const dates of cases) {
+      const r = parseBlockoutForm(fdOf(dates));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.start_date).toBe('errors.dateFormat');
+    }
+  });
+
+  it('clamps the repeat count to 2..26 and defaults it to 4', () => {
+    const at = (repeat: string, count: string) => {
+      const r = parseBlockoutForm(fdOf({ start_date: '2030-01-10', repeat, count }));
+      if (!r.ok) throw new Error('expected ok');
+      return r.data;
+    };
+    expect(at('weekly', '6')).toMatchObject({ repeat: 'weekly', count: 6 });
+    expect(at('biweekly', '1').count).toBe(2);
+    expect(at('weekly', '99').count).toBe(26);
+    expect(at('weekly', '').count).toBe(4);
+    expect(at('weekly', 'abc').count).toBe(4);
+    // 'none' (or unknown) repeat always means a single row.
+    expect(at('none', '9')).toMatchObject({ repeat: 'none', count: 1 });
+    expect(at('daily', '9')).toMatchObject({ repeat: 'none', count: 1 });
+  });
+});
+
+describe('parseApplicationForm', () => {
+  it('signed-out requires team, name, and a valid email', () => {
+    const missing = parseApplicationForm(fdOf({}), false);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.errors.team_id).toBe('errors.required');
+      expect(missing.errors.name).toBe('errors.required');
+      expect(missing.errors.email).toBe('errors.required');
+    }
+    const badEmail = parseApplicationForm(fdOf({ team_id: '3', name: 'A', email: 'nope' }), false);
+    expect(badEmail.ok).toBe(false);
+    if (!badEmail.ok) expect(badEmail.errors.email).toBe('errors.emailInvalid');
+
+    const ok = parseApplicationForm(
+      fdOf({ team_id: '3', name: 'A B', email: 'A@Example.com', phone: ' 555 ', message: ' hi ', position_id: '7' }),
+      false,
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.data).toEqual({
+        teamId: 3, positionId: 7, name: 'A B', email: 'a@example.com', phone: '555', message: 'hi',
+      });
+    }
+  });
+
+  it('signed-in requires only the team; a non-numeric position becomes null', () => {
+    const r = parseApplicationForm(fdOf({ team_id: '2', position_id: 'x' }), true);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toMatchObject({ teamId: 2, positionId: null, name: '', email: '' });
+    expect(parseApplicationForm(fdOf({}), true).ok).toBe(false);
   });
 });

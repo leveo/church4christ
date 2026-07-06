@@ -289,6 +289,76 @@ export async function listPendingApplicationsForTeams(
   return results;
 }
 
+/** True when the person already has a PENDING application for this team. */
+export async function hasPendingApplication(db: D1Database, personId: number, teamId: number): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS x FROM team_applications WHERE person_id = ? AND team_id = ? AND status = 'P'`)
+    .bind(personId, teamId)
+    .first<{ x: number }>();
+  return row !== null;
+}
+
+/**
+ * Create a pending application. The partial UNIQUE index (person_id, team_id
+ * WHERE status='P') makes a concurrent duplicate a 0-change no-op instead of a
+ * 500 — callers pre-check hasPendingApplication for the friendly message.
+ */
+export async function createApplication(
+  db: D1Database,
+  personId: number,
+  teamId: number,
+  positionId: number | null,
+  message: string | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO team_applications (person_id, team_id, position_id, message) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT(person_id, team_id) WHERE status = 'P' DO NOTHING`,
+    )
+    .bind(personId, teamId, positionId, message)
+    .run();
+}
+
+/**
+ * Signed-out apply support: the person for `email` (stored lowercased), or a
+ * minimal new one (display_name = name, role 'member', active 1). An existing
+ * row — even a soft-deleted one — is returned as-is: applying must never
+ * resurrect or overwrite an account. The UNIQUE(email) race between the SELECT
+ * and INSERT resolves by re-reading the winner's row.
+ */
+export async function findOrCreatePersonByEmail(
+  db: D1Database,
+  email: string,
+  name: string,
+  phone: string | null,
+): Promise<number> {
+  const normalized = email.trim().toLowerCase();
+  const existing = await db
+    .prepare(`SELECT id FROM people WHERE email = ?`)
+    .bind(normalized)
+    .first<{ id: number }>();
+  if (existing) return existing.id;
+  try {
+    const r = await db
+      .prepare(
+        `INSERT INTO people (display_name, first_name, last_name, email, phone, role, active)
+         VALUES (?1, '', '', ?2, ?3, 'member', 1)`,
+      )
+      .bind(name, normalized, phone)
+      .run();
+    return r.meta.last_row_id;
+  } catch (e) {
+    if (String(e).includes('UNIQUE constraint failed')) {
+      const winner = await db
+        .prepare(`SELECT id FROM people WHERE email = ?`)
+        .bind(normalized)
+        .first<{ id: number }>();
+      if (winner) return winner.id;
+    }
+    throw e;
+  }
+}
+
 /**
  * Approve/reject a pending application. Pass `expectedTeamId` (the team the
  * caller is authorized for) so a leader can't decide another team's application

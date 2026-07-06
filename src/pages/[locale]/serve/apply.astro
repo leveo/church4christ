@@ -1,0 +1,197 @@
+---
+// Apply to serve — PUBLIC (route policy exact match). Two steps like dcfc:
+// pick a team (GET ?team=), then the full form (optional position, message,
+// and name/email/phone for signed-out applicants) with a honeypot.
+//
+// Ported logic (dcfc-serve/src/pages/apply.astro): a signed-in user applies as
+// themselves; a signed-out applicant is upserted by email (minimal person —
+// role 'member', active 1, never overwriting an existing account) and gets a
+// best-effort MAGIC LINK so they can sign in and track their status. A
+// duplicate pending application shows a friendly "already applied" note. Every
+// outcome renders the SAME success state (anti-enumeration: the response never
+// reveals whether an email was already registered or rate limited).
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import {
+  createApplication,
+  findOrCreatePersonByEmail,
+  hasPendingApplication,
+  listTeamPositions,
+  listTeamSummaries,
+} from '../../../lib/teamDb';
+import { getPersonByEmail } from '../../../lib/db';
+import { sendMagicLink } from '../../../lib/notify';
+import type { EmailEnv } from '../../../lib/email';
+import { parseApplicationForm } from '../../../lib/validate';
+import { btn, lab, noticeErr, tin } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user;
+const vars = env as unknown as EmailEnv & { DB: D1Database };
+const db = vars.DB;
+
+const idOf = (v: string | FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+const teams = await listTeamSummaries(db, locale);
+
+let errorKeys: string[] = [];
+let postedTeamId: number | null = null;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  // Honeypot: bots fill the hidden "website" field; pretend success, do nothing.
+  if (String(fd.get('website') ?? '') !== '') {
+    return Astro.redirect(localePath(locale, '/serve/apply?sent=1'), 303);
+  }
+
+  const parsed = parseApplicationForm(fd, !!user);
+  postedTeamId = idOf(fd.get('team_id'));
+  if (!parsed.ok) {
+    errorKeys = [...new Set(Object.values(parsed.errors))];
+  } else if (!teams.some((tm) => tm.id === parsed.data.teamId)) {
+    errorKeys = ['errors.invalidOption'];
+  } else {
+    const input = parsed.data;
+    // Re-derive the position against the CHOSEN team — a posted position_id
+    // from another team is dropped, not trusted.
+    const teamPositions = await listTeamPositions(db, input.teamId, locale);
+    const positionId = teamPositions.some((p) => p.id === input.positionId) ? input.positionId : null;
+
+    const personId = user ? user.id : await findOrCreatePersonByEmail(db, input.email, input.name, input.phone);
+    if (await hasPendingApplication(db, personId, input.teamId)) {
+      return Astro.redirect(localePath(locale, '/serve/apply?sent=1&dup=1'), 303);
+    }
+    await createApplication(db, personId, input.teamId, positionId, input.message);
+    // leader notification in task 5
+
+    // Signed-out applicants get a sign-in link so they can track their status.
+    // Best-effort: rate limiting and mail failures still land on the same
+    // success page (sendMagicLink already absorbs both).
+    if (!user) {
+      try {
+        const person = await getPersonByEmail(db, input.email);
+        if (person) await sendMagicLink(vars, db, person, locale);
+      } catch (e) {
+        console.error('applicant signin link failed', e);
+      }
+    }
+    return Astro.redirect(localePath(locale, `/serve/apply?sent=1${user ? '' : '&signin=1'}`), 303);
+  }
+}
+
+const sent = Astro.url.searchParams.has('sent');
+const isDup = Astro.url.searchParams.has('dup');
+const checkEmail = Astro.url.searchParams.has('signin');
+
+const selectedTeamId = postedTeamId ?? idOf(Astro.url.searchParams.get('team'));
+const selectedTeam = teams.find((tm) => tm.id === selectedTeamId) ?? null;
+const positions = selectedTeam ? await listTeamPositions(db, selectedTeam.id, locale) : [];
+---
+
+<Base title={t(locale, 'apply.title')} locale={locale}>
+  <div class="container-content max-w-xl py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'apply.title')}</h1>
+
+    {
+      sent ? (
+        <div class="mt-6 space-y-2 rounded-lg border border-success bg-success-soft p-6 text-success">
+          <p class="font-semibold">{isDup ? t(locale, 'apply.alreadyPending') : t(locale, 'apply.sent')}</p>
+          {checkEmail && <p>{t(locale, 'apply.checkEmail')}</p>}
+          <p class="pt-2">
+            <a href={localePath(locale, '/serve')} class="font-bold underline">
+              {t(locale, 'apply.backToServe')}
+            </a>
+          </p>
+        </div>
+      ) : (
+        <>
+          <p class="mt-3 text-ink-muted">{t(locale, 'apply.intro')}</p>
+
+          {!selectedTeam ? (
+            <form method="get" class="mt-6 space-y-4">
+              <label class="block">
+                <span class={lab}>{t(locale, 'apply.team')}</span>
+                <select name="team" required class={tin}>
+                  <option value="">{t(locale, 'apply.selectTeam')}</option>
+                  {teams.map((tm) => (
+                    <option value={tm.id}>
+                      {tm.ministry_name ? `${tm.ministry_name} — ` : ''}
+                      {tm.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="submit" class={btn}>{t(locale, 'apply.continue')}</button>
+            </form>
+          ) : (
+            <form method="post" class="mt-6 space-y-4">
+              <input type="hidden" name="team_id" value={selectedTeam.id} />
+              {/* Honeypot: hidden from humans, tempting for bots. */}
+              <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
+                <label>
+                  Website
+                  <input type="text" name="website" tabindex="-1" autocomplete="off" />
+                </label>
+              </div>
+
+              {errorKeys.map((key) => (
+                <p class={noticeErr}>{t(locale, key)}</p>
+              ))}
+
+              <p class="rounded-md border border-border bg-primary-soft px-4 py-2.5 font-semibold text-on-primary-soft">
+                {selectedTeam.ministry_name ? `${selectedTeam.ministry_name} — ` : ''}
+                {selectedTeam.name}
+                <a href={localePath(locale, '/serve/apply')} class="ml-2 text-sm font-normal underline">
+                  {t(locale, 'apply.changeTeam')}
+                </a>
+              </p>
+
+              {positions.length > 0 && (
+                <label class="block">
+                  <span class={lab}>{t(locale, 'apply.position')} ({t(locale, 'my.optional')})</span>
+                  <select name="position_id" class={tin}>
+                    <option value="">{t(locale, 'apply.anyPosition')}</option>
+                    {positions.map((p) => (
+                      <option value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {!user && (
+                <>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'apply.name')} *</span>
+                    <input name="name" required class={tin} />
+                  </label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'apply.email')} *</span>
+                    <input type="email" name="email" required class={tin} />
+                  </label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'apply.phone')} ({t(locale, 'my.optional')})</span>
+                    <input name="phone" class={tin} />
+                  </label>
+                </>
+              )}
+
+              <label class="block">
+                <span class={lab}>{t(locale, 'apply.message')} ({t(locale, 'my.optional')})</span>
+                <textarea name="message" rows="3" class={tin} />
+              </label>
+
+              <button type="submit" class={btn}>{t(locale, 'apply.submit')}</button>
+            </form>
+          )}
+        </>
+      )
+    }
+  </div>
+</Base>

@@ -23,6 +23,7 @@ const ERR = {
   integer: 'errors.integerInvalid',
   email: 'errors.emailInvalid',
   option: 'errors.invalidOption',
+  timePair: 'errors.timePair',
 } as const;
 
 const ROLES = ['member', 'editor', 'admin'] as const;
@@ -408,6 +409,101 @@ export function parsePersonForm(fd: FormData): FormResult<PersonInput> {
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, data: { firstName, lastName, displayName, email, phone, role, active, lang } };
+}
+
+// ---------------------------------------------------------------------------
+// Blockout dates (volunteer self-service, /my/blockouts)
+// ---------------------------------------------------------------------------
+export type BlockoutRepeat = 'none' | 'weekly' | 'biweekly';
+
+export interface BlockoutInput {
+  startDate: string;
+  endDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  reason: string | null;
+  repeat: BlockoutRepeat;
+  /** Occurrences to materialize when repeating; clamped to 2..26, else 1. */
+  count: number;
+}
+
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+/**
+ * Parse the add-blockout form. End date defaults to the start date. The time
+ * pair is optional (blank = whole day blocked), but a HALF-filled pair — only
+ * one side, a malformed value, or end <= start — is a mistake, not an all-day
+ * block, so it is rejected with `errors.timePair` rather than silently dropped.
+ * A repeat of weekly/biweekly clamps count to 2..26 (default 4); 'none' → 1.
+ */
+export function parseBlockoutForm(fd: FormData): FormResult<BlockoutInput> {
+  const errors: Record<string, string> = {};
+  const startDate = str(fd, 'start_date');
+  const endDate = str(fd, 'end_date') || startDate;
+  if (!isValidDateStr(startDate) || !isValidDateStr(endDate) || endDate < startDate) {
+    errors.start_date = ERR.date;
+  }
+
+  const st = str(fd, 'start_time');
+  const et = str(fd, 'end_time');
+  let startTime: string | null = null;
+  let endTime: string | null = null;
+  if (st !== '' || et !== '') {
+    if (!TIME_RE.test(st) || !TIME_RE.test(et) || et <= st) errors.start_time = ERR.timePair;
+    else {
+      startTime = st;
+      endTime = et;
+    }
+  }
+
+  const repeatRaw = str(fd, 'repeat');
+  const repeat: BlockoutRepeat = repeatRaw === 'weekly' || repeatRaw === 'biweekly' ? repeatRaw : 'none';
+  const countRaw = Number(str(fd, 'count'));
+  const count =
+    repeat === 'none' ? 1 : Math.min(26, Math.max(2, Number.isInteger(countRaw) && countRaw > 0 ? countRaw : 4));
+
+  const reason = str(fd, 'reason') || null;
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { startDate, endDate, startTime, endTime, reason, repeat, count } };
+}
+
+// ---------------------------------------------------------------------------
+// Serve application (/serve/apply — public)
+// ---------------------------------------------------------------------------
+export interface ApplicationInput {
+  teamId: number;
+  positionId: number | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  message: string | null;
+}
+
+/**
+ * Parse the apply form. team_id is always required; name + a valid email are
+ * required only for a signed-out applicant (a signed-in user applies as
+ * themselves and the page ignores these fields). position_id is optional and
+ * the page re-validates it against the chosen team's positions.
+ */
+export function parseApplicationForm(fd: FormData, signedIn: boolean): FormResult<ApplicationInput> {
+  const errors: Record<string, string> = {};
+  const teamId = requiredId(fd, 'team_id', errors);
+
+  const posRaw = str(fd, 'position_id');
+  const positionId = /^\d+$/.test(posRaw) ? Number(posRaw) : null;
+
+  const name = str(fd, 'name');
+  const email = str(fd, 'email').toLowerCase();
+  if (!signedIn) {
+    if (!name) errors.name = ERR.required;
+    if (!email) errors.email = ERR.required;
+    else if (!isEmail(email)) errors.email = ERR.email;
+  }
+  const phone = str(fd, 'phone') || null;
+  const message = str(fd, 'message') || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { teamId, positionId, name, email, phone, message } };
 }
 
 // ---------------------------------------------------------------------------

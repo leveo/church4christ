@@ -1,0 +1,140 @@
+---
+// Another person's profile — recruiting/scheduling aid for leaders and admins
+// (route policy classes /profile/<id> as team; this page re-checks the STRICTER
+// rule: any team leader or admin, otherwise 403). Shows the person's teams,
+// latest gifts summary, interests, and serving history. Ported from
+// dcfc-serve/src/pages/profile/[id].astro.
+//
+// Privacy rule (ported): a leader needs to see WHEN someone is unavailable, but
+// the blockout REASON can be private ("medical", "counselling") — reasons are
+// visible to admins only; leaders see the dates/times with the reason nulled.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import ServingHistory from '../../../components/ServingHistory.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { getPerson } from '../../../lib/adminDb';
+import {
+  getLatestGiftResult,
+  listBlockouts,
+  listPersonInterests,
+  listPersonServingHistory,
+  listPersonTeams,
+} from '../../../lib/myDb';
+import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+// Stricter than the route class: leaders of ANY team or admins only.
+const canViewOthers = user.isAdmin || user.leaderTeamIds.length > 0;
+if (!canViewOthers) return new Response(null, { status: 403 });
+
+const personId = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+if (!personId) return new Response(null, { status: 404 });
+// Your own id → the editable self page.
+if (personId === user.id) return Astro.redirect(localePath(locale, '/profile'), 303);
+
+const person = await getPerson(db, personId);
+if (!person) return new Response(null, { status: 404 });
+
+const [teams, history, blockouts, gift, interests] = await Promise.all([
+  listPersonTeams(db, personId, locale),
+  listPersonServingHistory(db, personId, locale),
+  listBlockouts(db, personId, '2000-01-01'),
+  getLatestGiftResult(db, personId),
+  listPersonInterests(db, personId),
+]);
+const visibleBlockouts = user.isAdmin ? blockouts : blockouts.map((b) => ({ ...b, reason: null }));
+const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
+---
+
+<Base title={person.display_name} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/serve/teams')} class="text-sm text-ink-muted hover:text-primary">
+      ← {t(locale, 'serve.teams.title')}
+    </a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{person.display_name}</h1>
+    <p class="mt-1 text-sm text-ink-muted">
+      {person.email}{person.phone && ` · ${person.phone}`}
+    </p>
+
+    <section class="mt-6">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.myTeams')}</h2>
+      {
+        teams.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'profile.noTeams')}</p>
+        ) : (
+          <ul class="mt-2 flex flex-wrap gap-2">
+            {teams.map((tm) => (
+              <li class="inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-sm text-on-primary-soft">
+                {tm.name}
+                {tm.is_leader === 1 && <span class="ml-1 text-xs font-bold text-accent">· {t(locale, 'profile.leaderTag')}</span>}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+      <section class="rounded-lg border border-border bg-surface-raised p-5">
+        <h2 class="font-display font-semibold">{t(locale, 'profile.giftResult')}</h2>
+        {
+          gift ? (
+            <div class="mt-2 space-y-2">
+              {gift.top_gifts.length > 0 && (
+                <ul class="flex flex-wrap gap-1.5">
+                  {gift.top_gifts.map((c) => (
+                    <li class="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-on-accent-soft">
+                      {categoryLabel(c)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {gift.recommended.length > 0 && (
+                <>
+                  <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'profile.giftRecommended')}</p>
+                  <ul class="flex flex-wrap gap-1.5">
+                    {gift.recommended.map((c) => (
+                      <li class="inline-flex items-center rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-on-primary-soft">
+                        {categoryLabel(c)}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          ) : (
+            <p class="mt-2 text-sm text-ink-subtle">{t(locale, 'profile.noGift')}</p>
+          )
+        }
+      </section>
+      <section class="rounded-lg border border-border bg-surface-raised p-5">
+        <h2 class="font-display font-semibold">{t(locale, 'profile.interests')}</h2>
+        {
+          interests.length > 0 ? (
+            <ul class="mt-2 flex flex-wrap gap-1.5">
+              {interests.map((c) => (
+                <li class="inline-flex items-center rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-on-primary-soft">
+                  {categoryLabel(c)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="mt-2 text-sm text-ink-subtle">{t(locale, 'my.none')}</p>
+          )
+        }
+      </section>
+    </div>
+
+    <div class="mt-8">
+      <ServingHistory locale={locale} history={history} blockouts={visibleBlockouts} />
+    </div>
+  </div>
+</Base>

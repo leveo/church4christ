@@ -1,0 +1,205 @@
+---
+// My Schedule (authed via route policy): pending scheduling requests with
+// inline Accept / Decline(+reason), the upcoming confirmed list, open slots the
+// person can claim, their application status strip, and links to the calendar /
+// blockouts / profile pages. Ported from dcfc-serve/src/pages/my/index.astro.
+//
+// Authorization: respondToAssignment is called with the SESSION user's id — its
+// WHERE clause only touches that person's own assignment, so a posted
+// assignment_id belonging to someone else is a no-op. Claims re-derive
+// membership/fullness/conflicts inside claimOpenSlot (never forced).
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import StatusBadge from '../../../components/StatusBadge.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { claimOpenSlot, listOpenSlotsForPerson, respondToAssignment } from '../../../lib/planDb';
+import { listApplicationsByPerson, listPersonAssignments } from '../../../lib/myDb';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const idOf = (v: FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+let flashKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+
+  if (action === 'accept' || action === 'decline') {
+    const assignmentId = idOf(fd.get('assignment_id'));
+    if (assignmentId) {
+      const reason = String(fd.get('reason') ?? '').trim() || null;
+      const result = await respondToAssignment(db, assignmentId, user.id, action, reason);
+      if (result.ok && action === 'decline') {
+        // leader notification in task 5
+      }
+    }
+    return Astro.redirect(localePath(locale, '/my'), 303);
+  }
+  if (action === 'claim') {
+    const planId = idOf(fd.get('plan_id'));
+    const positionId = idOf(fd.get('position_id'));
+    if (planId && positionId) {
+      const result = await claimOpenSlot(db, { planId, positionId, personId: user.id });
+      if (result === 'ok') return Astro.redirect(localePath(locale, '/my?claimed=1'), 303);
+      flashKey = {
+        not_member: 'serve.plans.claimNotMember',
+        closed: 'serve.plans.claimClosed',
+        full: 'serve.plans.slotFull',
+        taken: 'serve.plans.claimTaken',
+        conflict: 'serve.plans.claimConflict',
+      }[result];
+    }
+  }
+}
+
+const claimed = Astro.url.searchParams.get('claimed') === '1';
+const today = todayInTz();
+const [assignments, openSlots, applications] = await Promise.all([
+  listPersonAssignments(db, user.id, today, locale),
+  listOpenSlotsForPerson(db, user.id, locale),
+  listApplicationsByPerson(db, user.id, locale),
+]);
+const pending = assignments.filter((a) => a.status === 'U');
+const upcoming = assignments.filter((a) => a.status === 'C');
+// Applications matter most to people not on a team yet, or with one pending.
+const showApplications =
+  applications.length > 0 && (user.memberTeamIds.length === 0 || applications.some((a) => a.status === 'P'));
+const appBadge: Record<'P' | 'A' | 'R', string> = {
+  P: 'bg-warn-soft text-warn',
+  A: 'bg-success-soft text-success',
+  R: 'bg-surface-sunken text-ink-muted',
+};
+---
+
+<Base title={t(locale, 'my.title')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'my.welcome', { name: user.displayName })}</h1>
+    <div class="mt-3 flex flex-wrap gap-2 text-sm">
+      <a href={localePath(locale, '/my/calendar')} class={btnSecondary}>{t(locale, 'my.calendar')}</a>
+      <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
+      <a href={localePath(locale, '/profile')} class={btnSecondary}>{t(locale, 'profile.title')}</a>
+    </div>
+
+    {claimed && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
+    {flashKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, flashKey)}</p>}
+
+    {
+      pending.length > 0 && (
+        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
+          <h2 class="font-display text-lg font-semibold text-warn">
+            {t(locale, 'my.pending')} ({pending.length})
+          </h2>
+          <ul class="mt-3 space-y-4">
+            {pending.map((a) => (
+              <li class="rounded-md border border-border bg-surface-raised p-4">
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <span class="font-bold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                  <span class="font-medium">{a.position_name}</span>
+                  <span class="text-ink-muted">
+                    {a.team_name} · {a.service_type_name}
+                  </span>
+                </div>
+                <form method="post" class="mt-3 flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="assignment_id" value={a.id} />
+                  <button type="submit" name="_action" value="accept" class={btn}>
+                    {t(locale, 'my.accept')}
+                  </button>
+                  <input
+                    name="reason"
+                    placeholder={t(locale, 'my.declineReason')}
+                    aria-label={t(locale, 'my.declineReason')}
+                    class={`${tin} max-w-56`}
+                  />
+                  <button type="submit" name="_action" value="decline" class={btnSecondary}>
+                    {t(locale, 'my.decline')}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.upcoming')}</h2>
+      {
+        upcoming.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.noUpcoming')}</p>
+        ) : (
+          <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+            {upcoming.map((a) => (
+              <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <span class="font-semibold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                <span class="font-medium">{a.position_name}</span>
+                <span class="text-ink-muted">
+                  {a.team_name} · {a.service_type_name}
+                </span>
+                <span class="ml-auto">
+                  <StatusBadge status={a.status} locale={locale} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    {
+      openSlots.length > 0 && (
+        <section class="mt-8">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'my.openSlots')}</h2>
+          <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+            {openSlots.map((s) => (
+              <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <span class="font-semibold tabular-nums">{formatDate(s.plan_date, locale)}</span>
+                <span class="font-medium">{s.position_name}</span>
+                <span class="text-ink-muted">
+                  {s.team_name} · {s.service_type_name}
+                </span>
+                <span class="text-xs text-ink-subtle">
+                  {s.taken}/{s.needed}
+                </span>
+                <form method="post" class="ml-auto">
+                  <input type="hidden" name="_action" value="claim" />
+                  <input type="hidden" name="plan_id" value={s.plan_id} />
+                  <input type="hidden" name="position_id" value={s.position_id} />
+                  <button type="submit" class={btn}>{t(locale, 'serve.plans.claim')}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      showApplications && (
+        <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'my.applications')}</h2>
+          <ul class="mt-3 space-y-2 text-sm">
+            {applications.map((a) => (
+              <li class="flex flex-wrap items-center gap-2">
+                <span class="font-medium">{a.team_name}</span>
+                {a.position_name && <span class="text-ink-muted">· {a.position_name}</span>}
+                <span class={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${appBadge[a.status]}`}>
+                  {t(locale, `my.appStatus.${a.status}`)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+  </div>
+</Base>

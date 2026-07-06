@@ -1,0 +1,96 @@
+---
+// Serving history block for the profile pages: upcoming assignments, the past
+// 12 months, and the person's blockout list side by side. Ported from
+// dcfc-serve/src/components/ServingHistory.astro — no congregation tag, the
+// ministry name arrives pre-localized from myDb, token styling only. Blockout
+// reasons are whatever the caller passed: /profile/[id] nulls them for
+// non-admin leaders before rendering (privacy rule).
+import StatusBadge from './StatusBadge.astro';
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { BlockoutRow, ServingHistoryRow } from '../lib/myDb';
+import { addDays, formatDate, todayInTz } from '../lib/dates';
+
+interface Props {
+  locale: Locale;
+  history: ServingHistoryRow[];
+  blockouts: BlockoutRow[];
+}
+const { locale, history, blockouts } = Astro.props;
+const today = todayInTz();
+const upcoming = history.filter((h) => h.plan_date >= today);
+const past = history.filter((h) => h.plan_date < today && h.plan_date >= addDays(today, -365));
+
+const contextName = (h: ServingHistoryRow) => h.ministry_name ?? h.team_name;
+const timeLabel = (b: BlockoutRow) => (b.start_time && b.end_time ? ` · ${b.start_time}–${b.end_time}` : '');
+---
+
+<div class="grid items-start gap-6 lg:grid-cols-[1.4fr_1fr]">
+  <section>
+    <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.history')}</h2>
+    {
+      history.length === 0 ? (
+        <p class="mt-3 text-sm text-ink-muted">{t(locale, 'profile.historyNone')}</p>
+      ) : (
+        <>
+          {upcoming.length > 0 && (
+            <div class="mt-3">
+              <p class="text-xs font-bold uppercase tracking-caps text-accent">{t(locale, 'profile.historyUpcoming')}</p>
+              <ul class="mt-2 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+                {upcoming.map((h) => (
+                  <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+                    <span class="font-semibold tabular-nums">{formatDate(h.plan_date, locale)}</span>
+                    <span class="font-medium">{h.position_name}</span>
+                    <span class="text-ink-muted">{contextName(h)}</span>
+                    <span class="ml-auto">
+                      <StatusBadge status={h.status} locale={locale} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {past.length > 0 && (
+            <div class="mt-4">
+              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'profile.historyPast')}</p>
+              <ul class="mt-2 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+                {past.map((h) => (
+                  <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm opacity-80">
+                    <span class="font-semibold tabular-nums text-ink-muted">{formatDate(h.plan_date, locale)}</span>
+                    <span class="font-medium">{h.position_name}</span>
+                    <span class="text-ink-muted">{contextName(h)}</span>
+                    <span class="ml-auto">
+                      <StatusBadge status={h.status} locale={locale} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )
+    }
+  </section>
+
+  <section>
+    <h2 class="font-display text-lg font-semibold">{t(locale, 'my.blockouts')}</h2>
+    {
+      blockouts.length === 0 ? (
+        <p class="mt-3 text-sm text-ink-muted">{t(locale, 'my.none')}</p>
+      ) : (
+        <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+          {blockouts.map((b) => (
+            <li class="px-4 py-2.5 text-sm">
+              <span class="font-semibold tabular-nums">
+                {b.start_date}
+                {b.end_date !== b.start_date && ` → ${b.end_date}`}
+                {timeLabel(b)}
+              </span>
+              {b.reason && <span class="ml-2 text-ink-muted">{b.reason}</span>}
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+</div>

@@ -53,6 +53,13 @@ export function formatDate(dateStr: string, locale: Locale): string {
   }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/** Inclusive date-string bounds for a 'YYYY-MM' month. The end is the '-31'
+ *  sentinel: string comparison against real 'YYYY-MM-DD' rows is safe for
+ *  shorter months (ported from dcfc-serve). */
+export function monthRange(ym: string): { start: string; end: string } {
+  return { start: `${ym}-01`, end: `${ym}-31` };
+}
+
 /** Month heading from a 'YYYY-MM' key: en → 'July 2026', zh → '2026年7月'. */
 export function formatMonth(yearMonth: string, locale: Locale): string {
   const [y, m] = yearMonth.split('-').map(Number);

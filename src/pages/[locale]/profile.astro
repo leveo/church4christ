@@ -1,0 +1,212 @@
+---
+// Own profile (authed via route policy): edit display/first/last name, phone and
+// preferred language; team chips; latest gifts-quiz summary; the ministry
+// interests checklist (replace semantics); and the ServingHistory block.
+// Ported from dcfc-serve/src/pages/profile.astro.
+//
+// Self-service hardening: email, role, and active are NOT self-editable. The
+// POST overwrites those three fields with the CURRENT row's values before
+// parsePersonForm runs, so a crafted `role=admin` / `active` / `email=` field
+// in the body is discarded server-side and the row keeps its current values.
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import ServingHistory from '../../components/ServingHistory.astro';
+import { localePath, parseLocale, LOCALES } from '../../lib/locales';
+import { t } from '../../lib/i18n';
+import { getPerson, savePerson } from '../../lib/adminDb';
+import {
+  getLatestGiftResult,
+  listBlockouts,
+  listPersonInterests,
+  listPersonServingHistory,
+  listPersonTeams,
+  setPersonInterests,
+} from '../../lib/myDb';
+import { MINISTRY_CATEGORIES } from '../../lib/ministryMeta';
+import { parsePersonForm } from '../../lib/validate';
+import { btn, lab, noticeErr, noticeOk, tin } from '../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
+
+let errorKeys: string[] = [];
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+
+  if (fd.get('_action') === 'saveInterests') {
+    const chosen = fd
+      .getAll('interest')
+      .map((v) => String(v))
+      .filter((c) => MINISTRY_CATEGORIES.includes(c));
+    await setPersonInterests(db, user.id, chosen);
+    return Astro.redirect(localePath(locale, '/profile?interests=1'), 303);
+  }
+
+  const current = await getPerson(db, user.id);
+  if (!current) return new Response(null, { status: 404 });
+  // Strip the privileged fields: whatever the form posted, the row keeps its
+  // current email/role/active. Volunteers edit names, phone, and language only.
+  fd.set('email', current.email);
+  fd.set('role', current.role);
+  if (current.active === 1) fd.set('active', 'on');
+  else fd.delete('active');
+
+  const parsed = parsePersonForm(fd);
+  if (parsed.ok) {
+    const result = await savePerson(db, { id: user.id, ...parsed.data }, user.email);
+    if (result.ok) return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
+    errorKeys = [...new Set(Object.values(result.errors))];
+  } else {
+    errorKeys = [...new Set(Object.values(parsed.errors))];
+  }
+}
+
+const saved = Astro.url.searchParams.has('saved');
+const interestsSaved = Astro.url.searchParams.has('interests');
+
+const [person, teams, history, blockouts, gift, myInterests] = await Promise.all([
+  getPerson(db, user.id),
+  listPersonTeams(db, user.id, locale),
+  listPersonServingHistory(db, user.id, locale),
+  listBlockouts(db, user.id, '2000-01-01'),
+  getLatestGiftResult(db, user.id),
+  listPersonInterests(db, user.id),
+]);
+if (!person) return new Response(null, { status: 404 });
+const interestSet = new Set(myInterests);
+---
+
+<Base title={t(locale, 'profile.title')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'profile.title')}</h1>
+
+    {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.saved')}</p>}
+    {interestsSaved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.interestsSaved')}</p>}
+    {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
+
+    <form method="post" class="mt-6 grid gap-4 rounded-lg border border-border bg-surface-raised p-6 sm:grid-cols-2">
+      <label class="block sm:col-span-2">
+        <span class={lab}>{t(locale, 'profile.name')}</span>
+        <input name="display_name" required value={person.display_name} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'profile.firstName')}</span>
+        <input name="first_name" value={person.first_name} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'profile.lastName')}</span>
+        <input name="last_name" value={person.last_name} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'profile.email')}</span>
+        <input value={person.email} disabled class={`${tin} bg-surface-sunken text-ink-muted`} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'profile.phone')}</span>
+        <input name="phone" value={person.phone ?? ''} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'profile.lang')}</span>
+        <select name="lang" class={tin}>
+          <option value="" selected={person.lang === null}>{t(locale, 'profile.langNone')}</option>
+          {LOCALES.map((l) => (
+            <option value={l} selected={person.lang === l}>{t(locale, `admin.settings.locale${l === 'en' ? 'En' : 'Zh'}`)}</option>
+          ))}
+        </select>
+      </label>
+      <div class="sm:col-span-2">
+        <button type="submit" class={btn}>{t(locale, 'profile.save')}</button>
+      </div>
+    </form>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.myTeams')}</h2>
+      {
+        teams.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'profile.noTeams')}</p>
+        ) : (
+          <ul class="mt-2 flex flex-wrap gap-2">
+            {teams.map((tm) => (
+              <li class="inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-sm text-on-primary-soft">
+                {tm.name}
+                {tm.is_leader === 1 && <span class="ml-1 text-xs font-bold text-accent">· {t(locale, 'profile.leaderTag')}</span>}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.giftResult')}</h2>
+      {
+        gift ? (
+          <div class="mt-2">
+            {gift.top_gifts.length > 0 && (
+              <div>
+                <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'profile.giftTop')}</p>
+                <ul class="mt-1.5 flex flex-wrap gap-1.5">
+                  {gift.top_gifts.map((c) => (
+                    <li class="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-on-accent-soft">
+                      {categoryLabel(c)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {gift.recommended.length > 0 && (
+              <div class="mt-3">
+                <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'profile.giftRecommended')}</p>
+                <ul class="mt-1.5 flex flex-wrap gap-1.5">
+                  {gift.recommended.map((c) => (
+                    <li class="inline-flex items-center rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-on-primary-soft">
+                      {categoryLabel(c)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p class="mt-2 text-sm text-ink-muted">
+            {t(locale, 'profile.noGift')}
+            <a href={localePath(locale, '/serve/gifts')} class="ml-1 font-semibold text-primary hover:underline">
+              {t(locale, 'profile.takeTest')} →
+            </a>
+          </p>
+        )
+      }
+    </section>
+
+    <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.interests')}</h2>
+      <p class="mt-1 text-sm text-ink-muted">{t(locale, 'profile.interestsHint')}</p>
+      <form method="post" class="mt-3">
+        <input type="hidden" name="_action" value="saveInterests" />
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {
+            MINISTRY_CATEGORIES.map((c) => (
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="interest" value={c} checked={interestSet.has(c)} class="h-4 w-4" />
+                {categoryLabel(c)}
+              </label>
+            ))
+          }
+        </div>
+        <button type="submit" class={`mt-4 ${btn}`}>{t(locale, 'profile.saveInterests')}</button>
+      </form>
+    </section>
+
+    <div class="mt-10">
+      <ServingHistory locale={locale} history={history} blockouts={blockouts} />
+    </div>
+  </div>
+</Base>
