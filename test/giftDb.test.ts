@@ -24,7 +24,7 @@ describe('saveGiftResult / getLatestGiftResult', () => {
   it('keeps history and returns the newest row (latest wins), JSON parsed', async () => {
     await env.DB
       .prepare(`INSERT INTO gift_results (person_id, top_gifts_json, recommended_json, created_at)
-                VALUES (1, '["service"]', '["care"]', '2030-01-01 00:00:00')`)
+                VALUES (1, '["service"]', '["care"]', '2020-01-01 00:00:00')`)
       .run();
     await saveGiftResult(env.DB, 1, ['teaching', 'mercy', 'giving'], ['children', 'youth', 'care']);
 

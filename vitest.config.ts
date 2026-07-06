@@ -4,12 +4,23 @@ import { defineConfig } from 'vitest/config';
 // no `/config` subpath export) — same deviation as the reference stack config.
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 
-// Two projects in one config:
-//  - `node`:    pure logic tests (tokens, locales, i18n) in a plain node env.
-//  - `workers`: runs in workerd via the pool with a live D1 binding (asserted
-//               queryable in test/security-headers.test.ts). migrations/0001_init.sql
-//               (added in slice 2) is applied by test/setup.ts's applyD1Migrations
-//               call before test/schema.test.ts's assertions run.
+// Pure-node tests — no `cloudflare:test` imports; they exercise build scripts
+// that do real filesystem reads/writes (readFileSync/writeFileSync) and call
+// process.exit/process.argv, which workerd (the workers pool) cannot run.
+// Everything NOT listed here defaults into the `workers` project below, so new
+// workers/D1 tests need no registration and can never be silently skipped. If a
+// pure test ever fails under the workers pool for an environmental reason, add
+// it here with a comment.
+const NODE_ONLY = ['test/tokens.test.ts', 'test/themeMeta.test.ts'];
+
+// Two projects in one config, classified by convention (see NODE_ONLY above):
+//  - `node`:    pure logic tests that need a real node filesystem/process.
+//  - `workers`: everything else — runs in workerd via the pool with a live D1
+//               binding (asserted queryable in test/security-headers.test.ts).
+//               migrations/0001_init.sql (added in slice 2) is applied by
+//               test/setup.ts's applyD1Migrations call before test/schema.test.ts's
+//               assertions run. Glob-included so any new test/*.test.ts is picked
+//               up automatically.
 export default defineConfig(async () => {
   const migrations = await readD1Migrations('./migrations');
   return {
@@ -18,22 +29,7 @@ export default defineConfig(async () => {
         {
           test: {
             name: 'node',
-            include: [
-              'test/tokens.test.ts',
-              'test/themeMeta.test.ts',
-              'test/locales.test.ts',
-              'test/i18n.test.ts',
-              'test/validate.test.ts',
-              'test/dates.test.ts',
-              'test/youtube.test.ts',
-              'test/upload.test.ts',
-              'test/session.test.ts',
-              'test/routePolicy.test.ts',
-              'test/content.test.ts',
-              'test/ministryMeta.test.ts',
-              'test/s2t.test.ts',
-              'test/csv.test.ts',
-            ],
+            include: NODE_ONLY,
             environment: 'node',
           },
         },
@@ -48,38 +44,8 @@ export default defineConfig(async () => {
           ],
           test: {
             name: 'workers',
-            include: [
-              'test/security-headers.test.ts',
-              'test/schema.test.ts',
-              'test/db.test.ts',
-              'test/settings.test.ts',
-              'test/theme.test.ts',
-              'test/seed.test.ts',
-              'test/auth.test.ts',
-              'test/middlewareAuth.test.ts',
-              'test/email.test.ts',
-              'test/authFlow.test.ts',
-              'test/planDb.test.ts',
-              'test/teamDb.test.ts',
-              'test/myDb.test.ts',
-              'test/ical.test.ts',
-              'test/adminDb.people.test.ts',
-              'test/adminDb.content.test.ts',
-              'test/adminDb.news.test.ts',
-              'test/adminDb.prayer.test.ts',
-              'test/adminDb.revisions.test.ts',
-              'test/settingsSave.test.ts',
-              'test/media.test.ts',
-              'test/backup.test.ts',
-              'test/publicDb.test.ts',
-              'test/ministryDb.test.ts',
-              'test/prayer-request.test.ts',
-              'test/emailSettings.test.ts',
-              'test/digest.test.ts',
-              'test/adminOverview.test.ts',
-              'test/notify.test.ts',
-              'test/ministryWizard.test.ts',
-            ],
+            include: ['test/**/*.test.ts'],
+            exclude: ['test/e2e/**', ...NODE_ONLY],
             setupFiles: ['./test/setup.ts'],
           },
         },
