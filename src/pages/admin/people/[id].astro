@@ -1,0 +1,188 @@
+---
+// Create / edit a person (adminOnly). `id='new'` creates; a numeric id edits.
+// Three POST actions (an `action` field, no JS required):
+//   save   → parsePersonForm → savePerson (identity; role/active preserved via
+//            hidden fields on edit, chosen inline on create)
+//   flags  → setPersonFlags (role + active — the one place to change them on an
+//            existing person; deactivation takes effect on their next request)
+//   delete → softDeletePerson (with a confirm())
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { getPerson, savePerson, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
+import { parsePersonForm } from '../../../lib/validate';
+import { LOCALES, type Locale } from '../../../lib/locales';
+import { tin, lab, card, errorText, btn, btnDanger, noticeOk } from '../../../lib/adminUi';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const ROLES = ['member', 'editor', 'admin'] as const;
+
+const rawId = Astro.params.id ?? '';
+const isNew = rawId === 'new';
+if (!isNew && !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const id = isNew ? null : Number(rawId);
+
+const person = id !== null ? await getPerson(db, id) : null;
+if (id !== null && !person) return new Response(null, { status: 404 });
+
+let errors: Record<string, string> = {};
+const values: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('action');
+
+  if (action === 'delete' && id !== null) {
+    await softDeletePerson(db, id);
+    return Astro.redirect('/admin/people/?saved=1', 303);
+  }
+
+  if (action === 'flags' && id !== null) {
+    const roleRaw = String(fd.get('role') ?? '');
+    const role = ROLES.find((r) => r === roleRaw);
+    await setPersonFlags(db, id, { role, active: fd.get('active') !== null });
+    return Astro.redirect(`/admin/people/${id}?saved=1`, 303);
+  }
+
+  if (action === 'save') {
+    for (const [k, v] of fd.entries()) if (typeof v === 'string') values[k] = v;
+    const parsed = parsePersonForm(fd);
+    if (parsed.ok) {
+      const result = await savePerson(db, { ...parsed.data, id }, user.email);
+      if (result.ok) return Astro.redirect('/admin/people/?saved=1', 303);
+      errors = result.errors;
+    } else {
+      errors = parsed.errors;
+    }
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const echoed = Object.keys(values).length > 0; // a failed save re-render
+
+// Failed save echoes submitted values; otherwise the stored row (or blank/new).
+const v = {
+  first_name: values.first_name ?? person?.first_name ?? '',
+  last_name: values.last_name ?? person?.last_name ?? '',
+  display_name: values.display_name ?? person?.display_name ?? '',
+  email: values.email ?? person?.email ?? '',
+  phone: values.phone ?? person?.phone ?? '',
+  role: values.role ?? person?.role ?? 'member',
+  lang: values.lang ?? person?.lang ?? '',
+  active: echoed ? 'active' in values : person ? person.active === 1 : true,
+};
+
+const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person.editTitle');
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <a href="/admin/people/" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.person.back')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
+
+  <form method="post" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
+    <input type="hidden" name="action" value="save" />
+    {/* On edit, role/active live in the flags form; carry current values so the
+        identity save validates and never clobbers them. */}
+    {!isNew && <input type="hidden" name="role" value={v.role} />}
+    {!isNew && v.active && <input type="hidden" name="active" value="1" />}
+
+    <h2 class="font-semibold sm:col-span-2">{t(lang, 'admin.person.detailsTitle')}</h2>
+
+    <label class="block sm:col-span-2">
+      <span class={lab}>{t(lang, 'admin.person.displayName')} *</span>
+      <input type="text" name="display_name" value={v.display_name} class={tin} />
+      {errors.display_name && <span class={errorText}>{t(lang, errors.display_name)}</span>}
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.person.firstName')}</span>
+      <input type="text" name="first_name" value={v.first_name} class={tin} />
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.person.lastName')}</span>
+      <input type="text" name="last_name" value={v.last_name} class={tin} />
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.person.email')} *</span>
+      <input type="email" name="email" value={v.email} class={tin} />
+      {errors.email && <span class={errorText}>{t(lang, errors.email)}</span>}
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.person.phone')}</span>
+      <input type="text" name="phone" value={v.phone} class={tin} />
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.person.lang')}</span>
+      <select name="lang" class={tin}>
+        <option value="" selected={v.lang === ''}>{t(lang, 'admin.person.langNone')}</option>
+        {LOCALES.map((loc) => (
+          <option value={loc} selected={v.lang === loc}>{t(lang, `locale.${loc}`)}</option>
+        ))}
+      </select>
+    </label>
+
+    {
+      isNew && (
+        <>
+          <label class="block">
+            <span class={lab}>{t(lang, 'admin.person.role')}</span>
+            <select name="role" class={tin}>
+              {ROLES.map((r) => (
+                <option value={r} selected={v.role === r}>{t(lang, `admin.role.${r}`)}</option>
+              ))}
+            </select>
+          </label>
+          <label class="flex items-center gap-2 sm:col-span-2">
+            <input type="checkbox" name="active" checked={v.active} />
+            <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
+          </label>
+        </>
+      )
+    }
+
+    <div class="sm:col-span-2">
+      <button type="submit" class={btn}>{t(lang, 'admin.person.save')}</button>
+    </div>
+  </form>
+
+  {
+    !isNew && person && (
+      <>
+        <form method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
+          <input type="hidden" name="action" value="flags" />
+          <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
+          <label class="block max-w-xs">
+            <span class={lab}>{t(lang, 'admin.person.role')}</span>
+            <select name="role" class={tin}>
+              {ROLES.map((r) => (
+                <option value={r} selected={person.role === r}>{t(lang, `admin.role.${r}`)}</option>
+              ))}
+            </select>
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" name="active" checked={person.active === 1} />
+            <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
+          </label>
+          <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
+        </form>
+
+        <form
+          method="post"
+          class="mt-6 max-w-2xl"
+          onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.person.deleteConfirm'))})`}
+        >
+          <input type="hidden" name="action" value="delete" />
+          <button type="submit" class={btnDanger}>{t(lang, 'admin.person.delete')}</button>
+        </form>
+      </>
+    )
+  }
+</Admin>

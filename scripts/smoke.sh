@@ -59,6 +59,14 @@ echo "$my_headers" | grep -iq '^HTTP/1.1 303' || fail "/en/my expected 303 for a
 echo "$my_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/en/my redirect not to /en/signin"
 echo "$my_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/my redirect missing nosniff header"
 
+# Admin console + admin-only people list both fail closed for anon (303 → signin).
+admin_headers=$(curl -s -D - -o /dev/null "$BASE/admin")
+echo "$admin_headers" | grep -iq '^HTTP/1.1 303' || fail "/admin expected 303 for anon"
+echo "$admin_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/admin redirect not to /en/signin"
+people_headers=$(curl -s -D - -o /dev/null "$BASE/admin/people")
+echo "$people_headers" | grep -iq '^HTTP/1.1 303' || fail "/admin/people expected 303 for anon"
+echo "$people_headers" | grep -iqE '^location: /en/signin\?next=' || fail "/admin/people redirect not to /en/signin"
+
 # Sign-in page renders its form, honeypot field included (anti-bot).
 signin_status=$(status "$BASE/en/signin")
 [ "$signin_status" = "200" ] || fail "/en/signin expected 200, got $signin_status"

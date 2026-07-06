@@ -1,0 +1,65 @@
+---
+// Admin console landing (fleshed out in slice 5). Reachable by editors, admins,
+// and team leaders (console class). Shows a stat row — a live people count for
+// admins, placeholder cards for content wired later — plus role-gated nav cards.
+import Admin from '../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../lib/i18n';
+import { countPeople } from '../../lib/adminDb';
+import { card } from '../../lib/adminUi';
+import type { Locale } from '../../lib/locales';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+// People count is admin-only data; fail soft to a placeholder so a DB hiccup
+// never 500s the dashboard.
+let peopleCount: number | null = null;
+if (user.isAdmin) {
+  try {
+    peopleCount = await countPeople(db);
+  } catch (e) {
+    console.error('admin dashboard people count failed', e);
+  }
+}
+
+const stats = [
+  ...(user.isAdmin ? [{ label: t(lang, 'admin.nav.people'), value: peopleCount === null ? '—' : String(peopleCount) }] : []),
+  { label: t(lang, 'admin.dashboard.bulletins'), value: '—' },
+  { label: t(lang, 'admin.dashboard.sermons'), value: '—' },
+];
+
+const cards = user.isAdmin
+  ? [{ href: '/admin/people', title: t(lang, 'admin.nav.people'), body: t(lang, 'admin.dashboard.peopleCardBody') }]
+  : [];
+---
+
+<Admin title={t(lang, 'admin.dashboard.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.dashboard.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.dashboard.welcome', { name: user.displayName })}</p>
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-3">
+    {
+      stats.map((s) => (
+        <div class={card}>
+          <div class="text-display-lg font-bold">{s.value}</div>
+          <div class="mt-1 text-sm text-ink-muted">{s.label}</div>
+        </div>
+      ))
+    }
+  </div>
+
+  {
+    cards.length > 0 && (
+      <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((c) => (
+          <a href={c.href} class={`${card} block hover:border-border-strong`}>
+            <h2 class="font-semibold">{c.title}</h2>
+            <p class="mt-1 text-sm text-ink-muted">{c.body}</p>
+          </a>
+        ))}
+      </div>
+    )
+  }
+</Admin>

@@ -53,6 +53,7 @@ export default defineConfig(async () => {
               'test/email.test.ts',
               'test/authFlow.test.ts',
               'test/planDb.test.ts',
+              'test/adminDb.people.test.ts',
             ],
             setupFiles: ['./test/setup.ts'],
           },

@@ -1,23 +1,40 @@
 ---
-// Minimal admin shell (fleshed out in slice 5): shared theme/mode wiring and a
-// single top bar. Admin renders in English for now.
+// Admin shell: shared theme/mode wiring, a top nav (role-gated links), and a
+// footer bar showing the signed-in email + a signout POST. Admin UI language
+// follows the signed-in person's `lang` (falling back to English). Fonts are
+// imported the same way Base.astro does so admin renders in the brand faces.
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
 import { THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
 
 interface Props {
   title?: string;
 }
 
 const { title } = Astro.props;
+const user = Astro.locals.user;
+const lang: Locale = user?.lang ?? 'en';
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
 const mode = THEME_DEFAULT_MODE[theme] ?? 'light';
-const appName = t('en', 'admin.title');
+const appName = t(lang, 'admin.title');
 const fullTitle = title ? `${title} · ${appName}` : appName;
+
+// Nav links render by role: the people section is admin-only; more sections are
+// appended by later slices. The dashboard is reachable by everyone who gets here.
+const nav = [
+  { href: '/admin', label: t(lang, 'admin.nav.dashboard'), show: true },
+  { href: '/admin/people', label: t(lang, 'admin.nav.people'), show: !!user?.isAdmin },
+].filter((n) => n.show);
 ---
 
 <!doctype html>
-<html lang="en" data-theme={theme} data-mode={mode}>
+<html lang={lang === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={mode}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -37,14 +54,34 @@ const fullTitle = title ? `${title} · ${appName}` : appName;
       })();
     </script>
   </head>
-  <body class="min-h-screen bg-surface text-ink">
+  <body class="min-h-screen flex flex-col bg-surface text-ink">
     <header class="bg-header-bg text-header-ink border-b border-border">
-      <div class="container-wide h-14 flex items-center">
+      <div class="container-wide h-14 flex items-center gap-6">
         <span class="font-display font-semibold">{appName}</span>
+        <nav class="flex items-center gap-4 text-sm">
+          {nav.map((n) => <a href={n.href} class="hover:underline">{n.label}</a>)}
+        </nav>
       </div>
     </header>
-    <main class="container-wide py-8">
+    <main class="container-wide py-8 flex-1">
       <slot />
     </main>
+    {
+      user && (
+        <footer class="border-t border-border bg-surface-raised">
+          <div class="container-wide h-14 flex items-center justify-between text-sm text-ink-muted">
+            <span>{user.email}</span>
+            <form method="post" action="/signout">
+              <button
+                type="submit"
+                class="rounded-md border border-border px-3 py-1.5 font-semibold hover:bg-surface-sunken"
+              >
+                {t(lang, 'common.signOut')}
+              </button>
+            </form>
+          </div>
+        </footer>
+      )
+    }
   </body>
 </html>
