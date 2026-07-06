@@ -25,7 +25,7 @@ import {
   type PersonOption,
   type PotentialVolunteer,
 } from '../../../../lib/teamDb';
-import { sendApplicationResult } from '../../../../lib/notify';
+import { sendApplicationResult, sendServeInvite } from '../../../../lib/notify';
 import { type EmailEnv } from '../../../../lib/email';
 import { btn, btnSecondary, tin } from '../../../../lib/adminUi';
 
@@ -36,6 +36,11 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = (env as { DB: D1Database }).DB;
+// People module gates the outreach "invite to serve" button (off → hidden +
+// the invite POST is unreachable). The team is fixed to this page's team, so a
+// leader can only ever invite for a team they already lead (canEdit gate).
+const hasPeople = Astro.locals.modules.has('people');
+const invited = Astro.url.searchParams.get('invited') === '1';
 
 const idOf = (v: string | FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
@@ -81,6 +86,16 @@ if (Astro.request.method === 'POST') {
     }
     return back();
   }
+  if (action === 'invite') {
+    // Outreach invite for THIS team (people module only). canEdit already
+    // guarantees the actor is an admin or a leader of this team.
+    if (!hasPeople) return new Response(null, { status: 404 });
+    const personId = idOf(fd.get('person_id'));
+    if (personId) {
+      await sendServeInvite(env as unknown as EmailEnv, db, { personId, teamId, invitedByEmail: user.email });
+    }
+    return Astro.redirect(localePath(locale, `/serve/teams/${teamId}?invited=1`), 303);
+  }
 }
 
 const team = await getTeam(db, teamId, locale);
@@ -116,6 +131,8 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
         </p>
       )
     }
+
+    {invited && <p class="mt-4 rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success">{t(locale, 'invite.sent')}</p>}
 
     {
       pendingApps.length > 0 && (
@@ -231,7 +248,7 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
                     {t(locale, 'serve.teams.viaInterest')}
                   </span>
                 )}
-                <span class="ml-auto flex gap-3">
+                <span class="ml-auto flex items-center gap-3">
                   <a href={localePath(locale, `/profile/${p.person_id}`)} class="text-primary hover:underline">
                     {t(locale, 'serve.teams.viewProfile')}
                   </a>
@@ -239,6 +256,15 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
                     <a href={`mailto:${p.email}`} class="text-primary hover:underline">
                       {t(locale, 'serve.teams.contact')}
                     </a>
+                  )}
+                  {hasPeople && (
+                    <form method="post">
+                      <input type="hidden" name="_action" value="invite" />
+                      <input type="hidden" name="person_id" value={p.person_id} />
+                      <button type="submit" class="font-semibold text-accent hover:underline">
+                        {t(locale, 'invite.button')}
+                      </button>
+                    </form>
                   )}
                 </span>
               </li>

@@ -4,6 +4,7 @@
 // updated_by column and no revisions (v1 simplification, per spec).
 import type {
   PersonInput,
+  MembershipStatus,
   BulletinInput,
   BulletinAnnouncementInput,
   ProgramRow,
@@ -19,7 +20,10 @@ import { LOCALES, type Locale } from './locales';
 
 type Role = PersonInput['role'];
 
-/** Row shape for the people list table. `active` is D1's raw 0/1 integer. */
+/** Row shape for the people list table. `active` is D1's raw 0/1 integer.
+ *  `membership_status` and `household_name` back the directory's status badge +
+ *  household column (people module); `household_name` is NULL when the person is
+ *  in no live household. */
 export interface PersonListRow {
   id: number;
   first_name: string;
@@ -29,11 +33,25 @@ export interface PersonListRow {
   phone: string | null;
   role: Role;
   active: number;
+  membership_status: MembershipStatus;
+  household_name: string | null;
 }
 
 /** Full row for the edit form. */
 export interface AdminPersonRow extends PersonListRow {
   lang: 'en' | 'zh' | null;
+  birthday: string | null;
+  address: string | null;
+  joined_on: string | null;
+}
+
+/** Directory filters (people module). serving/household are tri-state: undefined
+ *  = no filter, true = has, false = lacks. */
+export interface ListPeopleOpts {
+  q?: string;
+  status?: MembershipStatus;
+  serving?: boolean;
+  household?: boolean;
 }
 
 /** savePerson input: the parsed form plus the target id (null = create). */
@@ -43,31 +61,49 @@ export interface SavePersonInput extends PersonInput {
 
 export type SavePersonResult = { ok: true; id: number } | { ok: false; errors: { email: string } };
 
-const LIST_COLS = 'id, first_name, last_name, display_name, email, phone, role, active';
+// A person's live household is a LEFT JOIN through household_members (real
+// members carry a unique person_id, so this yields at most one row per person);
+// h.name is NULL when they belong to no live household.
+const PERSON_LIST_SELECT = `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
+         p.role, p.active, p.membership_status, h.name AS household_name
+  FROM people p
+  LEFT JOIN household_members hm ON hm.person_id = p.id
+  LEFT JOIN households h ON h.id = hm.household_id AND h.deleted_at IS NULL`;
 
 /**
- * Non-deleted people ordered by display_name. With `q`, case-insensitively
- * (SQLite ASCII LIKE) matches display/first/last name or email; LIKE wildcards
- * in the query are escaped so a literal `%` or `_` searches for itself.
+ * Non-deleted people ordered by display_name, each with its membership_status and
+ * live household name. With `q`, case-insensitively (SQLite ASCII LIKE) matches
+ * display/first/last name or email; LIKE wildcards in the query are escaped so a
+ * literal `%` or `_` searches for itself. The people-module directory filters
+ * (status / serving via team_members / has-household) narrow the set when set.
  */
-export async function listPeople(db: D1Database, opts: { q?: string } = {}): Promise<PersonListRow[]> {
+export async function listPeople(db: D1Database, opts: ListPeopleOpts = {}): Promise<PersonListRow[]> {
+  const conditions = ['p.deleted_at IS NULL'];
+  const binds: (string | number)[] = [];
   const q = opts.q?.trim();
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
-    const { results } = await db
-      .prepare(
-        `SELECT ${LIST_COLS} FROM people
-         WHERE deleted_at IS NULL
-           AND (display_name LIKE ?1 ESCAPE '\\' OR first_name LIKE ?1 ESCAPE '\\'
-                OR last_name LIKE ?1 ESCAPE '\\' OR email LIKE ?1 ESCAPE '\\')
-         ORDER BY display_name`,
-      )
-      .bind(like)
-      .all<PersonListRow>();
-    return results;
+    conditions.push(
+      `(p.display_name LIKE ? ESCAPE '\\' OR p.first_name LIKE ? ESCAPE '\\'
+        OR p.last_name LIKE ? ESCAPE '\\' OR p.email LIKE ? ESCAPE '\\')`,
+    );
+    binds.push(like, like, like, like);
+  }
+  if (opts.status) {
+    conditions.push('p.membership_status = ?');
+    binds.push(opts.status);
+  }
+  if (opts.serving !== undefined) {
+    conditions.push(
+      `${opts.serving ? 'EXISTS' : 'NOT EXISTS'} (SELECT 1 FROM team_members tmb WHERE tmb.person_id = p.id)`,
+    );
+  }
+  if (opts.household !== undefined) {
+    conditions.push(opts.household ? 'h.id IS NOT NULL' : 'h.id IS NULL');
   }
   const { results } = await db
-    .prepare(`SELECT ${LIST_COLS} FROM people WHERE deleted_at IS NULL ORDER BY display_name`)
+    .prepare(`${PERSON_LIST_SELECT} WHERE ${conditions.join(' AND ')} ORDER BY p.display_name`)
+    .bind(...binds)
     .all<PersonListRow>();
   return results;
 }
@@ -78,10 +114,19 @@ export async function countPeople(db: D1Database): Promise<number> {
   return row?.n ?? 0;
 }
 
-/** A single non-deleted person for the edit form. */
+/** A single non-deleted person for the edit form, with membership-profile depth
+ *  (birthday/address/joined_on) and live household name. */
 export async function getPerson(db: D1Database, id: number): Promise<AdminPersonRow | null> {
   return db
-    .prepare(`SELECT ${LIST_COLS}, lang FROM people WHERE id = ? AND deleted_at IS NULL`)
+    .prepare(
+      `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
+              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on,
+              h.name AS household_name
+       FROM people p
+       LEFT JOIN household_members hm ON hm.person_id = p.id
+       LEFT JOIN households h ON h.id = hm.household_id AND h.deleted_at IS NULL
+       WHERE p.id = ? AND p.deleted_at IS NULL`,
+    )
     .bind(id)
     .first<AdminPersonRow>();
 }
@@ -120,21 +165,21 @@ export async function savePerson(
       return { ok: true, id: existing.id };
     }
     try {
+      const cols = ['first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang'];
+      const binds: (string | number | null)[] = [
+        input.firstName,
+        input.lastName,
+        input.displayName,
+        input.email,
+        input.phone,
+        input.role,
+        input.active ? 1 : 0,
+        input.lang,
+      ];
+      appendMembershipColumns(cols, binds, input);
       const r = await db
-        .prepare(
-          `INSERT INTO people (first_name, last_name, display_name, email, phone, role, active, lang)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          input.firstName,
-          input.lastName,
-          input.displayName,
-          input.email,
-          input.phone,
-          input.role,
-          input.active ? 1 : 0,
-          input.lang,
-        )
+        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+        .bind(...binds)
         .run();
       return { ok: true, id: r.meta.last_row_id as number };
     } catch (e) {
@@ -161,25 +206,40 @@ export function isUniqueViolation(e: unknown): boolean {
   return String(e).includes('UNIQUE constraint failed');
 }
 
+// The membership-profile depth (birthday/address/membership_status/joined_on) is
+// written ONLY when the form was parsed with { admin: true } (membershipStatus is
+// then present). Self-service saves parse without it and persist birthday/address
+// through their own scoped UPDATE, and must never touch status/joined_on — so a
+// self-service save leaves these four columns exactly as the admin last set them.
+function appendMembershipColumns(
+  cols: string[],
+  binds: (string | number | null)[],
+  input: PersonInput,
+): void {
+  if (input.membershipStatus === undefined) return;
+  cols.push('birthday', 'address', 'membership_status', 'joined_on');
+  binds.push(input.birthday, input.address, input.membershipStatus, input.joinedOn ?? null);
+}
+
 // One UPDATE serves both a normal edit and a revive: deleted_at = NULL is a
 // harmless no-op for a live row and reclaims a soft-deleted one.
 function writePerson(db: D1Database, id: number, input: PersonInput): Promise<unknown> {
+  const cols = ['first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang'];
+  const binds: (string | number | null)[] = [
+    input.firstName,
+    input.lastName,
+    input.displayName,
+    input.email,
+    input.phone,
+    input.role,
+    input.active ? 1 : 0,
+    input.lang,
+  ];
+  appendMembershipColumns(cols, binds, input);
+  const assignments = cols.map((c) => `${c} = ?`).join(', ');
   return db
-    .prepare(
-      `UPDATE people SET first_name = ?, last_name = ?, display_name = ?, email = ?, phone = ?,
-         role = ?, active = ?, lang = ?, deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .bind(
-      input.firstName,
-      input.lastName,
-      input.displayName,
-      input.email,
-      input.phone,
-      input.role,
-      input.active ? 1 : 0,
-      input.lang,
-      id,
-    )
+    .prepare(`UPDATE people SET ${assignments}, deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`)
+    .bind(...binds, id)
     .run();
 }
 
