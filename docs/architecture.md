@@ -89,7 +89,7 @@ config is absent, so the demo deploy runs all its crons without backups configur
 
 ## Testing
 
-The system is covered by **over 470 automated tests**. Unit and integration tests run in
+The system is covered by **over 490 automated tests**. Unit and integration tests run in
 the Cloudflare Workers test pool (`vitest`), end-to-end tests run against the actual built
 Worker (`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and
 checks routing, i18n, the health probe, and the security headers over HTTP. See

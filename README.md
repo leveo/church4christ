@@ -18,7 +18,18 @@ monthly bill. The rest of this page explains why that is possible and how to try
 
 ---
 
-## Why not WordPress, Wix, or a paid service?
+## Who is this for?
+
+Small and mid-size churches, fellowships, and nonprofits — **especially bilingual and
+immigrant congregations** — that want a fast, modern website without a monthly bill or a
+professional web team. It fits best if you want to **own your content and your members'
+data**, and you either have one technically-comfortable volunteer or are happy to let an
+AI assistant do the setup. If you would rather pay for a hands-off, all-in-one church
+platform, a mature service like **Planning Center** may suit you better — the
+comparison below and [`docs/why-this-stack.md`](docs/why-this-stack.md) are honest about
+when to choose which.
+
+## Why not WordPress, Wix, or a service like Planning Center?
 
 Those are good tools. For many churches, though, they mean a monthly bill that never
 stops, a site that slows down as you add plugins, and content that lives on someone
@@ -26,29 +37,35 @@ else's platform. Church4Christ takes a different path: the whole site is a small
 self-contained project that runs on **Cloudflare's free tier**, so a typical church
 site costs **nothing per month** to host.
 
-| | **Church4Christ** | WordPress (self-hosted) | Wix / Squarespace | Custom agency build |
+| | **Church4Christ** | WordPress (self-hosted) | Wix / Squarespace | Church SaaS (e.g. Planning Center) |
 |---|---|---|---|---|
-| **Monthly cost** | $0 (free tier) | Hosting + plugins, ongoing | Subscription, ongoing | Build fee + hosting |
-| **Speed worldwide** | Fast everywhere (served near the visitor) | Depends on host | Good | Depends on build |
-| **You own your data** | Yes, fully | Yes | No — lives on their platform | Usually |
-| **You own the code** | Yes — it is all here, open source | Yes | No | Depends on contract |
-| **Vendor lock-in** | None | Some (plugins) | High | High (one agency) |
-| **Security upkeep** | Almost none — no plugin treadmill | Constant plugin/security updates | Handled for you | Depends on retainer |
-| **Bilingual** | Built in (English + Chinese) | Add-on plugin | Add-on / manual | Custom work |
-| **Set-up difficulty** | Needs one technical volunteer or an AI assistant, once | Moderate | Easy | You hire it out |
+| **Monthly cost** | $0 (free tier) | Hosting + plugins, ongoing | Subscription, ongoing | Subscription, per module |
+| **Speed worldwide** | Fast everywhere (served near the visitor) | Depends on host | Good | Good |
+| **You own your data** | Yes, fully | Yes | No — lives on their platform | No — lives on their platform |
+| **You own the code** | Yes — it is all here, open source | Yes | No | No |
+| **Vendor lock-in** | None | Some (plugins) | High | High |
+| **Security upkeep** | Almost none — no plugin treadmill | Constant plugin/security updates | Handled for you | Handled for you |
+| **Bilingual** | Built in (English + Chinese) | Add-on plugin | Add-on / manual | Limited |
+| **Public website + CMS + volunteers** | All in one, free | Website only (add plugins) | Website only | Strong on management; website often separate |
+| **Set-up difficulty** | Needs one technical volunteer or an AI assistant, once | Moderate | Easy | Easy |
 | **Drag-and-drop page builder** | No | Yes (plugins) | Yes | Varies |
 
 **The honest trade-offs.** Church4Christ has **no drag-and-drop page builder** — you
 edit content through clear admin forms, not by dragging boxes around a canvas. WordPress's
 huge plugin ecosystem can also extend a site in thousands of ready-made directions that
-this project simply does not try to match. And the
-**initial setup** (creating the free account, deploying once, entering your church's
-details) needs someone comfortable with a few commands **or** an AI assistant to do it
-for you. After that, the day-to-day — writing bulletins, adding sermons, scheduling
-volunteers — is ordinary form-filling that any staff member can do.
+this project simply does not try to match. Mature church platforms like **Planning
+Center** are genuinely excellent at internal church management (giving, check-ins,
+membership) and ask nothing technical of you — this project is **not trying to out-feature
+them**; it trades their polish and hands-off convenience for **$0 cost, full control, and
+a unified public site**. And the **initial setup** (creating the free account, deploying
+once, entering your church's details) needs someone comfortable with a few commands **or**
+an AI assistant to do it for you. After that, the day-to-day — writing bulletins, adding
+sermons, scheduling volunteers — is ordinary form-filling that any staff member can do.
 
 What you get in return: **no monthly bill, no plugin updates to babysit, no vendor who
-can raise your price or shut you down, and a site that stays fast** as it grows.
+can raise your price or shut you down, and a site that stays fast** as it grows. The full
+reasoning — including why Cloudflare instead of a server on AWS/Azure/GCP, and why this
+particular tech stack — is in [**`docs/why-this-stack.md`**](docs/why-this-stack.md).
 
 ---
 
@@ -57,7 +74,7 @@ can raise your price or shut you down, and a site that stays fast** as it grows.
 You do not have to be a developer to run this project. This repository is written to be
 **read by an AI coding assistant** — tools like [Claude Code](https://www.claude.com/product/claude-code)
 or Codex. Every feature has a plain-English guide in [`docs/features/`](docs/features/),
-and the code is covered by **over 470 automated tests**, so an assistant can make changes
+and the code is covered by **over 490 automated tests**, so an assistant can make changes
 with confidence and you can tell whether they worked.
 
 The idea: open this project with an AI assistant, describe what you want in normal
@@ -169,9 +186,14 @@ big part of why the site loads quickly and costs so little to run.
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 470 automated
-tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful. For the
-full picture, see [`docs/architecture.md`](docs/architecture.md),
+each with a light and a dark mode. And the code is held together by **over 490 automated
+tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
+
+**Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;
+why Astro + Tailwind + TypeScript with no heavy framework; and when a mature service like
+Planning Center is the better call — all of that is laid out honestly in
+[**`docs/why-this-stack.md`**](docs/why-this-stack.md). For the technical picture, see
+[`docs/architecture.md`](docs/architecture.md),
 [`docs/design-system.md`](docs/design-system.md), and [`docs/i18n.md`](docs/i18n.md).
 
 ---
