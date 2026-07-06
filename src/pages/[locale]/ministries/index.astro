@@ -1,0 +1,78 @@
+---
+// Ministries directory: the active ministries, grouped into the six coarse UI
+// groups (ministryMeta), each rendered as a section with a heading. Empty groups
+// are skipped; cards badge open serving roles. DB read fails soft to an empty
+// list so a database hiccup degrades to the "nothing yet" state instead of 500.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import SectionTitle from '../../../components/SectionTitle.astro';
+import MinistryCard from '../../../components/MinistryCard.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listMinistries } from '../../../lib/db';
+import { MINISTRY_GROUPS, groupOf, groupLabelKey } from '../../../lib/ministryMeta';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let ministries: Awaited<ReturnType<typeof listMinistries>> = [];
+try {
+  ministries = await listMinistries((env as { DB: D1Database }).DB, locale);
+} catch (err) {
+  console.error('ministries index: load failed', err);
+}
+
+// One section per non-empty group, in the canonical display order.
+const sections = MINISTRY_GROUPS.map((group) => ({
+  group,
+  items: ministries.filter((m) => groupOf(m.category) === group),
+})).filter((s) => s.items.length > 0);
+---
+
+<Base title={t(locale, 'ministries.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'ministries.title')}</h1>
+      <p class="mt-3 max-w-narrow text-lg">{t(locale, 'ministries.intro')}</p>
+      <a
+        href={localePath(locale, '/serve')}
+        class="mt-6 inline-flex min-h-11 items-center rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+      >
+        {t(locale, 'ministries.serveCta')} →
+      </a>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      sections.length === 0 ? (
+        <p class="rounded-md border border-border bg-surface-raised px-4 py-10 text-center text-ink-muted">
+          {t(locale, 'ministries.empty')}
+        </p>
+      ) : (
+        <div class="flex flex-col gap-14">
+          {sections.map((section) => (
+            <section>
+              <SectionTitle title={t(locale, groupLabelKey(section.group))} />
+              <div class="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {section.items.map((m) => (
+                  <MinistryCard
+                    icon={m.icon}
+                    name={m.name}
+                    intro={m.intro}
+                    slug={m.slug}
+                    locale={locale}
+                    openSlots={m.openSignupSlots}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )
+    }
+  </div>
+</Base>

@@ -1,0 +1,30 @@
+---
+// Statement of faith: renders the `pages/beliefs` content entry.
+import { render } from 'astro:content';
+import ContentPage from '../../../components/ContentPage.astro';
+import { parseLocale } from '../../../lib/locales';
+import { getLocalized } from '../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const found = await getLocalized('pages', 'beliefs', locale);
+if (!found) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const { entry, translated } = found;
+const { Content } = await render(entry);
+---
+
+<ContentPage
+  title={entry.data.title}
+  description={entry.data.description}
+  locale={locale}
+  translated={translated}
+>
+  <Content />
+</ContentPage>

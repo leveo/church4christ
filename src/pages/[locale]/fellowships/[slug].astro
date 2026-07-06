@@ -1,0 +1,72 @@
+---
+// Single fellowship: meeting details + leaders panel, then the prose body.
+import { render } from 'astro:content';
+import ContentPage from '../../../components/ContentPage.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { getLocalized } from '../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const slug = Astro.params.slug ?? '';
+const found = await getLocalized('fellowships', slug, locale);
+if (!found) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const { entry, translated } = found;
+const { Content } = await render(entry);
+const { name, meetingTime, location, audience, leaders } = entry.data;
+
+// Locale-specific punctuation: zh uses the enumeration comma 、 and fullwidth
+// parentheses for leader roles; en uses ', ' and ASCII parentheses.
+const sep = locale === 'zh' ? '、' : ', ';
+const withRole = (l: { name: string; role?: string }) =>
+  l.role ? (locale === 'zh' ? `${l.name}（${l.role}）` : `${l.name} (${l.role})`) : l.name;
+---
+
+<ContentPage title={name} description={audience} locale={locale} translated={translated}>
+  <div slot="before" class="bg-surface-sunken border border-border rounded-lg p-5">
+    <dl class="text-sm flex flex-col gap-2">
+      {
+        audience && (
+          <div class="flex gap-2">
+            <dt class="font-semibold shrink-0">{t(locale, 'fellowships.audience')}:</dt>
+            <dd class="text-ink-muted">{audience}</dd>
+          </div>
+        )
+      }
+      <div class="flex gap-2">
+        <dt class="font-semibold shrink-0">{t(locale, 'fellowships.meets')}:</dt>
+        <dd class="text-ink-muted">{meetingTime}</dd>
+      </div>
+      <div class="flex gap-2">
+        <dt class="font-semibold shrink-0">{t(locale, 'fellowships.location')}:</dt>
+        <dd class="text-ink-muted">{location}</dd>
+      </div>
+      {
+        leaders.length > 0 && (
+          <div class="flex gap-2">
+            <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
+            <dd class="text-ink-muted">{leaders.map(withRole).join(sep)}</dd>
+          </div>
+        )
+      }
+    </dl>
+  </div>
+
+  <Content />
+
+  <Fragment slot="after">
+    <a
+      href={localePath(locale, '/fellowships')}
+      class="text-ink-muted underline decoration-accent underline-offset-2 hover:text-accent"
+    >
+      {t(locale, 'fellowships.back')}
+    </a>
+  </Fragment>
+</ContentPage>

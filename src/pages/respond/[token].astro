@@ -1,0 +1,147 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { t } from '../../lib/i18n';
+import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
+import { consumeToken, peekToken } from '../../lib/auth';
+import { getPersonById, i18nJoin } from '../../lib/db';
+import { respondToAssignment } from '../../lib/planDb';
+import { sendDeclineNotice } from '../../lib/notify';
+import { type EmailEnv } from '../../lib/email';
+
+// Email Accept/Decline without signing in. Same two-step shape as /auth: GET
+// only peeks (mail scanners), the explicit Accept/Decline POST consumes. The
+// page renders in the token owner's saved language (the email was sent in it).
+const raw = Astro.params.token ?? '';
+const db = (env as unknown as { DB: D1Database }).DB;
+
+interface Summary {
+  plan_date: string;
+  service_name: string;
+  position_name: string;
+}
+
+/** Assignment context for the summary, localized via i18nJoin (en fallback). */
+async function loadSummary(assignmentId: number, locale: Locale): Promise<Summary | null> {
+  const st = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
+  const core = await db
+    .prepare(
+      `SELECT p.plan_date AS plan_date, ra.position_id AS position_id, ${st.select}
+       FROM roster_assignments ra
+       JOIN plans p ON p.id = ra.plan_id AND p.deleted_at IS NULL
+       JOIN service_types st ON st.id = p.service_type_id
+       ${st.joins}
+       WHERE ra.id = ? AND ra.deleted_at IS NULL`,
+    )
+    .bind(assignmentId)
+    .first<{ plan_date: string; position_id: number; name: string }>();
+  if (!core) return null;
+  const pos = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
+  const posRow = await db
+    .prepare(`SELECT ${pos.select} FROM positions pos ${pos.joins} WHERE pos.id = ?`)
+    .bind(core.position_id)
+    .first<{ name: string }>();
+  return { plan_date: core.plan_date, service_name: core.name, position_name: posRow?.name ?? '' };
+}
+
+type State = 'show' | 'accepted' | 'declined' | 'past' | 'invalid';
+let state: State = 'invalid';
+let summary: Summary | null = null;
+let locale: Locale = DEFAULT_LOCALE;
+
+const langOf = (lang: string | null): Locale => (lang === 'zh' ? 'zh' : 'en');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const rawAction = form.get('action');
+  const action = rawAction === 'accept' ? 'accept' : rawAction === 'decline' ? 'decline' : null;
+  // Validate the action BEFORE touching the token: a malformed POST (missing or
+  // unknown action) must not burn a still-valid single-use token to no effect.
+  if (action) {
+    const reason = String(form.get('reason') ?? '').trim() || null;
+    const consumed = await consumeToken(db, raw, 'respond');
+    if (consumed?.assignment_id) {
+      const person = await getPersonById(db, consumed.person_id);
+      locale = langOf(person?.lang ?? null);
+      const result = await respondToAssignment(db, consumed.assignment_id, consumed.person_id, action, reason);
+      if (result.ok) {
+        state = action === 'accept' ? 'accepted' : 'declined';
+        // Best-effort: let the team's leaders know so they can find a replacement.
+        if (action === 'decline') await sendDeclineNotice(env as unknown as EmailEnv, db, consumed.assignment_id, reason);
+      } else state = result.reason === 'past' ? 'past' : 'invalid';
+    }
+  }
+} else {
+  const peeked = await peekToken(db, raw, 'respond');
+  if (peeked?.assignment_id) {
+    const person = await getPersonById(db, peeked.person_id);
+    locale = langOf(person?.lang ?? null);
+    summary = await loadSummary(peeked.assignment_id, locale);
+    if (summary) state = 'show';
+  }
+}
+
+const message =
+  state === 'accepted'
+    ? 'respond.accepted'
+    : state === 'declined'
+      ? 'respond.declined'
+      : state === 'past'
+        ? 'respond.past'
+        : 'respond.invalid';
+---
+<Base title={t(locale, 'respond.title')} locale={locale} noindex>
+  <section class="container-narrow py-16 text-center">
+    {
+      state === 'show' && summary ? (
+        <>
+          <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'respond.title')}</h1>
+          <p class="mt-4 bg-surface-raised border border-border rounded-lg p-4 font-medium">
+            {t(locale, 'respond.summary', {
+              position: summary.position_name,
+              service: summary.service_name,
+              date: summary.plan_date,
+            })}
+          </p>
+          <form method="post" class="mt-6 space-y-4">
+            <button
+              name="action"
+              value="accept"
+              class="w-full rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
+            >
+              {t(locale, 'respond.accept')}
+            </button>
+            <label class="block text-left">
+              <span class="block text-sm font-semibold">{t(locale, 'respond.reasonLabel')}</span>
+              <textarea
+                name="reason"
+                rows="2"
+                placeholder={t(locale, 'respond.reasonPlaceholder')}
+                class="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2"
+              />
+            </label>
+            <button
+              name="action"
+              value="decline"
+              class="w-full rounded-full border border-border font-semibold px-6 py-3 hover:bg-surface-raised"
+            >
+              {t(locale, 'respond.decline')}
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          <h1 class="font-display text-heading-sm font-semibold">{t(locale, message)}</h1>
+          {(state === 'past' || state === 'invalid') && (
+            <a
+              href={`/${locale}/signin`}
+              class="mt-6 inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
+            >
+              {t(locale, 'respond.retry')}
+            </a>
+          )}
+        </>
+      )
+    }
+  </section>
+</Base>

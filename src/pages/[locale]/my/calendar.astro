@@ -1,0 +1,114 @@
+---
+// Personal serving calendar (authed via route policy): a server-rendered month
+// grid (?month=YYYY-MM navigation) with assignment dots + blockout shading, and
+// the iCal subscribe box. Ported from the reference stack's src/pages/my/calendar.astro,
+// except the calendar token is an explicit Generate/Regenerate action (32 hex
+// chars) instead of create-on-view — regenerating invalidates the old URL.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import MonthCalendar from '../../../components/MonthCalendar.astro';
+import { buildCalendarMarks } from '../../../lib/calendar';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listBlockouts, listPersonAssignments } from '../../../lib/myDb';
+import { generateCalendarToken, getCalendarToken } from '../../../lib/ical';
+import { formatMonth, monthRange, todayInTz } from '../../../lib/dates';
+import { btn, btnSecondary, tin } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'token') {
+    // Generate or rotate the person's OWN feed token (session id, never posted).
+    await generateCalendarToken(db, user.id);
+  }
+  const month = String(fd.get('month') ?? '');
+  const suffix = /^\d{4}-\d{2}$/.test(month) ? `?month=${month}` : '';
+  return Astro.redirect(localePath(locale, `/my/calendar${suffix}`), 303);
+}
+
+const today = todayInTz();
+const monthParam = Astro.url.searchParams.get('month') ?? '';
+const [year, month] = /^\d{4}-\d{2}$/.test(monthParam)
+  ? [Number(monthParam.slice(0, 4)), Number(monthParam.slice(5, 7))]
+  : [Number(today.slice(0, 4)), Number(today.slice(5, 7))];
+if (month < 1 || month > 12) return Astro.redirect(localePath(locale, '/my/calendar'), 303);
+
+const ym = `${year}-${String(month).padStart(2, '0')}`;
+const { start: monthStart, end: monthEnd } = monthRange(ym);
+
+const [assignments, blockouts, calToken] = await Promise.all([
+  listPersonAssignments(db, user.id, monthStart, locale).then((rows) => rows.filter((a) => a.plan_date <= monthEnd)),
+  listBlockouts(db, user.id, monthStart).then((rows) => rows.filter((b) => b.start_date <= monthEnd)),
+  getCalendarToken(db, user.id),
+]);
+const marks = buildCalendarMarks(assignments, blockouts, ym);
+
+const prev = month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
+const next = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+
+// The feed URL is NOT locale-prefixed (public token route); webcal:// makes a
+// click subscribe in Apple/Google Calendar, the https URL is for copy-paste.
+const icsPath = calToken ? `/cal/${calToken}.ics` : null;
+const webcalUrl = icsPath ? `webcal://${Astro.url.host}${icsPath}` : null;
+const httpsUrl = icsPath ? new URL(icsPath, Astro.url.origin).href : null;
+---
+
+<Base title={t(locale, 'my.calendar')} locale={locale} noindex>
+  <div class="container-content max-w-3xl py-12">
+    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <div class="mt-2 flex items-center gap-4">
+      <h1 class="font-display text-heading-md font-bold">{formatMonth(ym, locale)}</h1>
+      <div class="ml-auto flex gap-2 text-sm">
+        <a href={localePath(locale, `/my/calendar?month=${prev}`)} class={btnSecondary}>{t(locale, 'my.cal.prev')}</a>
+        <a href={localePath(locale, `/my/calendar?month=${next}`)} class={btnSecondary}>{t(locale, 'my.cal.next')}</a>
+      </div>
+    </div>
+
+    <div class="mt-6">
+      <MonthCalendar locale={locale} year={year} month={month} marks={marks} today={today} />
+    </div>
+
+    <div class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+      <p class="font-display font-semibold">{t(locale, 'my.cal.subscribeTitle')}</p>
+      <p class="mt-1 text-sm text-ink-muted">{t(locale, 'my.cal.subscribeIntro')}</p>
+      {
+        webcalUrl && httpsUrl ? (
+          <>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <a href={webcalUrl} class={btn}>
+                {t(locale, 'my.cal.subscribe')}
+              </a>
+              <input
+                readonly
+                value={httpsUrl}
+                onclick="this.select()"
+                aria-label={t(locale, 'my.cal.subscribeTitle')}
+                class={`${tin} min-w-52 flex-1 text-xs text-ink-muted`}
+              />
+            </div>
+            <form method="post" class="mt-3">
+              <input type="hidden" name="_action" value="token" />
+              <input type="hidden" name="month" value={ym} />
+              <button type="submit" class={btnSecondary}>{t(locale, 'my.cal.regenerate')}</button>
+            </form>
+            <p class="mt-2 text-xs text-ink-subtle">{t(locale, 'my.cal.regenerateHint')}</p>
+          </>
+        ) : (
+          <form method="post" class="mt-3">
+            <input type="hidden" name="_action" value="token" />
+            <input type="hidden" name="month" value={ym} />
+            <button type="submit" class={btn}>{t(locale, 'my.cal.generate')}</button>
+          </form>
+        )
+      }
+    </div>
+  </div>
+</Base>

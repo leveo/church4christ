@@ -1,0 +1,152 @@
+---
+// A single Sunday bulletin: order of worship, serving roster, memory verse,
+// announcements, offering/attendance, and flowers. Every JSON column is parsed
+// defensively (parseJsonArray) so malformed content renders as an empty section
+// instead of throwing. Section blocks only appear when they have content, so an
+// empty or minimal bulletin still reads cleanly.
+import { parseJsonArray } from '../lib/json';
+import { formatDate } from '../lib/dates';
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { BulletinRow, BulletinAnnouncementRow, RosterGroup } from '../lib/publicDb';
+
+interface ProgramRow { item: string; content: string; person: string }
+interface OfferingRow { label: string; amount: string | number }
+interface AttendanceRow { label: string; count: string | number }
+
+interface Props {
+  bulletin: BulletinRow;
+  announcements: BulletinAnnouncementRow[];
+  roster: RosterGroup[];
+  locale: Locale;
+}
+const { bulletin, announcements, roster, locale } = Astro.props;
+
+const program = parseJsonArray<ProgramRow>(bulletin.program_json);
+const offering = parseJsonArray<OfferingRow>(bulletin.offering_json);
+const attendance = parseJsonArray<AttendanceRow>(bulletin.attendance_json);
+const nameSep = locale === 'zh' ? '、' : ', ';
+
+const headingClass = 'mb-4 border-l-4 border-accent pl-3 font-display text-heading-sm font-bold';
+---
+
+<article class="space-y-10">
+  <header>
+    <p class="text-sm font-semibold uppercase tracking-caps text-accent">{bulletin.serviceTypeName}</p>
+    <h2 class="mt-1 font-display text-heading-md font-bold">{formatDate(bulletin.bulletin_date, locale)}</h2>
+    {bulletin.service_time_label && <p class="mt-1 text-ink-muted">{bulletin.service_time_label}</p>}
+  </header>
+
+  {
+    program.length > 0 && (
+      <section>
+        <h3 class={headingClass}>{t(locale, 'bulletin.program')}</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-sm">
+            <tbody>
+              {program.map((row) => (
+                <tr class="border-b border-border">
+                  <th class="w-24 py-2 pr-4 text-left align-top font-semibold sm:w-32">{row.item}</th>
+                  <td class="py-2 pr-4 align-top">{row.content}</td>
+                  <td class="py-2 text-right align-top text-ink-muted sm:w-40">{row.person}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    roster.length > 0 && (
+      <section>
+        <h3 class={headingClass}>{t(locale, 'bulletin.roster')}</h3>
+        <dl class="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+          {roster.map((r) => (
+            <div class="flex justify-between gap-4 border-b border-border py-1.5">
+              <dt class="font-semibold text-ink-muted">{r.position}</dt>
+              <dd class="text-right">{r.people.join(nameSep)}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    )
+  }
+
+  {
+    bulletin.memory_verse && (
+      <section class="rounded-lg border border-border bg-primary-soft p-6 text-on-primary-soft">
+        <h3 class="mb-2 font-display font-bold">{t(locale, 'bulletin.memoryVerse')}</h3>
+        <p>{bulletin.memory_verse}</p>
+      </section>
+    )
+  }
+
+  {
+    announcements.length > 0 && (
+      <section>
+        <h3 class={headingClass}>{t(locale, 'bulletin.announcements')}</h3>
+        <ol class="list-decimal space-y-3 pl-6 text-sm">
+          {announcements.map((a) => (
+            <li>
+              {a.title && <span class="font-semibold">{a.title} — </span>}
+              {a.body}
+              {a.link_url && (
+                <a href={a.link_url} rel="noopener" class="ml-1 font-semibold text-accent underline hover:text-accent-hover">
+                  {a.link_label ?? t(locale, 'bulletin.link')}
+                </a>
+              )}
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
+  {
+    (offering.length > 0 || attendance.length > 0) && (
+      <section class="grid gap-6 text-sm sm:grid-cols-2">
+        {offering.length > 0 && (
+          <div>
+            <h3 class="mb-2 font-display font-bold">{t(locale, 'bulletin.offering')}</h3>
+            <table class="w-full border-collapse">
+              <tbody>
+                {offering.map((o) => (
+                  <tr class="border-b border-border">
+                    <th class="py-1.5 text-left font-semibold text-ink-muted">{o.label}</th>
+                    <td class="py-1.5 text-right">{o.amount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {attendance.length > 0 && (
+          <div>
+            <h3 class="mb-2 font-display font-bold">{t(locale, 'bulletin.attendance')}</h3>
+            <table class="w-full border-collapse">
+              <tbody>
+                {attendance.map((a) => (
+                  <tr class="border-b border-border">
+                    <th class="py-1.5 text-left font-semibold text-ink-muted">{a.label}</th>
+                    <td class="py-1.5 text-right">{a.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  {
+    bulletin.flowers && (
+      <p class="text-sm text-ink-muted">
+        <span class="sr-only">{t(locale, 'bulletin.flowers')}: </span>
+        <span aria-hidden="true">🌸</span> {bulletin.flowers}
+      </p>
+    )
+  }
+</article>

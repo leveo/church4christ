@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 420" font-family="system-ui, sans-serif" role="img" aria-label="Pasting a YouTube link creates a sermon record that appears in the archive by year and series">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="420" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">Paste a YouTube link, get a sermon archive</text>
+
+  <!-- Top flow -->
+  <rect x="30" y="92" width="180" height="74" rx="8" fill="#C29A5B"/>
+  <text x="120" y="122" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Paste a YouTube link</text>
+  <text x="120" y="144" font-size="13" fill="#232630" text-anchor="middle">/admin/sermons</text>
+  <rect x="270" y="92" width="180" height="74" rx="8" fill="#31487A"/>
+  <text x="360" y="122" font-size="14" fill="#FFFFFF" text-anchor="middle">Site reads the video id</text>
+  <text x="360" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">no embed code needed</text>
+  <rect x="510" y="92" width="290" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="655" y="118" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">sermon record</text>
+  <text x="655" y="140" font-size="13" fill="#565B6B" text-anchor="middle">date · speaker · scripture · series · id</text>
+  <line x1="210" y1="129" x2="268" y2="129" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="129" x2="508" y2="129" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Public archive -->
+  <text x="30" y="228" font-size="15" font-weight="600" fill="#565B6B">Visitors browse it three ways</text>
+  <rect x="30" y="244" width="240" height="76" rx="8" fill="#31487A"/>
+  <text x="150" y="276" font-size="14" fill="#FFFFFF" text-anchor="middle">/sermons — latest first</text>
+  <text x="150" y="298" font-size="13" fill="#DDD9CF" text-anchor="middle">grouped by month</text>
+  <rect x="290" y="244" width="240" height="76" rx="8" fill="#31487A"/>
+  <text x="410" y="276" font-size="14" fill="#FFFFFF" text-anchor="middle">/sermons/[year]</text>
+  <text x="410" y="298" font-size="13" fill="#DDD9CF" text-anchor="middle">one year at a time</text>
+  <rect x="550" y="244" width="250" height="76" rx="8" fill="#31487A"/>
+  <text x="675" y="276" font-size="14" fill="#FFFFFF" text-anchor="middle">By series</text>
+  <text x="675" y="298" font-size="13" fill="#DDD9CF" text-anchor="middle">e.g. Sermon on the Mount</text>
+  <line x1="655" y1="166" x2="655" y2="200" stroke="#565B6B" stroke-width="2"/>
+  <line x1="150" y1="200" x2="675" y2="200" stroke="#565B6B" stroke-width="2"/>
+  <line x1="150" y1="200" x2="150" y2="242" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="410" y1="200" x2="410" y2="242" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="675" y1="200" x2="675" y2="242" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Facade -->
+  <rect x="230" y="356" width="360" height="46" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="410" y="384" font-size="13" fill="#565B6B" text-anchor="middle">Thumbnail only; the video loads when clicked (fast, private)</text>
+</svg>

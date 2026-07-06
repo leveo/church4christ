@@ -1,0 +1,64 @@
+name: CI
+
+# Continuous integration for the open-source demo: install, build, and run the
+# full test suite (unit + type-check + smoke + end-to-end). It never deploys and
+# needs no secrets — anyone can fork this repo and get a green build.
+#
+# Deployment is intentionally NOT automated here. Keep your Cloudflare
+# credentials out of this public repo: deploy your own instance manually with
+# `npm run deploy` (or from a separate private repo). See docs/deploy.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Cloudflare Worker types
+        run: npx wrangler types
+
+      - name: Build design tokens
+        run: npm run tokens
+
+      - name: Check token contrast + no hardcoded values
+        run: npm run tokens:check
+
+      - name: Run tests (node + workers projects)
+        run: npm test
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      # The smoke test drives a real preview server, so its local D1 needs the
+      # schema and the demo data — the same two commands from the quickstart.
+      - name: Apply D1 migrations (local)
+        run: npm run db:migrate:local
+
+      - name: Seed demo data (local)
+        run: npm run db:seed:local
+
+      - name: Smoke test
+        run: bash scripts/smoke.sh
+
+      - name: End-to-end tests (built worker)
+        run: npm run test:e2e

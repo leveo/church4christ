@@ -1,0 +1,55 @@
+---
+// Serving report (admin only): per-person confirmed / upcoming / declines / last
+// served over a ?months= window (default 12), busiest first — a burnout and
+// re-engagement view. CSV export lives at /admin/reports.csv. Ported from
+// the reference stack.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { listServeReport } from '../../../lib/adminOverviewDb';
+import { addDays, formatDate, todayInTz } from '../../../lib/dates';
+import { th, td } from '../../../lib/adminUi';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const months = Math.min(60, Math.max(1, Number(Astro.url.searchParams.get('months')) || 12));
+const today = todayInTz();
+const rows = await listServeReport(db, addDays(today, -months * 30), today);
+---
+<Admin title={t(lang, 'admin.reports.title')}>
+  <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.reports.back')}</a>
+  <div class="mt-2 flex flex-wrap items-center gap-3">
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.reports.title')}</h1>
+    <a href={`/admin/reports.csv?months=${months}`} class="ml-auto rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-on-primary hover:bg-primary-hover">{t(lang, 'admin.reports.exportCsv')}</a>
+  </div>
+  <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reports.window', { months })}</p>
+
+  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full text-sm border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reports.person')}</th>
+          <th class={`${th} text-right`}>{t(lang, 'admin.reports.confirmed')}</th>
+          <th class={`${th} text-right`}>{t(lang, 'admin.reports.upcoming')}</th>
+          <th class={`${th} text-right`}>{t(lang, 'admin.reports.declines')}</th>
+          <th class={th}>{t(lang, 'admin.reports.lastServed')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr class="border-t border-border">
+            <td class={td}><a href={`/${lang}/profile/${r.person_id}`} class="font-medium text-primary hover:underline">{r.name}</a></td>
+            <td class={`${td} text-right tabular-nums`}>{r.confirmed}</td>
+            <td class={`${td} text-right tabular-nums`}>{r.upcoming}</td>
+            <td class={`${td} text-right tabular-nums text-ink-subtle`}>{r.declines}</td>
+            <td class={`${td} text-ink-muted tabular-nums`}>{r.last_served ? formatDate(r.last_served, lang) : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    {rows.length === 0 && <p class="px-4 py-6 text-center text-ink-subtle">{t(lang, 'admin.reports.none')}</p>}
+  </div>
+</Admin>

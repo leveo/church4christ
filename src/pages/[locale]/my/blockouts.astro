@@ -1,0 +1,142 @@
+---
+// Blockout dates (authed via route policy): list + add form with a date range,
+// an optional time range (half-filled pair rejected server-side with an error
+// key), and optional weekly/biweekly recurrence (2..26 occurrences materialized
+// sharing a recurrence_group), plus delete-single and delete-series. Ported
+// from the reference stack's src/pages/my/blockouts.astro; parsing lives in
+// validate.parseBlockoutForm and the writes in myDb so both are unit-tested.
+// Every mutation is scoped to the SESSION user's person_id.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { addBlockout, deleteBlockout, deleteBlockoutSeries, listBlockouts } from '../../../lib/myDb';
+import { parseBlockoutForm } from '../../../lib/validate';
+import { todayInTz } from '../../../lib/dates';
+import { btn, lab, noticeErr, tin } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const idOf = (v: FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+let errorKeys: string[] = [];
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+
+  if (action === 'add') {
+    const parsed = parseBlockoutForm(fd);
+    if (parsed.ok) {
+      await addBlockout(db, user.id, parsed.data);
+      return Astro.redirect(localePath(locale, '/my/blockouts'), 303);
+    }
+    errorKeys = [...new Set(Object.values(parsed.errors))];
+  } else if (action === 'delete') {
+    const id = idOf(fd.get('id'));
+    if (id) await deleteBlockout(db, user.id, id);
+    return Astro.redirect(localePath(locale, '/my/blockouts'), 303);
+  } else if (action === 'delete_series') {
+    const group = String(fd.get('group') ?? '');
+    if (group) await deleteBlockoutSeries(db, user.id, group);
+    return Astro.redirect(localePath(locale, '/my/blockouts'), 303);
+  }
+}
+
+const blockouts = await listBlockouts(db, user.id, todayInTz());
+---
+
+<Base title={t(locale, 'my.blockouts')} locale={locale} noindex>
+  <div class="container-content max-w-3xl py-12">
+    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'my.blockouts')}</h1>
+
+    {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="mb-3 font-display font-semibold">{t(locale, 'my.addBlockout')}</h2>
+      <form method="post" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="_action" value="add" />
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.from')}</span>
+          <input type="date" name="start_date" required class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.to')}</span>
+          <input type="date" name="end_date" class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.timeFrom')} ({t(locale, 'my.optional')})</span>
+          <input type="time" name="start_time" class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.timeTo')} ({t(locale, 'my.optional')})</span>
+          <input type="time" name="end_time" class={tin} />
+        </label>
+        <label class="block min-w-32 flex-1">
+          <span class={lab}>{t(locale, 'my.reason')} ({t(locale, 'my.optional')})</span>
+          <input name="reason" class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.repeat')}</span>
+          <select name="repeat" class={tin}>
+            <option value="none">{t(locale, 'my.repeatNone')}</option>
+            <option value="weekly">{t(locale, 'my.repeatWeekly')}</option>
+            <option value="biweekly">{t(locale, 'my.repeatBiweekly')}</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'my.repeatCount')}</span>
+          <input type="number" name="count" min="2" max="26" value="4" class={`${tin} w-20`} />
+        </label>
+        <button type="submit" class={btn}>{t(locale, 'my.add')}</button>
+      </form>
+      <p class="mt-2 text-xs text-ink-subtle">{t(locale, 'my.blockoutHint')}</p>
+    </section>
+
+    <ul class="mt-6 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+      {
+        blockouts.map((b) => (
+          <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+            <span class="font-semibold tabular-nums">
+              {b.start_date}
+              {b.end_date !== b.start_date && ` → ${b.end_date}`}
+              {b.start_time && b.end_time && ` · ${b.start_time}–${b.end_time}`}
+            </span>
+            {b.reason && <span class="text-ink-muted">{b.reason}</span>}
+            {b.recurrence_group && (
+              <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                ↻ {t(locale, 'my.repeatBadge')}
+              </span>
+            )}
+            <span class="ml-auto flex items-center gap-3">
+              <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'my.confirmDelete'))})`}>
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={b.id} />
+                <button type="submit" class="text-xs text-danger hover:underline">
+                  {t(locale, 'my.delete')}
+                </button>
+              </form>
+              {b.recurrence_group && (
+                <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'my.confirmDelete'))})`}>
+                  <input type="hidden" name="_action" value="delete_series" />
+                  <input type="hidden" name="group" value={b.recurrence_group} />
+                  <button type="submit" class="text-xs text-danger hover:underline">
+                    {t(locale, 'my.deleteSeries')}
+                  </button>
+                </form>
+              )}
+            </span>
+          </li>
+        ))
+      }
+      {blockouts.length === 0 && <li class="px-4 py-3 text-sm text-ink-muted">{t(locale, 'my.none')}</li>}
+    </ul>
+  </div>
+</Base>

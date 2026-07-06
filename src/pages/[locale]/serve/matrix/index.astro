@@ -1,0 +1,43 @@
+---
+// Matrix service-type picker (team class via route policy). With exactly one
+// service type there is nothing to pick — redirect straight to its grid.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { listServiceTypes } from '../../../../lib/teamDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const db = (env as { DB: D1Database }).DB;
+
+const types = await listServiceTypes(db, locale);
+if (types.length === 1) return Astro.redirect(localePath(locale, `/serve/matrix/${types[0].id}`), 303);
+---
+
+<Base title={t(locale, 'serve.matrix.title')} locale={locale} noindex>
+  <div class="container-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.matrix.title')}</h1>
+    <p class="mt-2 text-ink-muted">{t(locale, 'serve.matrix.pick')}</p>
+    <div class="mt-6 grid max-w-content gap-4 sm:grid-cols-2">
+      {
+        types.map((st) => (
+          <a
+            href={localePath(locale, `/serve/matrix/${st.id}`)}
+            class="rounded-lg border border-border bg-surface-raised p-6 font-semibold hover:shadow-md"
+          >
+            {st.name}
+            {st.start_time && st.end_time && (
+              <span class="mt-1 block text-sm font-normal text-ink-muted tabular-nums">
+                {st.start_time}–{st.end_time}
+              </span>
+            )}
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</Base>

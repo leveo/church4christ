@@ -1,0 +1,278 @@
+/* Church4Christ base stylesheet — design-token driven.
+ * No literal colors/fonts here: everything flows from tokens.generated.css
+ * (built by scripts/build-tokens.mjs, enforced by scripts/check-tokens.mjs). */
+@import "tailwindcss";
+@import "./tokens.generated.css";
+
+/* Map runtime theme vars into Tailwind v4 theme namespaces so utilities like
+ * bg-primary, text-ink, text-on-primary, bg-surface-raised, border-border,
+ * rounded-md, shadow-md, font-display resolve per active theme/mode.
+ * `inline` makes utilities reference var(--*) at use-site instead of baking
+ * a single value in, which is what makes runtime theme switching work. */
+@theme inline {
+  /* Surfaces + ink */
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-sunken: var(--color-surface-sunken);
+  --color-surface-inverse: var(--color-surface-inverse);
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-ink-subtle: var(--color-ink-subtle);
+  --color-ink-inverse: var(--color-ink-inverse);
+
+  /* Brand */
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-active: var(--color-primary-active);
+  --color-on-primary: var(--color-on-primary);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-on-primary-soft: var(--color-on-primary-soft);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-on-accent: var(--color-on-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-on-accent-soft: var(--color-on-accent-soft);
+
+  /* Status */
+  --color-success: var(--color-success);
+  --color-on-success: var(--color-on-success);
+  --color-success-soft: var(--color-success-soft);
+  --color-warn: var(--color-warn);
+  --color-on-warn: var(--color-on-warn);
+  --color-warn-soft: var(--color-warn-soft);
+  --color-danger: var(--color-danger);
+  --color-on-danger: var(--color-on-danger);
+  --color-danger-soft: var(--color-danger-soft);
+  --color-info: var(--color-info);
+  --color-on-info: var(--color-on-info);
+  --color-info-soft: var(--color-info-soft);
+
+  /* Chrome */
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-ring: var(--color-ring);
+  --color-header-bg: var(--color-header-bg);
+  --color-header-ink: var(--color-header-ink);
+  --color-footer-bg: var(--color-footer-bg);
+  --color-footer-ink: var(--color-footer-ink);
+  --color-scrim: var(--color-scrim);
+
+  /* Fonts */
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  /* Radius + shadows (theme-owned) */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-full: var(--radius-full);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* Type scale (foundation) -> text-* utilities */
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-heading-sm: var(--text-heading-sm);
+  --text-heading-md: var(--text-heading-md);
+  --text-display-lg: var(--text-display-lg);
+  --text-display-xl: var(--text-display-xl);
+  --text-display-2xl: var(--text-display-2xl);
+
+  /* Leading + tracking -> leading-* / tracking-* utilities */
+  --leading-tight: var(--leading-tight);
+  --leading-snug: var(--leading-snug);
+  --leading-normal: var(--leading-normal);
+  --leading-relaxed: var(--leading-relaxed);
+  --leading-cjk: var(--leading-cjk);
+  --tracking-display: var(--tracking-display);
+  --tracking-caps: var(--tracking-caps);
+
+  /* Container widths -> max-w-narrow/content/wide */
+  --container-narrow: var(--container-narrow);
+  --container-content: var(--container-content);
+  --container-wide: var(--container-wide);
+
+  /* Easing -> ease-out / ease-in-out utilities */
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+}
+
+@layer base {
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    line-height: var(--leading-normal);
+  }
+
+  /* CJK text needs more breathing room than Latin. */
+  body:lang(zh) {
+    line-height: var(--leading-cjk);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Keyboard-accessible skip navigation; hidden until focused. */
+  .skip-link {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: var(--z-toast);
+    padding: 0.5rem 1rem;
+    background-color: var(--color-primary);
+    color: var(--color-on-primary);
+    border-radius: var(--radius-sm);
+    transform: translateY(-150%);
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  .skip-link:focus-visible {
+    transform: translateY(0);
+  }
+
+  .container-narrow,
+  .container-content,
+  .container-wide {
+    margin-inline: auto;
+    padding-inline: 1rem;
+    width: 100%;
+  }
+
+  .container-narrow {
+    max-width: var(--container-narrow);
+  }
+
+  .container-content {
+    max-width: var(--container-content);
+  }
+
+  .container-wide {
+    max-width: var(--container-wide);
+  }
+
+  /* PROSE MECHANISM (documented single choice): rendered markdown bodies emit
+   * raw h2/p/ul/blockquote/… elements, so their typography is applied via a
+   * `.prose` container class here — descendant selectors reach the markdown
+   * output cleanly, which a wrapper component could not. Every content page
+   * wraps its <slot/> in <article class="prose">. All values are token-driven
+   * (colors/fonts via var(--*); spacing in rem is allowed by tokens:check). */
+  .prose {
+    color: var(--color-ink);
+    line-height: var(--leading-relaxed);
+    max-width: var(--container-narrow);
+  }
+  /* CJK prose needs the roomier leading — without this, .prose's relaxed
+   * line-height would override the body:lang(zh) CJK rule above. */
+  .prose:lang(zh),
+  :lang(zh) .prose {
+    line-height: var(--leading-cjk);
+  }
+  .prose > :first-child {
+    margin-top: 0;
+  }
+  .prose h2 {
+    font-family: var(--font-display);
+    font-size: var(--text-heading-md);
+    font-weight: 700;
+    line-height: var(--leading-snug);
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .prose h3 {
+    font-family: var(--font-display);
+    font-size: var(--text-heading-sm);
+    font-weight: 600;
+    line-height: var(--leading-snug);
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose h4 {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose p {
+    margin-block: 1rem;
+  }
+  .prose ul,
+  .prose ol {
+    margin-block: 1rem;
+    padding-inline-start: 1.5rem;
+  }
+  .prose ul {
+    list-style: disc;
+  }
+  .prose ol {
+    list-style: decimal;
+  }
+  .prose li {
+    margin-block: 0.375rem;
+  }
+  .prose li::marker {
+    color: var(--color-ink-subtle);
+  }
+  .prose a {
+    color: var(--color-ink);
+    text-decoration-line: underline;
+    text-decoration-color: var(--color-accent);
+    text-underline-offset: 2px;
+  }
+  .prose a:hover {
+    color: var(--color-accent);
+  }
+  .prose strong {
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .prose em {
+    font-style: italic;
+  }
+  .prose blockquote {
+    border-inline-start: 3px solid var(--color-accent);
+    background-color: var(--color-surface-sunken);
+    color: var(--color-ink-muted);
+    font-style: italic;
+    padding: 0.75rem 1.25rem;
+    margin-block: 1.5rem;
+    border-radius: var(--radius-sm);
+  }
+  .prose blockquote p {
+    margin-block: 0.25rem;
+  }
+  .prose hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    margin-block: 2.5rem;
+  }
+  .prose code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background-color: var(--color-surface-sunken);
+    padding: 0.15em 0.4em;
+    border-radius: var(--radius-sm);
+  }
+}

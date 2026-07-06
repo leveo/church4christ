@@ -1,0 +1,62 @@
+---
+// Team directory: staff grouped pastoral → elders → staff, each sorted by
+// `order`, rendered as StaffCards with the initials-avatar fallback.
+import Base from '../../../../layouts/Base.astro';
+import StaffCard from '../../../../components/StaffCard.astro';
+import { parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { listLocalized } from '../../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const members = await listLocalized('staff', locale);
+
+const GROUPS = ['pastoral', 'elders', 'staff'] as const;
+const groups = GROUPS.map((group) => ({
+  group,
+  label: t(locale, `staff.group.${group}`),
+  members: members
+    .filter((m) => m.entry.data.group === group)
+    .sort((a, b) => a.entry.data.order - b.entry.data.order),
+})).filter((g) => g.members.length > 0);
+---
+
+<Base title={t(locale, 'staff.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'staff.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'staff.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      groups.length === 0 ? (
+        <p class="text-ink-muted">{t(locale, 'staff.empty')}</p>
+      ) : (
+        <div class="flex flex-col gap-10">
+          {groups.map((g) => (
+            <section>
+              <h2 class="font-display text-heading-sm font-semibold">{g.label}</h2>
+              <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {g.members.map((m) => (
+                  <StaffCard
+                    name={m.entry.data.name}
+                    role={m.entry.data.role}
+                    avatar={m.entry.data.avatar}
+                    slug={m.slug}
+                    locale={locale}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )
+    }
+  </div>
+</Base>

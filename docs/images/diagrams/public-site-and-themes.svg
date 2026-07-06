@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 470" font-family="system-ui, sans-serif" role="img" aria-label="How a public page request is routed, and how the stored theme restyles the whole site">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="470" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">The public site and how a theme is applied</text>
+
+  <!-- Row 1: request flow -->
+  <text x="30" y="82" font-size="15" font-weight="600" fill="#565B6B">A visitor opens a page</text>
+  <rect x="30" y="96" width="150" height="66" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="105" y="130" font-size="15" fill="#232630" text-anchor="middle">Visitor</text>
+  <rect x="230" y="96" width="170" height="66" rx="8" fill="#31487A"/>
+  <text x="315" y="124" font-size="15" fill="#FFFFFF" text-anchor="middle">"/" picks a language</text>
+  <text x="315" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">the browser's language</text>
+  <rect x="450" y="96" width="160" height="66" rx="8" fill="#31487A"/>
+  <text x="530" y="124" font-size="15" fill="#FFFFFF" text-anchor="middle">/en/… or /zh/…</text>
+  <text x="530" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">one shared layout</text>
+  <rect x="660" y="96" width="140" height="66" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="730" y="124" font-size="14" fill="#232630" text-anchor="middle">Home · Sermons</text>
+  <text x="730" y="144" font-size="14" fill="#232630" text-anchor="middle">Bulletin · Events</text>
+  <line x1="180" y1="129" x2="228" y2="129" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="129" x2="448" y2="129" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="610" y1="129" x2="658" y2="129" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row 2: theme flow -->
+  <text x="30" y="238" font-size="15" font-weight="600" fill="#565B6B">The look of every page comes from one saved setting</text>
+  <rect x="30" y="256" width="170" height="72" rx="8" fill="#C29A5B"/>
+  <text x="115" y="286" font-size="14" fill="#232630" text-anchor="middle">Admin picks a theme</text>
+  <text x="115" y="306" font-size="13" fill="#232630" text-anchor="middle">/admin/settings</text>
+  <rect x="250" y="256" width="170" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="335" y="286" font-size="14" fill="#232630" text-anchor="middle">Saved setting</text>
+  <text x="335" y="306" font-size="13" fill="#565B6B" text-anchor="middle">theme name + mode</text>
+  <rect x="470" y="256" width="150" height="72" rx="8" fill="#31487A"/>
+  <text x="545" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">Site reads it</text>
+  <text x="545" y="306" font-size="13" fill="#DDD9CF" text-anchor="middle">on the next page load</text>
+  <rect x="660" y="256" width="140" height="72" rx="8" fill="#31487A"/>
+  <text x="730" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">Every page wears</text>
+  <text x="730" y="306" font-size="14" fill="#FFFFFF" text-anchor="middle">the new theme</text>
+  <line x1="200" y1="292" x2="248" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="420" y1="292" x2="468" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="620" y1="292" x2="658" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- tokens feed -->
+  <rect x="250" y="378" width="370" height="66" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="435" y="406" font-size="14" fill="#232630" text-anchor="middle">tokens.generated.css — 3 themes x light/dark</text>
+  <text x="435" y="426" font-size="13" fill="#565B6B" text-anchor="middle">sanctuary · harvest · midnight (all shipped, no rebuild)</text>
+  <line x1="730" y1="328" x2="730" y2="411" stroke="#565B6B" stroke-width="2"/>
+  <line x1="730" y1="411" x2="622" y2="411" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="748" y="372" font-size="12" fill="#565B6B" text-anchor="middle">colors from</text>
+</svg>

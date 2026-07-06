@@ -1,0 +1,66 @@
+---
+// Fellowships listing: cards showing name, meeting time, location and leaders,
+// ordered by the `order` field. Localized-or-en-fallback per entry.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listLocalized } from '../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const fellowships = (await listLocalized('fellowships', locale)).sort(
+  (a, b) => a.entry.data.order - b.entry.data.order,
+);
+
+// Name-list separator is locale-specific: zh uses the enumeration comma 、.
+const sep = locale === 'zh' ? '、' : ', ';
+---
+
+<Base title={t(locale, 'fellowships.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'fellowships.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'fellowships.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      fellowships.length === 0 ? (
+        <p class="text-ink-muted">{t(locale, 'fellowships.empty')}</p>
+      ) : (
+        <div class="grid gap-6 sm:grid-cols-2">
+          {fellowships.map(({ entry, slug }) => (
+            <a
+              href={localePath(locale, `/fellowships/${slug}`)}
+              class="block bg-surface-raised border border-border rounded-lg p-6 hover:shadow-md hover:border-border-strong transition-shadow"
+            >
+              <h2 class="font-display text-heading-sm font-semibold">{entry.data.name}</h2>
+              {entry.data.audience && <p class="mt-1 text-sm text-ink-subtle">{entry.data.audience}</p>}
+              <dl class="mt-4 text-sm flex flex-col gap-1">
+                <div class="flex gap-2">
+                  <dt class="font-semibold shrink-0">{t(locale, 'fellowships.meets')}:</dt>
+                  <dd class="text-ink-muted">{entry.data.meetingTime}</dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="font-semibold shrink-0">{t(locale, 'fellowships.location')}:</dt>
+                  <dd class="text-ink-muted">{entry.data.location}</dd>
+                </div>
+                {entry.data.leaders.length > 0 && (
+                  <div class="flex gap-2">
+                    <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
+                    <dd class="text-ink-muted">{entry.data.leaders.map((l) => l.name).join(sep)}</dd>
+                  </div>
+                )}
+              </dl>
+            </a>
+          ))}
+        </div>
+      )
+    }
+  </div>
+</Base>

@@ -1,0 +1,47 @@
+---
+// Events page: every currently-active, in-window event as a card grid. Uses the
+// same windowing query as the home strip but without a limit. Reads fail soft to
+// empty so a database hiccup degrades to the "nothing yet" state.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import EventGrid from '../../../components/EventGrid.astro';
+import { parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { todayInTz } from '../../../lib/dates';
+import { listActiveEvents, type EventCardRow } from '../../../lib/publicDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let events: EventCardRow[] = [];
+try {
+  const db = (env as { DB: D1Database }).DB;
+  events = await listActiveEvents(db, locale, todayInTz());
+} catch (err) {
+  console.error('events index: load failed', err);
+}
+---
+
+<Base title={t(locale, 'events.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'events.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'events.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      events.length > 0 ? (
+        <EventGrid events={events} locale={locale} />
+      ) : (
+        <p class="rounded-md border border-border bg-surface-raised px-4 py-8 text-center text-ink-muted">
+          {t(locale, 'events.empty')}
+        </p>
+      )
+    }
+  </div>
+</Base>

@@ -1,0 +1,25 @@
+{
+  // Test-only Worker config for the vitest pool. Uses local placeholder values
+  // (never the real production database_id from wrangler.jsonc) so the pool spins
+  // up an isolated miniflare D1. migrations_dir is relative to this file.
+  "name": "church4christ-test",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Auth + email libs read these off the Worker env; the pool surfaces jsonc
+  // vars as `env` in workers tests. EMAIL_DEV_LOG keeps sendEmail off the real
+  // provider (there is no send_email binding here) so the devlog path is tested.
+  "vars": {
+    "SESSION_SECRET": "test-secret-at-least-32-characters-long",
+    "EMAIL_DEV_LOG": "1",
+    "APP_ORIGIN": "http://localhost"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "church4christ-db-test",
+      "database_id": "test",
+      "migrations_dir": "../migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "church4christ-media-test" }]
+}

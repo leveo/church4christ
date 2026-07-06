@@ -1,0 +1,24 @@
+---
+// Language switch: keeps the current path, swapping only the locale prefix.
+import { LOCALES, localePath, pathWithoutLocale, type Locale } from '../lib/locales';
+import { t } from '../lib/i18n';
+
+const current = Astro.locals.locale;
+const { rest } = pathWithoutLocale(Astro.url.pathname);
+const labelKey: Record<Locale, string> = { en: 'locale.en', zh: 'locale.zh' };
+---
+
+<nav class="flex items-center gap-1 text-sm" aria-label={t(current, 'common.language')}>
+  {
+    LOCALES.map((loc) => (
+      <a
+        href={localePath(loc, rest)}
+        hreflang={loc === 'zh' ? 'zh-Hans' : 'en'}
+        aria-current={loc === current ? 'true' : undefined}
+        class="px-2 py-1 rounded-md hover:bg-surface-raised aria-[current]:font-semibold aria-[current]:underline"
+      >
+        {t(current, labelKey[loc])}
+      </a>
+    ))
+  }
+</nav>

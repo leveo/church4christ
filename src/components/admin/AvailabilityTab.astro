@@ -1,0 +1,67 @@
+---
+// Availability tab: a team picker and a members × next-4-plans grid marking each
+// cell scheduled / blocked / free. Data comes from planDb.getTeamAvailability.
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import type { AvailabilityData } from '../../lib/planDb';
+import { card, tin, badge, badgeScheduled, badgeActive, badgeInactive } from '../../lib/adminUi';
+
+interface Props {
+  lang: Locale;
+  teams: { id: number; name: string }[];
+  selectedTeamId: number | null;
+  selectedTeamName: string;
+  availability: AvailabilityData;
+  scope: 'admin' | 'leader';
+}
+const { lang, teams, selectedTeamId, selectedTeamName, availability, scope } = Astro.props;
+const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: badgeInactive } as const;
+---
+<div class={card}>
+  <div class="flex items-center gap-3 flex-wrap">
+    <h2 class="font-display text-heading-sm font-bold">{selectedTeamName || t(lang, 'admin.console.availTitle')}</h2>
+    {teams.length > 1 && (
+      <form method="get" class="ml-auto">
+        <input type="hidden" name="tab" value="availability" />
+        {scope === 'leader' && <input type="hidden" name="scope" value="leader" />}
+        <select name="team" onchange="this.form.submit()" class={`${tin} w-auto`}>
+          {teams.map((tm) => <option value={tm.id} selected={tm.id === selectedTeamId}>{tm.name}</option>)}
+        </select>
+      </form>
+    )}
+  </div>
+  <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.console.availNote')}</p>
+
+  {availability.plans.length === 0 || availability.rows.length === 0 ? (
+    <p class="mt-6 text-sm text-ink-muted">{t(lang, teams.length === 0 ? 'admin.console.availNoTeam' : 'admin.console.availNoPlans')}</p>
+  ) : (
+    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+      <table class="w-full border-collapse text-sm min-w-[36rem]">
+        <thead class="bg-surface-sunken">
+          <tr>
+            <th class="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.console.member')}</th>
+            {availability.plans.map((p) => (
+              <th class="px-2 py-2.5 text-center text-xs font-semibold text-ink-subtle">{p.plan_date.slice(5)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {availability.rows.map((row) => (
+            <tr class="border-t border-border">
+              <td class="px-4 py-2.5">
+                <a href={`/${lang}/profile/${row.person_id}`} class="font-medium text-ink hover:text-primary">{row.name}</a>
+              </td>
+              {row.cells.map((c) => (
+                <td class="px-2 py-2.5 text-center">
+                  <span title={c.label} class={`${badge} ${cellCls[c.state]}`}>
+                    {c.state === 'scheduled' ? c.label : c.state === 'blocked' ? t(lang, 'admin.console.availBlocked') : t(lang, 'admin.console.availFree')}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>

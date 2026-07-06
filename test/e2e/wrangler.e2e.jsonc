@@ -1,0 +1,28 @@
+{
+  // e2e config: `main` points at the BUILT Astro SSR worker so SELF.fetch runs
+  // real requests (middleware + routes) against it. Requires `npm run build`
+  // first (test:e2e does that). Bindings mirror the runtime the pages read off
+  // env: an isolated local D1 (never the real database_id), the MEDIA R2 bucket,
+  // and the vars/secrets the worker needs — SESSION_SECRET (session JWTs),
+  // APP_ORIGIN (also the SELF.fetch origin so same-origin POSTs clear CSRF),
+  // EMAIL_DEV_LOG=1 (magic-link mail goes to the console, never a provider).
+  "name": "church4christ-e2e",
+  "main": "../../dist/server/entry.mjs",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "SESSION_SECRET": "e2e-test-secret-at-least-32-characters-long",
+    "APP_ORIGIN": "https://church.example",
+    "EMAIL_DEV_LOG": "1",
+    "EMAIL_FROM": "serve@church.example"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "church4christ-db-e2e",
+      "database_id": "e2e",
+      "migrations_dir": "../../migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "church4christ-media-e2e" }]
+}

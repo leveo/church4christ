@@ -1,0 +1,26 @@
+---
+// Shared section heading used by every home-page section: a small uppercase
+// accent eyebrow above a display-font h2, with an optional muted subtitle.
+// Token utilities only. Defaults to left-aligned; pass align="center" for the
+// centered variant. `id` lets a section anchor its heading for skip targets.
+interface Props {
+  eyebrow?: string;
+  title: string;
+  subtitle?: string;
+  align?: 'left' | 'center';
+  id?: string;
+}
+
+const { eyebrow, title, subtitle, align = 'left', id } = Astro.props;
+const centered = align === 'center';
+---
+
+<div class={centered ? 'text-center' : ''}>
+  {eyebrow && <p class="text-accent uppercase tracking-caps text-sm font-semibold">{eyebrow}</p>}
+  <h2 id={id} class="mt-2 font-display text-display-lg font-bold">{title}</h2>
+  {
+    subtitle && (
+      <p class={`mt-3 text-ink-muted text-lg max-w-narrow ${centered ? 'mx-auto' : ''}`}>{subtitle}</p>
+    )
+  }
+</div>

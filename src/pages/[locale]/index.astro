@@ -1,0 +1,164 @@
+---
+// Real home page: hero, announcement ticker, service-times cards, upcoming
+// events, latest sermon, ministries preview, and the prayer-request form. Every
+// section renders sensibly on an empty DB (graceful "nothing yet" states) and
+// pulls all user-visible strings from the dictionaries. DB reads fail soft to
+// empty so a database hiccup degrades the page instead of 500ing it — the same
+// pattern as give.astro.
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import Hero from '../../components/Hero.astro';
+import Ticker from '../../components/Ticker.astro';
+import SectionTitle from '../../components/SectionTitle.astro';
+import EventGrid from '../../components/EventGrid.astro';
+import SermonCard from '../../components/SermonCard.astro';
+import MinistryCard from '../../components/MinistryCard.astro';
+import PrayerForm from '../../components/PrayerForm.astro';
+import { localePath, parseLocale } from '../../lib/locales';
+import { t } from '../../lib/i18n';
+import { todayInTz } from '../../lib/dates';
+import { listMinistries } from '../../lib/db';
+import { getSiteIdentity } from '../../lib/settings';
+import {
+  listActiveAnnouncements,
+  listActiveEvents,
+  latestPublishedSermon,
+  type AnnouncementRow,
+  type EventCardRow,
+  type LatestSermonRow,
+} from '../../lib/publicDb';
+
+// `[locale]` matches any single path segment, so `/foo` would otherwise render
+// the home page. Reject anything that is not a real locale so it 404s instead.
+// Set the status explicitly so the rewritten response is a real 404 rather than
+// relying on Astro's rewrite carrying the not-found route's status.
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let announcements: AnnouncementRow[] = [];
+let events: EventCardRow[] = [];
+let latestSermon: LatestSermonRow | null = null;
+let ministries: Awaited<ReturnType<typeof listMinistries>> = [];
+let serviceTimes = '';
+let address = '';
+let phone = '';
+try {
+  const db = (env as { DB: D1Database }).DB;
+  const today = todayInTz();
+  const [a, e, s, m, identity] = await Promise.all([
+    listActiveAnnouncements(db, locale, today),
+    listActiveEvents(db, locale, today, 3),
+    latestPublishedSermon(db),
+    listMinistries(db, locale),
+    getSiteIdentity(db, locale),
+  ]);
+  announcements = a;
+  events = e;
+  latestSermon = s;
+  ministries = m;
+  serviceTimes = identity.serviceTimes;
+  address = identity.address;
+  phone = identity.phone;
+} catch (err) {
+  console.error('home: data load failed', err);
+}
+const ministriesPreview = ministries.slice(0, 6);
+
+const rawPrayer = Astro.url.searchParams.get('prayer');
+const prayerStatus = rawPrayer === 'sent' || rawPrayer === 'error' ? rawPrayer : null;
+
+const infoCards = [
+  { icon: '🕘', label: t(locale, 'home.serviceTimesLabel'), value: serviceTimes },
+  { icon: '📍', label: t(locale, 'home.addressLabel'), value: address },
+  { icon: '📞', label: t(locale, 'home.phoneLabel'), value: phone },
+].filter((c) => c.value);
+---
+
+<Base title={t(locale, 'home.welcome')} locale={locale}>
+  <Hero locale={locale} />
+
+  <Ticker announcements={announcements} locale={locale} />
+
+  {
+    infoCards.length > 0 && (
+      <section class="container-content py-16">
+        <SectionTitle
+          eyebrow={t(locale, 'home.visitEyebrow')}
+          title={t(locale, 'home.visitTitle')}
+          align="center"
+        />
+        <div class="mt-10 grid gap-6 sm:grid-cols-3">
+          {infoCards.map((c) => (
+            <div class="rounded-lg border border-border bg-surface-raised p-6 text-center">
+              <span class="text-3xl" aria-hidden="true">
+                {c.icon}
+              </span>
+              <p class="mt-3 text-sm font-semibold uppercase tracking-caps text-accent">{c.label}</p>
+              <p class="mt-2 font-display text-lg">{c.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  <section class="bg-surface-sunken py-16 md:py-20">
+    <div class="container-content">
+      <SectionTitle eyebrow={t(locale, 'home.eventsEyebrow')} title={t(locale, 'home.upcomingEvents')} />
+      <div class="mt-10">
+        {
+          events.length > 0 ? (
+            <EventGrid events={events} locale={locale} />
+          ) : (
+            <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
+              {t(locale, 'home.eventsEmpty')}
+            </p>
+          )
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="container-content py-16">
+    <SectionTitle eyebrow={t(locale, 'home.sermonEyebrow')} title={t(locale, 'home.latestSermon')} />
+    <div class="mt-10 max-w-content">
+      {
+        latestSermon ? (
+          <SermonCard sermon={latestSermon} locale={locale} />
+        ) : (
+          <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
+            {t(locale, 'home.sermonEmpty')}
+          </p>
+        )
+      }
+    </div>
+  </section>
+
+  <section class="bg-surface-sunken py-16">
+    <div class="container-content">
+      <SectionTitle eyebrow={t(locale, 'home.ministriesEyebrow')} title={t(locale, 'home.ministriesTitle')} />
+      {
+        ministriesPreview.length > 0 && (
+          <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {ministriesPreview.map((m) => (
+              <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} />
+            ))}
+          </div>
+        )
+      }
+      <div class="mt-8 text-center">
+        <a
+          href={localePath(locale, '/ministries')}
+          class="text-sm font-semibold text-accent hover:text-accent-hover"
+        >
+          {t(locale, 'home.allMinistries')} →
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <PrayerForm locale={locale} status={prayerStatus} />
+</Base>

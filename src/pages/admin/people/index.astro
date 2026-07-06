@@ -1,0 +1,80 @@
+---
+// People directory (adminOnly — the route policy gates /admin/people). Lists
+// non-deleted people with a GET ?q= search, role/status badges, and links into
+// the per-person editor. The "New person" button opens the create form.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { listPeople } from '../../../lib/adminDb';
+import { badge, badgeRole, badgeActive, badgeInactive, btn, tin, th, td, noticeOk } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const q = Astro.url.searchParams.get('q')?.trim() ?? '';
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+const people = await listPeople(db, { q: q || undefined });
+---
+
+<Admin title={t(lang, 'admin.people.title')}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.people.title')}</h1>
+    <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.deleted')}</p>}
+
+  <form method="get" class="mt-6 flex max-w-md gap-2">
+    <input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={tin} />
+    <button type="submit" class={btn}>{t(lang, 'admin.people.search')}</button>
+  </form>
+
+  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.people.colName')}</th>
+          <th class={th}>{t(lang, 'admin.people.colEmail')}</th>
+          <th class={th}>{t(lang, 'admin.people.colPhone')}</th>
+          <th class={th}>{t(lang, 'admin.people.colRole')}</th>
+          <th class={th}>{t(lang, 'admin.people.colActive')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          people.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.people.empty')}
+              </td>
+            </tr>
+          ) : (
+            people.map((p) => (
+              <tr class="border-t border-border hover:bg-surface-sunken">
+                <td class={td}>
+                  <a href={`/admin/people/${p.id}`} class="font-medium text-primary hover:underline">
+                    {p.display_name}
+                  </a>
+                </td>
+                <td class={td}>{p.email}</td>
+                <td class={td}>{p.phone ?? '—'}</td>
+                <td class={td}>
+                  <span class={`${badge} ${badgeRole[p.role] ?? badgeInactive}`}>{t(lang, `admin.role.${p.role}`)}</span>
+                </td>
+                <td class={td}>
+                  <span class={`${badge} ${p.active ? badgeActive : badgeInactive}`}>
+                    {p.active ? t(lang, 'admin.people.active') : t(lang, 'admin.people.inactive')}
+                  </span>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

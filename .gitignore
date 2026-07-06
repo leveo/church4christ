@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+.dev.vars
+worker-configuration.d.ts
+src/styles/tokens.generated.css
+src/lib/themeMeta.generated.ts
+.DS_Store
+.superpowers/

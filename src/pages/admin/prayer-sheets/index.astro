@@ -1,0 +1,72 @@
+---
+// Prayer sheets list (console class — re-checks editor∪admin). Non-deleted
+// sheets (drafts included), newest first.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { listPrayerSheets } from '../../../lib/adminDb';
+import { badge, btn, th, td, noticeOk, statusBadge } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+const rows = await listPrayerSheets(db);
+const nowSql = new Date().toISOString().slice(0, 19).replace('T', ' ');
+---
+
+<Admin title={t(lang, 'admin.prayerSheets.title')}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.prayerSheets.title')}</h1>
+    <a href="/admin/prayer-sheets/new" class={btn}>{t(lang, 'admin.prayerSheets.new')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+
+  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.prayerSheets.colDate')}</th>
+          <th class={th}>{t(lang, 'admin.prayerSheets.colLocale')}</th>
+          <th class={th}>{t(lang, 'admin.prayerSheets.colStatus')}</th>
+          <th class={th}>{t(lang, 'admin.prayerSheets.colUpdated')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="4">
+                {t(lang, 'admin.prayerSheets.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => {
+              const b = statusBadge(r.status, r.publish_at, nowSql);
+              return (
+                <tr class="border-t border-border hover:bg-surface-sunken">
+                  <td class={td}>
+                    <a href={`/admin/prayer-sheets/${r.id}`} class="font-medium text-primary hover:underline">
+                      {r.sheet_date}
+                    </a>
+                  </td>
+                  <td class={td}>{r.locale ? t(lang, `locale.${r.locale}`) : t(lang, 'admin.prayerSheets.localeNone')}</td>
+                  <td class={td}>
+                    <span class={`${badge} ${b.cls}`}>{t(lang, b.key)}</span>
+                  </td>
+                  <td class={`${td} text-ink-muted`}>{r.updated_at}</td>
+                </tr>
+              );
+            })
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

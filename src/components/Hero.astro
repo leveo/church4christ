@@ -1,0 +1,81 @@
+---
+// Full-width hero band. An original, abstract inline SVG scene (light rays
+// fanning over a gathered congregation, reduced to arches + heads) sits on the
+// brand-primary band, dimmed by a scrim gradient so the heading + CTAs stay
+// legible. All SVG fills are CSS vars (var(--color-*)) at low opacity — no color
+// literals — so the scene re-tints per active theme/mode.
+import { localePath, type Locale } from '../lib/locales';
+import { t } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+// Light-ray beams fanning from a point above the band. Each is a thin triangle
+// from the apex to a slice of the horizon; widths + opacities alternate for a
+// subtle radiant fabric. Pure geometry — colors are applied on the elements.
+const APEX_X = 600;
+const APEX_Y = -140;
+const beams = Array.from({ length: 9 }, (_, i) => {
+  const center = 100 + i * 125;
+  const halfWidth = 24 + (i % 3) * 16;
+  const opacity = i % 2 === 0 ? 0.1 : 0.05;
+  return { points: `${APEX_X},${APEX_Y} ${center - halfWidth},640 ${center + halfWidth},640`, opacity };
+});
+
+// Abstract congregation: a back row of gentle arches + a front row of nearer
+// (larger, more opaque) ones, each topped by a "head" circle.
+const backRow = Array.from({ length: 7 }, (_, i) => 110 + i * 165);
+const frontRow = Array.from({ length: 8 }, (_, i) => 40 + i * 158);
+---
+
+<section class="relative isolate overflow-hidden bg-primary text-on-primary">
+  <svg
+    class="absolute inset-0 h-full w-full"
+    viewBox="0 0 1200 600"
+    preserveAspectRatio="xMidYMid slice"
+    aria-hidden="true"
+    fill="none"
+  >
+    <circle cx={APEX_X} cy="30" r="240" fill="var(--color-accent)" opacity="0.12"></circle>
+    {beams.map((b) => <polygon points={b.points} fill="var(--color-on-primary)" opacity={b.opacity} />)}
+    {
+      backRow.map((x) => (
+        <g fill="var(--color-on-primary)" opacity="0.13">
+          <path d={`M ${x - 55} 600 L ${x - 55} 470 A 55 55 0 0 1 ${x + 55} 470 L ${x + 55} 600 Z`} />
+          <circle cx={x} cy="452" r="26" />
+        </g>
+      ))
+    }
+    {
+      frontRow.map((x) => (
+        <g fill="var(--color-on-primary)" opacity="0.22">
+          <path d={`M ${x - 48} 600 L ${x - 48} 522 A 48 48 0 0 1 ${x + 48} 522 L ${x + 48} 600 Z`} />
+          <circle cx={x} cy="506" r="22" />
+        </g>
+      ))
+    }
+  </svg>
+
+  <div class="absolute inset-0 bg-gradient-to-t from-scrim to-transparent" aria-hidden="true"></div>
+
+  <div class="relative container-content py-24 text-center md:py-32">
+    <h1 class="mx-auto max-w-content font-display text-display-2xl font-bold">{t(locale, 'home.heroTitle')}</h1>
+    <p class="mx-auto mt-5 max-w-narrow text-lg md:text-xl">{t(locale, 'home.heroSubtitle')}</p>
+    <div class="mt-9 flex flex-wrap justify-center gap-3">
+      <a
+        href={localePath(locale, '/visit')}
+        class="rounded-full bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent-hover"
+      >
+        {t(locale, 'nav.visit')}
+      </a>
+      <a
+        href={localePath(locale, '/sermons')}
+        class="rounded-full border border-on-primary/50 px-6 py-3 font-semibold hover:bg-primary-hover"
+      >
+        {t(locale, 'home.heroCtaSermons')}
+      </a>
+    </div>
+  </div>
+</section>

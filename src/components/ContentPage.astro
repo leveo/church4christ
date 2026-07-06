@@ -1,0 +1,61 @@
+---
+// Shared shell for every prose page (evergreen pages, articles, staff bios):
+// a bg-primary-soft title band + optional subtitle slot, an optional "not
+// translated" notice when showing an English fallback, then the prose body.
+// Typography comes from the `.prose` component class in base.css (see that file
+// for the single documented prose mechanism).
+import Base from '../layouts/Base.astro';
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+
+interface Props {
+  title: string;
+  description?: string;
+  locale: Locale;
+  /** false → render the "showing English version" notice. */
+  translated?: boolean;
+  noindex?: boolean;
+}
+
+const { title, description, locale, translated = true, noindex = false } = Astro.props;
+---
+
+<Base title={title} description={description} locale={locale} noindex={noindex}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold break-words">{title}</h1>
+      {
+        Astro.slots.has('subtitle') && (
+          <div class="mt-3 text-lg">
+            <slot name="subtitle" />
+          </div>
+        )
+      }
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      !translated && (
+        <p class="mb-8 rounded-md border border-border bg-info-soft text-info px-4 py-3 text-sm">
+          {t(locale, 'content.notTranslated')}
+        </p>
+      )
+    }
+    {
+      Astro.slots.has('before') && (
+        <div class="mb-8">
+          <slot name="before" />
+        </div>
+      )
+    }
+    <article class="prose"><slot /></article>
+    {
+      Astro.slots.has('after') && (
+        <div class="mt-10">
+          <slot name="after" />
+        </div>
+      )
+    }
+  </div>
+</Base>

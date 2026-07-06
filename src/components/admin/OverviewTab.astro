@@ -1,0 +1,64 @@
+---
+// Overview tab: role-scoped stat cards, a "needs your attention" action list,
+// quick links, and a 7-day automation summary. Ported from the reference stack's
+// OverviewTab, restyled against church-cms tokens.
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import type { StatCard, AttentionItem } from '../../lib/adminOverviewDb';
+import { card } from '../../lib/adminUi';
+
+interface Props {
+  lang: Locale;
+  scope: 'admin' | 'leader';
+  stats: StatCard[];
+  attention: AttentionItem[];
+  sent: number;
+}
+const { lang, scope, stats, attention, sent } = Astro.props;
+---
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  {stats.map((s) => (
+    <div class={card}>
+      <div class="text-display-lg font-bold text-primary">{s.value}</div>
+      <div class="mt-1 text-sm text-ink-muted">{t(lang, `admin.console.stat.${s.key}`)}</div>
+    </div>
+  ))}
+</div>
+
+<div class="mt-6 grid lg:grid-cols-[1.4fr_1fr] gap-5 items-start">
+  <div class={card}>
+    <p class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.console.needsAttention')}</p>
+    {attention.length === 0 ? (
+      <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.console.allClear')}</p>
+    ) : (
+      <div class="mt-2 divide-y divide-border">
+        {attention.map((a) => (
+          <a href={a.href} class="flex items-center gap-3 py-3 text-[0.9375rem] text-ink hover:text-primary">
+            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-sunken">{a.icon}</span>
+            <span class="flex-1">{lang === 'zh' ? a.zh : a.en}</span>
+            <span class="text-ink-subtle">→</span>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
+
+  <div class="flex flex-col gap-4">
+    <div class={card}>
+      <p class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.console.quickActions')}</p>
+      <div class="mt-3 flex flex-col gap-2">
+        <a href="/admin/ministries?tab=new" class="rounded-md bg-primary px-4 py-2 text-center text-sm font-semibold text-on-primary hover:bg-primary-hover">{t(lang, 'admin.console.qaNewMinistry')}</a>
+        <a href={`/${lang}/serve/matrix`} class="rounded-md border border-border px-4 py-2 text-center text-sm font-semibold text-ink hover:bg-surface-sunken">{t(lang, 'admin.console.qaSchedule')}</a>
+        {scope === 'admin' && (
+          <>
+            <a href="/admin/people" class="rounded-md border border-border px-4 py-2 text-center text-sm font-semibold text-ink hover:bg-surface-sunken">{t(lang, 'admin.console.qaPeople')}</a>
+            <a href="/admin/reports" class="rounded-md border border-border px-4 py-2 text-center text-sm font-semibold text-ink hover:bg-surface-sunken">{t(lang, 'admin.console.qaReports')}</a>
+          </>
+        )}
+      </div>
+    </div>
+    <div class="rounded-xl border border-border bg-surface-sunken p-4 text-sm text-ink-muted">
+      {t(lang, 'admin.console.automationSummary', { sent })}
+    </div>
+  </div>
+</div>

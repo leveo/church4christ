@@ -1,0 +1,189 @@
+---
+// Site settings (adminOnly — the route policy covers /admin/settings; this page
+// re-checks isAdmin and 403s anyone else). A grouped form over the site.* / theme.*
+// / locale.* settings: identity (per-locale name/tagline/service times), contact,
+// links, and appearance (theme radio cards with generated swatches, default color
+// mode, default language). Save → parseSettingsForm (15-key allowlist, URL/email/
+// enum validated) → setSettings batch → clearThemeCache() so a theme change takes
+// effect on the very next render → 303 ?saved=1. The Admin shell reads the active
+// theme, so this page (and the whole site) restyles immediately after a save.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { getSettings, setSettings } from '../../../lib/settings';
+import { parseSettingsForm } from '../../../lib/validate';
+import { clearThemeCache } from '../../../lib/theme';
+import { THEME_META } from '../../../lib/themeMeta.generated';
+import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !user.isAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+const KEYS = [
+  'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',
+  'site.service_times.en', 'site.service_times.zh',
+  'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url',
+  'theme.name', 'theme.default_mode', 'locale.default',
+];
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    return Astro.redirect('/admin/settings?err=1', 303);
+  }
+  const parsed = parseSettingsForm(fd);
+  if (parsed.ok) {
+    await setSettings(db, parsed.data);
+    // The theme may have changed — drop the per-isolate cache so the next render
+    // (this redirect's GET) already reflects the new theme.name / default_mode.
+    clearThemeCache();
+    return Astro.redirect('/admin/settings?saved=1', 303);
+  }
+  errors = parsed.errors;
+}
+
+const cur = await getSettings(db, KEYS);
+const saved = Astro.url.searchParams.get('saved') === '1';
+const badRequest = Astro.url.searchParams.get('err') === '1';
+
+// Echo submitted values on a failed save, else the stored settings.
+const g = (key: string): string => (fd ? String(fd.get(key) ?? '') : (cur[key] ?? ''));
+const selectedTheme = g('theme.name') || 'sanctuary';
+const selectedMode = g('theme.default_mode') || 'light';
+const selectedLocale = g('locale.default') || 'en';
+const themeLabel = (name: string) => t(lang, `admin.settings.themeName.${name}`);
+const hasErrors = Object.keys(errors).length > 0;
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={t(lang, 'admin.settings.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.settings.title')}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.settings.saved')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
+  {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl space-y-6">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.settings.identityTitle')}</h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.nameEn')}</span>
+          <input name="site.name.en" value={g('site.name.en')} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.nameZh')}</span>
+          <input name="site.name.zh" value={g('site.name.zh')} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.taglineEn')}</span>
+          <input name="site.tagline.en" value={g('site.tagline.en')} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.taglineZh')}</span>
+          <input name="site.tagline.zh" value={g('site.tagline.zh')} class={tin} />
+        </label>
+        <label class="block sm:col-span-2">
+          <span class={lab}>{t(lang, 'admin.settings.serviceTimesEn')}</span>
+          <input name="site.service_times.en" value={g('site.service_times.en')} class={tin} />
+        </label>
+        <label class="block sm:col-span-2">
+          <span class={lab}>{t(lang, 'admin.settings.serviceTimesZh')}</span>
+          <input name="site.service_times.zh" value={g('site.service_times.zh')} class={tin} />
+        </label>
+      </div>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.settings.contactTitle')}</h2>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.settings.address')}</span>
+        <input name="site.address" value={g('site.address')} class={tin} />
+      </label>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.email')}</span>
+          <input name="site.email" value={g('site.email')} class={tin} />
+          {errors['site.email'] && <span class={errorText}>{t(lang, errors['site.email'])}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.phone')}</span>
+          <input name="site.phone" value={g('site.phone')} class={tin} />
+        </label>
+      </div>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.settings.mapUrl')}</span>
+        <input name="site.map_url" value={g('site.map_url')} class={tin} />
+        {errors['site.map_url'] && <span class={errorText}>{t(lang, errors['site.map_url'])}</span>}
+      </label>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.settings.linksTitle')}</h2>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.settings.givingUrl')}</span>
+        <input name="site.giving_url" value={g('site.giving_url')} class={tin} />
+        {errors['site.giving_url'] && <span class={errorText}>{t(lang, errors['site.giving_url'])}</span>}
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.settings.youtubeUrl')}</span>
+        <input name="site.youtube_url" value={g('site.youtube_url')} class={tin} />
+        {errors['site.youtube_url'] && <span class={errorText}>{t(lang, errors['site.youtube_url'])}</span>}
+      </label>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.settings.appearanceTitle')}</h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.settings.currentTheme', { theme: themeLabel(selectedTheme) })}</p>
+      <fieldset>
+        <legend class={lab}>{t(lang, 'admin.settings.theme')}</legend>
+        <div class="grid gap-3 sm:grid-cols-3">
+          {
+            THEME_META.map((m) => (
+              <label class={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${selectedTheme === m.name ? 'border-primary ring-2 ring-primary' : 'border-border'}`}>
+                <input type="radio" name="theme.name" value={m.name} checked={selectedTheme === m.name} />
+                <span class="flex gap-1" aria-hidden="true">
+                  <span class="h-5 w-5 rounded-full border border-border" style={`background:${m.swatches.primary}`} />
+                  <span class="h-5 w-5 rounded-full border border-border" style={`background:${m.swatches.accent}`} />
+                  <span class="h-5 w-5 rounded-full border border-border" style={`background:${m.swatches.surface}`} />
+                </span>
+                <span class="text-sm font-semibold text-ink">{themeLabel(m.name)}</span>
+              </label>
+            ))
+          }
+        </div>
+        {errors['theme.name'] && <span class={errorText}>{t(lang, errors['theme.name'])}</span>}
+      </fieldset>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.defaultMode')}</span>
+          <select name="theme.default_mode" class={tin}>
+            <option value="light" selected={selectedMode === 'light'}>{t(lang, 'admin.settings.modeLight')}</option>
+            <option value="dark" selected={selectedMode === 'dark'}>{t(lang, 'admin.settings.modeDark')}</option>
+          </select>
+          {errors['theme.default_mode'] && <span class={errorText}>{t(lang, errors['theme.default_mode'])}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.settings.localeDefault')}</span>
+          <select name="locale.default" class={tin}>
+            <option value="en" selected={selectedLocale === 'en'}>{t(lang, 'admin.settings.localeEn')}</option>
+            <option value="zh" selected={selectedLocale === 'zh'}>{t(lang, 'admin.settings.localeZh')}</option>
+          </select>
+          {errors['locale.default'] && <span class={errorText}>{t(lang, errors['locale.default'])}</span>}
+        </label>
+      </div>
+    </section>
+
+    <div class="flex items-center gap-4">
+      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+    </div>
+  </form>
+</Admin>

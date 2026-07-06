@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 480" font-family="system-ui, sans-serif" role="img" aria-label="Passwordless sign-in, roles that gate the admin console, and the revision safety net">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="480" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">Signing in and who can see what</text>
+
+  <!-- Sign-in flow -->
+  <text x="30" y="82" font-size="15" font-weight="600" fill="#565B6B">Sign-in has no passwords</text>
+  <rect x="30" y="96" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="105" y="124" font-size="14" fill="#232630" text-anchor="middle">Enter your email</text>
+  <text x="105" y="144" font-size="13" fill="#565B6B" text-anchor="middle">/signin</text>
+  <rect x="230" y="96" width="160" height="64" rx="8" fill="#C29A5B"/>
+  <text x="310" y="124" font-size="14" fill="#232630" text-anchor="middle">Magic link emailed</text>
+  <text x="310" y="144" font-size="13" fill="#232630" text-anchor="middle">single use · 15 min</text>
+  <rect x="440" y="96" width="160" height="64" rx="8" fill="#31487A"/>
+  <text x="520" y="124" font-size="14" fill="#FFFFFF" text-anchor="middle">Click it</text>
+  <text x="520" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">session cookie set</text>
+  <rect x="650" y="96" width="150" height="64" rx="8" fill="#31487A"/>
+  <text x="725" y="124" font-size="14" fill="#FFFFFF" text-anchor="middle">You are signed in</text>
+  <text x="725" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">30 days</text>
+  <line x1="180" y1="128" x2="228" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="390" y1="128" x2="438" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="600" y1="128" x2="648" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Roles -->
+  <text x="30" y="216" font-size="15" font-weight="600" fill="#565B6B">Your role decides which doors open</text>
+  <rect x="30" y="232" width="175" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="117" y="262" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Member</text>
+  <text x="117" y="284" font-size="13" fill="#565B6B" text-anchor="middle">own schedule · profile</text>
+  <rect x="222" y="232" width="175" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="309" y="262" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Editor</text>
+  <text x="309" y="284" font-size="13" fill="#565B6B" text-anchor="middle">bulletins · sermons · news</text>
+  <rect x="414" y="232" width="175" height="72" rx="8" fill="#31487A"/>
+  <text x="501" y="262" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="middle">Admin</text>
+  <text x="501" y="284" font-size="13" fill="#DDD9CF" text-anchor="middle">people · settings · reports</text>
+  <rect x="606" y="232" width="194" height="72" rx="8" fill="#C29A5B"/>
+  <text x="703" y="262" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Team leader</text>
+  <text x="703" y="284" font-size="13" fill="#232630" text-anchor="middle">scheduling for their team</text>
+
+  <!-- Console + revisions -->
+  <rect x="30" y="356" width="360" height="90" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="210" y="388" font-size="15" font-weight="600" fill="#232630" text-anchor="middle">/admin console</text>
+  <text x="210" y="412" font-size="13" fill="#565B6B" text-anchor="middle">Dashboard · content · prayer wall ·</text>
+  <text x="210" y="430" font-size="13" fill="#565B6B" text-anchor="middle">people · serve · settings (tabs by role)</text>
+  <rect x="440" y="356" width="360" height="90" rx="8" fill="#2F7A4D"/>
+  <text x="620" y="388" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">Every save snapshots the old version</text>
+  <text x="620" y="412" font-size="13" fill="#FFFFFF" text-anchor="middle">one-click restore of any version</text>
+  <text x="620" y="430" font-size="13" fill="#DDD9CF" text-anchor="middle">nothing is ever lost by accident</text>
+  <line x1="390" y1="401" x2="438" y2="401" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="210" y1="304" x2="210" y2="354" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>

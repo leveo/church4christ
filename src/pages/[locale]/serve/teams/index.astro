@@ -1,0 +1,119 @@
+---
+// Team directory (team class via route policy): every serving team with its
+// localized name, ministry link, member/leader counts, and an open-slot badge.
+// Admin-only: a create-team form (ministry select + en/zh names) — the POST
+// re-checks admin server-side and 403s otherwise.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { createTeam, listMinistryOptions, listTeamSummaries } from '../../../../lib/teamDb';
+import { btn, lab, noticeErr, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+let errorKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  if (!user.isAdmin) return new Response(null, { status: 403 });
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'create') {
+    const ministryId = /^\d+$/.test(String(fd.get('ministry_id') ?? '')) ? Number(fd.get('ministry_id')) : null;
+    const nameEn = String(fd.get('name_en') ?? '').trim();
+    const nameZh = String(fd.get('name_zh') ?? '').trim();
+    if (!nameEn) {
+      errorKey = 'errors.required';
+    } else {
+      const id = await createTeam(db, { ministryId, nameEn, nameZh: nameZh || null });
+      return Astro.redirect(localePath(locale, `/serve/teams/${id}`), 303);
+    }
+  }
+}
+
+const teams = await listTeamSummaries(db, locale);
+const ministries = user.isAdmin ? await listMinistryOptions(db, locale) : [];
+const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
+---
+
+<Base title={t(locale, 'serve.teams.title')} locale={locale} noindex>
+  <div class="container-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.teams.title')}</h1>
+
+    <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        teams.map((tm) => (
+          <div class="rounded-lg border border-border bg-surface-raised p-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <a
+                href={localePath(locale, `/serve/teams/${tm.id}`)}
+                class="font-display font-semibold text-primary hover:underline"
+              >
+                {tm.name}
+              </a>
+              {myTeamIds.has(tm.id) && (
+                <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                  {t(locale, 'serve.teams.myTeam')}
+                </span>
+              )}
+              {tm.open_slots > 0 && (
+                <span class="ml-auto inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-on-accent-soft">
+                  {t(locale, 'serve.teams.openBadge', { count: tm.open_slots })}
+                </span>
+              )}
+            </div>
+            {tm.ministry_slug && tm.ministry_name && (
+              <p class="mt-2 text-sm">
+                <a
+                  href={localePath(locale, `/ministries/${tm.ministry_slug}`)}
+                  class="text-accent hover:text-accent-hover"
+                >
+                  {tm.ministry_name}
+                </a>
+              </p>
+            )}
+            <p class="mt-2 text-sm text-ink-muted">
+              {t(locale, 'serve.teams.membersCount', { count: tm.member_count })}
+              {' · '}
+              {t(locale, 'serve.teams.leadersCount', { count: tm.leader_count })}
+            </p>
+          </div>
+        ))
+      }
+    </div>
+
+    {
+      user.isAdmin && (
+        <section class="mt-10 rounded-lg border border-border bg-surface-raised p-6">
+          <h2 class="mb-4 font-display text-lg font-semibold">{t(locale, 'serve.teams.create')}</h2>
+          {errorKey && <p class={`mb-3 ${noticeErr}`}>{t(locale, errorKey)}</p>}
+          <form method="post" class="flex flex-wrap items-end gap-3">
+            <input type="hidden" name="_action" value="create" />
+            <label class="block min-w-44 flex-1">
+              <span class={lab}>{t(locale, 'serve.teams.nameEn')}</span>
+              <input name="name_en" required class={tin} />
+            </label>
+            <label class="block min-w-44 flex-1">
+              <span class={lab}>{t(locale, 'serve.teams.nameZh')}</span>
+              <input name="name_zh" class={tin} />
+            </label>
+            <label class="block">
+              <span class={lab}>{t(locale, 'serve.teams.ministry')}</span>
+              <select name="ministry_id" class={`${tin} w-52`}>
+                <option value="">—</option>
+                {ministries.map((m) => (
+                  <option value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btn}>{t(locale, 'serve.teams.create')}</button>
+          </form>
+        </section>
+      )
+    }
+  </div>
+</Base>

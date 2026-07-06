@@ -1,0 +1,175 @@
+---
+// Bulletin landing: the latest published bulletin for each service type, shown
+// in a CSS-only tabbed switcher (radio inputs — no JS required, native radio
+// semantics only). A single service type renders its bulletin with no tab
+// chrome at all. Year-grouped archive below. Reads fail soft to empty.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import BulletinView from '../../../components/BulletinView.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import {
+  latestBulletins,
+  listBulletinDates,
+  getBulletinAnnouncements,
+  bulletinRoster,
+  type BulletinRow,
+  type BulletinAnnouncementRow,
+  type BulletinDateRow,
+  type RosterGroup,
+} from '../../../lib/publicDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+interface Entry {
+  bulletin: BulletinRow;
+  announcements: BulletinAnnouncementRow[];
+  roster: RosterGroup[];
+}
+
+let entries: Entry[] = [];
+let dates: BulletinDateRow[] = [];
+try {
+  const db = (env as { DB: D1Database }).DB;
+  const [bulletins, archive] = await Promise.all([latestBulletins(db, locale), listBulletinDates(db, locale)]);
+  dates = archive;
+  entries = await Promise.all(
+    bulletins.map(async (bulletin) => ({
+      bulletin,
+      announcements: await getBulletinAnnouncements(db, bulletin.id),
+      roster: await bulletinRoster(db, bulletin.service_type_id, bulletin.bulletin_date, locale),
+    })),
+  );
+} catch (err) {
+  console.error('bulletin index: load failed', err);
+}
+
+// Group the archive by year (newest first) for a collapsible past-bulletins nav.
+const byYear = new Map<string, BulletinDateRow[]>();
+for (const d of dates) {
+  const year = d.bulletin_date.slice(0, 4);
+  if (!byYear.has(year)) byYear.set(year, []);
+  byYear.get(year)!.push(d);
+}
+const currentYear = new Date().getFullYear().toString();
+---
+
+<Base title={t(locale, 'bulletin.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'bulletin.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'bulletin.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content max-w-content py-10">
+    {
+      entries.length === 1 ? (
+        <BulletinView
+          bulletin={entries[0].bulletin}
+          announcements={entries[0].announcements}
+          roster={entries[0].roster}
+          locale={locale}
+        />
+      ) : entries.length > 1 ? (
+        <div class="bulletin-tabs">
+          {entries.map((e, i) => (
+            <input
+              type="radio"
+              name="bulletin-tab"
+              id={`bt-${e.bulletin.service_type_id}`}
+              class="tab-input sr-only"
+              checked={i === 0}
+            />
+          ))}
+          <div class="tab-labels mb-8 flex flex-wrap gap-1 border-b border-border">
+            {entries.map((e) => (
+              <label
+                for={`bt-${e.bulletin.service_type_id}`}
+                class="tab-label -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 font-semibold text-ink-muted hover:text-ink"
+              >
+                {e.bulletin.serviceTypeName}
+              </label>
+            ))}
+          </div>
+          <div class="tab-panels">
+            {entries.map((e) => (
+              <div class="tab-panel">
+                <BulletinView
+                  bulletin={e.bulletin}
+                  announcements={e.announcements}
+                  roster={e.roster}
+                  locale={locale}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p class="py-12 text-center text-ink-muted">{t(locale, 'bulletin.empty')}</p>
+      )
+    }
+
+    {
+      byYear.size > 0 && (
+        <nav class="mt-14 border-t border-border pt-6" aria-label={t(locale, 'bulletin.archive')}>
+          <h2 class="mb-3 font-display font-bold">{t(locale, 'bulletin.archive')}</h2>
+          {[...byYear.entries()].map(([year, rows]) => (
+            <details open={year === currentYear} class="mb-2">
+              <summary class="cursor-pointer py-1 font-medium">{t(locale, 'sermons.yearLabel', { year })}</summary>
+              <ul class="mt-2 flex flex-wrap gap-2 text-sm">
+                {rows.map((d) => (
+                  <li>
+                    <a
+                      href={`${localePath(locale, `/bulletin/${d.bulletin_date}`)}?service=${d.service_type_id}`}
+                      class="inline-flex rounded-full border border-border px-3 py-1.5 hover:border-border-strong hover:text-accent"
+                    >
+                      {formatDate(d.bulletin_date, locale)} · {d.serviceTypeName}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
+        </nav>
+      )
+    }
+  </div>
+</Base>
+
+<style>
+  .tab-panel {
+    display: none;
+  }
+  .tab-input:nth-of-type(1):checked ~ .tab-panels > .tab-panel:nth-child(1),
+  .tab-input:nth-of-type(2):checked ~ .tab-panels > .tab-panel:nth-child(2),
+  .tab-input:nth-of-type(3):checked ~ .tab-panels > .tab-panel:nth-child(3),
+  .tab-input:nth-of-type(4):checked ~ .tab-panels > .tab-panel:nth-child(4),
+  .tab-input:nth-of-type(5):checked ~ .tab-panels > .tab-panel:nth-child(5),
+  .tab-input:nth-of-type(6):checked ~ .tab-panels > .tab-panel:nth-child(6) {
+    display: block;
+  }
+  .tab-input:nth-of-type(1):checked ~ .tab-labels > .tab-label:nth-child(1),
+  .tab-input:nth-of-type(2):checked ~ .tab-labels > .tab-label:nth-child(2),
+  .tab-input:nth-of-type(3):checked ~ .tab-labels > .tab-label:nth-child(3),
+  .tab-input:nth-of-type(4):checked ~ .tab-labels > .tab-label:nth-child(4),
+  .tab-input:nth-of-type(5):checked ~ .tab-labels > .tab-label:nth-child(5),
+  .tab-input:nth-of-type(6):checked ~ .tab-labels > .tab-label:nth-child(6) {
+    color: var(--color-accent);
+    border-bottom-color: var(--color-accent);
+  }
+  .tab-input:nth-of-type(1):focus-visible ~ .tab-labels > .tab-label:nth-child(1),
+  .tab-input:nth-of-type(2):focus-visible ~ .tab-labels > .tab-label:nth-child(2),
+  .tab-input:nth-of-type(3):focus-visible ~ .tab-labels > .tab-label:nth-child(3),
+  .tab-input:nth-of-type(4):focus-visible ~ .tab-labels > .tab-label:nth-child(4),
+  .tab-input:nth-of-type(5):focus-visible ~ .tab-labels > .tab-label:nth-child(5),
+  .tab-input:nth-of-type(6):focus-visible ~ .tab-labels > .tab-label:nth-child(6) {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+</style>

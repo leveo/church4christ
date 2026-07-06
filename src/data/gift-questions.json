@@ -1,0 +1,546 @@
+{
+  "gifts": [
+    {
+      "code": "teaching",
+      "label": {
+        "en": "Teaching",
+        "zh": "教导"
+      },
+      "definition": {
+        "en": "A gift for explaining God’s truth clearly so others can understand it and grow.",
+        "zh": "清楚讲解神真理的恩赐，使人能够明白并且成长。"
+      },
+      "ministries": [
+        "children",
+        "youth",
+        "college"
+      ]
+    },
+    {
+      "code": "service",
+      "label": {
+        "en": "Service",
+        "zh": "服事"
+      },
+      "definition": {
+        "en": "A gift for meeting practical needs and supporting the work behind the scenes.",
+        "zh": "满足实际需要、在幕后支持事工的恩赐。"
+      },
+      "ministries": [
+        "av-tech",
+        "hospitality"
+      ]
+    },
+    {
+      "code": "mercy",
+      "label": {
+        "en": "Mercy",
+        "zh": "怜悯"
+      },
+      "definition": {
+        "en": "A gift for coming alongside the hurting with compassion and comfort.",
+        "zh": "以怜悯和安慰陪伴受伤之人的恩赐。"
+      },
+      "ministries": [
+        "care",
+        "seniors"
+      ]
+    },
+    {
+      "code": "giving",
+      "label": {
+        "en": "Giving",
+        "zh": "施予"
+      },
+      "definition": {
+        "en": "A gift for generously providing resources to advance God’s kingdom.",
+        "zh": "慷慨供应资源、推进神国度的恩赐。"
+      },
+      "ministries": [
+        "missions",
+        "care"
+      ]
+    },
+    {
+      "code": "leadership",
+      "label": {
+        "en": "Leadership",
+        "zh": "领导"
+      },
+      "definition": {
+        "en": "A gift for casting vision and guiding people toward a shared goal.",
+        "zh": "描绘异象、带领众人朝共同目标前进的恩赐。"
+      },
+      "ministries": [
+        "youth",
+        "college",
+        "family"
+      ]
+    },
+    {
+      "code": "hospitality",
+      "label": {
+        "en": "Hospitality",
+        "zh": "接待"
+      },
+      "definition": {
+        "en": "A gift for welcoming others warmly and helping them feel they belong.",
+        "zh": "热情接待他人、使人感到有归属的恩赐。"
+      },
+      "ministries": [
+        "hospitality",
+        "family"
+      ]
+    },
+    {
+      "code": "evangelism",
+      "label": {
+        "en": "Evangelism",
+        "zh": "传福音"
+      },
+      "definition": {
+        "en": "A gift for sharing the good news of Jesus naturally and with courage.",
+        "zh": "自然而勇敢地传扬耶稣好消息的恩赐。"
+      },
+      "ministries": [
+        "missions",
+        "college"
+      ]
+    },
+    {
+      "code": "encouragement",
+      "label": {
+        "en": "Encouragement",
+        "zh": "劝勉"
+      },
+      "definition": {
+        "en": "A gift for strengthening and comforting others with timely, hope-filled words.",
+        "zh": "以合时、满有盼望的话语坚固并安慰他人的恩赐。"
+      },
+      "ministries": [
+        "care",
+        "youth"
+      ]
+    },
+    {
+      "code": "administration",
+      "label": {
+        "en": "Administration",
+        "zh": "管理"
+      },
+      "definition": {
+        "en": "A gift for organizing people and details so ministry runs smoothly.",
+        "zh": "组织人手与细节、使事工顺畅运作的恩赐。"
+      },
+      "ministries": [
+        "av-tech",
+        "worship"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "tags": [
+        "teaching"
+      ],
+      "text": {
+        "en": "I enjoy explaining Scripture in a way people can grasp.",
+        "zh": "我喜欢用人容易明白的方式讲解圣经。"
+      }
+    },
+    {
+      "id": 2,
+      "tags": [
+        "service"
+      ],
+      "text": {
+        "en": "I would rather quietly get a task done than stand up front.",
+        "zh": "比起站在台前，我更愿意默默把事情做好。"
+      }
+    },
+    {
+      "id": 3,
+      "tags": [
+        "mercy"
+      ],
+      "text": {
+        "en": "My heart is drawn to people who are hurting or overlooked.",
+        "zh": "我的心特别被那些受伤或被忽略的人吸引。"
+      }
+    },
+    {
+      "id": 4,
+      "tags": [
+        "giving"
+      ],
+      "text": {
+        "en": "I look for chances to support God’s work with my resources.",
+        "zh": "我会寻找机会，用我的资源支持神的工作。"
+      }
+    },
+    {
+      "id": 5,
+      "tags": [
+        "leadership"
+      ],
+      "text": {
+        "en": "I can cast a vision and rally people toward a goal.",
+        "zh": "我能描绘异象，并召聚众人朝一个目标前进。"
+      }
+    },
+    {
+      "id": 6,
+      "tags": [
+        "hospitality"
+      ],
+      "text": {
+        "en": "I love making newcomers feel welcomed and at home.",
+        "zh": "我喜欢让初来的人感到被欢迎、宾至如归。"
+      }
+    },
+    {
+      "id": 7,
+      "tags": [
+        "evangelism"
+      ],
+      "text": {
+        "en": "I look for natural ways to share the good news of Jesus.",
+        "zh": "我会寻找自然的机会，与人分享耶稣的好消息。"
+      }
+    },
+    {
+      "id": 8,
+      "tags": [
+        "encouragement"
+      ],
+      "text": {
+        "en": "I know how to speak words that lift someone up.",
+        "zh": "我懂得用话语来激励、扶持一个人。"
+      }
+    },
+    {
+      "id": 9,
+      "tags": [
+        "administration"
+      ],
+      "text": {
+        "en": "I enjoy organizing details so an event runs smoothly.",
+        "zh": "我喜欢把细节安排妥当，好让活动顺利进行。"
+      }
+    },
+    {
+      "id": 10,
+      "tags": [
+        "teaching"
+      ],
+      "text": {
+        "en": "I love studying a passage deeply until its meaning becomes clear.",
+        "zh": "我喜欢深入研读一段经文，直到明白它的意思。"
+      }
+    },
+    {
+      "id": 11,
+      "tags": [
+        "service"
+      ],
+      "text": {
+        "en": "I notice practical needs around me and step in to meet them.",
+        "zh": "我会留意身边实际的需要，并主动去满足它们。"
+      }
+    },
+    {
+      "id": 12,
+      "tags": [
+        "mercy"
+      ],
+      "text": {
+        "en": "I can sit with a grieving friend without needing to fix anything.",
+        "zh": "我能安静地陪伴悲伤的朋友，而不急着替他解决问题。"
+      }
+    },
+    {
+      "id": 13,
+      "tags": [
+        "giving"
+      ],
+      "text": {
+        "en": "I feel joy giving generously, often without telling anyone.",
+        "zh": "我乐意慷慨地给予，而且常常不让别人知道。"
+      }
+    },
+    {
+      "id": 14,
+      "tags": [
+        "leadership"
+      ],
+      "text": {
+        "en": "People tend to follow the direction I set.",
+        "zh": "别人往往会跟随我所定的方向。"
+      }
+    },
+    {
+      "id": 15,
+      "tags": [
+        "hospitality"
+      ],
+      "text": {
+        "en": "Opening my home to others brings me real joy.",
+        "zh": "向别人敞开我的家，让我真心喜乐。"
+      }
+    },
+    {
+      "id": 16,
+      "tags": [
+        "evangelism"
+      ],
+      "text": {
+        "en": "Talking about my faith with people who don’t yet believe excites me.",
+        "zh": "与还未信主的人谈论我的信仰，让我兴奋。"
+      }
+    },
+    {
+      "id": 17,
+      "tags": [
+        "encouragement"
+      ],
+      "text": {
+        "en": "People often feel more hopeful after talking with me.",
+        "zh": "别人和我谈过之后，常常感到更有盼望。"
+      }
+    },
+    {
+      "id": 18,
+      "tags": [
+        "administration"
+      ],
+      "text": {
+        "en": "I can turn a messy plan into a clear, workable schedule.",
+        "zh": "我能把杂乱的计划整理成清晰可行的时间表。"
+      }
+    },
+    {
+      "id": 19,
+      "tags": [
+        "teaching"
+      ],
+      "text": {
+        "en": "People come to me when they want to understand a hard teaching.",
+        "zh": "当别人想弄懂一个难明白的教导时，会来找我。"
+      }
+    },
+    {
+      "id": 20,
+      "tags": [
+        "service"
+      ],
+      "text": {
+        "en": "Setting up, cleaning up, and behind-the-scenes work suit me well.",
+        "zh": "布置场地、收拾整理这些幕后的工作很适合我。"
+      }
+    },
+    {
+      "id": 21,
+      "tags": [
+        "mercy"
+      ],
+      "text": {
+        "en": "I often sense when someone is quietly struggling.",
+        "zh": "当有人正在默默挣扎时，我常常能够察觉。"
+      }
+    },
+    {
+      "id": 22,
+      "tags": [
+        "giving"
+      ],
+      "text": {
+        "en": "When I hear of a real need, I quickly think about how I can provide.",
+        "zh": "当我听到一个真实的需要时，我很快就会想我能如何供应。"
+      }
+    },
+    {
+      "id": 23,
+      "tags": [
+        "leadership"
+      ],
+      "text": {
+        "en": "I enjoy taking responsibility for a team and its outcome.",
+        "zh": "我乐意为一个团队和它的成果承担责任。"
+      }
+    },
+    {
+      "id": 24,
+      "tags": [
+        "hospitality"
+      ],
+      "text": {
+        "en": "I can naturally start a warm conversation with a stranger.",
+        "zh": "我能自然地与陌生人开始一段温暖的谈话。"
+      }
+    },
+    {
+      "id": 25,
+      "tags": [
+        "evangelism"
+      ],
+      "text": {
+        "en": "I often pray for friends who don’t yet know Christ.",
+        "zh": "我常为那些还不认识基督的朋友祷告。"
+      }
+    },
+    {
+      "id": 26,
+      "tags": [
+        "encouragement"
+      ],
+      "text": {
+        "en": "I love coming alongside someone to help them keep going.",
+        "zh": "我喜欢陪伴一个人，帮助他坚持走下去。"
+      }
+    },
+    {
+      "id": 27,
+      "tags": [
+        "administration"
+      ],
+      "text": {
+        "en": "Coordinating people and tasks comes easily to me.",
+        "zh": "协调人手与安排任务对我来说很容易。"
+      }
+    },
+    {
+      "id": 28,
+      "tags": [
+        "teaching"
+      ],
+      "text": {
+        "en": "I find joy in helping someone see a truth they had missed.",
+        "zh": "帮助别人看见他们以前忽略的真理，让我很喜乐。"
+      }
+    },
+    {
+      "id": 29,
+      "tags": [
+        "service"
+      ],
+      "text": {
+        "en": "I feel useful when I can lighten someone else’s workload.",
+        "zh": "当我能为别人分担一些重担时，我觉得自己有用。"
+      }
+    },
+    {
+      "id": 30,
+      "tags": [
+        "mercy"
+      ],
+      "text": {
+        "en": "Comforting people in pain feels natural to me.",
+        "zh": "安慰在痛苦中的人，对我来说是很自然的事。"
+      }
+    },
+    {
+      "id": 31,
+      "tags": [
+        "leadership"
+      ],
+      "text": {
+        "en": "I can see the big picture and help others move toward it.",
+        "zh": "我能看见整体的大局，并帮助别人一同朝着它前进。"
+      }
+    },
+    {
+      "id": 32,
+      "tags": [
+        "hospitality"
+      ],
+      "text": {
+        "en": "I pay attention so that no one is left standing alone.",
+        "zh": "我会留意，好让没有人被冷落、独自站在一旁。"
+      }
+    },
+    {
+      "id": 33,
+      "tags": [
+        "evangelism"
+      ],
+      "text": {
+        "en": "I carry a burden to see people far from God come home.",
+        "zh": "我心里有负担，渴望看见远离神的人回到祂面前。"
+      }
+    },
+    {
+      "id": 34,
+      "tags": [
+        "encouragement"
+      ],
+      "text": {
+        "en": "When someone is discouraged, I want to remind them of God’s promises.",
+        "zh": "当有人灰心时，我会想提醒他神的应许。"
+      }
+    },
+    {
+      "id": 35,
+      "tags": [
+        "administration"
+      ],
+      "text": {
+        "en": "I keep track of the steps needed to reach a goal.",
+        "zh": "我会理清达成目标所需要的每一个步骤。"
+      }
+    },
+    {
+      "id": 36,
+      "tags": [
+        "teaching"
+      ],
+      "text": {
+        "en": "I would gladly prepare a lesson to teach a small group.",
+        "zh": "我很乐意预备一堂课，去教导一个小组。"
+      }
+    },
+    {
+      "id": 37,
+      "tags": [
+        "leadership"
+      ],
+      "text": {
+        "en": "Making decisions under pressure energizes rather than drains me.",
+        "zh": "在压力下做决定让我更有干劲，而不是让我疲惫。"
+      }
+    },
+    {
+      "id": 38,
+      "tags": [
+        "teaching",
+        "encouragement"
+      ],
+      "text": {
+        "en": "I love explaining God’s Word in a way that also strengthens people’s faith.",
+        "zh": "我喜欢讲解神的话，同时也坚固人的信心。"
+      }
+    },
+    {
+      "id": 39,
+      "tags": [
+        "giving",
+        "mercy"
+      ],
+      "text": {
+        "en": "When someone is in need, I want to meet both their practical and emotional needs.",
+        "zh": "当有人有需要时，我想同时满足他实际和情感上的需要。"
+      }
+    },
+    {
+      "id": 40,
+      "tags": [
+        "hospitality",
+        "service"
+      ],
+      "text": {
+        "en": "I gladly prepare food and space so guests feel cared for.",
+        "zh": "我乐意预备饭食和场地，让客人感到被关怀。"
+      }
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+---
+// Volunteer console (console route class — leaders ∪ admins; an editor with no
+// team is 403'd here: the volunteer console is not the content console). A tabbed
+// surface over overview / applications / ministries / new-ministry wizard / email
+// (admin only) / availability, each role-scoped. Ported from the reference stack's
+// /admin/index.astro, adapted to church-cms: i18n names, non-locale admin routes,
+// and a page-level leader-or-admin gate. Every POST re-checks its own authority.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import OverviewTab from '../../../components/admin/OverviewTab.astro';
+import ApplicationsTab from '../../../components/admin/ApplicationsTab.astro';
+import MinistriesTab from '../../../components/admin/MinistriesTab.astro';
+import NewMinistryTab from '../../../components/admin/NewMinistryTab.astro';
+import EmailTab from '../../../components/admin/EmailTab.astro';
+import AvailabilityTab from '../../../components/admin/AvailabilityTab.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { addDays, todayInTz } from '../../../lib/dates';
+import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
+import { getStats, getNeedsAttention, type Scope } from '../../../lib/adminOverviewDb';
+import { getTeamAvailability } from '../../../lib/planDb';
+import {
+  decideApplication,
+  listActivePeople,
+  listAllTeamIds,
+  listPendingApplicationsForTeams,
+  listTeamSummaries,
+} from '../../../lib/teamDb';
+import {
+  canManageMinistry,
+  createMinistryFromWizard,
+  leaderMinistryIds,
+  listMinistryEditRows,
+  listMinistrySummaries,
+  toggleMinistryActive,
+  updateMinistryBasics,
+  type MinistryWizardInput,
+} from '../../../lib/ministryDb';
+import {
+  fillTemplate,
+  getTemplate,
+  listEmailLog,
+  listRules,
+  listTemplates,
+  saveTemplate,
+  setRule,
+  type TemplateKey,
+} from '../../../lib/emailSettingsDb';
+import { sendApplicationResult } from '../../../lib/notify';
+import { sendEmail, type EmailEnv } from '../../../lib/email';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const vars = env as unknown as EmailEnv & { DB: D1Database };
+const db = vars.DB;
+
+// Page-level gate: the volunteer console is for team leaders and admins only.
+const canAdmin = user.isAdmin;
+if (!canAdmin && user.leaderTeamIds.length === 0) {
+  return new Response(t(lang, 'admin.console.forbidden'), { status: 403 });
+}
+
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+const today = todayInTz();
+
+const url = new URL(Astro.request.url);
+// Admins default to church-wide and may switch to leader scope; leaders are locked.
+let scope: Scope = canAdmin ? (url.searchParams.get('scope') === 'leader' ? 'leader' : 'admin') : 'leader';
+const scopeQ = scope === 'leader' ? '&scope=leader' : '';
+const scopeAdmin = scope === 'admin';
+
+async function leadsTeam(teamId: number): Promise<boolean> {
+  return user.isAdmin || user.leaderTeamIds.includes(teamId);
+}
+
+let flashKey: string | null = null;
+let errKey: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  const to = (tab: string, extra = '') => Astro.redirect(`/admin/ministries?tab=${tab}${scopeQ}${extra}`, 303);
+
+  if (action === 'approveApp' || action === 'rejectApp') {
+    const appId = idOf(fd.get('application_id'));
+    if (appId) {
+      const appRow = await db.prepare(`SELECT team_id FROM team_applications WHERE id = ?`).bind(appId).first<{ team_id: number }>();
+      if (appRow && (await leadsTeam(appRow.team_id))) {
+        const approve = action === 'approveApp';
+        const decided = await decideApplication(db, appId, approve, user.email, appRow.team_id);
+        if (decided) await sendApplicationResult(vars, db, appId, approve);
+      }
+    }
+    return to('applications');
+  }
+
+  if (action === 'toggleMinistry') {
+    const mid = idOf(fd.get('ministry_id'));
+    if (mid && (await canManageMinistry(db, user, mid))) await toggleMinistryActive(db, mid, fd.get('active') === '1');
+    return to('ministries');
+  }
+
+  if (action === 'updateBasics') {
+    const mid = idOf(fd.get('ministry_id'));
+    if (mid && (await canManageMinistry(db, user, mid))) {
+      await updateMinistryBasics(db, mid, {
+        name_en: String(fd.get('name_en') ?? '').trim(),
+        name_zh: String(fd.get('name_zh') ?? '').trim(),
+        category: String(fd.get('category') ?? '').trim(),
+        icon: String(fd.get('icon') ?? '').trim(),
+        intro_en: null,
+        intro_zh: null,
+        leader_person_id: canAdmin ? idOf(fd.get('leader_person_id')) : user.id,
+      });
+    }
+    return to('ministries');
+  }
+
+  if (action === 'createMinistry') {
+    const name_en = String(fd.get('name_en') ?? '').trim();
+    const name_zh = String(fd.get('name_zh') ?? '').trim();
+    if (!name_en && !name_zh) return to('new', '&err=needName');
+    const namesEn = fd.getAll('pos_name_en').map((v) => String(v).trim());
+    const namesZh = fd.getAll('pos_name_zh').map((v) => String(v).trim());
+    const needs = fd.getAll('pos_needed').map((v) => Number(String(v)) || 1);
+    const opens = fd.getAll('pos_open').map((v) => String(v) === '1');
+    const positions = namesEn
+      .map((ne, i) => ({ name_en: ne, name_zh: namesZh[i] ?? '', needed: needs[i] ?? 1, open: opens[i] ?? false }))
+      .filter((p) => p.name_en !== '' || p.name_zh !== '');
+    const freq = String(fd.get('frequency') ?? 'sun');
+    const input: MinistryWizardInput = {
+      name_en,
+      name_zh,
+      category: String(fd.get('category') ?? '').trim(),
+      icon: String(fd.get('icon') ?? '').trim(),
+      intro_en: String(fd.get('intro_en') ?? '').trim() || null,
+      intro_zh: null,
+      // A non-admin leader can only make THEMSELVES the ministry leader.
+      leader_person_id: canAdmin ? idOf(fd.get('leader_person_id')) : user.id,
+      meeting_time: String(fd.get('meeting_time') ?? '').trim() || null,
+      positions,
+      frequency: (['sun', 'sat', 'biweekly', 'monthly', 'irregular'].includes(freq) ? freq : 'sun') as MinistryWizardInput['frequency'],
+      autoGenerate: fd.get('auto_generate') === '1',
+    };
+    await createMinistryFromWizard(db, input);
+    return to('new', '&created=' + encodeURIComponent(name_en || name_zh));
+  }
+
+  if (action === 'toggleRule' && canAdmin) {
+    const key = String(fd.get('rule_key') ?? '');
+    if (key) await setRule(db, key, fd.get('enabled') === '1');
+    return to('email', '&flash=ruleUpdated');
+  }
+
+  if (action === 'saveTemplate' && canAdmin) {
+    const key = String(fd.get('template_key') ?? '');
+    const locale = String(fd.get('locale') ?? '');
+    if (key && (locale === 'en' || locale === 'zh')) {
+      await saveTemplate(db, key, locale, String(fd.get('subject') ?? ''), String(fd.get('body') ?? ''));
+    }
+    return to('email', `&tpl=${key}&flash=templateSaved`);
+  }
+
+  if (action === 'sendTest' && canAdmin) {
+    const key = String(fd.get('template_key') ?? 'request') as TemplateKey;
+    const locale = String(fd.get('locale') ?? lang) as Locale;
+    const stored = await getTemplate(db, key, locale);
+    const subject = String(fd.get('subject') ?? '').trim() || stored?.subject || '';
+    const body = String(fd.get('body') ?? '').trim() || stored?.body || '';
+    if (user.email && (subject || body)) {
+      const sample = {
+        name: user.displayName, position: t(lang, 'admin.console.tpl.request'), date: today,
+        team: t(lang, 'admin.console.tab.ministries'), service: t(lang, 'admin.console.tab.overview'),
+        reason: '—', link: `${vars.APP_ORIGIN ?? ''}/${lang}/my`,
+      };
+      await sendEmail(vars, db, {
+        to: user.email, toName: user.displayName, kind: 'test', detail: `${key}/${locale}`,
+        subject: `[TEST] ${fillTemplate(subject, sample)}`,
+        text: fillTemplate(body, sample),
+        html: `<pre style="font-family:inherit;white-space:pre-wrap">${fillTemplate(body, sample)}</pre>`,
+      });
+    }
+    return to('email', `&tpl=${key}&test=1`);
+  }
+
+  return to(url.searchParams.get('tab') ?? 'overview');
+}
+
+// ── GET: resolve tab + load its data ──
+let tab = url.searchParams.get('tab') ?? 'overview';
+if (tab === 'email' && !canAdmin) tab = 'overview';
+if (url.searchParams.get('flash') === 'templateSaved') flashKey = 'admin.console.email.testSent';
+if (url.searchParams.get('err') === 'needName') errKey = 'admin.console.wiz.needName';
+
+// Pending-application badge (independent of the active tab).
+const badgeTeamIds = scopeAdmin ? await listAllTeamIds(db) : user.leaderTeamIds;
+const pendingBadge = badgeTeamIds.length === 0
+  ? 0
+  : (await db.prepare(`SELECT COUNT(*) AS n FROM team_applications WHERE status = 'P' AND team_id IN (${badgeTeamIds.map(() => '?').join(',')})`).bind(...badgeTeamIds).first<{ n: number }>())?.n ?? 0;
+
+let overviewData: Awaited<ReturnType<typeof loadOverview>> | null = null;
+let appsData: Awaited<ReturnType<typeof loadApps>> | null = null;
+let ministriesData: Awaited<ReturnType<typeof loadMinistries>> | null = null;
+let newData: { categories: { value: string; label: string }[]; leaders: { id: number; name: string }[]; published: boolean; publishedName: string } | null = null;
+let emailData: Awaited<ReturnType<typeof loadEmail>> | null = null;
+let availData: Awaited<ReturnType<typeof loadAvail>> | null = null;
+
+async function loadOverview() {
+  const [stats, attention, automation] = await Promise.all([
+    getStats(db, scope, user, today),
+    getNeedsAttention(db, scope, user, today, addDays(today, 14), lang),
+    db.prepare(`SELECT COUNT(*) AS n FROM email_log WHERE created_at > datetime('now', '-7 days')`).first<{ n: number }>(),
+  ]);
+  return { stats, attention, sent: automation?.n ?? 0 };
+}
+async function loadApps() {
+  const teamIds = scopeAdmin ? await listAllTeamIds(db) : user.leaderTeamIds;
+  return { applications: await listPendingApplicationsForTeams(db, teamIds, lang) };
+}
+async function loadMinistries() {
+  let ministries = await listMinistrySummaries(db, lang, today);
+  let editRows = await listMinistryEditRows(db);
+  if (!scopeAdmin) {
+    const ids = new Set(await leaderMinistryIds(db, user));
+    ministries = ministries.filter((m) => ids.has(m.id));
+    editRows = editRows.filter((m) => ids.has(m.id));
+  }
+  const categories = MINISTRY_CATEGORIES.map((c) => ({ value: c, label: t(lang, `ministries.category.${c}`) }));
+  const leaders = (await listActivePeople(db)).map((p) => ({ id: p.id, name: p.display_name }));
+  return { ministries, editRows, categories, leaders, title: t(lang, scopeAdmin ? 'admin.console.allMinistries' : 'admin.console.myMinistries') };
+}
+async function loadEmail() {
+  const [rules, templates, log] = await Promise.all([listRules(db), listTemplates(db), listEmailLog(db, 50)]);
+  const raw = url.searchParams.get('tpl') ?? 'request';
+  const selectedKey = (['remind', 'request', 'appResult', 'digestAM'].includes(raw) ? raw : 'request') as TemplateKey;
+  return { rules, templates, selectedKey, log, testSent: url.searchParams.has('test') };
+}
+async function loadAvail() {
+  const all = await listTeamSummaries(db, lang);
+  const teams = (scopeAdmin ? all : all.filter((tm) => user.leaderTeamIds.includes(tm.id))).map((tm) => ({ id: tm.id, name: tm.name }));
+  const requested = idOf(url.searchParams.get('team'));
+  const selected = teams.find((tm) => tm.id === requested) ?? teams[0];
+  const availability = selected ? await getTeamAvailability(db, selected.id, lang) : { plans: [], rows: [] };
+  return { teams, selectedTeamId: selected?.id ?? null, selectedTeamName: selected?.name ?? '', availability };
+}
+
+if (tab === 'overview') overviewData = await loadOverview();
+else if (tab === 'applications') appsData = await loadApps();
+else if (tab === 'ministries') ministriesData = await loadMinistries();
+else if (tab === 'new') {
+  const categories = MINISTRY_CATEGORIES.map((c) => ({ value: c, label: t(lang, `ministries.category.${c}`) }));
+  const leaders = (await listActivePeople(db)).map((p) => ({ id: p.id, name: p.display_name }));
+  const created = url.searchParams.get('created');
+  newData = { categories, leaders, published: created !== null, publishedName: created ?? '' };
+} else if (tab === 'email' && canAdmin) emailData = await loadEmail();
+else if (tab === 'availability') availData = await loadAvail();
+
+const tabs: { id: string; label: string; show: boolean }[] = [
+  { id: 'overview', label: 'admin.console.tab.overview', show: true },
+  { id: 'applications', label: 'admin.console.tab.applications', show: true },
+  { id: 'ministries', label: 'admin.console.tab.ministries', show: true },
+  { id: 'new', label: 'admin.console.tab.new', show: true },
+  { id: 'email', label: 'admin.console.tab.email', show: canAdmin },
+  { id: 'availability', label: 'admin.console.tab.availability', show: true },
+];
+---
+<Admin title={t(lang, 'admin.console.title')}>
+  <div class="flex items-center gap-4 flex-wrap">
+    <div class="flex-1 min-w-64">
+      <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.console.title')}</h1>
+      <p class="mt-1 text-sm text-ink-muted">{scope === 'leader' ? `${user.displayName} · ${t(lang, 'admin.console.scopeLeaderDesc')}` : t(lang, 'admin.console.scopeAdminDesc')}</p>
+    </div>
+    {canAdmin && (
+      <div class="flex border border-border rounded-full p-0.5 gap-0.5">
+        <a href={`/admin/ministries?tab=${tab}&scope=leader`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'leader' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeLeader')}</a>
+        <a href={`/admin/ministries?tab=${tab}`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'admin' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeAdmin')}</a>
+      </div>
+    )}
+  </div>
+
+  <nav class="mt-5 flex gap-1 flex-wrap border-b border-border" aria-label={t(lang, 'admin.console.title')}>
+    {tabs.filter((tb) => tb.show).map((tb) => (
+      <a href={`/admin/ministries?tab=${tb.id}${scopeQ}`}
+         class:list={['px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb.id ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}>
+        {t(lang, tb.label)}
+        {tb.id === 'applications' && pendingBadge > 0 && (
+          <span class="ml-1.5 px-1.5 py-px rounded-full bg-primary text-on-primary text-[0.6875rem]">{pendingBadge}</span>
+        )}
+      </a>
+    ))}
+  </nav>
+
+  <div class="mt-6">
+    {flashKey && <p class="mb-5 rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success">{t(lang, flashKey)}</p>}
+    {errKey && <p class="mb-5 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(lang, errKey)}</p>}
+
+    {tab === 'overview' && overviewData && <OverviewTab lang={lang} scope={scope} stats={overviewData.stats} attention={overviewData.attention} sent={overviewData.sent} />}
+    {tab === 'applications' && appsData && <ApplicationsTab lang={lang} applications={appsData.applications} />}
+    {tab === 'ministries' && ministriesData && <MinistriesTab lang={lang} title={ministriesData.title} ministries={ministriesData.ministries} editRows={ministriesData.editRows} categories={ministriesData.categories} leaders={ministriesData.leaders} />}
+    {tab === 'new' && newData && <NewMinistryTab lang={lang} categories={newData.categories} leaders={newData.leaders} published={newData.published} publishedName={newData.publishedName} />}
+    {tab === 'email' && emailData && <EmailTab lang={lang} rules={emailData.rules} templates={emailData.templates} selectedKey={emailData.selectedKey} log={emailData.log} testSent={emailData.testSent} />}
+    {tab === 'availability' && availData && <AvailabilityTab lang={lang} teams={availData.teams} selectedTeamId={availData.selectedTeamId} selectedTeamName={availData.selectedTeamName} availability={availData.availability} scope={scope} />}
+  </div>
+</Admin>

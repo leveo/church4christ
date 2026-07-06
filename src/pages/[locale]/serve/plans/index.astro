@@ -1,0 +1,164 @@
+---
+// Serving plans index (team class via route policy): one section per service
+// type listing upcoming plans (date, title/series, filled/needed summary).
+// Admin-only controls per section: create a single plan (date+title+series) and
+// idempotent weekly generation through a date (explicit weekday select +
+// through-date, ported from the reference stack). Non-admins see the list only; the POST
+// handler re-checks admin server-side and 403s otherwise.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { createPlan, ensureWeeklyPlans, listPlans } from '../../../../lib/planDb';
+import { listPlanFills, listServiceTypes } from '../../../../lib/teamDb';
+import { addDays, formatDate, isValidDateStr, nextWeekday, todayInTz } from '../../../../lib/dates';
+import { btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+// Creating/generating plans defines the church-wide service schedule — an
+// admin function. Leaders manage positions & assignments within an existing
+// plan (scoped by canEditPosition on the detail page), not the plan structure.
+const canCreate = user.isAdmin;
+
+const idOf = (v: FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+let errorKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  if (!canCreate) return new Response(null, { status: 403 });
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  const serviceTypeId = idOf(fd.get('service_type_id'));
+
+  if (action === 'create' && serviceTypeId) {
+    const planDate = String(fd.get('plan_date') ?? '').trim();
+    if (!isValidDateStr(planDate)) {
+      errorKey = 'errors.dateFormat';
+    } else {
+      const id = await createPlan(db, {
+        serviceTypeId,
+        planDate,
+        title: String(fd.get('title') ?? '').trim() || null,
+        series: String(fd.get('series') ?? '').trim() || null,
+      });
+      return Astro.redirect(localePath(locale, `/serve/plans/${id}`), 303);
+    }
+  } else if (action === 'generate' && serviceTypeId) {
+    const through = String(fd.get('through_date') ?? '').trim();
+    const weekday = idOf(fd.get('weekday'));
+    if (!isValidDateStr(through) || weekday === null || weekday > 6) {
+      errorKey = 'errors.dateFormat';
+    } else {
+      const count = await ensureWeeklyPlans(db, serviceTypeId, weekday, through);
+      return Astro.redirect(localePath(locale, `/serve/plans?generated=${count}`), 303);
+    }
+  }
+}
+
+const generated = Astro.url.searchParams.get('generated');
+const types = await listServiceTypes(db, locale);
+const plansByType = await Promise.all(types.map((st) => listPlans(db, st.id, locale, { limit: 12 })));
+const fills = await listPlanFills(db, plansByType.flat().map((p) => p.id));
+const fillOf = (planId: number) => fills.find((f) => f.plan_id === planId);
+
+const today = todayInTz();
+const defaultDate = nextWeekday(today, 0);
+const defaultThrough = addDays(today, 56); // ~8 weeks out
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+---
+
+<Base title={t(locale, 'serve.plans.title')} locale={locale} noindex>
+  <div class="container-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.plans.title')}</h1>
+
+    {generated !== null && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.generated', { count: generated })}</p>}
+    {errorKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, errorKey)}</p>}
+
+    {
+      types.map((st) => {
+        const plans = plansByType[types.indexOf(st)];
+        return (
+          <section class="mt-10">
+            <h2 class="font-display text-lg font-semibold">{st.name}</h2>
+            {plans.length === 0 ? (
+              <p class="mt-3 text-sm text-ink-muted">{t(locale, 'serve.plans.empty')}</p>
+            ) : (
+              <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+                {plans.map((p) => {
+                  const fill = fillOf(p.id);
+                  return (
+                    <li>
+                      <a
+                        href={localePath(locale, `/serve/plans/${p.id}`)}
+                        class="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-surface-sunken"
+                      >
+                        <span class="font-semibold tabular-nums">{formatDate(p.plan_date, locale)}</span>
+                        {p.title && <span class="text-ink-muted">{p.title}</span>}
+                        {p.series && <span class="text-xs text-ink-subtle">{p.series}</span>}
+                        {fill && fill.needed > 0 && (
+                          <span
+                            class={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                              fill.filled >= fill.needed ? 'bg-success-soft text-success' : 'bg-warn-soft text-warn'
+                            }`}
+                          >
+                            {t(locale, 'serve.plans.filled', { filled: fill.filled, needed: fill.needed })}
+                          </span>
+                        )}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {canCreate && (
+              <div class="mt-4 flex flex-wrap gap-8">
+                <form method="post" class="flex flex-wrap items-end gap-3">
+                  <input type="hidden" name="_action" value="create" />
+                  <input type="hidden" name="service_type_id" value={st.id} />
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'serve.plans.date')}</span>
+                    <input type="date" name="plan_date" value={defaultDate} required class={tin} />
+                  </label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'serve.plans.planTitle')}</span>
+                    <input name="title" class={tin} />
+                  </label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'serve.plans.series')}</span>
+                    <input name="series" class={tin} />
+                  </label>
+                  <button type="submit" class={btn}>{t(locale, 'serve.plans.create')}</button>
+                </form>
+                <form method="post" class="flex flex-wrap items-end gap-3">
+                  <input type="hidden" name="_action" value="generate" />
+                  <input type="hidden" name="service_type_id" value={st.id} />
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'serve.plans.weekday')}</span>
+                    <select name="weekday" class={tin}>
+                      {WEEKDAYS.map((d) => (
+                        <option value={d} selected={d === 0}>{t(locale, `serve.plans.weekday${d}`)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'serve.plans.generateThrough')}</span>
+                    <input type="date" name="through_date" value={defaultThrough} required class={tin} />
+                  </label>
+                  <button type="submit" class={btnSecondary}>{t(locale, 'serve.plans.generate')}</button>
+                </form>
+              </div>
+            )}
+          </section>
+        );
+      })
+    }
+  </div>
+</Base>

@@ -1,0 +1,22 @@
+---
+// Assignment status pill: U (unconfirmed) / C (confirmed) / D (declined),
+// token-styled (warn/success/danger soft variants) and dictionary-labeled.
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+
+interface Props {
+  status: 'U' | 'C' | 'D';
+  locale: Locale;
+}
+
+const { status, locale } = Astro.props;
+const styles = {
+  U: 'bg-warn-soft text-warn',
+  C: 'bg-success-soft text-success',
+  D: 'bg-danger-soft text-danger',
+} as const;
+---
+
+<span class={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${styles[status]}`}>
+  {t(locale, `serve.status.${status}`)}
+</span>

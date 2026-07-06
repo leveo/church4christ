@@ -1,0 +1,39 @@
+---
+// Upcoming-events strip: a responsive card grid. Each card shows the event image
+// (served from /media/<key> when present) or a deterministic ImagePlaceholder,
+// then the localized title/blurb and an optional external link. Token utilities
+// only.
+import ImagePlaceholder from './ImagePlaceholder.astro';
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { EventCardRow } from '../lib/publicDb';
+
+interface Props {
+  events: EventCardRow[];
+  locale: Locale;
+}
+const { events, locale } = Astro.props;
+---
+
+<div class="grid items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
+  {
+    events.map((ev) => (
+      <article class="flex flex-col overflow-hidden rounded-lg border border-border bg-surface-raised transition-shadow hover:shadow-md">
+        {ev.imageKey ? (
+          <img src={`/media/${ev.imageKey}`} alt="" loading="lazy" class="aspect-video w-full object-cover" />
+        ) : (
+          <ImagePlaceholder seed={ev.title} class="aspect-video w-full" />
+        )}
+        <div class="flex flex-1 flex-col p-5">
+          <h3 class="font-display text-lg font-semibold">{ev.title}</h3>
+          {ev.blurb && <p class="mt-2 flex-1 text-sm text-ink-muted">{ev.blurb}</p>}
+          {ev.url && (
+            <a href={ev.url} rel="noopener" class="mt-4 text-sm font-semibold text-accent hover:text-accent-hover">
+              {t(locale, 'home.eventLink')} →
+            </a>
+          )}
+        </div>
+      </article>
+    ))
+  }
+</div>

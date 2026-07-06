@@ -1,0 +1,80 @@
+---
+// Service types CRUD (admin only): bilingual name + optional start/end times +
+// sort. Service types carry plans and bulletins/sermons, so this is the one place
+// they are created and retired (soft delete). Ported from the reference stack.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { listServiceTypesAdmin, saveServiceType, softDeleteServiceType } from '../../../lib/teamDb';
+import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+const TIME_RE = /^\d{2}:\d{2}$/;
+const timeOf = (v: FormDataEntryValue | null): string | null => (TIME_RE.test(String(v ?? '')) ? String(v) : null);
+
+let errKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  if (action === 'delete') {
+    const id = idOf(fd.get('id'));
+    if (id) await softDeleteServiceType(db, id);
+    return Astro.redirect('/admin/service-types', 303);
+  }
+  const nameEn = String(fd.get('name_en') ?? '').trim();
+  if (!nameEn) {
+    errKey = 'errors.required';
+  } else {
+    await saveServiceType(db, action === 'save' ? idOf(fd.get('id')) : null, {
+      nameEn,
+      nameZh: String(fd.get('name_zh') ?? '').trim() || null,
+      startTime: timeOf(fd.get('start_time')),
+      endTime: timeOf(fd.get('end_time')),
+      sort: Number(String(fd.get('sort') ?? '0')) || 0,
+    });
+    return Astro.redirect('/admin/service-types', 303);
+  }
+}
+
+const types = await listServiceTypesAdmin(db);
+---
+<Admin title={t(lang, 'admin.serviceTypes.title')}>
+  <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.serviceTypes.back')}</a>
+  <h1 class="mt-2 font-display text-heading-md font-bold">{t(lang, 'admin.serviceTypes.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.serviceTypes.intro')}</p>
+
+  {errKey && <p class="mt-4 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(lang, errKey)}</p>}
+
+  <div class="mt-6 space-y-3">
+    {types.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.serviceTypes.none')}</p>}
+    {types.map((st) => (
+      <form method="post" class={`${card} flex flex-wrap items-end gap-3`}>
+        <input type="hidden" name="id" value={st.id} />
+        <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required value={st.name_en ?? ''} class={tin} /></label>
+        <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" value={st.name_zh ?? ''} class={tin} /></label>
+        <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" value={st.start_time ?? ''} class={tin} /></label>
+        <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" value={st.end_time ?? ''} class={tin} /></label>
+        <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" value={st.sort} class={tin} /></label>
+        <button name="_action" value="save" class={btn}>{t(lang, 'admin.serviceTypes.save')}</button>
+        <button name="_action" value="delete" data-confirm={t(lang, 'admin.serviceTypes.confirmDelete')} class={btnDanger}>{t(lang, 'admin.serviceTypes.delete')}</button>
+      </form>
+    ))}
+  </div>
+
+  <section class={`mt-8 ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold mb-4">{t(lang, 'admin.serviceTypes.create')}</h2>
+    <form method="post" class="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="_action" value="create" />
+      <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required class={tin} /></label>
+      <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" class={tin} /></label>
+      <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" class={tin} /></label>
+      <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" class={tin} /></label>
+      <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" value="0" class={tin} /></label>
+      <button class={btn}>{t(lang, 'admin.serviceTypes.create')}</button>
+    </form>
+  </section>
+</Admin>

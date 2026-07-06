@@ -1,0 +1,10 @@
+---
+// Root fallback. Middleware normally 302s `/` before this route is reached;
+// this keeps `/` working if that ever changes. Same content-negotiation.
+import { localePath, pickLocaleFromHeader } from '../lib/locales';
+
+return Astro.redirect(
+  localePath(pickLocaleFromHeader(Astro.request.headers.get('accept-language')), '/'),
+  302,
+);
+---
