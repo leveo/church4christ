@@ -90,15 +90,15 @@ describe('/cal/[token].ics (public token feed)', () => {
 });
 
 describe('/en/serve/apply (public)', () => {
-  it('signed-out POST creates a minimal person, a pending application, and a login token', async () => {
+  it('signed-out POST creates a minimal person, a pending application, and a login token; a duplicate is indistinguishable', async () => {
     const email = 'applicant.e2e@example.com';
     const res = await post(
       '/en/serve/apply',
       `team_id=2&name=New+Applicant&email=${encodeURIComponent(email)}&phone=555-0000&message=hi`,
     );
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toContain('sent=1');
-    expect(res.headers.get('location')).toContain('signin=1');
+    const freshLocation = res.headers.get('location')!;
+    expect(freshLocation).toBe('/en/serve/apply?sent=1&signin=1');
 
     const person = await env.DB
       .prepare(`SELECT id, display_name, role, active FROM people WHERE email = ?`)
@@ -113,48 +113,73 @@ describe('/en/serve/apply (public)', () => {
     expect(app).toMatchObject({ status: 'P', team_id: 2 });
 
     // Magic link issued (EMAIL_DEV_LOG=1: mail devlogged, token row persisted).
-    const token = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM tokens WHERE person_id = ? AND purpose = 'login'`)
-      .bind(person!.id)
-      .first<{ n: number }>();
-    expect(token?.n).toBe(1);
+    const tokensOf = async () =>
+      (await env.DB
+        .prepare(`SELECT COUNT(*) AS n FROM tokens WHERE person_id = ? AND purpose = 'login'`)
+        .bind(person!.id)
+        .first<{ n: number }>())!.n;
+    expect(await tokensOf()).toBe(1);
+    const freshBody = await (await get(freshLocation)).text();
 
-    // A second pending application for the same team → friendly dup, still one row.
+    // ANTI-ENUMERATION: a second signed-out application for the same team must
+    // be byte-identical to a fresh success — same redirect (no dup flag), same
+    // rendered body — while writing no duplicate row and still sending the
+    // magic link so the person can sign in and see their pending application.
     const dup = await post(
       '/en/serve/apply',
       `team_id=2&name=New+Applicant&email=${encodeURIComponent(email)}`,
     );
     expect(dup.status).toBe(303);
-    expect(dup.headers.get('location')).toContain('dup=1');
+    const dupLocation = dup.headers.get('location')!;
+    expect(dupLocation).toBe(freshLocation);
+    expect(dupLocation).not.toContain('dup');
+    const dupBody = await (await get(dupLocation)).text();
+    expect(dupBody).toBe(freshBody);
+
     const count = await env.DB
       .prepare(`SELECT COUNT(*) AS n FROM team_applications WHERE person_id = ?`)
       .bind(person!.id)
       .first<{ n: number }>();
-    expect(count?.n).toBe(1);
+    expect(count?.n).toBe(1); // no duplicate application
+    expect(await tokensOf()).toBe(2); // magic link sent again
   });
 
-  it('honeypot POST pretends success and writes nothing', async () => {
+  it('honeypot POST lands on the exact same success state and writes nothing', async () => {
     const res = await post('/en/serve/apply', 'team_id=2&name=Bot&email=bot@example.com&website=spam');
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toContain('sent=1');
+    // Same redirect target as a genuine signed-out submission — no tell.
+    expect(res.headers.get('location')).toBe('/en/serve/apply?sent=1&signin=1');
     const person = await env.DB
       .prepare(`SELECT id FROM people WHERE email = 'bot@example.com'`)
       .first<{ id: number }>();
     expect(person).toBeNull();
   });
 
-  it('signed-in POST applies as the session user, ignoring posted identity fields', async () => {
+  it('signed-in POST applies as the session user; a signed-in duplicate shows the friendly note', async () => {
     const cookie = await sessionCookie(5, 'mark.liu@example.com');
     // Team 3 (Hospitality) — mark has no application there in the seed.
     const res = await post('/en/serve/apply', 'team_id=3&name=Impostor&email=other@example.com', { cookie });
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toContain('sent=1');
+    expect(res.headers.get('location')).toBe('/en/serve/apply?sent=1');
     const app = await env.DB
       .prepare(`SELECT person_id, status FROM team_applications WHERE team_id = 3 AND person_id = 5`)
       .first<{ person_id: number; status: string }>();
     expect(app).toMatchObject({ person_id: 5, status: 'P' });
     // No person was created for the posted email.
     expect(await env.DB.prepare(`SELECT id FROM people WHERE email = 'other@example.com'`).first()).toBeNull();
+
+    // Signed-in duplicate → the dup flag and the "already applied" note (the
+    // user owns the account, nothing leaks).
+    const dup = await post('/en/serve/apply', 'team_id=3', { cookie });
+    expect(dup.status).toBe(303);
+    expect(dup.headers.get('location')).toBe('/en/serve/apply?sent=1&dup=1');
+    const dupBody = await (await get(dup.headers.get('location')!, { cookie })).text();
+    expect(dupBody).toContain('You already have an application with this team');
+
+    // The dup flag is session-gated: hand-typing it anonymously renders the
+    // neutral success, not the note.
+    const anonBody = await (await get('/en/serve/apply?sent=1&dup=1')).text();
+    expect(anonBody).not.toContain('You already have an application with this team');
   });
 });
 

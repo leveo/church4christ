@@ -46,9 +46,11 @@ let postedTeamId: number | null = null;
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData();
-  // Honeypot: bots fill the hidden "website" field; pretend success, do nothing.
+  // Honeypot: bots fill the hidden "website" field; pretend success, do
+  // nothing — landing on the EXACT signed-out success state so the response is
+  // indistinguishable from a real submission.
   if (String(fd.get('website') ?? '') !== '') {
-    return Astro.redirect(localePath(locale, '/serve/apply?sent=1'), 303);
+    return Astro.redirect(localePath(locale, '/serve/apply?sent=1&signin=1'), 303);
   }
 
   const parsed = parseApplicationForm(fd, !!user);
@@ -65,15 +67,27 @@ if (Astro.request.method === 'POST') {
     const positionId = teamPositions.some((p) => p.id === input.positionId) ? input.positionId : null;
 
     const personId = user ? user.id : await findOrCreatePersonByEmail(db, input.email, input.name, input.phone);
-    if (await hasPendingApplication(db, personId, input.teamId)) {
+    const alreadyPending = await hasPendingApplication(db, personId, input.teamId);
+
+    // The friendly "already applied" note is for SIGNED-IN users only (they
+    // own the account, nothing leaks). A signed-out submitter must get the
+    // identical neutral success on every branch — new person, existing person,
+    // existing WITH a pending application — or the response would reveal
+    // whether an email already applied to a team (enumeration).
+    if (alreadyPending && user) {
       return Astro.redirect(localePath(locale, '/serve/apply?sent=1&dup=1'), 303);
     }
-    await createApplication(db, personId, input.teamId, positionId, input.message);
-    // leader notification in task 5
+    if (!alreadyPending) {
+      // A concurrent duplicate is absorbed by the partial-unique index
+      // (createApplication is ON CONFLICT DO NOTHING) — treated as success.
+      await createApplication(db, personId, input.teamId, positionId, input.message);
+      // leader notification in task 5
+    }
 
-    // Signed-out applicants get a sign-in link so they can track their status.
-    // Best-effort: rate limiting and mail failures still land on the same
-    // success page (sendMagicLink already absorbs both).
+    // Signed-out applicants get a sign-in link so they can track their status
+    // (on the pending-duplicate branch too — signing in shows the existing
+    // application). Best-effort: rate limiting and mail failures still land on
+    // the same success page (sendMagicLink already absorbs both).
     if (!user) {
       try {
         const person = await getPersonByEmail(db, input.email);
@@ -87,7 +101,9 @@ if (Astro.request.method === 'POST') {
 }
 
 const sent = Astro.url.searchParams.has('sent');
-const isDup = Astro.url.searchParams.has('dup');
+// dup is only ever set for signed-in submitters; gate the render on the
+// session too so hand-typing ?dup=1 anonymously still shows the neutral state.
+const isDup = Astro.url.searchParams.has('dup') && !!user;
 const checkEmail = Astro.url.searchParams.has('signin');
 
 const selectedTeamId = postedTeamId ?? idOf(Astro.url.searchParams.get('team'));
