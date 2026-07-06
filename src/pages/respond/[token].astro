@@ -6,6 +6,8 @@ import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
 import { consumeToken, peekToken } from '../../lib/auth';
 import { getPersonById, i18nJoin } from '../../lib/db';
 import { respondToAssignment } from '../../lib/planDb';
+import { sendDeclineNotice } from '../../lib/notify';
+import { type EmailEnv } from '../../lib/email';
 
 // Email Accept/Decline without signing in. Same two-step shape as /auth: GET
 // only peeks (mail scanners), the explicit Accept/Decline POST consumes. The
@@ -62,8 +64,11 @@ if (Astro.request.method === 'POST') {
       const person = await getPersonById(db, consumed.person_id);
       locale = langOf(person?.lang ?? null);
       const result = await respondToAssignment(db, consumed.assignment_id, consumed.person_id, action, reason);
-      if (result.ok) state = action === 'accept' ? 'accepted' : 'declined';
-      else state = result.reason === 'past' ? 'past' : 'invalid';
+      if (result.ok) {
+        state = action === 'accept' ? 'accepted' : 'declined';
+        // Best-effort: let the team's leaders know so they can find a replacement.
+        if (action === 'decline') await sendDeclineNotice(env as unknown as EmailEnv, db, consumed.assignment_id, reason);
+      } else state = result.reason === 'past' ? 'past' : 'invalid';
     }
   }
 } else {

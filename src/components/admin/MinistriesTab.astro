@@ -1,0 +1,101 @@
+---
+// Ministries tab: a summary table (name, category, team / member / open-role
+// counts, active toggle) with a per-row collapsible "edit basics" form.
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import type { MinistrySummary, MinistryEditRow } from '../../lib/ministryDb';
+import { card, th, td, tin, lab, btn, badge, badgeActive, badgeInactive } from '../../lib/adminUi';
+
+interface Props {
+  lang: Locale;
+  title: string;
+  ministries: MinistrySummary[];
+  editRows: MinistryEditRow[];
+  categories: { value: string; label: string }[];
+  leaders: { id: number; name: string }[];
+}
+const { lang, title, ministries, editRows, categories, leaders } = Astro.props;
+const editOf = (id: number) => editRows.find((r) => r.id === id);
+---
+<div class={card}>
+  <div class="flex items-center gap-3 flex-wrap">
+    <h2 class="font-display text-heading-sm font-bold">{title}</h2>
+    <a href="/admin/ministries?tab=new" class={`ml-auto ${btn}`}>{t(lang, 'admin.console.newMinistryBtn')}</a>
+  </div>
+
+  {ministries.length === 0 ? (
+    <p class="mt-6 text-sm text-ink-muted">{t(lang, 'admin.console.noMinistries')}</p>
+  ) : (
+    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+      <table class="w-full border-collapse text-sm min-w-[44rem]">
+        <thead class="bg-surface-sunken">
+          <tr>
+            <th class={th}>{t(lang, 'admin.console.col.ministry')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.console.col.teams')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.console.col.members')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.console.col.openRoles')}</th>
+            <th class={th}>{t(lang, 'admin.console.col.status')}</th>
+            <th class={th}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {ministries.map((m) => {
+            const e = editOf(m.id);
+            return (
+              <>
+                <tr class="border-t border-border">
+                  <td class={`${td} font-semibold whitespace-nowrap`}>{m.icon} {m.name}</td>
+                  <td class={`${td} text-center text-ink-muted`}>{m.team_count}</td>
+                  <td class={`${td} text-center text-ink-muted`}>{m.member_count}</td>
+                  <td class={`${td} text-center`}>{m.open_count > 0 ? <span class="font-semibold text-primary">{m.open_count}</span> : <span class="text-ink-subtle">0</span>}</td>
+                  <td class={td}>
+                    <span class={`${badge} ${m.active === 1 ? badgeActive : badgeInactive}`}>{t(lang, m.active === 1 ? 'admin.console.active' : 'admin.console.disabled')}</span>
+                  </td>
+                  <td class={`${td} text-right whitespace-nowrap`}>
+                    <span class="inline-flex gap-2 items-center">
+                      <a href={`/${lang}/serve/matrix`} class="text-primary hover:underline text-xs font-semibold">{t(lang, 'admin.console.schedule')}</a>
+                      <form method="post" class="inline">
+                        <input type="hidden" name="ministry_id" value={m.id} />
+                        <input type="hidden" name="active" value={m.active === 1 ? '0' : '1'} />
+                        <button name="_action" value="toggleMinistry" class="text-xs font-semibold text-ink-muted hover:text-danger">{t(lang, m.active === 1 ? 'admin.console.disable' : 'admin.console.enable')}</button>
+                      </form>
+                    </span>
+                  </td>
+                </tr>
+                {e && (
+                  <tr class="border-t border-border bg-surface-sunken">
+                    <td colspan="6" class="px-3 py-2">
+                      <details>
+                        <summary class="cursor-pointer text-xs font-semibold text-primary">{t(lang, 'admin.console.editBasics')}</summary>
+                        <form method="post" class="mt-3 grid sm:grid-cols-2 gap-3">
+                          <input type="hidden" name="ministry_id" value={m.id} />
+                          <label><span class={lab}>{t(lang, 'admin.console.wiz.nameEn')}</span><input name="name_en" value={e.name_en ?? ''} class={tin} /></label>
+                          <label><span class={lab}>{t(lang, 'admin.console.wiz.nameZh')}</span><input name="name_zh" value={e.name_zh ?? ''} class={tin} /></label>
+                          <label><span class={lab}>{t(lang, 'admin.console.wiz.category')}</span>
+                            <select name="category" class={tin}>
+                              {categories.map((c) => <option value={c.value} selected={c.value === e.category}>{c.label}</option>)}
+                            </select>
+                          </label>
+                          <label><span class={lab}>{t(lang, 'admin.console.wiz.icon')}</span><input name="icon" value={e.icon} class={tin} /></label>
+                          <label><span class={lab}>{t(lang, 'admin.console.wiz.leader')}</span>
+                            <select name="leader_person_id" class={tin}>
+                              <option value="">{t(lang, 'admin.console.wiz.leaderNone')}</option>
+                              {leaders.map((l) => <option value={l.id} selected={l.id === e.leader_person_id}>{l.name}</option>)}
+                            </select>
+                          </label>
+                          <div class="sm:col-span-2">
+                            <button name="_action" value="updateBasics" class={btn}>{t(lang, 'admin.console.saveBasics')}</button>
+                          </div>
+                        </form>
+                      </details>
+                    </td>
+                  </tr>
+                )}
+              </>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>

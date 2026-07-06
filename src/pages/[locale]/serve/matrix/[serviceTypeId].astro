@@ -16,6 +16,8 @@ import { t } from '../../../../lib/i18n';
 import { assignPerson, canEditPosition } from '../../../../lib/planDb';
 import { getMatrix, listServiceTypes, listTeamMembers } from '../../../../lib/teamDb';
 import { addDays, isValidDateStr, todayInTz } from '../../../../lib/dates';
+import { sendSchedulingRequest } from '../../../../lib/notify';
+import { type EmailEnv } from '../../../../lib/email';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -46,7 +48,12 @@ if (Astro.request.method === 'POST') {
     }
     const result = await assignPerson(db, { planId, positionId, personId, assignedBy: user.id });
     if (result === 'ok') {
-      // notify in task 5: scheduling-request email (accept/decline link) to the assignee.
+      // Best-effort scheduling-request email (accept/decline link) to the assignee.
+      const row = await db
+        .prepare(`SELECT id FROM roster_assignments WHERE plan_id = ? AND position_id = ? AND person_id = ? AND deleted_at IS NULL`)
+        .bind(planId, positionId, personId)
+        .first<{ id: number }>();
+      if (row) await sendSchedulingRequest(env as unknown as EmailEnv, db, row.id);
       return Astro.redirect(`${Astro.url.pathname}${Astro.url.search}`, 303);
     }
     if (result === 'full') flashKey = 'serve.plans.slotFull';

@@ -1,0 +1,78 @@
+---
+// Teams overview (admin only): a flat list of every serving team across all
+// ministries with member / leader / open-slot counts and soft-delete / restore.
+// Teams are CREATED from a ministry page (or the wizard); this is the retirement
+// surface. Ported from dcfc-serve's admin teams view.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { listTeamsAdmin, softDeleteTeam, restoreTeam } from '../../../lib/teamDb';
+import { th, td, badge, badgeActive, badgeInactive } from '../../../lib/adminUi';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const id = idOf(fd.get('id'));
+  if (id) {
+    if (fd.get('_action') === 'delete') await softDeleteTeam(db, id);
+    else if (fd.get('_action') === 'restore') await restoreTeam(db, id);
+  }
+  return Astro.redirect('/admin/teams', 303);
+}
+
+const teams = await listTeamsAdmin(db, lang);
+---
+<Admin title={t(lang, 'admin.teams.title')}>
+  <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.teams.back')}</a>
+  <h1 class="mt-2 font-display text-heading-md font-bold">{t(lang, 'admin.teams.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.teams.intro')}</p>
+
+  {teams.length === 0 ? (
+    <p class="mt-6 text-sm text-ink-muted">{t(lang, 'admin.teams.none')}</p>
+  ) : (
+    <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+      <table class="w-full border-collapse text-sm">
+        <thead class="bg-surface-sunken">
+          <tr>
+            <th class={th}>{t(lang, 'admin.teams.team')}</th>
+            <th class={th}>{t(lang, 'admin.teams.ministry')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.teams.members')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.teams.leaders')}</th>
+            <th class={`${th} text-center`}>{t(lang, 'admin.teams.openSlots')}</th>
+            <th class={th}>{t(lang, 'admin.teams.status')}</th>
+            <th class={th}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {teams.map((tm) => (
+            <tr class="border-t border-border">
+              <td class={`${td} font-semibold`}>{tm.name}</td>
+              <td class={`${td} text-ink-muted`}>{tm.ministry_name ?? t(lang, 'admin.teams.noMinistry')}</td>
+              <td class={`${td} text-center text-ink-muted`}>{tm.member_count}</td>
+              <td class={`${td} text-center text-ink-muted`}>{tm.leader_count}</td>
+              <td class={`${td} text-center`}>{tm.open_slots > 0 ? <span class="font-semibold text-primary">{tm.open_slots}</span> : <span class="text-ink-subtle">0</span>}</td>
+              <td class={td}>
+                <span class={`${badge} ${tm.deleted_at ? badgeInactive : badgeActive}`}>{t(lang, tm.deleted_at ? 'admin.teams.deleted' : 'admin.teams.active')}</span>
+              </td>
+              <td class={`${td} text-right`}>
+                <form method="post" class="inline">
+                  <input type="hidden" name="id" value={tm.id} />
+                  {tm.deleted_at ? (
+                    <button name="_action" value="restore" class="text-xs font-semibold text-primary hover:underline">{t(lang, 'admin.teams.restore')}</button>
+                  ) : (
+                    <button name="_action" value="delete" data-confirm={t(lang, 'admin.teams.confirmDelete')} class="text-xs font-semibold text-danger hover:underline">{t(lang, 'admin.teams.delete')}</button>
+                  )}
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</Admin>

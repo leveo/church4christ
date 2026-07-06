@@ -43,6 +43,115 @@ export async function listServiceTypes(db: D1Database, locale: Locale): Promise<
   return results;
 }
 
+export interface ServiceTypeAdminRow extends ServiceTypeRow {
+  name_en: string;
+  name_zh: string | null;
+  sort: number;
+}
+
+/** Non-deleted service types with BOTH locale names + sort, for the admin CRUD table. */
+export async function listServiceTypesAdmin(db: D1Database): Promise<ServiceTypeAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT st.id AS id, st.start_time AS start_time, st.end_time AS end_time, st.sort AS sort,
+              en.name AS name_en, zh.name AS name_zh, COALESCE(en.name, zh.name) AS name
+       FROM service_types st
+       LEFT JOIN service_type_i18n en ON en.service_type_id = st.id AND en.locale = 'en'
+       LEFT JOIN service_type_i18n zh ON zh.service_type_id = st.id AND zh.locale = 'zh'
+       WHERE st.deleted_at IS NULL
+       ORDER BY st.sort, st.id`,
+    )
+    .all<ServiceTypeAdminRow>();
+  return results;
+}
+
+export interface ServiceTypeInput {
+  nameEn: string;
+  nameZh: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  sort: number;
+}
+
+async function upsertServiceTypeI18n(db: D1Database, id: number, locale: Locale, name: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (?1, ?2, ?3)
+       ON CONFLICT(service_type_id, locale) DO UPDATE SET name = excluded.name`,
+    )
+    .bind(id, locale, name)
+    .run();
+}
+
+/** Create (id null) or update a service type + its i18n names. Returns the id. */
+export async function saveServiceType(db: D1Database, id: number | null, input: ServiceTypeInput): Promise<number> {
+  let stId = id;
+  if (stId) {
+    await db
+      .prepare(`UPDATE service_types SET start_time = ?1, end_time = ?2, sort = ?3, deleted_at = NULL WHERE id = ?4`)
+      .bind(input.startTime, input.endTime, input.sort, stId)
+      .run();
+  } else {
+    const row = await db
+      .prepare(`INSERT INTO service_types (start_time, end_time, sort) VALUES (?1, ?2, ?3) RETURNING id`)
+      .bind(input.startTime, input.endTime, input.sort)
+      .first<{ id: number }>();
+    stId = row!.id;
+  }
+  await upsertServiceTypeI18n(db, stId, 'en', input.nameEn);
+  if (input.nameZh) await upsertServiceTypeI18n(db, stId, 'zh', input.nameZh);
+  return stId;
+}
+
+export async function softDeleteServiceType(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`UPDATE service_types SET deleted_at = datetime('now') WHERE id = ?`).bind(id).run();
+}
+
+// ── Team soft-delete / restore (admin teams page) ──
+
+export interface TeamAdminRow extends TeamSummary {
+  deleted_at: string | null;
+}
+
+/** All teams INCLUDING soft-deleted ones, for the admin teams list. */
+export async function listTeamsAdmin(db: D1Database, locale: Locale): Promise<TeamAdminRow[]> {
+  const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
+  const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
+  const today = todayInTz(TZ);
+  const { results } = await db
+    .prepare(
+      `SELECT tm.id AS id, COALESCE(tm_l.name, tm_d.name) AS name, tm.deleted_at AS deleted_at,
+              min.id AS ministry_id, min.slug AS ministry_slug,
+              COALESCE(min_l.name, min_d.name) AS ministry_name,
+              (SELECT COUNT(*) FROM team_members
+                 JOIN people ON people.id = team_members.person_id AND people.deleted_at IS NULL
+                 WHERE team_members.team_id = tm.id) AS member_count,
+              (SELECT COUNT(*) FROM team_members
+                 JOIN people ON people.id = team_members.person_id AND people.deleted_at IS NULL
+                 WHERE team_members.team_id = tm.id AND team_members.is_leader = 1) AS leader_count,
+              (SELECT COUNT(*) FROM plan_positions pp
+                 JOIN plans ON plans.id = pp.plan_id AND plans.deleted_at IS NULL AND plans.plan_date >= ?1
+                 JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL AND pos.team_id = tm.id
+                 WHERE pp.open_signup = 1) AS open_slots
+       FROM teams tm
+       ${tmJ.joins}
+       LEFT JOIN ministries min ON min.id = tm.ministry_id
+       ${minJ.joins}
+       ORDER BY tm.deleted_at IS NOT NULL, tm.sort, tm.id`,
+    )
+    .bind(today)
+    .all<TeamAdminRow>();
+  return results;
+}
+
+export async function softDeleteTeam(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`UPDATE teams SET deleted_at = datetime('now') WHERE id = ?`).bind(id).run();
+}
+
+export async function restoreTeam(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`UPDATE teams SET deleted_at = NULL WHERE id = ?`).bind(id).run();
+}
+
 // ── Teams directory ──
 
 export interface TeamSummary {
@@ -256,13 +365,17 @@ export interface ApplicationRow {
   person_name: string;
   person_email: string | null;
   team_id: number;
+  team_name: string;
   position_name: string | null;
   message: string | null;
   status: 'P' | 'A' | 'R';
   created_at: string;
+  /** 1 when the applicant has ever completed the spiritual-gifts quiz. */
+  has_gifts: number;
 }
 
-/** Pending applications for the given teams (localized position name), oldest first. */
+/** Pending applications for the given teams (localized team/position names, gift
+ *  badge flag), oldest first. */
 export async function listPendingApplicationsForTeams(
   db: D1Database,
   teamIds: number[],
@@ -270,15 +383,20 @@ export async function listPendingApplicationsForTeams(
 ): Promise<ApplicationRow[]> {
   if (teamIds.length === 0) return [];
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
+  const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const placeholders = teamIds.map(() => '?').join(',');
   const { results } = await db
     .prepare(
       `SELECT ta.id AS id, ta.person_id AS person_id, people.display_name AS person_name,
               people.email AS person_email, ta.team_id AS team_id,
+              COALESCE(tm_l.name, tm_d.name) AS team_name,
               COALESCE(pos_l.name, pos_d.name) AS position_name,
-              ta.message AS message, ta.status AS status, ta.created_at AS created_at
+              ta.message AS message, ta.status AS status, ta.created_at AS created_at,
+              EXISTS(SELECT 1 FROM gift_results gr WHERE gr.person_id = ta.person_id) AS has_gifts
        FROM team_applications ta
        JOIN people ON people.id = ta.person_id AND people.deleted_at IS NULL
+       JOIN teams tm ON tm.id = ta.team_id
+       ${tmJ.joins}
        LEFT JOIN positions pos ON pos.id = ta.position_id
        ${posJ.joins}
        WHERE ta.status = 'P' AND ta.team_id IN (${placeholders})
@@ -287,6 +405,12 @@ export async function listPendingApplicationsForTeams(
     .bind(...teamIds)
     .all<ApplicationRow>();
   return results;
+}
+
+/** All non-deleted team ids (for admin-scope application review). */
+export async function listAllTeamIds(db: D1Database): Promise<number[]> {
+  const { results } = await db.prepare(`SELECT id FROM teams WHERE deleted_at IS NULL`).all<{ id: number }>();
+  return results.map((r) => r.id);
 }
 
 /** True when the person already has a PENDING application for this team. */

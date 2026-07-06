@@ -25,6 +25,8 @@ import {
   type PersonOption,
   type PotentialVolunteer,
 } from '../../../../lib/teamDb';
+import { sendApplicationResult } from '../../../../lib/notify';
+import { type EmailEnv } from '../../../../lib/email';
 import { btn, btnSecondary, tin } from '../../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -73,8 +75,9 @@ if (Astro.request.method === 'POST') {
     if (appId) {
       // decideApplication is scoped to THIS team, so a leader can't decide
       // another team's application by posting its id.
-      await decideApplication(db, appId, approve, user.email, teamId);
-      // notify in task 5: application-result email to the applicant.
+      const decided = await decideApplication(db, appId, approve, user.email, teamId);
+      // Best-effort application-result email to the applicant (approve → member).
+      if (decided) await sendApplicationResult(env as unknown as EmailEnv, db, appId, approve);
     }
     return back();
   }

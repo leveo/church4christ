@@ -22,7 +22,7 @@ import {
   listTeamSummaries,
 } from '../../../lib/teamDb';
 import { getPersonByEmail } from '../../../lib/db';
-import { sendMagicLink } from '../../../lib/notify';
+import { sendApplicationReceived, sendMagicLink } from '../../../lib/notify';
 import type { EmailEnv } from '../../../lib/email';
 import { parseApplicationForm } from '../../../lib/validate';
 import { btn, lab, noticeErr, tin } from '../../../lib/adminUi';
@@ -81,7 +81,12 @@ if (Astro.request.method === 'POST') {
       // A concurrent duplicate is absorbed by the partial-unique index
       // (createApplication is ON CONFLICT DO NOTHING) — treated as success.
       await createApplication(db, personId, input.teamId, positionId, input.message);
-      // leader notification in task 5
+      // Best-effort: notify the team's leaders that a new application awaits review.
+      const appRow = await db
+        .prepare(`SELECT id FROM team_applications WHERE person_id = ? AND team_id = ? AND status = 'P'`)
+        .bind(personId, input.teamId)
+        .first<{ id: number }>();
+      if (appRow) await sendApplicationReceived(vars, db, appRow.id);
     }
 
     // Signed-out applicants get a sign-in link so they can track their status

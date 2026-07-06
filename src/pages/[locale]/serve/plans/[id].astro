@@ -30,6 +30,8 @@ import {
 } from '../../../../lib/planDb';
 import { listServiceTypes, listTeamMembers, listTeamPositions, listTeamSummaries } from '../../../../lib/teamDb';
 import { formatDate } from '../../../../lib/dates';
+import { sendSchedulingRequest } from '../../../../lib/notify';
+import { type EmailEnv } from '../../../../lib/email';
 import { btn, btnSecondary, noticeOk, tin } from '../../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -73,7 +75,12 @@ if (Astro.request.method === 'POST') {
     }
     const result = await assignPerson(db, { planId, positionId, personId, assignedBy: user.id, force: fd.get('force') === '1' });
     if (result === 'ok') {
-      // notify in task 5: scheduling-request email (accept/decline link) to the assignee.
+      // Best-effort scheduling-request email (accept/decline link) to the assignee.
+      const row = await db
+        .prepare(`SELECT id FROM roster_assignments WHERE plan_id = ? AND position_id = ? AND person_id = ? AND deleted_at IS NULL`)
+        .bind(planId, positionId, personId)
+        .first<{ id: number }>();
+      if (row) await sendSchedulingRequest(env as unknown as EmailEnv, db, row.id);
       return back();
     }
     if (result === 'full') flashKey = 'serve.plans.slotFull';

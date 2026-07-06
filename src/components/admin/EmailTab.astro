@@ -1,0 +1,117 @@
+---
+// Email tab (admin only): automation-rule toggles, a per-key/per-locale template
+// editor with a {placeholder} hint and a send-test button, and the last-50 send
+// log. Templates are edited one locale at a time (each locale block is its own
+// form). Ported from dcfc-serve's EmailTab, adapted to church-cms per-locale rows.
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import type { EmailTemplate, EmailLogRow, TemplateKey } from '../../lib/emailSettingsDb';
+import { card, tin, lab, btn, btnSecondary, th, td, badge } from '../../lib/adminUi';
+
+interface Props {
+  lang: Locale;
+  rules: Record<string, boolean>;
+  templates: EmailTemplate[];
+  selectedKey: TemplateKey;
+  log: EmailLogRow[];
+  testSent: boolean;
+}
+const { lang, rules, templates, selectedKey, log, testSent } = Astro.props;
+
+const ruleDefs = [
+  { key: 'remind7', label: 'admin.console.rule.remind7', sub: 'admin.console.rule.remind7sub' },
+  { key: 'remind3', label: 'admin.console.rule.remind3', sub: 'admin.console.rule.remind3sub' },
+  { key: 'digestAM', label: 'admin.console.rule.digestAM', sub: 'admin.console.rule.digestAMsub' },
+] as const;
+const tplKeys: TemplateKey[] = ['remind', 'request', 'appResult', 'digestAM'];
+const editLocales: { loc: Locale; label: string }[] = [
+  { loc: 'en', label: t(lang, 'admin.console.email.localeEn') },
+  { loc: 'zh', label: t(lang, 'admin.console.email.localeZh') },
+];
+const tplFor = (loc: Locale) => templates.find((tp) => tp.template_key === selectedKey && tp.locale === loc) ?? { subject: '', body: '' };
+const vars = ['{name}', '{position}', '{date}', '{team}', '{service}', '{reason}', '{link}'];
+const logCls: Record<string, string> = {
+  sent: 'bg-success-soft text-success', delivered: 'bg-success-soft text-success',
+  opened: 'bg-accent-soft text-on-accent-soft', devlog: 'bg-surface-sunken text-ink-muted',
+  bounced: 'bg-danger-soft text-danger', failed: 'bg-danger-soft text-danger',
+};
+---
+<div class="grid lg:grid-cols-[1.2fr_1fr] gap-5 items-start">
+  <div class="flex flex-col gap-5">
+    <div class={card}>
+      <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.console.email.rules')}</h2>
+      <div class="mt-2 divide-y divide-border">
+        {ruleDefs.map((r) => {
+          const on = rules[r.key] ?? false;
+          return (
+            <div class="flex items-center gap-3.5 py-3.5">
+              <form method="post">
+                <input type="hidden" name="rule_key" value={r.key} />
+                <input type="hidden" name="enabled" value={on ? '0' : '1'} />
+                <button name="_action" value="toggleRule" aria-pressed={on} class:list={['relative w-11 h-6 rounded-full shrink-0 transition-colors', on ? 'bg-primary' : 'bg-border']}>
+                  <span class:list={['absolute top-0.5 h-5 w-5 rounded-full bg-surface shadow transition-all', on ? 'left-[22px]' : 'left-0.5']}></span>
+                </button>
+              </form>
+              <div class="flex-1">
+                <div class="font-semibold text-[0.9375rem]">{t(lang, r.label)}</div>
+                <div class="text-[0.8125rem] text-ink-muted">{t(lang, r.sub)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    <div class={card}>
+      <div class="flex items-center gap-2 flex-wrap">
+        <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.console.email.template')}</h2>
+        <div class="ml-auto flex gap-1 flex-wrap">
+          {tplKeys.map((k) => (
+            <a href={`/admin/ministries?tab=email&tpl=${k}`} class:list={['px-3 py-1 rounded-full text-xs font-semibold', k === selectedKey ? 'bg-primary text-on-primary' : 'border border-border text-ink-muted hover:bg-surface-sunken']}>{t(lang, `admin.console.tpl.${k}`)}</a>
+          ))}
+        </div>
+      </div>
+
+      {editLocales.map(({ loc, label }) => {
+        const tp = tplFor(loc);
+        return (
+          <form method="post" class="mt-4 border-t border-border pt-4">
+            <input type="hidden" name="template_key" value={selectedKey} />
+            <input type="hidden" name="locale" value={loc} />
+            <div class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{label}</div>
+            <label class="block mt-2"><span class={lab}>{t(lang, 'admin.console.email.subject')}</span><input name="subject" value={tp.subject} class={tin} /></label>
+            <label class="block mt-2"><span class={lab}>{t(lang, 'admin.console.email.body')}</span><textarea name="body" rows="4" class={`${tin} resize-y leading-relaxed`}>{tp.body}</textarea></label>
+            <div class="mt-2.5 flex gap-1.5 flex-wrap items-center">
+              <span class="text-xs text-ink-subtle">{t(lang, 'admin.console.email.variables')}</span>
+              {vars.map((v) => <code class="px-1.5 py-0.5 rounded bg-surface-sunken text-ink-muted text-xs">{v}</code>)}
+            </div>
+            <div class="mt-3 flex gap-2.5 flex-wrap">
+              <button name="_action" value="saveTemplate" class={btn}>{t(lang, 'admin.console.email.save')}</button>
+              <button name="_action" value="sendTest" class={btnSecondary}>{testSent ? t(lang, 'admin.console.email.testSent') : t(lang, 'admin.console.email.sendTest')}</button>
+            </div>
+          </form>
+        );
+      })}
+    </div>
+  </div>
+
+  <div class={card}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.console.email.log')}</h2>
+    {log.length === 0 ? (
+      <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.console.email.noLog')}</p>
+    ) : (
+      <div class="mt-2 divide-y divide-border">
+        {log.map((l) => (
+          <div class="flex items-center gap-2.5 py-2.5 text-[0.8125rem]">
+            <span class="text-ink-subtle tabular-nums whitespace-nowrap">{l.created_at.slice(5, 16)}</span>
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold truncate">{l.to_name || l.to_email}</div>
+              <div class="text-ink-muted truncate">{l.kind}{l.detail ? ` · ${l.detail}` : ''}</div>
+            </div>
+            <span class={`${badge} ${logCls[l.status] ?? 'bg-surface-sunken text-ink-muted'} whitespace-nowrap`}>{t(lang, `admin.console.logStatus.${l.status}`)}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</div>

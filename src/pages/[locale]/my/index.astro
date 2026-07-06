@@ -16,6 +16,8 @@ import { t } from '../../../lib/i18n';
 import { claimOpenSlot, listOpenSlotsForPerson, respondToAssignment } from '../../../lib/planDb';
 import { listApplicationsByPerson, listPersonAssignments } from '../../../lib/myDb';
 import { formatDate, todayInTz } from '../../../lib/dates';
+import { sendDeclineNotice } from '../../../lib/notify';
+import { type EmailEnv } from '../../../lib/email';
 import { btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -40,7 +42,8 @@ if (Astro.request.method === 'POST') {
       const reason = String(fd.get('reason') ?? '').trim() || null;
       const result = await respondToAssignment(db, assignmentId, user.id, action, reason);
       if (result.ok && action === 'decline') {
-        // leader notification in task 5
+        // Best-effort: notify the team's leaders of the decline.
+        await sendDeclineNotice(env as unknown as EmailEnv, db, assignmentId, reason);
       }
     }
     return Astro.redirect(localePath(locale, '/my'), 303);

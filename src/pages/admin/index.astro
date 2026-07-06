@@ -56,6 +56,21 @@ try {
   console.error('admin dashboard load failed', e);
 }
 
+// Volunteer-console entry: pending serving applications, scoped to the viewer
+// (admin → church-wide; team leader → their teams). Best-effort.
+const isLeader = user.leaderTeamIds.length > 0;
+let pendingApps = 0;
+try {
+  if (user.isAdmin) {
+    pendingApps = (await db.prepare(`SELECT COUNT(*) AS n FROM team_applications WHERE status = 'P'`).first<{ n: number }>())?.n ?? 0;
+  } else if (isLeader) {
+    const ph = user.leaderTeamIds.map(() => '?').join(',');
+    pendingApps = (await db.prepare(`SELECT COUNT(*) AS n FROM team_applications WHERE status = 'P' AND team_id IN (${ph})`).bind(...user.leaderTeamIds).first<{ n: number }>())?.n ?? 0;
+  }
+} catch (e) {
+  console.error('pending applications count failed', e);
+}
+
 const stats = [
   ...(user.isAdmin ? [{ label: t(lang, 'admin.nav.people'), value: peopleCount === null ? '—' : String(peopleCount) }] : []),
   ...(isStaff
@@ -97,6 +112,19 @@ function revHref(r: RecentRevisionRow): string {
             </div>
           </div>
         ))}
+      </div>
+    )
+  }
+
+  {
+    (user.isAdmin || isLeader) && (
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        <a href="/admin/ministries?tab=applications" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.volunteerConsole')}</span>
+          <span class={`${badge} ${pendingApps > 0 ? badgeActive : badgeInactive}`}>
+            {t(lang, 'admin.dashboard.applicationsCount', { count: pendingApps })}
+          </span>
+        </a>
       </div>
     )
   }

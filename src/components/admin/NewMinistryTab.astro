@@ -1,0 +1,174 @@
+---
+// New-ministry wizard: a 4-step progressive form (basics → roles → schedule →
+// review). Without JS every panel shows and Publish submits directly; with JS a
+// stepper reveals one panel at a time. Submits _action=createMinistry, parsed by
+// the console page into createMinistryFromWizard. Ported from dcfc-serve.
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import { tin, lab, btn, btnSecondary, rowBtn, card } from '../../lib/adminUi';
+
+interface Props {
+  lang: Locale;
+  categories: { value: string; label: string }[];
+  leaders: { id: number; name: string }[];
+  published: boolean;
+  publishedName: string;
+}
+const { lang, categories, leaders, published, publishedName } = Astro.props;
+
+const steps = [
+  { n: 1, label: t(lang, 'admin.console.wiz.basics') },
+  { n: 2, label: t(lang, 'admin.console.wiz.roles') },
+  { n: 3, label: t(lang, 'admin.console.wiz.schedule') },
+  { n: 4, label: t(lang, 'admin.console.wiz.review') },
+];
+const freqs = [
+  { value: 'sun', label: t(lang, 'admin.console.wiz.freqSun') },
+  { value: 'sat', label: t(lang, 'admin.console.wiz.freqSat') },
+  { value: 'biweekly', label: t(lang, 'admin.console.wiz.freqBiweekly') },
+  { value: 'monthly', label: t(lang, 'admin.console.wiz.freqMonthly') },
+  { value: 'irregular', label: t(lang, 'admin.console.wiz.freqIrregular') },
+];
+---
+{published ? (
+  <div class={`${card} max-w-2xl text-center`}>
+    <div class="text-5xl">🎉</div>
+    <h2 class="mt-3 font-display text-heading-md font-bold text-primary">{t(lang, 'admin.console.wiz.doneTitle', { name: publishedName })}</h2>
+    <p class="mt-2 text-ink-muted">{t(lang, 'admin.console.wiz.doneBody')}</p>
+    <div class="mt-5 flex gap-3 justify-center flex-wrap">
+      <a href="/admin/ministries?tab=ministries" class={btn}>{t(lang, 'admin.console.tab.ministries')}</a>
+      <a href="/admin/ministries?tab=new" class={btnSecondary}>{t(lang, 'admin.console.wiz.createAnother')}</a>
+    </div>
+  </div>
+) : (
+  <form method="post" class="max-w-2xl" data-wizard>
+    <input type="hidden" name="_action" value="createMinistry" />
+
+    <div class="flex gap-2 flex-wrap" data-step-bar>
+      {steps.map((s) => (
+        <div data-step-pill={s.n} class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-[0.8125rem] font-semibold text-ink-subtle">
+          <span class="flex h-5 w-5 items-center justify-center rounded-full bg-surface-sunken text-[0.6875rem]">{s.n}</span>
+          {s.label}
+        </div>
+      ))}
+    </div>
+
+    <div class={`mt-5 ${card}`}>
+      <div data-step-panel="1" class="grid sm:grid-cols-2 gap-4">
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.nameEn')} *</span><input name="name_en" class={tin} /></label>
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.nameZh')}</span><input name="name_zh" class={tin} /></label>
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.category')}</span>
+          <select name="category" class={tin}>{categories.map((c) => <option value={c.value}>{c.label}</option>)}</select>
+        </label>
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.icon')}</span><input name="icon" placeholder="🎵" class={tin} /></label>
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.leader')}</span>
+          <select name="leader_person_id" class={tin}>
+            <option value="">{t(lang, 'admin.console.wiz.leaderNone')}</option>
+            {leaders.map((l) => <option value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+        <label class="sm:col-span-2"><span class={lab}>{t(lang, 'admin.console.wiz.intro')}</span><textarea name="intro_en" rows="2" class={`${tin} resize-y`}></textarea></label>
+      </div>
+
+      <div data-step-panel="2">
+        <p class="text-sm text-ink-muted">{t(lang, 'admin.console.wiz.rolesHint')}</p>
+        <div class="mt-4 flex flex-col gap-2.5" data-roles>
+          {[0, 1, 2].map(() => (
+            <div class="flex items-end gap-2.5 flex-wrap rounded-lg border border-border px-3 py-2.5" data-role-row>
+              <label class="flex-1 min-w-32"><span class={lab}>{t(lang, 'admin.console.wiz.roleNameEn')}</span><input name="pos_name_en" class={tin} /></label>
+              <label class="flex-1 min-w-32"><span class={lab}>{t(lang, 'admin.console.wiz.roleNameZh')}</span><input name="pos_name_zh" class={tin} /></label>
+              <label class="w-20"><span class={lab}>{t(lang, 'admin.console.wiz.needed')}</span><input type="number" min="1" name="pos_needed" value="1" class={tin} /></label>
+              <input type="hidden" name="pos_open" value="0" data-open-hidden />
+              <label class="flex items-center gap-1.5 text-xs text-ink-muted pb-2.5"><input type="checkbox" data-open-check class="h-4 w-4" />{t(lang, 'admin.console.wiz.openSignup')}</label>
+              <button type="button" data-remove-role class={`${rowBtn} pb-2 ml-auto`}>{t(lang, 'admin.console.wiz.removeRole')}</button>
+            </div>
+          ))}
+        </div>
+        <button type="button" data-add-role class={`mt-3 ${rowBtn}`}>{t(lang, 'admin.console.wiz.addRole')}</button>
+      </div>
+
+      <div data-step-panel="3" class="grid sm:grid-cols-2 gap-4">
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.frequency')}</span>
+          <select name="frequency" class={tin}>{freqs.map((f) => <option value={f.value}>{f.label}</option>)}</select>
+        </label>
+        <label><span class={lab}>{t(lang, 'admin.console.wiz.time')}</span><input name="meeting_time" placeholder="10:00 – 11:30" class={tin} /></label>
+        <div class="sm:col-span-2 rounded-lg border border-border bg-surface-sunken p-4 text-sm text-ink-muted">
+          <label class="flex items-center gap-2.5 cursor-pointer font-semibold text-ink">
+            <input type="checkbox" name="auto_generate" value="1" checked class="h-4 w-4" />
+            {t(lang, 'admin.console.wiz.autoGen')}
+          </label>
+          <p class="mt-1.5 ml-6">{t(lang, 'admin.console.wiz.autoGenNote')}</p>
+        </div>
+      </div>
+
+      <div data-step-panel="4">
+        <h3 class="font-display text-heading-sm font-semibold">{t(lang, 'admin.console.wiz.reviewTitle')}</h3>
+        <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.console.wiz.reviewNote')}</p>
+      </div>
+
+      <div class="mt-6 flex gap-2.5 border-t border-border pt-5">
+        <button type="button" data-back hidden class={btnSecondary}>{t(lang, 'admin.console.wiz.back')}</button>
+        <button type="button" data-next hidden class={`ml-auto ${btn}`}>{t(lang, 'admin.console.wiz.next')}</button>
+        <button type="submit" data-publish class={`ml-auto ${btn}`}>{t(lang, 'admin.console.wiz.publish')}</button>
+      </div>
+    </div>
+  </form>
+)}
+
+<script>
+  const form = document.querySelector<HTMLFormElement>('[data-wizard]');
+  if (form) {
+    const total = 4;
+    let step = 1;
+    const panels = form.querySelectorAll<HTMLElement>('[data-step-panel]');
+    const pills = form.querySelectorAll<HTMLElement>('[data-step-pill]');
+    const back = form.querySelector<HTMLButtonElement>('[data-back]')!;
+    const next = form.querySelector<HTMLButtonElement>('[data-next]')!;
+    const publish = form.querySelector<HTMLButtonElement>('[data-publish]')!;
+
+    function render() {
+      panels.forEach((p) => (p.hidden = Number(p.getAttribute('data-step-panel')) !== step));
+      pills.forEach((pill) => {
+        const n = Number(pill.getAttribute('data-step-pill'));
+        pill.classList.toggle('border-primary', n === step);
+        pill.classList.toggle('text-primary', n === step);
+        pill.classList.toggle('text-ink-subtle', n !== step);
+      });
+      back.hidden = step === 1;
+      next.hidden = step === total;
+      publish.hidden = step !== total;
+    }
+    next.addEventListener('click', () => {
+      const panel = form.querySelector<HTMLElement>(`[data-step-panel="${step}"]`);
+      const invalid = panel && [...panel.querySelectorAll<HTMLInputElement>('input, select, textarea')].find((el) => !el.checkValidity());
+      if (invalid) { invalid.reportValidity(); return; }
+      if (step < total) { step++; render(); }
+    });
+    back.addEventListener('click', () => { if (step > 1) { step--; render(); } });
+
+    const roles = form.querySelector<HTMLElement>('[data-roles]')!;
+    function wireRow(row: Element) {
+      const check = row.querySelector<HTMLInputElement>('[data-open-check]');
+      const hidden = row.querySelector<HTMLInputElement>('[data-open-hidden]');
+      check?.addEventListener('change', () => { if (hidden) hidden.value = check.checked ? '1' : '0'; });
+      row.querySelector('[data-remove-role]')?.addEventListener('click', () => {
+        if (roles.querySelectorAll('[data-role-row]').length > 1) row.remove();
+      });
+    }
+    roles.querySelectorAll('[data-role-row]').forEach(wireRow);
+    form.querySelector<HTMLButtonElement>('[data-add-role]')?.addEventListener('click', () => {
+      const first = roles.querySelector('[data-role-row]')!;
+      const clone = first.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('input').forEach((i) => {
+        if (i.type === 'checkbox') i.checked = false;
+        else if (i.name === 'pos_needed') i.value = '1';
+        else if (i.name === 'pos_open') i.value = '0';
+        else i.value = '';
+      });
+      roles.appendChild(clone);
+      wireRow(clone);
+    });
+
+    render();
+  }
+</script>
