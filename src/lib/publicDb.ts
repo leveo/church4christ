@@ -295,7 +295,8 @@ export async function getBulletinAnnouncements(
 /**
  * Serving roster for the plan matching a service type + date: confirmed and
  * unconfirmed assignments only (status != 'D'), non-deleted, grouped by
- * position in position sort order. Declined/soft-deleted rows are excluded.
+ * position in position sort order. Declined assignments and soft-deleted
+ * assignments/positions/people are all excluded.
  */
 export async function bulletinRoster(
   db: D1Database,
@@ -311,7 +312,7 @@ export async function bulletinRoster(
        JOIN roster_assignments ra ON ra.plan_id = pl.id AND ra.deleted_at IS NULL AND ra.status != 'D'
        JOIN positions pos ON pos.id = ra.position_id AND pos.deleted_at IS NULL
        ${joins}
-       JOIN people ppl ON ppl.id = ra.person_id
+       JOIN people ppl ON ppl.id = ra.person_id AND ppl.deleted_at IS NULL
        WHERE pl.service_type_id = ?1 AND pl.plan_date = ?2 AND pl.deleted_at IS NULL
        ORDER BY pos.sort, pos.id, ra.id`,
     )

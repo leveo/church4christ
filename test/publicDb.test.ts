@@ -212,20 +212,29 @@ describe('latestBulletins / getBulletin / listBulletinDates', () => {
 });
 
 describe('bulletinRoster', () => {
-  it('groups confirmed + unconfirmed by position (sort order); excludes declined and deleted', async () => {
+  it('groups confirmed + unconfirmed by position (sort order); excludes declined and every soft-delete', async () => {
     const db = env.DB;
     await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
     await db.prepare('INSERT INTO teams (id) VALUES (1)').run();
     await db.prepare("INSERT INTO plans (id, service_type_id, plan_date) VALUES (1, 1, '2026-06-28')").run();
-    await db.prepare('INSERT INTO positions (id, team_id, sort) VALUES (1, 1, 2), (2, 1, 1)').run();
+    // position 3 is soft-deleted: any assignment on it must not surface.
     await db
-      .prepare("INSERT INTO position_i18n (position_id, locale, name) VALUES (1,'en','Vocalist'),(1,'zh','歌手'),(2,'en','Sound')")
+      .prepare(
+        "INSERT INTO positions (id, team_id, sort, deleted_at) VALUES (1, 1, 2, NULL), (2, 1, 1, NULL), (3, 1, 3, datetime('now'))",
+      )
       .run();
     await db
       .prepare(
-        `INSERT INTO people (id, display_name, email) VALUES
-          (1, 'Amy', 'amy@example.com'), (2, 'Mark', 'mark@example.com'),
-          (3, 'Dan', 'dan@example.com'), (4, 'Sam', 'sam@example.com')`,
+        "INSERT INTO position_i18n (position_id, locale, name) VALUES (1,'en','Vocalist'),(1,'zh','歌手'),(2,'en','Sound'),(3,'en','Ghost')",
+      )
+      .run();
+    // person 5 is soft-deleted: their confirmed assignment must not surface.
+    await db
+      .prepare(
+        `INSERT INTO people (id, display_name, email, deleted_at) VALUES
+          (1, 'Amy', 'amy@example.com', NULL), (2, 'Mark', 'mark@example.com', NULL),
+          (3, 'Dan', 'dan@example.com', NULL), (4, 'Sam', 'sam@example.com', NULL),
+          (5, 'Del', 'del@example.com', datetime('now'))`,
       )
       .run();
     await db
@@ -235,15 +244,19 @@ describe('bulletinRoster', () => {
           (2, 1, 1, 2, 'U', NULL),
           (3, 1, 1, 3, 'D', NULL),
           (4, 1, 2, 4, 'C', NULL),
-          (5, 1, 2, 1, 'U', datetime('now'))`,
+          (5, 1, 2, 1, 'U', datetime('now')),
+          (6, 1, 2, 5, 'C', NULL),
+          (7, 1, 3, 1, 'C', NULL)`,
       )
       .run();
 
     const roster = await bulletinRoster(db, 1, '2026-06-28', 'zh');
-    // position 2 (sort 1) then position 1 (sort 2); pos2 en-fallback, pos1 zh
+    // position 2 (sort 1) then position 1 (sort 2); pos2 en-fallback, pos1 zh.
+    // 'Ghost' (soft-deleted position) must not appear at all.
     expect(roster.map((r) => r.position)).toEqual(['Sound', '歌手']);
     expect(roster.find((r) => r.position === '歌手')!.people).toEqual(['Amy', 'Mark']); // declined Dan excluded
-    expect(roster.find((r) => r.position === 'Sound')!.people).toEqual(['Sam']); // deleted assignment excluded
+    // deleted assignment (Amy) + soft-deleted person (Del) both excluded
+    expect(roster.find((r) => r.position === 'Sound')!.people).toEqual(['Sam']);
   });
 
   it('returns [] when no plan matches the service type + date', async () => {

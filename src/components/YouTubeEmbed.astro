@@ -1,11 +1,13 @@
 ---
 // Click-to-load YouTube facade (privacy-friendly, no third-party request until
 // the visitor opts in). Renders the video thumbnail with a play button; on
-// click JS swaps in a youtube-nocookie iframe. Two graceful fallbacks:
+// click JS swaps in a youtube-nocookie iframe. Graceful fallbacks:
 //   - no JS: the whole card is a link to the YouTube watch page.
-//   - thumbnail 404 (demo/placeholder ids never resolve): onerror hides the
-//     <img> and reveals a token-styled music-note placeholder that looks
-//     intentional rather than broken.
+//   - missing video (demo/placeholder ids): i.ytimg.com answers 404 with a
+//     VALID 120x90 gray JPEG, so the img fires `load`, never `error`. The
+//     script checks naturalWidth once loaded — a real hqdefault is 480x360,
+//     so anything <=120 wide swaps to the token-styled music-note placeholder.
+//   - network failure: the inline onerror does the same swap as a backup.
 import { t } from '../lib/i18n';
 import type { Locale } from '../lib/locales';
 
@@ -46,6 +48,24 @@ const watch = `https://www.youtube.com/watch?v=${videoId}`;
 
 <script>
   document.querySelectorAll<HTMLElement>('.yt-facade').forEach((el) => {
+    // Missing-video detection: i.ytimg.com 404s with a valid 120x90 gray JPEG,
+    // so `error` never fires for absent ids. A real hqdefault is 480x360 —
+    // treat anything <=120px wide as "no thumbnail" and swap to the placeholder
+    // (the inline onerror attribute remains the network-failure backup).
+    const img = el.querySelector('img');
+    if (img) {
+      const swap = () => {
+        img.style.display = 'none';
+        const placeholder = img.nextElementSibling as HTMLElement | null;
+        if (placeholder) placeholder.style.display = 'flex';
+      };
+      const check = () => {
+        if (img.naturalWidth > 0 && img.naturalWidth <= 120) swap();
+      };
+      if (img.complete) check();
+      else img.addEventListener('load', check);
+    }
+
     el.querySelector('a')?.addEventListener('click', (event) => {
       event.preventDefault();
       const iframe = document.createElement('iframe');

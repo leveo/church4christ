@@ -1,7 +1,8 @@
 ---
 // Bulletin landing: the latest published bulletin for each service type, shown
-// in a CSS-only tabbed switcher (radio inputs — no JS required), plus a
-// year-grouped archive of past bulletins. Reads fail soft to empty.
+// in a CSS-only tabbed switcher (radio inputs — no JS required, native radio
+// semantics only). A single service type renders its bulletin with no tab
+// chrome at all. Year-grouped archive below. Reads fail soft to empty.
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import BulletinView from '../../../components/BulletinView.astro';
@@ -68,7 +69,14 @@ const currentYear = new Date().getFullYear().toString();
 
   <div class="container-content max-w-content py-10">
     {
-      entries.length > 0 ? (
+      entries.length === 1 ? (
+        <BulletinView
+          bulletin={entries[0].bulletin}
+          announcements={entries[0].announcements}
+          roster={entries[0].roster}
+          locale={locale}
+        />
+      ) : entries.length > 1 ? (
         <div class="bulletin-tabs">
           {entries.map((e, i) => (
             <input
@@ -79,21 +87,19 @@ const currentYear = new Date().getFullYear().toString();
               checked={i === 0}
             />
           ))}
-          {entries.length > 1 && (
-            <div class="tab-labels mb-8 flex flex-wrap gap-1 border-b border-border" role="tablist">
-              {entries.map((e) => (
-                <label
-                  for={`bt-${e.bulletin.service_type_id}`}
-                  class="tab-label -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 font-semibold text-ink-muted hover:text-ink"
-                >
-                  {e.bulletin.serviceTypeName}
-                </label>
-              ))}
-            </div>
-          )}
+          <div class="tab-labels mb-8 flex flex-wrap gap-1 border-b border-border">
+            {entries.map((e) => (
+              <label
+                for={`bt-${e.bulletin.service_type_id}`}
+                class="tab-label -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 font-semibold text-ink-muted hover:text-ink"
+              >
+                {e.bulletin.serviceTypeName}
+              </label>
+            ))}
+          </div>
           <div class="tab-panels">
             {entries.map((e) => (
-              <div class="tab-panel" role="tabpanel">
+              <div class="tab-panel">
                 <BulletinView
                   bulletin={e.bulletin}
                   announcements={e.announcements}

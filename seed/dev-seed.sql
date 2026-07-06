@@ -201,8 +201,10 @@ INSERT INTO testimonies (id, person_id, author_name, locale, title, body, catego
    'Trust does not come easily to me. But serving on the AV team taught me that faithfulness in small hidden things is its own kind of worship. I am still learning, one Sunday at a time.',
    'serving', 'P', NULL);
 
--- Bulletins: per service type two published and one draft. English service in
--- English content, Chinese service entirely in Chinese content.
+-- Bulletins: per service type two published past Sundays, one draft (07-05),
+-- and one published upcoming Sunday (2026-07-12) that matches the seeded plans
+-- and roster so the public bulletin page demos the serving block. English
+-- service in English content, Chinese service entirely in Chinese content.
 INSERT INTO bulletins (id, service_type_id, bulletin_date, service_time_label, program_json, offering_json, attendance_json, memory_verse, flowers, status, publish_at, updated_by) VALUES
   (1, 1, '2026-06-21', '9:30 AM',
    '[{"item":"Prelude","content":"","person":"Pianist"},{"item":"Call to Worship","content":"Psalm 100","person":"Sarah Johnson"},{"item":"Praise","content":"How Great Is Our God","person":"Worship Team"},{"item":"Scripture Reading","content":"Matthew 5:13-16","person":"Ben Wu"},{"item":"Message","content":"You Are the Light of the World","person":"Sarah Johnson"},{"item":"Benediction","content":"","person":"Sarah Johnson"}]',
@@ -243,7 +245,21 @@ INSERT INTO bulletins (id, service_type_id, bulletin_date, service_time_label, p
    NULL, NULL,
    '「你出你入，耶和华要保护你，从今时直到永远。」（诗篇 121:8）',
    NULL,
-   'draft', NULL, 'admin@example.com');
+   'draft', NULL, 'admin@example.com'),
+  (7, 1, '2026-07-12', '9:30 AM',
+   '[{"item":"Prelude","content":"","person":"Pianist"},{"item":"Call to Worship","content":"Psalm 84","person":"Sarah Johnson"},{"item":"Praise","content":"Blessed Be Your Name","person":"Worship Team"},{"item":"Scripture Reading","content":"Matthew 5:1-3","person":"Grace Lin"},{"item":"Message","content":"Blessed Are the Poor in Spirit","person":"Sarah Johnson"},{"item":"Benediction","content":"","person":"Sarah Johnson"}]',
+   '[{"label":"General Fund","amount":"8,760"},{"label":"Missions","amount":"1,480"}]',
+   '[{"label":"Adults","count":198},{"label":"Kids","count":55}]',
+   '"Blessed are the poor in spirit, for theirs is the kingdom of heaven." (Matthew 5:3)',
+   'This week the flowers are given by the Lin family in praise to God.',
+   'published', NULL, 'admin@example.com'),
+  (8, 2, '2026-07-12', '上午11:00',
+   '[{"item":"序乐","content":"","person":"司琴"},{"item":"宣召","content":"诗篇 122 篇","person":"主席"},{"item":"颂赞","content":"你坐着为王","person":"敬拜队"},{"item":"读经","content":"诗篇 121:1-4","person":"林恩慈传道"},{"item":"证道","content":"我要向高山举目","person":"陈大卫牧师"},{"item":"祝福","content":"","person":"陈大卫牧师"}]',
+   '[{"label":"经常费","amount":"12,020"},{"label":"宣教","amount":"1,900"}]',
+   '[{"label":"中文堂","count":183},{"label":"主日学","count":92}]',
+   '「我的帮助从造天地的耶和华而来。」（诗篇 121:2）',
+   '本周鲜花由林姊妹一家为赞美神摆上。',
+   'published', NULL, 'admin@example.com');
 
 -- Three announcements per published bulletin, two per draft.
 INSERT INTO bulletin_announcements (bulletin_id, seq, title, body, link_url, link_label) VALUES
@@ -262,7 +278,13 @@ INSERT INTO bulletin_announcements (bulletin_id, seq, title, body, link_url, lin
   (5, 2, '招募同工', '招待组正在寻找几位迎新同工，愿意服事的请与王信实弟兄联系。', NULL, NULL),
   (5, 3, '网上奉献', '现已开通安全的网上奉献页面，欢迎透过它支持教会各项事工。', 'https://give.example.com/church4christ', '立即奉献'),
   (6, 1, '草稿通知', '本期周报仍是草稿，尚未正式发布。', NULL, NULL),
-  (6, 2, '敬请期待', '本主日完整程序将于定稿后显示于此。', NULL, NULL);
+  (6, 2, '敬请期待', '本主日完整程序将于定稿后显示于此。', NULL, NULL),
+  (7, 1, 'Summer Bible Camp', 'Camp week is almost here. Pray for the children and volunteers as final preparations wrap up.', 'https://church.yunfei-song.com/en/events', 'Learn more'),
+  (7, 2, 'Church Picnic', 'The all-church picnic is two weeks away on July 26 at Grace Park. Sign up to bring a dish.', NULL, NULL),
+  (7, 3, 'Serve on Sunday Mornings', 'The Worship and AV teams welcome new members. Speak with Sarah Johnson or Ben Wu to get started.', NULL, NULL),
+  (8, 1, '暑期圣经营', '圣经营下周开营，请为孩子们与同工的最后预备祷告。', 'https://church.yunfei-song.com/zh/events', '了解详情'),
+  (8, 2, '教会野餐', '全教会野餐将于七月二十六日在恩典公园举行，欢迎报名带一道菜。', NULL, NULL),
+  (8, 3, '主日服事招募', '敬拜队与媒体技术组欢迎新同工加入，有意者请与莎拉姊妹或吴恩本弟兄联系。', NULL, NULL);
 
 -- Ten sermons across both service types. Nine published and one draft.
 INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, updated_by) VALUES
