@@ -5,7 +5,12 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { sendReminders, sendWeeklyDigest } from '../src/lib/digest';
+import { sendEmail } from '../src/lib/email';
 import { setRule } from '../src/lib/emailSettingsDb';
+
+// Spy on sendEmail (keeping the real devlog implementation) so the HTML body of
+// each dev-sent message can be asserted — email_log does not store the body.
+vi.mock('../src/lib/email', { spy: true });
 
 // Fixed "now": Wednesday 2030-06-05 in Chicago → 7-day window [06-05, 06-12).
 const NOW = new Date('2030-06-05T12:00:00-05:00');
@@ -20,8 +25,9 @@ beforeAll(async () => {
       (5, 'Inactive', 'e@example.com', NULL, 0)`),
     env.DB.prepare(`INSERT INTO teams (id) VALUES (1)`),
     env.DB.prepare(`INSERT INTO team_i18n (team_id, locale, name) VALUES (1, 'en', 'Worship')`),
-    env.DB.prepare(`INSERT INTO positions (id, team_id) VALUES (1, 1)`),
-    env.DB.prepare(`INSERT INTO position_i18n (position_id, locale, name) VALUES (1, 'en', 'Vocalist')`),
+    env.DB.prepare(`INSERT INTO positions (id, team_id) VALUES (1, 1), (2, 1)`),
+    // Position 2 carries markup in its name — the HTML-escaping probe.
+    env.DB.prepare(`INSERT INTO position_i18n (position_id, locale, name) VALUES (1, 'en', 'Vocalist'), (2, 'en', '<b>X</b>')`),
     env.DB.prepare(`INSERT INTO service_types (id) VALUES (1), (2)`),
     env.DB.prepare(`INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (1, 'en', 'Chinese'), (2, 'en', 'Reminders')`),
     env.DB.prepare(`INSERT INTO plans (id, service_type_id, plan_date) VALUES
@@ -36,7 +42,8 @@ beforeAll(async () => {
       (3, 1, 4, 'C'),   -- D: 06-11, last day in window, included
       (4, 1, 4, 'C'),   -- D also on 06-12 = start+7: excluded
       (100, 1, 1, 'U'), -- reminders: exactly 7 days out
-      (101, 1, 1, 'U')  -- reminders: exactly 3 days out
+      (101, 1, 1, 'U'), -- reminders: exactly 3 days out
+      (2, 2, 1, 'C')    -- A: in window on the markup-named position (escaping probe)
     `),
   ]);
 });
@@ -45,6 +52,18 @@ describe('sendWeeklyDigest', () => {
   it('emails only people with non-declined assignments in the 7-day window', async () => {
     const sent = await sendWeeklyDigest(ENV, env.DB, NOW);
     expect(sent.sort()).toEqual(['a@example.com', 'd@example.com']);
+  });
+
+  it('HTML-escapes leader-editable names in the HTML body (plain text stays raw)', async () => {
+    vi.mocked(sendEmail).mockClear();
+    await sendWeeklyDigest(ENV, env.DB, NOW);
+    const call = vi.mocked(sendEmail).mock.calls.find(([, , msg]) => msg.to === 'a@example.com');
+    expect(call).toBeDefined();
+    const msg = call![2];
+    // Position 2 is named '<b>X</b>': escaped in the HTML branch, raw in text.
+    expect(msg.html).toContain('&lt;b&gt;X&lt;/b&gt;');
+    expect(msg.html).not.toContain('<b>X</b>');
+    expect(msg.text).toContain('<b>X</b>');
   });
 
   it('is gated by the digestAM rule', async () => {

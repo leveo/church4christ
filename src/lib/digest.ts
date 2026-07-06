@@ -5,7 +5,7 @@
 // variables), sendEmail takes (env, db, msg), and dates run in America/Chicago.
 import { addDays, todayInTz } from './dates';
 import { i18nJoin } from './db';
-import { sendEmail, type EmailEnv } from './email';
+import { escapeHtml, sendEmail, type EmailEnv } from './email';
 import { isRuleEnabled } from './emailSettingsDb';
 import { t } from './i18n';
 import { type Locale } from './locales';
@@ -79,6 +79,13 @@ export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date 
       const respond = r.status === 'U' ? ' ' + langs.map((l) => t(l, 'email.digestRespond')).join(' ') : '';
       return `${r.plan_date} — ${r.position_name} (${r.team_name}) · ${r.service_type_name}${respond}`;
     });
+    // HTML branch only: position/team/service names are leader-editable free
+    // text, so they must be escaped before interpolation into markup (the
+    // plain-text branch above stays raw; t() output is trusted dictionary copy).
+    const htmlLines = rows.map((r) => {
+      const respond = r.status === 'U' ? ' ' + langs.map((l) => t(l, 'email.digestRespond')).join(' ') : '';
+      return `${r.plan_date} — ${escapeHtml(r.position_name)} (${escapeHtml(r.team_name)}) · ${escapeHtml(r.service_type_name)}${respond}`;
+    });
     const intro = langs.map((l) => t(l, 'email.digestIntro', { name: person_name })).join('\n');
     const footer = langs.map((l) => t(l, 'email.digestFooter')).join(' ');
     const link = `${origin}/${only ?? 'en'}/my`;
@@ -93,7 +100,7 @@ export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date 
           detail: `${rows.length} item(s)`,
           subject: langs.map((l) => t(l, 'email.digestSubject')).join(' · '),
           text: `${intro}\n\n${lines.join('\n')}\n\n${footer} ${link}\n`,
-          html: `<p>${langs.map((l) => t(l, 'email.digestIntro', { name: person_name })).join('<br>')}</p><ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul><p>${footer} <a href="${link}">${link}</a></p>`,
+          html: `<p>${langs.map((l) => t(l, 'email.digestIntro', { name: person_name })).join('<br>')}</p><ul>${htmlLines.map((l) => `<li>${l}</li>`).join('')}</ul><p>${footer} <a href="${link}">${link}</a></p>`,
         },
       );
       sent.push(email);
