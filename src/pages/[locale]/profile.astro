@@ -47,6 +47,11 @@ const db = (env as { DB: D1Database }).DB;
 // household card; the auth basics (name/phone/lang, teams, gifts, interests,
 // history) always render.
 const hasPeople = Astro.locals.modules.has('people');
+// Soft-degrade cross-module links: `/my` is serve-owned and `/serve/gifts` is
+// gifts-owned, so both 404 when their module is off. Gate the links (not the
+// whole page — /profile is core auth surface) to avoid dead-ends.
+const hasServe = Astro.locals.modules.has('serve');
+const hasGifts = Astro.locals.modules.has('gifts');
 
 const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
 
@@ -188,7 +193,9 @@ const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.rol
 
 <Base title={t(locale, 'profile.title')} locale={locale} noindex>
   <div class="container-content max-w-content py-12">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    {hasServe && (
+      <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    )}
     <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'profile.title')}</h1>
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.saved')}</p>}
@@ -442,9 +449,11 @@ const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.rol
         ) : (
           <p class="mt-2 text-sm text-ink-muted">
             {t(locale, 'profile.noGift')}
-            <a href={localePath(locale, '/serve/gifts')} class="ml-1 font-semibold text-primary hover:underline">
-              {t(locale, 'profile.takeTest')} →
-            </a>
+            {hasGifts && (
+              <a href={localePath(locale, '/serve/gifts')} class="ml-1 font-semibold text-primary hover:underline">
+                {t(locale, 'profile.takeTest')} →
+              </a>
+            )}
           </p>
         )
       }

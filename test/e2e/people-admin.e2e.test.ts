@@ -77,6 +77,26 @@ describe('admin person editor (people module on)', () => {
     expect(leaderBody).not.toContain(secret);
     expect(leaderBody).not.toContain('Pastoral notes');
   });
+
+  it('withholds a seeded household, address, dependent, birthday, and note from a leader profile view (spec §B)', async () => {
+    const leader = await sessionCookie(3, 'sarah.johnson@example.com');
+    // Person 2 (David Chen) carries the seeded Chen Family household (with an
+    // address and a name-only child dependent Ethan Chen), a birthday, and an
+    // admin pastoral note — none of which may render on a leader's /profile/[id].
+    const leaderView = await get('/en/profile/2', { cookie: leader });
+    expect(leaderView.status).toBe(200);
+    const body = await leaderView.text();
+
+    // Positive control: his own display name IS shown to the leader.
+    expect(body).toContain('陈大卫 David Chen');
+
+    // Private membership data is all withheld (REAL seeded strings).
+    expect(body).not.toContain('Chen Family'); // household name
+    expect(body).not.toContain('88 Cornerstone Way'); // household + personal address
+    expect(body).not.toContain('Ethan Chen'); // dependent child
+    expect(body).not.toContain('1978-04-12'); // birthday
+    expect(body).not.toContain('Met with David to plan the fall newcomers class'); // pastoral note
+  });
 });
 
 describe('leader outreach invites', () => {

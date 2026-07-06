@@ -11,6 +11,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { get, post } from './helpers';
+import { createLoginToken } from '../../src/lib/auth';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { MODULE_KEYS } from '../../src/lib/modules';
 
@@ -30,6 +31,11 @@ function modulesBody(disabled: string[]): string {
     if (!disabled.includes(key)) body.append(`module.${key}`, '1');
   }
   return body.toString();
+}
+
+function rawOf(res: { raw: string } | { rateLimited: true }): string {
+  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+  return res.raw;
 }
 
 describe('Modules panel gates routes, nav, and home sections', () => {
@@ -106,6 +112,30 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     expect((await get('/en/ministries')).status).toBe(200);
     expect((await get('/en/serve/opportunities')).status).toBe(200);
     expect(await (await get('/en/')).text()).toContain('/en/ministries');
+  });
+
+  it('post-signin lands on /profile when serve is off (not the 404ing /my), and back on /my when serve is on', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+
+    // Serve OFF (the POST busts the per-isolate cache in-process): /my is
+    // serve-owned and 404s, so a magic-link consume must land the member on
+    // their core /profile instead of stranding them.
+    const off = await post('/admin/settings', modulesBody(['serve']), { cookie: admin });
+    expect(off.status).toBe(303);
+
+    // Person 3 (Sarah) is an active English-preferring member.
+    const offToken = rawOf(await createLoginToken(env.DB, 3));
+    const offRes = await post(`/auth/${offToken}`, '');
+    expect(offRes.status).toBe(303);
+    expect(offRes.headers.get('location')).toBe('/en/profile');
+
+    // Serve back ON → the landing returns to /my.
+    const on = await post('/admin/settings', modulesBody([]), { cookie: admin });
+    expect(on.status).toBe(303);
+    const onToken = rawOf(await createLoginToken(env.DB, 3));
+    const onRes = await post(`/auth/${onToken}`, '');
+    expect(onRes.status).toBe(303);
+    expect(onRes.headers.get('location')).toBe('/en/my');
   });
 
   it('disabling people hides the profile household card while the auth basics still render', async () => {
