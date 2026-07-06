@@ -1,0 +1,265 @@
+---
+// Team detail. View: members of this team + admins (others bounce back to the
+// directory). Edit (leaders of THIS team + admins): review pending applications
+// (approve/reject → team_applications status + decided_by/at), recruit from the
+// potential-volunteers panel (interest ∪ latest gift recommendation for the
+// team's ministry category, badged by source), add members, toggle leaders,
+// remove members. Members get a read-only roster + position chips. Every POST
+// re-checks (admin || leader-of-this-team) server-side and 403s otherwise.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import {
+  addTeamMember,
+  decideApplication,
+  getTeam,
+  listActivePeople,
+  listPendingApplicationsForTeams,
+  listPotentialVolunteers,
+  listTeamMembers,
+  listTeamPositions,
+  removeTeamMember,
+  setTeamLeader,
+  type ApplicationRow,
+  type PersonOption,
+  type PotentialVolunteer,
+} from '../../../../lib/teamDb';
+import { btn, btnSecondary, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const idOf = (v: string | FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+const teamId = idOf(Astro.params.id ?? null);
+if (!teamId) return new Response(null, { status: 404 });
+
+// View: members of this team + admins. Edit: leaders of this team + admins.
+const canView = user.isAdmin || user.memberTeamIds.includes(teamId) || user.leaderTeamIds.includes(teamId);
+const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+if (!canView) return Astro.redirect(localePath(locale, '/serve/teams'), 303);
+
+if (Astro.request.method === 'POST') {
+  if (!canEdit) return new Response(null, { status: 403 });
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  const back = () => Astro.redirect(localePath(locale, `/serve/teams/${teamId}`), 303);
+
+  if (action === 'addMember') {
+    const personId = idOf(fd.get('person_id'));
+    if (personId) await addTeamMember(db, teamId, personId);
+    return back();
+  }
+  if (action === 'removeMember') {
+    const personId = idOf(fd.get('person_id'));
+    if (personId) await removeTeamMember(db, teamId, personId);
+    return back();
+  }
+  if (action === 'setLeader') {
+    const personId = idOf(fd.get('person_id'));
+    if (personId) await setTeamLeader(db, teamId, personId, fd.get('leader') === '1');
+    return back();
+  }
+  if (action === 'decideApp') {
+    const appId = idOf(fd.get('application_id'));
+    const approve = fd.get('decision') === 'approve';
+    if (appId) {
+      // decideApplication is scoped to THIS team, so a leader can't decide
+      // another team's application by posting its id.
+      await decideApplication(db, appId, approve, user.email, teamId);
+      // notify in task 5: application-result email to the applicant.
+    }
+    return back();
+  }
+}
+
+const team = await getTeam(db, teamId, locale);
+if (!team) return new Response(null, { status: 404 });
+
+const [members, positions] = await Promise.all([listTeamMembers(db, teamId), listTeamPositions(db, teamId, locale)]);
+// Leaders/admins additionally see pending applications, the add-member pool,
+// and potential volunteers (interest ∪ latest gift recommendation for the
+// team's ministry category).
+const [pendingApps, allPeople, potential] = await Promise.all([
+  canEdit ? listPendingApplicationsForTeams(db, [teamId], locale) : Promise.resolve([] as ApplicationRow[]),
+  canEdit ? listActivePeople(db) : Promise.resolve([] as PersonOption[]),
+  canEdit && team.category
+    ? listPotentialVolunteers(db, team.category, teamId)
+    : Promise.resolve([] as PotentialVolunteer[]),
+]);
+const memberIds = new Set(members.map((m) => m.person_id));
+const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
+---
+
+<Base title={team.name} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/serve/teams')} class="text-sm text-ink-muted hover:text-primary">
+      ← {t(locale, 'serve.teams.title')}
+    </a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{team.name}</h1>
+    {
+      team.ministry_slug && team.ministry_name && (
+        <p class="mt-1 text-sm">
+          <a href={localePath(locale, `/ministries/${team.ministry_slug}`)} class="text-accent hover:text-accent-hover">
+            {team.ministry_name}
+          </a>
+        </p>
+      )
+    }
+
+    {
+      pendingApps.length > 0 && (
+        <section class="mt-6 rounded-lg border border-warn bg-warn-soft p-6">
+          <h2 class="mb-4 font-display text-lg font-semibold text-warn">
+            {t(locale, 'serve.teams.pendingApps')} ({pendingApps.length})
+          </h2>
+          <ul class="space-y-4">
+            {pendingApps.map((app) => (
+              <li class="rounded-md border border-border bg-surface-raised p-4">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-bold">{app.person_name}</span>
+                  {app.person_email && <span class="text-sm text-ink-muted">{app.person_email}</span>}
+                  {app.position_name && (
+                    <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                      {t(locale, 'serve.teams.appliedFor')}: {app.position_name}
+                    </span>
+                  )}
+                  <span class="ml-auto text-xs text-ink-subtle tabular-nums">{app.created_at.slice(0, 10)}</span>
+                </div>
+                {app.message && <p class="mt-2 text-sm text-ink-muted">{app.message}</p>}
+                <form method="post" class="mt-3 flex gap-2">
+                  <input type="hidden" name="_action" value="decideApp" />
+                  <input type="hidden" name="application_id" value={app.id} />
+                  <button type="submit" name="decision" value="approve" class={btn}>
+                    {t(locale, 'serve.teams.approve')}
+                  </button>
+                  <button type="submit" name="decision" value="reject" class={btnSecondary}>
+                    {t(locale, 'serve.teams.reject')}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="mt-8">
+      <h2 class="mb-3 font-display text-lg font-semibold">
+        {t(locale, 'serve.teams.members')} ({members.length})
+      </h2>
+      <ul class="divide-y divide-border rounded-lg border border-border bg-surface-raised">
+        {
+          members.map((m) => (
+            <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+              <span class="font-medium">{m.display_name}</span>
+              {m.is_leader === 1 && (
+                <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                  {t(locale, 'serve.teams.leader')}
+                </span>
+              )}
+              {canEdit && (
+                <span class="ml-auto flex gap-3">
+                  <form method="post">
+                    <input type="hidden" name="_action" value="setLeader" />
+                    <input type="hidden" name="person_id" value={m.person_id} />
+                    <input type="hidden" name="leader" value={m.is_leader === 1 ? '0' : '1'} />
+                    <button type="submit" class="text-primary hover:underline">
+                      {m.is_leader === 1 ? t(locale, 'serve.teams.removeLeader') : t(locale, 'serve.teams.makeLeader')}
+                    </button>
+                  </form>
+                  <form
+                    method="post"
+                    onsubmit={`return confirm(${JSON.stringify(t(locale, 'serve.teams.confirmRemove'))})`}
+                  >
+                    <input type="hidden" name="_action" value="removeMember" />
+                    <input type="hidden" name="person_id" value={m.person_id} />
+                    <button type="submit" class="text-danger hover:underline">
+                      {t(locale, 'serve.teams.remove')}
+                    </button>
+                  </form>
+                </span>
+              )}
+            </li>
+          ))
+        }
+        {members.length === 0 && <li class="px-4 py-3 text-sm text-ink-muted">{t(locale, 'serve.teams.noMembers')}</li>}
+      </ul>
+      {
+        canEdit && addablePeople.length > 0 && (
+          <form method="post" class="mt-3 flex items-center gap-2">
+            <input type="hidden" name="_action" value="addMember" />
+            <select name="person_id" class={`${tin} max-w-60`}>
+              {addablePeople.map((p) => (
+                <option value={p.id}>{p.display_name}</option>
+              ))}
+            </select>
+            <button type="submit" class={btnSecondary}>{t(locale, 'serve.teams.addMember')}</button>
+          </form>
+        )
+      }
+    </section>
+
+    {
+      canEdit && potential.length > 0 && (
+        <section class="mt-8 rounded-lg border border-accent-soft bg-surface-raised p-6">
+          <h2 class="font-display text-lg font-semibold">
+            {t(locale, 'serve.teams.potential')} ({potential.length})
+          </h2>
+          <p class="mt-1 text-sm text-ink-muted">{t(locale, 'serve.teams.potentialHint')}</p>
+          <ul class="mt-4 divide-y divide-border">
+            {potential.map((p) => (
+              <li class="flex flex-wrap items-center gap-2 py-2.5 text-sm">
+                <span class="font-semibold">{p.display_name}</span>
+                {p.via_gift === 1 && (
+                  <span class="inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-on-accent-soft">
+                    ✦ {t(locale, 'serve.teams.viaGift')}
+                  </span>
+                )}
+                {p.via_interest === 1 && (
+                  <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
+                    {t(locale, 'serve.teams.viaInterest')}
+                  </span>
+                )}
+                <span class="ml-auto flex gap-3">
+                  <a href={localePath(locale, `/profile/${p.person_id}`)} class="text-primary hover:underline">
+                    {t(locale, 'serve.teams.viewProfile')}
+                  </a>
+                  {p.email && (
+                    <a href={`mailto:${p.email}`} class="text-primary hover:underline">
+                      {t(locale, 'serve.teams.contact')}
+                    </a>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="mt-8">
+      <h2 class="mb-3 font-display text-lg font-semibold">{t(locale, 'serve.teams.positions')}</h2>
+      {
+        positions.length === 0 ? (
+          <p class="text-sm text-ink-muted">{t(locale, 'serve.teams.noPositions')}</p>
+        ) : (
+          <ul class="flex flex-wrap gap-2">
+            {positions.map((p) => (
+              <li class="inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-sm text-on-primary-soft">
+                {p.name}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</Base>

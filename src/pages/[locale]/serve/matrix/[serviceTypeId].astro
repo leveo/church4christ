@@ -1,0 +1,250 @@
+---
+// Scheduling matrix (team class via route policy): the next 8 plans of one
+// service type × the positions they need, rows grouped by team. Cells show
+// assignee name pills with a status initial (U/C/D, token-colored) plus an
+// inline assign select on rows of teams the viewer may edit. Ported from
+// dcfc-serve.
+//
+// Every assign POST re-checks canEditPosition server-side (403 otherwise). A
+// conflicted assign needs the richer plan-page UI, so it 303-redirects to
+// /serve/plans/[id]?cperson=&cposition= where the leader can review the
+// conflicts and force without re-picking; a full/duplicate result flashes here.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { assignPerson, canEditPosition } from '../../../../lib/planDb';
+import { getMatrix, listServiceTypes, listTeamMembers } from '../../../../lib/teamDb';
+import { addDays, isValidDateStr, todayInTz } from '../../../../lib/dates';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const idOf = (v: string | FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+const serviceTypeId = idOf(Astro.params.serviceTypeId ?? null);
+if (!serviceTypeId) return new Response(null, { status: 404 });
+const types = await listServiceTypes(db, locale);
+const serviceType = types.find((st) => st.id === serviceTypeId);
+if (!serviceType) return new Response(null, { status: 404 });
+
+let flashKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'assign') {
+    const planId = idOf(fd.get('plan_id'));
+    const positionId = idOf(fd.get('position_id'));
+    const personId = idOf(fd.get('person_id'));
+    if (!planId || !positionId || !personId || !(await canEditPosition(db, user, positionId))) {
+      return new Response(null, { status: 403 });
+    }
+    const result = await assignPerson(db, { planId, positionId, personId, assignedBy: user.id });
+    if (result === 'ok') {
+      // notify in task 5: scheduling-request email (accept/decline link) to the assignee.
+      return Astro.redirect(`${Astro.url.pathname}${Astro.url.search}`, 303);
+    }
+    if (result === 'full') flashKey = 'serve.plans.slotFull';
+    else if (result === 'duplicate') flashKey = 'serve.plans.duplicate';
+    else {
+      return Astro.redirect(
+        localePath(locale, `/serve/plans/${planId}?cperson=${personId}&cposition=${positionId}`),
+        303,
+      );
+    }
+  }
+}
+
+const fromParam = Astro.url.searchParams.get('from') ?? '';
+const today = todayInTz();
+const from = isValidDateStr(fromParam) ? fromParam : today;
+const { plans, rows, needs, assignments } = await getMatrix(db, serviceTypeId, from, 8, locale);
+
+const needOf = (planId: number, positionId: number) =>
+  needs.find((n) => n.plan_id === planId && n.position_id === positionId);
+const cellAssignments = (planId: number, positionId: number) =>
+  assignments.filter((a) => a.plan_id === planId && a.position_id === positionId);
+
+const teams = [...new Map(rows.map((r) => [r.team_id, r.team_name])).entries()];
+const editableTeamIds = teams.map(([id]) => id).filter((id) => user.isAdmin || user.leaderTeamIds.includes(id));
+const membersByTeam = new Map(
+  await Promise.all(editableTeamIds.map(async (id) => [id, await listTeamMembers(db, id)] as const)),
+);
+
+const statusStyles = {
+  U: 'bg-warn-soft text-warn border-warn',
+  C: 'bg-success-soft text-success border-success',
+  D: 'bg-danger-soft text-danger border-danger line-through',
+} as const;
+const nextFrom = plans.length > 0 ? plans[plans.length - 1].plan_date : from;
+// Page back one ~8-week window (not all the way to today), clamped at today.
+const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56) : today) : null;
+---
+
+<Base title={`${t(locale, 'serve.matrix.title')} · ${serviceType.name}`} locale={locale} noindex>
+  <section class="bg-primary text-on-primary">
+    <div class="container-content flex flex-wrap items-center gap-3 py-10">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.matrix.title')}</p>
+        <h1 class="mt-1 font-display text-heading-md font-bold">{serviceType.name}</h1>
+      </div>
+      <div class="ml-auto flex gap-2 text-sm">
+        {
+          types.length > 1 && (
+            <a
+              href={localePath(locale, '/serve/matrix')}
+              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+            >
+              {t(locale, 'serve.matrix.pick')}
+            </a>
+          )
+        }
+        {
+          prevFrom && (
+            <a
+              href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${prevFrom}`)}
+              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+            >
+              {t(locale, 'serve.matrix.prev')}
+            </a>
+          )
+        }
+        {
+          plans.length === 8 && (
+            <a
+              href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${nextFrom}`)}
+              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+            >
+              {t(locale, 'serve.matrix.next')}
+            </a>
+          )
+        }
+      </div>
+    </div>
+  </section>
+
+  <div class="container-content py-10">
+    {
+      flashKey && (
+        <p class="mb-4 rounded-md border border-warn bg-warn-soft px-4 py-2 text-sm text-warn">
+          {t(locale, flashKey)}
+        </p>
+      )
+    }
+
+    {
+      plans.length === 0 ? (
+        <p class="text-ink-muted">{t(locale, 'serve.plans.empty')}</p>
+      ) : (
+        <div class="overflow-x-auto rounded-lg border border-border">
+          <table class="w-full min-w-[56rem] border-collapse text-sm">
+            <thead>
+              <tr class="bg-surface-sunken">
+                <th class="sticky left-0 min-w-36 bg-surface-sunken px-3 py-2.5 text-left" />
+                {plans.map((p) => (
+                  <th class="whitespace-nowrap px-3 py-2.5 text-left font-bold">
+                    <a href={localePath(locale, `/serve/plans/${p.id}`)} class="tabular-nums hover:underline">
+                      {p.plan_date.slice(5)}
+                    </a>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {teams.map(([teamId, teamName]) => {
+                const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+                const members = membersByTeam.get(teamId) ?? [];
+                return (
+                  <>
+                    <tr class="bg-surface-sunken">
+                      <td
+                        colspan={plans.length + 1}
+                        class="sticky left-0 bg-surface-sunken px-3 py-1.5 text-xs font-bold uppercase tracking-caps text-ink-subtle"
+                      >
+                        {teamName}
+                      </td>
+                    </tr>
+                    {rows
+                      .filter((r) => r.team_id === teamId)
+                      .map((r) => (
+                        <tr class="border-t border-border align-top">
+                          <td class="sticky left-0 whitespace-nowrap bg-surface-raised px-3 py-2 font-semibold">
+                            {r.position_name}
+                          </td>
+                          {plans.map((p) => {
+                            const need = needOf(p.id, r.position_id);
+                            if (!need) return <td class="bg-surface-sunken/60 px-3 py-2" />;
+                            const cell = cellAssignments(p.id, r.position_id);
+                            const active = cell.filter((a) => a.status !== 'D').length;
+                            const slotsLeft = need.needed - active;
+                            return (
+                              <td class="px-3 py-2">
+                                <div class="flex flex-col gap-1">
+                                  {cell.map((a) => (
+                                    <span
+                                      class={`inline-block w-fit rounded-full border px-2 py-0.5 text-xs font-semibold ${statusStyles[a.status]}`}
+                                      title={t(locale, `serve.status.${a.status}`)}
+                                    >
+                                      {a.person_name} <span class="opacity-70">{a.status}</span>
+                                    </span>
+                                  ))}
+                                  {Array.from({ length: Math.max(0, slotsLeft) }).map(() => (
+                                    <span
+                                      class:list={[
+                                        'inline-block w-fit rounded-full px-2 py-0.5 text-xs',
+                                        need.open_signup === 1
+                                          ? 'border border-dashed border-accent text-accent'
+                                          : 'border border-border text-ink-subtle',
+                                      ]}
+                                    >
+                                      —
+                                    </span>
+                                  ))}
+                                  {canEdit && slotsLeft > 0 && members.length > 0 && (
+                                    <form method="post" class="mt-0.5 flex items-center gap-1">
+                                      <input type="hidden" name="_action" value="assign" />
+                                      <input type="hidden" name="plan_id" value={p.id} />
+                                      <input type="hidden" name="position_id" value={r.position_id} />
+                                      <select
+                                        name="person_id"
+                                        class="max-w-28 rounded-md border border-border bg-surface px-1 py-0.5 text-xs"
+                                      >
+                                        {members
+                                          .filter(
+                                            (m) =>
+                                              !cell.some((a) => a.person_id === m.person_id && a.status !== 'D'),
+                                          )
+                                          .map((m) => (
+                                            <option value={m.person_id}>{m.display_name}</option>
+                                          ))}
+                                      </select>
+                                      <button
+                                        type="submit"
+                                        aria-label={t(locale, 'serve.matrix.assignLabel')}
+                                        class="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-on-primary hover:bg-primary-hover"
+                                      >
+                                        +
+                                      </button>
+                                    </form>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </div>
+</Base>

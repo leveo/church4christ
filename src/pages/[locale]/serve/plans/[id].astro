@@ -1,0 +1,348 @@
+---
+// Plan detail (team class via route policy): full plan via getPlan — per
+// position a needed/open-signup editor, the assignee list (StatusBadge + remove),
+// an assign picker, and a claim button for open slots. Ported from dcfc-serve.
+//
+// Authorization: visibility AND every POST re-check (admin || leader of the
+// position's team) through canEditPosition — the team is re-derived from
+// position_id server-side, never trusted from the form. Volunteers can only
+// self-claim (claimOpenSlot re-derives membership itself). Failures 403.
+//
+// Conflicts are warnings: an assign that hits them re-renders with a warning
+// panel + "Assign anyway" force form. A matrix assign that hit conflicts
+// redirects here with ?cperson=&cposition= so the leader can review and force
+// without re-picking.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import StatusBadge from '../../../../components/StatusBadge.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import {
+  assignPerson,
+  canEditPosition,
+  claimOpenSlot,
+  getAssignmentPositionId,
+  getConflicts,
+  getPlan,
+  removeAssignment,
+  setPlanPosition,
+  type Conflict,
+} from '../../../../lib/planDb';
+import { listServiceTypes, listTeamMembers, listTeamPositions, listTeamSummaries } from '../../../../lib/teamDb';
+import { formatDate } from '../../../../lib/dates';
+import { btn, btnSecondary, noticeOk, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = (env as { DB: D1Database }).DB;
+
+const idOf = (v: string | FormDataEntryValue | null): number | null =>
+  /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
+
+const planId = idOf(Astro.params.id ?? null);
+if (!planId) return new Response(null, { status: 404 });
+const plan = await getPlan(db, planId, locale);
+if (!plan) return new Response(null, { status: 404 });
+
+// Conflict-override state: set when an assign hits warnings (rendered inline
+// instead of a redirect so the leader can confirm with force=1).
+let conflictFor: { positionId: number; personId: number; conflicts: Conflict[] } | null = null;
+let flashKey: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  const back = () => Astro.redirect(localePath(locale, `/serve/plans/${planId}`), 303);
+
+  if (action === 'setNeed') {
+    const positionId = idOf(fd.get('position_id'));
+    if (!positionId || !(await canEditPosition(db, user, positionId))) return new Response(null, { status: 403 });
+    const needed = Number(fd.get('needed') ?? 0) || 0;
+    await setPlanPosition(db, planId, positionId, needed, fd.get('open_signup') !== null);
+    return back();
+  }
+  if (action === 'assign') {
+    const positionId = idOf(fd.get('position_id'));
+    const personId = idOf(fd.get('person_id'));
+    if (!positionId || !personId || !(await canEditPosition(db, user, positionId))) {
+      return new Response(null, { status: 403 });
+    }
+    const result = await assignPerson(db, { planId, positionId, personId, assignedBy: user.id, force: fd.get('force') === '1' });
+    if (result === 'ok') {
+      // notify in task 5: scheduling-request email (accept/decline link) to the assignee.
+      return back();
+    }
+    if (result === 'full') flashKey = 'serve.plans.slotFull';
+    else if (result === 'duplicate') flashKey = 'serve.plans.duplicate';
+    else conflictFor = { positionId, personId, conflicts: await getConflicts(db, personId, planId) };
+  }
+  if (action === 'removeAssignment') {
+    const assignmentId = idOf(fd.get('assignment_id'));
+    if (assignmentId) {
+      const positionId = await getAssignmentPositionId(db, assignmentId);
+      if (!positionId || !(await canEditPosition(db, user, positionId))) return new Response(null, { status: 403 });
+      await removeAssignment(db, assignmentId);
+    }
+    return back();
+  }
+  if (action === 'claim') {
+    const positionId = idOf(fd.get('position_id'));
+    if (positionId) {
+      const result = await claimOpenSlot(db, { planId, positionId, personId: user.id });
+      if (result === 'ok') return Astro.redirect(localePath(locale, `/serve/plans/${planId}?claimed=1`), 303);
+      flashKey = {
+        not_member: 'serve.plans.claimNotMember',
+        closed: 'serve.plans.claimClosed',
+        full: 'serve.plans.slotFull',
+        taken: 'serve.plans.claimTaken',
+        conflict: 'serve.plans.claimConflict',
+      }[result];
+    }
+  }
+}
+
+// A matrix assign that hit conflicts redirects here with the person+position so
+// we can re-open the override inline instead of making the leader re-pick.
+if (!conflictFor && Astro.request.method === 'GET') {
+  const cPerson = idOf(Astro.url.searchParams.get('cperson'));
+  const cPosition = idOf(Astro.url.searchParams.get('cposition'));
+  if (cPerson && cPosition && (await canEditPosition(db, user, cPosition))) {
+    const conflicts = await getConflicts(db, cPerson, planId);
+    if (conflicts.length) conflictFor = { positionId: cPosition, personId: cPerson, conflicts };
+  }
+}
+const claimed = Astro.url.searchParams.get('claimed') === '1';
+
+const serviceType = (await listServiceTypes(db, locale)).find((st) => st.id === plan.service_type_id);
+const serviceTime =
+  serviceType?.start_time && serviceType?.end_time ? `${serviceType.start_time}–${serviceType.end_time}` : '';
+
+// Teams the viewer may edit: admins every team, leaders their own — this drives
+// the assign pickers, the needs editors, and the add-position form (teams the
+// user leads that aren't on this plan yet can still add needs).
+const allTeams = await listTeamSummaries(db, locale);
+const editableTeams = allTeams.filter((tm) => user.isAdmin || user.leaderTeamIds.includes(tm.id));
+const membersByTeam = new Map(
+  await Promise.all(editableTeams.map(async (tm) => [tm.id, await listTeamMembers(db, tm.id)] as const)),
+);
+
+const inPlan = new Set(plan.positions.map((pp) => pp.position_id));
+const addablePositions = (
+  await Promise.all(
+    editableTeams.map(async (tm) =>
+      (await listTeamPositions(db, tm.id, locale))
+        .filter((p) => !inPlan.has(p.id))
+        .map((p) => ({ ...p, teamName: tm.name })),
+    ),
+  )
+).flat();
+
+const teams = [...new Map(plan.positions.map((pp) => [pp.team_id, pp.team_name])).entries()];
+const personName = (id: number) =>
+  [...membersByTeam.values()].flat().find((m) => m.person_id === id)?.display_name ?? `#${id}`;
+---
+
+<Base title={`${formatDate(plan.plan_date, locale)} · ${plan.service_type_name}`} locale={locale} noindex>
+  <section class="bg-primary text-on-primary">
+    <div class="container-content py-10">
+      <a href={localePath(locale, '/serve/plans')} class="text-sm opacity-80 hover:opacity-100">
+        ← {t(locale, 'serve.plans.title')}
+      </a>
+      <h1 class="mt-2 font-display text-heading-md font-bold tabular-nums">
+        {formatDate(plan.plan_date, locale)} · {plan.service_type_name}
+      </h1>
+      {serviceTime && <p class="mt-1 text-sm opacity-80 tabular-nums">{serviceTime}</p>}
+      {
+        (plan.title || plan.series) && (
+          <p class="mt-1 opacity-90">
+            {plan.title}
+            {plan.series && <span class="opacity-70"> · {plan.series}</span>}
+          </p>
+        )
+      }
+    </div>
+  </section>
+
+  <div class="container-content py-10">
+    {claimed && <p class={`mb-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
+    {
+      flashKey && (
+        <p class="mb-4 rounded-md border border-warn bg-warn-soft px-4 py-2 text-sm text-warn">
+          {t(locale, flashKey)}
+        </p>
+      )
+    }
+
+    {
+      teams.map(([teamId, teamName]) => {
+        const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+        const members = membersByTeam.get(teamId) ?? [];
+        return (
+          <section class="mt-8">
+            <h2 class="font-display text-lg font-semibold">{teamName}</h2>
+            <div class="mt-3 space-y-3">
+              {plan.positions
+                .filter((pp) => pp.team_id === teamId)
+                .map((pp) => {
+                  const activeCount = pp.assignees.filter((a) => a.status !== 'D').length;
+                  const confirmed = pp.assignees.filter((a) => a.status === 'C').length;
+                  const slotsLeft = pp.needed - activeCount;
+                  const mine = pp.assignees.some((a) => a.person_id === user.id && a.status !== 'D');
+                  const canClaim =
+                    pp.open_signup === 1 && user.memberTeamIds.includes(teamId) && slotsLeft > 0 && !mine;
+                  return (
+                    <div class="rounded-lg border border-border bg-surface-raised p-4">
+                      <div class="flex flex-wrap items-center gap-3">
+                        <span class="font-semibold">{pp.position_name}</span>
+                        {pp.open_signup === 1 && (
+                          <span class="inline-flex items-center rounded-full border border-dashed border-accent px-2 py-0.5 text-xs font-semibold text-accent">
+                            {t(locale, 'serve.plans.openSignup')}
+                          </span>
+                        )}
+                        <span class="ml-auto text-xs text-ink-subtle">
+                          {t(locale, 'serve.plans.assignedCount', { confirmed, needed: pp.needed })}
+                        </span>
+                      </div>
+
+                      <ul class="mt-2 space-y-1.5">
+                        {pp.assignees.map((a) => (
+                          <li class="flex flex-wrap items-center gap-2 text-sm">
+                            <span>{a.person_name}</span>
+                            <StatusBadge status={a.status} locale={locale} />
+                            {canEdit && a.decline_reason && (
+                              <span class="text-xs text-ink-subtle">({a.decline_reason})</span>
+                            )}
+                            {canEdit && (
+                              <form
+                                method="post"
+                                class="ml-auto"
+                                onsubmit={`return confirm(${JSON.stringify(t(locale, 'serve.plans.confirmRemove'))})`}
+                              >
+                                <input type="hidden" name="_action" value="removeAssignment" />
+                                <input type="hidden" name="assignment_id" value={a.assignment_id} />
+                                <button type="submit" class="text-xs text-danger hover:underline">
+                                  {t(locale, 'serve.plans.remove')}
+                                </button>
+                              </form>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+
+                      {conflictFor && conflictFor.positionId === pp.position_id && (
+                        <div class="mt-3 rounded-md border border-warn bg-warn-soft p-3 text-sm text-warn">
+                          <p class="font-bold">
+                            {t(locale, 'serve.plans.conflicts', { name: personName(conflictFor.personId) })}
+                          </p>
+                          <ul class="mt-1 list-disc pl-5">
+                            {conflictFor.conflicts.map((c) => (
+                              <li>
+                                {c.kind === 'blockout'
+                                  ? `${t(locale, 'serve.plans.conflictBlockout')}${c.detail ? ` (${c.detail})` : ''}`
+                                  : t(locale, 'serve.plans.conflictDouble', { detail: c.detail })}
+                              </li>
+                            ))}
+                          </ul>
+                          <form method="post" class="mt-2">
+                            <input type="hidden" name="_action" value="assign" />
+                            <input type="hidden" name="position_id" value={pp.position_id} />
+                            <input type="hidden" name="person_id" value={conflictFor.personId} />
+                            <input type="hidden" name="force" value="1" />
+                            <button
+                              type="submit"
+                              class="inline-flex items-center rounded-md bg-warn px-3 py-1.5 text-xs font-semibold text-on-warn hover:opacity-90"
+                            >
+                              {t(locale, 'serve.plans.assignAnyway')}
+                            </button>
+                          </form>
+                        </div>
+                      )}
+
+                      <div class="mt-3 flex flex-wrap items-center gap-4">
+                        {canEdit && slotsLeft > 0 && members.length > 0 && (
+                          <form method="post" class="flex items-center gap-2">
+                            <input type="hidden" name="_action" value="assign" />
+                            <input type="hidden" name="position_id" value={pp.position_id} />
+                            <select name="person_id" class={`${tin} max-w-52`}>
+                              {members
+                                .filter(
+                                  (m) => !pp.assignees.some((a) => a.person_id === m.person_id && a.status !== 'D'),
+                                )
+                                .map((m) => (
+                                  <option value={m.person_id}>{m.display_name}</option>
+                                ))}
+                            </select>
+                            <button type="submit" class={btn}>{t(locale, 'serve.plans.assign')}</button>
+                          </form>
+                        )}
+                        {canClaim && (
+                          <form method="post">
+                            <input type="hidden" name="_action" value="claim" />
+                            <input type="hidden" name="position_id" value={pp.position_id} />
+                            <button
+                              type="submit"
+                              class="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+                            >
+                              {t(locale, 'serve.plans.claim')}
+                            </button>
+                          </form>
+                        )}
+                        {canEdit && (
+                          <form method="post" class="ml-auto flex items-center gap-2 text-xs text-ink-muted">
+                            <input type="hidden" name="_action" value="setNeed" />
+                            <input type="hidden" name="position_id" value={pp.position_id} />
+                            <label>
+                              {t(locale, 'serve.plans.needed')}
+                              <input
+                                name="needed"
+                                value={pp.needed}
+                                class="ml-1 w-14 rounded-md border border-border bg-surface px-1.5 py-1"
+                              />
+                            </label>
+                            <label class="flex items-center gap-1">
+                              <input type="checkbox" name="open_signup" checked={pp.open_signup === 1} />
+                              {t(locale, 'serve.plans.openSignup')}
+                            </label>
+                            <button type="submit" class={btnSecondary}>{t(locale, 'serve.plans.save')}</button>
+                          </form>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+        );
+      })
+    }
+
+    {
+      addablePositions.length > 0 && (
+        <section class="mt-8 rounded-lg border border-border bg-surface-raised p-4">
+          <h2 class="mb-3 text-sm font-bold">{t(locale, 'serve.plans.addPosition')}</h2>
+          <form method="post" class="flex flex-wrap items-center gap-2 text-sm">
+            <input type="hidden" name="_action" value="setNeed" />
+            <select name="position_id" class={`${tin} max-w-72`}>
+              {addablePositions.map((p) => (
+                <option value={p.id}>{p.teamName} — {p.name}</option>
+              ))}
+            </select>
+            <label class="text-xs text-ink-muted">
+              {t(locale, 'serve.plans.needed')}
+              <input name="needed" value="1" class="ml-1 w-14 rounded-md border border-border bg-surface px-1.5 py-1" />
+            </label>
+            <label class="flex items-center gap-1 text-xs text-ink-muted">
+              <input type="checkbox" name="open_signup" />
+              {t(locale, 'serve.plans.openSignup')}
+            </label>
+            <button type="submit" class={btnSecondary}>{t(locale, 'serve.plans.add')}</button>
+          </form>
+        </section>
+      )
+    }
+  </div>
+</Base>
