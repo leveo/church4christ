@@ -1,7 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import { DEFAULT_LOCALE, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
-import { THEME_DEFAULT } from './lib/theme';
+import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
@@ -53,8 +53,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // locale. `rest` is the locale-stripped path the route policy classifies.
   const { locale, rest } = pathWithoutLocale(pathname);
   context.locals.locale = locale ?? DEFAULT_LOCALE;
-  context.locals.theme = THEME_DEFAULT; // settings-driven in slice 5
   context.locals.user = null;
+
+  // Active theme from the `theme.name` setting, cached per-isolate (60s) in
+  // ./lib/theme. Guarded: an empty DB or a missing settings table (fresh install)
+  // falls back to THEME_DEFAULT rather than 500ing every page.
+  const vars = env as unknown as AuthEnv;
+  try {
+    context.locals.theme = (await getActiveTheme(vars.DB)).theme;
+  } catch {
+    context.locals.theme = THEME_DEFAULT;
+  }
 
   // CSRF: reject cross-origin state-changing requests before doing any work. When
   // the Origin header is present it must match this origin; when it is absent,
@@ -81,7 +90,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Session: reload the person row every request so deactivation / soft-delete /
   // epoch bumps take effect immediately. Fail closed — a missing SESSION_SECRET
   // (or any verify/load failure) simply leaves the user anonymous, never a 500.
-  const vars = env as unknown as AuthEnv;
   const cookie = context.cookies.get(SESSION_COOKIE)?.value;
   if (cookie && vars.SESSION_SECRET) {
     const claims = await verifySession(vars.SESSION_SECRET, cookie);

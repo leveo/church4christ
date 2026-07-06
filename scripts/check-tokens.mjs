@@ -14,7 +14,7 @@ import { basename, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCAN_EXTS = new Set(['.astro', '.ts', '.tsx', '.css']);
-const EXCLUDED_FILES = new Set(['tokens.generated.css']);
+const EXCLUDED_FILES = new Set(['tokens.generated.css', 'themeMeta.generated.ts']);
 const ALLOW_MARK = '/* tokens-ok */';
 
 const HEX_RE = /#[0-9a-fA-F]{3,8}\b/;

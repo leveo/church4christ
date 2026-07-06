@@ -219,8 +219,18 @@ export default {
 
   'admin.title': '四方基督教会 管理后台',
 
+  'admin.nav.label': '后台导航',
   'admin.nav.dashboard': '仪表板',
+  'admin.nav.content': '内容',
+  'admin.nav.bulletins': '周报',
+  'admin.nav.sermons': '讲道',
+  'admin.nav.prayerSheets': '祷告单',
+  'admin.nav.news': '消息与活动',
+  'admin.nav.announcements': '消息',
+  'admin.nav.events': '活动',
+  'admin.nav.prayerWall': '祷告墙',
   'admin.nav.people': '会众',
+  'admin.nav.settings': '设置',
 
   'admin.dashboard.title': '仪表板',
   'admin.dashboard.welcome': '你好，{name}。',

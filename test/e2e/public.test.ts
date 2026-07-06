@@ -120,7 +120,11 @@ describe('announcement ticker shows the active announcement per locale', () => {
 });
 
 describe('per-locale document attributes + hreflang', () => {
-  it('/en/ carries data-theme="sanctuary" and both hreflang alternates', async () => {
+  it('/en/ reflects the seeded theme setting (data-theme) and both hreflang alternates', async () => {
+    // data-theme is now settings-driven: middleware reads theme.name via the
+    // cached getActiveTheme, and the seed sets it to sanctuary. (The cache-bust
+    // path after a live theme switch is covered by the unit test, since the
+    // per-isolate 60s cache makes it flaky to exercise over SELF.fetch here.)
     const body = await (await get('/en/')).text();
     expect(body).toContain('data-theme="sanctuary"');
     expect(body).toContain('hreflang="en"');

@@ -1,15 +1,17 @@
 ---
-// Admin shell: shared theme/mode wiring, a top nav (role-gated links), and a
-// footer bar showing the signed-in email + a signout POST. Admin UI language
-// follows the signed-in person's `lang` (falling back to English). Fonts are
-// imported the same way Base.astro does so admin renders in the brand faces.
+// Admin shell: shared theme/mode wiring, a role-gated top nav, a repeat-row
+// editor island (progressive enhancement for the content forms), and a footer
+// bar showing the signed-in email + a signout POST. Admin UI language follows
+// the signed-in person's `lang` (falling back to English). Fonts are imported
+// the same way Base.astro does so admin renders in the brand faces.
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
-import { THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { env } from 'cloudflare:workers';
+import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
 import type { Locale } from '../lib/locales';
 
@@ -21,28 +23,77 @@ const { title } = Astro.props;
 const user = Astro.locals.user;
 const lang: Locale = user?.lang ?? 'en';
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
-const mode = THEME_DEFAULT_MODE[theme] ?? 'light';
+// Default color mode for the no-flash script comes from the `theme.default_mode`
+// setting (cached per-isolate, warmed by middleware). Guarded so a DB hiccup
+// falls back to the theme's intrinsic default rather than 500ing the page.
+let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
+try {
+  defaultMode = (await getActiveTheme((env as { DB: D1Database }).DB)).defaultMode;
+} catch {
+  /* keep the theme's intrinsic default mode */
+}
 const appName = t(lang, 'admin.title');
 const fullTitle = title ? `${title} · ${appName}` : appName;
 
-// Nav links render by role: the people section is admin-only; more sections are
-// appended by later slices. The dashboard is reachable by everyone who gets here.
-const nav = [
-  { href: '/admin', label: t(lang, 'admin.nav.dashboard'), show: true },
-  { href: '/admin/people', label: t(lang, 'admin.nav.people'), show: !!user?.isAdmin },
-].filter((n) => n.show);
+// Nav renders by role. Everyone who reaches /admin sees the dashboard; content
+// (bulletins/sermons/prayer-sheets) + news (announcements/events) + the prayer
+// wall need editor∪admin; people + settings are admin-only. Team leaders (no
+// editor/admin) therefore see the dashboard only — their console lands in slice 6.
+// Links to pages built later this slice (tasks 2–4) are intentionally live.
+const isStaff = !!(user?.isEditor || user?.isAdmin);
+const isAdmin = !!user?.isAdmin;
+
+type NavItem = { label: string; href: string };
+type NavSection = { label: string; href?: string; show: boolean; children?: NavItem[] };
+
+const sections: NavSection[] = (
+  [
+    { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: true },
+    {
+      label: t(lang, 'admin.nav.content'),
+      show: isStaff,
+      children: [
+        { label: t(lang, 'admin.nav.bulletins'), href: '/admin/bulletins' },
+        { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons' },
+        { label: t(lang, 'admin.nav.prayerSheets'), href: '/admin/prayer-sheets' },
+      ],
+    },
+    {
+      label: t(lang, 'admin.nav.news'),
+      show: isStaff,
+      children: [
+        { label: t(lang, 'admin.nav.announcements'), href: '/admin/announcements' },
+        { label: t(lang, 'admin.nav.events'), href: '/admin/events' },
+      ],
+    },
+    { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff },
+    { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin },
+    { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
+  ] satisfies NavSection[]
+).filter((s) => s.show);
+
+const current = Astro.url.pathname.replace(/\/+$/, '') || '/admin';
+const isActive = (href: string) => current === href || (href !== '/admin' && current.startsWith(href));
+const linkClass = (href: string) =>
+  `whitespace-nowrap rounded px-2 py-1 hover:underline ${isActive(href) ? 'font-semibold underline' : ''}`;
 ---
 
 <!doctype html>
-<html lang={lang === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={mode}>
+<html
+  lang={lang === 'zh' ? 'zh-Hans' : 'en'}
+  data-theme={theme}
+  data-mode={defaultMode}
+  data-mode-default={defaultMode}
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{fullTitle}</title>
     <meta name="robots" content="noindex" />
     <script is:inline>
+      // No-flash mode: honor a saved choice, else fall back to the settings-driven
+      // default carried in data-mode-default (rendered from theme.default_mode).
       (function () {
-        var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
         var el = document.documentElement;
         var saved = null;
         try {
@@ -50,16 +101,33 @@ const nav = [
         } catch (e) {
           /* private mode / storage disabled — use the theme default */
         }
-        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
+        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : el.dataset.modeDefault || 'light';
       })();
     </script>
   </head>
   <body class="min-h-screen flex flex-col bg-surface text-ink">
     <header class="bg-header-bg text-header-ink border-b border-border">
       <div class="container-wide h-14 flex items-center gap-6">
-        <span class="font-display font-semibold">{appName}</span>
-        <nav class="flex items-center gap-4 text-sm">
-          {nav.map((n) => <a href={n.href} class="hover:underline">{n.label}</a>)}
+        <a href="/admin" class="font-display font-semibold whitespace-nowrap">{appName}</a>
+        <nav class="flex items-center gap-3 text-sm overflow-x-auto" aria-label={t(lang, 'admin.nav.label')}>
+          {
+            sections.map((section) =>
+              section.children ? (
+                <span class="flex items-center gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{section.label}</span>
+                  {section.children.map((c) => (
+                    <a href={c.href} class={linkClass(c.href)}>
+                      {c.label}
+                    </a>
+                  ))}
+                </span>
+              ) : (
+                <a href={section.href} class={linkClass(section.href!)}>
+                  {section.label}
+                </a>
+              ),
+            )
+          }
         </nav>
       </div>
     </header>
@@ -83,5 +151,35 @@ const nav = [
         </footer>
       )
     }
+    <script>
+      // Repeat-rows editor island (ported from dcfc-website): progressive
+      // enhancement over a <template data-repeat-template> plus [data-repeat-row]
+      // rows with add / remove / move-up / move-down controls. Add clones the
+      // template before it; remove/move act on the closest row. Pure enhancement —
+      // with JS off the form still posts every row and the server skips blanks.
+      document.querySelectorAll<HTMLElement>('[data-repeat]').forEach((box) => {
+        const tpl = box.querySelector<HTMLTemplateElement>('template[data-repeat-template]');
+        box.querySelector('[data-repeat-add]')?.addEventListener('click', () => {
+          if (tpl) box.insertBefore(tpl.content.cloneNode(true), tpl);
+        });
+        box.addEventListener('click', (e) => {
+          const target = e.target as HTMLElement;
+          const rm = target.closest('[data-repeat-remove]');
+          if (rm && box.contains(rm)) {
+            rm.closest('[data-repeat-row]')?.remove();
+            return;
+          }
+          const mv = target.closest<HTMLElement>('[data-repeat-up], [data-repeat-down]');
+          if (!mv || !box.contains(mv)) return;
+          const row = mv.closest('[data-repeat-row]');
+          if (!row || !row.parentElement) return;
+          if (mv.matches('[data-repeat-up]') && row.previousElementSibling?.matches('[data-repeat-row]')) {
+            row.parentElement.insertBefore(row, row.previousElementSibling);
+          } else if (mv.matches('[data-repeat-down]') && row.nextElementSibling?.matches('[data-repeat-row]')) {
+            row.parentElement.insertBefore(row.nextElementSibling, row);
+          }
+        });
+      });
+    </script>
   </body>
 </html>

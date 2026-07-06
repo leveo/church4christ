@@ -220,8 +220,18 @@ export default {
 
   'admin.title': 'Church4Christ Admin',
 
+  'admin.nav.label': 'Admin navigation',
   'admin.nav.dashboard': 'Dashboard',
+  'admin.nav.content': 'Content',
+  'admin.nav.bulletins': 'Bulletins',
+  'admin.nav.sermons': 'Sermons',
+  'admin.nav.prayerSheets': 'Prayer sheets',
+  'admin.nav.news': 'News & Events',
+  'admin.nav.announcements': 'Announcements',
+  'admin.nav.events': 'Events',
+  'admin.nav.prayerWall': 'Prayer Wall',
   'admin.nav.people': 'People',
+  'admin.nav.settings': 'Settings',
 
   'admin.dashboard.title': 'Dashboard',
   'admin.dashboard.welcome': 'Welcome, {name}.',

@@ -9,10 +9,11 @@ import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
+import { env } from 'cloudflare:workers';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
-import { THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
 
 interface Props {
@@ -26,7 +27,15 @@ const { title, locale, noindex = false } = Astro.props;
 const description = Astro.props.description ?? t(locale, 'site.tagline');
 
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
-const mode = THEME_DEFAULT_MODE[theme] ?? 'light';
+// Default color mode for the no-flash script comes from the `theme.default_mode`
+// setting (cached per-isolate, warmed by middleware). Guarded so a DB hiccup
+// falls back to the theme's intrinsic default rather than 500ing the page.
+let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
+try {
+  defaultMode = (await getActiveTheme((env as { DB: D1Database }).DB)).defaultMode;
+} catch {
+  /* keep the theme's intrinsic default mode */
+}
 
 const siteName = t(locale, 'site.name');
 const fullTitle = `${title} · ${siteName}`;
@@ -44,7 +53,12 @@ const alternates = [
 ---
 
 <!doctype html>
-<html lang={locale === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={mode}>
+<html
+  lang={locale === 'zh' ? 'zh-Hans' : 'en'}
+  data-theme={theme}
+  data-mode={defaultMode}
+  data-mode-default={defaultMode}
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -55,9 +69,9 @@ const alternates = [
     {alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script is:inline>
-      // No-flash mode: honor a saved choice, else fall back to the theme default.
+      // No-flash mode: honor a saved choice, else fall back to the settings-driven
+      // default carried in data-mode-default (rendered from theme.default_mode).
       (function () {
-        var modes = { sanctuary: 'light', harvest: 'light', midnight: 'dark' };
         var el = document.documentElement;
         var saved = null;
         try {
@@ -65,7 +79,7 @@ const alternates = [
         } catch (e) {
           /* private mode / storage disabled — use the theme default */
         }
-        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : modes[el.dataset.theme] || 'light';
+        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : el.dataset.modeDefault || 'light';
       })();
     </script>
   </head>

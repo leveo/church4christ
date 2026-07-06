@@ -20,6 +20,7 @@ export default defineConfig(async () => {
             name: 'node',
             include: [
               'test/tokens.test.ts',
+              'test/themeMeta.test.ts',
               'test/locales.test.ts',
               'test/i18n.test.ts',
               'test/validate.test.ts',
@@ -50,6 +51,7 @@ export default defineConfig(async () => {
               'test/schema.test.ts',
               'test/db.test.ts',
               'test/settings.test.ts',
+              'test/theme.test.ts',
               'test/seed.test.ts',
               'test/auth.test.ts',
               'test/middlewareAuth.test.ts',
