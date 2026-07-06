@@ -1,0 +1,96 @@
+# Architecture
+
+Church4Christ is a single **Astro** application rendered on the server and deployed as
+one **Cloudflare Worker**. There is no separate backend service and no client-side
+JavaScript framework: every page is server-rendered HTML, and the Worker talks directly
+to Cloudflare's data services. This keeps the moving parts few, the hosting free, and
+the whole thing fast worldwide because the Worker runs close to each visitor.
+
+![How Church4Christ runs on Cloudflare](images/diagrams/architecture.svg)
+
+## The request path
+
+1. **A browser requests a page.** Cloudflare routes it to the Worker at the edge
+   location nearest the visitor.
+2. **Middleware runs first** (`src/middleware.ts`), on every request, in this order:
+   - **Locale** — a bare `/` is content-negotiated from `Accept-Language` and redirected
+     to `/en/…` or `/zh/…`; otherwise the locale is read from the leading path segment.
+   - **Active theme** — the site's theme name is loaded from settings (cached per isolate)
+     so the page renders in the right colors; a fresh/empty database falls back to the
+     default theme rather than erroring.
+   - **CSRF** — any non-`GET`/`HEAD`/`OPTIONS` request is rejected unless its `Origin`
+     (or `Sec-Fetch-Site`) proves it is same-origin.
+   - **Session** — the session cookie (a signed JWT) is verified and the person row is
+     **reloaded from the database every request**, so a deactivation or a
+     "sign out everywhere" takes effect on the very next page load.
+   - **Route policy** — `src/lib/routePolicy.ts` classifies the path and enforces the
+     required role. It **fails closed**: an unknown `/admin/*` path is denied, not
+     allowed. Anonymous users hitting a protected page are redirected to sign in;
+     signed-in users without the right role get a 403.
+   - **Security headers** are applied to every response (`src/lib/securityHeaders.ts`).
+3. **Astro renders** the matched page or API route (`src/pages/**`), reading data through
+   the helpers in `src/lib/`.
+4. **The response goes back** through the Worker to the browser, with `Cache-Control:
+   no-store` on any page rendered for a signed-in user (public assets and media set their
+   own caching).
+
+## The pieces
+
+| Layer | What it is | Where |
+|---|---|---|
+| **Worker entry** | `fetch` (Astro handler) + `scheduled` (cron dispatch) | `src/worker.ts` |
+| **Middleware** | Auth, CSRF, route policy, locale, theme, headers | `src/middleware.ts` |
+| **Pages & API** | Public site under `[locale]/`, admin under `/admin`, JSON under `/api` | `src/pages/**` |
+| **Data helpers** | One module per domain (admin, plans, prayer, email, …) | `src/lib/*Db.ts` |
+| **Database (D1)** | Content, people, schedules, revisions, logs | binding `DB` |
+| **Object storage (R2)** | Uploaded media (`uploads/`) and nightly backups (`backups/`) | binding `MEDIA` |
+| **Email** | Transactional mail through one choke point | binding `EMAIL` |
+
+## Data: Cloudflare D1
+
+All structured data lives in **D1**, Cloudflare's SQLite-backed database, reached through
+the `DB` binding. Schema changes are ordinary SQL migration files under `migrations/`,
+applied with `wrangler d1 migrations apply`. Translatable content uses companion `*_i18n`
+tables joined with a `COALESCE` fallback to the default language (see
+[`docs/i18n.md`](i18n.md)), so adding a language never changes a table's shape.
+
+Editable content (bulletins, sermons, announcements, events, prayer sheets) is written
+with a **full-snapshot revision** in the same `db.batch`, which is what powers the
+one-click "restore an earlier version" throughout the admin area.
+
+## Media & backups: Cloudflare R2
+
+Uploaded images live in **R2** under the `uploads/` prefix and are served back only
+through the `/media/[...key]` route, which is structurally incapable of reaching anything
+outside `uploads/` — so the `backups/` prefix (where the nightly database dump lands) is
+never publicly reachable. Uploads are restricted to a small allowlist of image types
+(no SVG) with a size cap; see [`SECURITY.md`](../SECURITY.md).
+
+## Scheduled work: cron triggers
+
+The Worker's `scheduled` handler (`src/worker.ts`) dispatches three cron triggers
+declared in `wrangler.jsonc` (the two files are kept in sync by hand):
+
+| Cron | When | Job |
+|---|---|---|
+| `0 13 * * *` | Daily | Serving reminders to unconfirmed volunteers |
+| `0 14 * * 4` | Thursday | Weekly serving digest email |
+| `0 9 * * *` | Nightly | Back up D1 → `backups/YYYY-MM-DD.sql` in R2 |
+
+The backup **skips gracefully** (logs a line, no error) when its account/database/token
+config is absent, so the demo deploy runs all its crons without backups configured. See
+`src/lib/backup.ts` and [`docs/deploy.md`](deploy.md) for enabling it.
+
+## Design & internationalization
+
+- **Design tokens** (`design/*.json`) compile into CSS variables and three themes — see
+  [`docs/design-system.md`](design-system.md).
+- **Two languages** (English + Chinese) share one codebase — see [`docs/i18n.md`](i18n.md).
+
+## Testing
+
+The system is covered by **over 470 automated tests**. Unit and integration tests run in
+the Cloudflare Workers test pool (`vitest`), end-to-end tests run against the actual built
+Worker (`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and
+checks routing, i18n, the health probe, and the security headers over HTTP. See
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to run each suite.

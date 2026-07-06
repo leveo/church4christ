@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" font-family="system-ui, sans-serif" role="img" aria-label="How Church4Christ runs on Cloudflare: a browser reaches one Worker at the edge, which runs middleware then Astro SSR, and talks to D1, R2, and email — with cron triggers driving reminders, digest, and the nightly backup">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+    <marker id="arrowG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F7A4D"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="880" height="560" fill="#F7F5F0"/>
+  <text x="32" y="44" font-size="22" font-weight="700" fill="#232630">How Church4Christ runs on Cloudflare</text>
+  <text x="32" y="70" font-size="14" fill="#565B6B">One Worker at the edge renders every page, guards each request, and reads from D1, R2, and email.</text>
+
+  <!-- Clients -->
+  <text x="32" y="104" font-size="13" font-weight="600" fill="#565B6B">Who visits</text>
+  <rect x="32" y="116" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="107" y="146" font-size="15" fill="#232630" text-anchor="middle">Visitor</text>
+  <text x="107" y="166" font-size="12" fill="#565B6B" text-anchor="middle">any browser</text>
+  <rect x="32" y="196" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="107" y="226" font-size="15" fill="#232630" text-anchor="middle">Church staff</text>
+  <text x="107" y="246" font-size="12" fill="#565B6B" text-anchor="middle">signed in at /admin</text>
+  <line x1="182" y1="148" x2="246" y2="180" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="182" y1="228" x2="246" y2="300" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Worker container -->
+  <rect x="248" y="92" width="356" height="286" rx="12" fill="#FFFFFF" stroke="#31487A" stroke-width="2"/>
+  <text x="426" y="118" font-size="15" font-weight="700" fill="#31487A" text-anchor="middle">Cloudflare Worker — Astro SSR</text>
+
+  <!-- Middleware -->
+  <rect x="268" y="134" width="316" height="152" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="284" y="156" font-size="13" font-weight="700" fill="#232630">Middleware (every request)</text>
+  <text x="284" y="180" font-size="12.5" fill="#565B6B">Locale routing — / picks /en or /zh</text>
+  <text x="284" y="200" font-size="12.5" fill="#565B6B">Session — reload the signed-in person</text>
+  <text x="284" y="220" font-size="12.5" fill="#565B6B">CSRF — reject cross-origin writes</text>
+  <text x="284" y="240" font-size="12.5" fill="#565B6B">Route policy — role gate, fails closed</text>
+  <text x="284" y="260" font-size="12.5" fill="#565B6B">Security headers + active theme</text>
+
+  <!-- Render -->
+  <rect x="268" y="300" width="316" height="56" rx="8" fill="#C29A5B"/>
+  <text x="426" y="324" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Render a page or API route</text>
+  <text x="426" y="342" font-size="12" fill="#232630" text-anchor="middle">public pages · /admin console · /api</text>
+
+  <!-- Services -->
+  <text x="650" y="104" font-size="13" font-weight="600" fill="#565B6B">Cloudflare storage &amp; email</text>
+  <rect x="650" y="116" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="750" y="146" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">D1 — SQL database</text>
+  <text x="750" y="168" font-size="12" fill="#565B6B" text-anchor="middle">content · people · schedules</text>
+  <rect x="650" y="204" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="750" y="234" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">R2 — object storage</text>
+  <text x="750" y="256" font-size="12" fill="#565B6B" text-anchor="middle">media · nightly backups</text>
+  <rect x="650" y="292" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="750" y="322" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Email binding</text>
+  <text x="750" y="344" font-size="12" fill="#565B6B" text-anchor="middle">magic links · reminders</text>
+
+  <line x1="604" y1="236" x2="648" y2="154" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="604" y1="240" x2="648" y2="242" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="604" y1="244" x2="648" y2="328" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Cron -->
+  <rect x="248" y="398" width="356" height="92" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="268" y="420" font-size="13" font-weight="700" fill="#232630">Cron triggers → scheduled()</text>
+  <text x="268" y="442" font-size="12.5" fill="#565B6B">Daily — serving reminders (email)</text>
+  <text x="268" y="462" font-size="12.5" fill="#565B6B">Thursday — weekly serving digest (email)</text>
+  <text x="268" y="482" font-size="12.5" fill="#565B6B">Nightly — backup D1 → R2 (skips if unconfigured)</text>
+  <line x1="426" y1="398" x2="426" y2="380" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Backup path -->
+  <polyline points="604,470 626,470 626,242 648,242" fill="none" stroke="#2F7A4D" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowG)"/>
+  <text x="470" y="512" font-size="12" fill="#2F7A4D">— — nightly backup writes to R2</text>
+</svg>
