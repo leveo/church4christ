@@ -14,7 +14,8 @@ both languages, and two services on the same Sunday each get their own sheet.
 You can save a bulletin as a **draft** while you are still working on it, and set a
 **publish time** so it goes live on its own — handy for preparing next Sunday's sheet on
 Wednesday and letting it appear Saturday night. When it publishes, the page also shows who
-is scheduled to serve that Sunday, pulled straight from the volunteer scheduler.
+is scheduled to serve that Sunday, pulled straight from the serve module (volunteer
+scheduling).
 
 ## How your team uses it
 
@@ -36,9 +37,9 @@ announcements, the memory verse, and — near the bottom — a **Serving This Su
 ![A published bulletin on the public site](../images/public/bulletin.png)
 
 That serving list is not typed into the bulletin. It comes from the same roster the
-volunteer module fills in (see [Volunteer & serve](volunteer-serve.md)), so once a leader
-schedules people, their names show up on the bulletin with no extra work — and if the
-schedule changes, the bulletin follows.
+serve module fills in (see [The serve module (volunteer scheduling)](volunteer-serve.md)),
+so once a leader schedules people, their names show up on the bulletin with no extra
+work — and if the schedule changes, the bulletin follows.
 
 **Two services on one Sunday.** Because a bulletin is tied to a service type as well as a date,
 two services on the same morning each get their own sheet — the 9:30 English worship and the
@@ -52,7 +53,7 @@ and see the memory verse whenever they like.
 **Good to know:**
 
 - Announcements added to a bulletin belong to that week's sheet. The rotating news ticker on the
-  home page is separate (see [The public website](public-site-and-themes.md)).
+  home page is separate (see [The public website and themes](public-site-and-themes.md)).
 - Setting a publish time is the easy way to prepare a bulletin midweek and let it appear on its
   own — no need to be at your computer Saturday night.
 - If you edit a published bulletin, the change is live immediately, and the previous version is
@@ -62,7 +63,7 @@ and see the memory verse whenever they like.
 
 The diagram shows the one editor screen on the left, the draft/publish choice in the
 middle, and the public page on the right — with the serving roster flowing in from the
-volunteer scheduler.
+serve module.
 
 ![From the bulletin editor to the Sunday page](../images/diagrams/bulletins.svg)
 
@@ -73,9 +74,9 @@ volunteer scheduler.
   `src/pages/admin/bulletins/index.astro` + `[id].astro`.
 - **Public view:** `src/pages/[locale]/bulletin/index.astro` + `[date].astro` render
   `src/components/BulletinView.astro`.
-- **Serving roster:** `src/lib/publicDb.ts` reads confirmed assignments from
-  `roster_assignments` for the plan matching that service type + date — the same table the
-  serve module writes.
+- **Serving roster:** `src/lib/publicDb.ts` reads non-declined (confirmed and unconfirmed)
+  assignments from `roster_assignments` for the plan matching that service type + date — the
+  same table the serve module writes.
 - **Scheduling:** the `publish_at` column plus a `status` of `draft`/`published` gate
   visibility; program and offering/attendance are stored as JSON columns.
 - **Tests:** `test/adminDb.content.test.ts`, `test/adminDb.revisions.test.ts`,

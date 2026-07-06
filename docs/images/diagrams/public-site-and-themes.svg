@@ -13,10 +13,10 @@
   <text x="105" y="130" font-size="15" fill="#232630" text-anchor="middle">Visitor</text>
   <rect x="230" y="96" width="170" height="66" rx="8" fill="#31487A"/>
   <text x="315" y="124" font-size="15" fill="#FFFFFF" text-anchor="middle">"/" picks a language</text>
-  <text x="315" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">from Accept-Language</text>
+  <text x="315" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">the browser's language</text>
   <rect x="450" y="96" width="160" height="66" rx="8" fill="#31487A"/>
   <text x="530" y="124" font-size="15" fill="#FFFFFF" text-anchor="middle">/en/… or /zh/…</text>
-  <text x="530" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">Base.astro layout</text>
+  <text x="530" y="144" font-size="13" fill="#DDD9CF" text-anchor="middle">one shared layout</text>
   <rect x="660" y="96" width="140" height="66" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="730" y="124" font-size="14" fill="#232630" text-anchor="middle">Home · Sermons</text>
   <text x="730" y="144" font-size="14" fill="#232630" text-anchor="middle">Bulletin · Events</text>
@@ -30,14 +30,14 @@
   <text x="115" y="286" font-size="14" fill="#232630" text-anchor="middle">Admin picks a theme</text>
   <text x="115" y="306" font-size="13" fill="#232630" text-anchor="middle">/admin/settings</text>
   <rect x="250" y="256" width="170" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="335" y="286" font-size="14" fill="#232630" text-anchor="middle">settings table</text>
-  <text x="335" y="306" font-size="13" fill="#565B6B" text-anchor="middle">theme.name + mode</text>
+  <text x="335" y="286" font-size="14" fill="#232630" text-anchor="middle">Saved setting</text>
+  <text x="335" y="306" font-size="13" fill="#565B6B" text-anchor="middle">theme name + mode</text>
   <rect x="470" y="256" width="150" height="72" rx="8" fill="#31487A"/>
-  <text x="545" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">getActiveTheme()</text>
-  <text x="545" y="306" font-size="13" fill="#DDD9CF" text-anchor="middle">read on render</text>
+  <text x="545" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">Site reads it</text>
+  <text x="545" y="306" font-size="13" fill="#DDD9CF" text-anchor="middle">on the next page load</text>
   <rect x="660" y="256" width="140" height="72" rx="8" fill="#31487A"/>
-  <text x="730" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">&lt;html data-theme</text>
-  <text x="730" y="306" font-size="14" fill="#FFFFFF" text-anchor="middle">data-mode&gt;</text>
+  <text x="730" y="286" font-size="14" fill="#FFFFFF" text-anchor="middle">Every page wears</text>
+  <text x="730" y="306" font-size="14" fill="#FFFFFF" text-anchor="middle">the new theme</text>
   <line x1="200" y1="292" x2="248" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="420" y1="292" x2="468" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="620" y1="292" x2="658" y2="292" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>

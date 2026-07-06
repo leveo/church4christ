@@ -17,8 +17,8 @@
   <text x="505" y="118" font-size="15" fill="#FFFFFF" text-anchor="middle">Position</text>
   <line x1="180" y1="113" x2="228" y2="113" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="380" y1="113" x2="428" y2="113" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="640" y="108" font-size="13" fill="#565B6B" text-anchor="middle">a team belongs to a</text>
-  <text x="640" y="126" font-size="13" fill="#565B6B" text-anchor="middle">ministry; positions to a team</text>
+  <text x="700" y="108" font-size="13" fill="#565B6B" text-anchor="middle">a team belongs to a</text>
+  <text x="700" y="126" font-size="13" fill="#565B6B" text-anchor="middle">ministry; positions to a team</text>
 
   <!-- Service row -->
   <text x="30" y="176" font-size="14" font-weight="600" fill="#565B6B">A dated service</text>

@@ -47,7 +47,7 @@
   <text x="210" y="430" font-size="13" fill="#565B6B" text-anchor="middle">people · serve · settings (tabs by role)</text>
   <rect x="440" y="356" width="360" height="90" rx="8" fill="#2F7A4D"/>
   <text x="620" y="388" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">Every save snapshots the old version</text>
-  <text x="620" y="412" font-size="13" fill="#FFFFFF" text-anchor="middle">revisions table · one-click restore</text>
+  <text x="620" y="412" font-size="13" fill="#FFFFFF" text-anchor="middle">one-click restore of any version</text>
   <text x="620" y="430" font-size="13" fill="#DDD9CF" text-anchor="middle">nothing is ever lost by accident</text>
   <line x1="390" y1="401" x2="438" y2="401" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="210" y1="304" x2="210" y2="354" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>

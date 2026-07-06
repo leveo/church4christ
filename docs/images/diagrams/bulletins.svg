@@ -23,7 +23,7 @@
   <!-- Publish -->
   <rect x="380" y="150" width="160" height="72" rx="8" fill="#C29A5B"/>
   <text x="460" y="180" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Draft or Publish</text>
-  <text x="460" y="202" font-size="13" fill="#232630" text-anchor="middle">optional publish_at</text>
+  <text x="460" y="202" font-size="13" fill="#232630" text-anchor="middle">or set a publish time</text>
   <line x1="330" y1="186" x2="378" y2="186" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Public page -->
@@ -39,8 +39,8 @@
 
   <!-- Shared roster source -->
   <rect x="380" y="360" width="330" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="545" y="390" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">roster_assignments (the serve module)</text>
-  <text x="545" y="412" font-size="13" fill="#565B6B" text-anchor="middle">same table the volunteer scheduler fills in</text>
+  <text x="545" y="390" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">The serving roster — one shared list</text>
+  <text x="545" y="412" font-size="13" fill="#565B6B" text-anchor="middle">the serve module fills it in (roster_assignments)</text>
   <line x1="620" y1="360" x2="680" y2="262" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <text x="500" y="348" font-size="12" fill="#565B6B" text-anchor="middle">feeds "Serving this Sunday"</text>
 </svg>

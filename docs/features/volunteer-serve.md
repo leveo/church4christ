@@ -1,11 +1,11 @@
-# Volunteer scheduling (the serve module)
+# The serve module (volunteer scheduling)
 
 ## What it does
 
-The serve module is how your church organizes people to serve: worship, children,
-hospitality, tech, and every other team. It answers the weekly questions — who is on next
-Sunday, what roles are still open, who has not confirmed yet — and it lets volunteers see
-and respond to their own schedule.
+The serve module (volunteer scheduling) is how your church organizes people to serve:
+worship, children, hospitality, tech, and every other team. It answers the weekly
+questions — who is on next Sunday, what roles are still open, who has not confirmed yet —
+and it lets volunteers see and respond to their own schedule.
 
 Everything is built from four simple pieces. A **ministry** (like Worship) contains one or
 more **teams**; a team defines its **positions** (like Vocalist or Sound); and a **plan** is
@@ -82,7 +82,7 @@ or Outlook — so their commitments show up next to the rest of their life.
 **Reminders and the weekly digest.** The site nudges people automatically: a reminder to anyone
 still unconfirmed as their service approaches, and a weekly digest listing each person's serving
 for the coming week. These run on their own; a leader never has to send them by hand. (Which
-reminders run is controlled on the Email tab — see [Email & automation](email-automation.md).)
+reminders run is controlled on the Email tab — see [Email and automation](email-automation.md).)
 
 ## How it fits together
 

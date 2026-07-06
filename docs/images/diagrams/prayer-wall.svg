@@ -13,8 +13,8 @@
   <text x="120" y="140" font-size="13" fill="#232630" text-anchor="middle">name/email optional</text>
   <text x="120" y="158" font-size="12" fill="#232630" text-anchor="middle">hidden honeypot field</text>
   <rect x="270" y="88" width="170" height="80" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="355" y="122" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">prayer_requests</text>
-  <text x="355" y="144" font-size="13" fill="#565B6B" text-anchor="middle">new request stored</text>
+  <text x="355" y="122" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Request stored</text>
+  <text x="355" y="144" font-size="13" fill="#565B6B" text-anchor="middle">waiting for the team</text>
   <line x1="210" y1="128" x2="268" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Kanban -->
@@ -33,7 +33,7 @@
   <!-- Activity log -->
   <rect x="270" y="230" width="530" height="76" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="535" y="262" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Every move, "prayed", and comment is logged</text>
-  <text x="535" y="286" font-size="13" fill="#565B6B" text-anchor="middle">prayer_activity — an audit trail on each card</text>
+  <text x="535" y="286" font-size="13" fill="#565B6B" text-anchor="middle">each card keeps its own history (prayer_activity)</text>
   <line x1="650" y1="168" x2="650" y2="228" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Folding -->
