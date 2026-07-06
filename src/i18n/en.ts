@@ -299,6 +299,7 @@ export default {
   'admin.form.saved': 'Saved.',
   'admin.form.deleted': 'Deleted.',
   'admin.form.edit': 'Edit',
+  'admin.form.badRequest': 'The submitted form could not be read. Please try again.',
 
   'admin.dashboard.published': 'Published',
   'admin.dashboard.drafts': 'Drafts',

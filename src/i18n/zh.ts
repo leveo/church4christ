@@ -298,6 +298,7 @@ export default {
   'admin.form.saved': '已保存。',
   'admin.form.deleted': '已删除。',
   'admin.form.edit': '编辑',
+  'admin.form.badRequest': '提交的表单无法读取，请重试。',
 
   'admin.dashboard.published': '已发布',
   'admin.dashboard.drafts': '草稿',

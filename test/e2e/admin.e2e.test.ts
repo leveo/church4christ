@@ -180,4 +180,21 @@ describe('announcements + events console + media upload loop', () => {
     expect((await get('/media/uploads/%2e%2e/backups/leak.sql')).status).toBe(404);
     expect((await get('/media/uploads/UPPER.png')).status).toBe(404);
   });
+
+  it('a garbage multipart body on /admin/events re-renders with the bad-request banner, not a 5xx', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const res = await SELF.fetch(`${ORIGIN}/admin/events`, {
+      method: 'POST',
+      headers: {
+        origin: ORIGIN,
+        cookie,
+        'content-type': 'multipart/form-data; boundary=----broken',
+      },
+      body: 'this is not a valid multipart payload',
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    // The editor's lang is zh (seed person 2), so the zh banner text renders.
+    expect(await res.text()).toContain('提交的表单无法读取，请重试。');
+  });
 });

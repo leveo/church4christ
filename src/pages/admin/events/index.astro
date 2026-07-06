@@ -24,6 +24,7 @@ const media = (env as { MEDIA: R2Bucket }).MEDIA;
 let errors: Record<string, string> = {};
 let fd: FormData | null = null;
 let failedId: string | null = null; // id whose form failed ('' = the create form)
+let badRequest = false; // unparseable POST body → generic localized banner, not a 500
 
 if (Astro.request.method === 'POST') {
   // Reject a clearly-oversized body before buffering it. The multipart envelope
@@ -35,7 +36,15 @@ if (Astro.request.method === 'POST') {
     errors.image = 'errors.imageTooLarge';
     failedId = '';
   } else {
-    fd = await Astro.request.formData();
+    // A malformed multipart body (bad boundary, truncated stream, oversized
+    // read) throws here; re-render with a banner instead of surfacing a 500.
+    try {
+      fd = await Astro.request.formData();
+    } catch {
+      badRequest = true;
+    }
+  }
+  if (fd) {
     const action = String(fd.get('action') ?? '');
     const idRaw = String(fd.get('id') ?? '');
     const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
@@ -113,6 +122,7 @@ const h2 = 'font-display text-heading-sm font-bold';
   <h1 class="font-display text-heading-md font-bold">{heading}</h1>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
 
   <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl">
     <section class={`${card} space-y-4`}>
