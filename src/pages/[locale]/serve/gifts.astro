@@ -1,0 +1,204 @@
+---
+// Spiritual-gifts quiz — PUBLIC (route policy exact match). A no-JS single-form
+// POST: 40 first-person statements each answered on a 4-point frequency scale
+// (Never/Sometimes/Often/Always → 0..3). Submitting scores the answers, saves a
+// history row for signed-in users, and renders the top-3 gifts as cards with
+// links into the matching ministries. Signed-in users can then add the
+// recommended ministry categories to their profile interests (a second POST);
+// signed-out users are nudged to sign in so their result is saved.
+//
+// A small progress island is pure enhancement; the radios are `required`, so
+// with JS off the browser still enforces a complete submission.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import GiftResultCard from '../../../components/GiftResultCard.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listMinistries } from '../../../lib/db';
+import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
+import {
+  GIFT_CODES,
+  QUESTIONS,
+  giftMeta,
+  scoreQuiz,
+  type Answer,
+} from '../../../lib/giftQuiz';
+import { addRecommendedToInterests, saveGiftResult } from '../../../lib/giftDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user;
+const db = (env as { DB: D1Database }).DB;
+
+const SCALE: { value: Answer; key: string }[] = [
+  { value: 0, key: 'serve.gifts.scale.never' },
+  { value: 1, key: 'serve.gifts.scale.sometimes' },
+  { value: 2, key: 'serve.gifts.scale.often' },
+  { value: 3, key: 'serve.gifts.scale.always' },
+];
+
+let results: { topGifts: string[]; recommended: string[] } | null = null;
+let interestsAdded = false;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'addInterests' && user) {
+    const recommended = fd.getAll('rec').map(String).filter((c) => MINISTRY_CATEGORIES.includes(c));
+    const topGifts = fd.getAll('top').map(String).filter((c) => GIFT_CODES.includes(c));
+    await addRecommendedToInterests(db, user.id, recommended);
+    interestsAdded = true;
+    results = { topGifts, recommended };
+  } else {
+    const answers: Record<number, Answer> = {};
+    for (const q of QUESTIONS) {
+      const n = Number(fd.get(`q${q.id}`));
+      if (n === 0 || n === 1 || n === 2 || n === 3) answers[q.id] = n as Answer;
+    }
+    const scored = scoreQuiz(answers);
+    results = { topGifts: scored.topGifts, recommended: scored.recommended };
+    if (user) await saveGiftResult(db, user.id, scored.topGifts, scored.recommended);
+  }
+}
+
+// Resolve each recommended category to a ministry link (matching slug) + label.
+const ministries = results ? await listMinistries(db, locale) : [];
+const categoryLabel = (c: string) =>
+  MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c;
+const linkFor = (category: string) => {
+  const m = ministries.find((x) => x.category === category);
+  return { label: categoryLabel(category), href: m ? localePath(locale, `/ministries/${m.slug}`) : null };
+};
+---
+
+<Base title={t(locale, 'serve.gifts.title')} locale={locale}>
+  <section class="bg-primary text-on-primary">
+    <div class="container-content max-w-narrow py-14 text-center">
+      <p class="text-sm font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.gifts.eyebrow')}</p>
+      <h1 class="mt-3 font-display text-display-xl font-bold">{t(locale, 'serve.gifts.title')}</h1>
+      <p class="mt-4">{t(locale, 'serve.gifts.intro')}</p>
+    </div>
+  </section>
+
+  <div class="container-content max-w-content py-12">
+    {
+      results ? (
+        <div>
+          <h2 class="font-display text-heading-md font-bold">{t(locale, 'serve.gifts.resultTitle')}</h2>
+          <p class="mt-2 text-ink-muted">{t(locale, 'serve.gifts.resultIntro')}</p>
+
+          <div class="mt-6 flex flex-col gap-6">
+            {results.topGifts.map((code, i) => {
+              const gift = giftMeta(code);
+              return gift ? (
+                <GiftResultCard gift={gift} rank={i + 1} locale={locale} links={gift.ministries.map(linkFor)} />
+              ) : null;
+            })}
+          </div>
+
+          <div class="mt-8 flex flex-wrap items-center gap-3">
+            {user ? (
+              interestsAdded ? (
+                <p class="rounded-md border border-success bg-success-soft px-4 py-2 text-sm font-semibold text-success">
+                  {t(locale, 'serve.gifts.interestsAdded')}
+                </p>
+              ) : (
+                <form method="post">
+                  <input type="hidden" name="_action" value="addInterests" />
+                  {results.topGifts.map((c) => <input type="hidden" name="top" value={c} />)}
+                  {results.recommended.map((c) => <input type="hidden" name="rec" value={c} />)}
+                  <button
+                    type="submit"
+                    class="inline-flex min-h-11 items-center rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+                  >
+                    {t(locale, 'serve.gifts.addInterests')}
+                  </button>
+                </form>
+              )
+            ) : (
+              <p class="text-sm text-ink-muted">
+                {t(locale, 'serve.gifts.signInToSave')}
+                <a href={localePath(locale, '/signin')} class="ml-1 font-semibold text-primary hover:underline">
+                  {t(locale, 'common.signIn')} →
+                </a>
+              </p>
+            )}
+            {user && !interestsAdded && (
+              <p class="text-sm text-ink-subtle">{t(locale, 'serve.gifts.saved')}</p>
+            )}
+            <a
+              href={localePath(locale, '/serve/gifts')}
+              class="inline-flex min-h-11 items-center rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:bg-surface-sunken"
+            >
+              {t(locale, 'serve.gifts.retake')}
+            </a>
+          </div>
+        </div>
+      ) : (
+        <form method="post" id="giftForm">
+          <div class="sticky top-0 z-10 -mx-4 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur">
+            <div class="flex items-center gap-3">
+              <div class="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                <div id="giftProgressBar" class="h-full bg-primary transition-[width] duration-200" style="width:0%" />
+              </div>
+              <span id="giftProgressText" class="shrink-0 text-xs font-semibold tabular-nums text-ink-muted">
+                {t(locale, 'serve.gifts.progress', { done: 0, total: QUESTIONS.length })}
+              </span>
+            </div>
+          </div>
+
+          <ol class="mt-6 space-y-5">
+            {QUESTIONS.map((q) => (
+              <li class="rounded-lg border border-border bg-surface-raised p-5">
+                <p class="font-semibold">
+                  {q.id}. {q.text[locale]}
+                </p>
+                <div class="mt-3 grid gap-2 sm:grid-cols-4">
+                  {SCALE.map((s) => (
+                    <label class="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-surface-sunken has-[:checked]:border-primary has-[:checked]:bg-primary-soft has-[:checked]:text-on-primary-soft">
+                      <input type="radio" name={`q${q.id}`} value={s.value} required class="h-4 w-4 shrink-0" />
+                      <span>{t(locale, s.key)}</span>
+                    </label>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <button
+            type="submit"
+            class="mt-8 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-primary px-6 py-3 text-base font-semibold text-on-primary hover:bg-primary-hover"
+          >
+            {t(locale, 'serve.gifts.submit')}
+          </button>
+        </form>
+      )
+    }
+  </div>
+
+  {
+    !results && (
+      <script
+        is:inline
+        define:vars={{ total: QUESTIONS.length, label: t(locale, 'serve.gifts.progress', { done: '__d__', total: QUESTIONS.length }) }}
+      >
+        const form = document.getElementById('giftForm');
+        if (form) {
+          const bar = document.getElementById('giftProgressBar');
+          const text = document.getElementById('giftProgressText');
+          const update = () => {
+            const done = new Set(
+              [...form.querySelectorAll('input[type=radio]:checked')].map((el) => el.name),
+            ).size;
+            bar.style.width = `${(done / total) * 100}%`;
+            text.textContent = label.replace('__d__', String(done));
+          };
+          form.addEventListener('change', update);
+          update();
+        }
+      </script>
+    )
+  }
+</Base>

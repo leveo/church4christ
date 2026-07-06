@@ -66,6 +66,7 @@ describe('classifyRoute', () => {
     ['/admin/ministries', 'console'],
     ['/admin/availability', 'console'],
     ['/admin/applications', 'console'],
+    ['/admin/testimonies', 'console'],
     // ── adminOnly ──
     ['/admin/people', 'adminOnly'],
     ['/admin/people/4', 'adminOnly'],

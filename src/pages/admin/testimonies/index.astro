@@ -1,0 +1,140 @@
+---
+// Testimony review queue (console class — re-checks editor∪admin, 403s a bare
+// team leader). Lists pending testimonies with a locale badge + body preview and
+// two no-JS POST actions on an `_action` field: approve (publish now) / return.
+// Both DB helpers are guarded on status='P', so double-submits are harmless.
+// PUBLIC TESTIMONY TEXT IS ALWAYS ESCAPED — rendered as {expr}, never set:html.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import {
+  listPendingTestimonies,
+  approveTestimony,
+  returnTestimony,
+  type PendingTestimonyRow,
+} from '../../../lib/testimonyDb';
+import { badge, badgeScheduled, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const PAGE = '/admin/testimonies';
+
+if (Astro.request.method === 'POST') {
+  let fd: FormData | null = null;
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    return Astro.redirect(`${PAGE}?err=1`, 303);
+  }
+  try {
+    const action = String(fd.get('_action') ?? '');
+    const idRaw = String(fd.get('id') ?? '');
+    if (/^\d+$/.test(idRaw)) {
+      const id = Number(idRaw);
+      if (action === 'approve') {
+        await approveTestimony(db, id);
+        return Astro.redirect(`${PAGE}?approved=1`, 303);
+      }
+      if (action === 'return') {
+        await returnTestimony(db, id);
+        return Astro.redirect(`${PAGE}?returned=1`, 303);
+      }
+    }
+    return Astro.redirect(PAGE, 303);
+  } catch (e) {
+    console.error('testimony review action failure', e);
+    return Astro.redirect(`${PAGE}?err=1`, 303);
+  }
+}
+
+const showErr = Astro.url.searchParams.has('err');
+const approved = Astro.url.searchParams.has('approved');
+const returned = Astro.url.searchParams.has('returned');
+
+let pending: PendingTestimonyRow[] = [];
+let dbFailed = false;
+try {
+  pending = await listPendingTestimonies(db);
+} catch (e) {
+  console.error('admin testimonies D1 failure', e);
+  dbFailed = true;
+}
+const isLong = (s: string) => [...s].length > 200;
+const preview = (s: string) => [...s].slice(0, 200).join('');
+const dateOf = (utc: string) => utc.slice(0, 10);
+---
+
+<Admin title={t(lang, 'admin.testimonies.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.testimonies.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.testimonies.intro', { count: pending.length })}</p>
+  {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.testimonies.dbError')}</p>}
+  {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.testimonies.actionError')}</p>}
+  {approved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.testimonies.approved')}</p>}
+  {returned && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.testimonies.returned')}</p>}
+
+  {
+    pending.length === 0 ? (
+      <p class="mt-6 rounded-md border border-border bg-surface-raised px-4 py-10 text-center text-ink-muted">
+        {t(lang, 'admin.testimonies.empty')}
+      </p>
+    ) : (
+      <div class="mt-6 space-y-4">
+        {pending.map((ti) => (
+          <article class="rounded-lg border border-border bg-surface-raised p-5">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class={`${badge} ${badgeScheduled}`}>{t(lang, `locale.${ti.locale}`)}</span>
+                <h2 class="font-display text-lg font-semibold">{ti.title}</h2>
+              </div>
+              <span class="text-xs text-ink-subtle">
+                {ti.author_name} · {dateOf(ti.created_at)}
+              </span>
+            </div>
+
+            {isLong(ti.body) ? (
+              <details class="group mt-2">
+                <summary class="cursor-pointer text-sm leading-relaxed text-ink-muted">
+                  <span class="group-open:hidden">{preview(ti.body)}… </span>
+                  <span class="text-xs font-semibold text-primary group-open:hidden">{t(lang, 'admin.testimonies.expand')}</span>
+                  <span class="hidden whitespace-pre-wrap group-open:inline">{ti.body}</span>
+                </summary>
+              </details>
+            ) : (
+              <p class="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{ti.body}</p>
+            )}
+
+            <div class="mt-4 flex flex-wrap gap-2">
+              <form method="post">
+                <input type="hidden" name="_action" value="approve" />
+                <input type="hidden" name="id" value={ti.id} />
+                <button
+                  type="submit"
+                  class="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:bg-primary-hover"
+                >
+                  {t(lang, 'admin.testimonies.approve')}
+                </button>
+              </form>
+              <form method="post">
+                <input type="hidden" name="_action" value="return" />
+                <input type="hidden" name="id" value={ti.id} />
+                <button
+                  type="submit"
+                  class="inline-flex items-center rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-soft"
+                >
+                  {t(lang, 'admin.testimonies.return')}
+                </button>
+              </form>
+            </div>
+          </article>
+        ))}
+      </div>
+    )
+  }
+
+  <p class="mt-6 text-xs text-ink-subtle">{t(lang, 'admin.testimonies.reviewedHint')}</p>
+</Admin>

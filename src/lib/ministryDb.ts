@@ -147,6 +147,8 @@ export interface TestimonyCardRow {
   body: string;
   /** The row's own locale — badge it when it differs from the requested one. */
   locale: Locale;
+  /** Publish timestamp (SQL datetime) — used for the date on the full page. */
+  publishedAt: string | null;
 }
 
 /**
@@ -161,7 +163,7 @@ export async function listPublishedTestimonies(
 ): Promise<TestimonyCardRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT author_name AS authorName, title, body, locale
+      `SELECT author_name AS authorName, title, body, locale, published_at AS publishedAt
        FROM testimonies
        WHERE status = 'A' AND deleted_at IS NULL
        ORDER BY (CASE WHEN locale = ?1 THEN 0 ELSE 1 END), published_at DESC, id DESC

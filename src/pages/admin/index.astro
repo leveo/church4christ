@@ -17,6 +17,7 @@ import {
   type WeekPrepRow,
   type RecentRevisionRow,
 } from '../../lib/adminDb';
+import { countPendingTestimonies } from '../../lib/testimonyDb';
 import { badge, badgeActive, badgeInactive, card, th, td, btn, btnSecondary } from '../../lib/adminUi';
 import { todayInTz, nextWeekday, formatDate } from '../../lib/dates';
 import type { Locale } from '../../lib/locales';
@@ -35,18 +36,21 @@ let prayerCounts: StatusCounts = { published: 0, draft: 0 };
 let weekPrep: WeekPrepRow[] = [];
 let revisions: RecentRevisionRow[] = [];
 let newPrayerCount = 0;
+let pendingTestimonies = 0;
 
 try {
   if (user.isAdmin) peopleCount = await countPeople(db);
   if (isStaff) {
-    [bulletinCounts, sermonCounts, prayerCounts, weekPrep, revisions, newPrayerCount] = await Promise.all([
-      countContentByStatus(db, 'bulletins'),
-      countContentByStatus(db, 'sermons'),
-      countContentByStatus(db, 'prayer_sheets'),
-      listWeekPrep(db, sunday, lang),
-      listRecentRevisions(db, 5),
-      countNewPrayerRequests(db),
-    ]);
+    [bulletinCounts, sermonCounts, prayerCounts, weekPrep, revisions, newPrayerCount, pendingTestimonies] =
+      await Promise.all([
+        countContentByStatus(db, 'bulletins'),
+        countContentByStatus(db, 'sermons'),
+        countContentByStatus(db, 'prayer_sheets'),
+        listWeekPrep(db, sunday, lang),
+        listRecentRevisions(db, 5),
+        countNewPrayerRequests(db),
+        countPendingTestimonies(db),
+      ]);
   }
 } catch (e) {
   console.error('admin dashboard load failed', e);
@@ -99,12 +103,20 @@ function revHref(r: RecentRevisionRow): string {
 
   {
     isStaff && (
-      <a href="/admin/prayer-wall" class={`${card} mt-6 flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
-        <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.prayerWall')}</span>
-        <span class={`${badge} ${newPrayerCount > 0 ? badgeActive : badgeInactive}`}>
-          {t(lang, 'admin.dashboard.newRequests', { count: newPrayerCount })}
-        </span>
-      </a>
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        <a href="/admin/prayer-wall" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.prayerWall')}</span>
+          <span class={`${badge} ${newPrayerCount > 0 ? badgeActive : badgeInactive}`}>
+            {t(lang, 'admin.dashboard.newRequests', { count: newPrayerCount })}
+          </span>
+        </a>
+        <a href="/admin/testimonies" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.testimonies')}</span>
+          <span class={`${badge} ${pendingTestimonies > 0 ? badgeActive : badgeInactive}`}>
+            {t(lang, 'admin.dashboard.pendingReview', { count: pendingTestimonies })}
+          </span>
+        </a>
+      </div>
     )
   }
 

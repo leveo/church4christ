@@ -66,6 +66,7 @@ const ADMIN_CONSOLE = [
   '/admin/ministries',
   '/admin/availability',
   '/admin/applications',
+  '/admin/testimonies',
 ];
 
 /** Strip a single trailing slash (but keep the bare root `/`). */

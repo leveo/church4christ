@@ -23,6 +23,7 @@ import {
   setPersonInterests,
 } from '../../lib/myDb';
 import { MINISTRY_CATEGORIES } from '../../lib/ministryMeta';
+import { giftLabel } from '../../lib/giftQuiz';
 import { parsePersonForm } from '../../lib/validate';
 import { btn, lab, noticeErr, noticeOk, tin } from '../../lib/adminUi';
 
@@ -156,7 +157,7 @@ const interestSet = new Set(myInterests);
                 <ul class="mt-1.5 flex flex-wrap gap-1.5">
                   {gift.top_gifts.map((c) => (
                     <li class="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-on-accent-soft">
-                      {categoryLabel(c)}
+                      {giftLabel(c, locale)}
                     </li>
                   ))}
                 </ul>

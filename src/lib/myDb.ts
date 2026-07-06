@@ -266,29 +266,7 @@ export async function setPersonInterests(db: D1Database, personId: number, categ
   await db.batch(stmts);
 }
 
-export interface GiftResultRow {
-  top_gifts: string[];
-  recommended: string[];
-  created_at: string;
-}
-
-/** The person's most recent gifts-quiz result, JSON columns parsed (null-safe). */
-export async function getLatestGiftResult(db: D1Database, personId: number): Promise<GiftResultRow | null> {
-  const row = await db
-    .prepare(
-      `SELECT top_gifts_json, recommended_json, created_at FROM gift_results
-       WHERE person_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
-    )
-    .bind(personId)
-    .first<{ top_gifts_json: string; recommended_json: string; created_at: string }>();
-  if (!row) return null;
-  const parse = (json: string): string[] => {
-    try {
-      const v = JSON.parse(json);
-      return Array.isArray(v) ? v.map(String) : [];
-    } catch {
-      return [];
-    }
-  };
-  return { top_gifts: parse(row.top_gifts_json), recommended: parse(row.recommended_json), created_at: row.created_at };
-}
+// The latest gift result lives in giftDb (the canonical gifts-persistence
+// module); re-exported here so the /my* and /profile pages keep their single
+// myDb import surface.
+export { getLatestGiftResult, type GiftResultRow } from './giftDb';
