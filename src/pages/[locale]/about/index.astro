@@ -1,0 +1,61 @@
+---
+// About page: story/mission/values from the `pages/about` entry, plus an
+// "explore more" strip linking to the beliefs + staff sub-pages.
+import { render } from 'astro:content';
+import ContentPage from '../../../components/ContentPage.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { getLocalized } from '../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const found = await getLocalized('pages', 'about', locale);
+if (!found) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const { entry, translated } = found;
+const { Content } = await render(entry);
+
+const explore = [
+  {
+    href: localePath(locale, '/about/beliefs'),
+    title: t(locale, 'about.beliefsLink'),
+    body: t(locale, 'about.beliefsLinkBody'),
+  },
+  {
+    href: localePath(locale, '/about/staff'),
+    title: t(locale, 'about.staffLink'),
+    body: t(locale, 'about.staffLinkBody'),
+  },
+];
+---
+
+<ContentPage
+  title={entry.data.title}
+  description={entry.data.description}
+  locale={locale}
+  translated={translated}
+>
+  <Content />
+  <Fragment slot="after">
+    <h2 class="font-display text-heading-sm font-semibold">{t(locale, 'about.exploreTitle')}</h2>
+    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+      {
+        explore.map((item) => (
+          <a
+            href={item.href}
+            class="block bg-surface-raised border border-border rounded-lg p-5 hover:shadow-md hover:border-border-strong transition-shadow"
+          >
+            <p class="font-display font-semibold">{item.title}</p>
+            <p class="mt-1 text-sm text-ink-muted">{item.body}</p>
+          </a>
+        ))
+      }
+    </div>
+  </Fragment>
+</ContentPage>

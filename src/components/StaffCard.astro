@@ -1,0 +1,33 @@
+---
+// A single staff member on the team directory: avatar (image or initials
+// fallback) + name + role, linking to the bio page. Token utilities only.
+import { localePath, type Locale } from '../lib/locales';
+import AvatarInitials from './AvatarInitials.astro';
+
+interface Props {
+  name: string;
+  role: string;
+  slug: string;
+  locale: Locale;
+  avatar?: string;
+}
+
+const { name, role, slug, locale, avatar } = Astro.props;
+---
+
+<a
+  href={localePath(locale, `/about/staff/${slug}`)}
+  class="flex items-center gap-4 p-4 bg-surface-raised border border-border rounded-lg hover:shadow-md hover:border-border-strong transition-shadow"
+>
+  {
+    avatar ? (
+      <img src={avatar} alt="" class="w-14 h-14 rounded-full object-cover shrink-0" />
+    ) : (
+      <AvatarInitials name={name} />
+    )
+  }
+  <div class="min-w-0">
+    <p class="font-display font-semibold truncate">{name}</p>
+    <p class="text-sm text-ink-muted truncate">{role}</p>
+  </div>
+</a>

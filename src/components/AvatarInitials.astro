@@ -1,0 +1,50 @@
+---
+// Deterministic initials avatar: a token-styled circle whose soft background is
+// picked from the name's hash (stable across renders). Used as the fallback when
+// a staff member has no committed avatar image. Purely decorative — aria-hidden.
+interface Props {
+  name: string;
+  /** Utility sizing classes (width/height/text-size). */
+  sizeClass?: string;
+}
+
+const { name, sizeClass = 'w-14 h-14 text-lg' } = Astro.props;
+
+// Soft-token palettes; each pairs a soft background with a readable foreground.
+const palettes = [
+  'bg-primary-soft text-on-primary-soft',
+  'bg-accent-soft text-on-accent-soft',
+  'bg-info-soft text-info',
+  'bg-success-soft text-success',
+];
+
+// Stable string hash (djb2-ish) → palette index.
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// Initials: CJK names → the surname (first character, titles stripped); Latin
+// names → first letters of the first and last word.
+function initials(raw: string): string {
+  const stripped = raw.replace(/牧师|传道|长老|执事|弟兄|姊妹/g, '').trim();
+  if (/[一-鿿]/.test(stripped)) {
+    return [...stripped][0] ?? '';
+  }
+  const words = stripped.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+const palette = palettes[hash(name) % palettes.length];
+const label = initials(name);
+---
+
+<span
+  class={`inline-flex shrink-0 items-center justify-center rounded-full font-display font-semibold ${sizeClass} ${palette}`}
+  aria-hidden="true"
+>
+  {label}
+</span>

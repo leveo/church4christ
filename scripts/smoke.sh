@@ -90,6 +90,21 @@ signout_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: $BAS
 signout_get=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/signout")
 [ "$signout_get" = "405" ] || fail "GET /signout expected 405, got $signout_get"
 
+# Slice 4 content pages: evergreen pages + collection indexes render 200 in both
+# locales, driven by the content collections (glob loaders) and the give-page
+# settings link. /en/visit carries the brand name; /zh/visit its localized title.
+visit_en_status=$(status "$BASE/en/visit")
+[ "$visit_en_status" = "200" ] || fail "/en/visit expected 200, got $visit_en_status"
+curl -sf "$BASE/en/visit" | grep -q 'Church4Christ' || fail "/en/visit missing Church4Christ"
+visit_zh_status=$(status "$BASE/zh/visit")
+[ "$visit_zh_status" = "200" ] || fail "/zh/visit expected 200, got $visit_zh_status"
+curl -sf "$BASE/zh/visit" | grep -q '计划到访' || fail "/zh/visit missing localized visit title"
+
+for path in /en/about/staff /en/articles /en/fellowships /en/give; do
+  s=$(status "$BASE$path")
+  [ "$s" = "200" ] || fail "$path expected 200, got $s"
+done
+
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
 echo "$en_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/ missing x-content-type-options"

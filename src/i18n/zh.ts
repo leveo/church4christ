@@ -51,6 +51,43 @@ export default {
   'home.card3Title': '找到服事的岗位',
   'home.card3Body': '用你的恩赐祝福他人，在大家庭中一同成长。',
 
+  'content.notTranslated': '本页尚未翻译，当前显示的是英文版本。',
+
+  'articles.title': '文章',
+  'articles.intro': '来自我们团队的灵修分享、教导与牧养劝勉。',
+  'articles.empty': '暂时还没有发布文章，敬请期待。',
+  'articles.byline': '作者：{author} · {date}',
+  'articles.englishBadge': '英文',
+  'articles.back': '← 返回文章列表',
+
+  'fellowships.title': '团契',
+  'fellowships.intro': '在小组中彼此分享生活、查考圣经、一同祷告。',
+  'fellowships.empty': '团契小组信息即将上线。',
+  'fellowships.meets': '聚会时间',
+  'fellowships.location': '聚会地点',
+  'fellowships.audience': '适合对象',
+  'fellowships.leaders': '同工',
+  'fellowships.back': '← 返回团契列表',
+
+  'staff.title': '我们的团队',
+  'staff.intro': '在教会大家庭中服事的牧者、长老与同工。',
+  'staff.empty': '团队成员信息即将上线。',
+  'staff.group.pastoral': '牧养团队',
+  'staff.group.elders': '长老',
+  'staff.group.staff': '同工与执事',
+  'staff.email': '邮箱',
+  'staff.back': '← 返回团队',
+
+  'about.exploreTitle': '了解更多',
+  'about.beliefsLink': '我们的信仰',
+  'about.beliefsLinkBody': '塑造我们共同生活的核心信念。',
+  'about.staffLink': '认识我们的团队',
+  'about.staffLinkBody': '在这里服事的牧者、长老与同工。',
+
+  'give.ctaButton': '在线奉献',
+  'give.ctaNote': '点击后将在新标签页打开我们的安全奉献平台。',
+  'give.unavailable': '在线奉献功能正在筹备中，其间可先与牧者联系。',
+
   'errors.required': '此栏必填。',
   'errors.dateFormat': '日期格式须为 YYYY-MM-DD。',
   'errors.urlInvalid': '链接须以 http:// 或 https:// 开头。',

@@ -1,0 +1,64 @@
+---
+// Articles listing: every article for this locale (localized-or-en-fallback),
+// newest first, as excerpt cards. A badge marks entries only available in English.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { listLocalized } from '../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+// date is 'YYYY-MM-DD' → lexical sort desc == chronological desc.
+const articles = (await listLocalized('articles', locale)).sort((a, b) =>
+  b.entry.data.date.localeCompare(a.entry.data.date),
+);
+---
+
+<Base title={t(locale, 'articles.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'articles.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'articles.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      articles.length === 0 ? (
+        <p class="text-ink-muted">{t(locale, 'articles.empty')}</p>
+      ) : (
+        <ul class="flex flex-col gap-6">
+          {articles.map(({ entry, translated, slug }) => (
+            <li>
+              <a
+                href={localePath(locale, `/articles/${slug}`)}
+                class="block bg-surface-raised border border-border rounded-lg p-6 hover:shadow-md hover:border-border-strong transition-shadow"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <h2 class="font-display text-heading-sm font-semibold">{entry.data.title}</h2>
+                  {!translated && (
+                    <span class="shrink-0 rounded-full bg-info-soft text-info px-2.5 py-0.5 text-xs font-semibold">
+                      {t(locale, 'articles.englishBadge')}
+                    </span>
+                  )}
+                </div>
+                <p class="mt-1 text-sm text-ink-subtle">
+                  {t(locale, 'articles.byline', {
+                    author: entry.data.author,
+                    date: formatDate(entry.data.date, locale),
+                  })}
+                </p>
+                {entry.data.excerpt && <p class="mt-3 text-ink-muted">{entry.data.excerpt}</p>}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
+</Base>

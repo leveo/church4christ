@@ -52,6 +52,43 @@ export default {
   'home.card3Title': 'Find a place to serve',
   'home.card3Body': 'Use your gifts to bless others and grow alongside the family.',
 
+  'content.notTranslated': 'This page hasn’t been translated yet — you’re reading the English version.',
+
+  'articles.title': 'Articles',
+  'articles.intro': 'Reflections, teaching, and pastoral encouragement from our team.',
+  'articles.empty': 'No articles have been published yet. Check back soon.',
+  'articles.byline': 'By {author} · {date}',
+  'articles.englishBadge': 'English',
+  'articles.back': '← All articles',
+
+  'fellowships.title': 'Fellowships',
+  'fellowships.intro': 'Smaller communities where we share life, study Scripture, and pray together.',
+  'fellowships.empty': 'Fellowship groups will be listed here soon.',
+  'fellowships.meets': 'Meets',
+  'fellowships.location': 'Location',
+  'fellowships.audience': 'Who it’s for',
+  'fellowships.leaders': 'Leaders',
+  'fellowships.back': '← All fellowships',
+
+  'staff.title': 'Our Team',
+  'staff.intro': 'The pastors, elders, and staff who serve our church family.',
+  'staff.empty': 'Team members will be listed here soon.',
+  'staff.group.pastoral': 'Pastoral Team',
+  'staff.group.elders': 'Elders',
+  'staff.group.staff': 'Staff & Deacons',
+  'staff.email': 'Email',
+  'staff.back': '← Meet the team',
+
+  'about.exploreTitle': 'Explore more',
+  'about.beliefsLink': 'What we believe',
+  'about.beliefsLinkBody': 'The core convictions that shape our life together.',
+  'about.staffLink': 'Meet our team',
+  'about.staffLinkBody': 'The pastors, elders, and staff who serve here.',
+
+  'give.ctaButton': 'Give online',
+  'give.ctaNote': 'You’ll be taken to our secure giving partner in a new tab.',
+  'give.unavailable': 'Online giving is being set up. Please speak with a pastor in the meantime.',
+
   'errors.required': 'This field is required.',
   'errors.dateFormat': 'Enter a date as YYYY-MM-DD.',
   'errors.urlInvalid': 'Enter a link starting with http:// or https://.',

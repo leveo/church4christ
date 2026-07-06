@@ -171,4 +171,102 @@
   .container-wide {
     max-width: var(--container-wide);
   }
+
+  /* PROSE MECHANISM (documented single choice): rendered markdown bodies emit
+   * raw h2/p/ul/blockquote/… elements, so their typography is applied via a
+   * `.prose` container class here — descendant selectors reach the markdown
+   * output cleanly, which a wrapper component could not. Every content page
+   * wraps its <slot/> in <article class="prose">. All values are token-driven
+   * (colors/fonts via var(--*); spacing in rem is allowed by tokens:check). */
+  .prose {
+    color: var(--color-ink);
+    line-height: var(--leading-relaxed);
+    max-width: var(--container-narrow);
+  }
+  .prose > :first-child {
+    margin-top: 0;
+  }
+  .prose h2 {
+    font-family: var(--font-display);
+    font-size: var(--text-heading-md);
+    font-weight: 700;
+    line-height: var(--leading-snug);
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .prose h3 {
+    font-family: var(--font-display);
+    font-size: var(--text-heading-sm);
+    font-weight: 600;
+    line-height: var(--leading-snug);
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose h4 {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose p {
+    margin-block: 1rem;
+  }
+  .prose ul,
+  .prose ol {
+    margin-block: 1rem;
+    padding-inline-start: 1.5rem;
+  }
+  .prose ul {
+    list-style: disc;
+  }
+  .prose ol {
+    list-style: decimal;
+  }
+  .prose li {
+    margin-block: 0.375rem;
+  }
+  .prose li::marker {
+    color: var(--color-ink-subtle);
+  }
+  .prose a {
+    color: var(--color-ink);
+    text-decoration-line: underline;
+    text-decoration-color: var(--color-accent);
+    text-underline-offset: 2px;
+  }
+  .prose a:hover {
+    color: var(--color-accent);
+  }
+  .prose strong {
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .prose em {
+    font-style: italic;
+  }
+  .prose blockquote {
+    border-inline-start: 3px solid var(--color-accent);
+    background-color: var(--color-surface-sunken);
+    color: var(--color-ink-muted);
+    font-style: italic;
+    padding: 0.75rem 1.25rem;
+    margin-block: 1.5rem;
+    border-radius: var(--radius-sm);
+  }
+  .prose blockquote p {
+    margin-block: 0.25rem;
+  }
+  .prose hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    margin-block: 2.5rem;
+  }
+  .prose code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background-color: var(--color-surface-sunken);
+    padding: 0.15em 0.4em;
+    border-radius: var(--radius-sm);
+  }
 }

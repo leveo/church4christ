@@ -1,0 +1,61 @@
+---
+// Staff bio page: avatar (image or initials), name, role, optional email, and
+// the prose bio body. En-fallback aware; unknown slug → 404.
+import { render } from 'astro:content';
+import ContentPage from '../../../../components/ContentPage.astro';
+import AvatarInitials from '../../../../components/AvatarInitials.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { getLocalized } from '../../../../lib/content';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const slug = Astro.params.slug ?? '';
+const found = await getLocalized('staff', slug, locale);
+if (!found) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const { entry, translated } = found;
+const { Content } = await render(entry);
+const { name, role, email, avatar } = entry.data;
+---
+
+<ContentPage title={name} description={role} locale={locale} translated={translated}>
+  <span slot="subtitle">{role}</span>
+
+  <div slot="before" class="flex items-center gap-4">
+    {
+      avatar ? (
+        <img src={avatar} alt="" class="w-20 h-20 rounded-full object-cover" />
+      ) : (
+        <AvatarInitials name={name} sizeClass="w-20 h-20 text-2xl" />
+      )
+    }
+    {
+      email && (
+        <div class="text-sm">
+          <p class="text-ink-subtle">{t(locale, 'staff.email')}</p>
+          <a class="text-ink underline decoration-accent underline-offset-2 hover:text-accent" href={`mailto:${email}`}>
+            {email}
+          </a>
+        </div>
+      )
+    }
+  </div>
+
+  <Content />
+
+  <Fragment slot="after">
+    <a
+      href={localePath(locale, '/about/staff')}
+      class="text-ink-muted underline decoration-accent underline-offset-2 hover:text-accent"
+    >
+      {t(locale, 'staff.back')}
+    </a>
+  </Fragment>
+</ContentPage>

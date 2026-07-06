@@ -27,6 +27,7 @@ export default defineConfig(async () => {
               'test/youtube.test.ts',
               'test/session.test.ts',
               'test/routePolicy.test.ts',
+              'test/content.test.ts',
             ],
             environment: 'node',
           },
