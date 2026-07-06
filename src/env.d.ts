@@ -11,5 +11,6 @@ declare namespace App {
     user: import('./lib/types').SessionUser | null;
     locale: import('./lib/locales').Locale;
     theme: string;
+    modules: Set<string>;
   }
 }
