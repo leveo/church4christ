@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="The serve module: ministry to team to position to plan to assignment, with leader and volunteer swimlanes">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="560" fill="#F7F5F0"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#232630">How volunteer scheduling fits together</text>
+
+  <!-- Structure row -->
+  <text x="30" y="76" font-size="14" font-weight="600" fill="#565B6B">The building blocks</text>
+  <rect x="30" y="86" width="150" height="54" rx="8" fill="#31487A"/>
+  <text x="105" y="118" font-size="15" fill="#FFFFFF" text-anchor="middle">Ministry</text>
+  <rect x="230" y="86" width="150" height="54" rx="8" fill="#31487A"/>
+  <text x="305" y="118" font-size="15" fill="#FFFFFF" text-anchor="middle">Team</text>
+  <rect x="430" y="86" width="150" height="54" rx="8" fill="#31487A"/>
+  <text x="505" y="118" font-size="15" fill="#FFFFFF" text-anchor="middle">Position</text>
+  <line x1="180" y1="113" x2="228" y2="113" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="380" y1="113" x2="428" y2="113" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="640" y="108" font-size="13" fill="#565B6B" text-anchor="middle">a team belongs to a</text>
+  <text x="640" y="126" font-size="13" fill="#565B6B" text-anchor="middle">ministry; positions to a team</text>
+
+  <!-- Service row -->
+  <text x="30" y="176" font-size="14" font-weight="600" fill="#565B6B">A dated service</text>
+  <rect x="30" y="186" width="180" height="62" rx="8" fill="#C29A5B"/>
+  <text x="120" y="214" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Plan</text>
+  <text x="120" y="234" font-size="13" fill="#232630" text-anchor="middle">one service, one date</text>
+  <rect x="260" y="186" width="220" height="62" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="370" y="212" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Needs positions</text>
+  <text x="370" y="234" font-size="13" fill="#565B6B" text-anchor="middle">how many · some open to sign up</text>
+  <rect x="530" y="186" width="270" height="62" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="665" y="212" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Assignment</text>
+  <text x="665" y="234" font-size="13" fill="#565B6B" text-anchor="middle">who serves, and their status</text>
+  <line x1="210" y1="217" x2="258" y2="217" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="480" y1="217" x2="528" y2="217" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="505" y1="140" x2="505" y2="184" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- caption -->
+  <text x="30" y="286" font-size="13" fill="#565B6B">Leaders create assignments (Unconfirmed); volunteers Confirm or Decline; a decline emails the leaders.</text>
+
+  <!-- Leader lane -->
+  <rect x="30" y="302" width="770" height="108" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <rect x="30" y="302" width="98" height="108" rx="8" fill="#31487A"/>
+  <text x="79" y="352" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">Leader</text>
+  <text x="79" y="372" font-size="12" fill="#DDD9CF" text-anchor="middle">does</text>
+  <rect x="142" y="322" width="150" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="217" y="352" font-size="13" fill="#232630" text-anchor="middle">Generate weekly</text>
+  <text x="217" y="370" font-size="13" fill="#232630" text-anchor="middle">plans forward</text>
+  <rect x="306" y="322" width="150" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="381" y="352" font-size="13" fill="#232630" text-anchor="middle">Matrix — assign</text>
+  <text x="381" y="370" font-size="13" fill="#232630" text-anchor="middle">inline</text>
+  <rect x="470" y="322" width="150" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="545" y="352" font-size="13" fill="#232630" text-anchor="middle">Check</text>
+  <text x="545" y="370" font-size="13" fill="#232630" text-anchor="middle">availability</text>
+  <rect x="634" y="322" width="152" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="710" y="352" font-size="13" fill="#232630" text-anchor="middle">Review</text>
+  <text x="710" y="370" font-size="13" fill="#232630" text-anchor="middle">applications</text>
+
+  <!-- Volunteer lane -->
+  <rect x="30" y="426" width="770" height="112" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <rect x="30" y="426" width="98" height="112" rx="8" fill="#C29A5B"/>
+  <text x="79" y="478" font-size="15" font-weight="700" fill="#232630" text-anchor="middle">Volunteer</text>
+  <text x="79" y="498" font-size="12" fill="#232630" text-anchor="middle">does</text>
+  <rect x="142" y="448" width="160" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="222" y="478" font-size="13" fill="#232630" text-anchor="middle">Gifts quiz →</text>
+  <text x="222" y="496" font-size="13" fill="#232630" text-anchor="middle">recommendations</text>
+  <rect x="316" y="448" width="130" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="381" y="478" font-size="13" fill="#232630" text-anchor="middle">Apply</text>
+  <text x="381" y="496" font-size="13" fill="#232630" text-anchor="middle">to serve</text>
+  <rect x="460" y="448" width="140" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="530" y="478" font-size="13" fill="#232630" text-anchor="middle">Claim an</text>
+  <text x="530" y="496" font-size="13" fill="#232630" text-anchor="middle">open slot</text>
+  <rect x="614" y="448" width="172" height="68" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="700" y="478" font-size="13" fill="#232630" text-anchor="middle">Respond · set</text>
+  <text x="700" y="496" font-size="13" fill="#232630" text-anchor="middle">blockouts · iCal</text>
+</svg>

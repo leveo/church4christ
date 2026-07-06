@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 450" font-family="system-ui, sans-serif" role="img" aria-label="A public prayer request becomes a card on the admin kanban, moved across columns with a logged activity trail">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="450" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">From prayer form to prayer wall</text>
+
+  <!-- Intake -->
+  <rect x="30" y="88" width="180" height="80" rx="8" fill="#C29A5B"/>
+  <text x="120" y="118" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Public prayer form</text>
+  <text x="120" y="140" font-size="13" fill="#232630" text-anchor="middle">name/email optional</text>
+  <text x="120" y="158" font-size="12" fill="#232630" text-anchor="middle">hidden honeypot field</text>
+  <rect x="270" y="88" width="170" height="80" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="355" y="122" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">prayer_requests</text>
+  <text x="355" y="144" font-size="13" fill="#565B6B" text-anchor="middle">new request stored</text>
+  <line x1="210" y1="128" x2="268" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Kanban -->
+  <text x="800" y="80" font-size="15" font-weight="600" fill="#565B6B" text-anchor="end">/admin/prayer-wall — drag between columns</text>
+  <rect x="500" y="92" width="90" height="76" rx="8" fill="#31487A"/>
+  <text x="545" y="126" font-size="13" fill="#FFFFFF" text-anchor="middle">New</text>
+  <text x="545" y="146" font-size="13" fill="#DDD9CF" text-anchor="middle">Praying</text>
+  <rect x="602" y="92" width="90" height="76" rx="8" fill="#31487A"/>
+  <text x="647" y="122" font-size="12" fill="#FFFFFF" text-anchor="middle">Long term</text>
+  <text x="647" y="142" font-size="12" fill="#DDD9CF" text-anchor="middle">Waiting</text>
+  <rect x="704" y="92" width="96" height="76" rx="8" fill="#2F7A4D"/>
+  <text x="752" y="122" font-size="13" fill="#FFFFFF" text-anchor="middle">Answered</text>
+  <text x="752" y="142" font-size="12" fill="#DDD9CF" text-anchor="middle">Cancelled</text>
+  <line x1="440" y1="128" x2="498" y2="128" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Activity log -->
+  <rect x="270" y="230" width="530" height="76" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="535" y="262" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Every move, "prayed", and comment is logged</text>
+  <text x="535" y="286" font-size="13" fill="#565B6B" text-anchor="middle">prayer_activity — an audit trail on each card</text>
+  <line x1="650" y1="168" x2="650" y2="228" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Folding -->
+  <rect x="270" y="352" width="530" height="66" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="535" y="380" font-size="14" fill="#232630" text-anchor="middle">Answered / cancelled cards older than 90 days fold away</text>
+  <text x="535" y="402" font-size="13" fill="#565B6B" text-anchor="middle">the wall stays tidy; "show all" brings them back</text>
+  <line x1="535" y1="306" x2="535" y2="350" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>

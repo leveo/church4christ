@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 470" font-family="system-ui, sans-serif" role="img" aria-label="How a weekly bulletin is edited, published, and shown on the site with its serving roster">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="470" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">From bulletin editor to Sunday page</text>
+
+  <!-- Editor box holding the parts -->
+  <text x="30" y="84" font-size="15" font-weight="600" fill="#565B6B">One editor screen, /admin/bulletins</text>
+  <rect x="30" y="98" width="300" height="230" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="180" y="126" font-size="15" font-weight="600" fill="#232630" text-anchor="middle">Bulletin for a date + service</text>
+  <rect x="50" y="142" width="260" height="34" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="180" y="164" font-size="13" fill="#232630" text-anchor="middle">Program rows (add / drag to reorder)</text>
+  <rect x="50" y="184" width="260" height="34" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="180" y="206" font-size="13" fill="#232630" text-anchor="middle">Announcements (repeat rows)</text>
+  <rect x="50" y="226" width="260" height="34" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="180" y="248" font-size="13" fill="#232630" text-anchor="middle">Offering · attendance · memory verse</text>
+  <rect x="50" y="268" width="260" height="34" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="180" y="290" font-size="13" fill="#232630" text-anchor="middle">Flowers · service time label</text>
+
+  <!-- Publish -->
+  <rect x="380" y="150" width="160" height="72" rx="8" fill="#C29A5B"/>
+  <text x="460" y="180" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Draft or Publish</text>
+  <text x="460" y="202" font-size="13" fill="#232630" text-anchor="middle">optional publish_at</text>
+  <line x1="330" y1="186" x2="378" y2="186" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Public page -->
+  <rect x="590" y="98" width="210" height="176" rx="8" fill="#31487A"/>
+  <text x="695" y="130" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">/bulletin page</text>
+  <text x="695" y="156" font-size="13" fill="#DDD9CF" text-anchor="middle">Order of worship</text>
+  <text x="695" y="178" font-size="13" fill="#DDD9CF" text-anchor="middle">Announcements</text>
+  <text x="695" y="200" font-size="13" fill="#DDD9CF" text-anchor="middle">Memory verse · offering</text>
+  <rect x="610" y="216" width="170" height="44" rx="8" fill="#2F7A4D"/>
+  <text x="695" y="238" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle">Serving this Sunday</text>
+  <text x="695" y="254" font-size="12" fill="#DDD9CF" text-anchor="middle">names from the roster</text>
+  <line x1="540" y1="186" x2="588" y2="186" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Shared roster source -->
+  <rect x="380" y="360" width="330" height="72" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="545" y="390" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">roster_assignments (the serve module)</text>
+  <text x="545" y="412" font-size="13" fill="#565B6B" text-anchor="middle">same table the volunteer scheduler fills in</text>
+  <line x1="620" y1="360" x2="680" y2="262" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="500" y="348" font-size="12" fill="#565B6B" text-anchor="middle">feeds "Serving this Sunday"</text>
+</svg>

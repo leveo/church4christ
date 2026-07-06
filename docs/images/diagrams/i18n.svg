@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 450" font-family="system-ui, sans-serif" role="img" aria-label="A request is routed by locale, filled from three translation sources, and can be converted Simplified to Traditional in the browser">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="450" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">One codebase, two languages side by side</text>
+
+  <!-- Left flow -->
+  <rect x="30" y="120" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="105" y="150" font-size="14" fill="#232630" text-anchor="middle">Visitor</text>
+  <text x="105" y="170" font-size="13" fill="#565B6B" text-anchor="middle">opens a page</text>
+  <rect x="220" y="120" width="180" height="64" rx="8" fill="#31487A"/>
+  <text x="310" y="150" font-size="14" fill="#FFFFFF" text-anchor="middle">Locale routing</text>
+  <text x="310" y="170" font-size="13" fill="#DDD9CF" text-anchor="middle">/en/… or /zh/…</text>
+  <line x1="180" y1="152" x2="218" y2="152" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Three sources -->
+  <text x="630" y="72" font-size="14" font-weight="600" fill="#565B6B" text-anchor="middle">filled from three sources</text>
+  <rect x="460" y="82" width="340" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="630" y="106" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Buttons &amp; labels — dictionaries</text>
+  <text x="630" y="124" font-size="13" fill="#565B6B" text-anchor="middle">i18n/en.ts · i18n/zh.ts (same keys)</text>
+  <rect x="460" y="144" width="340" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="630" y="168" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Editable content — translation tables</text>
+  <text x="630" y="186" font-size="13" fill="#565B6B" text-anchor="middle">*_i18n rows · missing → English fallback</text>
+  <rect x="460" y="206" width="340" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="630" y="230" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Long pages — content collections</text>
+  <text x="630" y="248" font-size="13" fill="#565B6B" text-anchor="middle">content/…/en/ and /zh/ Markdown</text>
+  <line x1="400" y1="145" x2="458" y2="108" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="160" x2="458" y2="170" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="175" x2="458" y2="232" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Rendered + toggle -->
+  <rect x="220" y="300" width="220" height="64" rx="8" fill="#31487A"/>
+  <text x="330" y="330" font-size="14" fill="#FFFFFF" text-anchor="middle">Page in that language</text>
+  <text x="330" y="350" font-size="13" fill="#DDD9CF" text-anchor="middle">English or 简体中文</text>
+  <rect x="480" y="300" width="320" height="64" rx="8" fill="#C29A5B"/>
+  <text x="640" y="330" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">简 → 繁 toggle (in the browser)</text>
+  <text x="640" y="350" font-size="13" fill="#232630" text-anchor="middle">Simplified base, one click to Traditional</text>
+  <line x1="630" y1="258" x2="440" y2="300" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="440" y1="332" x2="478" y2="332" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <text x="330" y="408" font-size="13" fill="#565B6B" text-anchor="middle">Adding a third language = one more dictionary + rows + folder — no new database columns.</text>
+</svg>
