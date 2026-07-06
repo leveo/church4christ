@@ -322,7 +322,7 @@ INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture
 INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status, publish_at, updated_by) VALUES
   (1, date('now','weekday 0','-14 days'), 'zh',
    '[{"heading":"感恩","items":["感谢神保守上主日崇拜顺利","感谢弟兄姊妹忠心的服事"]},{"heading":"教会与同工","items":["为牧者及同工身心灵健壮祷告","为新学期的儿童事工预备祷告"]},{"heading":"宣教","items":["为暑期短宣队的行前预备祷告"]}]',
-   'published', datetime('now','weekday 0','-18 days'), 'admin@example.com'),
+   'published', datetime('now','weekday 0','-18 days','start of day','+8 hours'), 'admin@example.com'),
   (2, date('now','-5 days'), 'zh',
    '[{"heading":"感恩","items":["感谢神赐下平安稳妥的一周","感谢新朋友愿意固定聚会"]},{"heading":"关怀","items":["为患病的长者早日康复祷告","为待产的姊妹母子平安祷告"]},{"heading":"社区","items":["为城市的需要与福音的广传祷告"]}]',
    'published', datetime('now','-7 days'), 'admin@example.com');

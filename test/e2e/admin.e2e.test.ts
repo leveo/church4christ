@@ -71,7 +71,10 @@ describe('/admin/bulletins (console class)', () => {
 
   it('editor creates a draft bulletin via parallel repeat-row arrays → 303 → row listed, absent from public', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
-    const date = '2026-09-06'; // a Sunday not present in the seed
+    // A Sunday guaranteed outside the seed's occupied range (the relative seed
+    // occupies sunday(-10)..sunday(+7)), so UNIQUE(service_type_id, bulletin_date)
+    // can never collide with a seeded row on any wall-clock date.
+    const date = sunday(9);
 
     const body = new URLSearchParams();
     body.append('action', 'save');
@@ -237,7 +240,7 @@ describe('prayer wall — no-JS move + revisions + settings theme', () => {
 
   it('the revisions page renders the history of a bulletin the editor just saved', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
-    const date = '2026-10-04';
+    const date = sunday(13); // outside the seed's sunday(-10)..sunday(+7) range
     const body = new URLSearchParams({ action: 'save', service_type_id: '1', bulletin_date: date, status: 'draft', publish_at: '' });
     const created = await post('/admin/bulletins/new', body.toString(), { cookie });
     expect(created.status).toBe(303);
@@ -276,7 +279,7 @@ describe('prayer wall — no-JS move + revisions + settings theme', () => {
 describe('editor-created content reaches the public site (publish lifecycles)', () => {
   it('a PUBLISHED bulletin appears on its public dated page (draft-not-public is proven elsewhere)', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
-    const date = '2026-11-01'; // a date absent from the seed
+    const date = sunday(17); // outside the seed's sunday(-10)..sunday(+7) range
     const marker = 'Living Water Message E2E';
 
     const body = new URLSearchParams();
@@ -300,11 +303,13 @@ describe('editor-created content reaches the public site (publish lifecycles)', 
 
   it('a PUBLISHED sermon (pasted full YouTube URL) appears on /en/sermons/<year> with the extracted id in the embed facade', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
+    const date = sunday(25); // outside the seed's sunday(-10)..sunday(+7) range
+    const year = date.slice(0, 4); // the archive year is computed from the same date
 
     const body = new URLSearchParams();
     body.append('action', 'save');
     body.append('service_type_id', '1');
-    body.append('sermon_date', '2027-01-10'); // a year not in the seed
+    body.append('sermon_date', date);
     body.append('title', 'The Living Water E2E');
     body.append('speaker', 'Pastor David');
     body.append('youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'); // full URL
@@ -313,7 +318,7 @@ describe('editor-created content reaches the public site (publish lifecycles)', 
     const created = await post('/admin/sermons/new', body.toString(), { cookie });
     expect(created.status).toBe(303);
 
-    const page = await get('/en/sermons/2027');
+    const page = await get(`/en/sermons/${year}`);
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('The Living Water E2E');
@@ -345,7 +350,7 @@ describe('editor-created content reaches the public site (publish lifecycles)', 
 
   it('a PUBLISHED zh prayer sheet on a new date renders on /zh/prayer/<date>', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
-    const date = '2026-12-02';
+    const date = sunday(21); // outside the seed's sunday(-10)..sunday(+7) range
     const heading = '感恩 E2E';
 
     const body = new URLSearchParams();
