@@ -2,7 +2,7 @@
 // (zh-Hans); when the visitor prefers Traditional, the whole document is
 // converted in place. The conversion table is code-split behind a dynamic
 // import and only fetched in Traditional mode — Simplified readers pay zero
-// extra bytes. Ported from dcfc-website's zh-client.ts with the direction
+// extra bytes. Ported from the reference stack's zh-client.ts with the direction
 // flipped (their base was Traditional with t2s).
 const KEY = 'c4c-hant';
 const HAN_RE = /[㐀-鿿]/;

@@ -3,7 +3,7 @@
 // an optional time range (half-filled pair rejected server-side with an error
 // key), and optional weekly/biweekly recurrence (2..26 occurrences materialized
 // sharing a recurrence_group), plus delete-single and delete-series. Ported
-// from dcfc-serve/src/pages/my/blockouts.astro; parsing lives in
+// from the reference stack's src/pages/my/blockouts.astro; parsing lives in
 // validate.parseBlockoutForm and the writes in myDb so both are unit-tested.
 // Every mutation is scoped to the SESSION user's person_id.
 import { env } from 'cloudflare:workers';

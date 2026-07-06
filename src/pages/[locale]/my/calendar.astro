@@ -1,7 +1,7 @@
 ---
 // Personal serving calendar (authed via route policy): a server-rendered month
 // grid (?month=YYYY-MM navigation) with assignment dots + blockout shading, and
-// the iCal subscribe box. Ported from dcfc-serve/src/pages/my/calendar.astro,
+// the iCal subscribe box. Ported from the reference stack's src/pages/my/calendar.astro,
 // except the calendar token is an explicit Generate/Regenerate action (32 hex
 // chars) instead of create-on-view — regenerating invalidates the old URL.
 import { env } from 'cloudflare:workers';

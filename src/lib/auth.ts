@@ -1,7 +1,7 @@
 // One-time tokens for magic sign-in links and email accept/decline links. The
 // raw token is returned to the caller exactly once (embed it in the emailed
 // link); only its SHA-256 hex hash is ever persisted. Ported from
-// dcfc-serve/src/lib/auth.ts, adapted to createLoginToken/createRespondToken
+// the reference stack's src/lib/auth.ts, adapted to createLoginToken/createRespondToken
 // (rate limit folded into createLoginToken) with exported TTL/limit constants.
 
 export type TokenPurpose = 'login' | 'respond';

@@ -1,4 +1,4 @@
-// Content admin data-access (workers project, live D1). Ports the dcfc-website
+// Content admin data-access (workers project, live D1). Ports the reference stack
 // saveBulletin/saveSermon/savePrayerSheet suites, adapted to our schema
 // (bulletins/sermons keyed on (service_type_id, date); prayer_sheets on
 // sheet_date + a locale column) and to the Result-returning API

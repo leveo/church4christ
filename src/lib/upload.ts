@@ -1,4 +1,4 @@
-// Image upload helpers, ported from dcfc-website and adapted to this schema.
+// Image upload helpers, ported from the reference stack and adapted to this schema.
 // SVG is deliberately NOT allowed (scriptable format); the media route
 // additionally refuses to serve any stored SVG inline (defense in depth).
 // Keys are content-addressed (sha256 of the bytes) so re-uploading identical

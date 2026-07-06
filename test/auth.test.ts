@@ -1,5 +1,5 @@
 // One-time token tests (workers project, live D1). Ported + adapted from
-// dcfc-serve/test/auth.test.ts: raw is never stored (only sha256Hex), peek does
+// the reference stack's test/auth.test.ts: raw is never stored (only sha256Hex), peek does
 // not consume, consume is single-use, wrong-purpose/expired/unknown → null, and
 // createLoginToken enforces the 3-per-15-min rate limit (respond tokens exempt).
 import { env } from 'cloudflare:test';

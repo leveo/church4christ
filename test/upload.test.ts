@@ -1,4 +1,4 @@
-// Upload helper unit tests (node project), ported from dcfc-website and adapted
+// Upload helper unit tests (node project), ported from the reference stack and adapted
 // to our async, byte-hashing uploadKey and the ASCII-lowercase sanitizer.
 import { describe, it, expect } from 'vitest';
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, sanitizeFilename, sha256Hex, uploadKey } from '../src/lib/upload';

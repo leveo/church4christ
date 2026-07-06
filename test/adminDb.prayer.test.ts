@@ -1,4 +1,4 @@
-// Prayer-wall admin data-access (workers project, live D1). Ports the dcfc-website
+// Prayer-wall admin data-access (workers project, live D1). Ports the reference stack
 // prayer-wall suite to our grouped-board API: move logs a 'moved' activity row and
 // rejects an unknown status; pray/comment are logged (comment clamped to 2000,
 // empty rejected); delete removes the request AND its activity in one batch; the

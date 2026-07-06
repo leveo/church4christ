@@ -6,7 +6,7 @@
 // team from position_id server-side (canEditPosition) — never trust form-posted
 // team ids. Volunteers mutate only their own rows (verified by person_id).
 //
-// Ported faithfully from dcfc-serve/src/lib/planDb.ts, adapted to church-cms:
+// Ported faithfully from the reference stack's src/lib/planDb.ts, adapted to church-cms:
 // localized names come from *_i18n companion tables (via i18nJoin), there is no
 // congregation column, plans/roster_assignments have no updated_at column, and
 // team_members has no deleted_at column. respondToAssignment is the slice-3

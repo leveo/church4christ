@@ -3,7 +3,7 @@
 // localized names, team membership mutations, application review, the
 // leader-facing "potential volunteers" union, and the matrix grid data.
 //
-// Ported from dcfc-serve (adminDb team/application functions, giftDb
+// Ported from the reference stack (adminDb team/application functions, giftDb
 // listPotentialVolunteers, db.getMatrix), adapted to church-cms: names come
 // from *_i18n companion tables (via i18nJoin, en fallback), there is no
 // congregation column, `team_members` has no id/deleted_at/updated_at (so add

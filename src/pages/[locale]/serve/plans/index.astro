@@ -3,7 +3,7 @@
 // type listing upcoming plans (date, title/series, filled/needed summary).
 // Admin-only controls per section: create a single plan (date+title+series) and
 // idempotent weekly generation through a date (explicit weekday select +
-// through-date, ported from dcfc-serve). Non-admins see the list only; the POST
+// through-date, ported from the reference stack). Non-admins see the list only; the POST
 // handler re-checks admin server-side and 403s otherwise.
 import { env } from 'cloudflare:workers';
 import Base from '../../../../layouts/Base.astro';

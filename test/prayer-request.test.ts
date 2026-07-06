@@ -1,4 +1,4 @@
-// Workers project (live D1). Ported from dcfc-website's prayer-request API test,
+// Workers project (live D1). Ported from the reference stack's prayer-request API test,
 // aimed at the pure lib (src/lib/prayerRequest) the thin route delegates to:
 // valid submit stores + returns 'sent', bad/missing fields (incl. the consent
 // checkbox) return 'error' without storing, honeypot is silently accepted, and

@@ -51,7 +51,7 @@ jobs:
     needs: build-test
     runs-on: ubuntu-latest
     # Deploy only on pushes to main. Secrets cannot be used in a job-level `if`,
-    # so the CLOUDFLARE_API_TOKEN presence check is a step below (dcfc-website
+    # so the CLOUDFLARE_API_TOKEN presence check is a step below (the reference stack
     # pattern) — a fork/PR without the secret simply no-ops the deploy step.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:

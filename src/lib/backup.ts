@@ -1,5 +1,5 @@
 // Nightly D1 -> R2 backup via the D1 REST export API (slice 7). Ported from the
-// reference stack (dcfc-website src/lib/backup.ts). Verified flow: POST /export
+// reference stack's src/lib/backup.ts. Verified flow: POST /export
 // with {"output_format":"polling"} -> {result:{at_bookmark}}; re-POST
 // {"current_bookmark": bookmark} until result.success && result.signed_url; GET
 // signed_url -> SQL dump; store as backups/YYYY-MM-DD.sql. The backups/ prefix is

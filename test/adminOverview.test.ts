@@ -1,6 +1,6 @@
 // Admin console Overview data (workers project, migrated D1 — no seed applied, so
 // ministries/teams start empty). Covers role-scoped getStats and the four
-// needs-attention buckets. Ported from dcfc-serve's adminOverview test, adapted to
+// needs-attention buckets. Ported from the reference stack's adminOverview test, adapted to
 // church-cms i18n tables + SessionUser shape.
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';

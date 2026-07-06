@@ -1,5 +1,5 @@
 // Shared month-calendar mark building for /my and /my/calendar. Pure — no D1.
-// Ported from dcfc-serve/src/lib/calendar.ts unchanged.
+// Ported from the reference stack's src/lib/calendar.ts unchanged.
 
 export interface DayMark {
   statuses: ('U' | 'C' | 'D')[];

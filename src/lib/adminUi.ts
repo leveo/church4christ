@@ -1,6 +1,6 @@
 // Shared Tailwind class-constant strings for the /admin surfaces. Token
 // utilities only (no literal colors/fonts) so a theme swap restyles admin for
-// free — same idea as dcfc-serve's adminUi.ts, rewritten against our tokens.
+// free — same idea as the reference stack's adminUi.ts, rewritten against our tokens.
 // Pages compose these; keeping them here keeps the markup declarative and the
 // look consistent across every admin page.
 

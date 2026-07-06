@@ -2,7 +2,7 @@
 // are global on/off toggles (remind7 / remind3 / digestAM); templates are
 // editable subject/body with {placeholder} variables, stored per locale
 // (template_key + locale primary key); the log is written by lib/email.ts on
-// every send. Ported from dcfc-serve's emailSettingsDb, adapted to church-cms's
+// every send. Ported from the reference stack's emailSettingsDb, adapted to church-cms's
 // per-locale email_templates table (migration 0002).
 
 export type RuleKey = 'remind7' | 'remind3' | 'digestAM';

@@ -1,5 +1,5 @@
 // planDb scheduling-engine tests (workers project, live D1). The engine semantics
-// are ported from dcfc-serve/test/planDb.test.ts, adapted to church-cms: i18n
+// are ported from the reference stack's test/planDb.test.ts, adapted to church-cms: i18n
 // names (team/position/service_type via *_i18n), no congregation, object-param
 // signatures with string-union results, getConflicts(personId, planId). The
 // slice-3 respondToAssignment contract is exercised unchanged at the bottom.

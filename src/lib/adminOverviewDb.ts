@@ -1,6 +1,6 @@
 // Admin console Overview data + the per-person serving report. Everything is
 // role-scoped: 'admin' sees the whole church; 'leader' sees only the teams they
-// lead (via SessionUser.leaderTeamIds). Ported from dcfc-serve's adminOverviewDb,
+// lead (via SessionUser.leaderTeamIds). Ported from the reference stack's adminOverviewDb,
 // adapted to church-cms: localized names come from *_i18n companion tables,
 // hrefs are locale-prefixed serve routes, and testimonies use the shared status.
 import { i18nJoin, type Locale } from './db';

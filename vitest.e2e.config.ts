@@ -22,7 +22,7 @@ export default defineConfig(async () => {
       // The built worker eagerly WebAssembly.compile()s es-module-lexer at module
       // init; the test pool blocks buffer-compiled WASM, but that lexer is never
       // used at request time, so the rejection is benign noise — don't fail on it.
-      // (Ported verbatim from dcfc-serve's e2e config.)
+      // (Ported verbatim from the reference stack's e2e config.)
       dangerouslyIgnoreUnhandledErrors: true,
     },
   };

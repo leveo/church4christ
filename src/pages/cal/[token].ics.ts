@@ -2,7 +2,7 @@
 // policy: /cal/ is a public prefix; the token IS the credential). Subscribed to
 // by Google/Apple Calendar, so magic-link-only volunteers still see their
 // dates. Regenerating people.calendar_token revokes the subscription. Ported
-// from dcfc-serve/src/pages/cal/[token].ics.ts, adapted to church-cms: names
+// from the reference stack's src/pages/cal/[token].ics.ts, adapted to church-cms: names
 // come from the *_i18n companion tables (English — calendar clients cache one
 // feed for everyone), and the UID host derives from APP_ORIGIN.
 import type { APIRoute } from 'astro';

@@ -1,6 +1,6 @@
 // Scheduled serving mail: the daily reminder pass and the weekly digest, both
 // fired by the crons in worker.ts and both gated by the email_rules toggles the
-// admin Email tab controls. Ported from dcfc-serve/src/lib/digest.ts, adapted to
+// admin Email tab controls. Ported from the reference stack's src/lib/digest.ts, adapted to
 // church-cms: names come from *_i18n companion tables (English used for the mail
 // variables), sendEmail takes (env, db, msg), and dates run in America/Chicago.
 import { addDays, todayInTz } from './dates';

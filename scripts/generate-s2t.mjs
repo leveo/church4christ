@@ -2,7 +2,7 @@
 // (Apache-2.0, nk2028/opencc-data mirroring BYVoid/OpenCC dictionaries).
 // Simplified→Traditional only; run `node scripts/generate-s2t.mjs` to regenerate.
 //
-// Ported from dcfc-website's scripts/generate-t2s.mjs with the direction
+// Ported from the reference stack's scripts/generate-t2s.mjs with the direction
 // flipped, plus one s2t-specific change: identity phrases (from === target,
 // e.g. 皇后→皇后) are KEPT when converting the phrase char-by-char would
 // produce something else (后→後 would give 皇後) — in this direction they

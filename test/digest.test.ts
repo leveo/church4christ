@@ -1,5 +1,5 @@
 // Weekly digest + daily reminders (workers project, migrated D1). Migration 0002
-// seeds the rules (remind7=1, remind3=0, digestAM=1). Ported from dcfc-serve's
+// seeds the rules (remind7=1, remind3=0, digestAM=1). Ported from the reference stack's
 // digest test, adapted to church-cms (emails are NOT NULL, so the excluded cases
 // use a declined / inactive / out-of-window assignment instead of a null email).
 import { env } from 'cloudflare:test';

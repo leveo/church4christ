@@ -7,7 +7,7 @@
 // missing zh row falls back to English. Every query filters soft-deletes.
 //
 // The admin-console reads/writes (ministry summaries table, active toggle, and
-// the 4-step new-ministry wizard) are ported from dcfc-serve's ministryDb,
+// the 4-step new-ministry wizard) are ported from the reference stack's ministryDb,
 // adapted to church-cms's i18n companion tables (no name/category columns on
 // teams; localized names in *_i18n) and slug-keyed ministries.
 import { i18nJoin, type Locale } from './db';

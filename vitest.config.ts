@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 // In @cloudflare/vitest-pool-workers@0.17.0, both `cloudflareTest` and
 // `readD1Migrations` are exported from the package's main entrypoint (there is
-// no `/config` subpath export) — same deviation as the dcfc-serve config.
+// no `/config` subpath export) — same deviation as the reference stack config.
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 
 // Two projects in one config:

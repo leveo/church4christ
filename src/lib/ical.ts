@@ -1,6 +1,6 @@
 // Minimal iCalendar (RFC 5545) feed builder for a volunteer's serving schedule,
 // plus the people.calendar_token helpers behind /cal/[token].ics. Ported from
-// dcfc-serve/src/lib/ical.ts, adapted to church-cms: the caller passes the FULL
+// the reference stack's src/lib/ical.ts, adapted to church-cms: the caller passes the FULL
 // UID (stable `c4c-assignment-<id>@<host>`), and the token is an explicit
 // generate/regenerate action (32 hex chars) instead of create-on-view —
 // regenerating invalidates the old subscription URL.
@@ -28,7 +28,7 @@ function nextDay(iso: string): string {
 }
 
 /**
- * Build a VCALENDAR document. Timed events use floating local time (dcfc's
+ * Build a VCALENDAR document. Timed events use floating local time (the reference stack's
  * choice — a 9:30 service reads as 9:30 in any viewer's calendar, no TZID);
  * events without both times render as all-day. CRLF line endings per RFC 5545.
  */

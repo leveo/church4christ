@@ -55,7 +55,7 @@ export function formatDate(dateStr: string, locale: Locale): string {
 
 /** Inclusive date-string bounds for a 'YYYY-MM' month. The end is the '-31'
  *  sentinel: string comparison against real 'YYYY-MM-DD' rows is safe for
- *  shorter months (ported from dcfc-serve). */
+ *  shorter months (ported from the reference stack). */
 export function monthRange(ym: string): { start: string; end: string } {
   return { start: `${ym}-01`, end: `${ym}-31` };
 }

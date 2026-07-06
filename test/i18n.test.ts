@@ -5,7 +5,7 @@ import { t } from '../src/lib/i18n';
 
 const dicts = { en, zh } as const;
 
-describe('dictionaries (parity, ported from dcfc-serve)', () => {
+describe('dictionaries (parity, ported from the reference stack)', () => {
   it('has a non-empty string for every key in both locales', () => {
     for (const locale of ['en', 'zh'] as const) {
       for (const [key, value] of Object.entries(dicts[locale])) {

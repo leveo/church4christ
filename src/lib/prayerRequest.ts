@@ -2,7 +2,7 @@
 // tested against a live D1 binding without importing an Astro route (mirrors how
 // the auth flow is tested through its libs). The route stays a thin adapter:
 // read the form + env, call submitPrayerRequest, redirect back. Ported from
-// dcfc-website's endpoint, adapted so name/email are optional and the redirect
+// the reference stack's endpoint, adapted so name/email are optional and the redirect
 // target is derived from a sanitized Referer instead of a fixed home path.
 
 const MAX_MESSAGE = 4000;

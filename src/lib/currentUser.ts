@@ -2,9 +2,9 @@
 // memberships, mapped to the shape middleware attaches as `Astro.locals.user`.
 // The person row is re-read on every request so deactivation (active=0),
 // soft-delete, and a session_epoch bump (signout) take effect immediately.
-// Two queries per call. Ported from dcfc-serve's getActivePersonById +
+// Two queries per call. Ported from the reference stack's getActivePersonById +
 // getPersonTeamIds, adapted to the role model and the team_members schema
-// (which — unlike dcfc — has no soft-delete column, so only teams.deleted_at
+// (which — unlike the reference stack — has no soft-delete column, so only teams.deleted_at
 // is filtered).
 import type { SessionUser } from './types';
 

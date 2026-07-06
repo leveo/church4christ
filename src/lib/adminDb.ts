@@ -250,7 +250,7 @@ export class DuplicateDateError extends Error {
  *  - a LIVE occupant is always a real conflict → DuplicateDateError.
  * `id IS NOT ?`: with a NULL id (insert) it matches every row in the slot; with
  * a numeric id (update) it excludes the row being updated. SQLite semantics,
- * ported from dcfc-website.
+ * ported from the reference stack.
  */
 async function resolveDateSlot(
   db: D1Database,
@@ -1111,7 +1111,7 @@ export async function toggleEventActive(db: D1Database, id: number): Promise<voi
 
 // ===========================================================================
 // Prayer wall (editor ∪ admin; kanban triage of public prayer_requests). Ported
-// from dcfc-website. prayer_requests has no updated_at column — cards order by
+// from the reference stack. prayer_requests has no updated_at column — cards order by
 // created_at DESC and derive recency from prayer_activity, where every move /
 // pray / comment is logged with the acting staff email. Public message text is
 // ALWAYS escaped by the page (never set:html).

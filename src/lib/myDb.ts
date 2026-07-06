@@ -4,7 +4,7 @@
 // serving history, their own applications, ministry interests, and the latest
 // gifts-quiz result.
 //
-// Ported from dcfc-serve/src/lib/db.ts (listPersonAssignments, listBlockouts,
+// Ported from the reference stack's src/lib/db.ts (listPersonAssignments, listBlockouts,
 // listPersonTeams, listPersonServingHistory) + adminDb (listApplicationsByPerson)
 // + giftDb (interests, latest gift result), adapted to church-cms: localized
 // names come from *_i18n companion tables (i18nJoin, en fallback), there is no

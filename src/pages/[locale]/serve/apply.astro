@@ -1,9 +1,9 @@
 ---
-// Apply to serve — PUBLIC (route policy exact match). Two steps like dcfc:
+// Apply to serve — PUBLIC (route policy exact match). Two steps like the reference stack:
 // pick a team (GET ?team=), then the full form (optional position, message,
 // and name/email/phone for signed-out applicants) with a honeypot.
 //
-// Ported logic (dcfc-serve/src/pages/apply.astro): a signed-in user applies as
+// Ported logic (the reference stack's src/pages/apply.astro): a signed-in user applies as
 // themselves; a signed-out applicant is upserted by email (minimal person —
 // role 'member', active 1, never overwriting an existing account) and gets a
 // best-effort MAGIC LINK so they can sign in and track their status. A

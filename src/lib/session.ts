@@ -3,7 +3,7 @@ import { SignJWT, jwtVerify } from 'jose';
 // Session = stateless jose HS256 JWT in an HttpOnly cookie. Middleware reloads
 // the person row every request, so revocation is people.active=0 / deleted_at /
 // a session_epoch bump (carried as the `ep` claim). Ported from
-// dcfc-serve/src/lib/session.ts (cookie name c4c_session, secret-first args).
+// the reference stack's src/lib/session.ts (cookie name c4c_session, secret-first args).
 export const SESSION_COOKIE = 'c4c_session';
 export const SESSION_MAX_AGE_S = 30 * 24 * 60 * 60; // 30 days
 

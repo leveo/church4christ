@@ -1,6 +1,6 @@
 // Pure-logic session tests (node project): jose HS256 mint/verify round-trip,
 // tamper/wrong-secret/expired/garbage rejection, and the Set-Cookie builders.
-// Ported + adapted from dcfc-serve/test/session.test.ts (cookie name c4c_session,
+// Ported + adapted from the reference stack's test/session.test.ts (cookie name c4c_session,
 // secret-first signatures, {id,email,sessionEpoch} person shape).
 import { SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';

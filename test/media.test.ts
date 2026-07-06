@@ -1,4 +1,4 @@
-// Media route unit tests (workers project, live R2 binding). Ports dcfc-website's
+// Media route unit tests (workers project, live R2 binding). Ports the reference stack's
 // helper-level route tests and adds the strict-key-pattern traversal guard.
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';

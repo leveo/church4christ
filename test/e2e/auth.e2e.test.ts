@@ -2,7 +2,7 @@
 // consume (/auth/[token]), the email accept/decline consume (/respond/[token]),
 // and the sign-in anti-enumeration guarantee. Tokens are created directly in the
 // seeded env.DB via the pure auth libs (the same env.DB the worker reads) — the
-// dcfc-serve/test/e2e/smoke.test.ts pattern. Isolated storage rolls back each
+// the reference stack's test/e2e/smoke.test.ts pattern. Isolated storage rolls back each
 // test's writes, so every `it` starts from the clean seed.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';

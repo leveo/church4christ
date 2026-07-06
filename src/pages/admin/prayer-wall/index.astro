@@ -215,7 +215,7 @@ const isLong = (msg: string) => [...msg].length > 120;
     // Kanban drag-and-drop: progressive enhancement over the no-JS move form.
     // On drop, POST a move for the dragged card to the target column's status,
     // then reload. redirect:'manual' avoids following the 303 (a success surfaces
-    // as an opaqueredirect). Ported from dcfc-website's island.
+    // as an opaqueredirect). Ported from the reference stack's island.
     const board = document.getElementById('kanban');
     const moveError = board?.dataset.moveError ?? 'Move failed.';
     let draggingId: string | null = null;

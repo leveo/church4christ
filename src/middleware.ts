@@ -14,7 +14,7 @@ import { canAccess, classifyRoute } from './lib/routePolicy';
 
 // SESSION_SECRET and AUTH_DEV_BYPASS_EMAIL are runtime secrets/vars that
 // `wrangler types` cannot see (they're not in wrangler.jsonc), so read them off
-// the Worker env with a cast — same technique as dcfc-serve's middleware.
+// the Worker env with a cast — same technique as the reference stack's middleware.
 type AuthEnv = { DB: D1Database; SESSION_SECRET?: string; AUTH_DEV_BYPASS_EMAIL?: string };
 
 /** Minimal 403 page. Deliberately unstyled this slice; visual polish lands later.
