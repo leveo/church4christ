@@ -37,6 +37,8 @@ export default {
   'common.signIn': '登录',
   'common.signOut': '退出',
   'common.mySchedule': '我的日程',
+  'common.zhToggleToTrad': '繁',
+  'common.zhToggleAria': '简繁转换',
 
   'home.heroTitle': '在神的家中找到你的位置',
   'home.heroSubtitle': '无论你在信仰的哪个阶段，这里都为你预备了位置。',

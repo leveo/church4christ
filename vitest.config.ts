@@ -29,6 +29,7 @@ export default defineConfig(async () => {
               'test/routePolicy.test.ts',
               'test/content.test.ts',
               'test/ministryMeta.test.ts',
+              'test/s2t.test.ts',
             ],
             environment: 'node',
           },

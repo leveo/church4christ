@@ -164,6 +164,11 @@ serve_status=$(status "$BASE/en/serve")
 serve_en=$(curl -sf "$BASE/en/serve")
 echo "$serve_en" | grep -q 'Three simple steps' || fail "/en/serve missing how-it-works heading"
 
+# Slice 4 Task 5: the 简→繁 toggle button renders on zh pages only. The bodies
+# were captured above (zh_body from /zh/, en_body from /en/).
+echo "$zh_body" | grep -q 'data-zh-toggle' || fail "/zh/ missing data-zh-toggle button"
+echo "$en_body" | grep -q 'data-zh-toggle' && fail "/en/ unexpectedly renders data-zh-toggle button"
+
 # All three baseline security headers present on a rendered page.
 en_headers=$(curl -s -D - -o /dev/null "$BASE/en/")
 echo "$en_headers" | grep -iq '^x-content-type-options: nosniff' || fail "/en/ missing x-content-type-options"

@@ -76,5 +76,12 @@ const alternates = [
       <slot />
     </main>
     <Footer />
+    <script>
+      // 简/繁 toggle: cheap no-op on non-zh pages; the conversion table itself
+      // is behind a dynamic import and only loads when the visitor enables
+      // Traditional (see src/lib/zh-client.ts).
+      import { initZhToggle } from '../lib/zh-client';
+      initZhToggle();
+    </script>
   </body>
 </html>

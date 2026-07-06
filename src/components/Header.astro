@@ -42,6 +42,19 @@ const nav: { key: string; path: string }[] = [
     </nav>
 
     <div class="hidden lg:flex items-center gap-3 shrink-0">
+      {
+        locale === 'zh' && (
+          <button
+            type="button"
+            data-zh-toggle
+            data-no-convert
+            class="px-2.5 py-1 rounded-md border border-border text-sm font-semibold hover:bg-surface-raised cursor-pointer"
+            aria-label={t(locale, 'common.zhToggleAria')}
+          >
+            {t(locale, 'common.zhToggleToTrad')}
+          </button>
+        )
+      }
       <LocaleSwitch />
       <a
         href={give}
@@ -80,7 +93,20 @@ const nav: { key: string; path: string }[] = [
         >
           {t(locale, 'nav.give')}
         </a>
-        <div class="mt-3 flex justify-center">
+        <div class="mt-3 flex justify-center items-center gap-4">
+          {
+            locale === 'zh' && (
+              <button
+                type="button"
+                data-zh-toggle
+                data-no-convert
+                class="px-2.5 py-1 rounded-md border border-border text-sm font-semibold hover:bg-surface-raised cursor-pointer"
+                aria-label={t(locale, 'common.zhToggleAria')}
+              >
+                {t(locale, 'common.zhToggleToTrad')}
+              </button>
+            )
+          }
           <LocaleSwitch />
         </div>
       </div>

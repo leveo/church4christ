@@ -38,6 +38,8 @@ export default {
   'common.signIn': 'Sign in',
   'common.signOut': 'Sign out',
   'common.mySchedule': 'My Schedule',
+  'common.zhToggleToTrad': '繁',
+  'common.zhToggleAria': 'Switch between Simplified and Traditional Chinese',
 
   'home.heroTitle': 'Find your place in God’s family',
   'home.heroSubtitle': 'Wherever you are on your journey of faith, there is a place for you here.',
