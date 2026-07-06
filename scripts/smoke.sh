@@ -47,8 +47,12 @@ zh_body=$(curl -sf "$BASE/zh/")
 echo "$zh_body" | grep -q '四方基督教会' || fail "/zh/ missing 四方基督教会"
 echo "$zh_body" | grep -q 'lang="zh-Hans"' || fail "/zh/ missing lang=\"zh-Hans\""
 
-# `/healthz` → liveness JSON.
-curl -sf "$BASE/healthz" | grep -q '{"ok":true}' || fail "/healthz not {\"ok\":true}"
+# `/healthz` → liveness JSON. Buffer the body before grepping (see the /en/ note
+# above): piping curl straight into `grep -q` lets grep close the pipe on its
+# match and trip curl's SIGPIPE under `pipefail`, a false failure that surfaces
+# intermittently on faster CI runners.
+healthz_body=$(curl -sf "$BASE/healthz")
+echo "$healthz_body" | grep -q '{"ok":true}' || fail "/healthz not {\"ok\":true}"
 
 # Unknown leading segment → real 404 (guard in [locale]/index.astro). The route
 # policy's unknown-path fallback is `public` outside the protected namespaces
@@ -98,12 +102,18 @@ signout_get=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/signout")
 # Slice 4 content pages: evergreen pages + collection indexes render 200 in both
 # locales, driven by the content collections (glob loaders) and the give-page
 # settings link. /en/visit carries the brand name; /zh/visit its localized title.
+# Buffer each body before grepping (see the /en/ note above): a content page
+# streams a chunked response and the brand name sits in the <title> near the top,
+# so `curl … | grep -q` closes the pipe on its early match and trips curl's
+# SIGPIPE under `pipefail` — a false "missing" failure seen on faster CI runners.
 visit_en_status=$(status "$BASE/en/visit")
 [ "$visit_en_status" = "200" ] || fail "/en/visit expected 200, got $visit_en_status"
-curl -sf "$BASE/en/visit" | grep -q 'Church4Christ' || fail "/en/visit missing Church4Christ"
+visit_en_body=$(curl -sf "$BASE/en/visit")
+echo "$visit_en_body" | grep -q 'Church4Christ' || fail "/en/visit missing Church4Christ"
 visit_zh_status=$(status "$BASE/zh/visit")
 [ "$visit_zh_status" = "200" ] || fail "/zh/visit expected 200, got $visit_zh_status"
-curl -sf "$BASE/zh/visit" | grep -q '计划到访' || fail "/zh/visit missing localized visit title"
+visit_zh_body=$(curl -sf "$BASE/zh/visit")
+echo "$visit_zh_body" | grep -q '计划到访' || fail "/zh/visit missing localized visit title"
 
 for path in /en/about/staff /en/articles /en/fellowships /en/give; do
   s=$(status "$BASE$path")
