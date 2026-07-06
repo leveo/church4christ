@@ -1,0 +1,187 @@
+---
+// Announcements admin (console class — re-checks editor∪admin, 403s a bare team
+// leader). Inline management: a single add/edit form (driven by ?edit=<id>) over
+// a list of every announcement (active and hidden). Three no-JS POST actions on
+// an `action` field: save (create/update), toggle (flip active), delete (hard
+// delete with a revision snapshot). POST-redirect-GET; a failed save re-renders
+// the form on the same row with echoed values + localized errors.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { parseAnnouncementForm } from '../../../lib/validate';
+import { listAnnouncements, saveAnnouncement, deleteAnnouncement, toggleAnnouncementActive } from '../../../lib/adminDb';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? '');
+  const idRaw = String(fd.get('id') ?? '');
+  const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+  if (action === 'delete' && id !== null) {
+    await deleteAnnouncement(db, id, user.email);
+    return Astro.redirect('/admin/announcements?deleted=1', 303);
+  }
+  if (action === 'toggle' && id !== null) {
+    await toggleAnnouncementActive(db, id);
+    return Astro.redirect('/admin/announcements?saved=1', 303);
+  }
+  if (action === 'save') {
+    const parsed = parseAnnouncementForm(fd);
+    if (parsed.ok) {
+      await saveAnnouncement(db, { ...parsed.data, id }, user.email);
+      return Astro.redirect('/admin/announcements?saved=1', 303);
+    }
+    errors = parsed.errors;
+    failedId = id === null ? '' : String(id);
+  }
+}
+
+const rows = await listAnnouncements(db);
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+
+// The shared form edits ?edit=<id> (or the failed row after a bad save), else creates.
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const v =
+  fd && failedId !== null
+    ? { titleEn: g('title_en'), titleZh: g('title_zh'), url: g('url'), sort: g('sort'), active: fd.get('active') !== null, startsAt: g('starts_at'), endsAt: g('ends_at') }
+    : editingRow
+      ? { titleEn: editingRow.title_en, titleZh: editingRow.title_zh, url: editingRow.url ?? '', sort: String(editingRow.sort), active: editingRow.active === 1, startsAt: editingRow.starts_at ?? '', endsAt: editingRow.ends_at ?? '' }
+      : { titleEn: '', titleZh: '', url: '', sort: '0', active: true, startsAt: '', endsAt: '' };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.announcements.title');
+const formHeading = editId ? t(lang, 'admin.announcements.editTitle') : t(lang, 'admin.announcements.newTitle');
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.announcements.titleEn')}</span>
+          <input name="title_en" value={v.titleEn} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.announcements.titleZh')}</span>
+          <input name="title_zh" value={v.titleZh} class={tin} />
+        </label>
+      </div>
+      {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.announcements.hint')}</p>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.announcements.url')}</span>
+        <input name="url" value={v.url} class={tin} />
+        {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
+      </label>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.announcements.startsAt')}</span>
+          <input type="date" name="starts_at" value={v.startsAt} class={tin} />
+          {errors.starts_at && <span class={errorText}>{t(lang, errors.starts_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.announcements.endsAt')}</span>
+          <input type="date" name="ends_at" value={v.endsAt} class={tin} />
+          {errors.ends_at && <span class={errorText}>{t(lang, errors.ends_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.announcements.sort')}</span>
+          <input name="sort" value={v.sort} class={tin} />
+          {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
+        </label>
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.announcements.active')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/announcements" class="text-sm text-primary hover:underline">{t(lang, 'admin.announcements.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.announcements.existing')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.announcements.colTitle')}</th>
+          <th class={th}>{t(lang, 'admin.announcements.colUrl')}</th>
+          <th class={th}>{t(lang, 'admin.announcements.colWindow')}</th>
+          <th class={th}>{t(lang, 'admin.announcements.colSort')}</th>
+          <th class={th}>{t(lang, 'admin.announcements.colActive')}</th>
+          <th class={th}>{t(lang, 'admin.announcements.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="6">
+                {t(lang, 'admin.announcements.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
+                </td>
+                <td class={`${td} break-all`}>{r.url ?? '—'}</td>
+                <td class={`${td} text-ink-muted`}>{(r.starts_at ?? '…').slice(0, 10)} → {(r.ends_at ?? '…').slice(0, 10)}</td>
+                <td class={td}>{r.sort}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.announcements.active') : t(lang, 'admin.announcements.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/announcements?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>
+                        {r.active ? t(lang, 'admin.announcements.deactivate') : t(lang, 'admin.announcements.activate')}
+                      </button>
+                    </form>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.announcements.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

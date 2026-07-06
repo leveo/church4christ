@@ -1,0 +1,265 @@
+---
+// Events admin (console class — re-checks editor∪admin, 403s a bare team leader).
+// Same inline add/edit model as announcements (?edit=<id>, save/toggle/delete),
+// plus a multipart image upload: a chosen file is validated (type + size),
+// stored in R2 under a content-addressed key, registered in the media table, and
+// its key saved on the event. A "remove image" checkbox clears the key (the R2
+// object is left in place — keys are content-addressed and may be shared). The
+// public EventGrid renders the image via /media/<key>.
+import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../../lib/i18n';
+import { parseEventForm } from '../../../lib/validate';
+import { listEvents, saveEvent, deleteEvent, toggleEventActive } from '../../../lib/adminDb';
+import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadKey, registerMedia } from '../../../lib/upload';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = (env as { DB: D1Database }).DB;
+const media = (env as { MEDIA: R2Bucket }).MEDIA;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+
+if (Astro.request.method === 'POST') {
+  // Reject a clearly-oversized body before buffering it. The multipart envelope
+  // adds only a few KB over the file, so anything past the cap + 1 MB slack is a
+  // too-large image; we can't echo values (the body is discarded), so the form
+  // re-renders blank with the size error on the create form.
+  const contentLength = Number(Astro.request.headers.get('content-length') ?? '0');
+  if (contentLength > MAX_IMAGE_BYTES + 1_000_000) {
+    errors.image = 'errors.imageTooLarge';
+    failedId = '';
+  } else {
+    fd = await Astro.request.formData();
+    const action = String(fd.get('action') ?? '');
+    const idRaw = String(fd.get('id') ?? '');
+    const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+    if (action === 'delete' && id !== null) {
+      await deleteEvent(db, id, user.email);
+      return Astro.redirect('/admin/events?deleted=1', 303);
+    }
+    if (action === 'toggle' && id !== null) {
+      await toggleEventActive(db, id);
+      return Astro.redirect('/admin/events?saved=1', 303);
+    }
+    if (action === 'save') {
+      const parsed = parseEventForm(fd);
+      if (!parsed.ok) {
+        errors = parsed.errors;
+        failedId = id === null ? '' : String(id);
+      } else {
+        const data = parsed.data; // data.imageKey carries the current key (hidden field)
+        const file = fd.get('image');
+        if (file instanceof File && file.size > 0) {
+          if (!ALLOWED_IMAGE_TYPES.includes(file.type)) errors.image = 'errors.imageType';
+          else if (file.size > MAX_IMAGE_BYTES) errors.image = 'errors.imageTooLarge';
+          else {
+            const bytes = await file.arrayBuffer();
+            const key = await uploadKey(bytes, file.name);
+            await media.put(key, bytes, { httpMetadata: { contentType: file.type } });
+            await registerMedia(db, { r2Key: key, filename: file.name, contentType: file.type, size: file.size, uploadedBy: user.email });
+            data.imageKey = key;
+          }
+        } else if (fd.get('remove_image')) {
+          data.imageKey = null;
+        }
+        if (Object.keys(errors).length) {
+          failedId = id === null ? '' : String(id);
+        } else {
+          await saveEvent(db, { ...data, id }, user.email);
+          return Astro.redirect('/admin/events?saved=1', 303);
+        }
+      }
+    }
+  }
+}
+
+const rows = await listEvents(db);
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const echoing = fd !== null && failedId !== null;
+const v = echoing
+  ? {
+      titleEn: g('title_en'), titleZh: g('title_zh'), blurbEn: g('blurb_en'), blurbZh: g('blurb_zh'),
+      url: g('url'), sort: g('sort'), active: fd!.get('active') !== null, startsAt: g('starts_at'), endsAt: g('ends_at'),
+      imageKey: g('image_key'),
+    }
+  : editingRow
+    ? {
+        titleEn: editingRow.title_en, titleZh: editingRow.title_zh, blurbEn: editingRow.blurb_en, blurbZh: editingRow.blurb_zh,
+        url: editingRow.url ?? '', sort: String(editingRow.sort), active: editingRow.active === 1,
+        startsAt: editingRow.starts_at ?? '', endsAt: editingRow.ends_at ?? '', imageKey: editingRow.image_key ?? '',
+      }
+    : { titleEn: '', titleZh: '', blurbEn: '', blurbZh: '', url: '', sort: '0', active: true, startsAt: '', endsAt: '', imageKey: '' };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.events.title');
+const formHeading = editId ? t(lang, 'admin.events.editTitle') : t(lang, 'admin.events.newTitle');
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+
+  <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      <input type="hidden" name="image_key" value={v.imageKey} />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.titleEn')}</span>
+          <input name="title_en" value={v.titleEn} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.titleZh')}</span>
+          <input name="title_zh" value={v.titleZh} class={tin} />
+        </label>
+      </div>
+      {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.events.hint')}</p>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.blurbEn')}</span>
+          <textarea name="blurb_en" rows="2" class={tin}>{v.blurbEn}</textarea>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.blurbZh')}</span>
+          <textarea name="blurb_zh" rows="2" class={tin}>{v.blurbZh}</textarea>
+        </label>
+      </div>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.events.url')}</span>
+        <input name="url" value={v.url} class={tin} />
+        {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
+      </label>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.startsAt')}</span>
+          <input type="date" name="starts_at" value={v.startsAt} class={tin} />
+          {errors.starts_at && <span class={errorText}>{t(lang, errors.starts_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.endsAt')}</span>
+          <input type="date" name="ends_at" value={v.endsAt} class={tin} />
+          {errors.ends_at && <span class={errorText}>{t(lang, errors.ends_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.events.sort')}</span>
+          <input name="sort" value={v.sort} class={tin} />
+          {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
+        </label>
+      </div>
+      <div class="space-y-2">
+        {
+          v.imageKey && (
+            <div class="space-y-1">
+              <span class={lab}>{t(lang, 'admin.events.currentImage')}</span>
+              <img src={`/media/${v.imageKey}`} alt="" class="w-64 max-w-full rounded border border-border" loading="lazy" />
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="remove_image" /> {t(lang, 'admin.events.removeImage')}
+              </label>
+            </div>
+          )
+        }
+        <label class="block">
+          <span class={lab}>{v.imageKey ? t(lang, 'admin.events.changeImage') : t(lang, 'admin.events.image')}</span>
+          <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" class="text-sm" />
+        </label>
+        {errors.image && <span class={errorText}>{t(lang, errors.image)}</span>}
+        <p class="text-xs text-ink-subtle">{t(lang, 'admin.events.imageHint')}</p>
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.events.active')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/events" class="text-sm text-primary hover:underline">{t(lang, 'admin.events.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.events.existing')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.events.colImage')}</th>
+          <th class={th}>{t(lang, 'admin.events.colTitle')}</th>
+          <th class={th}>{t(lang, 'admin.events.colUrl')}</th>
+          <th class={th}>{t(lang, 'admin.events.colWindow')}</th>
+          <th class={th}>{t(lang, 'admin.events.colSort')}</th>
+          <th class={th}>{t(lang, 'admin.events.colActive')}</th>
+          <th class={th}>{t(lang, 'admin.events.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="7">
+                {t(lang, 'admin.events.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  {r.image_key ? (
+                    <img src={`/media/${r.image_key}`} alt="" class="h-14 w-24 rounded border border-border object-cover" loading="lazy" />
+                  ) : (
+                    <span class="text-ink-subtle">—</span>
+                  )}
+                </td>
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
+                </td>
+                <td class={`${td} break-all`}>{r.url ?? '—'}</td>
+                <td class={`${td} text-ink-muted`}>{(r.starts_at ?? '…').slice(0, 10)} → {(r.ends_at ?? '…').slice(0, 10)}</td>
+                <td class={td}>{r.sort}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.events.active') : t(lang, 'admin.events.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/events?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>
+                        {r.active ? t(lang, 'admin.events.deactivate') : t(lang, 'admin.events.activate')}
+                      </button>
+                    </form>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.events.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

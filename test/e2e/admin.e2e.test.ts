@@ -3,10 +3,11 @@
 // session → 403, and an admin session → 200. Session cookies are minted with the
 // pure session lib (mintSession) using the e2e SESSION_SECRET, for seeded people
 // whose session_epoch is the default 0 — no mail round-trip needed.
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { get, post } from './helpers';
+import { get, post, ORIGIN } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
+import { uploadKey } from '../../src/lib/upload';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 
@@ -115,4 +116,68 @@ describe('content console pages render for editors and 403 for members', () => {
       expect(res.status).toBe(403);
     });
   }
+});
+
+describe('announcements + events console + media upload loop', () => {
+  // Minimal 1×1 PNG (67 bytes). A fresh Uint8Array so its .buffer is exactly the
+  // image bytes — uploadKey hashes it to derive the content-addressed R2 key.
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
+
+  it('announcements + events consoles render for an editor and 403 for a member', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    for (const path of ['/admin/announcements', '/admin/events']) {
+      expect((await get(path, { cookie: editor })).status).toBe(200);
+      expect((await get(path, { cookie: member })).status).toBe(403);
+    }
+  });
+
+  it('editor uploads a tiny PNG on a new event → 303, /media serves it, and it shows on /en/events', async () => {
+    const cookie = await sessionCookie(2, 'pastor.david@example.com');
+
+    const form = new FormData();
+    form.set('action', 'save');
+    form.set('title_en', 'E2E Upload Event');
+    form.set('title_zh', '上传测试活动');
+    form.set('blurb_en', 'Uploaded from the e2e test.');
+    form.set('sort', '0');
+    form.set('active', 'on');
+    form.set('image_key', '');
+    form.set('image', new File([pngBytes], 'tiny.png', { type: 'image/png' }));
+
+    const created = await SELF.fetch(`${ORIGIN}/admin/events`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get('location')).toContain('/admin/events');
+
+    // The content-addressed key is deterministic from the bytes + filename.
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'tiny.png');
+    expect(key).toMatch(/^uploads\/[a-f0-9]{16}-tiny\.png$/);
+
+    // /media serves the object inline with the stored type + immutable cache.
+    const served = await get(`/media/${key}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(served.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+
+    // The new event (active, no window bounds) renders on the public events page
+    // with the /media image URL — the full upload→display loop.
+    const events = await get('/en/events');
+    expect(events.status).toBe(200);
+    const html = await events.text();
+    expect(html).toContain('E2E Upload Event');
+    expect(html).toContain(`/media/${key}`);
+  });
+
+  it('the media route refuses non-uploads keys and path traversal (404)', async () => {
+    expect((await get('/media/backups/2026-01-01.sql')).status).toBe(404);
+    expect((await get('/media/uploads/%2e%2e/backups/leak.sql')).status).toBe(404);
+    expect((await get('/media/uploads/UPPER.png')).status).toBe(404);
+  });
 });

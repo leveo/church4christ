@@ -20,5 +20,6 @@
       "database_id": "test",
       "migrations_dir": "../migrations"
     }
-  ]
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "church4christ-media-test" }]
 }

@@ -12,8 +12,10 @@ import type {
   SermonInput,
   PrayerSheetInput,
   PrayerSection,
+  AnnouncementInput,
+  EventInput,
 } from './validate';
-import type { Locale } from './locales';
+import { LOCALES, type Locale } from './locales';
 
 type Role = PersonInput['role'];
 
@@ -851,4 +853,246 @@ export async function listRecentRevisions(db: D1Database, limit: number): Promis
     .bind(limit)
     .all<RecentRevisionRow>();
   return results;
+}
+
+// ===========================================================================
+// News: home announcements + upcoming events (editor ∪ admin). These carry NO
+// draft/publish or soft-delete columns — they are visibility-windowed by the
+// `active` flag + optional starts_at/ends_at (see publicDb). The admin model is
+// therefore HARD delete. Each save is a single db.batch (upsert the row, rewrite
+// its i18n companion rows via DELETE + re-INSERT, append a full-snapshot
+// revision). For an INSERT the child + revision statements reference the new row
+// via `(SELECT MAX(id) FROM <table>)`: within one transactional batch SQLite has
+// just assigned the largest rowid to our insert, so MAX(id) is exactly it.
+// ===========================================================================
+
+/** Insert one i18n title (announcements) or title+blurb (events) row per locale
+ *  that carries a title. `idExpr` is either a literal `?N` bind for an update or
+ *  the MAX(id) subquery for an insert. */
+function i18nInserts(
+  db: D1Database,
+  table: 'announcement_i18n' | 'event_i18n',
+  fk: string,
+  idExpr: string,
+  idBind: number | null,
+  titles: Partial<Record<Locale, string>>,
+  blurbs?: Partial<Record<Locale, string>>,
+): D1PreparedStatement[] {
+  const bindId = (extra: (string | number | null)[]) => (idBind === null ? extra : [idBind, ...extra]);
+  return LOCALES.filter((loc) => titles[loc] !== undefined).map((loc) =>
+    blurbs
+      ? db
+          .prepare(`INSERT INTO ${table} (${fk}, locale, title, blurb) VALUES (${idExpr}, ?, ?, ?)`)
+          .bind(...bindId([loc, titles[loc] as string, blurbs[loc] ?? '']))
+      : db
+          .prepare(`INSERT INTO ${table} (${fk}, locale, title) VALUES (${idExpr}, ?, ?)`)
+          .bind(...bindId([loc, titles[loc] as string])),
+  );
+}
+
+// ── Announcements ────────────────────────────────────────────────────────────
+
+export interface SaveAnnouncementInput extends AnnouncementInput {
+  id: number | null;
+}
+
+export interface AnnouncementAdminRow {
+  id: number;
+  title_en: string;
+  title_zh: string;
+  url: string | null;
+  sort: number;
+  active: number;
+  starts_at: string | null;
+  ends_at: string | null;
+}
+
+/** Every announcement (active AND inactive), both-locale titles for display, in
+ *  sort order — the admin list shows the full set, not just the windowed ones. */
+export async function listAnnouncements(db: D1Database): Promise<AnnouncementAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.id AS id, COALESCE(en.title, '') AS title_en, COALESCE(zh.title, '') AS title_zh,
+              a.url AS url, a.sort AS sort, a.active AS active, a.starts_at AS starts_at, a.ends_at AS ends_at
+       FROM announcements a
+       LEFT JOIN announcement_i18n en ON en.announcement_id = a.id AND en.locale = 'en'
+       LEFT JOIN announcement_i18n zh ON zh.announcement_id = a.id AND zh.locale = 'zh'
+       ORDER BY a.sort, a.id`,
+    )
+    .all<AnnouncementAdminRow>();
+  return results;
+}
+
+/** Create or update an announcement in ONE transaction (upsert + i18n rewrite +
+ *  revision snapshot). No unique business key, so no dateTaken path. */
+export async function saveAnnouncement(db: D1Database, input: SaveAnnouncementInput, editedBy: string): Promise<{ id: number }> {
+  const active = input.active ? 1 : 0;
+  if (input.id === null) {
+    const results = await db.batch([
+      db
+        .prepare(`INSERT INTO announcements (url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5)`)
+        .bind(input.url, input.sort, active, input.startsAt, input.endsAt),
+      ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '(SELECT MAX(id) FROM announcements)', null, input.titles),
+      db
+        .prepare(
+          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+           VALUES ('announcement', (SELECT MAX(id) FROM announcements), ?1, ?2)`,
+        )
+        .bind(snapshot(input), editedBy),
+    ]);
+    return { id: results[0].meta.last_row_id as number };
+  }
+  await db.batch([
+    db
+      .prepare(`UPDATE announcements SET url = ?1, sort = ?2, active = ?3, starts_at = ?4, ends_at = ?5 WHERE id = ?6`)
+      .bind(input.url, input.sort, active, input.startsAt, input.endsAt, input.id),
+    db.prepare(`DELETE FROM announcement_i18n WHERE announcement_id = ?1`).bind(input.id),
+    ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '?', input.id, input.titles),
+    db
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('announcement', ?1, ?2, ?3)`)
+      .bind(input.id, snapshot(input), editedBy),
+  ]);
+  return { id: input.id };
+}
+
+/** Hard-delete an announcement and its i18n rows, snapshotting what was removed
+ *  into revisions ({ v:1, deleted:… }) so the record survives in history. */
+export async function deleteAnnouncement(db: D1Database, id: number, editedBy: string): Promise<void> {
+  const row = await db
+    .prepare(`SELECT url, sort, active, starts_at, ends_at FROM announcements WHERE id = ?1`)
+    .bind(id)
+    .first<{ url: string | null; sort: number; active: number; starts_at: string | null; ends_at: string | null }>();
+  if (!row) return;
+  const { results: titles } = await db
+    .prepare(`SELECT locale, title FROM announcement_i18n WHERE announcement_id = ?1`)
+    .bind(id)
+    .all<{ locale: string; title: string }>();
+  const deleted = {
+    titles: Object.fromEntries(titles.map((t) => [t.locale, t.title])),
+    url: row.url,
+    sort: row.sort,
+    active: row.active === 1,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+  };
+  await db.batch([
+    db
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('announcement', ?1, ?2, ?3)`)
+      .bind(id, JSON.stringify({ v: 1, deleted }), editedBy),
+    db.prepare(`DELETE FROM announcement_i18n WHERE announcement_id = ?1`).bind(id),
+    db.prepare(`DELETE FROM announcements WHERE id = ?1`).bind(id),
+  ]);
+}
+
+/** Flip an announcement's active flag (quick list action, no snapshot). */
+export async function toggleAnnouncementActive(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`UPDATE announcements SET active = 1 - active WHERE id = ?1`).bind(id).run();
+}
+
+// ── Events ───────────────────────────────────────────────────────────────────
+
+export interface SaveEventInput extends EventInput {
+  id: number | null;
+}
+
+export interface EventAdminRow {
+  id: number;
+  title_en: string;
+  title_zh: string;
+  blurb_en: string;
+  blurb_zh: string;
+  image_key: string | null;
+  url: string | null;
+  sort: number;
+  active: number;
+  starts_at: string | null;
+  ends_at: string | null;
+}
+
+/** Every event (active AND inactive), both-locale title/blurb + image key, in
+ *  sort order. */
+export async function listEvents(db: D1Database): Promise<EventAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT e.id AS id, COALESCE(en.title, '') AS title_en, COALESCE(zh.title, '') AS title_zh,
+              COALESCE(en.blurb, '') AS blurb_en, COALESCE(zh.blurb, '') AS blurb_zh,
+              e.image_key AS image_key, e.url AS url, e.sort AS sort, e.active AS active,
+              e.starts_at AS starts_at, e.ends_at AS ends_at
+       FROM events e
+       LEFT JOIN event_i18n en ON en.event_id = e.id AND en.locale = 'en'
+       LEFT JOIN event_i18n zh ON zh.event_id = e.id AND zh.locale = 'zh'
+       ORDER BY e.sort, e.id`,
+    )
+    .all<EventAdminRow>();
+  return results;
+}
+
+/** Create or update an event in ONE transaction (upsert + i18n title/blurb
+ *  rewrite + revision snapshot). image_key is stored as passed by the page (the
+ *  page resolves upload / removal before calling this). */
+export async function saveEvent(db: D1Database, input: SaveEventInput, editedBy: string): Promise<{ id: number }> {
+  const active = input.active ? 1 : 0;
+  if (input.id === null) {
+    const results = await db.batch([
+      db
+        .prepare(`INSERT INTO events (image_key, url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`)
+        .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt),
+      ...i18nInserts(db, 'event_i18n', 'event_id', '(SELECT MAX(id) FROM events)', null, input.titles, input.blurbs),
+      db
+        .prepare(
+          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+           VALUES ('event', (SELECT MAX(id) FROM events), ?1, ?2)`,
+        )
+        .bind(snapshot(input), editedBy),
+    ]);
+    return { id: results[0].meta.last_row_id as number };
+  }
+  await db.batch([
+    db
+      .prepare(`UPDATE events SET image_key = ?1, url = ?2, sort = ?3, active = ?4, starts_at = ?5, ends_at = ?6 WHERE id = ?7`)
+      .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt, input.id),
+    db.prepare(`DELETE FROM event_i18n WHERE event_id = ?1`).bind(input.id),
+    ...i18nInserts(db, 'event_i18n', 'event_id', '?', input.id, input.titles, input.blurbs),
+    db
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('event', ?1, ?2, ?3)`)
+      .bind(input.id, snapshot(input), editedBy),
+  ]);
+  return { id: input.id };
+}
+
+/** Hard-delete an event and its i18n rows, snapshotting what was removed into
+ *  revisions. The R2 object at image_key is left in place — keys are
+ *  content-addressed and may be shared by another event. */
+export async function deleteEvent(db: D1Database, id: number, editedBy: string): Promise<void> {
+  const row = await db
+    .prepare(`SELECT image_key, url, sort, active, starts_at, ends_at FROM events WHERE id = ?1`)
+    .bind(id)
+    .first<{ image_key: string | null; url: string | null; sort: number; active: number; starts_at: string | null; ends_at: string | null }>();
+  if (!row) return;
+  const { results: rows } = await db
+    .prepare(`SELECT locale, title, blurb FROM event_i18n WHERE event_id = ?1`)
+    .bind(id)
+    .all<{ locale: string; title: string; blurb: string }>();
+  const deleted = {
+    titles: Object.fromEntries(rows.map((r) => [r.locale, r.title])),
+    blurbs: Object.fromEntries(rows.map((r) => [r.locale, r.blurb])),
+    imageKey: row.image_key,
+    url: row.url,
+    sort: row.sort,
+    active: row.active === 1,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+  };
+  await db.batch([
+    db
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('event', ?1, ?2, ?3)`)
+      .bind(id, JSON.stringify({ v: 1, deleted }), editedBy),
+    db.prepare(`DELETE FROM event_i18n WHERE event_id = ?1`).bind(id),
+    db.prepare(`DELETE FROM events WHERE id = ?1`).bind(id),
+  ]);
+}
+
+/** Flip an event's active flag (quick list action, no snapshot). */
+export async function toggleEventActive(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`UPDATE events SET active = 1 - active WHERE id = ?1`).bind(id).run();
 }
