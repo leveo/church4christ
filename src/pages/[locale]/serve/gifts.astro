@@ -63,8 +63,11 @@ if (Astro.request.method === 'POST') {
   }
 }
 
+// Soft-degrade: the quiz still runs, but its ministry recommendations (the
+// serve-flow cross-links) are hidden when the serve module is off.
+const serveOn = Astro.locals.modules.has('serve');
 // Resolve each recommended category to a ministry link (matching slug) + label.
-const ministries = results ? await listMinistries(db, locale) : [];
+const ministries = results && serveOn ? await listMinistries(db, locale) : [];
 const categoryLabel = (c: string) =>
   MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c;
 const linkFor = (category: string) => {
@@ -93,7 +96,7 @@ const linkFor = (category: string) => {
             {results.topGifts.map((code, i) => {
               const gift = giftMeta(code);
               return gift ? (
-                <GiftResultCard gift={gift} rank={i + 1} locale={locale} links={gift.ministries.map(linkFor)} />
+                <GiftResultCard gift={gift} rank={i + 1} locale={locale} links={serveOn ? gift.ministries.map(linkFor) : []} />
               ) : null;
             })}
           </div>

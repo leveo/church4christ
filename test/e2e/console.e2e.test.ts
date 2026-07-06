@@ -34,7 +34,7 @@ describe('/admin/ministries access gate', () => {
 describe('assign → scheduling-request devlog row', () => {
   it('an admin assign on a plan writes a request email_log devlog row', async () => {
     const cookie = await sessionCookie(1, 'admin@example.com');
-    // Plan 2 (English service, 2026-07-19), position 1 (Worship Leader), assign mark (5).
+    // Plan 2 (English service, the second upcoming Sunday), position 1 (Worship Leader), assign mark (5).
     const res = await post('/en/serve/plans/2', '_action=assign&position_id=1&person_id=5', { cookie });
     expect(res.status).toBe(303);
     const row = await env.DB

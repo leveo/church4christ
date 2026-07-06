@@ -1,22 +1,43 @@
 ---
 // People directory (adminOnly — the route policy gates /admin/people). Lists
-// non-deleted people with a GET ?q= search, role/status badges, and links into
-// the per-person editor. The "New person" button opens the create form.
+// non-deleted people with a GET search + (people module) membership-status /
+// serving / household filters, status + household columns, and links into the
+// per-person editor. The core name/email/phone/role/active view predates the
+// people module, so it always renders; the extra filters + columns are gated on
+// locals.modules.has('people').
 import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { listPeople } from '../../../lib/adminDb';
+import { MEMBERSHIP_STATUSES } from '../../../lib/validate';
 import { badge, badgeRole, badgeActive, badgeInactive, btn, tin, th, td, noticeOk } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const db = (env as { DB: D1Database }).DB;
+const hasPeople = Astro.locals.modules.has('people');
 
-const q = Astro.url.searchParams.get('q')?.trim() ?? '';
-const saved = Astro.url.searchParams.get('saved') === '1';
-const deleted = Astro.url.searchParams.get('deleted') === '1';
-const people = await listPeople(db, { q: q || undefined });
+const params = Astro.url.searchParams;
+const q = params.get('q')?.trim() ?? '';
+const saved = params.get('saved') === '1';
+const deleted = params.get('deleted') === '1';
+
+// People-module filters (ignored — and never rendered — when the module is off).
+const statusRaw = params.get('status') ?? '';
+const status = (MEMBERSHIP_STATUSES as readonly string[]).includes(statusRaw)
+  ? (statusRaw as (typeof MEMBERSHIP_STATUSES)[number])
+  : undefined;
+const servingRaw = params.get('serving') ?? '';
+const serving = servingRaw === 'yes' ? true : servingRaw === 'no' ? false : undefined;
+const householdRaw = params.get('household') ?? '';
+const household = householdRaw === 'yes' ? true : householdRaw === 'no' ? false : undefined;
+
+const people = await listPeople(db, {
+  q: q || undefined,
+  ...(hasPeople ? { status, serving, household } : {}),
+});
+const colspan = hasPeople ? 7 : 5;
 ---
 
 <Admin title={t(lang, 'admin.people.title')}>
@@ -28,9 +49,43 @@ const people = await listPeople(db, { q: q || undefined });
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.deleted')}</p>}
 
-  <form method="get" class="mt-6 flex max-w-md gap-2">
-    <input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={tin} />
-    <button type="submit" class={btn}>{t(lang, 'admin.people.search')}</button>
+  <form method="get" class="mt-6 flex flex-wrap items-end gap-3">
+    <label class="block">
+      <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.search')}</span>
+      <input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={`${tin} min-w-56`} />
+    </label>
+    {
+      hasPeople && (
+        <>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterStatus')}</span>
+            <select name="status" class={tin}>
+              <option value="" selected={status === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              {MEMBERSHIP_STATUSES.map((s) => (
+                <option value={s} selected={status === s}>{t(lang, `membership.${s}`)}</option>
+              ))}
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterServing')}</span>
+            <select name="serving" class={tin}>
+              <option value="" selected={serving === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              <option value="yes" selected={serving === true}>{t(lang, 'admin.people.filterYes')}</option>
+              <option value="no" selected={serving === false}>{t(lang, 'admin.people.filterNo')}</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterHousehold')}</span>
+            <select name="household" class={tin}>
+              <option value="" selected={household === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              <option value="yes" selected={household === true}>{t(lang, 'admin.people.filterYes')}</option>
+              <option value="no" selected={household === false}>{t(lang, 'admin.people.filterNo')}</option>
+            </select>
+          </label>
+        </>
+      )
+    }
+    <button type="submit" class={btn}>{hasPeople ? t(lang, 'admin.people.filterApply') : t(lang, 'admin.people.search')}</button>
   </form>
 
   <div class="mt-6 overflow-x-auto rounded-xl border border-border">
@@ -41,6 +96,8 @@ const people = await listPeople(db, { q: q || undefined });
           <th class={th}>{t(lang, 'admin.people.colEmail')}</th>
           <th class={th}>{t(lang, 'admin.people.colPhone')}</th>
           <th class={th}>{t(lang, 'admin.people.colRole')}</th>
+          {hasPeople && <th class={th}>{t(lang, 'admin.people.colMembership')}</th>}
+          {hasPeople && <th class={th}>{t(lang, 'admin.people.colHousehold')}</th>}
           <th class={th}>{t(lang, 'admin.people.colActive')}</th>
         </tr>
       </thead>
@@ -48,7 +105,7 @@ const people = await listPeople(db, { q: q || undefined });
         {
           people.length === 0 ? (
             <tr>
-              <td class={`${td} text-ink-muted`} colspan="5">
+              <td class={`${td} text-ink-muted`} colspan={colspan}>
                 {t(lang, 'admin.people.empty')}
               </td>
             </tr>
@@ -65,6 +122,12 @@ const people = await listPeople(db, { q: q || undefined });
                 <td class={td}>
                   <span class={`${badge} ${badgeRole[p.role] ?? badgeInactive}`}>{t(lang, `admin.role.${p.role}`)}</span>
                 </td>
+                {hasPeople && (
+                  <td class={td}>
+                    <span class={`${badge} bg-accent-soft text-on-accent-soft`}>{t(lang, `membership.${p.membership_status}`)}</span>
+                  </td>
+                )}
+                {hasPeople && <td class={`${td} text-ink-muted`}>{p.household_name ?? '—'}</td>}
                 <td class={td}>
                   <span class={`${badge} ${p.active ? badgeActive : badgeInactive}`}>
                     {p.active ? t(lang, 'admin.people.active') : t(lang, 'admin.people.inactive')}

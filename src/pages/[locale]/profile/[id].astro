@@ -21,8 +21,12 @@ import {
   listPersonServingHistory,
   listPersonTeams,
 } from '../../../lib/myDb';
+import { listTeamSummaries, type TeamSummary } from '../../../lib/teamDb';
+import { sendServeInvite } from '../../../lib/notify';
+import { type EmailEnv } from '../../../lib/email';
 import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
 import { giftLabel } from '../../../lib/giftQuiz';
+import { btn, lab, tin, noticeOk, noticeErr } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -43,6 +47,33 @@ if (personId === user.id) return Astro.redirect(localePath(locale, '/profile'), 
 
 const person = await getPerson(db, personId);
 if (!person) return new Response(null, { status: 404 });
+
+// Outreach: a leader may invite this person to serve on ONE of THEIR teams; an
+// admin may pick any active team. The invite UI + POST are gated on the people
+// module (off → hidden + unreachable), and the team is re-checked server-side
+// (a crafted foreign team_id from a non-admin leader → 403). Notes/birthday/
+// address/household are never exposed here (privacy rule).
+const hasPeople = Astro.locals.modules.has('people');
+
+if (Astro.request.method === 'POST') {
+  if (!hasPeople) return new Response(null, { status: 404 });
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'invite') {
+    const teamId = /^\d+$/.test(String(fd.get('team_id') ?? '')) ? Number(fd.get('team_id')) : null;
+    if (teamId === null) return new Response(null, { status: 400 });
+    if (!user.isAdmin && !user.leaderTeamIds.includes(teamId)) return new Response(null, { status: 403 });
+    // Honest outcome: false (inactive/no-email invitee or missing team) → ?invited=0.
+    const sent = await sendServeInvite(env as unknown as EmailEnv, db, { personId, teamId, invitedByEmail: user.email });
+    return Astro.redirect(localePath(locale, `/profile/${personId}?invited=${sent ? '1' : '0'}`), 303);
+  }
+  return new Response(null, { status: 400 });
+}
+
+const invited = Astro.url.searchParams.get('invited') === '1';
+const inviteFailed = Astro.url.searchParams.get('invited') === '0';
+const inviteTeams: TeamSummary[] = hasPeople
+  ? (await listTeamSummaries(db, locale)).filter((tm) => user.isAdmin || user.leaderTeamIds.includes(tm.id))
+  : [];
 
 const [teams, history, blockouts, gift, interests] = await Promise.all([
   listPersonTeams(db, personId, locale),
@@ -82,6 +113,29 @@ const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale
         )
       }
     </section>
+
+    {
+      hasPeople && inviteTeams.length > 0 && (
+        <section class="mt-6 rounded-lg border border-accent-soft bg-surface-raised p-5">
+          <h2 class="font-display font-semibold">{t(locale, 'invite.title')}</h2>
+          <p class="mt-1 text-sm text-ink-muted">{t(locale, 'invite.hint')}</p>
+          {invited && <p class={`mt-3 ${noticeOk}`}>{t(locale, 'invite.sent')}</p>}
+          {inviteFailed && <p class={`mt-3 ${noticeErr}`}>{t(locale, 'invite.failed')}</p>}
+          <form method="post" class="mt-3 flex flex-wrap items-end gap-2">
+            <input type="hidden" name="_action" value="invite" />
+            <label class="block">
+              <span class={lab}>{t(locale, 'invite.selectTeam')}</span>
+              <select name="team_id" class={tin}>
+                {inviteTeams.map((tm) => (
+                  <option value={tm.id}>{tm.name}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btn}>{t(locale, 'invite.send')}</button>
+          </form>
+        </section>
+      )
+    }
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2">
       <section class="rounded-lg border border-border bg-surface-raised p-5">

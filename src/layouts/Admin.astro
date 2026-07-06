@@ -13,6 +13,7 @@ import '../styles/base.css';
 import { env } from 'cloudflare:workers';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
+import type { ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
 
 interface Props {
@@ -43,35 +44,44 @@ const fullTitle = title ? `${title} · ${appName}` : appName;
 const isStaff = !!(user?.isEditor || user?.isAdmin);
 const isAdmin = !!user?.isAdmin;
 
-type NavItem = { label: string; href: string };
-type NavSection = { label: string; href?: string; show: boolean; children?: NavItem[] };
+// A nav entry with a `module` hides when that module is off (settings itself has
+// none — it is core). Groups drop out once every child is hidden.
+const modules = Astro.locals.modules;
+const modOn = (m?: ModuleKey) => !m || modules.has(m);
 
-const sections: NavSection[] = (
-  [
-    { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: true },
-    {
-      label: t(lang, 'admin.nav.content'),
-      show: isStaff,
-      children: [
-        { label: t(lang, 'admin.nav.bulletins'), href: '/admin/bulletins' },
-        { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons' },
-        { label: t(lang, 'admin.nav.prayerSheets'), href: '/admin/prayer-sheets' },
-        { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies' },
-      ],
-    },
-    {
-      label: t(lang, 'admin.nav.news'),
-      show: isStaff,
-      children: [
-        { label: t(lang, 'admin.nav.announcements'), href: '/admin/announcements' },
-        { label: t(lang, 'admin.nav.events'), href: '/admin/events' },
-      ],
-    },
-    { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff },
-    { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin },
-    { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
-  ] satisfies NavSection[]
-).filter((s) => s.show);
+type NavItem = { label: string; href: string; module?: ModuleKey };
+type NavSection = { label: string; href?: string; show: boolean; module?: ModuleKey; children?: NavItem[] };
+
+const rawSections: NavSection[] = [
+  { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: true },
+  {
+    label: t(lang, 'admin.nav.content'),
+    show: isStaff,
+    children: [
+      { label: t(lang, 'admin.nav.bulletins'), href: '/admin/bulletins', module: 'bulletins' },
+      { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons', module: 'sermons' },
+      { label: t(lang, 'admin.nav.prayerSheets'), href: '/admin/prayer-sheets', module: 'prayer-sheets' },
+      { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies', module: 'testimonies' },
+    ],
+  },
+  {
+    label: t(lang, 'admin.nav.news'),
+    show: isStaff,
+    module: 'events',
+    children: [
+      { label: t(lang, 'admin.nav.announcements'), href: '/admin/announcements' },
+      { label: t(lang, 'admin.nav.events'), href: '/admin/events' },
+    ],
+  },
+  { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff, module: 'prayer-wall' },
+  { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin, module: 'people' },
+  { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
+];
+
+const sections: NavSection[] = rawSections
+  .filter((s) => s.show && modOn(s.module))
+  .map((s) => (s.children ? { ...s, children: s.children.filter((c) => modOn(c.module)) } : s))
+  .filter((s) => !s.children || s.children.length > 0);
 
 const current = Astro.url.pathname.replace(/\/+$/, '') || '/admin';
 const isActive = (href: string) => current === href || (href !== '/admin' && current.startsWith(href));

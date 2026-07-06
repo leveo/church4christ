@@ -7,6 +7,8 @@ import {
   parseAnnouncementForm,
   parseEventForm,
   parsePersonForm,
+  parseHouseholdForm,
+  parseDependentForm,
   parseSettingsForm,
   parseBlockoutForm,
   parseApplicationForm,
@@ -253,7 +255,7 @@ describe('parsePersonForm', () => {
     if (!r.ok) return;
     expect(r.data).toEqual({
       firstName: '長隆', lastName: '王', displayName: '王長隆', email: 'wang@example.com',
-      phone: '214-555-0100', role: 'editor', active: true, lang: 'zh',
+      phone: '214-555-0100', role: 'editor', active: true, lang: 'zh', birthday: null, address: null,
     });
   });
   it('defaults empty optionals to null / inactive / member', () => {
@@ -262,7 +264,7 @@ describe('parsePersonForm', () => {
     if (!r.ok) return;
     expect(r.data).toEqual({
       firstName: '', lastName: '', displayName: '訪客', email: 'guest@example.com',
-      phone: null, role: 'member', active: false, lang: null,
+      phone: null, role: 'member', active: false, lang: null, birthday: null, address: null,
     });
   });
   it('requires display_name and a valid email', () => {
@@ -279,6 +281,124 @@ describe('parsePersonForm', () => {
     expect(r.errors.email).toBe('errors.required');
     expect(r.errors.role).toBe('errors.invalidOption');
     expect(r.errors.lang).toBe('errors.invalidOption');
+  });
+});
+
+describe('parsePersonForm — membership profile fields', () => {
+  it('accepts a past birthday and an address, both variants', () => {
+    const r = parsePersonForm(fdOf({
+      display_name: 'X', email: 'x@example.com', role: 'member',
+      birthday: '1990-05-15', address: '1 Main St',
+    }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.birthday).toBe('1990-05-15');
+    expect(r.data.address).toBe('1 Main St');
+    // membership fields are absent on the self-service variant
+    expect(r.data.membershipStatus).toBeUndefined();
+    expect(r.data.joinedOn).toBeUndefined();
+  });
+
+  it('rejects a future birthday', () => {
+    const r = parsePersonForm(fdOf({ display_name: 'X', email: 'x@example.com', role: 'member', birthday: '2999-01-01' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.birthday).toBe('errors.dateFuture');
+  });
+
+  it('rejects a malformed birthday and an over-length address', () => {
+    const r = parsePersonForm(fdOf({
+      display_name: 'X', email: 'x@example.com', role: 'member',
+      birthday: '1990-13-40', address: 'a'.repeat(201),
+    }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.birthday).toBe('errors.dateFormat');
+    expect(r.errors.address).toBe('errors.tooLong');
+  });
+
+  it('admin variant reads membership_status + joined_on', () => {
+    const r = parsePersonForm(
+      fdOf({ display_name: 'X', email: 'x@example.com', role: 'member', membership_status: 'member', joined_on: '2020-01-05' }),
+      { admin: true },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.membershipStatus).toBe('member');
+    expect(r.data.joinedOn).toBe('2020-01-05');
+  });
+
+  it("admin variant defaults an absent membership_status to 'visitor' and rejects a bad enum", () => {
+    const dflt = parsePersonForm(fdOf({ display_name: 'X', email: 'x@example.com', role: 'member' }), { admin: true });
+    expect(dflt.ok).toBe(true);
+    if (dflt.ok) expect(dflt.data.membershipStatus).toBe('visitor');
+
+    const bad = parsePersonForm(
+      fdOf({ display_name: 'X', email: 'x@example.com', role: 'member', membership_status: 'guest' }),
+      { admin: true },
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors.membership_status).toBe('errors.invalidOption');
+  });
+});
+
+describe('parseHouseholdForm', () => {
+  it('parses name + optional address/phone', () => {
+    const r = parseHouseholdForm(fdOf({ name: 'Chen Family', address: '1 Main St', phone: '555-1000' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({ name: 'Chen Family', address: '1 Main St', phone: '555-1000' });
+  });
+
+  it('nulls blank optionals', () => {
+    const r = parseHouseholdForm(fdOf({ name: 'Solo' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({ name: 'Solo', address: null, phone: null });
+  });
+
+  it('requires a name and enforces the length caps', () => {
+    const missing = parseHouseholdForm(fdOf({ name: '  ' }));
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.errors.name).toBe('errors.required');
+
+    const tooLong = parseHouseholdForm(fdOf({ name: 'a'.repeat(81), address: 'b'.repeat(201), phone: 'c'.repeat(41) }));
+    expect(tooLong.ok).toBe(false);
+    if (!tooLong.ok) {
+      expect(tooLong.errors.name).toBe('errors.tooLong');
+      expect(tooLong.errors.address).toBe('errors.tooLong');
+      expect(tooLong.errors.phone).toBe('errors.tooLong');
+    }
+  });
+});
+
+describe('parseDependentForm', () => {
+  it('parses a child dependent', () => {
+    const r = parseDependentForm(fdOf({ display_name: 'Little One', role: 'child' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({ displayName: 'Little One', role: 'child' });
+  });
+
+  it('defaults an absent role to adult', () => {
+    const r = parseDependentForm(fdOf({ display_name: 'Grownup' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.role).toBe('adult');
+  });
+
+  it('requires a display_name and rejects a bad role enum', () => {
+    const missing = parseDependentForm(fdOf({ display_name: '' }));
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.errors.display_name).toBe('errors.required');
+
+    const bad = parseDependentForm(fdOf({ display_name: 'X', role: 'infant' }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors.role).toBe('errors.invalidOption');
+
+    const long = parseDependentForm(fdOf({ display_name: 'a'.repeat(81) }));
+    expect(long.ok).toBe(false);
+    if (!long.ok) expect(long.errors.display_name).toBe('errors.tooLong');
   });
 });
 
@@ -319,6 +439,14 @@ describe('parseSettingsForm', () => {
     const bad = parseSettingsForm(fdOf({ 'theme.name': '' }));
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors['theme.name']).toBe('errors.invalidOption');
+  });
+  it('accepts module.<key> toggles with a 0/1 value and rejects anything else', () => {
+    const ok = parseSettingsForm(fdOf({ 'module.sermons': '1', 'module.serve': '0' }));
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.data).toEqual({ 'module.sermons': '1', 'module.serve': '0' });
+    const bad = parseSettingsForm(fdOf({ 'module.sermons': '2' }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors['module.sermons']).toBe('errors.invalidOption');
   });
 });
 

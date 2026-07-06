@@ -26,6 +26,9 @@ const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const db = (env as { DB: D1Database }).DB;
 const isStaff = user.isEditor || user.isAdmin;
+// Dashboard cards mirror the module gating: a card renders only when its module
+// is on, so the dashboard never links into a disabled (404ing) admin surface.
+const modules = Astro.locals.modules;
 
 const sunday = nextWeekday(todayInTz(), 0);
 
@@ -72,14 +75,10 @@ try {
 }
 
 const stats = [
-  ...(user.isAdmin ? [{ label: t(lang, 'admin.nav.people'), value: peopleCount === null ? '—' : String(peopleCount) }] : []),
-  ...(isStaff
-    ? [
-        { label: t(lang, 'admin.dashboard.bulletins'), value: `${bulletinCounts.published} / ${bulletinCounts.draft}` },
-        { label: t(lang, 'admin.dashboard.sermons'), value: `${sermonCounts.published} / ${sermonCounts.draft}` },
-        { label: t(lang, 'admin.dashboard.prayerSheets'), value: `${prayerCounts.published} / ${prayerCounts.draft}` },
-      ]
-    : []),
+  ...(user.isAdmin && modules.has('people') ? [{ label: t(lang, 'admin.nav.people'), value: peopleCount === null ? '—' : String(peopleCount) }] : []),
+  ...(isStaff && modules.has('bulletins') ? [{ label: t(lang, 'admin.dashboard.bulletins'), value: `${bulletinCounts.published} / ${bulletinCounts.draft}` }] : []),
+  ...(isStaff && modules.has('sermons') ? [{ label: t(lang, 'admin.dashboard.sermons'), value: `${sermonCounts.published} / ${sermonCounts.draft}` }] : []),
+  ...(isStaff && modules.has('prayer-sheets') ? [{ label: t(lang, 'admin.dashboard.prayerSheets'), value: `${prayerCounts.published} / ${prayerCounts.draft}` }] : []),
 ];
 
 // Revision entity → edit-page href (announcement/event have no per-id editor yet).
@@ -117,7 +116,7 @@ function revHref(r: RecentRevisionRow): string {
   }
 
   {
-    (user.isAdmin || isLeader) && (
+    (user.isAdmin || isLeader) && modules.has('serve') && (
       <div class="mt-6 grid gap-4 sm:grid-cols-2">
         <a href="/admin/ministries?tab=applications" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
           <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.volunteerConsole')}</span>
@@ -130,26 +129,30 @@ function revHref(r: RecentRevisionRow): string {
   }
 
   {
-    isStaff && (
+    isStaff && (modules.has('prayer-wall') || modules.has('testimonies')) && (
       <div class="mt-6 grid gap-4 sm:grid-cols-2">
-        <a href="/admin/prayer-wall" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
-          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.prayerWall')}</span>
-          <span class={`${badge} ${newPrayerCount > 0 ? badgeActive : badgeInactive}`}>
-            {t(lang, 'admin.dashboard.newRequests', { count: newPrayerCount })}
-          </span>
-        </a>
-        <a href="/admin/testimonies" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
-          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.testimonies')}</span>
-          <span class={`${badge} ${pendingTestimonies > 0 ? badgeActive : badgeInactive}`}>
-            {t(lang, 'admin.dashboard.pendingReview', { count: pendingTestimonies })}
-          </span>
-        </a>
+        {modules.has('prayer-wall') && (
+          <a href="/admin/prayer-wall" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+            <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.prayerWall')}</span>
+            <span class={`${badge} ${newPrayerCount > 0 ? badgeActive : badgeInactive}`}>
+              {t(lang, 'admin.dashboard.newRequests', { count: newPrayerCount })}
+            </span>
+          </a>
+        )}
+        {modules.has('testimonies') && (
+          <a href="/admin/testimonies" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+            <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.testimonies')}</span>
+            <span class={`${badge} ${pendingTestimonies > 0 ? badgeActive : badgeInactive}`}>
+              {t(lang, 'admin.dashboard.pendingReview', { count: pendingTestimonies })}
+            </span>
+          </a>
+        )}
       </div>
     )
   }
 
   {
-    isStaff && (
+    isStaff && (modules.has('bulletins') || modules.has('sermons')) && (
       <section class="mt-10">
         <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.dashboard.weekPrepTitle')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.dashboard.weekPrepIntro', { date: formatDate(sunday, lang) })}</p>
@@ -158,32 +161,36 @@ function revHref(r: RecentRevisionRow): string {
             <div class={card}>
               <h3 class="font-semibold">{row.name}</h3>
               <div class="mt-3 space-y-2 text-sm">
-                <div class="flex items-center justify-between gap-2">
-                  <span>
-                    {t(lang, 'admin.dashboard.bulletin')}{' '}
-                    <span class={`${badge} ${row.bulletin_id ? badgeActive : badgeInactive}`}>
-                      {row.bulletin_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                {modules.has('bulletins') && (
+                  <div class="flex items-center justify-between gap-2">
+                    <span>
+                      {t(lang, 'admin.dashboard.bulletin')}{' '}
+                      <span class={`${badge} ${row.bulletin_id ? badgeActive : badgeInactive}`}>
+                        {row.bulletin_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                      </span>
                     </span>
-                  </span>
-                  {row.bulletin_id ? (
-                    <a href={`/admin/bulletins/${row.bulletin_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
-                  ) : (
-                    <a href={`/admin/bulletins/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
-                  )}
-                </div>
-                <div class="flex items-center justify-between gap-2">
-                  <span>
-                    {t(lang, 'admin.dashboard.sermon')}{' '}
-                    <span class={`${badge} ${row.sermon_id ? badgeActive : badgeInactive}`}>
-                      {row.sermon_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                    {row.bulletin_id ? (
+                      <a href={`/admin/bulletins/${row.bulletin_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
+                    ) : (
+                      <a href={`/admin/bulletins/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
+                    )}
+                  </div>
+                )}
+                {modules.has('sermons') && (
+                  <div class="flex items-center justify-between gap-2">
+                    <span>
+                      {t(lang, 'admin.dashboard.sermon')}{' '}
+                      <span class={`${badge} ${row.sermon_id ? badgeActive : badgeInactive}`}>
+                        {row.sermon_id ? t(lang, 'admin.dashboard.ready') : t(lang, 'admin.dashboard.missing')}
+                      </span>
                     </span>
-                  </span>
-                  {row.sermon_id ? (
-                    <a href={`/admin/sermons/${row.sermon_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
-                  ) : (
-                    <a href={`/admin/sermons/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
-                  )}
-                </div>
+                    {row.sermon_id ? (
+                      <a href={`/admin/sermons/${row.sermon_id}`} class={btnSecondary}>{t(lang, 'admin.dashboard.edit')}</a>
+                    ) : (
+                      <a href={`/admin/sermons/new?service=${row.service_type_id}`} class={btn}>{t(lang, 'admin.dashboard.create')}</a>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
