@@ -58,6 +58,12 @@ export default defineConfig(async () => {
             include: ['test/pg/**/*.test.ts'],
             environment: 'node',
             testTimeout: 20_000,
+            // Every pg suite shares one database and resets it with
+            // `DROP SCHEMA public CASCADE` in beforeAll; running the files in
+            // parallel lets one suite drop the schema (or re-run the migration's
+            // CREATE OR REPLACE FUNCTION) out from under another. Serialize the
+            // files. Scoped to this project only — node/workers stay parallel.
+            fileParallelism: false,
           },
         },
       ],
