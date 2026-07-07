@@ -9,14 +9,16 @@ import type { AppDb, AppDbResult, AppStatement } from './appDb';
 /**
  * Rewrite D1/SQLite parameter placeholders (`?`, `?3`) to Postgres `$n`.
  * A tiny scanner tracks string/identifier/comment state so a `?` inside
- * quotes or comments is never rewritten. Anonymous `?` are numbered in
- * appearance order (D1 forbids mixing anonymous and numbered in one query,
- * so we don't handle the mix specially).
+ * quotes or comments is never rewritten. A bare `?` is numbered as one greater
+ * than the largest parameter number assigned so far — SQLite's exact rule — so a
+ * query mixing numbered and anonymous forms (e.g. `... >= ?1 AND id IN (?)`, where
+ * a numbered head query splices an anonymous IN-list) numbers the `?` as `?N+1`
+ * just as D1 does, instead of restarting at `$1` and colliding with `?1`.
  */
 export function translatePlaceholders(sql: string): string {
   let out = '';
   let i = 0;
-  let n = 0;
+  let largest = 0;
   type Mode = 'code' | 'sq' | 'dq' | 'line' | 'block';
   let mode: Mode = 'code';
   while (i < sql.length) {
@@ -31,12 +33,14 @@ export function translatePlaceholders(sql: string): string {
         let j = i + 1;
         while (j < sql.length && sql[j] >= '0' && sql[j] <= '9') j++;
         if (j > i + 1) {
-          out += '$' + sql.slice(i + 1, j);
+          const num = Number(sql.slice(i + 1, j));
+          largest = Math.max(largest, num);
+          out += '$' + num;
           i = j;
           continue;
         }
-        n += 1;
-        out += '$' + n;
+        largest += 1;
+        out += '$' + largest;
         i += 1;
         continue;
       }

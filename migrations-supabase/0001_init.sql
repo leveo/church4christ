@@ -57,6 +57,21 @@ LANGUAGE sql STABLE AS $$
   SELECT to_char(sqlite_compat_apply(sqlite_compat_base(ts), mods), 'YYYY-MM-DD');
 $$;
 
+-- SQLite's max()/min() double as scalar greatest()/least() when given 2+ args;
+-- Postgres's max()/min() are single-arg aggregates only, so the app's
+-- SUM(MAX(0, needed - filled)) / SUM(MIN(needed, filled)) staffing math (ministryDb,
+-- adminOverviewDb, teamDb) needs a 2-arg scalar overload. Add it under the same
+-- names so that SQL runs unchanged on both backends — Postgres resolves by arity,
+-- leaving the 1-arg aggregate untouched (max(x) / min(x) still aggregate). Every
+-- call site passes non-null small counts, so greatest/least (which, unlike SQLite,
+-- skip NULLs) match SQLite's scalar semantics here. Returns integer to mirror
+-- SQLite/D1: SUM(integer) is bigint, read back as a JS number via int8AsNumber.
+CREATE OR REPLACE FUNCTION max(a bigint, b bigint)
+RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT greatest(a, b)::integer $$;
+
+CREATE OR REPLACE FUNCTION min(a bigint, b bigint)
+RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT least(a, b)::integer $$;
+
 
 -- ---------------------------------------------------------------------------
 -- Part 2: schema. A fresh consolidated snapshot of the D1 migrations

@@ -48,7 +48,7 @@ export default defineConfig(async () => {
           test: {
             name: 'workers',
             include: ['test/**/*.test.ts'],
-            exclude: ['test/e2e/**', 'test/pg/**', ...NODE_ONLY],
+            exclude: ['test/e2e/**', 'test/e2e-pg/**', 'test/pg/**', ...NODE_ONLY],
             setupFiles: ['./test/setup.ts'],
           },
         },

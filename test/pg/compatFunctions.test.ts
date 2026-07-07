@@ -47,6 +47,23 @@ describe.skipIf(!hasPg)('SQLite-compat datetime()/date()', () => {
     const v = (await sql.unsafe('SELECT created_at FROM dtest'))[0].created_at as string;
     expect(v).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
+
+  // 2-arg scalar max()/min(): SQLite treats these as greatest()/least(); Postgres
+  // only has the 1-arg aggregates, so the migration adds scalar overloads for the
+  // app's SUM(MAX(0, needed - filled)) staffing math.
+  it('scalar max()/min() overloads behave as greatest()/least()', async () => {
+    expect(Number(await one('max(0, 5)'))).toBe(5);
+    expect(Number(await one('max(7, 2)'))).toBe(7);
+    expect(Number(await one('min(3, 8)'))).toBe(3);
+    // integer literal vs a bigint COUNT result — the real call shape — resolves via
+    // implicit cast (the `function max(integer, bigint) does not exist` case).
+    expect(Number(await one('max(0, (SELECT count(*) FROM (VALUES (1),(2),(3)) v(x))::bigint)'))).toBe(3);
+  });
+  it('the 1-arg max()/min() aggregate is untouched by the scalar overload', async () => {
+    const r = await sql.unsafe('SELECT max(x) AS mx, min(x) AS mn FROM (VALUES (3),(7),(1)) t(x)');
+    expect(Number(r[0].mx)).toBe(7);
+    expect(Number(r[0].mn)).toBe(1);
+  });
 });
 
 // Tripwire — deliberately NOT gated on hasPg, so it runs on every `npm test`.

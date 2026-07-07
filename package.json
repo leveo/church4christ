@@ -14,6 +14,7 @@
     "screenshots": "node scripts/screenshots.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "test:e2e:pg": "npm run build && vitest run --config vitest.e2e.pg.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:migrate:supabase": "node scripts/db/migrate-supabase.mjs",

@@ -72,12 +72,33 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // optional-chained so a runtime-less unit caller never crashes, and end() is a
   // no-op on D1 so this is free on the default backend.
   let released = false;
-  const release = () => {
-    if (released) return;
+  // Drain the per-request db client exactly once (ends the postgres.js client on
+  // supabase; a no-op on D1).
+  const drainClient = (): Promise<void> => {
+    if (released) return Promise.resolve();
     released = true;
-    context.locals.cfContext?.waitUntil?.(end());
+    return end();
+  };
+  // Non-streaming exits (redirects, 403, and the whole D1 backend) can drain in
+  // the background — nothing streams a db query after they return.
+  const release = () => {
+    context.locals.cfContext?.waitUntil?.(drainClient());
   };
   const finish = (res: Response): Response => {
+    // supabase: a rendered body streams LAZILY — component db queries run as the
+    // client consumes the stream, so ending the postgres.js client at
+    // middleware-return would race them (CONNECTION_ENDED mid-render). Pipe the
+    // body through a pass-through TransformStream whose flush() — fired after the
+    // last byte — drains the client, deferring end() until every in-render query
+    // has completed. Null-body exits (redirects) have nothing to stream.
+    if (backend === 'supabase' && res.body) {
+      const drain = new TransformStream({
+        async flush() {
+          await drainClient();
+        },
+      });
+      return new Response(res.body.pipeThrough(drain), res);
+    }
     release();
     return res;
   };

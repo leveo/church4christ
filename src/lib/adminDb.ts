@@ -315,9 +315,11 @@ export class DuplicateDateError extends Error {
  *    that occupant (and its child rows) so the update can proceed; its
  *    snapshots stay in `revisions`;
  *  - a LIVE occupant is always a real conflict → DuplicateDateError.
- * `id IS NOT ?`: with a NULL id (insert) it matches every row in the slot; with
- * a numeric id (update) it excludes the row being updated. SQLite semantics,
- * ported from the reference stack.
+ * `id IS DISTINCT FROM ?`: with a NULL id (insert) it matches every row in the
+ * slot; with a numeric id (update) it excludes the row being updated. Postgres
+ * rejects SQLite's `IS NOT <expr>` null-safe form, so use the SQL-standard
+ * `IS DISTINCT FROM`, which both D1/SQLite and Postgres accept with identical
+ * semantics.
  */
 async function resolveDateSlot(
   db: AppDb,
@@ -330,7 +332,7 @@ async function resolveDateSlot(
   const where = matchCols.map((c, i) => `${c} = ?${i + 1}`).join(' AND ');
   const idParam = matchCols.length + 1;
   const row = await db
-    .prepare(`SELECT id, deleted_at FROM ${table} WHERE ${where} AND id IS NOT ?${idParam}`)
+    .prepare(`SELECT id, deleted_at FROM ${table} WHERE ${where} AND id IS DISTINCT FROM ?${idParam}`)
     .bind(...matchVals, id)
     .first<{ id: number; deleted_at: string | null }>();
   if (!row) return id;
@@ -1255,7 +1257,7 @@ export async function listPrayerActivity(db: AppDb, id: number): Promise<PrayerA
 export async function movePrayerRequest(db: AppDb, id: number, newStatus: string, author: string): Promise<void> {
   if (!(PRAYER_STATUSES as readonly string[]).includes(newStatus)) throw new Error(`invalid prayer status: ${newStatus}`);
   const r = await db
-    .prepare(`UPDATE prayer_requests SET status = ?1 WHERE id = ?2 AND status IS NOT ?1`)
+    .prepare(`UPDATE prayer_requests SET status = ?1 WHERE id = ?2 AND status IS DISTINCT FROM ?1`)
     .bind(newStatus, id)
     .run();
   if (r.meta.changes > 0) {
