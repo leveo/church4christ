@@ -6,6 +6,8 @@
 // webhook-order race, the refund flip, the subscription lifecycle, and the
 // 'ignored' outcome for foreign traffic / missing metadata (a giving event must
 // never throw on someone else's Stripe payload). Self-skips without DATABASE_URL.
+// The isDbConnectivityError describe at the bottom is pure (no DB) and deliberately
+// NOT gated — it runs on every `npm test`.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
@@ -13,7 +15,7 @@ import { PgAdapter } from '../../src/lib/pgAdapter';
 import type { AppDb } from '../../src/lib/appDb';
 import { saveFund } from '../../src/lib/fundDb';
 import { getStripeCustomer, getRecurringBySubscription } from '../../src/lib/givingDb';
-import { handleStripeEvent } from '../../src/lib/givingWebhook';
+import { handleStripeEvent, isDbConnectivityError } from '../../src/lib/givingWebhook';
 import type { StripeEnv } from '../../src/lib/stripe';
 
 const ENV: StripeEnv = { STRIPE_SECRET_KEY: 'sk_test_x', APP_ORIGIN: 'https://church.example' };
@@ -243,5 +245,38 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
     for (const c of cases) {
       expect(await handleStripeEvent({ db, env: ENV }, c)).toBe('ignored');
     }
+  });
+});
+
+// ── isDbConnectivityError (pure, no DB — ungated on purpose) ───────────────────
+// The webhook endpoint's 500-vs-200 fork: a transient connectivity failure must
+// 500 so Stripe redelivers (money integrity — never silently drop an
+// invoice.paid); everything else is a logic bug it logs and swallows as 200.
+describe('isDbConnectivityError', () => {
+  it('true for postgres.js client codes and socket errnos', () => {
+    expect(isDbConnectivityError({ code: 'CONNECTION_CLOSED' })).toBe(true);
+    expect(isDbConnectivityError({ code: 'CONNECT_TIMEOUT' })).toBe(true);
+    expect(isDbConnectivityError({ code: 'ECONNREFUSED' })).toBe(true);
+    expect(isDbConnectivityError({ code: 'ETIMEDOUT' })).toBe(true);
+  });
+
+  it('true for Postgres connection-class SQLSTATEs (08*, 53*, 57P*)', () => {
+    expect(isDbConnectivityError({ code: '08006' })).toBe(true); // connection_failure
+    expect(isDbConnectivityError({ code: '08000' })).toBe(true); // connection_exception
+    expect(isDbConnectivityError({ code: '53300' })).toBe(true); // too_many_connections
+    expect(isDbConnectivityError({ code: '57P01' })).toBe(true); // admin_shutdown
+    expect(isDbConnectivityError({ code: '57P03' })).toBe(true); // cannot_connect_now
+  });
+
+  it('false for logic errors: constraint SQLSTATEs, code-less errors, non-errors', () => {
+    expect(isDbConnectivityError({ code: '23505' })).toBe(false); // unique_violation
+    expect(isDbConnectivityError(new TypeError('x is not a function'))).toBe(false);
+    expect(isDbConnectivityError(new Error('boom'))).toBe(false);
+    expect(isDbConnectivityError({ code: undefined })).toBe(false);
+    expect(isDbConnectivityError({})).toBe(false);
+    expect(isDbConnectivityError(null)).toBe(false);
+    expect(isDbConnectivityError(undefined)).toBe(false);
+    expect(isDbConnectivityError('CONNECTION_CLOSED')).toBe(false); // string, not an error object
+    expect(isDbConnectivityError({ code: 57 })).toBe(false); // numeric code is not a SQLSTATE
   });
 });

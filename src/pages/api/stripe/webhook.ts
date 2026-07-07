@@ -11,30 +11,14 @@
 // infinite retry queue, so a logic error is logged and returned as 200 'error_logged'
 // (the event is effectively dropped, but Stripe stops hammering us). The ONE
 // exception is a database-connectivity failure — that IS transient, so we 500 and
-// let Stripe retry once the DB is back. We tell them apart by the postgres.js
-// connection error codes.
+// let Stripe retry once the DB is back. isDbConnectivityError (src/lib/givingWebhook)
+// tells them apart by the postgres.js client codes + connection-class SQLSTATEs.
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { verifyStripeWebhook, type StripeEnv } from '../../../lib/stripe';
-import { handleStripeEvent } from '../../../lib/givingWebhook';
+import { handleStripeEvent, isDbConnectivityError } from '../../../lib/givingWebhook';
 
 export const prerender = false;
-
-// postgres.js connection-failure codes (src/lib/dbProvider opens the client) plus
-// the socket-level errnos they can surface as. These are transient → let Stripe retry.
-const DB_CONN_CODES = new Set([
-  'CONNECT_TIMEOUT',
-  'CONNECTION_CLOSED',
-  'CONNECTION_DESTROYED',
-  'CONNECTION_ENDED',
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ETIMEDOUT',
-]);
-function isDbConnectivityError(e: unknown): boolean {
-  const code = (e as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && DB_CONN_CODES.has(code);
-}
 
 export const POST: APIRoute = async ({ request, locals }) => {
   // The webhook backs BOTH Supabase modules; live when either is enabled.

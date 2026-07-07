@@ -32,6 +32,37 @@ export interface WebhookDeps {
   fetcher?: typeof fetch;
 }
 
+// postgres.js client-side connection-failure codes (src/lib/dbProvider opens the
+// client) plus the socket-level errnos they can surface as.
+const DB_CONN_CODES = new Set([
+  'CONNECT_TIMEOUT',
+  'CONNECTION_CLOSED',
+  'CONNECTION_DESTROYED',
+  'CONNECTION_ENDED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+]);
+
+/**
+ * True when `e` is a transient database-connectivity failure — the one case the
+ * webhook endpoint answers with a 500 so Stripe retries (anything else is a logic
+ * bug it logs and swallows as 200, since a retry would just fail again). Matches:
+ *  - the postgres.js client codes / socket errnos in {@link DB_CONN_CODES};
+ *  - Postgres server-side connection-class SQLSTATEs (postgres.js sets `.code` to
+ *    the SQLSTATE): class 08 (connection exceptions, e.g. 08006 connection_failure),
+ *    class 53 (insufficient resources, e.g. 53300 too_many_connections), and 57P*
+ *    (admin shutdown / crash / cannot_connect_now).
+ * Money integrity depends on this classification: treating a transient failure as
+ * a logic error would 200 the event and silently drop an invoice.paid instead of
+ * letting Stripe redeliver it.
+ */
+export function isDbConnectivityError(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code !== 'string') return false;
+  return DB_CONN_CODES.has(code) || code.startsWith('08') || code.startsWith('53') || code.startsWith('57P');
+}
+
 /** A short outcome for the log line: what the handler did with this event. */
 type Outcome = 'gift_recorded' | 'recurring_started' | 'refunded' | 'status_synced' | 'ignored';
 
