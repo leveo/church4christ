@@ -98,6 +98,10 @@ describe('getTheme', () => {
 });
 
 describe('getHeroImageKey', () => {
+  it('returns an empty string when the homepage hero media key is unset', async () => {
+    expect(await getHeroImageKey(env.DB)).toBe('');
+  });
+
   it('getHeroImageKey returns the configured homepage hero media key', async () => {
     await env.DB.prepare(
       "INSERT INTO settings (key, value) VALUES ('site.hero_image_key', 'uploads/hero.webp')",

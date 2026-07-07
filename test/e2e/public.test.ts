@@ -122,7 +122,9 @@ describe('announcement ticker shows the active announcement per locale', () => {
 describe('homepage hero image', () => {
   it('renders a configured homepage hero image through /media', async () => {
     await env.DB.prepare(
-      "INSERT INTO settings (key, value) VALUES ('site.hero_image_key', 'uploads/hero-test.webp')",
+      `INSERT INTO settings (key, value)
+       VALUES ('site.hero_image_key', 'uploads/hero-test.webp')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     ).run();
     const res = await get('/en');
     expect(res.status).toBe(200);
