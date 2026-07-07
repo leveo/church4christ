@@ -270,7 +270,7 @@ describe('createRegistrationCheckout', () => {
     email: 'reg@example.com',
   };
 
-  it('builds the payment-mode registration checkout param map with a 30-min expiry', async () => {
+  it('builds the payment-mode registration checkout param map with a 30-min + margin expiry', async () => {
     const { fn, calls } = mockFetch(json({ id: 'cs_reg', url: 'https://checkout/cs_reg' }));
     const before = Math.floor(Date.now() / 1000);
     const out = await createRegistrationCheckout(ENV, base, fn);
@@ -278,10 +278,11 @@ describe('createRegistrationCheckout', () => {
     expect(out).toEqual({ id: 'cs_reg', url: 'https://checkout/cs_reg' });
 
     const b = bodyEntries(calls[0]);
-    // expires_at is computed from Date.now() at call time → now + 1800s.
+    // expires_at is computed from Date.now() at call time → now + 1830s (Stripe's
+    // 30-min minimum plus the deliberate 30s latency/clock-skew margin).
     const exp = Number(b.expires_at);
-    expect(exp).toBeGreaterThanOrEqual(before + 1800);
-    expect(exp).toBeLessThanOrEqual(after + 1800);
+    expect(exp).toBeGreaterThanOrEqual(before + 1830);
+    expect(exp).toBeLessThanOrEqual(after + 1830);
     delete b.expires_at;
     expect(b).toEqual({
       mode: 'payment',

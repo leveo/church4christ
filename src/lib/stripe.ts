@@ -219,10 +219,11 @@ export async function createRecurringCheckout(
 /**
  * One-time (payment-mode) Checkout Session for an event REGISTRATION. Distinct
  * from a gift: `metadata.kind = 'registration'` routes it to the registration
- * branch of the shared webhook, and `expires_at` (now + 30 min, Stripe's minimum)
- * bounds how long the pending row holds its seat — an abandoned checkout expires,
- * fires checkout.session.expired, and the webhook frees the seat. `Date.now()` is
- * read at call time so each session gets a fresh 30-minute window. Registrations
+ * branch of the shared webhook, and `expires_at` (now + 30.5 min — Stripe's
+ * 30-min minimum plus a skew margin) bounds how long the pending row holds its
+ * seat — an abandoned checkout expires, fires checkout.session.expired, and the
+ * webhook frees the seat. `Date.now()` is read at call time so each session gets
+ * a fresh window. Registrations
  * are always email-prefilled (no saved customer reuse — giving owns that).
  * success → /register/done?ok=1&paid=1 (the paid marker drives the receipt copy);
  * cancel → back to the event page so the visitor can retry.
@@ -258,7 +259,9 @@ export async function createRegistrationCheckout(
     success_url: `${origin}/${args.locale}/register/done?ok=1&paid=1`,
     cancel_url: `${origin}/${args.locale}/register/${args.eventId}`,
     customer_email: args.email,
-    expires_at: Math.floor(Date.now() / 1000) + 1800,
+    // Plan said now+1800 (Stripe's exact minimum); the +30s margin is deliberate
+    // so latency/clock skew can't land the value under the minimum and reject.
+    expires_at: Math.floor(Date.now() / 1000) + 1830,
     metadata,
     payment_intent_data: { metadata },
   };

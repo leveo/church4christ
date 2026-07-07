@@ -40,6 +40,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // URLs land in the registrant's language (the endpoint itself is locale-free).
   const locale: Locale = parseLocale(String(form.get('locale') ?? '')) ?? locals.locale;
 
+  // Honeypot: real visitors never fill the hidden `website` field. Pretend it
+  // worked (the exact free-registration success state) so bots get no signal,
+  // but write nothing — a bot must not be able to exhaust an event's capacity.
+  if (String(form.get('website') ?? '') !== '') return redirect(`/${locale}/register/done?ok=1`);
+
   const eventId = Number(form.get('event_id'));
   if (!Number.isInteger(eventId) || eventId <= 0) return backToList(locale);
 

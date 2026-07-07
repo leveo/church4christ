@@ -69,6 +69,14 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="event_id" value={event.id} />
 
+            {/* Honeypot: hidden from humans, tempting for bots. */}
+            <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
+              <label>
+                Website
+                <input type="text" name="website" tabindex="-1" autocomplete="off" />
+              </label>
+            </div>
+
             <label class="block">
               <span class={lab}>{t(locale, 'register.name')}</span>
               <input name="name" required class={tin} value={user ? user.displayName : ''} readonly={!!user} />
