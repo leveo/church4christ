@@ -116,11 +116,11 @@ export async function listMinistries(db: AppDb, locale: Locale): Promise<Ministr
   const { results } = await db
     .prepare(
       `SELECT m.id AS id, m.slug AS slug, m.category AS category, m.icon AS icon,
-              m.cover_key AS coverKey, m.leader_person_id AS leaderPersonId,
-              m.meeting_time AS meetingTime, m.sort AS sort,
+              m.cover_key AS "coverKey", m.leader_person_id AS "leaderPersonId",
+              m.meeting_time AS "meetingTime", m.sort AS sort,
               ${select},
               (SELECT COUNT(DISTINCT t.id) FROM teams t
-                 WHERE t.ministry_id = m.id AND t.deleted_at IS NULL) AS teamCount,
+                 WHERE t.ministry_id = m.id AND t.deleted_at IS NULL) AS "teamCount",
               (SELECT COUNT(*) FROM plan_positions pp
                  JOIN plans p ON p.id = pp.plan_id
                    -- 2-arg date(): Postgres parses the bare 1-arg form as a CAST to the
@@ -129,7 +129,7 @@ export async function listMinistries(db: AppDb, locale: Locale): Promise<Ministr
                  JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
                  JOIN teams t2 ON t2.id = pos.team_id
                    AND t2.deleted_at IS NULL AND t2.ministry_id = m.id
-                 WHERE pp.open_signup = 1) AS openSignupSlots
+                 WHERE pp.open_signup = 1) AS "openSignupSlots"
        FROM ministries m
        ${joins}
        WHERE m.active = 1 AND m.deleted_at IS NULL

@@ -68,7 +68,7 @@ export async function listActiveEvents(
 ): Promise<EventCardRow[]> {
   const { select, joins } = i18nJoin('event_i18n', 'e', 'event_id', ['title', 'blurb'], locale);
   const sql =
-    `SELECT ${select}, e.image_key AS imageKey, e.url AS url
+    `SELECT ${select}, e.image_key AS "imageKey", e.url AS url
      FROM events e
      ${joins}
      WHERE ${WINDOW}
@@ -177,7 +177,7 @@ export async function listSermonsByYear(db: AppDb, year: number, locale: Locale)
     .prepare(
       `SELECT s.id AS id, s.sermon_date AS sermon_date, s.title AS title, s.speaker AS speaker,
               s.scripture AS scripture, s.series AS series, s.youtube_id AS youtube_id,
-              COALESCE(st_l.name, st_d.name) AS serviceTypeName
+              COALESCE(st_l.name, st_d.name) AS "serviceTypeName"
        FROM sermons s
        JOIN service_types st ON st.id = s.service_type_id
        ${joins}
@@ -194,7 +194,7 @@ const BULLETIN_COLS = `b.id AS id, b.service_type_id AS service_type_id, b.bulle
   b.service_time_label AS service_time_label, b.program_json AS program_json,
   b.offering_json AS offering_json, b.attendance_json AS attendance_json,
   b.memory_verse AS memory_verse, b.flowers AS flowers,
-  COALESCE(st_l.name, st_d.name) AS serviceTypeName`;
+  COALESCE(st_l.name, st_d.name) AS "serviceTypeName"`;
 
 /** The latest published bulletin for each service type (one row per type), ordered by type sort. */
 export async function latestBulletins(db: AppDb, locale: Locale): Promise<BulletinRow[]> {
@@ -246,7 +246,7 @@ export async function listBulletinServicesForDate(
   const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
-      `SELECT b.service_type_id AS service_type_id, COALESCE(st_l.name, st_d.name) AS serviceTypeName
+      `SELECT b.service_type_id AS service_type_id, COALESCE(st_l.name, st_d.name) AS "serviceTypeName"
        FROM bulletins b
        JOIN service_types st ON st.id = b.service_type_id
        ${joins}
@@ -264,7 +264,7 @@ export async function listBulletinDates(db: AppDb, locale: Locale): Promise<Bull
   const { results } = await db
     .prepare(
       `SELECT b.bulletin_date AS bulletin_date, b.service_type_id AS service_type_id,
-              COALESCE(st_l.name, st_d.name) AS serviceTypeName
+              COALESCE(st_l.name, st_d.name) AS "serviceTypeName"
        FROM bulletins b
        JOIN service_types st ON st.id = b.service_type_id
        ${joins}

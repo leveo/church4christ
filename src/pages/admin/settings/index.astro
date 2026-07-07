@@ -44,7 +44,7 @@ if (Astro.request.method === 'POST') {
   const parsed = parseSettingsForm(fd);
   if (parsed.ok) {
     if (isModules) {
-      // The Modules panel is its OWN form: it writes ALL 11 module.<key> rows
+      // The Modules panel is its OWN form: it writes ALL 13 module.<key> rows
       // explicitly — a checked box posts '1' (in parsed.data), an unchecked box
       // is absent → we write '0'. This deliberate full write does NOT rely on the
       // parser's partial-update semantics, so unchecking truly disables a module.

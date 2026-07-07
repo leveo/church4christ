@@ -637,7 +637,10 @@ export async function listPlans(
        JOIN service_types st ON st.id = plans.service_type_id
        ${stJ.joins}
        WHERE plans.deleted_at IS NULL AND plans.plan_date >= ?1
-         AND (?2 IS NULL OR plans.service_type_id = ?2)
+         -- CAST anchors the optional filter param's type: Postgres cannot infer
+         -- the type of a bare NULL bind in ?2 IS NULL; the cast is a no-op on
+         -- SQLite/D1 (CAST(NULL AS INTEGER) stays NULL).
+         AND (CAST(?2 AS INTEGER) IS NULL OR plans.service_type_id = ?2)
        ORDER BY plans.plan_date LIMIT ?3`,
     )
     .bind(from, serviceTypeId, limit)

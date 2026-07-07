@@ -400,7 +400,7 @@ export async function listBulletins(db: AppDb, opts: { serviceTypeId?: number } 
     .prepare(
       `SELECT b.id AS id, b.service_type_id AS service_type_id, b.bulletin_date AS bulletin_date,
               b.status AS status, b.publish_at AS publish_at, b.updated_by AS updated_by, b.updated_at AS updated_at,
-              COALESCE(sti.name, '') AS serviceTypeName
+              COALESCE(sti.name, '') AS "serviceTypeName"
        FROM bulletins b
        LEFT JOIN service_type_i18n sti ON sti.service_type_id = b.service_type_id AND sti.locale = 'en'
        WHERE b.deleted_at IS NULL ${filtered ? 'AND b.service_type_id = ?1' : ''}
@@ -623,7 +623,7 @@ export async function listSermons(db: AppDb, opts: { year?: number } = {}): Prom
     .prepare(
       `SELECT s.id AS id, s.service_type_id AS service_type_id, s.sermon_date AS sermon_date, s.title AS title,
               s.speaker AS speaker, s.status AS status, s.updated_by AS updated_by, s.updated_at AS updated_at,
-              COALESCE(sti.name, '') AS serviceTypeName
+              COALESCE(sti.name, '') AS "serviceTypeName"
        FROM sermons s
        LEFT JOIN service_type_i18n sti ON sti.service_type_id = s.service_type_id AND sti.locale = 'en'
        WHERE s.deleted_at IS NULL ${filtered ? "AND substr(s.sermon_date, 1, 4) = ?1" : ''}

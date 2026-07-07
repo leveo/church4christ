@@ -81,8 +81,8 @@ export async function getMinistryBySlug(
   const ministry = await db
     .prepare(
       `SELECT m.id AS id, m.slug AS slug, m.category AS category, m.icon AS icon,
-              m.cover_key AS coverKey, m.meeting_time AS meetingTime,
-              ${select}, ldr.display_name AS leaderName
+              m.cover_key AS "coverKey", m.meeting_time AS "meetingTime",
+              ${select}, ldr.display_name AS "leaderName"
        FROM ministries m
        ${joins}
        LEFT JOIN people ldr ON ldr.id = m.leader_person_id AND ldr.deleted_at IS NULL
@@ -101,7 +101,7 @@ export async function getMinistryBySlug(
         `SELECT t.id AS id, ${teamJoin.select},
                 (SELECT COUNT(DISTINCT tm.person_id) FROM team_members tm
                    JOIN people p ON p.id = tm.person_id AND p.deleted_at IS NULL
-                   WHERE tm.team_id = t.id) AS memberCount,
+                   WHERE tm.team_id = t.id) AS "memberCount",
                 (SELECT COUNT(*) FROM plan_positions pp
                    JOIN plans pl ON pl.id = pp.plan_id
                      -- 2-arg date(): Postgres parses the bare 1-arg form as a CAST to the
@@ -109,7 +109,7 @@ export async function getMinistryBySlug(
                      AND pl.deleted_at IS NULL AND pl.plan_date >= date('now', 'start of day')
                    JOIN positions pos ON pos.id = pp.position_id
                      AND pos.deleted_at IS NULL AND pos.team_id = t.id
-                   WHERE pp.open_signup = 1) AS openSignupCount
+                   WHERE pp.open_signup = 1) AS "openSignupCount"
          FROM teams t
          ${teamJoin.joins}
          WHERE t.ministry_id = ?1 AND t.deleted_at IS NULL
@@ -119,7 +119,7 @@ export async function getMinistryBySlug(
       .all<TeamRow>(),
     db
       .prepare(
-        `SELECT tm.team_id AS teamId, ppl.display_name AS name
+        `SELECT tm.team_id AS "teamId", ppl.display_name AS name
          FROM team_members tm
          JOIN people ppl ON ppl.id = tm.person_id AND ppl.deleted_at IS NULL
          JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
@@ -130,7 +130,7 @@ export async function getMinistryBySlug(
       .all<{ teamId: number; name: string }>(),
     db
       .prepare(
-        `SELECT pos.id AS id, pos.team_id AS teamId, ${posJoin.select}
+        `SELECT pos.id AS id, pos.team_id AS "teamId", ${posJoin.select}
          FROM positions pos
          ${posJoin.joins}
          JOIN teams t ON t.id = pos.team_id AND t.deleted_at IS NULL
@@ -176,7 +176,7 @@ export async function listPublishedTestimonies(
 ): Promise<TestimonyCardRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT author_name AS authorName, title, body, locale, published_at AS publishedAt
+      `SELECT author_name AS "authorName", title, body, locale, published_at AS "publishedAt"
        FROM testimonies
        WHERE status = 'A' AND deleted_at IS NULL
        ORDER BY (CASE WHEN locale = ?1 THEN 0 ELSE 1 END), published_at DESC, id DESC

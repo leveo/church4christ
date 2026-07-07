@@ -47,6 +47,11 @@ export function openDb(env: DbEnv): { db: AppDb; backend: DbBackend; end: () => 
       fetch_types: false,
       prepare: false,
       connect_timeout: 10,
+      // Postgres returns int8 (COUNT/SUM results) as a string to avoid precision
+      // loss. This schema has no true bigint columns, so parse int8 as a JS number
+      // to match D1/SQLite — where COUNT(*) is already a number and the *Db modules
+      // consume these values (member_count, teamCount, …) as numbers.
+      types: { int8AsNumber: { to: 20, from: [20], serialize: String, parse: Number } },
     });
     return {
       db: new PgAdapter(sql),
