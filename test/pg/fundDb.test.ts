@@ -47,8 +47,8 @@ describe.skipIf(!hasPg)('fundDb (Postgres)', () => {
   });
 
   it('getFund falls back to en when the locale row is missing', async () => {
-    // Write only via saveFund (always writes both), then delete the zh row to
-    // prove the en-fallback join, not a stored zh value.
+    // Write only via saveFund (a non-blank zh name writes both rows), then delete
+    // the zh row to prove the en-fallback join, not a stored zh value.
     const id = await saveFund(db, { fund_number: 'F101', name_en: 'Missions', name_zh: '宣教', active: 1, sort: 2 });
     await sql.unsafe('DELETE FROM fund_i18n WHERE fund_id = $1 AND locale = $2', [id, 'zh']);
     const zh = await getFund(db, 'zh', id);
@@ -57,6 +57,24 @@ describe.skipIf(!hasPg)('fundDb (Postgres)', () => {
 
   it('getFund returns null for an unknown id', async () => {
     expect(await getFund(db, 'en', 999999)).toBeNull();
+  });
+
+  it('a blank zh name never stores an empty row — zh reads fall back to en through create/edit/blank', async () => {
+    // COALESCE(zh.name, en.name) only fires on NULL (a missing row), not '':
+    // saveFund must DELETE (or skip) the zh row when the zh name is blank, or zh
+    // donors would see a blank fund option.
+    const id = await saveFund(db, { fund_number: 'F110', name_en: 'Deacons', name_zh: '', active: 1, sort: 10 });
+    const zhList = await listFunds(db, 'zh');
+    expect(zhList.find((f) => f.id === id)?.name).toBe('Deacons'); // en fallback, not ''
+
+    // Edit adds a real zh name: the zh row now wins.
+    await saveFund(db, { id, fund_number: 'F110', name_en: 'Deacons', name_zh: '执事', active: 1, sort: 10 });
+    expect((await listFunds(db, 'zh')).find((f) => f.id === id)?.name).toBe('执事');
+
+    // Edit blanks it again (whitespace only): the zh row is removed, fallback returns.
+    await saveFund(db, { id, fund_number: 'F110', name_en: 'Deacons', name_zh: '  ', active: 1, sort: 10 });
+    expect((await listFunds(db, 'zh')).find((f) => f.id === id)?.name).toBe('Deacons');
+    expect((await getFund(db, 'en', id))?.name).toBe('Deacons'); // en row untouched throughout
   });
 
   it('saveFund with an id updates the fund and both names', async () => {

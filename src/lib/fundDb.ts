@@ -49,13 +49,17 @@ export async function getFund(db: AppDb, locale: Locale, id: number): Promise<Fu
 }
 
 /**
- * Insert (id absent) or update (id present) a fund plus BOTH locale names in one
+ * Insert (id absent) or update (id present) a fund plus its locale names in one
  * pass. The i18n rows are upserted on their (fund_id, locale) primary key so a
- * rename overwrites in place. A duplicate `fund_number` — on the INSERT, or on an
- * UPDATE that moves onto another fund's number — trips the UNIQUE(fund_number)
- * index and is mapped to a clean 'fund_number_taken' throw (never a raw 500),
- * mirroring the pre-check-free race mapping the people/household writers use.
- * Returns the fund id.
+ * rename overwrites in place. The en row is always written; a blank/whitespace
+ * zh name DELETES the zh row instead of storing '' — the i18nJoin en-fallback
+ * COALESCE only fires on NULL (a missing row), never on an empty string, so a
+ * stored '' would render a blank fund option to zh donors. Blanking the zh name
+ * on an edit therefore also removes a previously saved zh row. A duplicate
+ * `fund_number` — on the INSERT, or on an UPDATE that moves onto another fund's
+ * number — trips the UNIQUE(fund_number) index and is mapped to a clean
+ * 'fund_number_taken' throw (never a raw 500), mirroring the pre-check-free
+ * race mapping the people/household writers use. Returns the fund id.
  */
 export async function saveFund(
   db: AppDb,
@@ -76,13 +80,16 @@ export async function saveFund(
         .first<{ id: number }>();
       fundId = created!.id;
     }
+    const nameZh = input.name_zh.trim();
     await db.batch([
       db
         .prepare(`INSERT INTO fund_i18n (fund_id, locale, name) VALUES (?1, 'en', ?2) ON CONFLICT (fund_id, locale) DO UPDATE SET name = excluded.name`)
         .bind(fundId, input.name_en),
-      db
-        .prepare(`INSERT INTO fund_i18n (fund_id, locale, name) VALUES (?1, 'zh', ?2) ON CONFLICT (fund_id, locale) DO UPDATE SET name = excluded.name`)
-        .bind(fundId, input.name_zh),
+      nameZh
+        ? db
+            .prepare(`INSERT INTO fund_i18n (fund_id, locale, name) VALUES (?1, 'zh', ?2) ON CONFLICT (fund_id, locale) DO UPDATE SET name = excluded.name`)
+            .bind(fundId, nameZh)
+        : db.prepare(`DELETE FROM fund_i18n WHERE fund_id = ?1 AND locale = 'zh'`).bind(fundId),
     ]);
     return fundId;
   } catch (e) {
