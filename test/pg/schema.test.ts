@@ -1,19 +1,29 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { hasPg, pgClient, resetSchema } from './helpers';
+import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
+
+// The D1 migration files whose CREATE TABLE / ADD COLUMN statements define the
+// shared schema this port must match. 0004 adds the two people giving columns.
+const D1_FILES = ['0001_init.sql', '0002_email.sql', '0003_people.sql', '0004_giving_people.sql'];
 
 describe.skipIf(!hasPg)('Postgres schema port', () => {
   const sql = hasPg ? pgClient() : (null as never);
   beforeAll(async () => {
     await resetSchema(sql);
-    await sql.unsafe(readFileSync('migrations-supabase/0001_init.sql', 'utf8'));
+    // Migrate via the runner so every migrations-supabase/*.sql applies in order
+    // (0001_init + 0002_giving), the way an operator ships it.
+    execFileSync('node', ['scripts/db/migrate-supabase.mjs'], {
+      env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
+      encoding: 'utf8',
+    });
   });
   afterAll(async () => { await sql?.end(); });
 
   it('creates every table the D1 migrations create', async () => {
     // Parse table names straight out of the D1 migration files so this test
     // can never drift from the source of truth.
-    const d1Sql = ['0001_init.sql', '0002_email.sql', '0003_people.sql']
+    const d1Sql = D1_FILES
       .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
       .join('\n');
     const wanted = [...d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)/gi)].map((m) => m[1].toLowerCase());
@@ -29,7 +39,7 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
   it('ports every column of every table', async () => {
     // Column-level parity: extract "name TYPE" pairs per table from the D1 SQL
     // (including ALTER TABLE ADD COLUMN lines) and check information_schema.
-    const d1Sql = ['0001_init.sql', '0002_email.sql', '0003_people.sql']
+    const d1Sql = D1_FILES
       .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
       .join('\n');
     const cols: Array<[string, string]> = [];
