@@ -14,9 +14,12 @@
     "screenshots": "node scripts/screenshots.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "test:e2e:pg": "npm run build && vitest run --config vitest.e2e.pg.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:supabase": "node scripts/db/migrate-supabase.mjs",
     "db:seed:local": "wrangler d1 execute DB --local --file=./seed/dev-seed.sql",
+    "db:seed:supabase": "node scripts/db/seed-supabase.mjs",
     "cf-typegen": "wrangler types",
     "deploy": "astro build && wrangler deploy"
   },
@@ -28,7 +31,8 @@
     "@fontsource-variable/nunito": "^5.2.7",
     "@fontsource-variable/space-grotesk": "^5.2.10",
     "astro": "^7.0.5",
-    "jose": "^6.2.3"
+    "jose": "^6.2.3",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",

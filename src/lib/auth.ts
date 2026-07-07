@@ -4,6 +4,8 @@
 // the reference stack's src/lib/auth.ts, adapted to createLoginToken/createRespondToken
 // (rate limit folded into createLoginToken) with exported TTL/limit constants.
 
+import type { AppDb } from './appDb';
+
 export type TokenPurpose = 'login' | 'respond';
 
 export const LOGIN_TTL_MIN = 15;
@@ -37,7 +39,7 @@ export async function sha256Hex(value: string): Promise<string> {
 }
 
 async function insertToken(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   purpose: TokenPurpose,
   assignmentId: number | null,
@@ -54,7 +56,7 @@ async function insertToken(
 }
 
 /** Login tokens issued for this person within the rate-limit window. */
-async function countRecentLoginTokens(db: D1Database, personId: number): Promise<number> {
+async function countRecentLoginTokens(db: AppDb, personId: number): Promise<number> {
   const row = await db
     .prepare(
       `SELECT COUNT(*) AS n FROM tokens
@@ -70,7 +72,7 @@ async function countRecentLoginTokens(db: D1Database, personId: number): Promise
  * when the person already has LOGIN_RATE_LIMIT login tokens inside the window.
  */
 export async function createLoginToken(
-  db: D1Database,
+  db: AppDb,
   personId: number,
 ): Promise<{ raw: string } | { rateLimited: true }> {
   if ((await countRecentLoginTokens(db, personId)) >= LOGIN_RATE_LIMIT) {
@@ -81,7 +83,7 @@ export async function createLoginToken(
 
 /** Issue an accept/decline token bound to a roster assignment. Not rate limited. */
 export async function createRespondToken(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   assignmentId: number,
 ): Promise<{ raw: string }> {
@@ -93,7 +95,7 @@ export async function createRespondToken(
  * — for the GET confirm page, which must survive mail-scanner prefetches.
  */
 export async function peekToken(
-  db: D1Database,
+  db: AppDb,
   rawToken: string,
   purpose: TokenPurpose,
 ): Promise<TokenRow | null> {
@@ -112,7 +114,7 @@ export async function peekToken(
  * is unknown, expired, already used, or for a different purpose.
  */
 export async function consumeToken(
-  db: D1Database,
+  db: AppDb,
   rawToken: string,
   purpose: TokenPurpose,
 ): Promise<TokenRow | null> {

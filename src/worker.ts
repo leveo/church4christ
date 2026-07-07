@@ -3,6 +3,7 @@ import { sendReminders, sendWeeklyDigest } from './lib/digest';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
+import { getBackend, openDb } from './lib/dbProvider';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -20,19 +21,32 @@ export default {
     clearModuleCache();
     // Each mail pass gates itself on the email_rules toggles; kick it off with
     // waitUntil so the scheduled invocation stays alive until the mail is sent.
-    const vars = env as unknown as EmailEnv & { DB: D1Database };
+    // Only the mail branches touch the database, so only they openDb — a
+    // per-branch db + drainer, released by .finally(end) after the pass (a no-op
+    // on D1). The backup/default branches never open a client to leak.
+    const vars = env as unknown as EmailEnv;
     switch (controller.cron) {
-      case REMINDER_CRON:
-        ctx.waitUntil(sendReminders(vars, vars.DB));
+      case REMINDER_CRON: {
+        const { db, end } = openDb(env as never);
+        ctx.waitUntil(sendReminders(vars, db).finally(end));
         break;
-      case DIGEST_CRON:
-        ctx.waitUntil(sendWeeklyDigest(vars, vars.DB));
+      }
+      case DIGEST_CRON: {
+        const { db, end } = openDb(env as never);
+        ctx.waitUntil(sendWeeklyDigest(vars, db).finally(end));
         break;
+      }
       case BACKUP_CRON:
-        // Log-and-skips when the D1 export vars/secret are unset (demo deploy);
-        // otherwise exports D1 and writes backups/YYYY-MM-DD.sql to R2. The key
-        // date comes from the cron's scheduledTime, not wall clock, so execution
-        // jitter can't shift the backup onto the wrong date.
+        // The D1 SQL export is D1-specific: on the supabase backend, skip it —
+        // Supabase runs its own managed backups (getBackend reads the var without
+        // opening a client). Otherwise export D1 and write backups/YYYY-MM-DD.sql
+        // to R2 (also log-and-skips when the export vars/secret are unset, e.g.
+        // demo deploy). The key date comes from the cron's scheduledTime, not
+        // wall clock, so jitter can't shift the date.
+        if (getBackend(env as never) !== 'd1') {
+          console.log('backup skipped: supabase backend has its own backups');
+          break;
+        }
         ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv, new Date(controller.scheduledTime)));
         break;
       default:

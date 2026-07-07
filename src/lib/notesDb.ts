@@ -5,6 +5,8 @@
 // already gated the request to an admin. Notes are soft-deleted (deleted_at) so
 // history is retained; listNotes excludes soft-deleted rows.
 
+import type { AppDb } from './appDb';
+
 export const NOTE_MAX_LEN = 4000;
 
 export interface PersonNote {
@@ -21,7 +23,7 @@ export interface PersonNote {
  * errors). Returns the new note id.
  */
 export async function addNote(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   authorEmail: string,
   body: string,
@@ -29,15 +31,15 @@ export async function addNote(
   const trimmed = body.trim();
   if (!trimmed) throw new Error('note_empty');
   if (trimmed.length > NOTE_MAX_LEN) throw new Error('note_too_long');
-  const r = await db
-    .prepare(`INSERT INTO person_notes (person_id, author_email, body) VALUES (?, ?, ?)`)
+  const created = await db
+    .prepare(`INSERT INTO person_notes (person_id, author_email, body) VALUES (?, ?, ?) RETURNING id`)
     .bind(personId, authorEmail, trimmed)
-    .run();
-  return r.meta.last_row_id as number;
+    .first<{ id: number }>();
+  return created!.id;
 }
 
 /** Soft-delete a note (idempotent — already-deleted rows do not move). Returns true when a row was deleted. */
-export async function softDeleteNote(db: D1Database, noteId: number): Promise<boolean> {
+export async function softDeleteNote(db: AppDb, noteId: number): Promise<boolean> {
   const r = await db
     .prepare(`UPDATE person_notes SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`)
     .bind(noteId)
@@ -46,7 +48,7 @@ export async function softDeleteNote(db: D1Database, noteId: number): Promise<bo
 }
 
 /** A person's live notes, newest first. */
-export async function listNotes(db: D1Database, personId: number): Promise<PersonNote[]> {
+export async function listNotes(db: AppDb, personId: number): Promise<PersonNote[]> {
   const { results } = await db
     .prepare(
       `SELECT id, person_id, author_email, body, created_at

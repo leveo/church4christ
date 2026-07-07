@@ -58,6 +58,38 @@ Editable content (bulletins, sermons, announcements, events, prayer sheets) is w
 with a **full-snapshot revision** in the same `db.batch`, which is what powers the
 one-click "restore an earlier version" throughout the admin area.
 
+## The database seam: D1 or Postgres
+
+Every data-access helper talks to an **`AppDb`** interface rather than to D1 directly
+(`src/lib/appDb.ts`). `AppDb` is deliberately shaped like Cloudflare's D1 binding —
+`prepare(...).bind(...).first/all/run` plus `batch(...)` — so the **D1 binding satisfies it
+structurally, with no adapter and no copy** (a compile-time check in `appDb.ts` fails
+`astro check` if a future D1 type bump ever breaks that). That one seam lets the whole app
+run on either of two databases:
+
+- **Cloudflare D1** (the default) — the `DB` binding *is* the `AppDb`. This is the
+  zero-setup, free path the rest of these docs assume.
+- **Postgres / Supabase** — `PgAdapter` (`src/lib/pgAdapter.ts`) implements the same
+  interface over the `postgres.js` driver, reached through the Cloudflare **Hyperdrive**
+  binding. It rewrites D1/SQLite `?` placeholders to Postgres `$n` on the way to the driver
+  and runs a `batch` as one real transaction.
+
+**Which backend runs** is the `DB_BACKEND` var: `getBackend` (`src/lib/dbProvider.ts`) reads
+it and returns `'supabase'` only for the exact string `supabase`, and `'d1'` for everything
+else (including unset). `openDb` then returns a **per-request** `{ db, backend, end }` — on
+D1 a zero-copy passthrough whose `end()` is a no-op; on Postgres a fresh postgres.js client
+over Hyperdrive (Workers sockets are request-scoped, so the client is never cached across
+requests) whose `end()` drains it after the response. The middleware opens this once per
+request and hands the page `locals.db` and `locals.dbBackend` (`src/middleware.ts`); the
+`scheduled` handler opens its own for the cron jobs that touch data.
+
+**Two modules require Postgres.** `giving` and `registration` are marked
+`requiresBackend: 'supabase'` in `src/lib/modules.ts`, and `getEnabledModules` force-disables
+any such module on a mismatched backend — so both stay off on D1 even when their settings row
+says on. They need Stripe, subscriptions, and checkout state that SQLite-scale D1 is not the
+right home for; see [`docs/supabase-setup.md`](supabase-setup.md) and
+[`docs/features/giving.md`](features/giving.md).
+
 ## Media & backups: Cloudflare R2
 
 Uploaded images live in **R2** under the `uploads/` prefix and are served back only
@@ -89,8 +121,11 @@ config is absent, so the demo deploy runs all its crons without backups configur
 
 ## Testing
 
-The system is covered by **over 490 automated tests**. Unit and integration tests run in
+The system is covered by **over 900 automated tests**. Unit and integration tests run in
 the Cloudflare Workers test pool (`vitest`), end-to-end tests run against the actual built
 Worker (`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and
-checks routing, i18n, the health probe, and the security headers over HTTP. See
+checks routing, i18n, the health probe, and the security headers over HTTP. A separate `pg`
+project and `vitest.e2e.pg.config.ts` run the same kind of coverage for **Giving** and
+**Registration** against a real Postgres database — self-skipped when no `DATABASE_URL` is
+set, so the default D1 suite never depends on Postgres being available. See
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to run each suite.

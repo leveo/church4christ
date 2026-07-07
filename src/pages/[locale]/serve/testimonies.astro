@@ -5,7 +5,6 @@
 // name is optional (blank → "Anonymous 匿名"); title + body are required. The
 // row's locale is the current page locale. A honeypot field silently absorbs
 // bots. Signed-in visitors get their name prefilled and their person_id linked.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -20,7 +19,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const ANON = 'Anonymous 匿名';
 const MAX_BODY = 5000;
 

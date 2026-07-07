@@ -10,7 +10,11 @@
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["serve@church.yunfei-song.com"] }],
   "vars": {
     "APP_ORIGIN": "https://church.yunfei-song.com",
-    "EMAIL_FROM": "serve@church.yunfei-song.com"
+    "EMAIL_FROM": "serve@church.yunfei-song.com",
+    // Database backend: "d1" (default) or "supabase". With "supabase" the worker
+    // reads/writes Postgres over the HYPERDRIVE binding below; see the commented
+    // hyperdrive block and docs/supabase-setup.md.
+    "DB_BACKEND": "d1"
     // Nightly D1→R2 backup (src/lib/backup.ts): uncomment and fill both vars
     // below, then run `wrangler secret put D1_EXPORT_TOKEN`. All three must be
     // set together; if any is missing the backup cron logs "backup skipped: not
@@ -26,6 +30,9 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Supabase backend (docs/supabase-setup.md): set DB_BACKEND to "supabase",
+  // uncomment, and paste the id from `wrangler hyperdrive create`.
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "YOUR_HYPERDRIVE_ID" }],
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "church4christ-media" }
   ],

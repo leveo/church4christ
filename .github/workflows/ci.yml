@@ -18,6 +18,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # Postgres for the Supabase-backend test layer (the pg vitest project + the
+    # Postgres-backed e2e). The D1 steps never touch it; the pg suites self-skip
+    # when DATABASE_URL is unset, so this service is the only thing that turns
+    # them on in CI.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,3 +80,28 @@ jobs:
 
       - name: End-to-end tests (built worker)
         run: npm run test:e2e
+
+      # ── Supabase (Postgres) backend ─────────────────────────────────────────
+      # Re-prove the data layer against Postgres using the service container
+      # above. The migrate + seed scripts read SUPABASE_DB_URL; the vitest pg
+      # project and the Postgres e2e read DATABASE_URL. The URL is the service's
+      # mapped port on localhost.
+      - name: Apply Supabase migrations (Postgres)
+        run: npm run db:migrate:supabase
+        env:
+          SUPABASE_DB_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: Seed demo data (Postgres)
+        run: npm run db:seed:supabase
+        env:
+          SUPABASE_DB_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: Postgres backend tests (pg project)
+        run: npx vitest run --project pg
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: End-to-end tests (Postgres worker)
+        run: npm run test:e2e:pg
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres

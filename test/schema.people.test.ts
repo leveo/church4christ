@@ -81,6 +81,28 @@ describe('people membership columns', () => {
   });
 });
 
+// Migration 0004 keeps the shared `people` schema identical on both backends: the
+// giving module is Supabase-only, but these two columns land on D1 too.
+describe('people giving columns (migration 0004)', () => {
+  it('adds finance and stripe_customer_id', async () => {
+    const { results } = await env.DB.prepare('PRAGMA table_info(people)').all<{ name: string }>();
+    const cols = results.map((r) => r.name);
+    for (const col of ['finance', 'stripe_customer_id']) {
+      expect(cols).toContain(col);
+    }
+  });
+
+  it('defaults finance to 0 and stripe_customer_id to NULL', async () => {
+    await person(1, 'f@example.com');
+    const row = await env.DB.prepare('SELECT finance, stripe_customer_id FROM people WHERE id = 1').first<{
+      finance: number;
+      stripe_customer_id: string | null;
+    }>();
+    expect(row?.finance).toBe(0);
+    expect(row?.stripe_customer_id).toBeNull();
+  });
+});
+
 describe('household_members constraints', () => {
   it('rejects a role outside adult/child', async () => {
     const h = await household();

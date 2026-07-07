@@ -74,7 +74,7 @@ particular tech stack — is in [**`docs/why-this-stack.md`**](docs/why-this-sta
 You do not have to be a developer to run this project. This repository is written to be
 **read by an AI coding assistant** — tools like [Claude Code](https://www.claude.com/product/claude-code)
 or Codex. Every feature has a plain-English guide in [`docs/features/`](docs/features/),
-and the code is covered by **over 490 automated tests**, so an assistant can make changes
+and the code is covered by **over 900 automated tests**, so an assistant can make changes
 with confidence and you can tell whether they worked.
 
 The idea: open this project with an AI assistant, describe what you want in normal
@@ -118,6 +118,8 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
 | [![](docs/images/admin/person-detail.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Give everyone a profile — families, membership status, private pastoral notes, and a board that connects members to serving. |
+| [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Receive card gifts online through Stripe, record checks and cash by hand, and let every family see its own giving history. |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Put events online for sign-up — free or paid through Stripe — with your own questions and a roster you can export. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and a weekly digest that send themselves. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
@@ -182,6 +184,11 @@ clicks. The guide covers the first-admin setup and email so a real congregation 
 using the site the same day. Deployment is manual on purpose — your Cloudflare keys never
 have to touch a public repo.
 
+**Choosing your database.** The default setup uses Cloudflare **D1** and needs no extra
+accounts. It runs everything except online **Giving** and **Registration**, which need
+Postgres and Stripe and run on a free **Supabase** database instead. Want those two? Follow
+[**`docs/supabase-setup.md`**](docs/supabase-setup.md). You can start on D1 and switch later.
+
 ---
 
 ## What's under the hood
@@ -195,7 +202,7 @@ big part of why the site loads quickly and costs so little to run.
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 490 automated
+each with a light and a dark mode. And the code is held together by **over 900 automated
 tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
 
 **Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;

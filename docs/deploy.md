@@ -13,6 +13,13 @@ an AI assistant").
 > R2 all have free allowances. A custom domain is the only thing you might pay for, and only
 > if you do not already own one.
 
+> **Which database?** This guide uses **D1**, the default — no extra accounts, simplest
+> setup, and it runs everything except online **Giving** and **Registration**. Those two
+> modules need Postgres and Stripe, which run on **Supabase** instead. If you want them,
+> follow [`supabase-setup.md`](./supabase-setup.md) for the database and Stripe parts and
+> come back here for the rest (domain, email, first admin). You can start on D1 and switch
+> later.
+
 ## Before you start
 
 You need:

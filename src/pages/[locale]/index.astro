@@ -5,7 +5,6 @@
 // pulls all user-visible strings from the dictionaries. DB reads fail soft to
 // empty so a database hiccup degrades the page instead of 500ing it — the same
 // pattern as give.astro.
-import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
 import Hero from '../../components/Hero.astro';
 import Ticker from '../../components/Ticker.astro';
@@ -46,7 +45,7 @@ let serviceTimes = '';
 let address = '';
 let phone = '';
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   const today = todayInTz();
   const [a, e, s, m, identity] = await Promise.all([
     listActiveAnnouncements(db, locale, today),

@@ -52,8 +52,9 @@ import {
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const hasPeople = Astro.locals.modules.has('people');
+const hasGiving = Astro.locals.modules.has('giving');
 const ROLES = ['member', 'editor', 'admin'] as const;
 
 const rawId = Astro.params.id ?? '';
@@ -89,7 +90,13 @@ if (Astro.request.method === 'POST') {
   if (action === 'flags' && id !== null) {
     const roleRaw = String(fd.get('role') ?? '');
     const role = ROLES.find((r) => r === roleRaw);
-    await setPersonFlags(db, id, { role, active: fd.get('active') !== null });
+    // The finance flag (giving admin access) is only shown — and only read — when
+    // the giving module is on; a crafted POST while off is ignored, leaving it as set.
+    await setPersonFlags(db, id, {
+      role,
+      active: fd.get('active') !== null,
+      ...(hasGiving ? { finance: fd.get('finance') !== null } : {}),
+    });
     return Astro.redirect(`/admin/people/${id}?saved=1`, 303);
   }
 
@@ -350,6 +357,12 @@ const summaryErrors = Object.entries(errors)
             <input type="checkbox" name="active" checked={person.active === 1} />
             <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
           </label>
+          {hasGiving && (
+            <label class="flex items-center gap-2">
+              <input type="checkbox" name="finance" checked={person.finance === 1} />
+              <span class="text-sm">{t(lang, 'admin.people.finance')}</span>
+            </label>
+          )}
           <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
         </form>
 

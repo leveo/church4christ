@@ -3,6 +3,7 @@
 // lead (via SessionUser.leaderTeamIds). Ported from the reference stack's adminOverviewDb,
 // adapted to church-cms: localized names come from *_i18n companion tables,
 // hrefs are locale-prefixed serve routes, and testimonies use the shared status.
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import type { SessionUser } from './types';
 
@@ -13,14 +14,17 @@ export interface StatCard {
   key: 'people' | 'ministries' | 'plans' | 'apps' | 'members' | 'unfilled';
 }
 
+// `clause` is spliced straight into a WHERE, so its no-team/all-scope fallbacks are
+// the SQL boolean literals TRUE/FALSE, not 1/0 — Postgres's WHERE demands a boolean
+// (SQLite/D1 accept the TRUE/FALSE keywords too, so both backends agree).
 function leaderTeamFilter(user: SessionUser): { clause: string; binds: number[] } {
-  if (user.leaderTeamIds.length === 0) return { clause: '0', binds: [] };
+  if (user.leaderTeamIds.length === 0) return { clause: 'FALSE', binds: [] };
   const placeholders = user.leaderTeamIds.map(() => '?').join(',');
   return { clause: `teams.id IN (${placeholders})`, binds: user.leaderTeamIds };
 }
 
 /** Four headline counts for the Overview cards, scoped by role. */
-export async function getStats(db: D1Database, scope: Scope, user: SessionUser, fromDate: string): Promise<StatCard[]> {
+export async function getStats(db: AppDb, scope: Scope, user: SessionUser, fromDate: string): Promise<StatCard[]> {
   if (scope === 'admin') {
     const [people, ministries, plans, apps] = await Promise.all([
       db.prepare(`SELECT COUNT(*) AS n FROM people WHERE active = 1 AND deleted_at IS NULL`).first<{ n: number }>(),
@@ -92,7 +96,7 @@ export interface AttentionItem {
  * locale-prefixed serve routes.
  */
 export async function getNeedsAttention(
-  db: D1Database,
+  db: AppDb,
   scope: Scope,
   user: SessionUser,
   fromDate: string,
@@ -100,7 +104,7 @@ export async function getNeedsAttention(
   locale: Locale,
 ): Promise<AttentionItem[]> {
   const items: AttentionItem[] = [];
-  const { clause, binds } = scope === 'leader' ? leaderTeamFilter(user) : { clause: '1', binds: [] as number[] };
+  const { clause, binds } = scope === 'leader' ? leaderTeamFilter(user) : { clause: 'TRUE', binds: [] as number[] };
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
 
@@ -114,22 +118,28 @@ export async function getNeedsAttention(
       ? db.prepare(`SELECT COUNT(*) AS n FROM testimonies WHERE status = 'P' AND deleted_at IS NULL`).first<{ n: number }>()
       : Promise.resolve(null),
     db.prepare(
-      `SELECT plans.id AS id, plans.plan_date AS plan_date, COALESCE(st_l.name, st_d.name) AS service_name,
-              SUM(MAX(0, plan_positions.needed - (
-                SELECT COUNT(*) FROM roster_assignments
-                WHERE roster_assignments.plan_id = plan_positions.plan_id
-                  AND roster_assignments.position_id = plan_positions.position_id
-                  AND roster_assignments.status != 'D' AND roster_assignments.deleted_at IS NULL))) AS gap
-       FROM plan_positions
-       JOIN plans ON plans.id = plan_positions.plan_id AND plans.deleted_at IS NULL
-         AND plans.plan_date >= ?1 AND plans.plan_date <= ?2
-       JOIN service_types st ON st.id = plans.service_type_id
-       ${stJ.joins}
-       JOIN positions ON positions.id = plan_positions.position_id
-       JOIN teams ON teams.id = positions.team_id
-       WHERE ${clause}
-       GROUP BY plans.id HAVING gap > 0
-       ORDER BY plans.plan_date LIMIT 3`,
+      // The gap filter is an outer WHERE over a grouped subquery: Postgres (unlike
+      // SQLite) rejects a SELECT alias in HAVING, and both accept filtering the
+      // alias one level out.
+      `SELECT id, plan_date, service_name, gap FROM (
+         SELECT plans.id AS id, plans.plan_date AS plan_date, COALESCE(st_l.name, st_d.name) AS service_name,
+                SUM(MAX(0, plan_positions.needed - (
+                  SELECT COUNT(*) FROM roster_assignments
+                  WHERE roster_assignments.plan_id = plan_positions.plan_id
+                    AND roster_assignments.position_id = plan_positions.position_id
+                    AND roster_assignments.status != 'D' AND roster_assignments.deleted_at IS NULL))) AS gap
+         FROM plan_positions
+         JOIN plans ON plans.id = plan_positions.plan_id AND plans.deleted_at IS NULL
+           AND plans.plan_date >= ?1 AND plans.plan_date <= ?2
+         JOIN service_types st ON st.id = plans.service_type_id
+         ${stJ.joins}
+         JOIN positions ON positions.id = plan_positions.position_id
+         JOIN teams ON teams.id = positions.team_id
+         WHERE ${clause}
+         GROUP BY plans.id, plans.plan_date, st_l.name, st_d.name
+       ) plan_gaps
+       WHERE gap > 0
+       ORDER BY plan_date LIMIT 3`,
     ).bind(fromDate, toDate, ...binds).all<{ id: number; plan_date: string; service_name: string; gap: number }>(),
     db.prepare(
       `SELECT people.display_name AS name, plans.plan_date AS plan_date, COALESCE(pos_l.name, pos_d.name) AS position_name
@@ -189,7 +199,7 @@ export interface ServeReportRow {
 }
 
 /** Per-person serving tallies since `fromDate`, busiest first. Admin-only. */
-export async function listServeReport(db: D1Database, fromDate: string, today: string): Promise<ServeReportRow[]> {
+export async function listServeReport(db: AppDb, fromDate: string, today: string): Promise<ServeReportRow[]> {
   const { results } = await db
     .prepare(
       `SELECT people.id AS person_id, people.display_name AS name, people.email AS email,

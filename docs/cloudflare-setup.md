@@ -29,6 +29,13 @@ All four have a **free allowance** that a normal church website stays comfortabl
 You are only ever billed if a site gets very large or very busy — and Cloudflare warns you
 long before that.
 
+> **One choice to know about: your database.** The **D1** filing cabinet above is the
+> default and runs everything except online **Giving** and **Registration** (paid event
+> sign-ups). Those two need a Postgres database and Stripe, so they run on a free service
+> called **Supabase** instead. Most churches start on D1 and never look back; if you want
+> giving or paid registration, [`supabase-setup.md`](./supabase-setup.md) is the plain-language
+> guide for that path. You can switch later — nothing is lost.
+
 ## What it costs — honestly
 
 - **The website itself: $0/month** on Cloudflare's free tier.

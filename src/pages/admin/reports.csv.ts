@@ -1,5 +1,4 @@
 import type { APIRoute } from 'astro';
-import { env } from 'cloudflare:workers';
 import { listServeReport } from '../../lib/adminOverviewDb';
 import { csvCell } from '../../lib/csv';
 import { addDays, todayInTz } from '../../lib/dates';
@@ -7,8 +6,8 @@ import { addDays, todayInTz } from '../../lib/dates';
 export const prerender = false;
 
 // CSV export of the serving report (admin only — routePolicy gates /admin/reports*).
-export const GET: APIRoute = async ({ url }) => {
-  const db = (env as { DB: D1Database }).DB;
+export const GET: APIRoute = async ({ url, locals }) => {
+  const db = locals.db;
   const months = Math.min(60, Math.max(1, Number(url.searchParams.get('months')) || 12));
   const today = todayInTz();
   const rows = await listServeReport(db, addDays(today, -months * 30), today);

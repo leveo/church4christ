@@ -34,7 +34,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 // Stricter than the route class: leaders of ANY team or admins only.
 const canViewOthers = user.isAdmin || user.leaderTeamIds.length > 0;

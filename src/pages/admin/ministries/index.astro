@@ -51,8 +51,8 @@ import { sendEmail, type EmailEnv } from '../../../lib/email';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const vars = env as unknown as EmailEnv & { DB: D1Database };
-const db = vars.DB;
+const vars = env as unknown as EmailEnv;
+const db = Astro.locals.db;
 
 // Page-level gate: the volunteer console is for team leaders and admins only.
 const canAdmin = user.isAdmin;

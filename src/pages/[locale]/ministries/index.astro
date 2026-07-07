@@ -3,7 +3,6 @@
 // groups (ministryMeta), each rendered as a section with a heading. Empty groups
 // are skipped; cards badge open serving roles. DB read fails soft to an empty
 // list so a database hiccup degrades to the "nothing yet" state instead of 500.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import SectionTitle from '../../../components/SectionTitle.astro';
 import MinistryCard from '../../../components/MinistryCard.astro';
@@ -20,7 +19,7 @@ if (!locale) {
 
 let ministries: Awaited<ReturnType<typeof listMinistries>> = [];
 try {
-  ministries = await listMinistries((env as { DB: D1Database }).DB, locale);
+  ministries = await listMinistries(Astro.locals.db, locale);
 } catch (err) {
   console.error('ministries index: load failed', err);
 }

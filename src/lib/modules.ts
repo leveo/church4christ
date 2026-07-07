@@ -5,9 +5,13 @@
 // and soft `uses` (degrade-only, no hard deps). `moduleForPath` is the middleware
 // choke point's classifier; `getEnabledModules` reads the `module.<key>` settings
 // with the same per-isolate 60s cache the theme uses.
+import type { AppDb } from './appDb';
+import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 11 module keys, in display order (drives the admin Modules panel + nav).
+// The 13 module keys, in display order (drives the admin Modules panel + nav).
+// `giving` and `registration` are appended last: they are backend-gated (Supabase
+// only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
   'bulletins',
   'sermons',
@@ -20,6 +24,8 @@ export const MODULE_KEYS = [
   'articles',
   'fellowships',
   'people',
+  'giving',
+  'registration',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -33,6 +39,9 @@ export interface ModuleDef {
   navKeys: string[];
   /** Soft dependencies — degrade-only cross-links, never hard gates. */
   uses: ModuleKey[];
+  /** Backend requirement: when set, the module is force-disabled on any other
+   *  backend (the filter in getEnabledModules wins over its settings row). */
+  requiresBackend?: 'supabase';
 }
 
 // Per-module route ownership. Notes: `/profile` stays CORE (auth surface), so it
@@ -111,6 +120,20 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     navKeys: [],
     uses: ['serve'],
   },
+  giving: {
+    publicPrefixes: ['/give/checkout', '/my/giving', '/api/giving'],
+    adminPrefixes: ['/admin/giving'],
+    navKeys: [],
+    uses: ['people'],
+    requiresBackend: 'supabase',
+  },
+  registration: {
+    publicPrefixes: ['/register', '/api/register'],
+    adminPrefixes: ['/admin/registration'],
+    navKeys: ['nav.register'],
+    uses: [],
+    requiresBackend: 'supabase',
+  },
 };
 
 // Flattened [prefix, key] pairs, built once. Every prefix a module owns (public
@@ -150,7 +173,7 @@ export function moduleForPath(path: string): ModuleKey | null {
 // admin save clears this (task 2 calls clearModuleCache) so a toggle takes effect
 // on the next request in the writing isolate; others catch up within the TTL.
 const CACHE_TTL_MS = 60_000;
-let cache: { value: Set<ModuleKey>; expiresAt: number } | null = null;
+let cache: { value: Set<ModuleKey>; backend: DbBackend; expiresAt: number } | null = null;
 
 /** Drop the cached enabled set (tests + admin save after a module toggle). */
 export function clearModuleCache(): void {
@@ -158,23 +181,43 @@ export function clearModuleCache(): void {
 }
 
 /**
+ * Drop modules whose `requiresBackend` doesn't match `backend` — the backend gate
+ * wins over any settings row, so e.g. `giving`/`registration` (supabase-only) stay
+ * off on D1. Pure; shared by {@link getEnabledModules} and the middleware's
+ * fail-safe so the two can't drift (a fail-safe that skipped this filter would
+ * enable a supabase-only module on D1, and its core routes would hit a
+ * nonexistent table).
+ */
+export function filterByBackend(keys: Iterable<ModuleKey>, backend: DbBackend): Set<ModuleKey> {
+  const out = new Set<ModuleKey>();
+  for (const key of keys) {
+    const req = MODULES[key].requiresBackend;
+    if (req && req !== backend) continue;
+    out.add(key);
+  }
+  return out;
+}
+
+/**
  * The set of enabled modules from the `module.<key>` settings, cached per-isolate
  * for {@link CACHE_TTL_MS}. Absent rows read as enabled (default ON), and any
  * value other than the exact string '0' also counts as enabled — '0' is the only
- * disable. May throw if the DB is unavailable; the middleware guards that to
- * all-enabled so a fresh install never 500s.
+ * disable. The backend filter ({@link filterByBackend}) then force-drops any
+ * module whose `requiresBackend` doesn't match, so e.g. `giving` stays off on D1
+ * even if `module.giving='1'`. The cache key includes `backend`, so a read for a
+ * different backend misses rather than serving the wrong set. May throw if the DB
+ * is unavailable; the middleware guards that to a backend-filtered all-enabled set
+ * so a fresh install never 500s.
  */
-export async function getEnabledModules(db: D1Database): Promise<Set<ModuleKey>> {
+export async function getEnabledModules(db: AppDb, backend: DbBackend): Promise<Set<ModuleKey>> {
   const now = Date.now();
-  if (cache && cache.expiresAt > now) return cache.value;
+  if (cache && cache.backend === backend && cache.expiresAt > now) return cache.value;
   const rows = await getSettings(
     db,
     MODULE_KEYS.map((key) => `module.${key}`),
   );
-  const enabled = new Set<ModuleKey>();
-  for (const key of MODULE_KEYS) {
-    if (rows[`module.${key}`] !== '0') enabled.add(key);
-  }
-  cache = { value: enabled, expiresAt: now + CACHE_TTL_MS };
+  const settingsEnabled = MODULE_KEYS.filter((key) => rows[`module.${key}`] !== '0');
+  const enabled = filterByBackend(settingsEnabled, backend);
+  cache = { value: enabled, backend, expiresAt: now + CACHE_TTL_MS };
   return enabled;
 }

@@ -13,14 +13,17 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-worker
 // it here with a comment.
 const NODE_ONLY = ['test/tokens.test.ts', 'test/themeMeta.test.ts'];
 
-// Two projects in one config, classified by convention (see NODE_ONLY above):
+// Three projects in one config, classified by convention (see NODE_ONLY above):
 //  - `node`:    pure logic tests that need a real node filesystem/process.
-//  - `workers`: everything else — runs in workerd via the pool with a live D1
-//               binding (asserted queryable in test/security-headers.test.ts).
+//  - `workers`: everything else under test/ — runs in workerd via the pool with a
+//               live D1 binding (asserted queryable in test/security-headers.test.ts).
 //               migrations/0001_init.sql (added in slice 2) is applied by
 //               test/setup.ts's applyD1Migrations call before test/schema.test.ts's
 //               assertions run. Glob-included so any new test/*.test.ts is picked
-//               up automatically.
+//               up automatically (test/pg/** is excluded — it runs in the pg project).
+//  - `pg`:      the Postgres-backend test layer (test/pg/**). Runs in plain node
+//               against a real Postgres via postgres.js. Every suite self-skips when
+//               DATABASE_URL is unset, so `npm test` stays green with no Postgres.
 export default defineConfig(async () => {
   const migrations = await readD1Migrations('./migrations');
   return {
@@ -45,8 +48,22 @@ export default defineConfig(async () => {
           test: {
             name: 'workers',
             include: ['test/**/*.test.ts'],
-            exclude: ['test/e2e/**', ...NODE_ONLY],
+            exclude: ['test/e2e/**', 'test/e2e-pg/**', 'test/pg/**', ...NODE_ONLY],
             setupFiles: ['./test/setup.ts'],
+          },
+        },
+        {
+          test: {
+            name: 'pg',
+            include: ['test/pg/**/*.test.ts'],
+            environment: 'node',
+            testTimeout: 20_000,
+            // Every pg suite shares one database and resets it with
+            // `DROP SCHEMA public CASCADE` in beforeAll; running the files in
+            // parallel lets one suite drop the schema (or re-run the migration's
+            // CREATE OR REPLACE FUNCTION) out from under another. Serialize the
+            // files. Scoped to this project only — node/workers stay parallel.
+            fileParallelism: false,
           },
         },
       ],

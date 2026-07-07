@@ -8,12 +8,11 @@
 // effect on the very next render → 303 ?saved=1. The Admin shell reads the active
 // theme, so this page (and the whole site) restyles immediately after a save.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
-import { MODULE_KEYS, clearModuleCache, type ModuleKey } from '../../../lib/modules';
+import { MODULE_KEYS, MODULES, clearModuleCache, type ModuleKey } from '../../../lib/modules';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
@@ -23,7 +22,7 @@ export const prerender = false;
 const user = Astro.locals.user;
 if (!user || !user.isAdmin) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const KEYS = [
   'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',
@@ -45,7 +44,7 @@ if (Astro.request.method === 'POST') {
   const parsed = parseSettingsForm(fd);
   if (parsed.ok) {
     if (isModules) {
-      // The Modules panel is its OWN form: it writes ALL 11 module.<key> rows
+      // The Modules panel is its OWN form: it writes ALL 13 module.<key> rows
       // explicitly — a checked box posts '1' (in parsed.data), an unchecked box
       // is absent → we write '0'. This deliberate full write does NOT rely on the
       // parser's partial-update semantics, so unchecking truly disables a module.
@@ -85,10 +84,13 @@ const h2 = 'font-display text-heading-sm font-bold';
 
 // Modules panel: grouped checkboxes over the `module.<key>` toggles. Current
 // state comes from locals.modules (the middleware's enabled set); absent = on.
+// `giving`/`registration` are backend-gated: on any backend other than the one
+// they require, their row renders disabled with a note (dbBackend drives that).
 const enabledModules = Astro.locals.modules;
+const dbBackend = Astro.locals.dbBackend;
 const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
   { titleKey: 'admin.settings.modulesContentGroup', keys: ['bulletins', 'sermons', 'prayer-sheets', 'articles', 'fellowships'] },
-  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people'] },
+  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people', 'giving', 'registration'] },
   { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: ['serve', 'gifts'] },
 ];
 ---
@@ -226,21 +228,27 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
         moduleGroups.map((group) => (
           <fieldset class="space-y-3">
             <legend class={lab}>{t(lang, group.titleKey)}</legend>
-            {group.keys.map((key) => (
-              <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
-                <input
-                  type="checkbox"
-                  name={`module.${key}`}
-                  value="1"
-                  checked={enabledModules.has(key)}
-                  class="mt-1 h-4 w-4 shrink-0"
-                />
-                <span>
-                  <span class="block text-sm font-semibold text-ink">{t(lang, `modules.${key}.label`)}</span>
-                  <span class="block text-sm text-ink-muted">{t(lang, `modules.${key}.desc`)}</span>
-                </span>
-              </label>
-            ))}
+            {group.keys.map((key) => {
+              const req = MODULES[key].requiresBackend;
+              const gated = req !== undefined && req !== dbBackend;
+              return (
+                <label class={`flex items-start gap-3 rounded-lg border border-border p-3 ${gated ? 'opacity-60' : 'cursor-pointer'}`}>
+                  <input
+                    type="checkbox"
+                    name={`module.${key}`}
+                    value="1"
+                    checked={enabledModules.has(key)}
+                    disabled={gated}
+                    class="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    <span class="block text-sm font-semibold text-ink">{t(lang, `modules.${key}.label`)}</span>
+                    <span class="block text-sm text-ink-muted">{t(lang, `modules.${key}.desc`)}</span>
+                    {gated && <span class="block text-sm text-ink-muted">{t(lang, 'admin.modules.requiresSupabase')}</span>}
+                  </span>
+                </label>
+              );
+            })}
           </fieldset>
         ))
       }

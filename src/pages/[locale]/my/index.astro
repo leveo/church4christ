@@ -26,7 +26,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const idOf = (v: FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
@@ -90,6 +90,13 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     <div class="mt-3 flex flex-wrap gap-2 text-sm">
       <a href={localePath(locale, '/my/calendar')} class={btnSecondary}>{t(locale, 'my.calendar')}</a>
       <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
+      {
+        Astro.locals.modules.has('giving') && (
+          <a href={localePath(locale, '/my/giving')} class={btnSecondary}>
+            {t(locale, 'my.giving.title')}
+          </a>
+        )
+      }
       <a href={localePath(locale, '/profile')} class={btnSecondary}>{t(locale, 'profile.title')}</a>
     </div>
 

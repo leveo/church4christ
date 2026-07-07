@@ -1,0 +1,68 @@
+---
+// Public registration index: every currently-open event as a card (title, date,
+// location, price-or-Free, a Full badge when at capacity). Uses the same open-
+// window query the admin roster reads. Reads fail soft to empty so a database
+// hiccup degrades to the "nothing open" state rather than 500ing. Owned by the
+// `registration` module — the middleware 404s this route when the module is off.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { listOpenEvents, type RegEvent } from '../../../lib/regDb';
+import { badge, badgeInactive } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let events: RegEvent[] = [];
+try {
+  events = await listOpenEvents(Astro.locals.db, locale);
+} catch (err) {
+  console.error('register index: load failed', err);
+}
+
+const priceLabel = (e: RegEvent) =>
+  e.price_cents !== null && e.price_cents > 0 ? `$${(e.price_cents / 100).toFixed(2)}` : t(locale, 'register.free');
+const isFull = (e: RegEvent) => e.capacity !== null && e.taken_count >= e.capacity;
+const when = (e: RegEvent) => `${formatDate(e.starts_at.slice(0, 10), locale)} ${e.starts_at.slice(11, 16)}`;
+---
+
+<Base title={t(locale, 'register.title')} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <h1 class="font-display text-display-lg font-bold">{t(locale, 'register.title')}</h1>
+      <p class="mt-3 text-lg">{t(locale, 'register.intro')}</p>
+    </div>
+  </div>
+
+  <div class="container-content py-10">
+    {
+      events.length > 0 ? (
+        <ul class="grid gap-4 sm:grid-cols-2">
+          {events.map((e) => (
+            <li class="rounded-xl border border-border bg-surface-raised p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-3">
+                <h2 class="font-display text-lg font-bold">
+                  <a href={localePath(locale, `/register/${e.id}`)} class="hover:underline">
+                    {e.title}
+                  </a>
+                </h2>
+                {isFull(e) && <span class={`${badge} ${badgeInactive}`}>{t(locale, 'register.full')}</span>}
+              </div>
+              <p class="mt-2 text-sm text-ink-muted">{when(e)}</p>
+              {e.location && <p class="text-sm text-ink-muted">{e.location}</p>}
+              <p class="mt-3 text-sm font-semibold">{priceLabel(e)}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p class="rounded-md border border-border bg-surface-raised px-4 py-8 text-center text-ink-muted">
+          {t(locale, 'register.empty')}
+        </p>
+      )
+    }
+  </div>
+</Base>

@@ -4,12 +4,11 @@
 // the pure helper, then 303 back to the submitting page with a ?prayer= flag and
 // the #prayer anchor so the form's banner + scroll position line up.
 import type { APIRoute } from 'astro';
-import { env } from 'cloudflare:workers';
 import { safeReturnPath, submitPrayerRequest, type PrayerOutcome } from '../../lib/prayerRequest';
 
 export const prerender = false;
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   const origin = new URL(request.url).origin;
   const back = (status: PrayerOutcome): Response => {
     const path = safeReturnPath(request.headers.get('referer'), origin);
@@ -23,6 +22,6 @@ export const POST: APIRoute = async ({ request }) => {
     return back('error');
   }
 
-  const outcome = await submitPrayerRequest((env as { DB: D1Database }).DB, form);
+  const outcome = await submitPrayerRequest(locals.db, form);
   return back(outcome);
 };

@@ -2,7 +2,6 @@
 // Sermons archive landing: the latest year's published sermons grouped by month,
 // with year-nav pills into /sermons/[year]. DB reads fail soft to empty so a
 // database hiccup degrades to the "coming soon" state instead of a 500.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import SermonMonthGrid from '../../../components/SermonMonthGrid.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -18,7 +17,7 @@ if (!locale) {
 let years: number[] = [];
 let sermons: SermonRow[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   years = await listSermonYears(db);
   sermons = years.length ? await listSermonsByYear(db, years[0], locale) : [];
 } catch (err) {

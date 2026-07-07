@@ -9,6 +9,9 @@ export type SessionUser = {
   role: 'member' | 'editor' | 'admin';
   isAdmin: boolean;
   isEditor: boolean;
+  // Finance-team flag (people.finance): grants the `finance` route class (the
+  // giving admin under /admin/giving) without full site-admin rights. 0 | 1.
+  finance: number;
   memberTeamIds: number[];
   leaderTeamIds: number[];
   lang: 'en' | 'zh' | null;

@@ -12,5 +12,10 @@ declare namespace App {
     locale: import('./lib/locales').Locale;
     theme: string;
     modules: Set<string>;
+    // Per-request database seam, opened by src/middleware.ts via openDb: `db` is
+    // the D1 binding on the default backend (zero-copy) or a request-scoped
+    // postgres.js AppDb on supabase; `dbBackend` names which one.
+    db: import('./lib/appDb').AppDb;
+    dbBackend: 'd1' | 'supabase';
   }
 }

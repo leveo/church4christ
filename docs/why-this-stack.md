@@ -80,6 +80,20 @@ platform, so the deployment glue is Cloudflare-specific. But your **data stays p
 (standard SQL, Markdown, and image files), and the code is open source (GPL v3), so you are
 never trapped: you can export everything and move if you ever need to.
 
+## One database by default, a second one only if you need it
+
+Almost every church should stay on **Cloudflare D1** — it is part of the same free platform,
+needs no extra account, and runs the entire site *except* two modules. The only reason to
+reach for something more is money: **online Giving and paid Registration** run card payments
+through Stripe and need a full Postgres database to hold subscriptions and checkout state,
+which is more than SQLite-scale D1 is meant for.
+
+So the project offers a second backend — **Supabase** (managed Postgres) — that you turn on
+with a one-line `DB_BACKEND` change when, and only when, you want those two features. It is
+still free, your data is still portable SQL, and everything else works identically on either
+database. Most sites never switch; the door is simply there if you grow into it. See
+[`supabase-setup.md`](./supabase-setup.md).
+
 ## Why Astro + Tailwind + TypeScript
 
 - **Astro** renders real HTML on the server and ships **almost no JavaScript** by default.
@@ -97,7 +111,7 @@ never trapped: you can export everything and move if you ever need to.
   hardcoded colors so the design system can't be quietly bypassed.
 - **TypeScript** catches mistakes before they ship and, just as importantly, makes the code
   **safe for an AI assistant or a non-expert to change** — the types guide correct edits and
-  the 490+ automated tests catch regressions. That combination is what makes "maintain your
+  the 900+ automated tests catch regressions. That combination is what makes "maintain your
   site by chatting with Claude Code" actually trustworthy rather than a gamble.
 
 The theme throughout: **fewer moving parts.** No client framework, no plugin ecosystem, no
