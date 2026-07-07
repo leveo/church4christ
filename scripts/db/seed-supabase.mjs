@@ -4,7 +4,7 @@
 // seed's explicit ids. The comment-strip + ';'-split is the exact pattern
 // test/e2e/setup.ts uses to load the same seed on D1, so both backends stay in
 // lockstep. Usage: SUPABASE_DB_URL=postgres://... node scripts/db/seed-supabase.mjs
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import postgres from 'postgres';
 
 const url = process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL;
@@ -28,8 +28,14 @@ function seedStatements(sql) {
 const sql = postgres(url, { max: 1, fetch_types: false, onnotice: () => {} });
 try {
   const statements = seedStatements(readFileSync('seed/dev-seed.sql', 'utf8'));
+  // The giving module is Supabase-only, so its demo data lives in a separate seed
+  // that only this Postgres path loads (never D1). Applied after dev-seed.sql —
+  // people/households already exist — and before the sequence reset below.
+  const givingStatements = existsSync('seed/giving-seed.sql')
+    ? seedStatements(readFileSync('seed/giving-seed.sql', 'utf8'))
+    : [];
   await sql.begin(async (tx) => {
-    for (const statement of statements) {
+    for (const statement of [...statements, ...givingStatements]) {
       await tx.unsafe(statement);
     }
     // The seed inserts explicit ids, which never advances the identity
@@ -44,7 +50,7 @@ try {
       );
     }
   });
-  console.log(`seeded ${statements.length} statements`);
+  console.log(`seeded ${statements.length + givingStatements.length} statements`);
 } catch (err) {
   console.error(err);
   process.exitCode = 1;
