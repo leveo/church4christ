@@ -14,10 +14,11 @@ interface PersonAuthRow {
   email: string;
   display_name: string;
   role: 'member' | 'editor' | 'admin';
+  finance: number;
   lang: string | null;
 }
 
-const PERSON_AUTH_COLS = 'id, email, display_name, role, lang';
+const PERSON_AUTH_COLS = 'id, email, display_name, role, finance, lang';
 
 /** A person's member ∪ leader team ids, excluding soft-deleted teams. */
 async function loadTeamIds(
@@ -50,6 +51,7 @@ function toSessionUser(
     role: person.role,
     isAdmin: person.role === 'admin',
     isEditor: person.role === 'editor',
+    finance: person.finance,
     memberTeamIds: teams.memberTeamIds,
     leaderTeamIds: teams.leaderTeamIds,
     lang: person.lang === 'en' || person.lang === 'zh' ? person.lang : null,

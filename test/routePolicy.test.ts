@@ -42,6 +42,18 @@ describe('classifyRoute', () => {
     ['/api/prayer-request', 'public'],
     ['/healthz', 'public'],
     ['/404', 'public'],
+    // ── giving/registration public surfaces (T4) ──
+    ['/give/thanks', 'public'],
+    ['/give/checkout', 'public'],
+    ['/api/giving/checkout', 'public'],
+    ['/api/giving/portal', 'public'],
+    ['/api/stripe/webhook', 'public'],
+    ['/register', 'public'],
+    ['/register/thanks', 'public'],
+    ['/api/register/submit', 'public'],
+    // ── finance (giving admin) ──
+    ['/admin/giving', 'finance'],
+    ['/admin/giving/funds', 'finance'],
     // ── authed ──
     ['/my', 'authed'],
     ['/my/blockouts', 'authed'],
@@ -137,6 +149,7 @@ function makeUser(over: Partial<SessionUser> = {}): SessionUser {
     memberTeamIds: [],
     leaderTeamIds: [],
     lang: null,
+    finance: 0,
     ...over,
   };
 }
@@ -148,6 +161,7 @@ describe('canAccess', () => {
   const leader = makeUser({ memberTeamIds: [3], leaderTeamIds: [3] });
   const editor = makeUser({ role: 'editor', isEditor: true });
   const admin = makeUser({ role: 'admin', isAdmin: true });
+  const financeUser = makeUser({ finance: 1 });
 
   it('public: everyone, including anonymous', () => {
     for (const u of [anon, member, editor, admin]) expect(canAccess('public', u)).toBe(true);
@@ -182,5 +196,13 @@ describe('canAccess', () => {
     expect(canAccess('adminOnly', leader)).toBe(false);
     expect(canAccess('adminOnly', editor)).toBe(false);
     expect(canAccess('adminOnly', admin)).toBe(true);
+  });
+
+  it('finance: admin or a finance-flagged user; never a plain editor/member/anon', () => {
+    expect(canAccess('finance', anon)).toBe(false);
+    expect(canAccess('finance', member)).toBe(false);
+    expect(canAccess('finance', editor)).toBe(false); // an editor is NOT finance
+    expect(canAccess('finance', financeUser)).toBe(true); // finance flag, non-admin
+    expect(canAccess('finance', admin)).toBe(true);
   });
 });

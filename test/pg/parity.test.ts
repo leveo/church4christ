@@ -171,7 +171,7 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
   describe('needs-attention (Postgres shortfall query)', () => {
     const adminUser: SessionUser = {
       id: 1, email: 'admin@example.com', displayName: 'Admin', role: 'admin',
-      isAdmin: true, isEditor: true, memberTeamIds: [], leaderTeamIds: [], lang: 'en',
+      isAdmin: true, isEditor: true, finance: 0, memberTeamIds: [], leaderTeamIds: [], lang: 'en',
     };
 
     it('admin scope reports the seeded pending app + testimony and the exact per-plan shortfalls', async () => {
