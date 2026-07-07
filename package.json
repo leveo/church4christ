@@ -16,7 +16,9 @@
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:supabase": "node scripts/db/migrate-supabase.mjs",
     "db:seed:local": "wrangler d1 execute DB --local --file=./seed/dev-seed.sql",
+    "db:seed:supabase": "node scripts/db/seed-supabase.mjs",
     "cf-typegen": "wrangler types",
     "deploy": "astro build && wrangler deploy"
   },
