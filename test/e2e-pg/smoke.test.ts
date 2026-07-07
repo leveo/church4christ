@@ -63,6 +63,24 @@ describe('Postgres-backed worker: public render path', () => {
     expect(body).toContain('name="fund_id"');
     expect(body).toContain('name="amount"');
   });
+
+  it('/en/my/giving: anon → 303 to signin (route policy /my is authed)', async () => {
+    const res = await get('/en/my/giving');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toContain('/signin');
+  });
+
+  it('/en/my/giving: signed-in giver → 200 (recurring/ledger/year reads over Postgres)', async () => {
+    // Person 1 (admin@example.com) has no seeded gifts yet (the giving seed lands
+    // in Task 9), so this exercises listRecurringForPerson / listHouseholdGifts /
+    // householdYearTotals returning empty and the page rendering all three empty
+    // states + the Manage portal form scaffold.
+    const res = await get('/en/my/giving', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Recurring giving'); // my.giving.recurring section heading
+    expect(body).toContain('No gifts recorded yet.'); // my.giving.empty — all three sections empty
+  });
 });
 
 describe('Postgres-backed worker: admin console (exercises the shortfall query)', () => {
