@@ -5,7 +5,6 @@
 // newest first, with an optional ?service= filter. The "New bulletin" button
 // opens the create form.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { listBulletins, listServiceTypeOptions } from '../../../lib/adminDb';
 import { badge, btn, tin, th, td, noticeOk, statusBadge } from '../../../lib/adminUi';
@@ -14,7 +13,7 @@ import type { Locale } from '../../../lib/locales';
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const serviceParam = Astro.url.searchParams.get('service');
 const serviceTypeId = serviceParam && /^\d+$/.test(serviceParam) ? Number(serviceParam) : undefined;

@@ -13,7 +13,7 @@ import { type EmailEnv } from '../../lib/email';
 // only peeks (mail scanners), the explicit Accept/Decline POST consumes. The
 // page renders in the token owner's saved language (the email was sent in it).
 const raw = Astro.params.token ?? '';
-const db = (env as unknown as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 interface Summary {
   plan_date: string;

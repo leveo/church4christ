@@ -1,0 +1,283 @@
+---
+// Giving admin home (finance route class — /admin/giving is admin ∪ finance).
+// Three stacked panels: (1) a GET filter bar (fund / date window / method) that
+// drives the gift ledger and the per-fund totals for that same window; (2) a
+// POST manual-entry form recording a check/cash gift (recordedBy = the acting
+// user) against an active fund, attributed to a member (person_id) or a free-text
+// guest name. Money is integer cents end to end — formatCents is the only place
+// cents become dollars; the amount enters as cents via parseAmountToCents.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseManualGiftForm } from '../../../lib/validate';
+import { listFunds, listFundsAdmin } from '../../../lib/fundDb';
+import { listGifts, fundTotals, recordManualGift } from '../../../lib/givingDb';
+import { listPeople } from '../../../lib/adminDb';
+import { isValidDateStr } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
+import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const METHODS = ['check', 'cash', 'card'] as const;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  if (String(fd.get('action') ?? '') === 'record') {
+    const parsed = parseManualGiftForm(fd);
+    if (parsed.ok) {
+      await recordManualGift(db, {
+        personId: parsed.data.personId,
+        donorName: parsed.data.donorName ?? undefined,
+        fundId: parsed.data.fundId,
+        amountCents: parsed.data.amountCents,
+        method: parsed.data.method,
+        checkNumber: parsed.data.checkNumber ?? undefined,
+        receivedOn: parsed.data.receivedOn,
+        note: parsed.data.note ?? undefined,
+        recordedBy: user.id,
+        currency: 'usd',
+      });
+      return Astro.redirect('/admin/giving?recorded=1', 303);
+    }
+    errors = parsed.errors;
+  }
+}
+
+// Ledger + totals filters (GET). Dates must be strict YYYY-MM-DD or they are
+// dropped (a bad param never poisons the query); fund/method are whitelisted.
+const params = Astro.url.searchParams;
+const fundParam = params.get('fund') ?? '';
+const filterFundId = /^\d+$/.test(fundParam) ? Number(fundParam) : undefined;
+const fromParam = params.get('from') ?? '';
+const from = isValidDateStr(fromParam) ? fromParam : undefined;
+const toParam = params.get('to') ?? '';
+const to = isValidDateStr(toParam) ? toParam : undefined;
+const methodParam = params.get('method') ?? '';
+const filterMethod = (METHODS as readonly string[]).includes(methodParam) ? methodParam : undefined;
+
+const [allFunds, activeFunds, people, gifts, totals] = await Promise.all([
+  listFundsAdmin(db),
+  listFunds(db, lang, { activeOnly: true }),
+  listPeople(db, {}),
+  listGifts(db, lang, { fundId: filterFundId, from, to, method: filterMethod, limit: 500 }),
+  fundTotals(db, lang, { from, to }),
+]);
+const activePeople = people.filter((p) => p.active === 1);
+// Resolve a member gift's donor from the people we already loaded (listGifts only
+// carries the free-text donor_name, not the linked member's name).
+const personById = new Map(people.map((p) => [p.id, p.display_name]));
+const donorOf = (gift: { person_id: number | null; donor_name: string | null }) => {
+  const member = gift.person_id !== null ? personById.get(gift.person_id) : undefined;
+  return member ?? (gift.donor_name || '—');
+};
+const fundLabel = (f: { name_en: string; name_zh: string }) => (lang === 'zh' ? f.name_zh || f.name_en : f.name_en);
+
+const recorded = params.get('recorded') === '1';
+const hasErrors = Object.keys(errors).length > 0;
+const g = (n: string) => String(fd?.get(n) ?? '');
+const echoing = fd !== null && hasErrors;
+
+const heading = t(lang, 'admin.giving.title');
+const h2 = 'font-display text-heading-sm font-bold';
+const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <div class="flex items-center gap-3">
+      <a href="/admin/giving/reconcile" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>
+      <a href="/admin/giving/funds" class={btn}>{t(lang, 'admin.giving.funds')}</a>
+    </div>
+  </div>
+
+  {recorded && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.giving.recorded')}</p>}
+
+  {/* (1) Manual entry */}
+  <section class={`mt-6 ${card} max-w-3xl space-y-4`}>
+    <h2 class={h2}>{t(lang, 'admin.giving.record')}</h2>
+    {hasErrors && <p class={noticeErr}>{t(lang, 'admin.giving.recordError')}</p>}
+    {activeFunds.length === 0 ? (
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.giving.fundsEmpty')}</p>
+    ) : (
+      <form method="post" class="grid gap-4 sm:grid-cols-2">
+        <input type="hidden" name="action" value="record" />
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.donor')}</span>
+          <select name="person_id" class={tin}>
+            <option value="" selected={echoing && g('person_id') === ''}>{t(lang, 'admin.giving.donorGuest')}</option>
+            {activePeople.map((p) => (
+              <option value={p.id} selected={echoing && g('person_id') === String(p.id)}>{p.display_name}</option>
+            ))}
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.guestName')}</span>
+          <input name="donor_name" value={echoing ? g('donor_name') : ''} class={tin} />
+        </label>
+        {errors.donor && <span class={`${errorText} sm:col-span-2`}>{t(lang, errors.donor)}</span>}
+
+        <label class="block">
+          <span class={lab}>{t(lang, 'give.fund')}</span>
+          <select name="fund_id" class={tin}>
+            {activeFunds.map((f) => (
+              <option value={f.id} selected={echoing && g('fund_id') === String(f.id)}>{f.name}</option>
+            ))}
+          </select>
+          {errors.fund_id && <span class={errorText}>{t(lang, errors.fund_id)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'give.amount')}</span>
+          <input name="amount" inputmode="decimal" value={echoing ? g('amount') : ''} class={tin} />
+          {errors.amount && <span class={errorText}>{t(lang, errors.amount)}</span>}
+        </label>
+
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.method')}</span>
+          <select name="method" class={tin} data-method>
+            <option value="check" selected={!echoing || g('method') === 'check'}>{methodLabel('check')}</option>
+            <option value="cash" selected={echoing && g('method') === 'cash'}>{methodLabel('cash')}</option>
+          </select>
+          {errors.method && <span class={errorText}>{t(lang, errors.method)}</span>}
+        </label>
+        <label class="block" data-check-field hidden={echoing && g('method') === 'cash'}>
+          <span class={lab}>{t(lang, 'admin.giving.checkNumber')}</span>
+          <input name="check_number" value={echoing ? g('check_number') : ''} class={tin} />
+        </label>
+
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.receivedOn')}</span>
+          <input type="date" name="received_on" value={echoing ? g('received_on') : ''} class={tin} />
+          {errors.received_on && <span class={errorText}>{t(lang, errors.received_on)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.note')}</span>
+          <input name="note" value={echoing ? g('note') : ''} class={tin} />
+        </label>
+
+        <div class="sm:col-span-2">
+          <button type="submit" class={btn}>{t(lang, 'admin.giving.record')}</button>
+        </div>
+      </form>
+    )}
+  </section>
+
+  {/* (2) Filter bar */}
+  <form method="get" class="mt-8 flex flex-wrap items-end gap-3">
+    <label class="block">
+      <span class={lab}>{t(lang, 'give.fund')}</span>
+      <select name="fund" class={tin}>
+        <option value="" selected={filterFundId === undefined}>{t(lang, 'admin.giving.allFunds')}</option>
+        {allFunds.map((f) => (
+          <option value={f.id} selected={filterFundId === f.id}>{fundLabel(f)}</option>
+        ))}
+      </select>
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.from')}</span>
+      <input type="date" name="from" value={from ?? ''} class={tin} />
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.to')}</span>
+      <input type="date" name="to" value={to ?? ''} class={tin} />
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.method')}</span>
+      <select name="method" class={tin}>
+        <option value="" selected={filterMethod === undefined}>{t(lang, 'admin.giving.allMethods')}</option>
+        {METHODS.map((m) => (
+          <option value={m} selected={filterMethod === m}>{methodLabel(m)}</option>
+        ))}
+      </select>
+    </label>
+    <button type="submit" class={btn}>{t(lang, 'admin.giving.filter')}</button>
+  </form>
+
+  {/* (3) Totals by fund */}
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.totals')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.giving.fundNumber')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
+          <th class={th}>{t(lang, 'admin.giving.count')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {totals.map((row) => (
+          <tr class="border-t border-border">
+            <td class={`${td} tabular-nums`}>{row.fund_number}</td>
+            <td class={td}>{row.fund_name}</td>
+            <td class={`${td} tabular-nums`}>{row.gift_count}</td>
+            <td class={`${td} tabular-nums font-medium`}>{formatCents(row.total_cents)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  {/* Gift ledger */}
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.ledger')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.giving.colDate')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colDonor')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colMethod')}</th>
+          <th class={th}>{t(lang, 'admin.giving.checkNumber')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          gifts.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="6">
+                {t(lang, 'admin.giving.giftsEmpty')}
+              </td>
+            </tr>
+          ) : (
+            gifts.map((gift) => (
+              <tr class="border-t border-border align-top">
+                <td class={`${td} tabular-nums`}>{(gift.received_on ?? gift.created_at).slice(0, 10)}</td>
+                <td class={td}>{donorOf(gift)}</td>
+                <td class={td}>{gift.fund_name}</td>
+                <td class={td}>
+                  <span class={`${badge} ${gift.status === 'refunded' ? badgeInactive : badgeActive}`}>{methodLabel(gift.method)}</span>
+                </td>
+                <td class={`${td} tabular-nums`}>{gift.check_number || '—'}</td>
+                <td class={`${td} tabular-nums font-medium`}>{formatCents(gift.amount_cents, gift.currency)}</td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <script is:inline>
+    // Progressive enhancement: hide the check-number field when the method is
+    // cash (the server drops it for cash regardless). With JS off it stays visible.
+    (function () {
+      var method = document.querySelector('select[data-method]');
+      var checkField = document.querySelector('[data-check-field]');
+      if (!method || !checkField) return;
+      var sync = function () {
+        checkField.hidden = method.value === 'cash';
+      };
+      method.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
+</Admin>

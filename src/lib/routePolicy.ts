@@ -14,7 +14,7 @@
 // to Astro's natural 404 for anonymous visitors, not bounce them to signin.
 import type { SessionUser } from './types';
 
-export type RouteClass = 'public' | 'authed' | 'team' | 'console' | 'adminOnly';
+export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'adminOnly';
 
 // Exact-match public paths (no session). Prefix families live in PUBLIC_PREFIXES.
 const PUBLIC_EXACT = new Set([
@@ -49,6 +49,19 @@ const PUBLIC_PREFIXES = [
   '/respond/',
   '/cal/',
   '/media/',
+  // Giving: the public give sub-pages (`/give/thanks`, `/give/checkout`) and the
+  // giving API (checkout/portal). Anonymous donors may give, so these need no
+  // session; the giving admin lives under /admin/giving (the `finance` class).
+  '/give/',
+  '/api/giving',
+  // The shared Stripe webhook — verified by signature, not by session; it is
+  // owned by no module, so the middleware never module-gates it (the endpoint
+  // does its own giving||registration check).
+  '/api/stripe/webhook',
+  // Registration lands its public prefixes now (Phase 3 builds the pages) so the
+  // policy is not re-touched later; harmless while the module is disabled.
+  '/register',
+  '/api/register',
 ];
 
 // Site-admin-only areas under /admin. Checked BEFORE the console list.
@@ -68,6 +81,10 @@ const ADMIN_CONSOLE = [
   '/admin/availability',
   '/admin/applications',
   '/admin/testimonies',
+  // Registration admin: editors run events, so the whole /admin/registration tree
+  // is console (editor ∪ admin ∪ leader), not adminOnly. The module gate (off by
+  // default) still 404s it when registration is disabled.
+  '/admin/registration',
 ];
 
 /** Strip a single trailing slash (but keep the bare root `/`). */
@@ -96,8 +113,11 @@ function isPublic(p: string): boolean {
 export function classifyRoute(pathname: string): RouteClass {
   const p = norm(pathname);
 
-  // /admin namespace: admin-only areas, then the console root + explicit console
-  // list, then fail closed — an unlisted /admin path is adminOnly, never weaker.
+  // /admin namespace: the finance area (giving admin) first — a finance-flagged
+  // user reaches it without full site-admin — then admin-only areas, then the
+  // console root + explicit console list, then fail closed (an unlisted /admin
+  // path is adminOnly, never weaker).
+  if (under(p, '/admin/giving')) return 'finance';
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
   if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
   if (under(p, '/admin')) return 'adminOnly';
@@ -128,6 +148,8 @@ export function canAccess(cls: RouteClass, user: SessionUser | null): boolean {
       return user !== null;
     case 'team':
       return user !== null && (user.isAdmin || user.memberTeamIds.length > 0 || user.leaderTeamIds.length > 0);
+    case 'finance':
+      return user !== null && (user.isAdmin || user.finance === 1);
     case 'console':
       return user !== null && (user.isAdmin || user.isEditor || user.leaderTeamIds.length > 0);
     case 'adminOnly':

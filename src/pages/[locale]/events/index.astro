@@ -2,7 +2,6 @@
 // Events page: every currently-active, in-window event as a card grid. Uses the
 // same windowing query as the home strip but without a limit. Reads fail soft to
 // empty so a database hiccup degrades to the "nothing yet" state.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import EventGrid from '../../../components/EventGrid.astro';
 import { parseLocale } from '../../../lib/locales';
@@ -18,7 +17,7 @@ if (!locale) {
 
 let events: EventCardRow[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   events = await listActiveEvents(db, locale, todayInTz());
 } catch (err) {
   console.error('events index: load failed', err);

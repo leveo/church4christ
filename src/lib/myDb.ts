@@ -14,6 +14,7 @@
 // Authorization: every mutation takes the OWNING person_id and scopes its WHERE
 // to it — a volunteer can only ever touch their own rows. Pages pass the
 // session user's id, never a form-posted one.
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { addDays } from './dates';
 import type { BlockoutInput } from './validate';
@@ -33,7 +34,7 @@ export interface MyAssignment {
 
 /** A person's live assignments on/after `fromDate`, soonest first, localized. */
 export async function listPersonAssignments(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   fromDate: string,
   locale: Locale,
@@ -78,7 +79,7 @@ export interface BlockoutRow {
 }
 
 /** A person's blockouts still ending on/after `fromDate`, earliest first. */
-export async function listBlockouts(db: D1Database, personId: number, fromDate: string): Promise<BlockoutRow[]> {
+export async function listBlockouts(db: AppDb, personId: number, fromDate: string): Promise<BlockoutRow[]> {
   const { results } = await db
     .prepare(
       `SELECT id, person_id, start_date, end_date, start_time, end_time, reason, recurrence_group
@@ -97,7 +98,7 @@ export async function listBlockouts(db: D1Database, personId: number, fromDate: 
  * crypto.randomUUID() recurrence_group so they can be deleted as a series;
  * repeat 'none' inserts a single row with a NULL group. Returns rows inserted.
  */
-export async function addBlockout(db: D1Database, personId: number, input: BlockoutInput): Promise<number> {
+export async function addBlockout(db: AppDb, personId: number, input: BlockoutInput): Promise<number> {
   const interval = input.repeat === 'weekly' ? 7 : input.repeat === 'biweekly' ? 14 : 0;
   const count = interval ? input.count : 1;
   const group = interval ? crypto.randomUUID() : null;
@@ -122,12 +123,12 @@ export async function addBlockout(db: D1Database, personId: number, input: Block
 }
 
 /** Delete one blockout — scoped to person_id so nobody can delete another's. */
-export async function deleteBlockout(db: D1Database, personId: number, id: number): Promise<void> {
+export async function deleteBlockout(db: AppDb, personId: number, id: number): Promise<void> {
   await db.prepare(`DELETE FROM blockout_dates WHERE id = ? AND person_id = ?`).bind(id, personId).run();
 }
 
 /** Delete a whole recurrence series — scoped to person_id like deleteBlockout. */
-export async function deleteBlockoutSeries(db: D1Database, personId: number, group: string): Promise<void> {
+export async function deleteBlockoutSeries(db: AppDb, personId: number, group: string): Promise<void> {
   await db
     .prepare(`DELETE FROM blockout_dates WHERE recurrence_group = ? AND person_id = ?`)
     .bind(group, personId)
@@ -143,7 +144,7 @@ export interface PersonTeamRow {
 }
 
 /** A person's team memberships (localized name + leader flag). */
-export async function listPersonTeams(db: D1Database, personId: number, locale: Locale): Promise<PersonTeamRow[]> {
+export async function listPersonTeams(db: AppDb, personId: number, locale: Locale): Promise<PersonTeamRow[]> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -171,7 +172,7 @@ export interface ServingHistoryRow {
 
 /** A person's entire live serving history (past + future), newest first, localized. */
 export async function listPersonServingHistory(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   locale: Locale,
 ): Promise<ServingHistoryRow[]> {
@@ -215,7 +216,7 @@ export interface MyApplicationRow {
 
 /** A person's most recent team applications (newest first, capped at 10). */
 export async function listApplicationsByPerson(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   locale: Locale,
 ): Promise<MyApplicationRow[]> {
@@ -244,7 +245,7 @@ export async function listApplicationsByPerson(
 // ── Interests & gifts (profile) ──
 
 /** The person's selected ministry-interest categories. */
-export async function listPersonInterests(db: D1Database, personId: number): Promise<string[]> {
+export async function listPersonInterests(db: AppDb, personId: number): Promise<string[]> {
   const { results } = await db
     .prepare(`SELECT category FROM person_interests WHERE person_id = ? ORDER BY category`)
     .bind(personId)
@@ -257,7 +258,7 @@ export async function listPersonInterests(db: D1Database, personId: number): Pro
  * against the known category list). Delete + inserts run in one batch so a
  * failed save can't leave a half-replaced set.
  */
-export async function setPersonInterests(db: D1Database, personId: number, categories: string[]): Promise<void> {
+export async function setPersonInterests(db: AppDb, personId: number, categories: string[]): Promise<void> {
   const unique = [...new Set(categories)];
   const stmts = [db.prepare(`DELETE FROM person_interests WHERE person_id = ?`).bind(personId)];
   for (const c of unique) {

@@ -1,7 +1,6 @@
 ---
 // A single year's published sermons (month-grouped), with year-nav pills. The
 // year is validated as a 4-digit number in 2000-2100; anything else 404s.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import SermonMonthGrid from '../../../components/SermonMonthGrid.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -24,7 +23,7 @@ if (!/^\d{4}$/.test(raw) || year < 2000 || year > 2100) {
 let years: number[] = [];
 let sermons: SermonRow[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   [years, sermons] = await Promise.all([listSermonYears(db), listSermonsByYear(db, year, locale)]);
 } catch (err) {
   console.error('sermons year: load failed', err);

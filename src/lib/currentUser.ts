@@ -6,6 +6,7 @@
 // getPersonTeamIds, adapted to the role model and the team_members schema
 // (which — unlike the reference stack — has no soft-delete column, so only teams.deleted_at
 // is filtered).
+import type { AppDb } from './appDb';
 import type { SessionUser } from './types';
 
 interface PersonAuthRow {
@@ -13,14 +14,15 @@ interface PersonAuthRow {
   email: string;
   display_name: string;
   role: 'member' | 'editor' | 'admin';
+  finance: number;
   lang: string | null;
 }
 
-const PERSON_AUTH_COLS = 'id, email, display_name, role, lang';
+const PERSON_AUTH_COLS = 'id, email, display_name, role, finance, lang';
 
 /** A person's member ∪ leader team ids, excluding soft-deleted teams. */
 async function loadTeamIds(
-  db: D1Database,
+  db: AppDb,
   personId: number,
 ): Promise<{ memberTeamIds: number[]; leaderTeamIds: number[] }> {
   const { results } = await db
@@ -49,6 +51,7 @@ function toSessionUser(
     role: person.role,
     isAdmin: person.role === 'admin',
     isEditor: person.role === 'editor',
+    finance: person.finance,
     memberTeamIds: teams.memberTeamIds,
     leaderTeamIds: teams.leaderTeamIds,
     lang: person.lang === 'en' || person.lang === 'zh' ? person.lang : null,
@@ -62,7 +65,7 @@ function toSessionUser(
  * those checks fail. Two queries: the person row, then their team ids.
  */
 export async function loadSessionUser(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   epoch: number,
 ): Promise<SessionUser | null> {
@@ -82,7 +85,7 @@ export async function loadSessionUser(
  * AUTH_DEV_BYPASS_EMAIL middleware shortcut. Active + non-deleted only; there is
  * no epoch to check since no cookie is involved. Returns null if no such person.
  */
-export async function loadSessionUserByEmail(db: D1Database, email: string): Promise<SessionUser | null> {
+export async function loadSessionUserByEmail(db: AppDb, email: string): Promise<SessionUser | null> {
   const person = await db
     .prepare(
       `SELECT ${PERSON_AUTH_COLS} FROM people

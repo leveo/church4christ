@@ -33,8 +33,8 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user;
-const vars = env as unknown as EmailEnv & { DB: D1Database };
-const db = vars.DB;
+const vars = env as unknown as EmailEnv;
+const db = Astro.locals.db;
 
 const idOf = (v: string | FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;

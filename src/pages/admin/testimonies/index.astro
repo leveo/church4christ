@@ -5,7 +5,6 @@
 // Both DB helpers are guarded on status='P', so double-submits are harmless.
 // PUBLIC TESTIMONY TEXT IS ALWAYS ESCAPED — rendered as {expr}, never set:html.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import {
   listPendingTestimonies,
@@ -21,7 +20,7 @@ export const prerender = false;
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const PAGE = '/admin/testimonies';
 
 if (Astro.request.method === 'POST') {

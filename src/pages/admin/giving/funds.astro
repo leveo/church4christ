@@ -1,0 +1,182 @@
+---
+// Funds admin (finance route class — /admin/giving is admin ∪ finance-flagged).
+// Inline add/edit model like the events console: a create form doubling as an
+// editor (?edit=<id>), plus a per-row activate/deactivate toggle. A fund carries
+// a unique fund_number and a name in both locales (saveFund writes both). A
+// duplicate fund_number surfaces admin.giving.fundNumberTaken, never a 500.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseFundForm } from '../../../lib/validate';
+import { listFundsAdmin, saveFund, toggleFundActive } from '../../../lib/fundDb';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let fundNumberTaken = false;
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? '');
+  const idRaw = String(fd.get('id') ?? '');
+  const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+
+  if (action === 'toggle' && id !== null) {
+    await toggleFundActive(db, id);
+    return Astro.redirect('/admin/giving/funds?saved=1', 303);
+  }
+  if (action === 'save') {
+    const parsed = parseFundForm(fd);
+    if (!parsed.ok) {
+      errors = parsed.errors;
+      failedId = id === null ? '' : String(id);
+    } else {
+      try {
+        await saveFund(db, {
+          ...(id !== null ? { id } : {}),
+          fund_number: parsed.data.fund_number,
+          name_en: parsed.data.name_en,
+          name_zh: parsed.data.name_zh,
+          active: parsed.data.active ? 1 : 0,
+          sort: parsed.data.sort,
+        });
+        return Astro.redirect('/admin/giving/funds?saved=1', 303);
+      } catch (e) {
+        if (e instanceof Error && e.message === 'fund_number_taken') {
+          fundNumberTaken = true;
+          failedId = id === null ? '' : String(id);
+        } else throw e;
+      }
+    }
+  }
+}
+
+const rows = await listFundsAdmin(db);
+const saved = Astro.url.searchParams.get('saved') === '1';
+
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const echoing = fd !== null && failedId !== null;
+const v = echoing
+  ? { fundNumber: g('fund_number'), nameEn: g('name_en'), nameZh: g('name_zh'), active: fd!.get('active') !== null, sort: g('sort') }
+  : editingRow
+    ? { fundNumber: editingRow.fund_number, nameEn: editingRow.name_en, nameZh: editingRow.name_zh, active: editingRow.active === 1, sort: String(editingRow.sort) }
+    : { fundNumber: '', nameEn: '', nameZh: '', active: true, sort: '0' };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.giving.funds');
+const formHeading = editId ? t(lang, 'admin.giving.editFund') : t(lang, 'admin.giving.newFund');
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <a href="/admin/giving" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.giving.record')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {fundNumberTaken && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, 'admin.giving.fundNumberTaken')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNumber')}</span>
+          <input name="fund_number" value={v.fundNumber} class={tin} />
+          {errors.fund_number && <span class={errorText}>{t(lang, errors.fund_number)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.sort')}</span>
+          <input name="sort" value={v.sort} class={tin} />
+          {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
+        </label>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNameEn')}</span>
+          <input name="name_en" value={v.nameEn} class={tin} />
+          {errors.name_en && <span class={errorText}>{t(lang, errors.name_en)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNameZh')}</span>
+          <input name="name_zh" value={v.nameZh} class={tin} />
+        </label>
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/giving/funds" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.funds')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.giving.fundNumber')}</th>
+          <th class={th}>{t(lang, 'admin.giving.fundName')}</th>
+          <th class={th}>{t(lang, 'admin.giving.sort')}</th>
+          <th class={th}>{t(lang, 'admin.giving.status')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.giving.fundsEmpty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={`${td} font-medium tabular-nums`}>{r.fund_number}</td>
+                <td class={td}>
+                  <div class="font-medium">{r.name_en || '—'}</div>
+                  <div class="text-ink-muted">{r.name_zh || '—'}</div>
+                </td>
+                <td class={td}>{r.sort}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.giving.active') : t(lang, 'admin.giving.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/giving/funds?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>
+                        {r.active ? t(lang, 'admin.giving.deactivate') : t(lang, 'admin.giving.activate')}
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

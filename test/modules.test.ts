@@ -5,10 +5,10 @@
 // /ministries), and the always-on CORE paths that must resolve to null (/,
 // /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
-import { MODULE_KEYS, MODULES, moduleForPath } from '../src/lib/modules';
+import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 11 module keys in display order', () => {
+  it('has all 13 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -21,15 +21,46 @@ describe('MODULES registry', () => {
       'articles',
       'fellowships',
       'people',
+      'giving',
+      'registration',
     ]);
   });
 
-  it('gifts and people softly use serve; every other module has no deps', () => {
+  it('gifts/people softly use serve, giving softly uses people; every other module has no deps', () => {
     expect(MODULES.gifts.uses).toEqual(['serve']);
     expect(MODULES.people.uses).toEqual(['serve']);
+    expect(MODULES.giving.uses).toEqual(['people']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people') expect(MODULES[key].uses).toEqual([]);
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving') expect(MODULES[key].uses).toEqual([]);
     }
+  });
+
+  it('giving and registration require the supabase backend; no other module does', () => {
+    expect(MODULES.giving.requiresBackend).toBe('supabase');
+    expect(MODULES.registration.requiresBackend).toBe('supabase');
+    for (const key of MODULE_KEYS) {
+      if (key !== 'giving' && key !== 'registration') expect(MODULES[key].requiresBackend).toBeUndefined();
+    }
+  });
+});
+
+describe('filterByBackend (middleware fail-safe + getEnabledModules share it)', () => {
+  it("on 'd1', drops the supabase-only modules (giving/registration)", () => {
+    const enabled = filterByBackend(MODULE_KEYS, 'd1');
+    expect(enabled.has('giving')).toBe(false);
+    expect(enabled.has('registration')).toBe(false);
+    // Every non-backend-gated module survives.
+    expect(enabled.size).toBe(MODULE_KEYS.length - 2);
+    for (const key of MODULE_KEYS) {
+      if (key !== 'giving' && key !== 'registration') expect(enabled.has(key)).toBe(true);
+    }
+  });
+
+  it("on 'supabase', keeps every module", () => {
+    const enabled = filterByBackend(MODULE_KEYS, 'supabase');
+    expect(enabled.size).toBe(MODULE_KEYS.length);
+    expect(enabled.has('giving')).toBe(true);
+    expect(enabled.has('registration')).toBe(true);
   });
 });
 
@@ -59,6 +90,16 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/articles', 'articles'],
     ['/articles/2026/grace', 'articles'],
     ['/fellowships', 'fellowships'],
+    // ── giving (backend-gated) prefixes; /my/giving beats serve's /my ──
+    ['/give/checkout', 'giving'],
+    ['/give/checkout/thanks', 'giving'],
+    ['/my/giving', 'giving'],
+    ['/my/giving/2026', 'giving'],
+    ['/api/giving', 'giving'],
+    // ── registration (backend-gated) prefixes ──
+    ['/register', 'registration'],
+    ['/register/summer-camp', 'registration'],
+    ['/api/register', 'registration'],
     // ── admin prefixes ──
     ['/admin/bulletins', 'bulletins'],
     ['/admin/sermons', 'sermons'],
@@ -71,6 +112,8 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/teams', 'serve'],
     ['/admin/reports', 'serve'],
     ['/admin/testimonies', 'testimonies'],
+    ['/admin/giving', 'giving'],
+    ['/admin/registration', 'registration'],
     // ── always-on core → null ──
     ['/', null],
     ['/profile', null], // auth surface stays core

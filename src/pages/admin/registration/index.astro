@@ -1,0 +1,208 @@
+---
+// Registration events admin (console class — editors run events, so this re-checks
+// editor∪admin and 403s a bare team leader, mirroring the events console). Inline
+// add/edit model like funds/events (?edit=<id>, a single save action): the create
+// form doubles as the editor. Price is dollars → integer cents with blank/0 = a
+// free event (price_cents NULL); datetimes are datetime-local → UTC. Per-event
+// questions + roster live on /admin/registration/[id]. Deactivate an event by
+// editing it and unchecking Active — there is no destructive delete here.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseRegEventForm } from '../../../lib/regForms';
+import { listEventsAdmin, saveEvent } from '../../../lib/regDb';
+import { utcToDatetimeLocal } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const idRaw = String(fd.get('id') ?? '');
+  const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+  const parsed = parseRegEventForm(fd);
+  if (!parsed.ok) {
+    errors = parsed.errors;
+    failedId = id === null ? '' : String(id);
+  } else {
+    await saveEvent(db, { ...(id !== null ? { id } : {}), ...parsed.data });
+    return Astro.redirect('/admin/registration?saved=1', 303);
+  }
+}
+
+const rows = await listEventsAdmin(db);
+const saved = Astro.url.searchParams.get('saved') === '1';
+
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const echoing = fd !== null && failedId !== null;
+const dollars = (cents: number | null) => (cents == null ? '' : (cents / 100).toFixed(2));
+const v = echoing
+  ? {
+      titleEn: g('title_en'), titleZh: g('title_zh'), descEn: g('description_en'), descZh: g('description_zh'),
+      startsAt: g('starts_at'), endsAt: g('ends_at'), opensAt: g('opens_at'), closesAt: g('closes_at'),
+      location: g('location'), capacity: g('capacity'), price: g('price'), active: fd!.get('active') !== null,
+    }
+  : editingRow
+    ? {
+        titleEn: editingRow.title_en, titleZh: editingRow.title_zh ?? '', descEn: editingRow.description_en ?? '', descZh: editingRow.description_zh ?? '',
+        startsAt: utcToDatetimeLocal(editingRow.starts_at), endsAt: utcToDatetimeLocal(editingRow.ends_at),
+        opensAt: utcToDatetimeLocal(editingRow.opens_at), closesAt: utcToDatetimeLocal(editingRow.closes_at),
+        location: editingRow.location ?? '', capacity: editingRow.capacity == null ? '' : String(editingRow.capacity),
+        price: dollars(editingRow.price_cents), active: editingRow.active === 1,
+      }
+    : { titleEn: '', titleZh: '', descEn: '', descZh: '', startsAt: '', endsAt: '', opensAt: '', closesAt: '', location: '', capacity: '', price: '', active: true };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.reg.title');
+const formHeading = editId ? t(lang, 'admin.reg.editEvent') : t(lang, 'admin.reg.newEvent');
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.titleEn')}</span>
+          <input name="title_en" value={v.titleEn} class={tin} />
+          {errors.title_en && <span class={errorText}>{t(lang, errors.title_en)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.titleZh')}</span>
+          <input name="title_zh" value={v.titleZh} class={tin} />
+        </label>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.descEn')}</span>
+          <textarea name="description_en" rows="2" class={tin}>{v.descEn}</textarea>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.descZh')}</span>
+          <textarea name="description_zh" rows="2" class={tin}>{v.descZh}</textarea>
+        </label>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.starts')}</span>
+          <input type="datetime-local" name="starts_at" value={v.startsAt} class={tin} />
+          {errors.starts_at && <span class={errorText}>{t(lang, errors.starts_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.ends')}</span>
+          <input type="datetime-local" name="ends_at" value={v.endsAt} class={tin} />
+          {errors.ends_at && <span class={errorText}>{t(lang, errors.ends_at)}</span>}
+        </label>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.opens')}</span>
+          <input type="datetime-local" name="opens_at" value={v.opensAt} class={tin} />
+          {errors.opens_at && <span class={errorText}>{t(lang, errors.opens_at)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.closes')}</span>
+          <input type="datetime-local" name="closes_at" value={v.closesAt} class={tin} />
+          {errors.closes_at && <span class={errorText}>{t(lang, errors.closes_at)}</span>}
+        </label>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.location')}</span>
+          <input name="location" value={v.location} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.capacity')}</span>
+          <input name="capacity" value={v.capacity} class={tin} inputmode="numeric" />
+          {errors.capacity && <span class={errorText}>{t(lang, errors.capacity)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.price')}</span>
+          <input name="price" value={v.price} class={tin} inputmode="decimal" />
+          {errors.price && <span class={errorText}>{t(lang, errors.price)}</span>}
+        </label>
+      </div>
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.priceHint')}</p>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.reg.active')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.reg.events')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reg.titleEn')}</th>
+          <th class={th}>{t(lang, 'admin.reg.starts')}</th>
+          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
+          <th class={th}>{t(lang, 'admin.reg.price')}</th>
+          <th class={th}>{t(lang, 'admin.reg.status')}</th>
+          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="6">
+                {t(lang, 'admin.reg.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
+                </td>
+                <td class={`${td} text-ink-muted tabular-nums`}>{r.starts_at.slice(0, 16)}</td>
+                <td class={`${td} tabular-nums`}>
+                  {r.taken_count}
+                  {r.capacity != null ? ` / ${r.capacity}` : ''}
+                </td>
+                <td class={td}>{r.price_cents == null ? t(lang, 'admin.reg.free') : formatCents(r.price_cents, r.currency)}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.reg.active') : t(lang, 'admin.reg.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/registration?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <a href={`/admin/registration/${r.id}`} class={rowBtn}>{t(lang, 'admin.reg.manage')}</a>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

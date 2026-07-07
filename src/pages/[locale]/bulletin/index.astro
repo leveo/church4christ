@@ -3,7 +3,6 @@
 // in a CSS-only tabbed switcher (radio inputs — no JS required, native radio
 // semantics only). A single service type renders its bulletin with no tab
 // chrome at all. Year-grouped archive below. Reads fail soft to empty.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import BulletinView from '../../../components/BulletinView.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -35,7 +34,7 @@ interface Entry {
 let entries: Entry[] = [];
 let dates: BulletinDateRow[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   const [bulletins, archive] = await Promise.all([latestBulletins(db, locale), listBulletinDates(db, locale)]);
   dates = archive;
   entries = await Promise.all(

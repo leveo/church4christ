@@ -16,7 +16,7 @@ established churches can turn features on as they grow into them.
 
 Everything is on by default, which is why the demo shows the full feature set. Turning a
 module off never touches the always-on core: the home page, visit and about pages, staff
-directory, giving page, sign-in, settings, and the nightly backup are always present.
+directory, the `/give` page, sign-in, settings, and the nightly backup are always present.
 
 ## How your team uses it
 
@@ -26,7 +26,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 11 modules:**
+**The 13 modules:**
 
 | Group | Module | What it includes |
 |---|---|---|
@@ -41,6 +41,15 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | Community | **People** | Member profiles, households, pastoral notes, and invite-to-serve. Turning it off hides those panels and tools everywhere; the basic people directory that powers sign-in stays. |
 | Volunteering | **Serve** | Ministries, teams, scheduling, applications, and reminders. |
 | Volunteering | **Gifts Quiz** | The spiritual-gifts quiz with ministry recommendations. |
+| Giving *(needs Supabase)* | **Giving** | Online one-time and recurring giving through Stripe, a funds admin, check/cash recording, and a household giving history. See [`giving.md`](giving.md). |
+| Giving *(needs Supabase)* | **Registration** | Event sign-up with custom questions and optional Stripe payment. See [`registration.md`](registration.md). |
+
+**Two modules need the Supabase database.** Giving and Registration both use Stripe and a
+Postgres-only feature, so they only run on the optional **Supabase** backend (see
+[`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**
+database sees their checkboxes **greyed out** in the Modules panel with a note explaining
+why, and their pages simply do not exist (404) until the church switches databases. Every
+other module works the same on either database.
 
 **What happens when a module is off.** The capability is hidden everywhere at once, not
 half-removed:
@@ -84,14 +93,19 @@ soft-degrade so an off module never leaves a dangling reference.
 ## For developers
 
 - **Registry:** `src/lib/modules.ts` is the pure, tested source of truth. `MODULES` maps
-  each of the 11 keys to the locale-stripped route prefixes it owns (public and admin), its
-  nav dictionary keys, and its soft `uses` (degrade-only, never a hard gate). `moduleForPath`
-  is the classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts`
-  even though `/serve` also matches.
+  each of the 13 keys to the locale-stripped route prefixes it owns (public and admin), its
+  nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
+  `requiresBackend: 'supabase'` for Giving and Registration. `moduleForPath` is the
+  classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts` even
+  though `/serve` also matches.
 - **Enablement + cache:** module state lives in the `module.<key>` settings rows (absent =
-  on; only the exact string `'0'` disables). `getEnabledModules(db)` reads them with a 60s
-  per-isolate cache; `clearModuleCache()` drops it after an admin save. The middleware puts
-  the result on `locals.modules` (a `Set<ModuleKey>`).
+  on; only the exact string `'0'` disables), then a shared `filterByBackend` helper drops any
+  module whose `requiresBackend` doesn't match the current database — so a Supabase-only
+  module can never turn on for a D1 deployment even if its setting row says so.
+  `getEnabledModules(db, backend)` applies both and caches per (backend, 60s); the middleware
+  puts the result on `locals.modules` (a `Set<ModuleKey>`) and, on a DB read failure, falls
+  back to "everything enabled" filtered through the same `filterByBackend` — so the fail-safe
+  can never re-enable a backend-gated module either.
 - **Enforcement:** `src/middleware.ts` is the single choke point — after locale resolution
   and before route policy, a path owned by a disabled module rewrites to `/404` with a 404
   status. A DB failure fails open to all-enabled so a fresh install never 500s.
@@ -100,7 +114,7 @@ soft-degrade so an off module never leaves a dangling reference.
   serving reminder and digest crons on the `serve` module; `src/worker.ts` clears the module
   cache before each scheduled run so a warm isolate reads fresh state.
 - **Admin panel:** `src/pages/admin/settings/index.astro` renders the grouped checkboxes and
-  writes all 11 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
+  writes all 13 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
   left partial), then calls `clearModuleCache()`.
 - **Tests:** `test/modules.test.ts` (registry, cache, `moduleForPath`) and
   `test/moduleGating.test.ts` (middleware 404s + hidden surfaces); module-off e2e assertions

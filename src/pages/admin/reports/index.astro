@@ -3,7 +3,6 @@
 // served over a ?months= window (default 12), busiest first — a burnout and
 // re-engagement view. CSV export lives at /admin/reports.csv. Ported from
 // the reference stack.
-import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
@@ -13,7 +12,7 @@ import { th, td } from '../../../lib/adminUi';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const months = Math.min(60, Math.max(1, Number(Astro.url.searchParams.get('months')) || 12));
 const today = todayInTz();

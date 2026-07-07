@@ -6,6 +6,7 @@
 // in the recipient's saved language (`lang`) when they have one, otherwise
 // bilingually (zh then en stacked); every interpolated variable is HTML-escaped
 // by `t()` before it reaches the message.
+import type { AppDb } from './appDb';
 import { createLoginToken, createRespondToken } from './auth';
 import { i18nJoin } from './db';
 import { escapeHtml, sendEmail, type EmailEnv } from './email';
@@ -29,7 +30,7 @@ interface MagicLinkPerson {
  */
 export async function sendMagicLink(
   env: EmailEnv,
-  db: D1Database,
+  db: AppDb,
   person: MagicLinkPerson,
   locale: Locale,
 ): Promise<boolean> {
@@ -110,7 +111,7 @@ interface AssignmentDetail {
   service_type_name: string;
 }
 
-async function getAssignmentDetail(db: D1Database, assignmentId: number): Promise<AssignmentDetail | null> {
+async function getAssignmentDetail(db: AppDb, assignmentId: number): Promise<AssignmentDetail | null> {
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], 'en');
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], 'en');
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], 'en');
@@ -146,7 +147,7 @@ interface ApplicationDetail {
   team_name: string;
 }
 
-async function getApplicationDetail(db: D1Database, applicationId: number): Promise<ApplicationDetail | null> {
+async function getApplicationDetail(db: AppDb, applicationId: number): Promise<ApplicationDetail | null> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], 'en');
   return db
     .prepare(
@@ -170,7 +171,7 @@ interface LeaderRecipient {
 }
 
 /** Active team leaders with an email (recipients of decline / application mail). */
-async function listTeamLeaders(db: D1Database, teamId: number): Promise<LeaderRecipient[]> {
+async function listTeamLeaders(db: AppDb, teamId: number): Promise<LeaderRecipient[]> {
   const { results } = await db
     .prepare(
       `SELECT people.email AS email, people.display_name AS name, people.lang AS lang
@@ -193,7 +194,7 @@ async function listTeamLeaders(db: D1Database, teamId: number): Promise<LeaderRe
  * has no email. Also used by the daily reminder cron to re-nudge unconfirmed
  * requests.
  */
-export async function sendSchedulingRequest(env: EmailEnv, db: D1Database, assignmentId: number): Promise<void> {
+export async function sendSchedulingRequest(env: EmailEnv, db: AppDb, assignmentId: number): Promise<void> {
   try {
     const d = await getAssignmentDetail(db, assignmentId);
     if (!d?.person_email) return;
@@ -220,7 +221,7 @@ export async function sendSchedulingRequest(env: EmailEnv, db: D1Database, assig
  */
 export async function sendDeclineNotice(
   env: EmailEnv,
-  db: D1Database,
+  db: AppDb,
   assignmentId: number,
   reason: string | null,
 ): Promise<void> {
@@ -247,7 +248,7 @@ export async function sendDeclineNotice(
 }
 
 /** Notify a team's leaders that a new serving application is awaiting review. */
-export async function sendApplicationReceived(env: EmailEnv, db: D1Database, applicationId: number): Promise<void> {
+export async function sendApplicationReceived(env: EmailEnv, db: AppDb, applicationId: number): Promise<void> {
   try {
     const a = await getApplicationDetail(db, applicationId);
     if (!a) return;
@@ -292,7 +293,7 @@ interface InviteRecipient {
  */
 export async function sendServeInvite(
   env: EmailEnv,
-  db: D1Database,
+  db: AppDb,
   args: { personId: number; teamId: number; invitedByEmail: string },
 ): Promise<boolean> {
   try {
@@ -343,7 +344,7 @@ export async function sendServeInvite(
 /** Tell the applicant whether their serving application was approved or rejected. */
 export async function sendApplicationResult(
   env: EmailEnv,
-  db: D1Database,
+  db: AppDb,
   applicationId: number,
   approved: boolean,
 ): Promise<void> {

@@ -5,7 +5,6 @@
 // recent revisions. People count is admin-only. Every DB read fails soft so a
 // hiccup never 500s the dashboard.
 import Admin from '../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../lib/i18n';
 import {
   countPeople,
@@ -24,7 +23,7 @@ import type { Locale } from '../../lib/locales';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const isStaff = user.isEditor || user.isAdmin;
 // Dashboard cards mirror the module gating: a card renders only when its module
 // is on, so the dashboard never links into a disabled (404ing) admin surface.

@@ -2,6 +2,7 @@
 // drafts) but always exclude soft-deleted rows. This slice starts the people
 // section only; content/roster writers land in later slices. People carry no
 // updated_by column and no revisions (v1 simplification, per spec).
+import type { AppDb, AppStatement } from './appDb';
 import type {
   PersonInput,
   MembershipStatus,
@@ -43,6 +44,7 @@ export interface AdminPersonRow extends PersonListRow {
   birthday: string | null;
   address: string | null;
   joined_on: string | null;
+  finance: number; // finance-team flag (giving admin access); D1 raw 0/1
 }
 
 /** Directory filters (people module). serving/household are tri-state: undefined
@@ -72,20 +74,20 @@ const PERSON_LIST_SELECT = `SELECT p.id, p.first_name, p.last_name, p.display_na
 
 /**
  * Non-deleted people ordered by display_name, each with its membership_status and
- * live household name. With `q`, case-insensitively (SQLite ASCII LIKE) matches
+ * live household name. With `q`, case-insensitively (LOWER() both sides) matches
  * display/first/last name or email; LIKE wildcards in the query are escaped so a
  * literal `%` or `_` searches for itself. The people-module directory filters
  * (status / serving via team_members / has-household) narrow the set when set.
  */
-export async function listPeople(db: D1Database, opts: ListPeopleOpts = {}): Promise<PersonListRow[]> {
+export async function listPeople(db: AppDb, opts: ListPeopleOpts = {}): Promise<PersonListRow[]> {
   const conditions = ['p.deleted_at IS NULL'];
   const binds: (string | number)[] = [];
   const q = opts.q?.trim();
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
     conditions.push(
-      `(p.display_name LIKE ? ESCAPE '\\' OR p.first_name LIKE ? ESCAPE '\\'
-        OR p.last_name LIKE ? ESCAPE '\\' OR p.email LIKE ? ESCAPE '\\')`,
+      `(LOWER(p.display_name) LIKE LOWER(?) ESCAPE '\\' OR LOWER(p.first_name) LIKE LOWER(?) ESCAPE '\\'
+        OR LOWER(p.last_name) LIKE LOWER(?) ESCAPE '\\' OR LOWER(p.email) LIKE LOWER(?) ESCAPE '\\')`,
     );
     binds.push(like, like, like, like);
   }
@@ -109,18 +111,18 @@ export async function listPeople(db: D1Database, opts: ListPeopleOpts = {}): Pro
 }
 
 /** Count of non-deleted people (dashboard stat). */
-export async function countPeople(db: D1Database): Promise<number> {
+export async function countPeople(db: AppDb): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM people WHERE deleted_at IS NULL`).first<{ n: number }>();
   return row?.n ?? 0;
 }
 
 /** A single non-deleted person for the edit form, with membership-profile depth
  *  (birthday/address/joined_on) and live household name. */
-export async function getPerson(db: D1Database, id: number): Promise<AdminPersonRow | null> {
+export async function getPerson(db: AppDb, id: number): Promise<AdminPersonRow | null> {
   return db
     .prepare(
       `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
-              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on,
+              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on, p.finance,
               h.name AS household_name
        FROM people p
        LEFT JOIN household_members hm ON hm.person_id = p.id
@@ -146,7 +148,7 @@ export async function getPerson(db: D1Database, id: number): Promise<AdminPerson
  * carry no updated_by column and no revisions in v1, so nothing records it.
  */
 export async function savePerson(
-  db: D1Database,
+  db: AppDb,
   input: SavePersonInput,
   editedBy: string,
 ): Promise<SavePersonResult> {
@@ -177,11 +179,11 @@ export async function savePerson(
         input.lang,
       ];
       appendMembershipColumns(cols, binds, input);
-      const r = await db
-        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+      const created = await db
+        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING id`)
         .bind(...binds)
-        .run();
-      return { ok: true, id: r.meta.last_row_id as number };
+        .first<{ id: number }>();
+      return { ok: true, id: created!.id };
     } catch (e) {
       if (isUniqueViolation(e)) return emailTaken; // pre-check ↔ INSERT race
       throw e;
@@ -201,9 +203,14 @@ export async function savePerson(
   return { ok: true, id: input.id };
 }
 
-/** Shared D1 UNIQUE-constraint detector (also used by householdDb's race mapping). */
+/** Shared UNIQUE-constraint detector (also used by householdDb/teamDb race mapping). */
 export function isUniqueViolation(e: unknown): boolean {
-  return String(e).includes('UNIQUE constraint failed');
+  // SQLite/D1 message, or Postgres SQLSTATE 23505 (postgres.js sets .code).
+  return (
+    String(e).includes('UNIQUE constraint failed') ||
+    (typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505') ||
+    String(e).includes('duplicate key value violates unique constraint')
+  );
 }
 
 // The membership-profile depth (birthday/address/membership_status/joined_on) is
@@ -223,7 +230,7 @@ function appendMembershipColumns(
 
 // One UPDATE serves both a normal edit and a revive: deleted_at = NULL is a
 // harmless no-op for a live row and reclaims a soft-deleted one.
-function writePerson(db: D1Database, id: number, input: PersonInput): Promise<unknown> {
+function writePerson(db: AppDb, id: number, input: PersonInput): Promise<unknown> {
   const cols = ['first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang'];
   const binds: (string | number | null)[] = [
     input.firstName,
@@ -244,14 +251,16 @@ function writePerson(db: D1Database, id: number, input: PersonInput): Promise<un
 }
 
 /**
- * Update just the role and/or active flags. Deactivation (active = 0) takes
- * effect on the person's next request — the middleware reloads the row and its
- * `active = 1` check rejects an inactive session.
+ * Update just the role, active, and/or finance flags (each written only when
+ * present, so a caller can touch one without clobbering the others).
+ * Deactivation (active = 0) takes effect on the person's next request — the
+ * middleware reloads the row and its `active = 1` check rejects an inactive
+ * session. `finance` grants the giving-admin (finance) route class.
  */
 export async function setPersonFlags(
-  db: D1Database,
+  db: AppDb,
   id: number,
-  flags: { role?: Role; active?: boolean },
+  flags: { role?: Role; active?: boolean; finance?: boolean },
 ): Promise<void> {
   const sets: string[] = [];
   const binds: (string | number)[] = [];
@@ -263,6 +272,10 @@ export async function setPersonFlags(
     sets.push('active = ?');
     binds.push(flags.active ? 1 : 0);
   }
+  if (flags.finance !== undefined) {
+    sets.push('finance = ?');
+    binds.push(flags.finance ? 1 : 0);
+  }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");
   binds.push(id);
@@ -271,7 +284,7 @@ export async function setPersonFlags(
 
 /** Soft-delete: hides the person from listPeople and revokes their session
  *  (middleware rejects a deleted_at row). Assignment history is preserved. */
-export async function softDeletePerson(db: D1Database, id: number): Promise<void> {
+export async function softDeletePerson(db: AppDb, id: number): Promise<void> {
   await db
     .prepare(`UPDATE people SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
     .bind(id)
@@ -309,12 +322,14 @@ export class DuplicateDateError extends Error {
  *    that occupant (and its child rows) so the update can proceed; its
  *    snapshots stay in `revisions`;
  *  - a LIVE occupant is always a real conflict → DuplicateDateError.
- * `id IS NOT ?`: with a NULL id (insert) it matches every row in the slot; with
- * a numeric id (update) it excludes the row being updated. SQLite semantics,
- * ported from the reference stack.
+ * `id IS DISTINCT FROM ?`: with a NULL id (insert) it matches every row in the
+ * slot; with a numeric id (update) it excludes the row being updated. Postgres
+ * rejects SQLite's `IS NOT <expr>` null-safe form, so use the SQL-standard
+ * `IS DISTINCT FROM`, which both D1/SQLite and Postgres accept with identical
+ * semantics.
  */
 async function resolveDateSlot(
-  db: D1Database,
+  db: AppDb,
   table: string,
   matchCols: string[],
   matchVals: (string | number)[],
@@ -324,13 +339,13 @@ async function resolveDateSlot(
   const where = matchCols.map((c, i) => `${c} = ?${i + 1}`).join(' AND ');
   const idParam = matchCols.length + 1;
   const row = await db
-    .prepare(`SELECT id, deleted_at FROM ${table} WHERE ${where} AND id IS NOT ?${idParam}`)
+    .prepare(`SELECT id, deleted_at FROM ${table} WHERE ${where} AND id IS DISTINCT FROM ?${idParam}`)
     .bind(...matchVals, id)
     .first<{ id: number; deleted_at: string | null }>();
   if (!row) return id;
   if (row.deleted_at === null) throw new DuplicateDateError();
   if (id === null) return row.id; // revive: the upsert adopts this soft-deleted row's id
-  const clears: D1PreparedStatement[] = [];
+  const clears: AppStatement[] = [];
   if (childFk) clears.push(db.prepare(`DELETE FROM ${childFk.table} WHERE ${childFk.col} = ?1`).bind(row.id));
   clears.push(db.prepare(`DELETE FROM ${table} WHERE id = ?1`).bind(row.id));
   await db.batch(clears);
@@ -345,7 +360,7 @@ function snapshot<T extends { id: number | null }>(input: T): string {
   return JSON.stringify({ v: 1, input: content });
 }
 
-async function softDeleteContent(db: D1Database, table: string, id: number, editedBy: string): Promise<void> {
+async function softDeleteContent(db: AppDb, table: string, id: number, editedBy: string): Promise<void> {
   await db
     .prepare(`UPDATE ${table} SET deleted_at = datetime('now'), updated_at = datetime('now'), updated_by = ?2 WHERE id = ?1`)
     .bind(id, editedBy)
@@ -353,7 +368,7 @@ async function softDeleteContent(db: D1Database, table: string, id: number, edit
 }
 
 /** Service types (id + localized name, en fallback) for the form <select>s. */
-export async function listServiceTypeOptions(db: D1Database, locale: Locale): Promise<{ id: number; name: string }[]> {
+export async function listServiceTypeOptions(db: AppDb, locale: Locale): Promise<{ id: number; name: string }[]> {
   const { results } = await db
     .prepare(
       `SELECT st.id AS id, COALESCE(l.name, d.name, '') AS name
@@ -388,13 +403,13 @@ export interface BulletinListRow {
 
 /** All non-deleted bulletins (drafts included), newest date first, en service
  *  name, optionally scoped to one service type (the ?service= filter). */
-export async function listBulletins(db: D1Database, opts: { serviceTypeId?: number } = {}): Promise<BulletinListRow[]> {
+export async function listBulletins(db: AppDb, opts: { serviceTypeId?: number } = {}): Promise<BulletinListRow[]> {
   const filtered = opts.serviceTypeId !== undefined;
   const { results } = await db
     .prepare(
       `SELECT b.id AS id, b.service_type_id AS service_type_id, b.bulletin_date AS bulletin_date,
               b.status AS status, b.publish_at AS publish_at, b.updated_by AS updated_by, b.updated_at AS updated_at,
-              COALESCE(sti.name, '') AS serviceTypeName
+              COALESCE(sti.name, '') AS "serviceTypeName"
        FROM bulletins b
        LEFT JOIN service_type_i18n sti ON sti.service_type_id = b.service_type_id AND sti.locale = 'en'
        WHERE b.deleted_at IS NULL ${filtered ? 'AND b.service_type_id = ?1' : ''}
@@ -447,7 +462,7 @@ function parseArr<T>(json: string | null): T[] {
 }
 
 /** A single non-deleted bulletin plus its announcements, for the edit form. */
-export async function getBulletinForEdit(db: D1Database, id: number): Promise<BulletinEditData | null> {
+export async function getBulletinForEdit(db: AppDb, id: number): Promise<BulletinEditData | null> {
   const row = await db
     .prepare(
       `SELECT id, service_type_id, bulletin_date, service_time_label, program_json, offering_json,
@@ -491,7 +506,7 @@ export async function getBulletinForEdit(db: D1Database, id: number): Promise<Bu
  * A duplicate LIVE date maps to `errors.dateTaken` (also on the pre-check ↔
  * INSERT race), never a raw 500.
  */
-export async function saveBulletin(db: D1Database, input: SaveBulletinInput, editedBy: string): Promise<SaveBulletinResult> {
+export async function saveBulletin(db: AppDb, input: SaveBulletinInput, editedBy: string): Promise<SaveBulletinResult> {
   let id: number | null;
   try {
     id = await resolveDateSlot(
@@ -516,7 +531,7 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
           .prepare(
             `INSERT INTO bulletins (service_type_id, bulletin_date, service_time_label, program_json, offering_json,
                   attendance_json, memory_verse, flowers, status, publish_at, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now')) RETURNING id`,
           )
           .bind(
             input.serviceTypeId,
@@ -553,8 +568,11 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
           );
 
   try {
-    const results = await db.batch([
-      upsert,
+    // Run the upsert first (INSERT ... RETURNING id / UPDATE) so we can capture the
+    // new id portably; the child statements below then reference the parent row by
+    // its unique (service_type_id, bulletin_date) key inside one atomic batch.
+    const inserted = await upsert.first<{ id: number }>();
+    await db.batch([
       db
         .prepare(
           `DELETE FROM bulletin_announcements
@@ -576,14 +594,14 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
         )
         .bind(input.serviceTypeId, input.bulletinDate, snapshot(input), editedBy),
     ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { bulletin_date: 'errors.dateTaken' } };
     throw e;
   }
 }
 
-export async function softDeleteBulletin(db: D1Database, id: number, editedBy: string): Promise<void> {
+export async function softDeleteBulletin(db: AppDb, id: number, editedBy: string): Promise<void> {
   await softDeleteContent(db, 'bulletins', id, editedBy);
 }
 
@@ -608,13 +626,13 @@ export interface SermonListRow {
 
 /** All non-deleted sermons (drafts included), newest date first, en service
  *  name, optionally scoped to a year (the ?year= filter). */
-export async function listSermons(db: D1Database, opts: { year?: number } = {}): Promise<SermonListRow[]> {
+export async function listSermons(db: AppDb, opts: { year?: number } = {}): Promise<SermonListRow[]> {
   const filtered = opts.year !== undefined;
   const { results } = await db
     .prepare(
       `SELECT s.id AS id, s.service_type_id AS service_type_id, s.sermon_date AS sermon_date, s.title AS title,
               s.speaker AS speaker, s.status AS status, s.updated_by AS updated_by, s.updated_at AS updated_at,
-              COALESCE(sti.name, '') AS serviceTypeName
+              COALESCE(sti.name, '') AS "serviceTypeName"
        FROM sermons s
        LEFT JOIN service_type_i18n sti ON sti.service_type_id = s.service_type_id AND sti.locale = 'en'
        WHERE s.deleted_at IS NULL ${filtered ? "AND substr(s.sermon_date, 1, 4) = ?1" : ''}
@@ -626,7 +644,7 @@ export async function listSermons(db: D1Database, opts: { year?: number } = {}):
 }
 
 /** Distinct years with at least one non-deleted sermon, newest first. */
-export async function listSermonYears(db: D1Database): Promise<number[]> {
+export async function listSermonYears(db: AppDb): Promise<number[]> {
   const { results } = await db
     .prepare(
       `SELECT DISTINCT CAST(substr(sermon_date, 1, 4) AS INTEGER) AS year
@@ -641,7 +659,7 @@ export interface SermonEditData extends SermonInput {
   updatedAt: string;
 }
 
-export async function getSermonForEdit(db: D1Database, id: number): Promise<SermonEditData | null> {
+export async function getSermonForEdit(db: AppDb, id: number): Promise<SermonEditData | null> {
   const row = await db
     .prepare(
       `SELECT id, service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, updated_at
@@ -677,7 +695,7 @@ export async function getSermonForEdit(db: D1Database, id: number): Promise<Serm
 
 /** Create or update a sermon in ONE transaction (upsert + revision snapshot).
  *  Sermons have no child rows. Duplicate LIVE (service_type, date) → dateTaken. */
-export async function saveSermon(db: D1Database, input: SaveSermonInput, editedBy: string): Promise<SaveSermonResult> {
+export async function saveSermon(db: AppDb, input: SaveSermonInput, editedBy: string): Promise<SaveSermonResult> {
   let id: number | null;
   try {
     id = await resolveDateSlot(db, 'sermons', ['service_type_id', 'sermon_date'], [input.serviceTypeId, input.sermonDate], input.id);
@@ -690,7 +708,7 @@ export async function saveSermon(db: D1Database, input: SaveSermonInput, editedB
       ? db
           .prepare(
             `INSERT INTO sermons (service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now')) RETURNING id`,
           )
           .bind(
             input.serviceTypeId,
@@ -722,23 +740,24 @@ export async function saveSermon(db: D1Database, input: SaveSermonInput, editedB
             id,
           );
   try {
-    const results = await db.batch([
-      upsert,
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           SELECT 'sermon', id, ?3, ?4 FROM sermons WHERE service_type_id = ?1 AND sermon_date = ?2`,
-        )
-        .bind(input.serviceTypeId, input.sermonDate, snapshot(input), editedBy),
-    ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    // Upsert first (INSERT ... RETURNING id / UPDATE) to capture the id portably;
+    // the revision row then references the parent by its unique key.
+    const inserted = await upsert.first<{ id: number }>();
+    await db
+      .prepare(
+        `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+         SELECT 'sermon', id, ?3, ?4 FROM sermons WHERE service_type_id = ?1 AND sermon_date = ?2`,
+      )
+      .bind(input.serviceTypeId, input.sermonDate, snapshot(input), editedBy)
+      .run();
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { sermon_date: 'errors.dateTaken' } };
     throw e;
   }
 }
 
-export async function softDeleteSermon(db: D1Database, id: number, editedBy: string): Promise<void> {
+export async function softDeleteSermon(db: AppDb, id: number, editedBy: string): Promise<void> {
   await softDeleteContent(db, 'sermons', id, editedBy);
 }
 
@@ -759,7 +778,7 @@ export interface PrayerSheetListRow {
   updated_at: string;
 }
 
-export async function listPrayerSheets(db: D1Database): Promise<PrayerSheetListRow[]> {
+export async function listPrayerSheets(db: AppDb): Promise<PrayerSheetListRow[]> {
   const { results } = await db
     .prepare(
       `SELECT id, sheet_date, locale, status, publish_at, updated_by, updated_at
@@ -774,7 +793,7 @@ export interface PrayerSheetEditData extends PrayerSheetInput {
   updatedAt: string;
 }
 
-export async function getPrayerSheetForEdit(db: D1Database, id: number): Promise<PrayerSheetEditData | null> {
+export async function getPrayerSheetForEdit(db: AppDb, id: number): Promise<PrayerSheetEditData | null> {
   const row = await db
     .prepare(
       `SELECT id, sheet_date, locale, sections_json, status, publish_at, updated_at
@@ -805,7 +824,7 @@ export async function getPrayerSheetForEdit(db: D1Database, id: number): Promise
 /** Create or update a prayer sheet in ONE transaction (upsert + revision
  *  snapshot). sheet_date is UNIQUE (single column). Duplicate LIVE date →
  *  dateTaken. */
-export async function savePrayerSheet(db: D1Database, input: SavePrayerSheetInput, editedBy: string): Promise<SavePrayerSheetResult> {
+export async function savePrayerSheet(db: AppDb, input: SavePrayerSheetInput, editedBy: string): Promise<SavePrayerSheetResult> {
   let id: number | null;
   try {
     id = await resolveDateSlot(db, 'prayer_sheets', ['sheet_date'], [input.sheetDate], input.id);
@@ -819,7 +838,7 @@ export async function savePrayerSheet(db: D1Database, input: SavePrayerSheetInpu
       ? db
           .prepare(
             `INSERT INTO prayer_sheets (sheet_date, locale, sections_json, status, publish_at, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) RETURNING id`,
           )
           .bind(input.sheetDate, input.locale, sectionsJson, input.status, input.publishAt, editedBy)
       : db
@@ -829,23 +848,24 @@ export async function savePrayerSheet(db: D1Database, input: SavePrayerSheetInpu
           )
           .bind(input.sheetDate, input.locale, sectionsJson, input.status, input.publishAt, editedBy, id);
   try {
-    const results = await db.batch([
-      upsert,
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           SELECT 'prayer_sheet', id, ?2, ?3 FROM prayer_sheets WHERE sheet_date = ?1`,
-        )
-        .bind(input.sheetDate, snapshot(input), editedBy),
-    ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    // Upsert first (INSERT ... RETURNING id / UPDATE) to capture the id portably;
+    // the revision row then references the parent by its unique sheet_date key.
+    const inserted = await upsert.first<{ id: number }>();
+    await db
+      .prepare(
+        `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+         SELECT 'prayer_sheet', id, ?2, ?3 FROM prayer_sheets WHERE sheet_date = ?1`,
+      )
+      .bind(input.sheetDate, snapshot(input), editedBy)
+      .run();
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { sheet_date: 'errors.dateTaken' } };
     throw e;
   }
 }
 
-export async function softDeletePrayerSheet(db: D1Database, id: number, editedBy: string): Promise<void> {
+export async function softDeletePrayerSheet(db: AppDb, id: number, editedBy: string): Promise<void> {
   await softDeleteContent(db, 'prayer_sheets', id, editedBy);
 }
 
@@ -857,7 +877,7 @@ export interface StatusCounts {
 }
 
 /** Published / draft counts for a content table (soft-deleted rows excluded). */
-export async function countContentByStatus(db: D1Database, table: 'bulletins' | 'sermons' | 'prayer_sheets'): Promise<StatusCounts> {
+export async function countContentByStatus(db: AppDb, table: 'bulletins' | 'sermons' | 'prayer_sheets'): Promise<StatusCounts> {
   const { results } = await db
     .prepare(`SELECT status, COUNT(*) AS n FROM ${table} WHERE deleted_at IS NULL GROUP BY status`)
     .all<{ status: string; n: number }>();
@@ -880,7 +900,7 @@ export interface WeekPrepRow {
 
 /** Per service type on `date`: is there a (non-deleted) bulletin and sermon?
  *  Powers the dashboard "this week prep" checklist. */
-export async function listWeekPrep(db: D1Database, date: string, locale: Locale): Promise<WeekPrepRow[]> {
+export async function listWeekPrep(db: AppDb, date: string, locale: Locale): Promise<WeekPrepRow[]> {
   const { results } = await db
     .prepare(
       `SELECT st.id AS service_type_id, COALESCE(l.name, d.name, '') AS name,
@@ -908,7 +928,7 @@ export interface RecentRevisionRow {
 }
 
 /** The most recent revision rows across all entities (dashboard activity). */
-export async function listRecentRevisions(db: D1Database, limit: number): Promise<RecentRevisionRow[]> {
+export async function listRecentRevisions(db: AppDb, limit: number): Promise<RecentRevisionRow[]> {
   const { results } = await db
     .prepare(`SELECT id, entity, entity_id, edited_by, edited_at FROM revisions ORDER BY edited_at DESC, id DESC LIMIT ?1`)
     .bind(limit)
@@ -920,25 +940,25 @@ export async function listRecentRevisions(db: D1Database, limit: number): Promis
 // News: home announcements + upcoming events (editor ∪ admin). These carry NO
 // draft/publish or soft-delete columns — they are visibility-windowed by the
 // `active` flag + optional starts_at/ends_at (see publicDb). The admin model is
-// therefore HARD delete. Each save is a single db.batch (upsert the row, rewrite
-// its i18n companion rows via DELETE + re-INSERT, append a full-snapshot
-// revision). For an INSERT the child + revision statements reference the new row
-// via `(SELECT MAX(id) FROM <table>)`: within one transactional batch SQLite has
-// just assigned the largest rowid to our insert, so MAX(id) is exactly it.
+// therefore HARD delete. Each save upserts the row, rewrites its i18n companion
+// rows via DELETE + re-INSERT, and appends a full-snapshot revision. For an
+// INSERT the parent row is written first (RETURNING id) so the child + revision
+// statements can reference the new id by bind — portable across backends and free
+// of the race an old greatest-rowid last-insert-id subquery would carry.
 // ===========================================================================
 
 /** Insert one i18n title (announcements) or title+blurb (events) row per locale
- *  that carries a title. `idExpr` is either a literal `?N` bind for an update or
- *  the MAX(id) subquery for an insert. */
+ *  that carries a title. `idExpr` is the parent-id placeholder — a `?` bind for
+ *  both the insert (new id) and update paths. */
 function i18nInserts(
-  db: D1Database,
+  db: AppDb,
   table: 'announcement_i18n' | 'event_i18n',
   fk: string,
   idExpr: string,
   idBind: number | null,
   titles: Partial<Record<Locale, string>>,
   blurbs?: Partial<Record<Locale, string>>,
-): D1PreparedStatement[] {
+): AppStatement[] {
   const bindId = (extra: (string | number | null)[]) => (idBind === null ? extra : [idBind, ...extra]);
   return LOCALES.filter((loc) => titles[loc] !== undefined).map((loc) =>
     blurbs
@@ -970,7 +990,7 @@ export interface AnnouncementAdminRow {
 
 /** Every announcement (active AND inactive), both-locale titles for display, in
  *  sort order — the admin list shows the full set, not just the windowed ones. */
-export async function listAnnouncements(db: D1Database): Promise<AnnouncementAdminRow[]> {
+export async function listAnnouncements(db: AppDb): Promise<AnnouncementAdminRow[]> {
   const { results } = await db
     .prepare(
       `SELECT a.id AS id, COALESCE(en.title, '') AS title_en, COALESCE(zh.title, '') AS title_zh,
@@ -986,22 +1006,23 @@ export async function listAnnouncements(db: D1Database): Promise<AnnouncementAdm
 
 /** Create or update an announcement in ONE transaction (upsert + i18n rewrite +
  *  revision snapshot). No unique business key, so no dateTaken path. */
-export async function saveAnnouncement(db: D1Database, input: SaveAnnouncementInput, editedBy: string): Promise<{ id: number }> {
+export async function saveAnnouncement(db: AppDb, input: SaveAnnouncementInput, editedBy: string): Promise<{ id: number }> {
   const active = input.active ? 1 : 0;
   if (input.id === null) {
-    const results = await db.batch([
+    // Insert the parent first (RETURNING id) so the i18n + revision children can
+    // reference the new id by bind — portable, and free of the old last-insert-id race.
+    const created = await db
+      .prepare(`INSERT INTO announcements (url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id`)
+      .bind(input.url, input.sort, active, input.startsAt, input.endsAt)
+      .first<{ id: number }>();
+    const newId = created!.id;
+    await db.batch([
+      ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '?', newId, input.titles),
       db
-        .prepare(`INSERT INTO announcements (url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5)`)
-        .bind(input.url, input.sort, active, input.startsAt, input.endsAt),
-      ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '(SELECT MAX(id) FROM announcements)', null, input.titles),
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           VALUES ('announcement', (SELECT MAX(id) FROM announcements), ?1, ?2)`,
-        )
-        .bind(snapshot(input), editedBy),
+        .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('announcement', ?1, ?2, ?3)`)
+        .bind(newId, snapshot(input), editedBy),
     ]);
-    return { id: results[0].meta.last_row_id as number };
+    return { id: newId };
   }
   await db.batch([
     // Upsert by id: a normal edit UPDATEs the live row; restoring a revision of a
@@ -1025,7 +1046,7 @@ export async function saveAnnouncement(db: D1Database, input: SaveAnnouncementIn
 
 /** Hard-delete an announcement and its i18n rows, snapshotting what was removed
  *  into revisions ({ v:1, deleted:… }) so the record survives in history. */
-export async function deleteAnnouncement(db: D1Database, id: number, editedBy: string): Promise<void> {
+export async function deleteAnnouncement(db: AppDb, id: number, editedBy: string): Promise<void> {
   const row = await db
     .prepare(`SELECT url, sort, active, starts_at, ends_at FROM announcements WHERE id = ?1`)
     .bind(id)
@@ -1053,7 +1074,7 @@ export async function deleteAnnouncement(db: D1Database, id: number, editedBy: s
 }
 
 /** Flip an announcement's active flag (quick list action, no snapshot). */
-export async function toggleAnnouncementActive(db: D1Database, id: number): Promise<void> {
+export async function toggleAnnouncementActive(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE announcements SET active = 1 - active WHERE id = ?1`).bind(id).run();
 }
 
@@ -1079,7 +1100,7 @@ export interface EventAdminRow {
 
 /** Every event (active AND inactive), both-locale title/blurb + image key, in
  *  sort order. */
-export async function listEvents(db: D1Database): Promise<EventAdminRow[]> {
+export async function listEvents(db: AppDb): Promise<EventAdminRow[]> {
   const { results } = await db
     .prepare(
       `SELECT e.id AS id, COALESCE(en.title, '') AS title_en, COALESCE(zh.title, '') AS title_zh,
@@ -1098,22 +1119,23 @@ export async function listEvents(db: D1Database): Promise<EventAdminRow[]> {
 /** Create or update an event in ONE transaction (upsert + i18n title/blurb
  *  rewrite + revision snapshot). image_key is stored as passed by the page (the
  *  page resolves upload / removal before calling this). */
-export async function saveEvent(db: D1Database, input: SaveEventInput, editedBy: string): Promise<{ id: number }> {
+export async function saveEvent(db: AppDb, input: SaveEventInput, editedBy: string): Promise<{ id: number }> {
   const active = input.active ? 1 : 0;
   if (input.id === null) {
-    const results = await db.batch([
+    // Insert the parent first (RETURNING id) so the i18n + revision children can
+    // reference the new id by bind — portable, and free of the old last-insert-id race.
+    const created = await db
+      .prepare(`INSERT INTO events (image_key, url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id`)
+      .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt)
+      .first<{ id: number }>();
+    const newId = created!.id;
+    await db.batch([
+      ...i18nInserts(db, 'event_i18n', 'event_id', '?', newId, input.titles, input.blurbs),
       db
-        .prepare(`INSERT INTO events (image_key, url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`)
-        .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt),
-      ...i18nInserts(db, 'event_i18n', 'event_id', '(SELECT MAX(id) FROM events)', null, input.titles, input.blurbs),
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           VALUES ('event', (SELECT MAX(id) FROM events), ?1, ?2)`,
-        )
-        .bind(snapshot(input), editedBy),
+        .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('event', ?1, ?2, ?3)`)
+        .bind(newId, snapshot(input), editedBy),
     ]);
-    return { id: results[0].meta.last_row_id as number };
+    return { id: newId };
   }
   await db.batch([
     // Upsert by id — same recreate-under-same-id behavior as saveAnnouncement, so
@@ -1136,7 +1158,7 @@ export async function saveEvent(db: D1Database, input: SaveEventInput, editedBy:
 /** Hard-delete an event and its i18n rows, snapshotting what was removed into
  *  revisions. The R2 object at image_key is left in place — keys are
  *  content-addressed and may be shared by another event. */
-export async function deleteEvent(db: D1Database, id: number, editedBy: string): Promise<void> {
+export async function deleteEvent(db: AppDb, id: number, editedBy: string): Promise<void> {
   const row = await db
     .prepare(`SELECT image_key, url, sort, active, starts_at, ends_at FROM events WHERE id = ?1`)
     .bind(id)
@@ -1166,7 +1188,7 @@ export async function deleteEvent(db: D1Database, id: number, editedBy: string):
 }
 
 /** Flip an event's active flag (quick list action, no snapshot). */
-export async function toggleEventActive(db: D1Database, id: number): Promise<void> {
+export async function toggleEventActive(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE events SET active = 1 - active WHERE id = ?1`).bind(id).run();
 }
 
@@ -1208,7 +1230,7 @@ export type PrayerBoard = Record<PrayerStatus, PrayerRequestRow[]>;
  * always complete; the two TERMINAL columns (answered/cancelled) hide cards
  * older than 90 days unless `all` is set — that's the '显示全部' toggle.
  */
-export async function listPrayerRequests(db: D1Database, opts: { all?: boolean } = {}): Promise<PrayerBoard> {
+export async function listPrayerRequests(db: AppDb, opts: { all?: boolean } = {}): Promise<PrayerBoard> {
   const where = opts.all
     ? ''
     : `WHERE r.status NOT IN ('answered','cancelled') OR r.created_at >= datetime('now','-90 days') `;
@@ -1225,7 +1247,7 @@ export async function listPrayerRequests(db: D1Database, opts: { all?: boolean }
 }
 
 /** One request's full activity log (all kinds), oldest-first for the card details. */
-export async function listPrayerActivity(db: D1Database, id: number): Promise<PrayerActivityRow[]> {
+export async function listPrayerActivity(db: AppDb, id: number): Promise<PrayerActivityRow[]> {
   const { results } = await db
     .prepare(
       `SELECT id, request_id, author, kind, body, created_at FROM prayer_activity
@@ -1239,10 +1261,10 @@ export async function listPrayerActivity(db: D1Database, id: number): Promise<Pr
 /** Move a request to `newStatus`, logging a 'moved' activity row (body = the new
  *  status). A no-op move (same status) logs nothing; a vanished id is a silent
  *  no-op. An unknown status is rejected — the page pre-checks the enum too. */
-export async function movePrayerRequest(db: D1Database, id: number, newStatus: string, author: string): Promise<void> {
+export async function movePrayerRequest(db: AppDb, id: number, newStatus: string, author: string): Promise<void> {
   if (!(PRAYER_STATUSES as readonly string[]).includes(newStatus)) throw new Error(`invalid prayer status: ${newStatus}`);
   const r = await db
-    .prepare(`UPDATE prayer_requests SET status = ?1 WHERE id = ?2 AND status IS NOT ?1`)
+    .prepare(`UPDATE prayer_requests SET status = ?1 WHERE id = ?2 AND status IS DISTINCT FROM ?1`)
     .bind(newStatus, id)
     .run();
   if (r.meta.changes > 0) {
@@ -1254,7 +1276,7 @@ export async function movePrayerRequest(db: D1Database, id: number, newStatus: s
 }
 
 /** Log that `author` prayed for this request (🙏). */
-export async function markPrayed(db: D1Database, id: number, author: string): Promise<void> {
+export async function markPrayed(db: AppDb, id: number, author: string): Promise<void> {
   await db
     .prepare(`INSERT INTO prayer_activity (request_id, author, kind, body) VALUES (?1, ?2, 'prayed', NULL)`)
     .bind(id, author)
@@ -1263,7 +1285,7 @@ export async function markPrayed(db: D1Database, id: number, author: string): Pr
 
 /** Log a staff comment (💬). Body is trimmed + clamped to 2000 chars; empty
  *  comments are rejected (the page also guards before calling). */
-export async function addPrayerComment(db: D1Database, id: number, author: string, body: string): Promise<void> {
+export async function addPrayerComment(db: AppDb, id: number, author: string, body: string): Promise<void> {
   const text = body.trim().slice(0, 2000);
   if (!text) throw new Error('prayer comment body required');
   await db
@@ -1274,7 +1296,7 @@ export async function addPrayerComment(db: D1Database, id: number, author: strin
 
 /** Hard-delete a request and its activity in ONE batch (activity first — the FK
  *  has no cascade). Removed permanently; there is no revision for prayer rows. */
-export async function deletePrayerRequest(db: D1Database, id: number): Promise<void> {
+export async function deletePrayerRequest(db: AppDb, id: number): Promise<void> {
   await db.batch([
     db.prepare(`DELETE FROM prayer_activity WHERE request_id = ?1`).bind(id),
     db.prepare(`DELETE FROM prayer_requests WHERE id = ?1`).bind(id),
@@ -1282,7 +1304,7 @@ export async function deletePrayerRequest(db: D1Database, id: number): Promise<v
 }
 
 /** Count of untriaged ('new') requests — the dashboard badge + intro line. */
-export async function countNewPrayerRequests(db: D1Database): Promise<number> {
+export async function countNewPrayerRequests(db: AppDb): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM prayer_requests WHERE status = 'new'`).first<{ n: number }>();
   return row?.n ?? 0;
 }
@@ -1300,7 +1322,7 @@ export interface RevisionRow {
 }
 
 /** The most recent revisions for one entity row, newest first, capped at 50. */
-export async function listRevisions(db: D1Database, entity: string, entityId: number): Promise<RevisionRow[]> {
+export async function listRevisions(db: AppDb, entity: string, entityId: number): Promise<RevisionRow[]> {
   const { results } = await db
     .prepare(
       `SELECT id, edited_by, edited_at, snapshot_json FROM revisions
@@ -1312,7 +1334,7 @@ export async function listRevisions(db: D1Database, entity: string, entityId: nu
 }
 
 /** One revision by id (used to validate + read a snapshot before restoring). */
-export async function getRevision(db: D1Database, id: number): Promise<{ entity: string; entity_id: number; snapshot_json: string } | null> {
+export async function getRevision(db: AppDb, id: number): Promise<{ entity: string; entity_id: number; snapshot_json: string } | null> {
   return db
     .prepare(`SELECT entity, entity_id, snapshot_json FROM revisions WHERE id = ?1`)
     .bind(id)
@@ -1337,7 +1359,7 @@ export type RestoreResult =
  *    highest-id row lets the next insert take its id) — refuse rather than clobber;
  *  - date_taken: the snapshot's UNIQUE date now collides with another live row.
  */
-export async function restoreRevision(db: D1Database, entity: string, revisionId: number, editedBy: string): Promise<RestoreResult> {
+export async function restoreRevision(db: AppDb, entity: string, revisionId: number, editedBy: string): Promise<RestoreResult> {
   const rev = await getRevision(db, revisionId);
   if (!rev || rev.entity !== entity) return { ok: false, error: 'not_found' };
 

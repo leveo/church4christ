@@ -1,5 +1,4 @@
 import type { APIRoute } from 'astro';
-import { env } from 'cloudflare:workers';
 import { clearSessionCookie } from '../lib/session';
 import { DEFAULT_LOCALE, pathWithoutLocale, type Locale } from '../lib/locales';
 
@@ -21,7 +20,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const userId = locals.user?.id;
   if (userId) {
     try {
-      await (env as unknown as { DB: D1Database }).DB
+      await locals.db
         .prepare(`UPDATE people SET session_epoch = session_epoch + 1 WHERE id = ?`)
         .bind(userId)
         .run();

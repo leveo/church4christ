@@ -6,7 +6,7 @@
 -- settings block (hello@church.yunfei-song.com), which is the spec demo domain.
 --
 -- RELATIVE DATES — every time-sensitive date is computed AT SEED TIME from
--- date('now') so a freshly cloned demo always looks alive, never pinned to a
+-- date('now', ...) so a freshly cloned demo always looks alive, never pinned to a
 -- calendar that has since passed. The anchor is "the first upcoming Sunday",
 -- written date('now','weekday 0'): SQLite's 'weekday 0' modifier advances to the
 -- next Sunday, or stays put when today is already Sunday (verified). Every other

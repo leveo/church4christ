@@ -1,0 +1,154 @@
+---
+// My Giving (authed via route policy; owned by the `giving` module, so the
+// middleware 404s this whole route when giving is off — the page never has to
+// re-check the module). Three read-only sections scoped to the viewer's LIVE
+// household (see givingDb.ts privacy note): (1) the giver's own recurring
+// subscriptions with a status chip and a "Manage" button that POSTs to the
+// Stripe billing portal; (2) the household gift ledger (succeeded + refunded);
+// (3) per-year household totals. All money flows through formatCents — cents are
+// integers end to end. Empty states for all three so a brand-new giver sees a
+// friendly page, not blanks.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
+import { listRecurringForPerson, listHouseholdGifts, householdYearTotals } from '../../../lib/givingDb';
+import { badge, btnSecondary, noticeErr, th, td } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+
+// The portal endpoint bounces back here with ?error=noportal (no Stripe customer
+// on file) or ?error=portal (Stripe call failed); everything else reads generic.
+const errParam = Astro.url.searchParams.get('error');
+const errorKey = errParam ? (errParam === 'noportal' ? 'give.error.noportal' : 'give.error.invalid') : null;
+
+const [recurring, gifts, yearTotals] = await Promise.all([
+  listRecurringForPerson(db, locale, user.id),
+  listHouseholdGifts(db, locale, user.id),
+  householdYearTotals(db, user.id),
+]);
+
+// Recurring subscription status → chip variant (webhook constrains the set to
+// active / past_due / canceled; fall back to neutral for anything unexpected).
+const statusChip: Record<string, string> = {
+  active: 'bg-success-soft text-success',
+  past_due: 'bg-warn-soft text-warn',
+  canceled: 'bg-surface-sunken text-ink-muted',
+};
+---
+
+<Base title={t(locale, 'my.giving.title')} locale={locale} noindex>
+  <div class="container-content max-w-3xl py-12">
+    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'my.giving.title')}</h1>
+
+    {errorKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, errorKey)}</p>}
+
+    {/* ── Recurring giving ─────────────────────────────────────────────────── */}
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.giving.recurring')}</h2>
+      {
+        recurring.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>
+        ) : (
+          <>
+            <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+              {recurring.map((r) => (
+                <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                  <span class="font-semibold tabular-nums">{formatCents(r.amount_cents)}</span>
+                  <span class="text-ink-muted">
+                    {r.fund_name} · {t(locale, r.interval === 'week' ? 'give.weekly' : 'give.monthly')}
+                  </span>
+                  <span class={`ml-auto ${badge} ${statusChip[r.status] ?? 'bg-surface-sunken text-ink-muted'}`}>
+                    {t(locale, `my.giving.status.${r.status}`)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <form method="post" action="/api/giving/portal" class="mt-3">
+              <input type="hidden" name="locale" value={locale} />
+              <button type="submit" class={btnSecondary}>{t(locale, 'my.giving.managePortal')}</button>
+            </form>
+          </>
+        )
+      }
+    </section>
+
+    {/* ── Household giving history ─────────────────────────────────────────── */}
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.giving.household')}</h2>
+      {
+        gifts.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>
+        ) : (
+          <div class="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-raised">
+            <table class="w-full">
+              <thead class="border-b border-border">
+                <tr>
+                  <th class={th}>{t(locale, 'my.giving.date')}</th>
+                  <th class={th}>{t(locale, 'my.giving.giver')}</th>
+                  <th class={th}>{t(locale, 'my.giving.fund')}</th>
+                  <th class={th}>{t(locale, 'my.giving.method')}</th>
+                  <th class={`${th} text-right`}>{t(locale, 'my.giving.amount')}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                {gifts.map((g) => (
+                  <tr>
+                    <td class={`${td} whitespace-nowrap tabular-nums`}>
+                      {formatDate(g.received_on ?? g.created_at.slice(0, 10), locale)}
+                    </td>
+                    <td class={td}>{g.giver_name}</td>
+                    <td class={td}>{g.fund_name}</td>
+                    <td class={td}>{t(locale, `giving.method.${g.method}`)}</td>
+                    <td class={`${td} whitespace-nowrap text-right tabular-nums`}>
+                      {formatCents(g.amount_cents, g.currency)}
+                      {g.status === 'refunded' && (
+                        <span class={`ml-2 ${badge} bg-surface-sunken text-ink-muted`}>{t(locale, 'my.giving.refunded')}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      }
+    </section>
+
+    {/* ── Per-year household totals ───────────────────────────────────────── */}
+    <section class="mt-8">
+      {
+        yearTotals.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>
+        ) : (
+          <div class="overflow-x-auto rounded-lg border border-border bg-surface-raised">
+            <table class="w-full">
+              <thead class="border-b border-border">
+                <tr>
+                  <th class={th}>{t(locale, 'my.giving.year')}</th>
+                  <th class={`${th} text-right`}>{t(locale, 'my.giving.total')}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                {yearTotals.map((y) => (
+                  <tr>
+                    <td class={`${td} tabular-nums`}>{y.year}</td>
+                    <td class={`${td} text-right font-semibold tabular-nums`}>{formatCents(y.total_cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      }
+    </section>
+  </div>
+</Base>

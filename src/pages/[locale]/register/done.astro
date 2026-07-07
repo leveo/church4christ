@@ -1,0 +1,31 @@
+---
+// Registration confirmation page. Reached two ways: the submit endpoint 303s a
+// FREE registration here (?ok=1, no paid marker → "you're registered"), and a
+// PAID registration lands here after the Stripe Checkout redirect (?ok=1&paid=1 →
+// adds the "payment received, check your email" note). Deliberately static: the
+// Stripe webhook is the source of truth for the paid seat, so this page makes no
+// DB/Stripe lookup. noindex since it's a post-submit landing page.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { btn, btnSecondary } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const paid = Astro.url.searchParams.get('paid') === '1';
+---
+
+<Base title={t(locale, 'register.done.title')} locale={locale} noindex={true}>
+  <div class="container-content max-w-xl py-16 text-center">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'register.done.title')}</h1>
+    {paid && <p class="mt-4 text-ink-muted">{t(locale, 'register.done.paid')}</p>}
+
+    <div class="mt-8 flex flex-wrap justify-center gap-3">
+      <a href={localePath(locale, '/')} class={btn}>{t(locale, 'notFound.home')}</a>
+      <a href={localePath(locale, '/register')} class={btnSecondary}>{t(locale, 'register.title')}</a>
+    </div>
+  </div>
+</Base>

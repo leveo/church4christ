@@ -3,7 +3,6 @@
 // else 404s. An optional ?service=<id> picks which service type's bulletin to
 // show when a date has more than one; it defaults to the first (by type sort).
 // A no-match date (or DB hiccup) 404s.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import BulletinView from '../../../components/BulletinView.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -38,7 +37,7 @@ let bulletin: BulletinRow | null = null;
 let announcements: BulletinAnnouncementRow[] = [];
 let roster: RosterGroup[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   services = await listBulletinServicesForDate(db, date, locale);
   if (services.length > 0) {
     const chosen = services.find((s) => s.service_type_id === serviceParam)?.service_type_id ?? services[0].service_type_id;

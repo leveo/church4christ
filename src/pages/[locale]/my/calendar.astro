@@ -4,7 +4,6 @@
 // the iCal subscribe box. Ported from the reference stack's src/pages/my/calendar.astro,
 // except the calendar token is an explicit Generate/Regenerate action (32 hex
 // chars) instead of create-on-view — regenerating invalidates the old URL.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import MonthCalendar from '../../../components/MonthCalendar.astro';
 import { buildCalendarMarks } from '../../../lib/calendar';
@@ -21,7 +20,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData();

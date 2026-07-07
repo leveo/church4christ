@@ -15,7 +15,8 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
-const vars = env as unknown as EmailEnv & { DB: D1Database };
+const vars = env as unknown as EmailEnv;
+const db = Astro.locals.db;
 // `next` is carried through a form re-render only. DECISION (slice 3): the
 // magic-link flow always lands on /{locale}/my, so we never propagate it into
 // the emailed link.
@@ -33,8 +34,8 @@ if (Astro.request.method === 'POST') {
     // Anti-enumeration: whether or not the person exists (or is rate limited),
     // we always fall through to the identical "check your email" state.
     try {
-      const person = await getPersonByEmail(vars.DB, email);
-      if (person) await sendMagicLink(vars, vars.DB, person, locale);
+      const person = await getPersonByEmail(db, email);
+      if (person) await sendMagicLink(vars, db, person, locale);
     } catch (e) {
       console.error('signin failure', e);
     }
