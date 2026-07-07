@@ -13,9 +13,8 @@ import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 //   admin/leader console, proving the whole middleware→route→postgres.js stack
 //   serves real pages against Postgres. The full test/e2e/** suite is NOT reused
 //   here: those tests seed and verify through the D1 `env.DB` binding (98 direct
-//   uses), which the Supabase-backed worker never reads — see the findings doc
-//   (docs/superpowers/plans/phase1-e2e-pg-findings.md) for the harness-coupling
-//   analysis and the portability bugs this exploration fixed.
+//   uses), which the Supabase-backed worker never reads, so it stays a D1-only
+//   suite; this smoke test is the Postgres-side coverage instead.
 // Migrate + seed: test/e2e-pg/global-setup.ts (Node, once) + test/e2e-pg/setup.ts
 // (in-pool, per file). Run via `npm run test:e2e:pg`, which builds the worker first.
 const DATABASE_URL = process.env.DATABASE_URL ?? '';

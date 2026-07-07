@@ -13,7 +13,7 @@
 //     explicit GROUP BY, and the TRUE/FALSE scope clause — reached via /admin/
 //     ministries as both an admin and a team leader.
 // This does NOT reuse test/e2e/** (those seed + verify through the D1 env.DB binding,
-// which this backend never reads) — see docs/superpowers/plans/phase1-e2e-pg-findings.md.
+// which this backend never reads).
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { get } from '../e2e/helpers';
