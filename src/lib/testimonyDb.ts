@@ -19,14 +19,14 @@ export interface TestimonyInput {
 
 /** Insert a testimony as pending (status defaults to 'P'). Returns its id. */
 export async function submitTestimony(db: D1Database, input: TestimonyInput): Promise<number> {
-  const r = await db
+  const created = await db
     .prepare(
       `INSERT INTO testimonies (person_id, author_name, locale, title, body, category)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id`,
     )
     .bind(input.person_id, input.author_name, input.locale, input.title, input.body, input.category)
-    .run();
-  return r.meta.last_row_id;
+    .first<{ id: number }>();
+  return created!.id;
 }
 
 export interface PendingTestimonyRow {

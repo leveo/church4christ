@@ -13,6 +13,7 @@
 // Authorization stays in the pages: every caller re-checks admin-or-leader of
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
+import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
 import { listPlans, type PlanListRow } from './planDb';
@@ -258,11 +259,11 @@ export interface CreateTeamArgs {
 /** Create a team + its i18n names (en required; zh only when provided). Returns the id. */
 export async function createTeam(db: D1Database, args: CreateTeamArgs): Promise<number> {
   const { ministryId, nameEn, nameZh = null, sort = 0 } = args;
-  const r = await db
-    .prepare(`INSERT INTO teams (ministry_id, sort) VALUES (?, ?)`)
+  const created = await db
+    .prepare(`INSERT INTO teams (ministry_id, sort) VALUES (?, ?) RETURNING id`)
     .bind(ministryId, sort)
-    .run();
-  const teamId = r.meta.last_row_id;
+    .first<{ id: number }>();
+  const teamId = created!.id;
   const stmts = [
     db.prepare(`INSERT INTO team_i18n (team_id, locale, name) VALUES (?, 'en', ?)`).bind(teamId, nameEn),
   ];
@@ -499,16 +500,16 @@ export async function findOrCreatePersonByEmail(
     .first<{ id: number }>();
   if (existing) return existing.id;
   try {
-    const r = await db
+    const created = await db
       .prepare(
         `INSERT INTO people (display_name, first_name, last_name, email, phone, role, active)
-         VALUES (?1, '', '', ?2, ?3, 'member', 1)`,
+         VALUES (?1, '', '', ?2, ?3, 'member', 1) RETURNING id`,
       )
       .bind(name, normalized, phone)
-      .run();
-    return r.meta.last_row_id;
+      .first<{ id: number }>();
+    return created!.id;
   } catch (e) {
-    if (String(e).includes('UNIQUE constraint failed')) {
+    if (isUniqueViolation(e)) {
       const winner = await db
         .prepare(`SELECT id FROM people WHERE email = ?`)
         .bind(normalized)

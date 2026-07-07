@@ -29,11 +29,11 @@ export async function addNote(
   const trimmed = body.trim();
   if (!trimmed) throw new Error('note_empty');
   if (trimmed.length > NOTE_MAX_LEN) throw new Error('note_too_long');
-  const r = await db
-    .prepare(`INSERT INTO person_notes (person_id, author_email, body) VALUES (?, ?, ?)`)
+  const created = await db
+    .prepare(`INSERT INTO person_notes (person_id, author_email, body) VALUES (?, ?, ?) RETURNING id`)
     .bind(personId, authorEmail, trimmed)
-    .run();
-  return r.meta.last_row_id as number;
+    .first<{ id: number }>();
+  return created!.id;
 }
 
 /** Soft-delete a note (idempotent — already-deleted rows do not move). Returns true when a row was deleted. */

@@ -113,10 +113,10 @@ export async function createHousehold(
   if (!person) throw new Error('person_not_found');
 
   const created = await db
-    .prepare(`INSERT INTO households (name, address, phone) VALUES (?, ?, ?)`)
+    .prepare(`INSERT INTO households (name, address, phone) VALUES (?, ?, ?) RETURNING id`)
     .bind(input.name, input.address, input.phone)
-    .run();
-  const householdId = created.meta.last_row_id as number;
+    .first<{ id: number }>();
+  const householdId = created!.id;
 
   try {
     await db
@@ -248,14 +248,14 @@ export async function addDependent(
   isAdmin: boolean,
 ): Promise<number> {
   await assertCanEdit(db, householdId, actorPersonId, isAdmin);
-  const r = await db
+  const created = await db
     .prepare(
       `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
-       VALUES (?, NULL, ?, ?, 0)`,
+       VALUES (?, NULL, ?, ?, 0) RETURNING id`,
     )
     .bind(householdId, displayName, role)
-    .run();
-  return r.meta.last_row_id as number;
+    .first<{ id: number }>();
+  return created!.id;
 }
 
 /**
@@ -359,14 +359,14 @@ export async function linkPersonToHousehold(
     .first<{ display_name: string }>();
   if (!person) throw new Error('person_not_found');
   try {
-    const r = await db
+    const created = await db
       .prepare(
         `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
-         VALUES (?, ?, ?, ?, 0)`,
+         VALUES (?, ?, ?, ?, 0) RETURNING id`,
       )
       .bind(householdId, personId, person.display_name, role)
-      .run();
-    return r.meta.last_row_id as number;
+      .first<{ id: number }>();
+    return created!.id;
   } catch (e) {
     if (isUniqueViolation(e)) throw new Error('already_in_household'); // pre-check ↔ INSERT race
     throw e;
@@ -423,7 +423,7 @@ export async function listHouseholds(db: D1Database, opts: { q?: string } = {}):
        FROM households h
        LEFT JOIN household_members hm ON hm.household_id = h.id
        WHERE h.deleted_at IS NULL
-         AND (?1 = '' OR h.name LIKE ?2 ESCAPE '\\')
+         AND (?1 = '' OR LOWER(h.name) LIKE LOWER(?2) ESCAPE '\\')
        GROUP BY h.id
        ORDER BY h.name, h.id`,
     )

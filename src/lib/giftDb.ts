@@ -5,8 +5,8 @@
 //
 // The gift_results columns store JSON arrays of gift codes (top_gifts_json) and
 // ministry categories (recommended_json). person_interests is additive here
-// (INSERT OR IGNORE) — quiz recommendations augment, never replace, the set a
-// person curates on their profile.
+// (ON CONFLICT DO NOTHING) — quiz recommendations augment, never replace, the set
+// a person curates on their profile.
 
 export interface GiftResultRow {
   top_gifts: string[];
@@ -50,7 +50,7 @@ export async function getLatestGiftResult(db: D1Database, personId: number): Pro
 
 /**
  * Add the given ministry categories to the person's interests without removing
- * any existing ones (INSERT OR IGNORE dedupes against the UNIQUE constraint).
+ * any existing ones (ON CONFLICT DO NOTHING dedupes against the UNIQUE constraint).
  * Blank/duplicate categories are dropped. A no-op for an empty list.
  */
 export async function addRecommendedToInterests(
@@ -62,7 +62,11 @@ export async function addRecommendedToInterests(
   if (clean.length === 0) return;
   await db.batch(
     clean.map((c) =>
-      db.prepare(`INSERT OR IGNORE INTO person_interests (person_id, category) VALUES (?, ?)`).bind(personId, c),
+      db
+        .prepare(
+          `INSERT INTO person_interests (person_id, category) VALUES (?, ?) ON CONFLICT (person_id, category) DO NOTHING`,
+        )
+        .bind(personId, c),
     ),
   );
 }

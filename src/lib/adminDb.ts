@@ -72,7 +72,7 @@ const PERSON_LIST_SELECT = `SELECT p.id, p.first_name, p.last_name, p.display_na
 
 /**
  * Non-deleted people ordered by display_name, each with its membership_status and
- * live household name. With `q`, case-insensitively (SQLite ASCII LIKE) matches
+ * live household name. With `q`, case-insensitively (LOWER() both sides) matches
  * display/first/last name or email; LIKE wildcards in the query are escaped so a
  * literal `%` or `_` searches for itself. The people-module directory filters
  * (status / serving via team_members / has-household) narrow the set when set.
@@ -84,8 +84,8 @@ export async function listPeople(db: D1Database, opts: ListPeopleOpts = {}): Pro
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
     conditions.push(
-      `(p.display_name LIKE ? ESCAPE '\\' OR p.first_name LIKE ? ESCAPE '\\'
-        OR p.last_name LIKE ? ESCAPE '\\' OR p.email LIKE ? ESCAPE '\\')`,
+      `(LOWER(p.display_name) LIKE LOWER(?) ESCAPE '\\' OR LOWER(p.first_name) LIKE LOWER(?) ESCAPE '\\'
+        OR LOWER(p.last_name) LIKE LOWER(?) ESCAPE '\\' OR LOWER(p.email) LIKE LOWER(?) ESCAPE '\\')`,
     );
     binds.push(like, like, like, like);
   }
@@ -177,11 +177,11 @@ export async function savePerson(
         input.lang,
       ];
       appendMembershipColumns(cols, binds, input);
-      const r = await db
-        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+      const created = await db
+        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING id`)
         .bind(...binds)
-        .run();
-      return { ok: true, id: r.meta.last_row_id as number };
+        .first<{ id: number }>();
+      return { ok: true, id: created!.id };
     } catch (e) {
       if (isUniqueViolation(e)) return emailTaken; // pre-check ↔ INSERT race
       throw e;
@@ -201,9 +201,14 @@ export async function savePerson(
   return { ok: true, id: input.id };
 }
 
-/** Shared D1 UNIQUE-constraint detector (also used by householdDb's race mapping). */
+/** Shared UNIQUE-constraint detector (also used by householdDb/teamDb race mapping). */
 export function isUniqueViolation(e: unknown): boolean {
-  return String(e).includes('UNIQUE constraint failed');
+  // SQLite/D1 message, or Postgres SQLSTATE 23505 (postgres.js sets .code).
+  return (
+    String(e).includes('UNIQUE constraint failed') ||
+    (typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505') ||
+    String(e).includes('duplicate key value violates unique constraint')
+  );
 }
 
 // The membership-profile depth (birthday/address/membership_status/joined_on) is
@@ -516,7 +521,7 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
           .prepare(
             `INSERT INTO bulletins (service_type_id, bulletin_date, service_time_label, program_json, offering_json,
                   attendance_json, memory_verse, flowers, status, publish_at, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now')) RETURNING id`,
           )
           .bind(
             input.serviceTypeId,
@@ -553,8 +558,11 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
           );
 
   try {
-    const results = await db.batch([
-      upsert,
+    // Run the upsert first (INSERT ... RETURNING id / UPDATE) so we can capture the
+    // new id portably; the child statements below then reference the parent row by
+    // its unique (service_type_id, bulletin_date) key inside one atomic batch.
+    const inserted = await upsert.first<{ id: number }>();
+    await db.batch([
       db
         .prepare(
           `DELETE FROM bulletin_announcements
@@ -576,7 +584,7 @@ export async function saveBulletin(db: D1Database, input: SaveBulletinInput, edi
         )
         .bind(input.serviceTypeId, input.bulletinDate, snapshot(input), editedBy),
     ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { bulletin_date: 'errors.dateTaken' } };
     throw e;
@@ -690,7 +698,7 @@ export async function saveSermon(db: D1Database, input: SaveSermonInput, editedB
       ? db
           .prepare(
             `INSERT INTO sermons (service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now')) RETURNING id`,
           )
           .bind(
             input.serviceTypeId,
@@ -722,16 +730,17 @@ export async function saveSermon(db: D1Database, input: SaveSermonInput, editedB
             id,
           );
   try {
-    const results = await db.batch([
-      upsert,
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           SELECT 'sermon', id, ?3, ?4 FROM sermons WHERE service_type_id = ?1 AND sermon_date = ?2`,
-        )
-        .bind(input.serviceTypeId, input.sermonDate, snapshot(input), editedBy),
-    ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    // Upsert first (INSERT ... RETURNING id / UPDATE) to capture the id portably;
+    // the revision row then references the parent by its unique key.
+    const inserted = await upsert.first<{ id: number }>();
+    await db
+      .prepare(
+        `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+         SELECT 'sermon', id, ?3, ?4 FROM sermons WHERE service_type_id = ?1 AND sermon_date = ?2`,
+      )
+      .bind(input.serviceTypeId, input.sermonDate, snapshot(input), editedBy)
+      .run();
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { sermon_date: 'errors.dateTaken' } };
     throw e;
@@ -819,7 +828,7 @@ export async function savePrayerSheet(db: D1Database, input: SavePrayerSheetInpu
       ? db
           .prepare(
             `INSERT INTO prayer_sheets (sheet_date, locale, sections_json, status, publish_at, updated_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))`,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) RETURNING id`,
           )
           .bind(input.sheetDate, input.locale, sectionsJson, input.status, input.publishAt, editedBy)
       : db
@@ -829,16 +838,17 @@ export async function savePrayerSheet(db: D1Database, input: SavePrayerSheetInpu
           )
           .bind(input.sheetDate, input.locale, sectionsJson, input.status, input.publishAt, editedBy, id);
   try {
-    const results = await db.batch([
-      upsert,
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           SELECT 'prayer_sheet', id, ?2, ?3 FROM prayer_sheets WHERE sheet_date = ?1`,
-        )
-        .bind(input.sheetDate, snapshot(input), editedBy),
-    ]);
-    return { ok: true, id: id ?? (results[0].meta.last_row_id as number) };
+    // Upsert first (INSERT ... RETURNING id / UPDATE) to capture the id portably;
+    // the revision row then references the parent by its unique sheet_date key.
+    const inserted = await upsert.first<{ id: number }>();
+    await db
+      .prepare(
+        `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
+         SELECT 'prayer_sheet', id, ?2, ?3 FROM prayer_sheets WHERE sheet_date = ?1`,
+      )
+      .bind(input.sheetDate, snapshot(input), editedBy)
+      .run();
+    return { ok: true, id: id ?? inserted!.id };
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, errors: { sheet_date: 'errors.dateTaken' } };
     throw e;
@@ -920,16 +930,16 @@ export async function listRecentRevisions(db: D1Database, limit: number): Promis
 // News: home announcements + upcoming events (editor ∪ admin). These carry NO
 // draft/publish or soft-delete columns — they are visibility-windowed by the
 // `active` flag + optional starts_at/ends_at (see publicDb). The admin model is
-// therefore HARD delete. Each save is a single db.batch (upsert the row, rewrite
-// its i18n companion rows via DELETE + re-INSERT, append a full-snapshot
-// revision). For an INSERT the child + revision statements reference the new row
-// via `(SELECT MAX(id) FROM <table>)`: within one transactional batch SQLite has
-// just assigned the largest rowid to our insert, so MAX(id) is exactly it.
+// therefore HARD delete. Each save upserts the row, rewrites its i18n companion
+// rows via DELETE + re-INSERT, and appends a full-snapshot revision. For an
+// INSERT the parent row is written first (RETURNING id) so the child + revision
+// statements can reference the new id by bind — portable across backends and free
+// of the race an old greatest-rowid last-insert-id subquery would carry.
 // ===========================================================================
 
 /** Insert one i18n title (announcements) or title+blurb (events) row per locale
- *  that carries a title. `idExpr` is either a literal `?N` bind for an update or
- *  the MAX(id) subquery for an insert. */
+ *  that carries a title. `idExpr` is the parent-id placeholder — a `?` bind for
+ *  both the insert (new id) and update paths. */
 function i18nInserts(
   db: D1Database,
   table: 'announcement_i18n' | 'event_i18n',
@@ -989,19 +999,20 @@ export async function listAnnouncements(db: D1Database): Promise<AnnouncementAdm
 export async function saveAnnouncement(db: D1Database, input: SaveAnnouncementInput, editedBy: string): Promise<{ id: number }> {
   const active = input.active ? 1 : 0;
   if (input.id === null) {
-    const results = await db.batch([
+    // Insert the parent first (RETURNING id) so the i18n + revision children can
+    // reference the new id by bind — portable, and free of the old last-insert-id race.
+    const created = await db
+      .prepare(`INSERT INTO announcements (url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id`)
+      .bind(input.url, input.sort, active, input.startsAt, input.endsAt)
+      .first<{ id: number }>();
+    const newId = created!.id;
+    await db.batch([
+      ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '?', newId, input.titles),
       db
-        .prepare(`INSERT INTO announcements (url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5)`)
-        .bind(input.url, input.sort, active, input.startsAt, input.endsAt),
-      ...i18nInserts(db, 'announcement_i18n', 'announcement_id', '(SELECT MAX(id) FROM announcements)', null, input.titles),
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           VALUES ('announcement', (SELECT MAX(id) FROM announcements), ?1, ?2)`,
-        )
-        .bind(snapshot(input), editedBy),
+        .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('announcement', ?1, ?2, ?3)`)
+        .bind(newId, snapshot(input), editedBy),
     ]);
-    return { id: results[0].meta.last_row_id as number };
+    return { id: newId };
   }
   await db.batch([
     // Upsert by id: a normal edit UPDATEs the live row; restoring a revision of a
@@ -1101,19 +1112,20 @@ export async function listEvents(db: D1Database): Promise<EventAdminRow[]> {
 export async function saveEvent(db: D1Database, input: SaveEventInput, editedBy: string): Promise<{ id: number }> {
   const active = input.active ? 1 : 0;
   if (input.id === null) {
-    const results = await db.batch([
+    // Insert the parent first (RETURNING id) so the i18n + revision children can
+    // reference the new id by bind — portable, and free of the old last-insert-id race.
+    const created = await db
+      .prepare(`INSERT INTO events (image_key, url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id`)
+      .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt)
+      .first<{ id: number }>();
+    const newId = created!.id;
+    await db.batch([
+      ...i18nInserts(db, 'event_i18n', 'event_id', '?', newId, input.titles, input.blurbs),
       db
-        .prepare(`INSERT INTO events (image_key, url, sort, active, starts_at, ends_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`)
-        .bind(input.imageKey, input.url, input.sort, active, input.startsAt, input.endsAt),
-      ...i18nInserts(db, 'event_i18n', 'event_id', '(SELECT MAX(id) FROM events)', null, input.titles, input.blurbs),
-      db
-        .prepare(
-          `INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by)
-           VALUES ('event', (SELECT MAX(id) FROM events), ?1, ?2)`,
-        )
-        .bind(snapshot(input), editedBy),
+        .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('event', ?1, ?2, ?3)`)
+        .bind(newId, snapshot(input), editedBy),
     ]);
-    return { id: results[0].meta.last_row_id as number };
+    return { id: newId };
   }
   await db.batch([
     // Upsert by id — same recreate-under-same-id behavior as saveAnnouncement, so
