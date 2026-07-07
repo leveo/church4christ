@@ -1,0 +1,160 @@
+---
+// Stripe reconciliation (finance route class — /admin/giving is admin ∪
+// finance-flagged). Feature-detects the OPTIONAL Supabase Stripe FDW: when the
+// `stripe` schema is absent (the common case — churches wire it up by hand) the
+// page renders setup instructions instead of failing, so a plain deployment is
+// never a 500. When present, it cross-checks the local gift ledger against Stripe
+// over a 7/30/90-day window and lists the three drift buckets. Read-only — audit,
+// no writes.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { stripeFdwAvailable, reconcile } from '../../../lib/givingReconcile';
+import { formatCents } from '../../../lib/money';
+import { card, th, td, noticeOk, btn } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+// Window selector: whitelist to 7/30/90 (default 30) so a junk param never
+// reaches the query.
+const PERIODS = [7, 30, 90] as const;
+const sinceParam = Number(Astro.url.searchParams.get('since') ?? '');
+const sinceDays = (PERIODS as readonly number[]).includes(sinceParam) ? sinceParam : 30;
+
+const available = await stripeFdwAvailable(db);
+const report = available ? await reconcile(db, { sinceDays }) : null;
+const allClear =
+  report !== null &&
+  report.missingLocally.length === 0 &&
+  report.amountMismatch.length === 0 &&
+  report.refundDrift.length === 0;
+
+const heading = t(lang, 'admin.giving.reconcile');
+const h2 = 'font-display text-heading-sm font-bold';
+const tableWrap = 'mt-3 overflow-x-auto rounded-xl border border-border';
+const table = 'w-full border-collapse';
+---
+
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <a href="/admin/giving" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.giving.record')}</a>
+  </div>
+
+  {
+    !available ? (
+      <section class={`mt-6 max-w-2xl ${card}`}>
+        <p class="text-sm text-ink-muted">{t(lang, 'admin.giving.fdwMissing')}</p>
+        <p class="mt-3 font-mono text-xs text-ink-subtle">migrations-supabase/9000_stripe_fdw.sql.example</p>
+      </section>
+    ) : (
+      <>
+        <form method="get" class="mt-6 flex flex-wrap items-end gap-3">
+          <label class="block">
+            <span class="block text-sm font-semibold text-ink-muted mb-1">{t(lang, 'admin.giving.sinceDays')}</span>
+            <select name="since" class="rounded-md border border-border bg-surface px-3 py-2 text-sm">
+              {PERIODS.map((p) => (
+                <option value={p} selected={p === sinceDays}>{t(lang, `admin.giving.since${p}`)}</option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" class={btn}>{t(lang, 'admin.giving.filter')}</button>
+        </form>
+
+        {allClear && <p class={`mt-6 max-w-2xl ${noticeOk}`}>{t(lang, 'admin.giving.reconcileClean')}</p>}
+
+        {/* Bucket 1: paid gift sessions in Stripe with no local gift */}
+        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.missingLocally')}</h2>
+        <div class={tableWrap}>
+          <table class={table}>
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.giving.colSession')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colDate')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colEmail')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report!.missingLocally.length === 0 ? (
+                <tr>
+                  <td class={`${td} text-ink-muted`} colspan="4">—</td>
+                </tr>
+              ) : (
+                report!.missingLocally.map((r) => (
+                  <tr class="border-t border-border">
+                    <td class={`${td} font-mono text-xs`}>{r.session_id}</td>
+                    <td class={`${td} tabular-nums font-medium`}>{formatCents(r.amount)}</td>
+                    <td class={`${td} tabular-nums`}>{r.created}</td>
+                    <td class={td}>{r.email ?? '—'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Bucket 2: local gift amount differs from the Stripe session */}
+        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.amountMismatch')}</h2>
+        <div class={tableWrap}>
+          <table class={table}>
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.giving.colGift')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colSession')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colLocal')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colStripe')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report!.amountMismatch.length === 0 ? (
+                <tr>
+                  <td class={`${td} text-ink-muted`} colspan="4">—</td>
+                </tr>
+              ) : (
+                report!.amountMismatch.map((r) => (
+                  <tr class="border-t border-border">
+                    <td class={`${td} tabular-nums`}>{r.gift_id}</td>
+                    <td class={`${td} font-mono text-xs`}>{r.session_id}</td>
+                    <td class={`${td} tabular-nums`}>{formatCents(r.local_cents)}</td>
+                    <td class={`${td} tabular-nums`}>{formatCents(r.stripe_cents)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Bucket 3: Stripe charge refunded but local gift still succeeded */}
+        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.refundDrift')}</h2>
+        <div class={tableWrap}>
+          <table class={table}>
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.giving.colGift')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colPaymentIntent')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report!.refundDrift.length === 0 ? (
+                <tr>
+                  <td class={`${td} text-ink-muted`} colspan="2">—</td>
+                </tr>
+              ) : (
+                report!.refundDrift.map((r) => (
+                  <tr class="border-t border-border">
+                    <td class={`${td} tabular-nums`}>{r.gift_id}</td>
+                    <td class={`${td} font-mono text-xs`}>{r.payment_intent_id}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+</Admin>

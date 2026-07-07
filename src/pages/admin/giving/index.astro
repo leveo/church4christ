@@ -92,7 +92,10 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
 <Admin title={heading}>
   <div class="flex items-center justify-between gap-4">
     <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <a href="/admin/giving/funds" class={btn}>{t(lang, 'admin.giving.funds')}</a>
+    <div class="flex items-center gap-3">
+      <a href="/admin/giving/reconcile" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>
+      <a href="/admin/giving/funds" class={btn}>{t(lang, 'admin.giving.funds')}</a>
+    </div>
   </div>
 
   {recorded && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.giving.recorded')}</p>}

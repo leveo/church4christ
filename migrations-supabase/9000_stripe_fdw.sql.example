@@ -1,0 +1,110 @@
+-- ============================================================================
+-- Stripe Foreign Data Wrapper (FDW) — OPTIONAL reconciliation support
+-- ============================================================================
+-- This file is NOT applied automatically. The migration runner
+-- (scripts/db/migrate-supabase.mjs) only picks up files ending in `.sql`; the
+-- `.sql.example` suffix deliberately keeps it out. Online giving works WITHOUT
+-- this — the Stripe webhook already records every gift into the local ledger.
+-- The FDW only powers the READ-ONLY reconciliation report at
+-- /admin/giving/reconcile, which cross-checks that ledger against Stripe.
+--
+-- TO ENABLE (once, per Supabase project):
+--   1. Open the Supabase dashboard → SQL editor.
+--   2. Paste the statements below.
+--   3. Replace <STRIPE_SECRET_KEY> with a Stripe *restricted* key that is
+--      read-only on Checkout Sessions, PaymentIntents, Charges, Subscriptions.
+--   4. Run step 3, copy the returned secret id, and paste it into <KEY_ID> in
+--      step 4 before running the rest.
+--   5. The reconcile page auto-detects the `stripe` schema and lights up on its
+--      next load — no app redeploy needed.
+--
+-- Reference (follow this exactly): https://supabase.com/docs/guides/database/extensions/wrappers/stripe
+-- Security: the key lives in Supabase Vault (encrypted), never in plain SQL once
+-- setup finishes. Every foreign table below is READ-ONLY.
+-- ============================================================================
+
+-- 1. Enable the Wrappers extension (bundled with Supabase).
+create extension if not exists wrappers with schema extensions;
+
+-- 2. Register the Stripe foreign data wrapper.
+create foreign data wrapper stripe_wrapper
+  handler stripe_fdw_handler
+  validator stripe_fdw_validator;
+
+-- 3. Store the Stripe key in Vault. Run this alone first, then copy the returned
+--    id for step 4. Replace <STRIPE_SECRET_KEY> with your restricted key.
+select vault.create_secret(
+  '<STRIPE_SECRET_KEY>',
+  'stripe',
+  'Stripe API key for the reconciliation FDW'
+);
+-- (If you lose the id later: select id from vault.secrets where name = 'stripe';)
+
+-- 4. Create the server, referencing the Vault secret by id. Replace <KEY_ID>
+--    with the id printed by step 3.
+create server stripe_server
+  foreign data wrapper stripe_wrapper
+  options (
+    api_key_id '<KEY_ID>',
+    api_url 'https://api.stripe.com/v1/',
+    api_version '2024-06-20'
+  );
+
+-- 5. Hold the foreign tables in a dedicated `stripe` schema. The reconcile page
+--    feature-detects the wrapper via to_regclass('stripe.checkout_sessions').
+create schema if not exists stripe;
+
+-- Checkout Sessions. reconcile reads `id` + `attrs` only: payment_status,
+-- amount_total, created (unix epoch) and metadata->>'kind' all live inside attrs.
+create foreign table stripe.checkout_sessions (
+  id text,
+  customer text,
+  payment_intent text,
+  subscription text,
+  attrs jsonb
+)
+  server stripe_server
+  options (object 'checkout/sessions', rowid_column 'id');
+
+-- Payment Intents. Not read by reconcile today; included so the schema mirrors
+-- the documented wrapper and is ready for future checks.
+create foreign table stripe.payment_intents (
+  id text,
+  customer text,
+  amount bigint,
+  currency text,
+  payment_method text,
+  created timestamp,
+  attrs jsonb
+)
+  server stripe_server
+  options (object 'payment_intents');
+
+-- Charges. reconcile reads payment_intent + created (mapped columns) and the
+-- `refunded` flag from attrs.
+create foreign table stripe.charges (
+  id text,
+  amount bigint,
+  currency text,
+  customer text,
+  description text,
+  invoice text,
+  payment_intent text,
+  status text,
+  created timestamp,
+  attrs jsonb
+)
+  server stripe_server
+  options (object 'charges');
+
+-- Subscriptions. Not read by reconcile today; included for completeness.
+create foreign table stripe.subscriptions (
+  id text,
+  customer text,
+  currency text,
+  current_period_start timestamp,
+  current_period_end timestamp,
+  attrs jsonb
+)
+  server stripe_server
+  options (object 'subscriptions', rowid_column 'id');
