@@ -122,7 +122,9 @@ export async function listMinistries(db: D1Database, locale: Locale): Promise<Mi
                  WHERE t.ministry_id = m.id AND t.deleted_at IS NULL) AS teamCount,
               (SELECT COUNT(*) FROM plan_positions pp
                  JOIN plans p ON p.id = pp.plan_id
-                   AND p.deleted_at IS NULL AND p.plan_date >= date('now')
+                   -- 2-arg date(): Postgres parses the bare 1-arg form as a CAST to the
+                   -- date type, never our compat function; 2-arg is identical on SQLite/D1.
+                   AND p.deleted_at IS NULL AND p.plan_date >= date('now', 'start of day')
                  JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
                  JOIN teams t2 ON t2.id = pos.team_id
                    AND t2.deleted_at IS NULL AND t2.ministry_id = m.id

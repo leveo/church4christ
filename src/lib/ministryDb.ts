@@ -103,7 +103,9 @@ export async function getMinistryBySlug(
                    WHERE tm.team_id = t.id) AS memberCount,
                 (SELECT COUNT(*) FROM plan_positions pp
                    JOIN plans pl ON pl.id = pp.plan_id
-                     AND pl.deleted_at IS NULL AND pl.plan_date >= date('now')
+                     -- 2-arg date(): Postgres parses the bare 1-arg form as a CAST to the
+                     -- date type, never our compat function; 2-arg is identical on SQLite/D1.
+                     AND pl.deleted_at IS NULL AND pl.plan_date >= date('now', 'start of day')
                    JOIN positions pos ON pos.id = pp.position_id
                      AND pos.deleted_at IS NULL AND pos.team_id = t.id
                    WHERE pp.open_signup = 1) AS openSignupCount

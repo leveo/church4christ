@@ -406,8 +406,13 @@ describe.skipIf(!hasPg)('SQLite-compat datetime()/date()', () => {
     expect(await one("date('2026-01-07', 'weekday 0', '-14 days')")).toBe('2025-12-28');
     expect(await one("datetime('2026-01-07 22:30:00', 'start of day', '+8 hours')")).toBe('2026-01-07 08:00:00');
   });
-  it("date('now') resolves to our function (text), not the date-type cast", async () => {
-    const v = await one("date('now')");
+  it("date('now','start of day') resolves to our function (text)", async () => {
+    // CONTROLLER AMENDMENT: PostgreSQL parses bare date('literal') as a CAST at
+    // parse time — no function overload can intercept it. Bare date('now') call
+    // sites are therefore rewritten to the 2-arg form date('now','start of day')
+    // (identical semantics on SQLite/D1), which always resolves via function
+    // lookup. A tripwire test bans bare date('now') from src/ + seed/.
+    const v = await one("date('now','start of day')");
     expect(typeof v).toBe('string');
     expect(v).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
@@ -483,7 +488,7 @@ $$;
 
 Watch out: SQLite's `weekday N` moves **forward** to the next matching weekday, staying put when already on it — the `((target - dow) % 7 + 7) % 7` days formula above encodes that; the tests pin it.
 
-- [ ] **Step 4:** Run tests — PASS. If `date('now')` resolves to the built-in date-type cast instead of our function (test 4 fails with a non-string), qualify nothing — instead rename is NOT an option (call sites are fixed); fix by ensuring the function is created in `public` and `search_path` puts `public` first (Supabase default does). Record findings in the commit message.
+- [ ] **Step 4:** Run tests — PASS. AMENDED (the original contingency here was misdiagnosed): bare `date('now')` is a parse-time cast in Postgres and cannot be intercepted. Rewrite the bare single-arg `date('now')` call sites (src/lib/db.ts, src/lib/ministryDb.ts, plus any in seed/ — grep `date\('now'\)` everywhere) to `date('now','start of day')` with a one-line comment, and add a pure tripwire test in `test/pg/compatFunctions.test.ts` (not skipIf-gated) that greps `src/` and `seed/` for bare `date('now')` (single-arg, i.e. not followed by a comma) and fails with an explanatory message when found.
 - [ ] **Step 5:** Commit: `feat(db): SQLite-compat datetime()/date() for Postgres`
 
 ---

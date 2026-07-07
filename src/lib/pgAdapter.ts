@@ -1,8 +1,8 @@
-// Postgres backend for the `AppDb` seam (src/lib/appDb.ts). The full PgAdapter
-// class lands in a later task; this task ships only the placeholder translation
-// helper it will depend on. D1/SQLite bind params as `?` / `?N`, but postgres.js
-// (and Postgres) speak `$n`, so every SQL string crossing the seam is rewritten
-// once on its way to the driver.
+// Postgres backend for the `AppDb` seam (src/lib/appDb.ts): the placeholder
+// translation helper plus the PgStatement/PgAdapter classes built on it.
+// D1/SQLite bind params as `?` / `?N`, but postgres.js (and Postgres) speak
+// `$n`, so every SQL string crossing the seam is rewritten once on its way to
+// the driver.
 import type postgres from 'postgres';
 import type { AppDb, AppDbResult, AppStatement } from './appDb';
 
