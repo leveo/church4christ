@@ -1,9 +1,13 @@
 import type { AppDb } from './appDb';
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, registerMedia, uploadKey } from './upload';
 
+export interface MediaBucket {
+  put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+}
+
 export interface SaveImageUploadInput {
   db: AppDb;
-  media: R2Bucket;
+  media: MediaBucket;
   file: File;
   uploadedBy: string | null;
 }
