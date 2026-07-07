@@ -34,8 +34,14 @@ try {
   const givingStatements = existsSync('seed/giving-seed.sql')
     ? seedStatements(readFileSync('seed/giving-seed.sql', 'utf8'))
     : [];
+  // The registration module is likewise Supabase-only, so its demo data lives in
+  // its own seed that only this Postgres path loads. Applied after giving-seed.sql
+  // and before the sequence reset, same existsSync tolerance.
+  const registrationStatements = existsSync('seed/registration-seed.sql')
+    ? seedStatements(readFileSync('seed/registration-seed.sql', 'utf8'))
+    : [];
   await sql.begin(async (tx) => {
-    for (const statement of [...statements, ...givingStatements]) {
+    for (const statement of [...statements, ...givingStatements, ...registrationStatements]) {
       await tx.unsafe(statement);
     }
     // The seed inserts explicit ids, which never advances the identity
@@ -50,7 +56,7 @@ try {
       );
     }
   });
-  console.log(`seeded ${statements.length + givingStatements.length} statements`);
+  console.log(`seeded ${statements.length + givingStatements.length + registrationStatements.length} statements`);
 } catch (err) {
   console.error(err);
   process.exitCode = 1;

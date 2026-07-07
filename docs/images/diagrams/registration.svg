@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="Registration: people sign up for events on a public page — a free event confirms right away, a paid event continues to Stripe's secure checkout and confirms when the payment clears; each event carries its own form built from five question types (short answer, paragraph, dropdown, checkboxes, yes/no) in English and Chinese; every sign-up, free or paid, lands on the event roster with its answers, which the team can export to a spreadsheet">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="560" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">Registration: sign up for events, free or paid</text>
+
+  <!-- Left card: how people sign up -->
+  <rect x="30" y="72" width="350" height="214" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M40,72 H370 Q380,72 380,82 V106 H30 V82 Q30,72 40,72 Z" fill="#31487A"/>
+  <text x="46" y="94" font-size="14" font-weight="700" fill="#FFFFFF">How people sign up</text>
+
+  <text x="46" y="132" font-size="13" font-weight="700" fill="#232630">Free event</text>
+  <rect x="132" y="120" width="46" height="17" rx="8" fill="#2F7A4D"/>
+  <text x="155" y="132" font-size="11" fill="#FFFFFF" text-anchor="middle">Free</text>
+  <text x="46" y="152" font-size="12" fill="#565B6B">Register in one tap &#8212; confirmed right away.</text>
+
+  <text x="46" y="188" font-size="13" font-weight="700" fill="#232630">Paid event</text>
+  <rect x="132" y="176" width="46" height="17" rx="8" fill="#31487A"/>
+  <text x="155" y="188" font-size="11" fill="#FFFFFF" text-anchor="middle">$25</text>
+  <text x="46" y="208" font-size="12" fill="#565B6B">Continue to Stripe &#8212; confirmed when paid.</text>
+
+  <line x1="46" y1="230" x2="364" y2="230" stroke="#DDD9CF" stroke-width="1"/>
+  <text x="46" y="250" font-size="12" fill="#565B6B">A guest needs only a name and email.</text>
+  <text x="46" y="268" font-size="12" fill="#565B6B">A signed-in member&#8217;s are already filled in.</text>
+
+  <!-- Right card: the form you build -->
+  <rect x="440" y="72" width="350" height="214" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M450,72 H780 Q790,72 790,82 V106 H440 V82 Q440,72 450,72 Z" fill="#31487A"/>
+  <text x="456" y="94" font-size="14" font-weight="700" fill="#FFFFFF">The form you build &#8212; five question types</text>
+
+  <text x="456" y="132" font-size="13" fill="#232630">Short answer</text>
+  <rect x="640" y="120" width="132" height="17" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="706" y="132" font-size="11" fill="#565B6B" text-anchor="middle">one line</text>
+
+  <text x="456" y="158" font-size="13" fill="#232630">Paragraph</text>
+  <rect x="640" y="146" width="132" height="17" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="706" y="158" font-size="11" fill="#565B6B" text-anchor="middle">longer note</text>
+
+  <text x="456" y="184" font-size="13" fill="#232630">Dropdown</text>
+  <rect x="640" y="172" width="132" height="17" rx="8" fill="#31487A"/>
+  <text x="706" y="184" font-size="11" fill="#FFFFFF" text-anchor="middle">pick one</text>
+
+  <text x="456" y="210" font-size="13" fill="#232630">Checkboxes</text>
+  <rect x="640" y="198" width="132" height="17" rx="8" fill="#31487A"/>
+  <text x="706" y="210" font-size="11" fill="#FFFFFF" text-anchor="middle">pick any</text>
+
+  <text x="456" y="236" font-size="13" fill="#232630">Yes / No</text>
+
+  <line x1="456" y1="252" x2="774" y2="252" stroke="#DDD9CF" stroke-width="1"/>
+  <text x="456" y="272" font-size="12" fill="#565B6B">Each label in English and Chinese, optional or required.</text>
+
+  <!-- Bottom: from sign-up to roster -->
+  <text x="30" y="322" font-size="15" font-weight="700" fill="#232630">From sign-up to one roster &#8212; free or paid</text>
+
+  <text x="30" y="348" font-size="12" font-weight="600" fill="#565B6B">A free sign-up confirms right away</text>
+
+  <rect x="30" y="356" width="160" height="56" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="110" y="381" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Registrant</text>
+  <text x="110" y="399" font-size="11" fill="#565B6B" text-anchor="middle">member or guest</text>
+
+  <line x1="190" y1="384" x2="244" y2="384" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="217" y="376" font-size="10" fill="#565B6B" text-anchor="middle">register</text>
+
+  <rect x="245" y="356" width="170" height="56" rx="8" fill="#2F7A4D"/>
+  <text x="330" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Confirmed</text>
+  <text x="330" y="399" font-size="11" fill="#FFFFFF" text-anchor="middle">the seat is yours</text>
+
+  <line x1="415" y1="384" x2="469" y2="384" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="442" y="376" font-size="10" fill="#565B6B" text-anchor="middle">lands on</text>
+
+  <rect x="470" y="356" width="170" height="56" rx="8" fill="#31487A"/>
+  <text x="555" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Roster</text>
+  <text x="555" y="399" font-size="11" fill="#DDD9CF" text-anchor="middle">every answer in a column</text>
+
+  <text x="662" y="380" font-size="11" fill="#565B6B">Export the roster as</text>
+  <text x="662" y="396" font-size="11" fill="#565B6B">a spreadsheet (CSV).</text>
+
+  <text x="30" y="438" font-size="12" font-weight="600" fill="#565B6B">A paid sign-up goes through Stripe first</text>
+
+  <rect x="30" y="446" width="160" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="110" y="477" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Registrant</text>
+
+  <line x1="190" y1="472" x2="244" y2="472" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="217" y="464" font-size="10" fill="#565B6B" text-anchor="middle">pay</text>
+
+  <rect x="245" y="446" width="170" height="52" rx="8" fill="#31487A"/>
+  <text x="330" y="470" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Stripe</text>
+  <text x="330" y="487" font-size="11" fill="#DDD9CF" text-anchor="middle">secure checkout</text>
+
+  <line x1="415" y1="472" x2="469" y2="472" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="442" y="464" font-size="10" fill="#565B6B" text-anchor="middle">confirms</text>
+
+  <rect x="470" y="446" width="170" height="52" rx="8" fill="#2F7A4D"/>
+  <text x="555" y="470" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Confirmed</text>
+  <text x="555" y="487" font-size="11" fill="#FFFFFF" text-anchor="middle">a seat on the same roster</text>
+
+  <text x="30" y="536" font-size="12" fill="#565B6B">Every sign-up &#8212; free or paid &#8212; lands on the event roster, which your team can export to a spreadsheet anytime.</text>
+</svg>
