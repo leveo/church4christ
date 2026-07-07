@@ -50,6 +50,19 @@ describe('Postgres-backed worker: public render path', () => {
     const body = await (await get('/en/sermons')).text();
     expect(body).toContain('The Beatitudes');
   });
+
+  it('/en/give renders the interactive giving form (giving module on over Postgres)', async () => {
+    // giving is Supabase-only and defaults ON, so on this backend /give is the
+    // checkout form — not the D1 external-link page. Rendering it exercises
+    // listFunds() over Postgres (the fund select is empty until the giving seed
+    // lands in Phase 2 Task 9, so assert the form scaffold, not fund rows).
+    const res = await get('/en/give');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('action="/api/giving/checkout"');
+    expect(body).toContain('name="fund_id"');
+    expect(body).toContain('name="amount"');
+  });
 });
 
 describe('Postgres-backed worker: admin console (exercises the shortfall query)', () => {
