@@ -12,7 +12,7 @@ import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
-import { MODULE_KEYS, clearModuleCache, type ModuleKey } from '../../../lib/modules';
+import { MODULE_KEYS, MODULES, clearModuleCache, type ModuleKey } from '../../../lib/modules';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
@@ -84,10 +84,13 @@ const h2 = 'font-display text-heading-sm font-bold';
 
 // Modules panel: grouped checkboxes over the `module.<key>` toggles. Current
 // state comes from locals.modules (the middleware's enabled set); absent = on.
+// `giving`/`registration` are backend-gated: on any backend other than the one
+// they require, their row renders disabled with a note (dbBackend drives that).
 const enabledModules = Astro.locals.modules;
+const dbBackend = Astro.locals.dbBackend;
 const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
   { titleKey: 'admin.settings.modulesContentGroup', keys: ['bulletins', 'sermons', 'prayer-sheets', 'articles', 'fellowships'] },
-  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people'] },
+  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people', 'giving', 'registration'] },
   { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: ['serve', 'gifts'] },
 ];
 ---
@@ -225,21 +228,27 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
         moduleGroups.map((group) => (
           <fieldset class="space-y-3">
             <legend class={lab}>{t(lang, group.titleKey)}</legend>
-            {group.keys.map((key) => (
-              <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
-                <input
-                  type="checkbox"
-                  name={`module.${key}`}
-                  value="1"
-                  checked={enabledModules.has(key)}
-                  class="mt-1 h-4 w-4 shrink-0"
-                />
-                <span>
-                  <span class="block text-sm font-semibold text-ink">{t(lang, `modules.${key}.label`)}</span>
-                  <span class="block text-sm text-ink-muted">{t(lang, `modules.${key}.desc`)}</span>
-                </span>
-              </label>
-            ))}
+            {group.keys.map((key) => {
+              const req = MODULES[key].requiresBackend;
+              const gated = req !== undefined && req !== dbBackend;
+              return (
+                <label class={`flex items-start gap-3 rounded-lg border border-border p-3 ${gated ? 'opacity-60' : 'cursor-pointer'}`}>
+                  <input
+                    type="checkbox"
+                    name={`module.${key}`}
+                    value="1"
+                    checked={enabledModules.has(key)}
+                    disabled={gated}
+                    class="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    <span class="block text-sm font-semibold text-ink">{t(lang, `modules.${key}.label`)}</span>
+                    <span class="block text-sm text-ink-muted">{t(lang, `modules.${key}.desc`)}</span>
+                    {gated && <span class="block text-sm text-ink-muted">{t(lang, 'admin.modules.requiresSupabase')}</span>}
+                  </span>
+                </label>
+              );
+            })}
           </fieldset>
         ))
       }

@@ -16,6 +16,7 @@ export default {
   'nav.fellowships': '团契',
   'nav.prayer': '代祷',
   'nav.opportunities': '服事机会',
+  'nav.register': '活动报名',
 
   'locale.en': 'EN',
   'locale.zh': '中文',
@@ -1109,6 +1110,7 @@ export default {
   'admin.settings.modulesCommunityGroup': '社区',
   'admin.settings.modulesVolunteeringGroup': '服事',
   'admin.settings.saveModules': '保存模块',
+  'admin.modules.requiresSupabase': '需要 Supabase 数据库',
   'modules.bulletins.label': '周报',
   'modules.bulletins.desc': '每周礼拜程序单，含程序、奉献与通告。',
   'modules.sermons.label': '讲道',
@@ -1131,4 +1133,8 @@ export default {
   'modules.fellowships.desc': '团契小组及其聚会信息。',
   'modules.people.label': '成员管理',
   'modules.people.desc': '成员档案、家庭与牧养记录。',
+  'modules.giving.label': '奉献',
+  'modules.giving.desc': '在线奉献、认献与个人奉献记录。',
+  'modules.registration.label': '活动报名',
+  'modules.registration.desc': '活动报名与报名者管理。',
 } satisfies Record<string, string>;

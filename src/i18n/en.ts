@@ -17,6 +17,7 @@ export default {
   'nav.fellowships': 'Fellowships',
   'nav.prayer': 'Prayer',
   'nav.opportunities': 'Opportunities',
+  'nav.register': 'Register',
 
   'locale.en': 'EN',
   'locale.zh': '中文',
@@ -1111,6 +1112,7 @@ export default {
   'admin.settings.modulesCommunityGroup': 'Community',
   'admin.settings.modulesVolunteeringGroup': 'Volunteering',
   'admin.settings.saveModules': 'Save modules',
+  'admin.modules.requiresSupabase': 'Requires the Supabase database',
   'modules.bulletins.label': 'Bulletins',
   'modules.bulletins.desc': 'Weekly service bulletins with program, offering, and announcements.',
   'modules.sermons.label': 'Sermons',
@@ -1133,4 +1135,8 @@ export default {
   'modules.fellowships.desc': 'Fellowship groups and their gathering details.',
   'modules.people.label': 'People',
   'modules.people.desc': 'Member profiles, households, and pastoral notes.',
+  'modules.giving.label': 'Giving',
+  'modules.giving.desc': 'Online giving, pledges, and member giving history.',
+  'modules.registration.label': 'Registration',
+  'modules.registration.desc': 'Event registration and attendee management.',
 } satisfies Record<string, string>;

@@ -30,7 +30,7 @@ if (Astro.request.method === 'POST') {
     // is disabled, which would strand the member. Land on their own /profile
     // instead when serve is off. The middleware sets locals.modules on every
     // request; fall back to the lib if it is somehow absent.
-    const modules = Astro.locals.modules ?? (await getEnabledModules(db));
+    const modules = Astro.locals.modules ?? (await getEnabledModules(db, Astro.locals.dbBackend));
     const landing = modules.has('serve') ? 'my' : 'profile';
     return new Response(null, {
       status: 303,

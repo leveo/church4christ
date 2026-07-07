@@ -6,6 +6,7 @@
 import type { AppDb } from './appDb';
 import { addDays, todayInTz } from './dates';
 import { i18nJoin } from './db';
+import { getBackend, type DbEnv } from './dbProvider';
 import { escapeHtml, sendEmail, type EmailEnv } from './email';
 import { isRuleEnabled } from './emailSettingsDb';
 import { t } from './i18n';
@@ -35,7 +36,9 @@ interface DigestRow {
 export async function sendWeeklyDigest(env: EmailEnv, db: AppDb, now: Date = new Date()): Promise<string[]> {
   // Serving mail belongs to the `serve` module — skip the whole pass when it is
   // off (before any rule check), so a church without volunteering sends nothing.
-  if (!(await getEnabledModules(db)).has('serve')) {
+  // `serve` is not backend-gated, but getEnabledModules needs the backend for its
+  // cache key; read it from the Worker env (the passed env IS the full env at runtime).
+  if (!(await getEnabledModules(db, getBackend(env as unknown as DbEnv))).has('serve')) {
     console.log('digest: serve module disabled — skipping');
     return [];
   }
@@ -125,7 +128,7 @@ export async function sendWeeklyDigest(env: EmailEnv, db: AppDb, now: Date = new
  * days before the service. Returns the number of reminders sent.
  */
 export async function sendReminders(env: EmailEnv, db: AppDb, now: Date = new Date()): Promise<number> {
-  if (!(await getEnabledModules(db)).has('serve')) {
+  if (!(await getEnabledModules(db, getBackend(env as unknown as DbEnv))).has('serve')) {
     console.log('reminders: serve module disabled — skipping');
     return 0;
   }

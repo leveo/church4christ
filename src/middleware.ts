@@ -101,7 +101,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // rewrite pattern, reconstructed with a 404 status and the baseline headers.
     let modules: Set<string>;
     try {
-      modules = await getEnabledModules(db);
+      modules = await getEnabledModules(db, context.locals.dbBackend);
     } catch {
       modules = new Set(MODULE_KEYS);
     }
