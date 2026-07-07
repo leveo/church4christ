@@ -246,6 +246,29 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect(qs[1].options).toEqual(['S', 'M']);
   });
 
+  it('saveQuestions ignores a foreign question id — cannot overwrite another event\'s labels', async () => {
+    const a = await openEvent();
+    const b = await openEvent();
+    await saveQuestions(db, b, [{ sort: 0, type: 'text', required: 0, label_en: 'B question', label_zh: 'B问题' }]);
+    const bq = (await listQuestionsAdmin(db, b))[0];
+
+    // Tampered payload: save event A while submitting event B's question id + labels.
+    await saveQuestions(db, a, [{ id: bq.id, sort: 0, type: 'text', required: 0, label_en: 'HIJACK', label_zh: 'HIJACK' }]);
+
+    // B is untouched — same id, original labels, still one question.
+    const bAfter = await listQuestionsAdmin(db, b);
+    expect(bAfter).toHaveLength(1);
+    expect(bAfter[0].id).toBe(bq.id);
+    expect(bAfter[0].label_en).toBe('B question');
+    expect(bAfter[0].label_zh).toBe('B问题');
+
+    // A treated the foreign id as a NEW question: its own id, the submitted label.
+    const aAfter = await listQuestionsAdmin(db, a);
+    expect(aAfter).toHaveLength(1);
+    expect(aAfter[0].id).not.toBe(bq.id);
+    expect(aAfter[0].label_en).toBe('HIJACK');
+  });
+
   it('listQuestions tolerates malformed options JSON (returns null, never throws)', async () => {
     const ev = await openEvent();
     const [{ id: qid }] = await sql.unsafe(

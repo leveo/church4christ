@@ -476,6 +476,13 @@ export async function saveEvent(
  * them SURVIVE; questions without an id are inserted, their i18n rows referencing
  * currval() right after each insert (see createRegistration for the currval
  * rationale). A blank zh label deletes the zh i18n row (en-fallback), like saveEvent.
+ *
+ * Cross-event safety: an incoming `id` that does NOT belong to `eventId` is
+ * treated as a NEW question (its id is dropped), never as a survivor. The reg_row
+ * UPDATE is already event-scoped (WHERE id = ? AND event_id = ?), but the
+ * reg_question_i18n upsert keys on question_id ALONE — so without this guard a
+ * tampered q[i][id] pointing at another event's question would overwrite that
+ * event's labels. Scoping to the event's own ids closes that.
  */
 export async function saveQuestions(
   db: AppDb,
@@ -490,7 +497,13 @@ export async function saveQuestions(
     label_zh: string;
   }>,
 ): Promise<void> {
-  const survivingIds = questions.filter((q) => q.id != null).map((q) => q.id as number);
+  // Strip any submitted id that this event does not own (treat it as a new
+  // question) so a foreign id can never reach the question_id-keyed i18n upsert.
+  const { results: owned } = await db.prepare(`SELECT id FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number }>();
+  const ownedIds = new Set(owned.map((r) => r.id));
+  const scoped = questions.map((q) => (q.id != null && !ownedIds.has(q.id) ? { ...q, id: undefined } : q));
+
+  const survivingIds = scoped.filter((q) => q.id != null).map((q) => q.id as number);
   const stmts: AppStatement[] = [];
 
   // Prune the removed questions first (surviving ids are UPDATEd below, never
@@ -504,7 +517,7 @@ export async function saveQuestions(
     stmts.push(db.prepare(`DELETE FROM reg_questions WHERE event_id = ?1`).bind(eventId));
   }
 
-  for (const q of questions) {
+  for (const q of scoped) {
     const opts = q.options != null ? JSON.stringify(q.options) : null;
     const labelZh = q.label_zh.trim();
     if (q.id != null) {
