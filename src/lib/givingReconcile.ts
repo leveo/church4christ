@@ -3,8 +3,13 @@
 // schema (setup: migrations-supabase/9000_stripe_fdw.sql.example, run by hand in
 // the Supabase SQL editor with their own key). This module feature-detects that
 // schema and, when present, cross-checks the local `gifts` ledger against Stripe:
-//   • missingLocally — a paid gift-kind Checkout Session that Stripe has but no
-//     local gift carries its session id (a webhook we dropped);
+//   • missingLocally — a paid ONE-TIME (mode='payment') gift-kind Checkout
+//     Session that Stripe has but no local gift carries its session id (a
+//     webhook we dropped). Subscription-mode gift sessions are excluded on
+//     purpose: a recurring signup never materializes a session-keyed gift — the
+//     webhook records recurring_gifts, and its money rows arrive via
+//     invoice.paid with a null session id — so counting them would flag every
+//     new recurring donor as "missing";
 //   • amountMismatch — a local gift whose amount_cents differs from its session's
 //     Stripe amount_total (a mis-recorded amount);
 //   • refundDrift — a Stripe charge marked refunded whose local gift is still
@@ -66,6 +71,7 @@ export async function reconcile(db: AppDb, opts: { sinceDays: number }): Promise
                 COALESCE(cs.attrs->>'customer_email', cs.attrs->'customer_details'->>'email') AS email
            FROM stripe.checkout_sessions cs
           WHERE cs.attrs->>'payment_status' = 'paid'
+            AND cs.attrs->>'mode' = 'payment'
             AND cs.attrs->'metadata'->>'kind' = 'gift'
             AND to_timestamp((cs.attrs->>'created')::bigint) >= ?1::timestamptz
             AND NOT EXISTS (SELECT 1 FROM gifts g WHERE g.stripe_checkout_session_id = cs.id)
@@ -91,6 +97,9 @@ export async function reconcile(db: AppDb, opts: { sinceDays: number }): Promise
       .all<{ gift_id: number; session_id: string; local_cents: number; stripe_cents: number }>()
   ).results;
 
+  // Window keys on CHARGE created, so a refund issued inside the window against
+  // an older-than-window charge is not caught — a deliberate literal reading of
+  // sinceDays (widen the period to audit further back).
   const refundDrift = (
     await db
       .prepare(

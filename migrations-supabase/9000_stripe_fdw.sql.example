@@ -54,8 +54,9 @@ create server stripe_server
 --    feature-detects the wrapper via to_regclass('stripe.checkout_sessions').
 create schema if not exists stripe;
 
--- Checkout Sessions. reconcile reads `id` + `attrs` only: payment_status,
--- amount_total, created (unix epoch) and metadata->>'kind' all live inside attrs.
+-- Checkout Sessions. reconcile reads `id` + `attrs` only: payment_status, mode,
+-- amount_total, created (unix epoch) and metadata->>'kind' all live inside attrs
+-- (the wrapper's attrs carries the full Stripe object).
 create foreign table stripe.checkout_sessions (
   id text,
   customer text,

@@ -73,16 +73,22 @@ describe.skipIf(!hasPg)('reconcile (Postgres, stub stripe schema)', () => {
     );
 
     // Checkout sessions. `created` is a unix epoch inside attrs (2 days ago =
-    // in-window for a 30-day report; 100 days ago = out of window).
+    // in-window for a 30-day report; 100 days ago = out of window). cs_recurring
+    // is the recurring-signup shape createRecurringCheckout produces
+    // (mode='subscription', paid, gift-kind) — it legitimately has NO
+    // session-keyed local gift (the webhook records recurring_gifts; money rows
+    // arrive via invoice.paid with a null session id) and must never count as
+    // missing.
     const epoch = (days: number) => `(extract(epoch from now())::bigint - ${days} * 86400)`;
     await sql.unsafe(
       `INSERT INTO stripe.checkout_sessions (id, attrs) VALUES
-         ('cs_missing',  jsonb_build_object('payment_status','paid','amount_total',7000,'created',${epoch(2)},'customer_email','giver@example.com','metadata',jsonb_build_object('kind','gift'))),
-         ('cs_match',    jsonb_build_object('payment_status','paid','amount_total',5000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift'))),
-         ('cs_mismatch', jsonb_build_object('payment_status','paid','amount_total',5000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift'))),
-         ('cs_old',      jsonb_build_object('payment_status','paid','amount_total',9000,'created',${epoch(100)},'metadata',jsonb_build_object('kind','gift'))),
-         ('cs_notgift',  jsonb_build_object('payment_status','paid','amount_total',9000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','other'))),
-         ('cs_unpaid',   jsonb_build_object('payment_status','unpaid','amount_total',9000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift')))`,
+         ('cs_missing',   jsonb_build_object('payment_status','paid','mode','payment','amount_total',7000,'created',${epoch(2)},'customer_email','giver@example.com','metadata',jsonb_build_object('kind','gift'))),
+         ('cs_match',     jsonb_build_object('payment_status','paid','mode','payment','amount_total',5000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift'))),
+         ('cs_mismatch',  jsonb_build_object('payment_status','paid','mode','payment','amount_total',5000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift'))),
+         ('cs_old',       jsonb_build_object('payment_status','paid','mode','payment','amount_total',9000,'created',${epoch(100)},'metadata',jsonb_build_object('kind','gift'))),
+         ('cs_notgift',   jsonb_build_object('payment_status','paid','mode','payment','amount_total',9000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','other'))),
+         ('cs_unpaid',    jsonb_build_object('payment_status','unpaid','mode','payment','amount_total',9000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift'))),
+         ('cs_recurring', jsonb_build_object('payment_status','paid','mode','subscription','amount_total',2000,'created',${epoch(2)},'metadata',jsonb_build_object('kind','gift')))`,
     );
 
     // Charges. `created` is a mapped timestamp column (UTC wall clock).
@@ -104,7 +110,7 @@ describe.skipIf(!hasPg)('reconcile (Postgres, stub stripe schema)', () => {
     expect(await stripeFdwAvailable(db)).toBe(true);
   });
 
-  it('missingLocally catches exactly the paid gift-kind session with no local gift', () => {
+  it('missingLocally catches exactly the paid one-time gift session with no local gift', () => {
     expect(report.missingLocally).toHaveLength(1);
     expect(report.missingLocally[0]).toMatchObject({
       session_id: 'cs_missing',
@@ -112,12 +118,15 @@ describe.skipIf(!hasPg)('reconcile (Postgres, stub stripe schema)', () => {
       email: 'giver@example.com',
     });
     expect(typeof report.missingLocally[0].created).toBe('string');
-    // Excludes: matched (cs_match), out-of-window (cs_old), non-gift (cs_notgift), unpaid (cs_unpaid).
+    // Excludes: matched (cs_match), out-of-window (cs_old), non-gift (cs_notgift),
+    // unpaid (cs_unpaid), and — regression — a recurring signup (cs_recurring,
+    // mode='subscription', paid gift-kind, no session-keyed local gift by design).
     const ids = report.missingLocally.map((r) => r.session_id);
     expect(ids).not.toContain('cs_match');
     expect(ids).not.toContain('cs_old');
     expect(ids).not.toContain('cs_notgift');
     expect(ids).not.toContain('cs_unpaid');
+    expect(ids).not.toContain('cs_recurring');
   });
 
   it('amountMismatch catches exactly the local gift whose amount differs from Stripe', () => {
