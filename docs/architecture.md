@@ -121,8 +121,11 @@ config is absent, so the demo deploy runs all its crons without backups configur
 
 ## Testing
 
-The system is covered by **over 490 automated tests**. Unit and integration tests run in
+The system is covered by **over 900 automated tests**. Unit and integration tests run in
 the Cloudflare Workers test pool (`vitest`), end-to-end tests run against the actual built
 Worker (`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and
-checks routing, i18n, the health probe, and the security headers over HTTP. See
+checks routing, i18n, the health probe, and the security headers over HTTP. A separate `pg`
+project and `vitest.e2e.pg.config.ts` run the same kind of coverage for **Giving** and
+**Registration** against a real Postgres database — self-skipped when no `DATABASE_URL` is
+set, so the default D1 suite never depends on Postgres being available. See
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to run each suite.

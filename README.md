@@ -74,7 +74,7 @@ particular tech stack — is in [**`docs/why-this-stack.md`**](docs/why-this-sta
 You do not have to be a developer to run this project. This repository is written to be
 **read by an AI coding assistant** — tools like [Claude Code](https://www.claude.com/product/claude-code)
 or Codex. Every feature has a plain-English guide in [`docs/features/`](docs/features/),
-and the code is covered by **over 490 automated tests**, so an assistant can make changes
+and the code is covered by **over 900 automated tests**, so an assistant can make changes
 with confidence and you can tell whether they worked.
 
 The idea: open this project with an AI assistant, describe what you want in normal
@@ -202,7 +202,7 @@ big part of why the site loads quickly and costs so little to run.
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 490 automated
+each with a light and a dark mode. And the code is held together by **over 900 automated
 tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
 
 **Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;

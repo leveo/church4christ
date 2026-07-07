@@ -111,7 +111,7 @@ database. Most sites never switch; the door is simply there if you grow into it.
   hardcoded colors so the design system can't be quietly bypassed.
 - **TypeScript** catches mistakes before they ship and, just as importantly, makes the code
   **safe for an AI assistant or a non-expert to change** — the types guide correct edits and
-  the 490+ automated tests catch regressions. That combination is what makes "maintain your
+  the 900+ automated tests catch regressions. That combination is what makes "maintain your
   site by chatting with Claude Code" actually trustworthy rather than a gamble.
 
 The theme throughout: **fewer moving parts.** No client framework, no plugin ecosystem, no
