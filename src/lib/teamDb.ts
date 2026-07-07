@@ -13,6 +13,7 @@
 // Authorization stays in the pages: every caller re-checks admin-or-leader of
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
+import type { AppDb } from './appDb';
 import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
@@ -30,7 +31,7 @@ export interface ServiceTypeRow {
 }
 
 /** Active service types, localized name with en fallback, in sort order. */
-export async function listServiceTypes(db: D1Database, locale: Locale): Promise<ServiceTypeRow[]> {
+export async function listServiceTypes(db: AppDb, locale: Locale): Promise<ServiceTypeRow[]> {
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -51,7 +52,7 @@ export interface ServiceTypeAdminRow extends ServiceTypeRow {
 }
 
 /** Non-deleted service types with BOTH locale names + sort, for the admin CRUD table. */
-export async function listServiceTypesAdmin(db: D1Database): Promise<ServiceTypeAdminRow[]> {
+export async function listServiceTypesAdmin(db: AppDb): Promise<ServiceTypeAdminRow[]> {
   const { results } = await db
     .prepare(
       `SELECT st.id AS id, st.start_time AS start_time, st.end_time AS end_time, st.sort AS sort,
@@ -74,7 +75,7 @@ export interface ServiceTypeInput {
   sort: number;
 }
 
-async function upsertServiceTypeI18n(db: D1Database, id: number, locale: Locale, name: string): Promise<void> {
+async function upsertServiceTypeI18n(db: AppDb, id: number, locale: Locale, name: string): Promise<void> {
   await db
     .prepare(
       `INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (?1, ?2, ?3)
@@ -85,7 +86,7 @@ async function upsertServiceTypeI18n(db: D1Database, id: number, locale: Locale,
 }
 
 /** Create (id null) or update a service type + its i18n names. Returns the id. */
-export async function saveServiceType(db: D1Database, id: number | null, input: ServiceTypeInput): Promise<number> {
+export async function saveServiceType(db: AppDb, id: number | null, input: ServiceTypeInput): Promise<number> {
   let stId = id;
   if (stId) {
     await db
@@ -104,7 +105,7 @@ export async function saveServiceType(db: D1Database, id: number | null, input: 
   return stId;
 }
 
-export async function softDeleteServiceType(db: D1Database, id: number): Promise<void> {
+export async function softDeleteServiceType(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE service_types SET deleted_at = datetime('now') WHERE id = ?`).bind(id).run();
 }
 
@@ -115,7 +116,7 @@ export interface TeamAdminRow extends TeamSummary {
 }
 
 /** All teams INCLUDING soft-deleted ones, for the admin teams list. */
-export async function listTeamsAdmin(db: D1Database, locale: Locale): Promise<TeamAdminRow[]> {
+export async function listTeamsAdmin(db: AppDb, locale: Locale): Promise<TeamAdminRow[]> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
   const today = todayInTz(TZ);
@@ -145,11 +146,11 @@ export async function listTeamsAdmin(db: D1Database, locale: Locale): Promise<Te
   return results;
 }
 
-export async function softDeleteTeam(db: D1Database, id: number): Promise<void> {
+export async function softDeleteTeam(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE teams SET deleted_at = datetime('now') WHERE id = ?`).bind(id).run();
 }
 
-export async function restoreTeam(db: D1Database, id: number): Promise<void> {
+export async function restoreTeam(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE teams SET deleted_at = NULL WHERE id = ?`).bind(id).run();
 }
 
@@ -168,7 +169,7 @@ export interface TeamSummary {
 }
 
 /** All teams with localized names, their ministry, member/leader counts, and an open-slot count. */
-export async function listTeamSummaries(db: D1Database, locale: Locale): Promise<TeamSummary[]> {
+export async function listTeamSummaries(db: AppDb, locale: Locale): Promise<TeamSummary[]> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
   const today = todayInTz(TZ);
@@ -210,7 +211,7 @@ export interface TeamDetailRow {
 }
 
 /** One non-deleted team with its localized name and ministry (null-safe). */
-export async function getTeam(db: D1Database, id: number, locale: Locale): Promise<TeamDetailRow | null> {
+export async function getTeam(db: AppDb, id: number, locale: Locale): Promise<TeamDetailRow | null> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
   return db
@@ -235,7 +236,7 @@ export interface MinistryOption {
 }
 
 /** Active ministries as select options (id + localized name), in sort order. */
-export async function listMinistryOptions(db: D1Database, locale: Locale): Promise<MinistryOption[]> {
+export async function listMinistryOptions(db: AppDb, locale: Locale): Promise<MinistryOption[]> {
   const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -257,7 +258,7 @@ export interface CreateTeamArgs {
 }
 
 /** Create a team + its i18n names (en required; zh only when provided). Returns the id. */
-export async function createTeam(db: D1Database, args: CreateTeamArgs): Promise<number> {
+export async function createTeam(db: AppDb, args: CreateTeamArgs): Promise<number> {
   const { ministryId, nameEn, nameZh = null, sort = 0 } = args;
   const created = await db
     .prepare(`INSERT INTO teams (ministry_id, sort) VALUES (?, ?) RETURNING id`)
@@ -284,7 +285,7 @@ export interface TeamMemberRow {
 }
 
 /** A team's roster (leaders first), excluding soft-deleted people. */
-export async function listTeamMembers(db: D1Database, teamId: number): Promise<TeamMemberRow[]> {
+export async function listTeamMembers(db: AppDb, teamId: number): Promise<TeamMemberRow[]> {
   const { results } = await db
     .prepare(
       `SELECT team_members.person_id AS person_id, people.display_name AS display_name,
@@ -300,7 +301,7 @@ export async function listTeamMembers(db: D1Database, teamId: number): Promise<T
 }
 
 /** Idempotent add (UNIQUE(team_id, person_id); an existing row is left as-is). */
-export async function addTeamMember(db: D1Database, teamId: number, personId: number): Promise<void> {
+export async function addTeamMember(db: AppDb, teamId: number, personId: number): Promise<void> {
   await db
     .prepare(`INSERT INTO team_members (team_id, person_id) VALUES (?, ?) ON CONFLICT(team_id, person_id) DO NOTHING`)
     .bind(teamId, personId)
@@ -308,11 +309,11 @@ export async function addTeamMember(db: D1Database, teamId: number, personId: nu
 }
 
 /** Remove a membership row (team_members has no soft-delete column). */
-export async function removeTeamMember(db: D1Database, teamId: number, personId: number): Promise<void> {
+export async function removeTeamMember(db: AppDb, teamId: number, personId: number): Promise<void> {
   await db.prepare(`DELETE FROM team_members WHERE team_id = ? AND person_id = ?`).bind(teamId, personId).run();
 }
 
-export async function setTeamLeader(db: D1Database, teamId: number, personId: number, isLeader: boolean): Promise<void> {
+export async function setTeamLeader(db: AppDb, teamId: number, personId: number, isLeader: boolean): Promise<void> {
   await db
     .prepare(`UPDATE team_members SET is_leader = ? WHERE team_id = ? AND person_id = ?`)
     .bind(isLeader ? 1 : 0, teamId, personId)
@@ -326,7 +327,7 @@ export interface PositionRow {
 }
 
 /** A team's non-deleted positions, localized, in sort order. */
-export async function listTeamPositions(db: D1Database, teamId: number, locale: Locale): Promise<PositionRow[]> {
+export async function listTeamPositions(db: AppDb, teamId: number, locale: Locale): Promise<PositionRow[]> {
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -347,7 +348,7 @@ export interface PersonOption {
 }
 
 /** Active, non-deleted people for the add-member select. */
-export async function listActivePeople(db: D1Database): Promise<PersonOption[]> {
+export async function listActivePeople(db: AppDb): Promise<PersonOption[]> {
   const { results } = await db
     .prepare(
       `SELECT id, display_name FROM people
@@ -378,7 +379,7 @@ export interface ApplicationRow {
 /** Pending applications for the given teams (localized team/position names, gift
  *  badge flag), oldest first. */
 export async function listPendingApplicationsForTeams(
-  db: D1Database,
+  db: AppDb,
   teamIds: number[],
   locale: Locale,
 ): Promise<ApplicationRow[]> {
@@ -420,7 +421,7 @@ export interface PersonApplicationRow {
 /** Every application a person has made (any status), newest first, with localized
  *  team/position names — the person-centric list on the admin person page. */
 export async function listApplicationsForPerson(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   locale: Locale,
 ): Promise<PersonApplicationRow[]> {
@@ -445,13 +446,13 @@ export async function listApplicationsForPerson(
 }
 
 /** All non-deleted team ids (for admin-scope application review). */
-export async function listAllTeamIds(db: D1Database): Promise<number[]> {
+export async function listAllTeamIds(db: AppDb): Promise<number[]> {
   const { results } = await db.prepare(`SELECT id FROM teams WHERE deleted_at IS NULL`).all<{ id: number }>();
   return results.map((r) => r.id);
 }
 
 /** True when the person already has a PENDING application for this team. */
-export async function hasPendingApplication(db: D1Database, personId: number, teamId: number): Promise<boolean> {
+export async function hasPendingApplication(db: AppDb, personId: number, teamId: number): Promise<boolean> {
   const row = await db
     .prepare(`SELECT 1 AS x FROM team_applications WHERE person_id = ? AND team_id = ? AND status = 'P'`)
     .bind(personId, teamId)
@@ -465,7 +466,7 @@ export async function hasPendingApplication(db: D1Database, personId: number, te
  * 500 — callers pre-check hasPendingApplication for the friendly message.
  */
 export async function createApplication(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   teamId: number,
   positionId: number | null,
@@ -488,7 +489,7 @@ export async function createApplication(
  * and INSERT resolves by re-reading the winner's row.
  */
 export async function findOrCreatePersonByEmail(
-  db: D1Database,
+  db: AppDb,
   email: string,
   name: string,
   phone: string | null,
@@ -529,7 +530,7 @@ export async function findOrCreatePersonByEmail(
  * not pending / not on the expected team.
  */
 export async function decideApplication(
-  db: D1Database,
+  db: AppDb,
   applicationId: number,
   approve: boolean,
   deciderEmail: string,
@@ -584,7 +585,7 @@ export interface PotentialVolunteer {
  * or soft-deleted people.
  */
 export async function listPotentialVolunteers(
-  db: D1Database,
+  db: AppDb,
   category: string,
   excludeTeamId: number,
 ): Promise<PotentialVolunteer[]> {
@@ -650,7 +651,7 @@ export interface MatrixData {
  * sort order, localized), every need cell, and every live assignment.
  */
 export async function getMatrix(
-  db: D1Database,
+  db: AppDb,
   serviceTypeId: number,
   fromDate: string,
   limit: number,
@@ -708,7 +709,7 @@ export interface PlanFill {
 }
 
 /** Per-plan filled/needed totals for the plans list. */
-export async function listPlanFills(db: D1Database, planIds: number[]): Promise<PlanFill[]> {
+export async function listPlanFills(db: AppDb, planIds: number[]): Promise<PlanFill[]> {
   if (planIds.length === 0) return [];
   const placeholders = planIds.map(() => '?').join(',');
   const { results } = await db

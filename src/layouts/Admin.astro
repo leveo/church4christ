@@ -10,7 +10,6 @@ import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
-import { env } from 'cloudflare:workers';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
 import type { ModuleKey } from '../lib/modules';
@@ -29,7 +28,7 @@ const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
 // falls back to the theme's intrinsic default rather than 500ing the page.
 let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
 try {
-  defaultMode = (await getActiveTheme((env as { DB: D1Database }).DB)).defaultMode;
+  defaultMode = (await getActiveTheme(Astro.locals.db)).defaultMode;
 } catch {
   /* keep the theme's intrinsic default mode */
 }

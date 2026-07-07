@@ -3,7 +3,6 @@
 // external CTA driven by the site's giving URL setting. Falls back gracefully
 // (a note, no button) when the setting is unset (empty DB) or the read fails.
 import { render } from 'astro:content';
-import { env } from 'cloudflare:workers';
 import ContentPage from '../../components/ContentPage.astro';
 import { parseLocale } from '../../lib/locales';
 import { t } from '../../lib/i18n';
@@ -27,7 +26,7 @@ const { Content } = await render(entry);
 // Giving link is a public setting; fail soft to '' so a DB hiccup never 500s.
 let givingUrl = '';
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   givingUrl = (await getSiteIdentity(db, locale)).givingUrl;
 } catch (e) {
   console.error('give page: getSiteIdentity failed', e);

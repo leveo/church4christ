@@ -15,6 +15,7 @@
 // Deletion model: leaveHousehold removes the caller's own row; when the last
 // REAL member leaves, the household is soft-deleted (deleted_at) and its
 // remaining name-only dependent rows are hard-deleted (they cannot outlive it).
+import type { AppDb } from './appDb';
 import { isUniqueViolation } from './adminDb';
 
 export const HOUSEHOLD_ROLES = ['adult', 'child'] as const;
@@ -61,7 +62,7 @@ const MEMBER_COLS = MEMBER_COL_NAMES.join(', ');
 const MEMBER_COLS_HM = MEMBER_COL_NAMES.map((c) => `hm.${c}`).join(', ');
 
 /** The active (non-deleted) household_members row for a real person, or null. */
-async function memberRowForPerson(db: D1Database, personId: number): Promise<HouseholdMember | null> {
+async function memberRowForPerson(db: AppDb, personId: number): Promise<HouseholdMember | null> {
   return db
     .prepare(
       `SELECT ${MEMBER_COLS_HM} FROM household_members hm
@@ -79,7 +80,7 @@ async function memberRowForPerson(db: D1Database, personId: number): Promise<Hou
  * person_id — so an adult account is required.
  */
 async function assertCanEdit(
-  db: D1Database,
+  db: AppDb,
   householdId: number,
   actorPersonId: number,
   isAdmin: boolean,
@@ -101,7 +102,7 @@ async function assertCanEdit(
  * the creator already belongs to one. Returns the new household id.
  */
 export async function createHousehold(
-  db: D1Database,
+  db: AppDb,
   input: HouseholdInput,
   creatorPersonId: number,
 ): Promise<number> {
@@ -146,7 +147,7 @@ export async function createHousehold(
  * null when the person is not in any (live) household.
  */
 export async function getHouseholdForPerson(
-  db: D1Database,
+  db: AppDb,
   personId: number,
 ): Promise<HouseholdWithMembers | null> {
   const membership = await memberRowForPerson(db, personId);
@@ -162,7 +163,7 @@ export async function getHouseholdForPerson(
  * is ever selected (privacy rule: never render another member's email).
  */
 export async function getLiveHouseholdForPerson(
-  db: D1Database,
+  db: AppDb,
   personId: number,
 ): Promise<HouseholdWithMembers | null> {
   const membership = await memberRowForPerson(db, personId);
@@ -191,7 +192,7 @@ export async function getLiveHouseholdForPerson(
 }
 
 /** A household by id with its ordered members, or null if missing/soft-deleted. */
-export async function getHousehold(db: D1Database, householdId: number): Promise<HouseholdWithMembers | null> {
+export async function getHousehold(db: AppDb, householdId: number): Promise<HouseholdWithMembers | null> {
   const h = await db
     .prepare(
       `SELECT id, name, address, phone, created_at, updated_at
@@ -218,7 +219,7 @@ export async function getHousehold(db: D1Database, householdId: number): Promise
  * updated.
  */
 export async function updateHousehold(
-  db: D1Database,
+  db: AppDb,
   householdId: number,
   input: HouseholdInput,
   actorPersonId: number,
@@ -240,7 +241,7 @@ export async function updateHousehold(
  * adult member or an admin. Returns the new member id.
  */
 export async function addDependent(
-  db: D1Database,
+  db: AppDb,
   householdId: number,
   displayName: string,
   role: HouseholdRole,
@@ -265,7 +266,7 @@ export async function addDependent(
  * Returns true when a row was deleted.
  */
 export async function removeDependent(
-  db: D1Database,
+  db: AppDb,
   memberId: number,
   actorPersonId: number,
   isAdmin: boolean,
@@ -290,7 +291,7 @@ export async function removeDependent(
  * adults always keeps a primary (no-op when only child-role real members
  * remain). Returns true when the person had a membership to remove.
  */
-export async function leaveHousehold(db: D1Database, personId: number): Promise<boolean> {
+export async function leaveHousehold(db: AppDb, personId: number): Promise<boolean> {
   const membership = await memberRowForPerson(db, personId);
   if (!membership) return false;
   const householdId = membership.household_id;
@@ -342,7 +343,7 @@ export async function leaveHousehold(db: D1Database, personId: number): Promise<
  * Returns the new member id.
  */
 export async function linkPersonToHousehold(
-  db: D1Database,
+  db: AppDb,
   householdId: number,
   personId: number,
   role: HouseholdRole = 'adult',
@@ -374,7 +375,7 @@ export async function linkPersonToHousehold(
 }
 
 /** Remove a real person's membership row (admin surgical unlink). Returns true when removed. */
-export async function unlinkPerson(db: D1Database, personId: number): Promise<boolean> {
+export async function unlinkPerson(db: AppDb, personId: number): Promise<boolean> {
   const r = await db
     .prepare(`DELETE FROM household_members WHERE person_id = ?`)
     .bind(personId)
@@ -383,7 +384,7 @@ export async function unlinkPerson(db: D1Database, personId: number): Promise<bo
 }
 
 /** Set a member's role (adult/child). Returns true when a row changed. */
-export async function setMemberRole(db: D1Database, memberId: number, role: HouseholdRole): Promise<boolean> {
+export async function setMemberRole(db: AppDb, memberId: number, role: HouseholdRole): Promise<boolean> {
   const r = await db
     .prepare(`UPDATE household_members SET role = ? WHERE id = ?`)
     .bind(role, memberId)
@@ -396,7 +397,7 @@ export async function setMemberRole(db: D1Database, memberId: number, role: Hous
  * the same household (primary is exclusive). Returns true when the target member
  * exists in the household.
  */
-export async function setPrimary(db: D1Database, householdId: number, memberId: number): Promise<boolean> {
+export async function setPrimary(db: AppDb, householdId: number, memberId: number): Promise<boolean> {
   const target = await db
     .prepare(`SELECT 1 FROM household_members WHERE id = ? AND household_id = ?`)
     .bind(memberId, householdId)
@@ -413,7 +414,7 @@ export async function setPrimary(db: D1Database, householdId: number, memberId: 
  * List live households with member counts (dependents included) for the admin
  * directory, name-ordered. An optional case-insensitive name substring filters.
  */
-export async function listHouseholds(db: D1Database, opts: { q?: string } = {}): Promise<HouseholdSummary[]> {
+export async function listHouseholds(db: AppDb, opts: { q?: string } = {}): Promise<HouseholdSummary[]> {
   const q = (opts.q ?? '').trim();
   const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   const { results } = await db

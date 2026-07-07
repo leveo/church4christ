@@ -35,7 +35,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 // People module gates the outreach "invite to serve" button (off → hidden +
 // the invite POST is unreachable). The team is fixed to this page's team, so a
 // leader can only ever invite for a team they already lead (canEdit gate).

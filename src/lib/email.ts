@@ -5,6 +5,7 @@
 // not fail the request that triggered it — it logs to email_log and returns a
 // boolean. When env.EMAIL_DEV_LOG === '1' the mail (including any magic link) is
 // logged to the console and recorded as 'devlog' instead of being sent.
+import type { AppDb } from './appDb';
 import { EmailMessage } from 'cloudflare:email';
 
 // Structural env: EMAIL/EMAIL_FROM/APP_ORIGIN come from Cloudflare.Env, but
@@ -94,7 +95,7 @@ type EmailStatus = 'sent' | 'failed' | 'devlog';
 
 /** Record a send attempt in email_log. Swallows its own errors so logging can
  *  never be the thing that breaks (or masks) a send. */
-async function logEmail(db: D1Database, msg: SendEmailInput, status: EmailStatus): Promise<void> {
+async function logEmail(db: AppDb, msg: SendEmailInput, status: EmailStatus): Promise<void> {
   try {
     await db
       .prepare(
@@ -114,7 +115,7 @@ async function logEmail(db: D1Database, msg: SendEmailInput, status: EmailStatus
  */
 export async function sendEmail(
   env: EmailEnv,
-  db: D1Database,
+  db: AppDb,
   msg: SendEmailInput,
 ): Promise<boolean> {
   if (env.EMAIL_DEV_LOG === '1') {

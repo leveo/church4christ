@@ -52,7 +52,7 @@ import {
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const hasPeople = Astro.locals.modules.has('people');
 const ROLES = ['member', 'editor', 'admin'] as const;
 

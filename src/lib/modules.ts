@@ -5,6 +5,7 @@
 // and soft `uses` (degrade-only, no hard deps). `moduleForPath` is the middleware
 // choke point's classifier; `getEnabledModules` reads the `module.<key>` settings
 // with the same per-isolate 60s cache the theme uses.
+import type { AppDb } from './appDb';
 import { getSettings } from './settings';
 
 // The 11 module keys, in display order (drives the admin Modules panel + nav).
@@ -164,7 +165,7 @@ export function clearModuleCache(): void {
  * disable. May throw if the DB is unavailable; the middleware guards that to
  * all-enabled so a fresh install never 500s.
  */
-export async function getEnabledModules(db: D1Database): Promise<Set<ModuleKey>> {
+export async function getEnabledModules(db: AppDb): Promise<Set<ModuleKey>> {
   const now = Date.now();
   if (cache && cache.expiresAt > now) return cache.value;
   const rows = await getSettings(

@@ -5,6 +5,7 @@
 // draft/publish rule (published + not soft-deleted; sermons carry no publish_at).
 // Localized text (title/blurb) comes through the shared i18nJoin builder so a
 // missing translation transparently falls back to English.
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 
 export interface AnnouncementRow {
@@ -37,7 +38,7 @@ const WINDOW = `active = 1 AND (starts_at IS NULL OR starts_at <= ?1) AND (ends_
 
 /** Active announcements for the ticker, localized (en fallback), ordered by sort. */
 export async function listActiveAnnouncements(
-  db: D1Database,
+  db: AppDb,
   locale: Locale,
   today: string,
 ): Promise<AnnouncementRow[]> {
@@ -60,7 +61,7 @@ export async function listActiveAnnouncements(
  * `limit` caps the result (the home page shows 3); omit it to list them all.
  */
 export async function listActiveEvents(
-  db: D1Database,
+  db: AppDb,
   locale: Locale,
   today: string,
   limit?: number,
@@ -78,7 +79,7 @@ export async function listActiveEvents(
 }
 
 /** The most recent published, non-deleted sermon (sermons carry no publish_at). */
-export async function latestPublishedSermon(db: D1Database): Promise<LatestSermonRow | null> {
+export async function latestPublishedSermon(db: AppDb): Promise<LatestSermonRow | null> {
   return db
     .prepare(
       `SELECT id, sermon_date, title, speaker, scripture, series, youtube_id
@@ -157,7 +158,7 @@ export interface PrayerSheetRow {
 }
 
 /** Distinct years that have at least one published sermon, newest first. */
-export async function listSermonYears(db: D1Database): Promise<number[]> {
+export async function listSermonYears(db: AppDb): Promise<number[]> {
   const { results } = await db
     .prepare(
       `SELECT DISTINCT CAST(substr(sermon_date, 1, 4) AS INTEGER) AS year
@@ -170,7 +171,7 @@ export async function listSermonYears(db: D1Database): Promise<number[]> {
 }
 
 /** Published sermons in `year`, newest first, with the localized service-type name. */
-export async function listSermonsByYear(db: D1Database, year: number, locale: Locale): Promise<SermonRow[]> {
+export async function listSermonsByYear(db: AppDb, year: number, locale: Locale): Promise<SermonRow[]> {
   const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -196,7 +197,7 @@ const BULLETIN_COLS = `b.id AS id, b.service_type_id AS service_type_id, b.bulle
   COALESCE(st_l.name, st_d.name) AS serviceTypeName`;
 
 /** The latest published bulletin for each service type (one row per type), ordered by type sort. */
-export async function latestBulletins(db: D1Database, locale: Locale): Promise<BulletinRow[]> {
+export async function latestBulletins(db: AppDb, locale: Locale): Promise<BulletinRow[]> {
   const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -218,7 +219,7 @@ export async function latestBulletins(db: D1Database, locale: Locale): Promise<B
 
 /** A single published bulletin for a service type on a date, or null. */
 export async function getBulletin(
-  db: D1Database,
+  db: AppDb,
   serviceTypeId: number,
   date: string,
   locale: Locale,
@@ -238,7 +239,7 @@ export async function getBulletin(
 
 /** Service types (id + localized name) that have a published bulletin on `date`, by type sort. */
 export async function listBulletinServicesForDate(
-  db: D1Database,
+  db: AppDb,
   date: string,
   locale: Locale,
 ): Promise<{ service_type_id: number; serviceTypeName: string }[]> {
@@ -258,7 +259,7 @@ export async function listBulletinServicesForDate(
 }
 
 /** Archive of published-bulletin dates (date + service type), newest first, capped at 52. */
-export async function listBulletinDates(db: D1Database, locale: Locale): Promise<BulletinDateRow[]> {
+export async function listBulletinDates(db: AppDb, locale: Locale): Promise<BulletinDateRow[]> {
   const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -277,7 +278,7 @@ export async function listBulletinDates(db: D1Database, locale: Locale): Promise
 
 /** A bulletin's announcements in display order. */
 export async function getBulletinAnnouncements(
-  db: D1Database,
+  db: AppDb,
   bulletinId: number,
 ): Promise<BulletinAnnouncementRow[]> {
   const { results } = await db
@@ -299,7 +300,7 @@ export async function getBulletinAnnouncements(
  * assignments/positions/people are all excluded.
  */
 export async function bulletinRoster(
-  db: D1Database,
+  db: AppDb,
   serviceTypeId: number,
   date: string,
   locale: Locale,
@@ -329,7 +330,7 @@ export async function bulletinRoster(
 }
 
 /** The most recent published prayer sheet, or null. */
-export async function latestPrayerSheet(db: D1Database): Promise<PrayerSheetRow | null> {
+export async function latestPrayerSheet(db: AppDb): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
@@ -342,7 +343,7 @@ export async function latestPrayerSheet(db: D1Database): Promise<PrayerSheetRow 
 }
 
 /** A published prayer sheet by date, or null. */
-export async function getPrayerSheet(db: D1Database, date: string): Promise<PrayerSheetRow | null> {
+export async function getPrayerSheet(db: AppDb, date: string): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
@@ -353,7 +354,7 @@ export async function getPrayerSheet(db: D1Database, date: string): Promise<Pray
 }
 
 /** Archive of published prayer-sheet dates, newest first, capped at 52. */
-export async function listPrayerSheetDates(db: D1Database): Promise<string[]> {
+export async function listPrayerSheetDates(db: AppDb): Promise<string[]> {
   const { results } = await db
     .prepare(
       `SELECT ps.sheet_date AS sheet_date FROM prayer_sheets ps WHERE ${published('ps')} ORDER BY ps.sheet_date DESC LIMIT 52`,

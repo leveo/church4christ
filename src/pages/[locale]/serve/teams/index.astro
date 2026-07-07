@@ -3,7 +3,6 @@
 // localized name, ministry link, member/leader counts, and an open-slot badge.
 // Admin-only: a create-team form (ministry select + en/zh names) — the POST
 // re-checks admin server-side and 403s otherwise.
-import { env } from 'cloudflare:workers';
 import Base from '../../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
@@ -16,7 +15,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 let errorKey: string | null = null;
 if (Astro.request.method === 'POST') {

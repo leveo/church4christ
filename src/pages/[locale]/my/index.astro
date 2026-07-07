@@ -26,7 +26,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user!;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const idOf = (v: FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;

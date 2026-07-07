@@ -3,6 +3,7 @@
 // admin Email tab controls. Ported from the reference stack's src/lib/digest.ts, adapted to
 // church-cms: names come from *_i18n companion tables (English used for the mail
 // variables), sendEmail takes (env, db, msg), and dates run in America/Chicago.
+import type { AppDb } from './appDb';
 import { addDays, todayInTz } from './dates';
 import { i18nJoin } from './db';
 import { escapeHtml, sendEmail, type EmailEnv } from './email';
@@ -31,7 +32,7 @@ interface DigestRow {
  * assignments in the next 7 days. Gated by the `digestAM` rule. Returns the
  * recipient emails (for logging/tests). One bad recipient never stops the rest.
  */
-export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date = new Date()): Promise<string[]> {
+export async function sendWeeklyDigest(env: EmailEnv, db: AppDb, now: Date = new Date()): Promise<string[]> {
   // Serving mail belongs to the `serve` module — skip the whole pass when it is
   // off (before any rule check), so a church without volunteering sends nothing.
   if (!(await getEnabledModules(db)).has('serve')) {
@@ -123,7 +124,7 @@ export async function sendWeeklyDigest(env: EmailEnv, db: D1Database, now: Date 
  * re-send the scheduling request to anyone still unconfirmed exactly that many
  * days before the service. Returns the number of reminders sent.
  */
-export async function sendReminders(env: EmailEnv, db: D1Database, now: Date = new Date()): Promise<number> {
+export async function sendReminders(env: EmailEnv, db: AppDb, now: Date = new Date()): Promise<number> {
   if (!(await getEnabledModules(db)).has('serve')) {
     console.log('reminders: serve module disabled — skipping');
     return 0;

@@ -12,12 +12,13 @@ import { mintSession, sessionCookie } from '../../lib/session';
 // otherwise burn a single-use token); the explicit POST consumes and signs in.
 // This route is locale-free, so the page renders bilingually (en + zh stacked).
 const raw = Astro.params.token ?? '';
-const vars = env as unknown as { DB: D1Database; SESSION_SECRET?: string };
+const vars = env as unknown as { SESSION_SECRET?: string };
+const db = Astro.locals.db;
 let state: 'confirm' | 'error' = 'error';
 
 if (Astro.request.method === 'POST') {
-  const consumed = vars.SESSION_SECRET ? await consumeToken(vars.DB, raw, 'login') : null;
-  const person = consumed ? await getPersonById(vars.DB, consumed.person_id) : null;
+  const consumed = vars.SESSION_SECRET ? await consumeToken(db, raw, 'login') : null;
+  const person = consumed ? await getPersonById(db, consumed.person_id) : null;
   if (person && person.active === 1 && vars.SESSION_SECRET) {
     const jwt = await mintSession(vars.SESSION_SECRET, {
       id: person.id,
@@ -29,7 +30,7 @@ if (Astro.request.method === 'POST') {
     // is disabled, which would strand the member. Land on their own /profile
     // instead when serve is off. The middleware sets locals.modules on every
     // request; fall back to the lib if it is somehow absent.
-    const modules = Astro.locals.modules ?? (await getEnabledModules(vars.DB));
+    const modules = Astro.locals.modules ?? (await getEnabledModules(db));
     const landing = modules.has('serve') ? 'my' : 'profile';
     return new Response(null, {
       status: 303,
@@ -41,7 +42,7 @@ if (Astro.request.method === 'POST') {
   }
   // fall through to the error state
 } else {
-  state = (await peekToken(vars.DB, raw, 'login')) !== null ? 'confirm' : 'error';
+  state = (await peekToken(db, raw, 'login')) !== null ? 'confirm' : 'error';
 }
 
 const title = LOCALES.map((l) => t(l, state === 'confirm' ? 'auth.confirm.title' : 'auth.error.title')).join(' · ');

@@ -18,7 +18,7 @@ import type { Locale } from '../../../lib/locales';
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const media = (env as { MEDIA: R2Bucket }).MEDIA;
 
 let errors: Record<string, string> = {};

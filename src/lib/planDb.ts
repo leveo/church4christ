@@ -12,6 +12,7 @@
 // team_members has no deleted_at column. respondToAssignment is the slice-3
 // contract and is preserved verbatim below.
 
+import type { AppDb } from './appDb';
 import { i18nJoin } from './db';
 import { addDays, nextWeekday, todayInTz } from './dates';
 import type { Locale } from './locales';
@@ -51,7 +52,7 @@ export interface CreatePlanArgs {
 // ── Authorization ──
 
 /** True when the user may edit scheduling for this position's team. */
-export async function canEditPosition(db: D1Database, user: SessionUser, positionId: number): Promise<boolean> {
+export async function canEditPosition(db: AppDb, user: SessionUser, positionId: number): Promise<boolean> {
   if (user.isAdmin) return true;
   const row = await db
     .prepare(`SELECT team_id FROM positions WHERE id = ? AND deleted_at IS NULL`)
@@ -63,7 +64,7 @@ export async function canEditPosition(db: D1Database, user: SessionUser, positio
 // ── Plan creation & weekly generation ──
 
 /** Revive-or-create against UNIQUE(service_type_id, plan_date). Returns the id. */
-export async function createPlan(db: D1Database, args: CreatePlanArgs): Promise<number> {
+export async function createPlan(db: AppDb, args: CreatePlanArgs): Promise<number> {
   const { serviceTypeId, planDate, title = null, series = null } = args;
   await db
     .prepare(
@@ -88,7 +89,7 @@ export async function createPlan(db: D1Database, args: CreatePlanArgs): Promise<
  * nearest earlier plan of the same service type that has any.
  */
 export async function ensureWeeklyPlans(
-  db: D1Database,
+  db: AppDb,
   serviceTypeId: number,
   weekday: number,
   throughDate: string,
@@ -143,7 +144,7 @@ export async function ensureWeeklyPlans(
 
 /** Set (or clear, with needed <= 0) how many people a plan needs in a position. */
 export async function setPlanPosition(
-  db: D1Database,
+  db: AppDb,
   planId: number,
   positionId: number,
   needed: number,
@@ -177,7 +178,7 @@ export async function setPlanPosition(
  * Double-booking labels use the English (default) name — callers needing the
  * viewer's locale re-localize from the ids.
  */
-export async function getConflicts(db: D1Database, personId: number, planId: number): Promise<Conflict[]> {
+export async function getConflicts(db: AppDb, personId: number, planId: number): Promise<Conflict[]> {
   const plan = await db
     .prepare(
       `SELECT plans.plan_date, service_types.start_time, service_types.end_time
@@ -237,7 +238,7 @@ export async function getConflicts(db: D1Database, personId: number, planId: num
  * are warnings — pass force=true to override); otherwise 'ok'. A soft-deleted or
  * previously-declined row for the same slot is revived to status 'U'.
  */
-export async function assignPerson(db: D1Database, args: AssignArgs): Promise<AssignResult> {
+export async function assignPerson(db: AppDb, args: AssignArgs): Promise<AssignResult> {
   const { planId, positionId, personId, assignedBy, force = false } = args;
 
   const plan = await db
@@ -297,7 +298,7 @@ export async function assignPerson(db: D1Database, args: AssignArgs): Promise<As
  * getConflicts must be empty — claims NEVER force ('conflict'). On success the
  * row is status 'C', is_signup 1.
  */
-export async function claimOpenSlot(db: D1Database, args: ClaimArgs): Promise<ClaimResult> {
+export async function claimOpenSlot(db: AppDb, args: ClaimArgs): Promise<ClaimResult> {
   const { planId, positionId, personId } = args;
 
   const state = await db
@@ -340,7 +341,7 @@ export async function claimOpenSlot(db: D1Database, args: ClaimArgs): Promise<Cl
 // ── Removal ──
 
 /** Soft-delete an assignment. Authorize via getAssignmentPositionId + canEditPosition. */
-export async function removeAssignment(db: D1Database, assignmentId: number): Promise<void> {
+export async function removeAssignment(db: AppDb, assignmentId: number): Promise<void> {
   await db
     .prepare(`UPDATE roster_assignments SET deleted_at = datetime('now') WHERE id = ?`)
     .bind(assignmentId)
@@ -348,7 +349,7 @@ export async function removeAssignment(db: D1Database, assignmentId: number): Pr
 }
 
 /** The position_id of a live assignment (for re-deriving the team to authorize). */
-export async function getAssignmentPositionId(db: D1Database, assignmentId: number): Promise<number | null> {
+export async function getAssignmentPositionId(db: AppDb, assignmentId: number): Promise<number | null> {
   const row = await db
     .prepare(`SELECT position_id FROM roster_assignments WHERE id = ? AND deleted_at IS NULL`)
     .bind(assignmentId)
@@ -375,7 +376,7 @@ export interface OpenSlot {
  * to, not full, not already theirs, and excluding dates where they're blocked
  * out or already serving. Localized names via i18n with an en fallback.
  */
-export async function listOpenSlotsForPerson(db: D1Database, personId: number, locale: Locale): Promise<OpenSlot[]> {
+export async function listOpenSlotsForPerson(db: AppDb, personId: number, locale: Locale): Promise<OpenSlot[]> {
   const fromDate = todayInTz(TZ);
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);
@@ -443,7 +444,7 @@ export interface AvailabilityData {
 }
 
 /** Team roster availability across the next 4 plans carrying any of the team's positions. */
-export async function getTeamAvailability(db: D1Database, teamId: number, locale: Locale): Promise<AvailabilityData> {
+export async function getTeamAvailability(db: AppDb, teamId: number, locale: Locale): Promise<AvailabilityData> {
   const fromDate = todayInTz(TZ);
   const { results: plans } = await db
     .prepare(
@@ -550,7 +551,7 @@ export interface PlanDetail {
 }
 
 /** Full plan detail: metadata + positions (needed/open) each with their assignees. */
-export async function getPlan(db: D1Database, id: number, locale: Locale): Promise<PlanDetail | null> {
+export async function getPlan(db: AppDb, id: number, locale: Locale): Promise<PlanDetail | null> {
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const meta = await db
     .prepare(
@@ -619,7 +620,7 @@ export interface PlanListRow {
 
 /** Plans on/after `from` (default today), soonest first. Optionally scoped to one service type. */
 export async function listPlans(
-  db: D1Database,
+  db: AppDb,
   serviceTypeId: number | null,
   locale: Locale,
   opts: { from?: string; limit?: number } = {},
@@ -660,7 +661,7 @@ export type RespondResult = { ok: true } | { ok: false; reason: 'past' | 'notfou
  * assignment belongs to the person.
  */
 export async function respondToAssignment(
-  db: D1Database,
+  db: AppDb,
   assignmentId: number,
   personId: number,
   action: RespondAction,

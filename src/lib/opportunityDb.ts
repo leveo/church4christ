@@ -9,6 +9,7 @@
 //       listOpenSlotsForPerson (declined 'D' and soft-deleted assignments don't
 //       count, past plans and closed positions are excluded) but is PUBLIC — it
 //       carries no person scoping (no team-membership / blockout filters).
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
 
@@ -27,7 +28,7 @@ export interface ApplicationTeam {
 }
 
 /** All active teams with their ministry, leader count and position chips. */
-export async function listApplicationTeams(db: D1Database, locale: Locale): Promise<ApplicationTeam[]> {
+export async function listApplicationTeams(db: AppDb, locale: Locale): Promise<ApplicationTeam[]> {
   const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], locale);
   const minJ = i18nJoin('ministry_i18n', 'min', 'ministry_id', ['name'], locale);
   const { results: teams } = await db
@@ -114,7 +115,7 @@ const MAX_DATES_PER_POSITION = 3;
  * open when needed − (assignees whose status is not 'D' and not soft-deleted) > 0
  * on a non-deleted, non-past plan whose position/team/service-type are all live.
  */
-export async function listOpportunitySlots(db: D1Database, locale: Locale): Promise<OpportunityTeam[]> {
+export async function listOpportunitySlots(db: AppDb, locale: Locale): Promise<OpportunityTeam[]> {
   const fromDate = todayInTz(TZ);
   const stJ = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const posJ = i18nJoin('position_i18n', 'pos', 'position_id', ['name'], locale);

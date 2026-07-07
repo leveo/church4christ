@@ -8,6 +8,8 @@
 // (ON CONFLICT DO NOTHING) — quiz recommendations augment, never replace, the set
 // a person curates on their profile.
 
+import type { AppDb } from './appDb';
+
 export interface GiftResultRow {
   top_gifts: string[];
   recommended: string[];
@@ -16,7 +18,7 @@ export interface GiftResultRow {
 
 /** Save a quiz result as a new history row (latest wins on read). */
 export async function saveGiftResult(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   topGifts: string[],
   recommended: string[],
@@ -28,7 +30,7 @@ export async function saveGiftResult(
 }
 
 /** The person's most recent gift result, JSON columns parsed (null-safe). */
-export async function getLatestGiftResult(db: D1Database, personId: number): Promise<GiftResultRow | null> {
+export async function getLatestGiftResult(db: AppDb, personId: number): Promise<GiftResultRow | null> {
   const row = await db
     .prepare(
       `SELECT top_gifts_json, recommended_json, created_at FROM gift_results
@@ -54,7 +56,7 @@ export async function getLatestGiftResult(db: D1Database, personId: number): Pro
  * Blank/duplicate categories are dropped. A no-op for an empty list.
  */
 export async function addRecommendedToInterests(
-  db: D1Database,
+  db: AppDb,
   personId: number,
   categories: string[],
 ): Promise<void> {

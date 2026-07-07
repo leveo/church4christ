@@ -6,7 +6,6 @@
 // people module, so it always renders; the extra filters + columns are gated on
 // locals.modules.has('people').
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { listPeople } from '../../../lib/adminDb';
 import { MEMBERSHIP_STATUSES } from '../../../lib/validate';
@@ -15,7 +14,7 @@ import type { Locale } from '../../../lib/locales';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const hasPeople = Astro.locals.modules.has('people');
 
 const params = Astro.url.searchParams;

@@ -8,7 +8,6 @@
 // effect on the very next render → 303 ?saved=1. The Admin shell reads the active
 // theme, so this page (and the whole site) restyles immediately after a save.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
@@ -23,7 +22,7 @@ export const prerender = false;
 const user = Astro.locals.user;
 if (!user || !user.isAdmin) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const KEYS = [
   'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',

@@ -7,6 +7,7 @@ import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
+import { openDb, type DbEnv } from './lib/dbProvider';
 
 // Baseline security headers (spec §14) live in ./lib/securityHeaders; the route
 // authorization policy lives in ./lib/routePolicy (both dependency-free +
@@ -16,7 +17,7 @@ import { canAccess, classifyRoute } from './lib/routePolicy';
 // SESSION_SECRET and AUTH_DEV_BYPASS_EMAIL are runtime secrets/vars that
 // `wrangler types` cannot see (they're not in wrangler.jsonc), so read them off
 // the Worker env with a cast — same technique as the reference stack's middleware.
-type AuthEnv = { DB: D1Database; SESSION_SECRET?: string; AUTH_DEV_BYPASS_EMAIL?: string };
+type AuthEnv = { SESSION_SECRET?: string; AUTH_DEV_BYPASS_EMAIL?: string };
 
 /** Minimal 403 page. Deliberately unstyled this slice; visual polish lands later.
  *  Hardened like every other response: baseline security headers + no-store
@@ -56,12 +57,30 @@ export const onRequest = defineMiddleware(async (context, next) => {
   context.locals.locale = locale ?? DEFAULT_LOCALE;
   context.locals.user = null;
 
+  // Per-request database seam. openDb is a zero-copy passthrough on the D1
+  // default (env.DB IS the AppDb) and cannot throw when DB is bound, so it runs
+  // OUTSIDE the fail-safe try/catch blocks below (those guard the reads, not the
+  // open). On supabase it opens a request-scoped postgres.js client; `finish`
+  // schedules end() on every return path so that client is always drained.
+  const { db, backend, end } = openDb(env as unknown as DbEnv);
+  context.locals.db = db;
+  context.locals.dbBackend = backend;
+  // Defer draining the db client until after the response is handed off, without
+  // blocking the streamed body. cfContext is the adapter's ExecutionContext
+  // (Astro v6 replaced the removed locals.runtime.ctx with locals.cfContext);
+  // optional-chained so a runtime-less unit caller never crashes, and end() is a
+  // no-op on D1 so this is free on the default backend.
+  const finish = (res: Response): Response => {
+    context.locals.cfContext?.waitUntil?.(end());
+    return res;
+  };
+
   // Active theme from the `theme.name` setting, cached per-isolate (60s) in
   // ./lib/theme. Guarded: an empty DB or a missing settings table (fresh install)
   // falls back to THEME_DEFAULT rather than 500ing every page.
   const vars = env as unknown as AuthEnv;
   try {
-    context.locals.theme = (await getActiveTheme(vars.DB)).theme;
+    context.locals.theme = (await getActiveTheme(db)).theme;
   } catch {
     context.locals.theme = THEME_DEFAULT;
   }
@@ -74,7 +93,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // rewrite pattern, reconstructed with a 404 status and the baseline headers.
   let modules: Set<string>;
   try {
-    modules = await getEnabledModules(vars.DB);
+    modules = await getEnabledModules(db);
   } catch {
     modules = new Set(MODULE_KEYS);
   }
@@ -85,7 +104,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const rendered = await context.rewrite('/404');
     const res = new Response(rendered.body, { status: 404, headers: rendered.headers });
     applySecurityHeaders(res.headers);
-    return res;
+    return finish(res);
   }
 
   // CSRF: reject cross-origin state-changing requests before doing any work. When
@@ -106,7 +125,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
         headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
       });
       applySecurityHeaders(res.headers);
-      return res;
+      return finish(res);
     }
   }
 
@@ -117,14 +136,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (cookie && vars.SESSION_SECRET) {
     const claims = await verifySession(vars.SESSION_SECRET, cookie);
     if (claims) {
-      context.locals.user = await loadSessionUser(vars.DB, claims.personId, claims.epoch);
+      context.locals.user = await loadSessionUser(db, claims.personId, claims.epoch);
     }
   }
   // Dev bypass: in `astro dev`, AUTH_DEV_BYPASS_EMAIL attaches that person with no
   // cookie so authed pages can be built without the mail round-trip. `import.meta.
   // env.DEV` is statically false in the production build, so this is tree-shaken.
   if (!context.locals.user && import.meta.env.DEV && vars.AUTH_DEV_BYPASS_EMAIL) {
-    context.locals.user = await loadSessionUserByEmail(vars.DB, vars.AUTH_DEV_BYPASS_EMAIL);
+    context.locals.user = await loadSessionUserByEmail(db, vars.AUTH_DEV_BYPASS_EMAIL);
   }
 
   // Route policy gate: the policy classifies BEFORE route existence, so a
@@ -137,9 +156,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
       const nextPath = encodeURIComponent(pathname + context.url.search);
       const redirect = context.redirect(`/${context.locals.locale}/signin?next=${nextPath}`, 303);
       applySecurityHeaders(redirect.headers);
-      return redirect;
+      return finish(redirect);
     }
-    return forbidden(context.locals.locale);
+    return finish(forbidden(context.locals.locale));
   }
 
   const res = await next();
@@ -158,5 +177,5 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const isCacheable = pathname.startsWith('/media/') || pathname.startsWith('/cal/');
     if (context.locals.user && !isCacheable) res.headers.set('cache-control', 'no-store');
   }
-  return res;
+  return finish(res);
 });

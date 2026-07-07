@@ -1,7 +1,6 @@
 ---
 // Prayer & Care landing: a prayer-meeting info card, the latest published
 // prayer sheet, and a year-grouped archive. Reads fail soft to empty.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import PrayerSheetView from '../../../components/PrayerSheetView.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -20,7 +19,7 @@ let sheet: PrayerSheetRow | null = null;
 let dates: string[] = [];
 let email = '';
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   const [s, d, identity] = await Promise.all([
     latestPrayerSheet(db),
     listPrayerSheetDates(db),

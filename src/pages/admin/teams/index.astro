@@ -3,7 +3,6 @@
 // ministries with member / leader / open-slot counts and soft-delete / restore.
 // Teams are CREATED from a ministry page (or the wizard); this is the retirement
 // surface. Ported from the reference stack's admin teams view.
-import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
@@ -12,7 +11,7 @@ import { th, td, badge, badgeActive, badgeInactive } from '../../../lib/adminUi'
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 
 if (Astro.request.method === 'POST') {

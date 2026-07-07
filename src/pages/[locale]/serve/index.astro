@@ -3,7 +3,6 @@
 // (with open-role badges), a published-testimonies strip, and a closing CTA
 // band. Every DB read fails soft to empty so the page degrades gracefully (grid
 // empty-state, hidden testimonies strip) instead of 500ing; all copy is dictionary-driven.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import SectionTitle from '../../../components/SectionTitle.astro';
 import MinistryCard from '../../../components/MinistryCard.astro';
@@ -22,7 +21,7 @@ if (!locale) {
 let ministries: Awaited<ReturnType<typeof listMinistries>> = [];
 let testimonies: TestimonyCardRow[] = [];
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   [ministries, testimonies] = await Promise.all([
     listMinistries(db, locale),
     listPublishedTestimonies(db, locale, 3),

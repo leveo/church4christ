@@ -3,6 +3,7 @@
 // lead (via SessionUser.leaderTeamIds). Ported from the reference stack's adminOverviewDb,
 // adapted to church-cms: localized names come from *_i18n companion tables,
 // hrefs are locale-prefixed serve routes, and testimonies use the shared status.
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import type { SessionUser } from './types';
 
@@ -20,7 +21,7 @@ function leaderTeamFilter(user: SessionUser): { clause: string; binds: number[] 
 }
 
 /** Four headline counts for the Overview cards, scoped by role. */
-export async function getStats(db: D1Database, scope: Scope, user: SessionUser, fromDate: string): Promise<StatCard[]> {
+export async function getStats(db: AppDb, scope: Scope, user: SessionUser, fromDate: string): Promise<StatCard[]> {
   if (scope === 'admin') {
     const [people, ministries, plans, apps] = await Promise.all([
       db.prepare(`SELECT COUNT(*) AS n FROM people WHERE active = 1 AND deleted_at IS NULL`).first<{ n: number }>(),
@@ -92,7 +93,7 @@ export interface AttentionItem {
  * locale-prefixed serve routes.
  */
 export async function getNeedsAttention(
-  db: D1Database,
+  db: AppDb,
   scope: Scope,
   user: SessionUser,
   fromDate: string,
@@ -189,7 +190,7 @@ export interface ServeReportRow {
 }
 
 /** Per-person serving tallies since `fromDate`, busiest first. Admin-only. */
-export async function listServeReport(db: D1Database, fromDate: string, today: string): Promise<ServeReportRow[]> {
+export async function listServeReport(db: AppDb, fromDate: string, today: string): Promise<ServeReportRow[]> {
   const { results } = await db
     .prepare(
       `SELECT people.id AS person_id, people.display_name AS name, people.email AS email,

@@ -10,6 +10,7 @@
 // the 4-step new-ministry wizard) are ported from the reference stack's ministryDb,
 // adapted to church-cms's i18n companion tables (no name/category columns on
 // teams; localized names in *_i18n) and slug-keyed ministries.
+import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { addDays, nextWeekday, todayInTz } from './dates';
 import { ensureWeeklyPlans, setPlanPosition } from './planDb';
@@ -72,7 +73,7 @@ interface TeamRow {
  * — open-signup plan positions on future (plan_date >= today), non-deleted plans.
  */
 export async function getMinistryBySlug(
-  db: D1Database,
+  db: AppDb,
   slug: string,
   locale: Locale,
 ): Promise<MinistryDetail | null> {
@@ -169,7 +170,7 @@ export interface TestimonyCardRow {
  * newest published_at wins. Capped at `limit`.
  */
 export async function listPublishedTestimonies(
-  db: D1Database,
+  db: AppDb,
   locale: Locale,
   limit: number,
 ): Promise<TestimonyCardRow[]> {
@@ -205,7 +206,7 @@ export interface MinistrySummary {
  * aggregates for the console Ministries table. `fromDate` scopes "open roles" to
  * upcoming plans. Names are localized (en fallback).
  */
-export async function listMinistrySummaries(db: D1Database, locale: Locale, fromDate: string): Promise<MinistrySummary[]> {
+export async function listMinistrySummaries(db: AppDb, locale: Locale, fromDate: string): Promise<MinistrySummary[]> {
   const minJ = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -248,7 +249,7 @@ export interface MinistryEditRow {
 }
 
 /** Both-locale names/intros + basics for every non-deleted ministry (edit forms). */
-export async function listMinistryEditRows(db: D1Database): Promise<MinistryEditRow[]> {
+export async function listMinistryEditRows(db: AppDb): Promise<MinistryEditRow[]> {
   const { results } = await db
     .prepare(
       `SELECT m.id AS id, m.category AS category, m.icon AS icon, m.leader_person_id AS leader_person_id,
@@ -264,7 +265,7 @@ export async function listMinistryEditRows(db: D1Database): Promise<MinistryEdit
 }
 
 /** True if the user may manage this ministry (admin, its named leader, or leads one of its teams). */
-export async function canManageMinistry(db: D1Database, user: SessionUser, ministryId: number): Promise<boolean> {
+export async function canManageMinistry(db: AppDb, user: SessionUser, ministryId: number): Promise<boolean> {
   if (user.isAdmin) return true;
   const m = await db
     .prepare(`SELECT leader_person_id FROM ministries WHERE id = ? AND deleted_at IS NULL`)
@@ -280,7 +281,7 @@ export async function canManageMinistry(db: D1Database, user: SessionUser, minis
 }
 
 /** Ministry ids the user leads (named leader ∪ ministries of teams they lead). */
-export async function leaderMinistryIds(db: D1Database, user: SessionUser): Promise<number[]> {
+export async function leaderMinistryIds(db: AppDb, user: SessionUser): Promise<number[]> {
   const ids = new Set<number>();
   const named = await db
     .prepare(`SELECT id FROM ministries WHERE leader_person_id = ? AND deleted_at IS NULL`)
@@ -298,7 +299,7 @@ export async function leaderMinistryIds(db: D1Database, user: SessionUser): Prom
   return [...ids];
 }
 
-export async function toggleMinistryActive(db: D1Database, id: number, active: boolean): Promise<void> {
+export async function toggleMinistryActive(db: AppDb, id: number, active: boolean): Promise<void> {
   await db.prepare(`UPDATE ministries SET active = ? WHERE id = ?`).bind(active ? 1 : 0, id).run();
 }
 
@@ -313,7 +314,7 @@ export interface MinistryBasics {
 }
 
 /** Update a ministry's editable basics (used by the Ministries-tab inline edit). */
-export async function updateMinistryBasics(db: D1Database, id: number, b: MinistryBasics): Promise<void> {
+export async function updateMinistryBasics(db: AppDb, id: number, b: MinistryBasics): Promise<void> {
   await db
     .prepare(`UPDATE ministries SET category = ?1, icon = ?2, leader_person_id = ?3 WHERE id = ?4`)
     .bind(b.category, b.icon || '📋', b.leader_person_id, id)
@@ -324,7 +325,7 @@ export async function updateMinistryBasics(db: D1Database, id: number, b: Minist
 
 /** Upsert a companion-table i18n row (columns validated by the caller's literals). */
 async function upsertI18n(
-  db: D1Database,
+  db: AppDb,
   table: 'ministry_i18n' | 'team_i18n' | 'position_i18n' | 'service_type_i18n',
   fk: string,
   id: number,
@@ -374,7 +375,7 @@ function slugify(name: string): string {
 }
 
 /** A slug not yet taken (appends -2, -3, … on collision). */
-async function uniqueSlug(db: D1Database, base: string): Promise<string> {
+async function uniqueSlug(db: AppDb, base: string): Promise<string> {
   const root = base || 'ministry';
   let candidate = root;
   for (let n = 2; ; n++) {
@@ -395,7 +396,7 @@ async function uniqueSlug(db: D1Database, base: string): Promise<string> {
  * is intentional and documented — the wizard is a low-frequency admin action.
  */
 export async function createMinistryFromWizard(
-  db: D1Database,
+  db: AppDb,
   input: MinistryWizardInput,
   now: Date = new Date(),
 ): Promise<number> {
