@@ -64,6 +64,17 @@ describe('Postgres-backed worker: public render path', () => {
     expect(body).toContain('name="amount"');
   });
 
+  it('/en/register renders the open-events list empty state (no reg events seeded)', async () => {
+    // registration is Supabase-only and defaults ON, so /register renders over
+    // Postgres via listOpenEvents(). The seed lands no reg_events, so this
+    // exercises the query returning empty and the page's empty-state markup.
+    const res = await get('/en/register');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Event registration'); // register.title heading
+    expect(body).toContain('No events are open for registration right now'); // register.empty
+  });
+
   it('/en/my/giving: anon → 303 to signin (route policy /my is authed)', async () => {
     const res = await get('/en/my/giving');
     expect(res.status).toBe(303);

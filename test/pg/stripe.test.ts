@@ -10,6 +10,7 @@ import {
   stripeRequest,
   createOneTimeCheckout,
   createRecurringCheckout,
+  createRegistrationCheckout,
   createPortalSession,
   retrieveSubscription,
   verifyStripeWebhook,
@@ -254,6 +255,67 @@ describe('createRecurringCheckout', () => {
     const { fn } = mockFetch(json({ id: 'x', url: 'y' }));
     await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0.5 }, fn)).rejects.toThrow();
     await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0 }, fn)).rejects.toThrow();
+  });
+});
+
+// ── createRegistrationCheckout ───────────────────────────────────────────────
+describe('createRegistrationCheckout', () => {
+  const base = {
+    amountCents: 2500,
+    currency: 'usd',
+    eventTitle: 'Summer Retreat',
+    eventId: 12,
+    locale: 'en',
+    registrationId: 88,
+    email: 'reg@example.com',
+  };
+
+  it('builds the payment-mode registration checkout param map with a 30-min expiry', async () => {
+    const { fn, calls } = mockFetch(json({ id: 'cs_reg', url: 'https://checkout/cs_reg' }));
+    const before = Math.floor(Date.now() / 1000);
+    const out = await createRegistrationCheckout(ENV, base, fn);
+    const after = Math.floor(Date.now() / 1000);
+    expect(out).toEqual({ id: 'cs_reg', url: 'https://checkout/cs_reg' });
+
+    const b = bodyEntries(calls[0]);
+    // expires_at is computed from Date.now() at call time → now + 1800s.
+    const exp = Number(b.expires_at);
+    expect(exp).toBeGreaterThanOrEqual(before + 1800);
+    expect(exp).toBeLessThanOrEqual(after + 1800);
+    delete b.expires_at;
+    expect(b).toEqual({
+      mode: 'payment',
+      'line_items[0][quantity]': '1',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][unit_amount]': '2500',
+      'line_items[0][price_data][product_data][name]': 'Summer Retreat',
+      success_url: 'https://church.example/en/register/done?ok=1&paid=1',
+      cancel_url: 'https://church.example/en/register/12',
+      customer_email: 'reg@example.com',
+      'metadata[kind]': 'registration',
+      'metadata[registration_id]': '88',
+      'payment_intent_data[metadata][kind]': 'registration',
+      'payment_intent_data[metadata][registration_id]': '88',
+    });
+  });
+
+  it('carries the locale + event id into the success/cancel URLs', async () => {
+    const { fn, calls } = mockFetch(json({ id: 'cs_reg2', url: 'https://checkout/cs_reg2' }));
+    await createRegistrationCheckout(ENV, { ...base, locale: 'zh', eventId: 7 }, fn);
+    const b = bodyEntries(calls[0]);
+    expect(b.success_url).toBe('https://church.example/zh/register/done?ok=1&paid=1');
+    expect(b.cancel_url).toBe('https://church.example/zh/register/7');
+  });
+
+  it('rejects a non-positive amount (a free registration never builds a checkout)', async () => {
+    const { fn } = mockFetch(json({ id: 'x', url: 'y' }));
+    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: 0 }, fn)).rejects.toThrow();
+    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: -100 }, fn)).rejects.toThrow();
+  });
+
+  it('throws when APP_ORIGIN is unset', async () => {
+    const { fn } = mockFetch(json({ id: 'x', url: 'y' }));
+    await expect(createRegistrationCheckout({ STRIPE_SECRET_KEY: 'sk' }, base, fn)).rejects.toThrow(/APP_ORIGIN/);
   });
 });
 

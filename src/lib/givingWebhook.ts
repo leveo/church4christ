@@ -13,8 +13,10 @@
 //     setRecurringStatus) is idempotent, so Stripe's at-least-once redelivery is a
 //     safe no-op on the second pass.
 //
-// The metadata.kind === 'gift' gate is what distinguishes our checkout/subscription
-// traffic from everyone else's; fund_id/person_id ride in metadata as strings.
+// The metadata.kind gate distinguishes our traffic from everyone else's:
+// kind === 'gift' is a donation (fund_id/person_id ride in metadata as strings);
+// kind === 'registration' is an event sign-up (confirm/cancel the pending row by
+// its attached Checkout session id). Every other kind resolves to 'ignored'.
 import type { AppDb } from './appDb';
 import { retrieveSubscription, type StripeEnv } from './stripe';
 import {
@@ -25,6 +27,7 @@ import {
   getRecurringBySubscription,
   setStripeCustomer,
 } from './givingDb';
+import { confirmBySession, cancelBySession } from './regDb';
 
 export interface WebhookDeps {
   db: AppDb;
@@ -64,7 +67,14 @@ export function isDbConnectivityError(e: unknown): boolean {
 }
 
 /** A short outcome for the log line: what the handler did with this event. */
-type Outcome = 'gift_recorded' | 'recurring_started' | 'refunded' | 'status_synced' | 'ignored';
+type Outcome =
+  | 'gift_recorded'
+  | 'recurring_started'
+  | 'refunded'
+  | 'status_synced'
+  | 'registration_confirmed'
+  | 'registration_cancelled'
+  | 'ignored';
 
 // ── tolerant field readers (a foreign/malformed payload must never throw) ──────
 function getMeta(obj: Record<string, unknown>): Record<string, unknown> {
@@ -140,6 +150,16 @@ function recurringFromSub(sub: Record<string, unknown>): RecurringParams | null 
 
 // ── per-event handlers ─────────────────────────────────────────────────────────
 async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, unknown>): Promise<Outcome> {
+  // Registration checkouts ride the same choke point as gifts, distinguished by
+  // metadata.kind; a paid registration confirms the pending row its Checkout
+  // session id is attached to. Matches by session id (confirmBySession), so the
+  // registration_id in metadata is informational only.
+  if (metaKind(session) === 'registration') {
+    const sessionId = strOrNull(session.id);
+    if (!sessionId) return 'ignored';
+    const confirmed = await confirmBySession(deps.db, sessionId, strOrNull(session.payment_intent));
+    return confirmed ? 'registration_confirmed' : 'ignored';
+  }
   if (metaKind(session) !== 'gift') return 'ignored';
   const mode = session.mode;
 
@@ -211,6 +231,17 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
   return 'gift_recorded';
 }
 
+/** A Checkout session expired. Only registration sessions hold a seat, so only
+ *  those need freeing (a gift checkout expiring records nothing). Idempotent:
+ *  cancelBySession moves only a still-pending row → 'ignored' on redelivery. */
+async function onCheckoutExpired(deps: WebhookDeps, session: Record<string, unknown>): Promise<Outcome> {
+  if (metaKind(session) !== 'registration') return 'ignored';
+  const sessionId = strOrNull(session.id);
+  if (!sessionId) return 'ignored';
+  const cancelled = await cancelBySession(deps.db, sessionId);
+  return cancelled ? 'registration_cancelled' : 'ignored';
+}
+
 async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>): Promise<Outcome> {
   const pi = strOrNull(charge.payment_intent);
   if (!pi) return 'ignored';
@@ -242,6 +273,8 @@ export async function handleStripeEvent(deps: WebhookDeps, event: Record<string,
   switch (type) {
     case 'checkout.session.completed':
       return onCheckoutCompleted(deps, object);
+    case 'checkout.session.expired':
+      return onCheckoutExpired(deps, object);
     case 'invoice.paid':
       return onInvoicePaid(deps, object);
     case 'charge.refunded':

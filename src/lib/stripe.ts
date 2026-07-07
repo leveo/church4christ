@@ -216,6 +216,56 @@ export async function createRecurringCheckout(
   return { id: session.id, url: session.url };
 }
 
+/**
+ * One-time (payment-mode) Checkout Session for an event REGISTRATION. Distinct
+ * from a gift: `metadata.kind = 'registration'` routes it to the registration
+ * branch of the shared webhook, and `expires_at` (now + 30 min, Stripe's minimum)
+ * bounds how long the pending row holds its seat — an abandoned checkout expires,
+ * fires checkout.session.expired, and the webhook frees the seat. `Date.now()` is
+ * read at call time so each session gets a fresh 30-minute window. Registrations
+ * are always email-prefilled (no saved customer reuse — giving owns that).
+ * success → /register/done?ok=1&paid=1 (the paid marker drives the receipt copy);
+ * cancel → back to the event page so the visitor can retry.
+ */
+export async function createRegistrationCheckout(
+  env: StripeEnv,
+  args: {
+    amountCents: number;
+    currency: string;
+    eventTitle: string;
+    eventId: number;
+    locale: string;
+    registrationId: number;
+    email: string;
+  },
+  fetcher: typeof fetch = fetch,
+): Promise<{ id: string; url: string }> {
+  assertAmount(args.amountCents);
+  const origin = requireOrigin(env);
+  const metadata = { kind: 'registration', registration_id: args.registrationId };
+  const params: Record<string, unknown> = {
+    mode: 'payment',
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: args.currency,
+          unit_amount: args.amountCents,
+          product_data: { name: args.eventTitle },
+        },
+      },
+    ],
+    success_url: `${origin}/${args.locale}/register/done?ok=1&paid=1`,
+    cancel_url: `${origin}/${args.locale}/register/${args.eventId}`,
+    customer_email: args.email,
+    expires_at: Math.floor(Date.now() / 1000) + 1800,
+    metadata,
+    payment_intent_data: { metadata },
+  };
+  const session = await stripeRequest<{ id: string; url: string }>(env, 'checkout/sessions', params, fetcher);
+  return { id: session.id, url: session.url };
+}
+
 /** A Billing Portal session so a donor can manage their recurring gift. */
 export async function createPortalSession(
   env: StripeEnv,
