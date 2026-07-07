@@ -11,6 +11,16 @@ EMAIL_DEV_LOG=1
 # When set, local dev auto-authenticates as this admin address (no magic link).
 AUTH_DEV_BYPASS_EMAIL=admin@example.com
 
+# Database backend for local dev: "d1" (default) or "supabase". With "supabase"
+# the worker reads/writes Postgres over the HYPERDRIVE binding instead of D1.
+# DB_BACKEND=d1
+
+# Local Postgres for `wrangler dev` when DB_BACKEND=supabase. wrangler points the
+# HYPERDRIVE binding at this URL locally (no real Hyperdrive needed). Migrate +
+# seed it first: `SUPABASE_DB_URL=<url> npm run db:migrate:supabase` then
+# `db:seed:supabase`. See docs/supabase-setup.md.
+# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
+
 # Token for the nightly D1→R2 backup (src/lib/backup.ts). Set this plus the
 # CF_ACCOUNT_ID + D1_DATABASE_ID vars in wrangler.jsonc to enable backups; if
 # any is unset the backup cron skips gracefully. Production uses

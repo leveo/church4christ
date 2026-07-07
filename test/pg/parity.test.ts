@@ -8,6 +8,8 @@ import { createLoginToken, consumeToken } from '../../src/lib/auth';
 import { listMinistries, getPersonByEmail } from '../../src/lib/db';
 import { listHouseholds, linkPersonToHousehold, getHousehold } from '../../src/lib/householdDb';
 import { listPeople, saveEvent } from '../../src/lib/adminDb';
+import { getNeedsAttention } from '../../src/lib/adminOverviewDb';
+import type { SessionUser } from '../../src/lib/types';
 import { listPlans } from '../../src/lib/planDb';
 import { listActiveEvents } from '../../src/lib/publicDb';
 import { getEnabledModules, clearModuleCache } from '../../src/lib/modules';
@@ -162,6 +164,43 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       expect(i18n.map((r) => r.locale)).toEqual(['en', 'zh']);
       const after = (await sql.unsafe('SELECT count(*)::int AS c FROM revisions'))[0].c as number;
       expect(after).toBe(before + 1);
+    });
+  });
+
+  // ── adminOverviewDb: the shortfall / HAVING-rewrite / GROUP BY query ────────
+  describe('needs-attention (Postgres shortfall query)', () => {
+    const adminUser: SessionUser = {
+      id: 1, email: 'admin@example.com', displayName: 'Admin', role: 'admin',
+      isAdmin: true, isEditor: true, memberTeamIds: [], leaderTeamIds: [], lang: 'en',
+    };
+
+    it('admin scope reports the seeded pending app + testimony and the exact per-plan shortfalls', async () => {
+      // Plans 1 (English service) and 9 (Chinese service) both land on the first
+      // upcoming Sunday (seed: date('now','weekday 0')). Scoping the window to that
+      // one day makes the grouped shortfall query return exactly those two plans.
+      const anchor = (await db.prepare("SELECT date('now','weekday 0') AS d").first<{ d: string }>())!.d;
+      const items = await getNeedsAttention(db, 'admin', adminUser, anchor, anchor, 'en');
+      const byKind = (k: string) => items.filter((i) => i.kind === k);
+
+      // One pending team application (person 9 → Worship), one pending testimony (#4).
+      expect(byKind('apps')).toHaveLength(1);
+      expect(byKind('apps')[0].en).toContain('1 new serving applications');
+      expect(byKind('testimonies')).toHaveLength(1);
+      expect(byKind('testimonies')[0].en).toContain('1 testimonies');
+      // The seed never sets notified_at, so nothing is "stale".
+      expect(byKind('stale')).toHaveLength(0);
+
+      // Shortfall math per plan (needed − non-declined assignments, floored at 0,
+      // summed): plan 1 → pos2 short 1 + pos8 short 2 = 3; plan 9 → pos6 short 1.
+      const understaffed = byKind('understaffed');
+      expect(understaffed).toHaveLength(2);
+      const gapByHref = Object.fromEntries(
+        understaffed.map((i) => [i.href, Number(/needs (\d+) role/.exec(i.en)![1])]),
+      );
+      expect(gapByHref['/en/serve/plans/1']).toBe(3);
+      expect(gapByHref['/en/serve/plans/9']).toBe(1);
+      // Service name resolved through the localized i18nJoin.
+      expect(understaffed.find((i) => i.href === '/en/serve/plans/1')!.en).toContain('Sunday Worship (English)');
     });
   });
 
