@@ -4,7 +4,7 @@
 // reader's defaults.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { getSetting, getSettings, getSiteIdentity, getTheme, setSetting } from '../src/lib/settings';
+import { getHeroImageKey, getSetting, getSettings, getSiteIdentity, getTheme, setSetting } from '../src/lib/settings';
 
 // Storage is isolated per test file but not per test in this pool config; wipe
 // the flat settings table before each test so reads see only that test's writes.
@@ -94,5 +94,14 @@ describe('getTheme', () => {
     await setSetting(db, 'theme.name', 'midnight');
     await setSetting(db, 'theme.default_mode', 'dark');
     expect(await getTheme(db)).toEqual({ theme: 'midnight', defaultMode: 'dark' });
+  });
+});
+
+describe('getHeroImageKey', () => {
+  it('getHeroImageKey returns the configured homepage hero media key', async () => {
+    await env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES ('site.hero_image_key', 'uploads/hero.webp')",
+    ).run();
+    expect(await getHeroImageKey(env.DB)).toBe('uploads/hero.webp');
   });
 });
