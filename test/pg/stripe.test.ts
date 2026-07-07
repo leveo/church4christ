@@ -328,6 +328,30 @@ describe('verifyStripeWebhook', () => {
     expect(await verifyStripeWebhook(payload, `t=nope,v1=abc`, secret, 300, now)).toBeNull(); // bad t + short v1
   });
 
+  // Secret rotation: during a rotation window Stripe sends one v1 entry per
+  // active secret, and its own libraries accept when ANY of them verifies. The
+  // parser must therefore keep every v1 entry, not just the last one.
+  it('accepts when only the FIRST of two v1 entries is valid (rotation)', async () => {
+    const good = await signStripe(secret, payload, now); // "t=<now>,v1=<good>"
+    const stale = (await signStripe('whsec_old', payload, now)).split('v1=')[1];
+    const header = `${good},v1=${stale}`;
+    expect(await verifyStripeWebhook(payload, header, secret, 300, now)).toMatchObject({ id: 'evt_1' });
+  });
+
+  it('accepts when only the SECOND of two v1 entries is valid (rotation)', async () => {
+    const goodV1 = (await signStripe(secret, payload, now)).split('v1=')[1];
+    const staleV1 = (await signStripe('whsec_old', payload, now)).split('v1=')[1];
+    const header = `t=${now},v1=${staleV1},v1=${goodV1}`;
+    expect(await verifyStripeWebhook(payload, header, secret, 300, now)).toMatchObject({ id: 'evt_1' });
+  });
+
+  it('rejects when both v1 entries are garbage', async () => {
+    // One well-formed hex signed with the wrong secret, one not even hex.
+    const wrongV1 = (await signStripe('whsec_old', payload, now)).split('v1=')[1];
+    const header = `t=${now},v1=${wrongV1},v1=nothex`;
+    expect(await verifyStripeWebhook(payload, header, secret, 300, now)).toBeNull();
+  });
+
   it('rejects a valid signature over a non-JSON payload (parse guard)', async () => {
     const notJson = 'this is not json';
     const sig = await signStripe(secret, notJson, now);

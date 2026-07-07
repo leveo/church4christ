@@ -250,6 +250,11 @@ export async function retrieveSubscription(
  * Verify a Stripe-Signature header (`t=...,v1=...`) with WebCrypto HMAC-SHA256.
  * Rejects when |now - t| > toleranceSeconds (default 300). Returns the parsed
  * event JSON or null when the signature is invalid.
+ *
+ * During webhook-secret rotation Stripe signs each event with every active
+ * secret and sends one `v1=` entry per signature; like Stripe's own libraries,
+ * this accepts when ANY v1 entry verifies — so ALL v1 values are kept (a
+ * key-value map would collapse them to the last).
  */
 export async function verifyStripeWebhook(
   payload: string,
@@ -258,15 +263,17 @@ export async function verifyStripeWebhook(
   toleranceSeconds = 300,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<Record<string, unknown> | null> {
-  const parts = new Map(
-    sigHeader.split(',').map((kv) => {
-      const i = kv.indexOf('=');
-      return [kv.slice(0, i).trim(), kv.slice(i + 1)] as const;
-    }),
-  );
-  const t = parts.get('t');
-  const v1 = parts.get('v1');
-  if (!t || !v1 || !/^\d+$/.test(t) || !/^[0-9a-f]{64}$/.test(v1)) return null;
+  let t: string | undefined;
+  const v1s: string[] = [];
+  for (const kv of sigHeader.split(',')) {
+    const i = kv.indexOf('=');
+    const k = kv.slice(0, i).trim();
+    const v = kv.slice(i + 1);
+    if (k === 't') t = v;
+    else if (k === 'v1') v1s.push(v);
+  }
+  const candidates = v1s.filter((v) => /^[0-9a-f]{64}$/.test(v));
+  if (!t || !/^\d+$/.test(t) || candidates.length === 0) return null;
   if (Math.abs(nowSeconds - Number(t)) > toleranceSeconds) return null;
   const key = await crypto.subtle.importKey(
     'raw',
@@ -275,12 +282,16 @@ export async function verifyStripeWebhook(
     false,
     ['verify'],
   );
-  const sigBytes = new Uint8Array(v1.match(/../g)!.map((h) => parseInt(h, 16)));
-  const ok = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${t}.${payload}`));
-  if (!ok) return null;
-  try {
-    return JSON.parse(payload) as Record<string, unknown>;
-  } catch {
-    return null;
+  const message = new TextEncoder().encode(`${t}.${payload}`);
+  for (const v1 of candidates) {
+    const sigBytes = new Uint8Array(v1.match(/../g)!.map((h) => parseInt(h, 16)));
+    if (await crypto.subtle.verify('HMAC', key, sigBytes, message)) {
+      try {
+        return JSON.parse(payload) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    }
   }
+  return null;
 }
