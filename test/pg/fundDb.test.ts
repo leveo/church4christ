@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import type { AppDb } from '../../src/lib/appDb';
-import { listFunds, getFund, saveFund, toggleFundActive } from '../../src/lib/fundDb';
+import { listFunds, getFund, saveFund, toggleFundActive, listFundsAdmin } from '../../src/lib/fundDb';
 
 describe.skipIf(!hasPg)('fundDb (Postgres)', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -99,6 +99,17 @@ describe.skipIf(!hasPg)('fundDb (Postgres)', () => {
     const activeOnly = await listFunds(db, 'en', { activeOnly: true });
     expect(activeOnly.some((f) => f.id === inactiveId)).toBe(false);
     expect(activeOnly.every((f) => f.active === 1)).toBe(true);
+  });
+
+  it('listFundsAdmin returns BOTH locale names, includes inactive, sorted by sort then id', async () => {
+    const id = await saveFund(db, { fund_number: 'F310', name_en: 'Youth', name_zh: '青年', active: 0, sort: 60 });
+    const rows = await listFundsAdmin(db);
+    const row = rows.find((r) => r.id === id);
+    expect(row).toMatchObject({ fund_number: 'F310', name_en: 'Youth', name_zh: '青年', active: 0, sort: 60 });
+    // The earlier active funds carry both names too (not just one locale).
+    expect(rows.every((r) => typeof r.name_en === 'string' && typeof r.name_zh === 'string')).toBe(true);
+    const sorts = rows.map((r) => r.sort);
+    expect([...sorts]).toEqual([...sorts].sort((a, b) => a - b));
   });
 
   it('toggleFundActive flips the active flag', async () => {

@@ -105,4 +105,22 @@ describe('Postgres-backed worker: admin console (exercises the shortfall query)'
     const res = await get('/admin/ministries', { cookie: await sessionCookie(3, 'sarah.johnson@example.com') });
     expect(res.status).toBe(200);
   });
+
+  it('/admin/giving: anon → 303 to signin (finance route class)', async () => {
+    const res = await get('/admin/giving');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toContain('/signin');
+  });
+
+  it('/admin/giving: admin → 200 (funds/totals/ledger reads over Postgres)', async () => {
+    // The giving admin (finance ∪ admin). Person 1 (admin@example.com) renders the
+    // page, exercising listFundsAdmin / fundTotals / listGifts / listPeople over
+    // Postgres. Assert the always-present manual-entry + totals headings, not fund
+    // rows (the giving seed lands in Task 9).
+    const res = await get('/admin/giving', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Record a gift'); // admin.giving.record heading
+    expect(body).toContain('Totals by fund'); // admin.giving.totals heading
+  });
 });

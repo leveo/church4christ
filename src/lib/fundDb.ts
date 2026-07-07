@@ -95,3 +95,33 @@ export async function saveFund(
 export async function toggleFundActive(db: AppDb, id: number): Promise<void> {
   await db.prepare(`UPDATE funds SET active = 1 - active, updated_at = datetime('now') WHERE id = ?1`).bind(id).run();
 }
+
+export interface FundAdminRow {
+  id: number;
+  fund_number: string;
+  name_en: string;
+  name_zh: string;
+  active: number; // 0 | 1
+  sort: number;
+}
+
+/**
+ * Every fund (active AND inactive) with BOTH locale names, for the admin funds
+ * table. listFunds returns only one locale's name (with en fallback) — the admin
+ * table shows en + zh side by side, so this reads both fund_i18n rows directly
+ * (mirrors listAnnouncements/listEvents). Ordered by sort then id.
+ */
+export async function listFundsAdmin(db: AppDb): Promise<FundAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT f.id AS id, f.fund_number AS fund_number,
+              COALESCE(en.name, '') AS name_en, COALESCE(zh.name, '') AS name_zh,
+              f.active AS active, f.sort AS sort
+       FROM funds f
+       LEFT JOIN fund_i18n en ON en.fund_id = f.id AND en.locale = 'en'
+       LEFT JOIN fund_i18n zh ON zh.fund_id = f.id AND zh.locale = 'zh'
+       ORDER BY f.sort, f.id`,
+    )
+    .all<FundAdminRow>();
+  return results;
+}

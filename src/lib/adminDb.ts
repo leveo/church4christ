@@ -44,6 +44,7 @@ export interface AdminPersonRow extends PersonListRow {
   birthday: string | null;
   address: string | null;
   joined_on: string | null;
+  finance: number; // finance-team flag (giving admin access); D1 raw 0/1
 }
 
 /** Directory filters (people module). serving/household are tri-state: undefined
@@ -121,7 +122,7 @@ export async function getPerson(db: AppDb, id: number): Promise<AdminPersonRow |
   return db
     .prepare(
       `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
-              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on,
+              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on, p.finance,
               h.name AS household_name
        FROM people p
        LEFT JOIN household_members hm ON hm.person_id = p.id
@@ -250,14 +251,16 @@ function writePerson(db: AppDb, id: number, input: PersonInput): Promise<unknown
 }
 
 /**
- * Update just the role and/or active flags. Deactivation (active = 0) takes
- * effect on the person's next request — the middleware reloads the row and its
- * `active = 1` check rejects an inactive session.
+ * Update just the role, active, and/or finance flags (each written only when
+ * present, so a caller can touch one without clobbering the others).
+ * Deactivation (active = 0) takes effect on the person's next request — the
+ * middleware reloads the row and its `active = 1` check rejects an inactive
+ * session. `finance` grants the giving-admin (finance) route class.
  */
 export async function setPersonFlags(
   db: AppDb,
   id: number,
-  flags: { role?: Role; active?: boolean },
+  flags: { role?: Role; active?: boolean; finance?: boolean },
 ): Promise<void> {
   const sets: string[] = [];
   const binds: (string | number)[] = [];
@@ -268,6 +271,10 @@ export async function setPersonFlags(
   if (flags.active !== undefined) {
     sets.push('active = ?');
     binds.push(flags.active ? 1 : 0);
+  }
+  if (flags.finance !== undefined) {
+    sets.push('finance = ?');
+    binds.push(flags.finance ? 1 : 0);
   }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");

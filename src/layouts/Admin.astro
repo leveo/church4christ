@@ -42,6 +42,9 @@ const fullTitle = title ? `${title} · ${appName}` : appName;
 // Links to pages built later this slice (tasks 2–4) are intentionally live.
 const isStaff = !!(user?.isEditor || user?.isAdmin);
 const isAdmin = !!user?.isAdmin;
+// Giving admin (finance route class): a finance-flagged member reaches it without
+// full site-admin, so its nav link shows for admins AND finance-flagged members.
+const isFinance = isAdmin || user?.finance === 1;
 
 // A nav entry with a `module` hides when that module is off (settings itself has
 // none — it is core). Groups drop out once every child is hidden.
@@ -74,6 +77,7 @@ const rawSections: NavSection[] = [
   },
   { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff, module: 'prayer-wall' },
   { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin, module: 'people' },
+  { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving' },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
 ];
 
