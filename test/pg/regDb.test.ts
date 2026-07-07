@@ -22,6 +22,9 @@ import {
   cancelBySession,
   cancelRegistration,
   listAllEvents,
+  listEventsAdmin,
+  getEventAdmin,
+  listQuestionsAdmin,
   saveEvent,
   saveQuestions,
   listRegistrations,
@@ -197,6 +200,50 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect(kept).toContain(qs[0].id); // survivor's answer preserved
     expect(kept).not.toContain(qs[1].id); // removed question's answer cascaded away
     expect(ansRows.find((r) => Number(r.question_id) === qs[0].id)!.value).toBe('Bob');
+  });
+
+  // ── Admin both-locale readers ────────────────────────────────────────────────
+  it('listEventsAdmin / getEventAdmin return both locales, counts, and null zh when absent', async () => {
+    const ev = await saveEvent(db, {
+      title_en: 'Gala', title_zh: '晚宴', description_en: 'EN body', description_zh: 'ZH body',
+      starts_at: ts(2 * DAY), capacity: 30, price_cents: 2500, active: 1,
+    });
+    // A registration so the counts are non-zero.
+    await createRegistration(db, {
+      eventId: ev, personId: null, name: 'A', email: 'a@x.com', status: 'confirmed', amountCents: 2500, currency: 'usd', answers: [],
+    });
+
+    const one = await getEventAdmin(db, ev);
+    expect(one).not.toBeNull();
+    expect(one!.title_en).toBe('Gala');
+    expect(one!.title_zh).toBe('晚宴');
+    expect(one!.description_en).toBe('EN body');
+    expect(one!.description_zh).toBe('ZH body');
+    expect(one!.capacity).toBe(30);
+    expect(one!.price_cents).toBe(2500);
+    expect(Number(one!.confirmed_count)).toBe(1);
+    expect(Number(one!.taken_count)).toBe(1);
+
+    const inList = (await listEventsAdmin(db)).find((e) => e.id === ev)!;
+    expect(inList.title_zh).toBe('晚宴');
+
+    // Blanking the zh title deletes the zh row → title_zh reads back null.
+    await saveEvent(db, { id: ev, title_en: 'Gala', title_zh: '', starts_at: ts(2 * DAY), active: 1 });
+    expect((await getEventAdmin(db, ev))!.title_zh).toBeNull();
+
+    expect(await getEventAdmin(db, 999999)).toBeNull();
+  });
+
+  it('listQuestionsAdmin returns raw both-locale labels (absent zh is null, not the en fallback)', async () => {
+    const ev = await openEvent();
+    await saveQuestions(db, ev, [
+      { sort: 0, type: 'text', required: 1, label_en: 'Name', label_zh: '姓名' },
+      { sort: 1, type: 'select', required: 0, options: ['S', 'M'], label_en: 'Size', label_zh: '' }, // blank zh
+    ]);
+    const qs = await listQuestionsAdmin(db, ev);
+    expect(qs.map((q) => q.label_en)).toEqual(['Name', 'Size']);
+    expect(qs.map((q) => q.label_zh)).toEqual(['姓名', null]); // blank zh reads back null, not 'Size'
+    expect(qs[1].options).toEqual(['S', 'M']);
   });
 
   it('listQuestions tolerates malformed options JSON (returns null, never throws)', async () => {

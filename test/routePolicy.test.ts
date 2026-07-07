@@ -80,6 +80,9 @@ describe('classifyRoute', () => {
     ['/admin/availability', 'console'],
     ['/admin/applications', 'console'],
     ['/admin/testimonies', 'console'],
+    ['/admin/registration', 'console'],
+    ['/admin/registration/5', 'console'],
+    ['/admin/registration/5/export.csv', 'console'],
     // ── adminOnly ──
     ['/admin/people', 'adminOnly'],
     ['/admin/people/4', 'adminOnly'],

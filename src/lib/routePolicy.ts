@@ -81,6 +81,10 @@ const ADMIN_CONSOLE = [
   '/admin/availability',
   '/admin/applications',
   '/admin/testimonies',
+  // Registration admin: editors run events, so the whole /admin/registration tree
+  // is console (editor ∪ admin ∪ leader), not adminOnly. The module gate (off by
+  // default) still 404s it when registration is disabled.
+  '/admin/registration',
 ];
 
 /** Strip a single trailing slash (but keep the bare root `/`). */

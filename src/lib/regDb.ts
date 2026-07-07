@@ -104,6 +104,36 @@ export async function listQuestions(db: AppDb, locale: Locale, eventId: number):
   return results.map((r) => ({ ...r, options: parseOptions(r.options) }));
 }
 
+/** An event's questions with BOTH locale labels raw (no cross-fallback — the
+ *  editor prefills each language, so an absent zh label reads null, NOT the en
+ *  label). Sort order; options JSON-decoded like listQuestions. */
+export interface RegQuestionAdmin {
+  id: number;
+  sort: number;
+  type: RegQuestion['type'];
+  required: number;
+  options: string[] | null;
+  label_en: string;
+  label_zh: string | null;
+}
+
+/** The question set for the admin builder: raw en + zh labels, sort order. */
+export async function listQuestionsAdmin(db: AppDb, eventId: number): Promise<RegQuestionAdmin[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT q.id AS id, q.sort AS sort, q.type AS type, q.required AS required, q.options AS options,
+              COALESCE(qen.label, '') AS label_en, qzh.label AS label_zh
+       FROM reg_questions q
+       LEFT JOIN reg_question_i18n qen ON qen.question_id = q.id AND qen.locale = 'en'
+       LEFT JOIN reg_question_i18n qzh ON qzh.question_id = q.id AND qzh.locale = 'zh'
+       WHERE q.event_id = ?1
+       ORDER BY q.sort, q.id`,
+    )
+    .bind(eventId)
+    .all<{ id: number; sort: number; type: RegQuestion['type']; required: number; options: string | null; label_en: string; label_zh: string | null }>();
+  return results.map((r) => ({ ...r, options: parseOptions(r.options) }));
+}
+
 /** Decode a reg_questions.options TEXT (a JSON array of strings) to string[].
  *  NULL, a non-array, a non-string element, or malformed JSON all yield null. */
 function parseOptions(raw: string | null): string[] | null {
@@ -300,6 +330,58 @@ export async function listAllEvents(db: AppDb, locale: Locale): Promise<RegEvent
     .bind(locale)
     .all<RegEvent>();
   return results;
+}
+
+/** An admin event carrying BOTH locale titles/descriptions (not a single
+ *  localized projection) so the editor form can prefill each language and the
+ *  list can show both. title_en is '' when the en row is missing; title_zh /
+ *  descriptions are null when that locale row is absent. */
+export interface RegEventAdmin {
+  id: number;
+  title_en: string;
+  title_zh: string | null;
+  description_en: string | null;
+  description_zh: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  capacity: number | null;
+  price_cents: number | null;
+  currency: string;
+  opens_at: string | null;
+  closes_at: string | null;
+  active: number;
+  confirmed_count: number;
+  taken_count: number;
+}
+
+// Both-locale event projection for the admin editor: the en and zh i18n rows join
+// side by side (no COALESCE — the form needs each language raw) plus the same
+// seat counts as EVENT_SELECT. Callers append their own WHERE / ORDER BY.
+const ADMIN_EVENT_SELECT = `
+  SELECT e.id AS id,
+         COALESCE(een.title, '') AS title_en, ezh.title AS title_zh,
+         een.description AS description_en, ezh.description AS description_zh,
+         e.starts_at AS starts_at, e.ends_at AS ends_at, e.location AS location,
+         e.capacity AS capacity, e.price_cents AS price_cents, e.currency AS currency,
+         e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
+         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
+         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status IN ('pending','confirmed')) AS taken_count
+  FROM reg_events e
+  LEFT JOIN reg_event_i18n een ON een.event_id = e.id AND een.locale = 'en'
+  LEFT JOIN reg_event_i18n ezh ON ezh.event_id = e.id AND ezh.locale = 'zh'`;
+
+/** Every event with both-locale title/description + counts, newest first — the
+ *  admin list, which doubles as the ?edit=<id> prefill source. */
+export async function listEventsAdmin(db: AppDb): Promise<RegEventAdmin[]> {
+  const { results } = await db.prepare(`${ADMIN_EVENT_SELECT} ORDER BY e.starts_at DESC, e.id DESC`).all<RegEventAdmin>();
+  return results;
+}
+
+/** A single event with both-locale fields + counts (the questions/roster page's
+ *  header + amount currency), or null when unknown. */
+export async function getEventAdmin(db: AppDb, id: number): Promise<RegEventAdmin | null> {
+  return db.prepare(`${ADMIN_EVENT_SELECT} WHERE e.id = ?1`).bind(id).first<RegEventAdmin>();
 }
 
 /**
