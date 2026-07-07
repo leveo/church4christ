@@ -181,15 +181,33 @@ export function clearModuleCache(): void {
 }
 
 /**
+ * Drop modules whose `requiresBackend` doesn't match `backend` — the backend gate
+ * wins over any settings row, so e.g. `giving`/`registration` (supabase-only) stay
+ * off on D1. Pure; shared by {@link getEnabledModules} and the middleware's
+ * fail-safe so the two can't drift (a fail-safe that skipped this filter would
+ * enable a supabase-only module on D1, and its core routes would hit a
+ * nonexistent table).
+ */
+export function filterByBackend(keys: Iterable<ModuleKey>, backend: DbBackend): Set<ModuleKey> {
+  const out = new Set<ModuleKey>();
+  for (const key of keys) {
+    const req = MODULES[key].requiresBackend;
+    if (req && req !== backend) continue;
+    out.add(key);
+  }
+  return out;
+}
+
+/**
  * The set of enabled modules from the `module.<key>` settings, cached per-isolate
  * for {@link CACHE_TTL_MS}. Absent rows read as enabled (default ON), and any
  * value other than the exact string '0' also counts as enabled — '0' is the only
- * disable. A module with a `requiresBackend` that doesn't match `backend` is then
- * force-dropped: the backend filter wins over its settings row, so e.g. `giving`
- * stays off on D1 even if `module.giving='1'`. The cache key includes `backend`,
- * so a read for a different backend misses rather than serving the wrong set.
- * May throw if the DB is unavailable; the middleware guards that to all-enabled so
- * a fresh install never 500s.
+ * disable. The backend filter ({@link filterByBackend}) then force-drops any
+ * module whose `requiresBackend` doesn't match, so e.g. `giving` stays off on D1
+ * even if `module.giving='1'`. The cache key includes `backend`, so a read for a
+ * different backend misses rather than serving the wrong set. May throw if the DB
+ * is unavailable; the middleware guards that to a backend-filtered all-enabled set
+ * so a fresh install never 500s.
  */
 export async function getEnabledModules(db: AppDb, backend: DbBackend): Promise<Set<ModuleKey>> {
   const now = Date.now();
@@ -198,13 +216,8 @@ export async function getEnabledModules(db: AppDb, backend: DbBackend): Promise<
     db,
     MODULE_KEYS.map((key) => `module.${key}`),
   );
-  const enabled = new Set<ModuleKey>();
-  for (const key of MODULE_KEYS) {
-    if (rows[`module.${key}`] === '0') continue;
-    const req = MODULES[key].requiresBackend;
-    if (req && req !== backend) continue; // backend gate wins over the settings row
-    enabled.add(key);
-  }
+  const settingsEnabled = MODULE_KEYS.filter((key) => rows[`module.${key}`] !== '0');
+  const enabled = filterByBackend(settingsEnabled, backend);
   cache = { value: enabled, backend, expiresAt: now + CACHE_TTL_MS };
   return enabled;
 }

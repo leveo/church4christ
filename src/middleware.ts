@@ -2,7 +2,7 @@ import { defineMiddleware } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import { DEFAULT_LOCALE, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
-import { MODULE_KEYS, getEnabledModules, moduleForPath } from './lib/modules';
+import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
@@ -89,15 +89,25 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // client consumes the stream, so ending the postgres.js client at
     // middleware-return would race them (CONNECTION_ENDED mid-render). Pipe the
     // body through a pass-through TransformStream whose flush() — fired after the
-    // last byte — drains the client, deferring end() until every in-render query
-    // has completed. Null-body exits (redirects) have nothing to stream.
+    // last byte on NORMAL completion — drains the client, deferring end() until
+    // every in-render query has run. But flush() only fires on a clean close: a
+    // client disconnect or a mid-render throw ABORTS the writable side instead, so
+    // flush() never runs and the client would leak. Drive a BACKSTOP off the pipe
+    // promise, which settles on EVERY outcome (resolves on clean close, rejects on
+    // abort/error), and drain there too. drainClient()'s `released` flag makes the
+    // double-drain a no-op — the client is ended exactly once, whichever path
+    // fires first. The backstop rides waitUntil so it never blocks the response;
+    // where waitUntil is absent (unit callers), flush() still covers the success
+    // path. Null-body exits (redirects) have nothing to stream.
     if (backend === 'supabase' && res.body) {
-      const drain = new TransformStream({
+      const { readable, writable } = new TransformStream({
         async flush() {
           await drainClient();
         },
       });
-      return new Response(res.body.pipeThrough(drain), res);
+      const pumped = res.body.pipeTo(writable);
+      context.locals.cfContext?.waitUntil?.(pumped.catch(() => {}).finally(() => drainClient()));
+      return new Response(readable, res);
     }
     release();
     return res;
@@ -124,7 +134,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
     try {
       modules = await getEnabledModules(db, context.locals.dbBackend);
     } catch {
-      modules = new Set(MODULE_KEYS);
+      // Fail safe to all-enabled, but STILL honor backend gating: a supabase-only
+      // module (giving/registration) must stay off on D1 even when the settings
+      // read fails, or a core route like /give would call listFunds against a
+      // nonexistent table and 500 instead of falling back gracefully.
+      modules = filterByBackend(MODULE_KEYS, context.locals.dbBackend);
     }
     context.locals.modules = modules;
 

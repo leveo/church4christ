@@ -12,11 +12,14 @@
 // key on title/description/label, not `name`.
 //
 // A pending registration HOLDS a seat until its Checkout session confirms or
-// expires, so taken_count (the capacity gate) counts status IN ('pending',
-// 'confirmed'); confirmed_count is the settled subset. See createRegistration for
-// the capacity-race backstop and its documented non-serializable window.
+// expires, so taken_count (the capacity gate) counts confirmed rows plus pending
+// rows still within a 1h freshness window (see HOLDS_SEAT — a dead pending row
+// whose worker never attached a session id is freed after 1h); confirmed_count is
+// the settled subset. See createRegistration for the capacity-race backstop and
+// its documented non-serializable window.
 import type { AppDb, AppStatement } from './appDb';
 import type { Locale } from './db';
+import { csvCell } from './csv';
 
 export interface RegQuestion {
   id: number;
@@ -44,10 +47,20 @@ export interface RegEvent {
   taken_count: number;
 }
 
+// A registration HOLDS a seat when it is confirmed, OR pending and still fresh.
+// A pending row whose worker died before attachCheckoutSession keeps a NULL
+// stripe_checkout_session_id — unreachable by confirmBySession/cancelBySession
+// (both key on the session id) — so without a freshness bound it would hold a
+// seat forever and could falsely trigger event_full. Stripe checkout sessions
+// expire at 30min, so a pending row older than 1h is definitively dead; excluding
+// it frees the seat without a background job. Assumes the row is aliased `r`.
+const HOLDS_SEAT = `(r.status = 'confirmed'
+  OR (r.status = 'pending' AND r.created_at > datetime('now','-1 hours')))`;
+
 // The localized event projection shared by every event reader. Locale binds as
-// ?1; a pending OR confirmed registration counts toward taken_count (it holds a
-// seat), confirmed_count is the settled subset. Callers append their own WHERE /
-// ORDER BY (numbered from ?2) and bind the locale first.
+// ?1; a confirmed OR fresh-pending registration counts toward taken_count (it
+// holds a seat — see HOLDS_SEAT), confirmed_count is the settled subset. Callers
+// append their own WHERE / ORDER BY (numbered from ?2) and bind the locale first.
 const EVENT_SELECT = `
   SELECT e.id AS id,
          COALESCE(el.title, ed.title, '') AS title,
@@ -56,7 +69,7 @@ const EVENT_SELECT = `
          e.capacity AS capacity, e.price_cents AS price_cents, e.currency AS currency,
          e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
          (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
-         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status IN ('pending','confirmed')) AS taken_count
+         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND ${HOLDS_SEAT}) AS taken_count
   FROM reg_events e
   LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?1
   LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'`;
@@ -247,12 +260,14 @@ export async function createRegistration(
     );
   }
   // Last statement: recount held seats + read capacity in the same transaction.
+  // Counts only LIVE seats (HOLDS_SEAT) so a stale/dead pending row can't wedge
+  // the event at capacity and reject a legitimate registration.
   stmts.push(
     db
       .prepare(
         `SELECT (SELECT capacity FROM reg_events WHERE id = ?1) AS cap,
                 count(*) AS taken
-         FROM registrations WHERE event_id = ?1 AND status IN ('pending','confirmed')`,
+         FROM registrations r WHERE r.event_id = ?1 AND ${HOLDS_SEAT}`,
       )
       .bind(input.eventId),
   );
@@ -366,7 +381,7 @@ const ADMIN_EVENT_SELECT = `
          e.capacity AS capacity, e.price_cents AS price_cents, e.currency AS currency,
          e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
          (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
-         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status IN ('pending','confirmed')) AS taken_count
+         (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND ${HOLDS_SEAT}) AS taken_count
   FROM reg_events e
   LEFT JOIN reg_event_i18n een ON een.event_id = e.id AND een.locale = 'en'
   LEFT JOIN reg_event_i18n ezh ON ezh.event_id = e.id AND ezh.locale = 'zh'`;
@@ -621,8 +636,11 @@ export async function listRegistrations(
  * The event roster as RFC4180 CSV: header Name,Email,Status,Amount,Registered
  * followed by one column per question (localized label, question sort order),
  * rows newest first. Amount is a plain dollars string — cents are integers, so
- * (amount_cents/100).toFixed(2) is exact. Every field is quoted when it contains
- * a comma, quote, CR, or LF, with embedded quotes doubled; rows are CRLF-joined.
+ * (amount_cents/100).toFixed(2) is exact. Each field goes through the shared
+ * csvCell: spreadsheet formula injection is neutralized (a leading = + - @ / tab /
+ * CR — reachable via the anonymous /api/register/submit name/email/answer fields —
+ * is quote-prefixed) THEN the value is RFC4180-quoted when it contains a comma,
+ * quote, CR, or LF, with embedded quotes doubled; rows are CRLF-joined.
  */
 export async function registrationsCsv(db: AppDb, locale: Locale, eventId: number): Promise<string> {
   const questions = await listQuestions(db, locale, eventId);
@@ -654,7 +672,7 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
   }
 
   const header = ['Name', 'Email', 'Status', 'Amount', 'Registered', ...questions.map((q) => q.label)];
-  const lines = [header.map(csvField).join(',')];
+  const lines = [header.map(csvCell).join(',')];
   for (const r of regs) {
     const m = byReg.get(r.id) ?? new Map<number, string>();
     const cells = [
@@ -665,13 +683,7 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
       r.created_at,
       ...questions.map((q) => m.get(q.id) ?? ''),
     ];
-    lines.push(cells.map(csvField).join(','));
+    lines.push(cells.map(csvCell).join(','));
   }
   return lines.join('\r\n');
-}
-
-/** RFC4180 field quoting: wrap in double quotes (doubling any embedded quote)
- *  when the value contains a comma, a double quote, or a line break. */
-function csvField(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }

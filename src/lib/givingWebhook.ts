@@ -48,14 +48,16 @@ const DB_CONN_CODES = new Set([
 ]);
 
 /**
- * True when `e` is a transient database-connectivity failure — the one case the
- * webhook endpoint answers with a 500 so Stripe retries (anything else is a logic
+ * True when `e` is a transient database failure — a case the webhook endpoint
+ * answers with a 500 so Stripe retries (anything definitively wrong is a logic
  * bug it logs and swallows as 200, since a retry would just fail again). Matches:
  *  - the postgres.js client codes / socket errnos in {@link DB_CONN_CODES};
- *  - Postgres server-side connection-class SQLSTATEs (postgres.js sets `.code` to
- *    the SQLSTATE): class 08 (connection exceptions, e.g. 08006 connection_failure),
- *    class 53 (insufficient resources, e.g. 53300 too_many_connections), and 57P*
- *    (admin shutdown / crash / cannot_connect_now).
+ *  - Postgres server-side transient SQLSTATEs (postgres.js sets `.code` to the
+ *    SQLSTATE): class 08 (connection exceptions, e.g. 08006 connection_failure),
+ *    class 53 (insufficient resources, e.g. 53300 too_many_connections), 57P*
+ *    (admin shutdown / crash / cannot_connect_now), and class 40 (transaction
+ *    rollback: 40001 serialization_failure, 40P01 deadlock_detected — a retry of
+ *    the same transaction is expected to succeed).
  * Money integrity depends on this classification: treating a transient failure as
  * a logic error would 200 the event and silently drop an invoice.paid instead of
  * letting Stripe redeliver it.
@@ -63,7 +65,37 @@ const DB_CONN_CODES = new Set([
 export function isDbConnectivityError(e: unknown): boolean {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code !== 'string') return false;
-  return DB_CONN_CODES.has(code) || code.startsWith('08') || code.startsWith('53') || code.startsWith('57P');
+  return (
+    DB_CONN_CODES.has(code) ||
+    code.startsWith('08') ||
+    code.startsWith('53') ||
+    code.startsWith('57P') ||
+    code.startsWith('40')
+  );
+}
+
+/**
+ * True when the webhook endpoint should 500 (→ Stripe redelivers) rather than
+ * swallow the event as 200. Broader than {@link isDbConnectivityError}: a KNOWN
+ * money event whose processing hit a *transient* failure — a Stripe API call that
+ * failed (retrieveSubscription during the invoice-before-completed race) or a
+ * network error reaching Stripe — must be retried, or the first month's gift is
+ * dropped and never re-sent. Retryable when:
+ *  - it is a transient DB failure ({@link isDbConnectivityError}); or
+ *  - it is a StripeError: readResponse (src/lib/stripe) attaches Stripe's HTTP
+ *    status as a numeric `.status` on a non-2xx (429/5xx transient, or even a 4xx
+ *    during the race) — redeliver rather than drop the money; or
+ *  - it is a network/fetch failure reaching Stripe: fetch throws a generic error
+ *    with the socket errno nested on `.cause`, so classify the cause too.
+ * NOT retryable — a definitive logic/constraint error (a 23xxx constraint
+ * violation, a plain TypeError from a real bug) returns 200 so a broken handler
+ * can't wedge an infinite retry loop.
+ */
+export function isRetryableWebhookError(e: unknown): boolean {
+  if (isDbConnectivityError(e)) return true;
+  if (typeof (e as { status?: unknown } | null)?.status === 'number') return true;
+  if (isDbConnectivityError((e as { cause?: unknown } | null)?.cause)) return true;
+  return false;
 }
 
 /** A short outcome for the log line: what the handler did with this event. */
@@ -164,6 +196,12 @@ async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, un
   const mode = session.mode;
 
   if (mode === 'payment') {
+    // Only a SETTLED payment books a gift. A completed session whose payment is
+    // still processing (async payment methods) or otherwise not 'paid' must not
+    // record money — Stripe re-fires completion when it settles. A paid card
+    // session always carries a payment_intent, so this gate also closes the
+    // null-PI double-insert gap (an unpaid session has no PI to dedup on).
+    if (session.payment_status !== 'paid') return 'ignored';
     const meta = getMeta(session);
     const fundId = intOrNull(meta.fund_id);
     const amountTotal = session.amount_total;
@@ -242,9 +280,26 @@ async function onCheckoutExpired(deps: WebhookDeps, session: Record<string, unkn
   return cancelled ? 'registration_cancelled' : 'ignored';
 }
 
+/** True when a charge.refunded event represents a FULL refund. Stripe sets
+ *  `charge.refunded` to true exactly when the entire charge has been refunded
+ *  (prefer it); comparing amount_refunded against the charge total is a defensive
+ *  fallback. A PARTIAL refund returns false so the gift stays 'succeeded'. */
+function isFullRefund(charge: Record<string, unknown>): boolean {
+  if (charge.refunded === true) return true;
+  const amount = charge.amount;
+  const refunded = charge.amount_refunded;
+  return typeof amount === 'number' && typeof refunded === 'number' && amount > 0 && refunded >= amount;
+}
+
 async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>): Promise<Outcome> {
   const pi = strOrNull(charge.payment_intent);
   if (!pi) return 'ignored';
+  // Only a FULL refund zeroes a gift's contribution. A partial refund ($50 on a
+  // $1000 gift) must NOT flip status to 'refunded' — that would drop the whole
+  // $1000 out of fundTotals/householdYearTotals (both filter status='succeeded'),
+  // understating fund totals and the donor's tax statement. On a partial refund
+  // we leave the gift 'succeeded' (a partial-refund ledger field is out of scope).
+  if (!isFullRefund(charge)) return 'ignored';
   // markGiftRefunded is scoped to our gifts by PI, so a foreign charge (or a
   // redelivered refund) simply moves no row → 'ignored'.
   const moved = await markGiftRefunded(deps.db, pi);

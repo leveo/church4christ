@@ -14,8 +14,8 @@ import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import type { AppDb } from '../../src/lib/appDb';
 import { saveFund } from '../../src/lib/fundDb';
-import { getStripeCustomer, getRecurringBySubscription } from '../../src/lib/givingDb';
-import { handleStripeEvent, isDbConnectivityError } from '../../src/lib/givingWebhook';
+import { getStripeCustomer, getRecurringBySubscription, fundTotals } from '../../src/lib/givingDb';
+import { handleStripeEvent, isDbConnectivityError, isRetryableWebhookError } from '../../src/lib/givingWebhook';
 import type { StripeEnv } from '../../src/lib/stripe';
 
 const ENV: StripeEnv = { STRIPE_SECRET_KEY: 'sk_test_x', APP_ORIGIN: 'https://church.example' };
@@ -80,6 +80,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
       ev('checkout.session.completed', {
         id: 'cs_guest',
         mode: 'payment',
+        payment_status: 'paid',
         payment_intent: 'pi_guest',
         amount_total: 5000,
         currency: 'usd',
@@ -108,6 +109,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
       ev('checkout.session.completed', {
         id: 'cs_member',
         mode: 'payment',
+        payment_status: 'paid',
         payment_intent: 'pi_member',
         amount_total: 2500,
         currency: 'usd',
@@ -126,6 +128,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
     const event = ev('checkout.session.completed', {
       id: 'cs_dup',
       mode: 'payment',
+      payment_status: 'paid',
       payment_intent: 'pi_dup',
       amount_total: 1000,
       currency: 'usd',
@@ -199,14 +202,72 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
   });
 
   // ── refund ─────────────────────────────────────────────────────────────────
-  it('charge.refunded flips the matching gift to refunded', async () => {
+  it('a FULL charge.refunded flips the matching gift to refunded', async () => {
     const outcome = await handleStripeEvent(
       { db, env: ENV },
-      ev('charge.refunded', { id: 'ch_1', payment_intent: 'pi_guest' }),
+      // Stripe sets refunded:true only on a full refund; amounts included too.
+      ev('charge.refunded', { id: 'ch_1', payment_intent: 'pi_guest', refunded: true, amount: 5000, amount_refunded: 5000 }),
     );
     expect(outcome).toBe('refunded');
     const [row] = await giftRow('stripe_payment_intent_id', 'pi_guest');
     expect(row.status).toBe('refunded');
+  });
+
+  it('a PARTIAL refund leaves the gift succeeded + counted; a FULL refund excludes it from totals', async () => {
+    // A clean fund so fundTotals reflects only these two gifts.
+    const rfund = await saveFund(db, { fund_number: 'W900', name_en: 'Refunds', name_zh: '退款', active: 1, sort: 9 });
+    const mkGift = (pi: string, cents: number) =>
+      handleStripeEvent(
+        { db, env: ENV },
+        ev('checkout.session.completed', {
+          id: `cs_${pi}`, mode: 'payment', payment_status: 'paid', payment_intent: pi, amount_total: cents, currency: 'usd',
+          metadata: { kind: 'gift', fund_id: String(rfund), person_id: '', donor_name: 'R' },
+        }),
+      );
+    expect(await mkGift('pi_full', 1000)).toBe('gift_recorded');
+    expect(await mkGift('pi_partial', 1000)).toBe('gift_recorded');
+
+    // Full refund (Stripe's refunded:true) → the gift flips to 'refunded'.
+    expect(
+      await handleStripeEvent(
+        { db, env: ENV },
+        ev('charge.refunded', { id: 'ch_full', payment_intent: 'pi_full', refunded: true, amount: 1000, amount_refunded: 1000 }),
+      ),
+    ).toBe('refunded');
+
+    // Partial refund ($5 of $10) → NO flip: the gift stays 'succeeded' and keeps
+    // its FULL amount in totals (a partial-refund ledger is out of scope).
+    expect(
+      await handleStripeEvent(
+        { db, env: ENV },
+        ev('charge.refunded', { id: 'ch_part', payment_intent: 'pi_partial', refunded: false, amount: 1000, amount_refunded: 500 }),
+      ),
+    ).toBe('ignored');
+
+    const [full] = await giftRow('stripe_payment_intent_id', 'pi_full');
+    const [partial] = await giftRow('stripe_payment_intent_id', 'pi_partial');
+    expect(full.status).toBe('refunded');
+    expect(partial.status).toBe('succeeded');
+
+    // fundTotals filters status='succeeded': the partially-refunded gift's whole
+    // $10 counts; the fully-refunded gift is excluded entirely.
+    const row = (await fundTotals(db, 'en', {})).find((t) => t.fund_id === rfund)!;
+    expect(row.total_cents).toBe(1000);
+    expect(row.gift_count).toBe(1);
+  });
+
+  // ── payment_status gate (only a settled session books a gift) ────────────────
+  it('a completed payment session that is not paid records no gift; paid does', async () => {
+    const mk = (pi: string, status: string) =>
+      ev('checkout.session.completed', {
+        id: `cs_${pi}`, mode: 'payment', payment_status: status, payment_intent: pi, amount_total: 1234, currency: 'usd',
+        metadata: { kind: 'gift', fund_id: String(fund), person_id: '', donor_name: 'PS' },
+      });
+    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_unpaid', 'unpaid'))).toBe('ignored');
+    expect(await giftRow('stripe_payment_intent_id', 'pi_unpaid')).toHaveLength(0);
+
+    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_paid', 'paid'))).toBe('gift_recorded');
+    expect(await giftRow('stripe_payment_intent_id', 'pi_paid')).toHaveLength(1);
   });
 
   // ── subscription lifecycle ───────────────────────────────────────────────────
@@ -260,12 +321,14 @@ describe('isDbConnectivityError', () => {
     expect(isDbConnectivityError({ code: 'ETIMEDOUT' })).toBe(true);
   });
 
-  it('true for Postgres connection-class SQLSTATEs (08*, 53*, 57P*)', () => {
+  it('true for Postgres transient SQLSTATEs (08*, 53*, 57P*, 40*)', () => {
     expect(isDbConnectivityError({ code: '08006' })).toBe(true); // connection_failure
     expect(isDbConnectivityError({ code: '08000' })).toBe(true); // connection_exception
     expect(isDbConnectivityError({ code: '53300' })).toBe(true); // too_many_connections
     expect(isDbConnectivityError({ code: '57P01' })).toBe(true); // admin_shutdown
     expect(isDbConnectivityError({ code: '57P03' })).toBe(true); // cannot_connect_now
+    expect(isDbConnectivityError({ code: '40P01' })).toBe(true); // deadlock_detected
+    expect(isDbConnectivityError({ code: '40001' })).toBe(true); // serialization_failure
   });
 
   it('false for logic errors: constraint SQLSTATEs, code-less errors, non-errors', () => {
@@ -278,5 +341,42 @@ describe('isDbConnectivityError', () => {
     expect(isDbConnectivityError(undefined)).toBe(false);
     expect(isDbConnectivityError('CONNECTION_CLOSED')).toBe(false); // string, not an error object
     expect(isDbConnectivityError({ code: 57 })).toBe(false); // numeric code is not a SQLSTATE
+  });
+});
+
+// ── isRetryableWebhookError (pure, no DB — ungated on purpose) ─────────────────
+// The endpoint's 500-vs-200 fork widened beyond DB connectivity: a failed Stripe
+// API call (retrieveSubscription during the invoice-before-completed race) or a
+// network error while processing a money event must retry, or the first month's
+// gift is dropped. A definitive logic/constraint error still 200s so a real bug
+// can't wedge an infinite retry loop.
+describe('isRetryableWebhookError', () => {
+  it('true for a StripeError (numeric .status) — a failed Stripe API call', () => {
+    const stripeErr = Object.assign(new Error('No such subscription'), { status: 404 });
+    expect(isRetryableWebhookError(stripeErr)).toBe(true);
+    expect(isRetryableWebhookError(Object.assign(new Error('rate limited'), { status: 429 }))).toBe(true);
+    expect(isRetryableWebhookError(Object.assign(new Error('stripe down'), { status: 500 }))).toBe(true);
+  });
+
+  it('true for a transient DB failure (delegates to isDbConnectivityError)', () => {
+    expect(isRetryableWebhookError({ code: 'CONNECTION_CLOSED' })).toBe(true);
+    expect(isRetryableWebhookError({ code: '08006' })).toBe(true);
+    expect(isRetryableWebhookError({ code: '40P01' })).toBe(true);
+  });
+
+  it('true for a network/fetch failure with the socket errno nested on .cause', () => {
+    const netErr = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    expect(isRetryableWebhookError(netErr)).toBe(true);
+  });
+
+  it('false for definitive logic/constraint errors (200 so no infinite retry)', () => {
+    expect(isRetryableWebhookError({ code: '23505' })).toBe(false); // unique_violation
+    expect(isRetryableWebhookError({ code: '23503' })).toBe(false); // foreign_key_violation
+    expect(isRetryableWebhookError(new TypeError('x is not a function'))).toBe(false);
+    expect(isRetryableWebhookError(new Error('boom'))).toBe(false);
+    expect(isRetryableWebhookError(null)).toBe(false);
+    expect(isRetryableWebhookError(undefined)).toBe(false);
+    // A non-numeric status is not a StripeError signal.
+    expect(isRetryableWebhookError({ status: '500' })).toBe(false);
   });
 });

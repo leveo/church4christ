@@ -8,15 +8,17 @@
 //   3. dispatch the parsed event to the pure handler and return 200 with its outcome.
 //
 // Retry discipline: Stripe retries any non-2xx. A *processing* bug must not build an
-// infinite retry queue, so a logic error is logged and returned as 200 'error_logged'
-// (the event is effectively dropped, but Stripe stops hammering us). The ONE
-// exception is a database-connectivity failure — that IS transient, so we 500 and
-// let Stripe retry once the DB is back. isDbConnectivityError (src/lib/givingWebhook)
-// tells them apart by the postgres.js client codes + connection-class SQLSTATEs.
+// infinite retry queue, so a definitive logic error is logged and returned as 200
+// 'error_logged' (the event is effectively dropped, but Stripe stops hammering us).
+// The exception is a TRANSIENT failure — a DB-connectivity blip OR a failed Stripe
+// API call / network error while processing a money event — which IS retryable, so
+// we 500 and let Stripe redeliver once it clears. isRetryableWebhookError
+// (src/lib/givingWebhook) tells them apart (postgres.js codes + transient SQLSTATEs,
+// a StripeError's numeric .status, and network errnos on .cause).
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { verifyStripeWebhook, type StripeEnv } from '../../../lib/stripe';
-import { handleStripeEvent, isDbConnectivityError } from '../../../lib/givingWebhook';
+import { handleStripeEvent, isRetryableWebhookError } from '../../../lib/givingWebhook';
 
 export const prerender = false;
 
@@ -40,11 +42,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const outcome = await handleStripeEvent({ db: locals.db, env: stripeEnv }, event);
     return new Response(outcome, { status: 200 });
   } catch (e) {
-    if (isDbConnectivityError(e)) {
-      console.error('stripe webhook: database connectivity error (will retry)', e);
-      return new Response('db_error', { status: 500 });
+    if (isRetryableWebhookError(e)) {
+      console.error('stripe webhook: transient error (will retry)', e);
+      return new Response('retry', { status: 500 });
     }
-    // A logic bug: log it and swallow with a 200 so Stripe does not retry forever.
+    // A definitive logic bug: log it and swallow with a 200 so Stripe does not
+    // retry forever.
     console.error('stripe webhook: processing error (dropping event)', e);
     return new Response('error_logged', { status: 200 });
   }

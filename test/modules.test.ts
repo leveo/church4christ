@@ -5,7 +5,7 @@
 // /ministries), and the always-on CORE paths that must resolve to null (/,
 // /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
-import { MODULE_KEYS, MODULES, moduleForPath } from '../src/lib/modules';
+import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
   it('has all 13 module keys in display order', () => {
@@ -41,6 +41,26 @@ describe('MODULES registry', () => {
     for (const key of MODULE_KEYS) {
       if (key !== 'giving' && key !== 'registration') expect(MODULES[key].requiresBackend).toBeUndefined();
     }
+  });
+});
+
+describe('filterByBackend (middleware fail-safe + getEnabledModules share it)', () => {
+  it("on 'd1', drops the supabase-only modules (giving/registration)", () => {
+    const enabled = filterByBackend(MODULE_KEYS, 'd1');
+    expect(enabled.has('giving')).toBe(false);
+    expect(enabled.has('registration')).toBe(false);
+    // Every non-backend-gated module survives.
+    expect(enabled.size).toBe(MODULE_KEYS.length - 2);
+    for (const key of MODULE_KEYS) {
+      if (key !== 'giving' && key !== 'registration') expect(enabled.has(key)).toBe(true);
+    }
+  });
+
+  it("on 'supabase', keeps every module", () => {
+    const enabled = filterByBackend(MODULE_KEYS, 'supabase');
+    expect(enabled.size).toBe(MODULE_KEYS.length);
+    expect(enabled.has('giving')).toBe(true);
+    expect(enabled.has('registration')).toBe(true);
   });
 });
 

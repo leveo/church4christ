@@ -123,6 +123,7 @@ describe.skipIf(!hasPg)('handleStripeEvent — registration branch (Postgres)', 
       ev('checkout.session.completed', {
         id: 'cs_gift',
         mode: 'payment',
+        payment_status: 'paid',
         payment_intent: 'pi_gift',
         amount_total: 5000,
         currency: 'usd',
