@@ -1,0 +1,137 @@
+// Postgres-backed smoke of the BUILT worker (SELF.fetch), run by
+// vitest.e2e.pg.config.ts with DB_BACKEND=supabase + a HYPERDRIVE binding on local
+// Postgres. Every request here flows middleware → route → postgres.js over
+// Hyperdrive, so a green run proves the whole stack serves real seeded pages against
+// Postgres — and specifically exercises the SQLite→Postgres portability fixes this
+// exploration landed:
+//   - the streamed-render drain (middleware pipes the body through a TransformStream
+//     whose flush() ends the client) — every rendered page below loads theme/
+//     settings/modules through the request-scoped client while the body streams;
+//   - the admin Overview shortfall query (adminOverviewDb.getNeedsAttention /
+//     getOverviewStats), which needed the 2-arg MAX/MIN compat functions, the mixed
+//     numbered/anonymous placeholder fix, the HAVING-alias → subquery rewrite, the
+//     explicit GROUP BY, and the TRUE/FALSE scope clause — reached via /admin/
+//     ministries as both an admin and a team leader.
+// This does NOT reuse test/e2e/** (those seed + verify through the D1 env.DB binding,
+// which this backend never reads) — see docs/superpowers/plans/phase1-e2e-pg-findings.md.
+import { env } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+import { get } from '../e2e/helpers';
+import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
+
+const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+async function sessionCookie(id: number, email: string): Promise<string> {
+  const jwt = await mintSession(SECRET, { id, email, sessionEpoch: 0 });
+  return `${SESSION_COOKIE}=${jwt}`;
+}
+
+describe('Postgres-backed worker: public render path', () => {
+  it('/healthz → 200 {"ok":true}', async () => {
+    const res = await get('/healthz');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('/en/ renders the seeded theme, both hreflang alternates, and the announcement', async () => {
+    const body = await (await get('/en/')).text();
+    expect(body).toContain('data-theme="sanctuary"'); // theme.name setting, read over Postgres
+    expect(body).toContain('hreflang="en"');
+    expect(body).toContain('hreflang="zh-Hans"');
+    expect(body).toContain('New members class every first Sunday'); // seeded announcement
+  });
+
+  it('/zh/ declares lang="zh-Hans" and renders the Chinese announcement', async () => {
+    const body = await (await get('/zh/')).text();
+    expect(body).toContain('lang="zh-Hans"');
+    expect(body).toContain('新朋友课程每月首个主日');
+  });
+
+  it('/en/sermons lists a published sermon', async () => {
+    const body = await (await get('/en/sermons')).text();
+    expect(body).toContain('The Beatitudes');
+  });
+
+  it('/en/give renders the interactive giving form (giving module on over Postgres)', async () => {
+    // giving is Supabase-only and defaults ON, so on this backend /give is the
+    // checkout form — not the D1 external-link page. Rendering it exercises
+    // listFunds() over Postgres (the fund select is empty until the giving seed
+    // lands in Phase 2 Task 9, so assert the form scaffold, not fund rows).
+    const res = await get('/en/give');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('action="/api/giving/checkout"');
+    expect(body).toContain('name="fund_id"');
+    expect(body).toContain('name="amount"');
+  });
+
+  it('/en/register renders the open-events list empty state (no reg events seeded)', async () => {
+    // registration is Supabase-only and defaults ON, so /register renders over
+    // Postgres via listOpenEvents(). The seed lands no reg_events, so this
+    // exercises the query returning empty and the page's empty-state markup.
+    const res = await get('/en/register');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Event registration'); // register.title heading
+    expect(body).toContain('No events are open for registration right now'); // register.empty
+  });
+
+  it('/en/my/giving: anon → 303 to signin (route policy /my is authed)', async () => {
+    const res = await get('/en/my/giving');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toContain('/signin');
+  });
+
+  it('/en/my/giving: signed-in giver → 200 (recurring/ledger/year reads over Postgres)', async () => {
+    // Person 1 (admin@example.com) has no seeded gifts yet (the giving seed lands
+    // in Task 9), so this exercises listRecurringForPerson / listHouseholdGifts /
+    // householdYearTotals returning empty and the page rendering all three empty
+    // states + the Manage portal form scaffold.
+    const res = await get('/en/my/giving', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Recurring giving'); // my.giving.recurring section heading
+    expect(body).toContain('No gifts recorded yet.'); // my.giving.empty — all three sections empty
+  });
+});
+
+describe('Postgres-backed worker: admin console (exercises the shortfall query)', () => {
+  it('/admin/ministries: anon → 303 to signin', async () => {
+    const res = await get('/admin/ministries');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toContain('/signin');
+  });
+
+  it('/admin/ministries: admin → 200 (Overview shortfall query runs over Postgres)', async () => {
+    // Person 1 (admin@example.com) is the admin — Overview runs getOverviewStats +
+    // getNeedsAttention (the SUM(MAX(0, needed - filled)) shortfall math) with the
+    // all-scope TRUE clause.
+    const res = await get('/admin/ministries', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+  });
+
+  it('/admin/ministries: team leader → 200 (leaderTeamFilter placeholder path)', async () => {
+    // Person 3 (sarah) leads Worship Team — the shortfall query runs with the
+    // `teams.id IN (?)` leader filter spliced into a numbered-placeholder head query
+    // (the mixed ?N / ? case the translator fix handles).
+    const res = await get('/admin/ministries', { cookie: await sessionCookie(3, 'sarah.johnson@example.com') });
+    expect(res.status).toBe(200);
+  });
+
+  it('/admin/giving: anon → 303 to signin (finance route class)', async () => {
+    const res = await get('/admin/giving');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toContain('/signin');
+  });
+
+  it('/admin/giving: admin → 200 (funds/totals/ledger reads over Postgres)', async () => {
+    // The giving admin (finance ∪ admin). Person 1 (admin@example.com) renders the
+    // page, exercising listFundsAdmin / fundTotals / listGifts / listPeople over
+    // Postgres. Assert the always-present manual-entry + totals headings, not fund
+    // rows (the giving seed lands in Task 9).
+    const res = await get('/admin/giving', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Record a gift'); // admin.giving.record heading
+    expect(body).toContain('Totals by fund'); // admin.giving.totals heading
+  });
+});

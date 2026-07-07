@@ -147,6 +147,20 @@ describe('setPersonFlags', () => {
     await setPersonFlags(env.DB, id, {}); // nothing to change
     expect(await getPerson(env.DB, id)).toMatchObject({ role: 'editor', active: 1 });
   });
+
+  it('sets the finance flag independently, defaulting to 0 and never clobbered by other flag updates', async () => {
+    const id = idOf(await savePerson(env.DB, input({ email: 'fin@example.com' }), 'x'));
+    expect(await getPerson(env.DB, id)).toMatchObject({ finance: 0 });
+
+    await setPersonFlags(env.DB, id, { finance: true });
+    expect(await getPerson(env.DB, id)).toMatchObject({ finance: 1, active: 1 });
+
+    await setPersonFlags(env.DB, id, { role: 'editor' }); // finance stays set
+    expect(await getPerson(env.DB, id)).toMatchObject({ finance: 1, role: 'editor' });
+
+    await setPersonFlags(env.DB, id, { finance: false });
+    expect(await getPerson(env.DB, id)).toMatchObject({ finance: 0 });
+  });
 });
 
 describe('savePerson — membership depth (admin variant)', () => {

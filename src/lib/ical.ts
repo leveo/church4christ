@@ -5,6 +5,8 @@
 // generate/regenerate action (32 hex chars) instead of create-on-view —
 // regenerating invalidates the old subscription URL.
 
+import type { AppDb } from './appDb';
+
 export interface ICalEvent {
   /** Full, stable UID (e.g. `c4c-assignment-42@church.example`). */
   uid: string;
@@ -63,7 +65,7 @@ export function buildICal(calName: string, events: ICalEvent[], stamp: string): 
 }
 
 /** The person's current calendar-feed token, or null when never generated. */
-export async function getCalendarToken(db: D1Database, personId: number): Promise<string | null> {
+export async function getCalendarToken(db: AppDb, personId: number): Promise<string | null> {
   const row = await db
     .prepare(`SELECT calendar_token FROM people WHERE id = ?`)
     .bind(personId)
@@ -76,7 +78,7 @@ export async function getCalendarToken(db: D1Database, personId: number): Promis
  * from 16 crypto-random bytes. Overwrites any previous token, so an old
  * subscription URL stops resolving — that is the revocation story.
  */
-export async function generateCalendarToken(db: D1Database, personId: number): Promise<string> {
+export async function generateCalendarToken(db: AppDb, personId: number): Promise<string> {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const token = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
   await db.prepare(`UPDATE people SET calendar_token = ? WHERE id = ?`).bind(token, personId).run();

@@ -8,7 +8,6 @@
 // The two terminal columns fold cards older than 90 days unless ?all=1.
 // PUBLIC MESSAGE TEXT IS ALWAYS ESCAPED — rendered as {expr}, never set:html.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import {
   PRAYER_STATUSES,
@@ -30,7 +29,7 @@ export const prerender = false;
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const WALL = '/admin/prayer-wall';
 const MAX_COMMENT = 2000;
 

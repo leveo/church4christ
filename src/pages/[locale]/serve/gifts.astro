@@ -9,7 +9,6 @@
 //
 // A small progress island is pure enhancement; the radios are `required`, so
 // with JS off the browser still enforces a complete submission.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import GiftResultCard from '../../../components/GiftResultCard.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -31,7 +30,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 const user = Astro.locals.user;
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const SCALE: { value: Answer; key: string }[] = [
   { value: 0, key: 'serve.gifts.scale.never' },

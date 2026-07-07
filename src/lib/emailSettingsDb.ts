@@ -5,6 +5,8 @@
 // every send. Ported from the reference stack's emailSettingsDb, adapted to church-cms's
 // per-locale email_templates table (migration 0002).
 
+import type { AppDb } from './appDb';
+
 export type RuleKey = 'remind7' | 'remind3' | 'digestAM';
 export type TemplateKey = 'remind' | 'request' | 'appResult' | 'digestAM';
 
@@ -26,17 +28,17 @@ export interface EmailLogRow {
 }
 
 /** All rules as a { key: enabled } map, for rendering the toggle list. */
-export async function listRules(db: D1Database): Promise<Record<string, boolean>> {
+export async function listRules(db: AppDb): Promise<Record<string, boolean>> {
   const { results } = await db.prepare(`SELECT rule_key, enabled FROM email_rules`).all<{ rule_key: string; enabled: number }>();
   return Object.fromEntries(results.map((r) => [r.rule_key, r.enabled === 1]));
 }
 
-export async function isRuleEnabled(db: D1Database, key: RuleKey): Promise<boolean> {
+export async function isRuleEnabled(db: AppDb, key: RuleKey): Promise<boolean> {
   const row = await db.prepare(`SELECT enabled FROM email_rules WHERE rule_key = ?`).bind(key).first<{ enabled: number }>();
   return row?.enabled === 1;
 }
 
-export async function setRule(db: D1Database, key: string, enabled: boolean): Promise<void> {
+export async function setRule(db: AppDb, key: string, enabled: boolean): Promise<void> {
   await db
     .prepare(
       `INSERT INTO email_rules (rule_key, enabled) VALUES (?1, ?2)
@@ -47,7 +49,7 @@ export async function setRule(db: D1Database, key: string, enabled: boolean): Pr
 }
 
 /** One template row for a (key, locale) pair, or null when unset. */
-export async function getTemplate(db: D1Database, key: TemplateKey, locale: string): Promise<EmailTemplate | null> {
+export async function getTemplate(db: AppDb, key: TemplateKey, locale: string): Promise<EmailTemplate | null> {
   return db
     .prepare(`SELECT template_key, locale, subject, body FROM email_templates WHERE template_key = ? AND locale = ?`)
     .bind(key, locale)
@@ -55,7 +57,7 @@ export async function getTemplate(db: D1Database, key: TemplateKey, locale: stri
 }
 
 /** Every template row, template_key then locale, for the editor grid. */
-export async function listTemplates(db: D1Database): Promise<EmailTemplate[]> {
+export async function listTemplates(db: AppDb): Promise<EmailTemplate[]> {
   const { results } = await db
     .prepare(`SELECT template_key, locale, subject, body FROM email_templates ORDER BY template_key, locale`)
     .all<EmailTemplate>();
@@ -63,7 +65,7 @@ export async function listTemplates(db: D1Database): Promise<EmailTemplate[]> {
 }
 
 export async function saveTemplate(
-  db: D1Database,
+  db: AppDb,
   key: string,
   locale: string,
   subject: string,
@@ -79,7 +81,7 @@ export async function saveTemplate(
 }
 
 /** Most recent send-log rows, newest first. */
-export async function listEmailLog(db: D1Database, limit = 50): Promise<EmailLogRow[]> {
+export async function listEmailLog(db: AppDb, limit = 50): Promise<EmailLogRow[]> {
   const { results } = await db
     .prepare(`SELECT id, to_email, to_name, kind, detail, status, created_at FROM email_log ORDER BY created_at DESC, id DESC LIMIT ?`)
     .bind(limit)
@@ -89,7 +91,7 @@ export async function listEmailLog(db: D1Database, limit = 50): Promise<EmailLog
 
 /** Direct email_log insert (lib/email.ts logs its own sends; this is for tests/tools). */
 export async function logEmail(
-  db: D1Database,
+  db: AppDb,
   entry: { to_email: string; to_name?: string | null; kind: string; detail?: string | null; status: string },
 ): Promise<void> {
   await db

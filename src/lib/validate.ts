@@ -11,6 +11,7 @@ import { extractYouTubeId } from './youtube';
 import { LOCALES, type Locale } from './locales';
 import { THEMES } from './theme';
 import { MODULE_KEYS } from './modules';
+import { parseAmountToCents } from './givingCheckout';
 
 export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
 
@@ -27,6 +28,7 @@ const ERR = {
   email: 'errors.emailInvalid',
   option: 'errors.invalidOption',
   timePair: 'errors.timePair',
+  amount: 'errors.amountInvalid',
 } as const;
 
 const ROLES = ['member', 'editor', 'admin'] as const;
@@ -659,4 +661,89 @@ export function parseSettingsForm(fd: FormData): FormResult<Record<string, strin
   }
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, data };
+}
+
+// ---------------------------------------------------------------------------
+// Giving admin — funds + manual check/cash entry (finance ∪ admin surfaces).
+// Pure FormData parsing so it unit-tests away from the request lifecycle; money
+// crosses as integer cents via parseAmountToCents (never a float).
+// ---------------------------------------------------------------------------
+export interface FundFormInput {
+  fund_number: string;
+  name_en: string;
+  name_zh: string;
+  active: boolean;
+  sort: number;
+}
+
+/** Fund create/edit form: fund_number + English name required; the Chinese name
+ *  is optional (getFund/listFunds fall back to en), sort defaults to 0. */
+export function parseFundForm(fd: FormData): FormResult<FundFormInput> {
+  const errors: Record<string, string> = {};
+  const fund_number = str(fd, 'fund_number');
+  if (!fund_number) errors.fund_number = ERR.required;
+  const name_en = str(fd, 'name_en');
+  if (!name_en) errors.name_en = ERR.required;
+  const name_zh = str(fd, 'name_zh');
+  const active = checkbox(fd, 'active');
+  const sort = sortOf(fd, errors);
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { fund_number, name_en, name_zh, active, sort } };
+}
+
+export interface ManualGiftInput {
+  personId: number | null;
+  donorName: string | null;
+  fundId: number;
+  amountCents: number;
+  method: 'check' | 'cash';
+  checkNumber: string | null;
+  receivedOn: string;
+  note: string | null;
+}
+
+/**
+ * Parse a manual check/cash gift. fund + amount + method + received-on are all
+ * required; the gift is attributed to EITHER a known member (person_id) or a
+ * free-text donor name — at least one is required. check_number is kept only for
+ * method 'check' (dropped for cash so a stray field never leaks onto a cash row).
+ */
+export function parseManualGiftForm(fd: FormData): FormResult<ManualGiftInput> {
+  const errors: Record<string, string> = {};
+
+  const fundId = requiredId(fd, 'fund_id', errors);
+
+  const amountCents = parseAmountToCents(str(fd, 'amount'));
+  if (amountCents === null) errors.amount = ERR.amount;
+
+  const methodRaw = str(fd, 'method');
+  const method = methodRaw === 'check' || methodRaw === 'cash' ? methodRaw : null;
+  if (!method) errors.method = ERR.option;
+
+  const receivedOn = str(fd, 'received_on');
+  if (receivedOn === '') errors.received_on = ERR.required;
+  else if (!isValidDateStr(receivedOn)) errors.received_on = ERR.date;
+
+  const personRaw = str(fd, 'person_id');
+  const personId = /^\d+$/.test(personRaw) ? Number(personRaw) : null;
+  const donorName = str(fd, 'donor_name') || null;
+  if (personId === null && donorName === null) errors.donor = ERR.required;
+
+  const checkNumber = method === 'check' ? str(fd, 'check_number') || null : null;
+  const note = str(fd, 'note') || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return {
+    ok: true,
+    data: {
+      personId,
+      donorName,
+      fundId,
+      amountCents: amountCents as number,
+      method: method as 'check' | 'cash',
+      checkNumber,
+      receivedOn,
+      note,
+    },
+  };
 }

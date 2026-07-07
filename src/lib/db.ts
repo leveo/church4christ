@@ -6,6 +6,7 @@
 // argument is validated first. Callers only ever pass trusted literals (table
 // names, column names, a Locale) — the validation is defense in depth, never a
 // substitute for parameterizing user input (which does not reach this layer).
+import type { AppDb } from './appDb';
 import { LOCALES, type Locale } from './locales';
 
 export type { Locale };
@@ -72,7 +73,7 @@ interface PersonRow {
 }
 
 /** Person by login email (lowercased + trimmed), excluding soft-deleted rows. */
-export async function getPersonByEmail(db: D1Database, email: string): Promise<PersonRow | null> {
+export async function getPersonByEmail(db: AppDb, email: string): Promise<PersonRow | null> {
   return db
     .prepare('SELECT * FROM people WHERE email = ? AND deleted_at IS NULL')
     .bind(email.trim().toLowerCase())
@@ -80,7 +81,7 @@ export async function getPersonByEmail(db: D1Database, email: string): Promise<P
 }
 
 /** Person by id, excluding soft-deleted rows. */
-export async function getPersonById(db: D1Database, id: number): Promise<PersonRow | null> {
+export async function getPersonById(db: AppDb, id: number): Promise<PersonRow | null> {
   return db
     .prepare('SELECT * FROM people WHERE id = ? AND deleted_at IS NULL')
     .bind(id)
@@ -110,23 +111,25 @@ interface MinistryListRow {
  * across those teams — an upper bound on "help wanted": it does NOT subtract
  * already-filled assignments (slices 4/6 refine if a true count is needed).
  */
-export async function listMinistries(db: D1Database, locale: Locale): Promise<MinistryListRow[]> {
+export async function listMinistries(db: AppDb, locale: Locale): Promise<MinistryListRow[]> {
   const { select, joins } = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name', 'intro'], locale);
   const { results } = await db
     .prepare(
       `SELECT m.id AS id, m.slug AS slug, m.category AS category, m.icon AS icon,
-              m.cover_key AS coverKey, m.leader_person_id AS leaderPersonId,
-              m.meeting_time AS meetingTime, m.sort AS sort,
+              m.cover_key AS "coverKey", m.leader_person_id AS "leaderPersonId",
+              m.meeting_time AS "meetingTime", m.sort AS sort,
               ${select},
               (SELECT COUNT(DISTINCT t.id) FROM teams t
-                 WHERE t.ministry_id = m.id AND t.deleted_at IS NULL) AS teamCount,
+                 WHERE t.ministry_id = m.id AND t.deleted_at IS NULL) AS "teamCount",
               (SELECT COUNT(*) FROM plan_positions pp
                  JOIN plans p ON p.id = pp.plan_id
-                   AND p.deleted_at IS NULL AND p.plan_date >= date('now')
+                   -- 2-arg date(): Postgres parses the bare 1-arg form as a CAST to the
+                   -- date type, never our compat function; 2-arg is identical on SQLite/D1.
+                   AND p.deleted_at IS NULL AND p.plan_date >= date('now', 'start of day')
                  JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
                  JOIN teams t2 ON t2.id = pos.team_id
                    AND t2.deleted_at IS NULL AND t2.ministry_id = m.id
-                 WHERE pp.open_signup = 1) AS openSignupSlots
+                 WHERE pp.open_signup = 1) AS "openSignupSlots"
        FROM ministries m
        ${joins}
        WHERE m.active = 1 AND m.deleted_at IS NULL

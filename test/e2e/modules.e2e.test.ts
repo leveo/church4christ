@@ -199,6 +199,22 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     const panel = await (await get('/admin/settings', { cookie: admin })).text();
     // People has no routes yet (slice 9) but is still a togglable module here.
     expect(panel).toContain('name="module.people"');
+    // All 13 keys render a checkbox (giving + registration are the backend-gated pair).
     for (const key of MODULE_KEYS) expect(panel).toContain(`name="module.${key}"`);
+  });
+
+  it('backend-gated modules (giving, registration) render disabled with a note on D1', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const panel = await (await get('/admin/settings', { cookie: admin })).text();
+
+    // e2e runs on the D1 backend, so both supabase-only modules are force-disabled:
+    // their checkbox carries the `disabled` attribute and the row shows the note.
+    const inputFor = (key: string) =>
+      panel.match(new RegExp(`<input[^>]*name="module\\.${key}"[^>]*>`))?.[0] ?? '';
+    expect(inputFor('giving')).toContain('disabled');
+    expect(inputFor('registration')).toContain('disabled');
+    // A non-gated module's checkbox stays enabled — the note is specific to the pair.
+    expect(inputFor('sermons')).not.toContain('disabled');
+    expect(panel).toContain('Requires the Supabase database');
   });
 });

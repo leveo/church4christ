@@ -4,7 +4,6 @@
 // in the parser) → saveSermon (upsert + revision snapshot in one db.batch;
 // duplicate live date → errors.dateTaken); delete → soft delete.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { parseSermonForm } from '../../../lib/validate';
 import { getSermonForEdit, saveSermon, softDeleteSermon, listServiceTypeOptions } from '../../../lib/adminDb';
@@ -15,7 +14,7 @@ import { tin, lab, card, errorText, btn, btnDanger, noticeErr } from '../../../l
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const rawId = Astro.params.id ?? '';
 const isNew = rawId === 'new';

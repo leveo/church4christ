@@ -1,0 +1,267 @@
+---
+// One event's question builder + registration roster (console class — re-checks
+// editor∪admin). The builder is a repeat-row form submitting indexed fields
+// (q[0][type]…) parsed by parseQuestionsForm into saveQuestions (replace-all;
+// surviving question ids keep their collected answers). Reorder by editing the
+// per-row Order numbers — no drag-drop. Progressive enhancement (vanilla JS, the
+// ministry-wizard pattern): add/remove rows + show the Options box only for
+// select/checkbox; with JS off the server-rendered rows still submit and the
+// options box is simply always visible. The roster lists each registration with
+// its answers in per-question columns, an admin cancel button, and a CSV link.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseQuestionsForm } from '../../../lib/regForms';
+import { getEventAdmin, listQuestionsAdmin, listRegistrations, saveQuestions, cancelRegistration, type RegQuestionAdmin } from '../../../lib/regDb';
+import { formatCents } from '../../../lib/money';
+import { tin, lab, card, btn, btnSecondary, rowBtn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const rawId = Astro.params.id ?? '';
+if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const eventId = Number(rawId);
+const event = await getEventAdmin(db, eventId);
+if (!event) return new Response(null, { status: 404 });
+
+let qError: string | null = null; // i18n key when the question form is rejected
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? '');
+  if (action === 'cancel') {
+    const rid = String(fd.get('registration_id') ?? '');
+    if (/^\d+$/.test(rid)) await cancelRegistration(db, Number(rid));
+    return Astro.redirect(`/admin/registration/${eventId}?cancelled=1`, 303);
+  }
+  if (action === 'saveQuestions') {
+    const parsed = parseQuestionsForm(fd);
+    if (!parsed.ok) {
+      qError = parsed.error === 'bad_type' ? 'admin.reg.qErrorType' : 'admin.reg.qErrorLabel';
+    } else {
+      await saveQuestions(db, eventId, parsed.questions);
+      return Astro.redirect(`/admin/registration/${eventId}?saved=1`, 303);
+    }
+  }
+}
+
+const questions = await listQuestionsAdmin(db, eventId);
+const roster = await listRegistrations(db, lang, eventId);
+const saved = Astro.url.searchParams.get('saved') === '1';
+const cancelled = Astro.url.searchParams.get('cancelled') === '1';
+
+// The event's display title + the localized question label (for roster headers
+// and aligning each answer to its column — the CSV keys by id, the HTML by label).
+const eventTitle = (lang === 'zh' ? event.title_zh || event.title_en : event.title_en) || `#${eventId}`;
+const qLabel = (q: RegQuestionAdmin) => (lang === 'zh' ? q.label_zh || q.label_en : q.label_en);
+
+const types: RegQuestionAdmin['type'][] = ['text', 'textarea', 'select', 'checkbox', 'yesno'];
+const needsOptions = (type: string) => type === 'select' || type === 'checkbox';
+const heading = t(lang, 'admin.reg.title');
+const h2 = 'font-display text-heading-sm font-bold';
+const cellCls = 'flex-1 min-w-40';
+---
+
+<Admin title={`${eventTitle} · ${heading}`}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{eventTitle}</h1>
+    <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.backToList')}</a>
+  </div>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {cancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.reg.questions')}</h2>
+  <form method="post" class="mt-4 max-w-3xl" data-q-form>
+    <input type="hidden" name="action" value="saveQuestions" />
+    {qError && <p class={`mb-4 ${noticeErr}`}>{t(lang, qError)}</p>}
+
+    <div class="space-y-3" data-q-list>
+      {
+        questions.map((q, i) => (
+          <div class={`${card} space-y-3`} data-q-row>
+            <input type="hidden" data-qname="id" name={`q[${i}][id]`} value={q.id} />
+            <div class="flex flex-wrap items-end gap-3">
+              <label class="w-20">
+                <span class={lab}>{t(lang, 'admin.reg.sort')}</span>
+                <input data-qname="sort" name={`q[${i}][sort]`} value={q.sort} inputmode="numeric" class={tin} />
+              </label>
+              <label class="min-w-40">
+                <span class={lab}>{t(lang, 'admin.reg.qType')}</span>
+                <select data-qname="type" name={`q[${i}][type]`} data-q-type class={tin}>
+                  {types.map((tp) => (
+                    <option value={tp} selected={q.type === tp}>
+                      {t(lang, `admin.reg.qType.${tp}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label class="flex items-center gap-2 pb-2 text-sm">
+                <input type="checkbox" data-qname="required" name={`q[${i}][required]`} value="1" checked={q.required === 1} />
+                {t(lang, 'admin.reg.required')}
+              </label>
+              <button type="button" data-q-remove class={`${rowBtn} ml-auto`}>
+                {t(lang, 'admin.reg.removeQuestion')}
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <label class={cellCls}>
+                <span class={lab}>{t(lang, 'admin.reg.labelEn')}</span>
+                <input data-qname="label_en" name={`q[${i}][label_en]`} value={q.label_en} class={tin} />
+              </label>
+              <label class={cellCls}>
+                <span class={lab}>{t(lang, 'admin.reg.labelZh')}</span>
+                <input data-qname="label_zh" name={`q[${i}][label_zh]`} value={q.label_zh ?? ''} class={tin} />
+              </label>
+            </div>
+            <label class="block" data-q-options hidden={!needsOptions(q.type)}>
+              <span class={lab}>{t(lang, 'admin.reg.options')}</span>
+              <textarea data-qname="options" name={`q[${i}][options]`} rows="3" class={tin}>{(q.options ?? []).join('\n')}</textarea>
+            </label>
+          </div>
+        ))
+      }
+    </div>
+
+    <template data-q-template>
+      <div class={`${card} space-y-3`} data-q-row>
+        <input type="hidden" data-qname="id" name="q[0][id]" value="" />
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="w-20">
+            <span class={lab}>{t(lang, 'admin.reg.sort')}</span>
+            <input data-qname="sort" name="q[0][sort]" value="" inputmode="numeric" class={tin} />
+          </label>
+          <label class="min-w-40">
+            <span class={lab}>{t(lang, 'admin.reg.qType')}</span>
+            <select data-qname="type" name="q[0][type]" data-q-type class={tin}>
+              {types.map((tp) => <option value={tp}>{t(lang, `admin.reg.qType.${tp}`)}</option>)}
+            </select>
+          </label>
+          <label class="flex items-center gap-2 pb-2 text-sm">
+            <input type="checkbox" data-qname="required" name="q[0][required]" value="1" />
+            {t(lang, 'admin.reg.required')}
+          </label>
+          <button type="button" data-q-remove class={`${rowBtn} ml-auto`}>{t(lang, 'admin.reg.removeQuestion')}</button>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <label class={cellCls}>
+            <span class={lab}>{t(lang, 'admin.reg.labelEn')}</span>
+            <input data-qname="label_en" name="q[0][label_en]" value="" class={tin} />
+          </label>
+          <label class={cellCls}>
+            <span class={lab}>{t(lang, 'admin.reg.labelZh')}</span>
+            <input data-qname="label_zh" name="q[0][label_zh]" value="" class={tin} />
+          </label>
+        </div>
+        <label class="block" data-q-options hidden>
+          <span class={lab}>{t(lang, 'admin.reg.options')}</span>
+          <textarea data-qname="options" name="q[0][options]" rows="3" class={tin} />
+        </label>
+      </div>
+    </template>
+
+    <div class="mt-4 flex items-center gap-3">
+      <button type="button" data-q-add class={btnSecondary}>{t(lang, 'admin.reg.addQuestion')}</button>
+      <button type="submit" class={btn}>{t(lang, 'admin.reg.saveQuestions')}</button>
+    </div>
+  </form>
+
+  <div class="mt-10 flex items-center justify-between gap-4">
+    <h2 class={h2}>{t(lang, 'admin.reg.registrations')}</h2>
+    <a href={`/admin/registration/${eventId}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
+  </div>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reg.name')}</th>
+          <th class={th}>{t(lang, 'admin.reg.email')}</th>
+          <th class={th}>{t(lang, 'admin.reg.status')}</th>
+          <th class={th}>{t(lang, 'admin.reg.amount')}</th>
+          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
+          {questions.map((q) => <th class={th}>{qLabel(q)}</th>)}
+          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          roster.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan={6 + questions.length}>
+                {t(lang, 'admin.reg.rosterEmpty')}
+              </td>
+            </tr>
+          ) : (
+            roster.map((r) => {
+              const byLabel = new Map(r.answers.map((a) => [a.label, a.value]));
+              return (
+                <tr class="border-t border-border align-top">
+                  <td class={`${td} font-medium`}>{r.name}</td>
+                  <td class={`${td} break-all`}>{r.email}</td>
+                  <td class={td}>{r.status}</td>
+                  <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
+                  <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>
+                  {questions.map((q) => (
+                    <td class={td}>{byLabel.get(qLabel(q)) ?? ''}</td>
+                  ))}
+                  <td class={td}>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.reg.cancelConfirm'))})`}>
+                      <input type="hidden" name="action" value="cancel" />
+                      <input type="hidden" name="registration_id" value={r.id} />
+                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled'}>
+                        {t(lang, 'admin.reg.cancel')}
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              );
+            })
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>
+
+<script>
+  // Question builder (vanilla progressive enhancement, ministry-wizard pattern):
+  // add/remove rows, show the Options box only for select/checkbox, and renumber
+  // every row's field names to a contiguous q[i][…] on submit so the server parses
+  // them in DOM order. With JS off, the server-rendered rows already carry correct
+  // indices and still submit.
+  const form = document.querySelector('[data-q-form]') as HTMLFormElement | null;
+  if (form) {
+    const list = form.querySelector('[data-q-list]') as HTMLElement;
+    const tpl = form.querySelector('template[data-q-template]') as HTMLTemplateElement | null;
+
+    function syncOptions(row: Element) {
+      const type = row.querySelector('[data-q-type]') as HTMLSelectElement | null;
+      const opts = row.querySelector('[data-q-options]') as HTMLElement | null;
+      if (type && opts) opts.hidden = !(type.value === 'select' || type.value === 'checkbox');
+    }
+    function wireRow(row: Element) {
+      row.querySelector('[data-q-type]')?.addEventListener('change', () => syncOptions(row));
+      row.querySelector('[data-q-remove]')?.addEventListener('click', () => row.remove());
+      syncOptions(row);
+    }
+    list.querySelectorAll('[data-q-row]').forEach(wireRow);
+
+    form.querySelector('[data-q-add]')?.addEventListener('click', () => {
+      const clone = tpl?.content.firstElementChild?.cloneNode(true) as Element | null;
+      if (!clone) return;
+      list.appendChild(clone);
+      wireRow(clone);
+    });
+
+    // Renumber every row's fields to a contiguous q[i][…] in DOM order on submit.
+    form.addEventListener('submit', () => {
+      list.querySelectorAll('[data-q-row]').forEach((row, i) => {
+        row.querySelectorAll('[data-qname]').forEach((el) => {
+          el.setAttribute('name', `q[${i}][${el.getAttribute('data-qname')}]`);
+        });
+      });
+    });
+  }
+</script>

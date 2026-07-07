@@ -8,7 +8,6 @@
 // rewritten. A snapshot whose UNIQUE date now collides with a live row
 // re-renders with an error banner instead of 500ing.
 export const prerender = false;
-import { env } from 'cloudflare:workers';
 import Admin from '../../../../layouts/Admin.astro';
 import { t } from '../../../../lib/i18n';
 import { listRevisions, getRevision, restoreRevision } from '../../../../lib/adminDb';
@@ -28,7 +27,7 @@ const EDITOR_URL: Record<string, (id: number) => string> = {
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const entity = Astro.params.entity ?? '';
 const rawId = Astro.params.id ?? '';

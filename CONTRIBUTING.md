@@ -71,6 +71,25 @@ Run these before opening a PR — they are the same steps CI runs:
 | `npm run test:e2e` | End-to-end tests against the actual built worker |
 | `npm run screenshots` | (Optional) regenerates the docs screenshots from the seeded dev server |
 
+### The Postgres tests (for Giving and Registration)
+
+The **Giving** and **Registration** modules run on the optional Supabase (Postgres) backend
+(see [`docs/supabase-setup.md`](docs/supabase-setup.md)), so their tests live in a separate
+`pg` project that needs a real Postgres. `npm test` **self-skips** those suites when
+`DATABASE_URL` is unset, so you only need this when you are working on giving or registration.
+To run them, start a throwaway local Postgres and point `DATABASE_URL` at it:
+
+```bash
+docker run -d --name c4c-pg-test -e POSTGRES_PASSWORD=postgres -p 5434:5432 postgres:16
+DATABASE_URL=postgres://postgres:postgres@localhost:5434/postgres npx vitest run --project pg
+```
+
+Keep this on its **own** port and container, separate from the dev Postgres in
+[`docs/supabase-setup.md`](docs/supabase-setup.md#9-local-development): these suites reset the
+schema (`DROP SCHEMA public CASCADE`) between runs, so never point them at a database that
+holds data you care about. The Postgres end-to-end smoke test uses the same database:
+`DATABASE_URL=… npm run test:e2e:pg`.
+
 ## Pull request checklist
 
 Before you open a PR, confirm:

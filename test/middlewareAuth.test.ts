@@ -46,6 +46,7 @@ describe('loadSessionUser', () => {
       role: 'editor',
       isAdmin: false,
       isEditor: true,
+      finance: 0,
       memberTeamIds: [],
       leaderTeamIds: [],
       lang: 'zh',

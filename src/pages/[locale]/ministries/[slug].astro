@@ -3,7 +3,6 @@
 // teams (leaders, member count, position chips, open-slots badge), the named
 // lead's card, and a CTA panel (apply to serve + gifts quiz). Unknown/inactive
 // slugs 404. Reads run inside the getMinistryBySlug call; a null result 404s.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -19,7 +18,7 @@ if (!locale) {
 const slug = Astro.params.slug ?? '';
 let ministry: MinistryDetail | null = null;
 try {
-  ministry = await getMinistryBySlug((env as { DB: D1Database }).DB, slug, locale);
+  ministry = await getMinistryBySlug(Astro.locals.db, slug, locale);
 } catch (err) {
   console.error('ministry detail: load failed', err);
 }

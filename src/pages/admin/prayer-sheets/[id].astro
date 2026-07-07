@@ -5,7 +5,6 @@
 // date → errors.dateTaken); delete → soft delete. Sections are repeat-rows: a
 // heading plus a textarea whose non-blank lines become the section's items.
 import Admin from '../../../layouts/Admin.astro';
-import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { parsePrayerSheetForm } from '../../../lib/validate';
 import { getPrayerSheetForEdit, savePrayerSheet, softDeletePrayerSheet } from '../../../lib/adminDb';
@@ -16,7 +15,7 @@ import { tin, lab, card, errorText, btn, btnDanger, rowBtn, noticeErr } from '..
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 
 const rawId = Astro.params.id ?? '';
 const isNew = rawId === 'new';

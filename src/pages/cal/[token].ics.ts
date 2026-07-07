@@ -11,10 +11,10 @@ import { buildICal, type ICalEvent } from '../../lib/ical';
 import { i18nJoin } from '../../lib/db';
 import { addDays, todayInTz } from '../../lib/dates';
 
-export const GET: APIRoute = async ({ params, url }) => {
+export const GET: APIRoute = async ({ params, url, locals }) => {
   const token = params.token ?? '';
-  const vars = env as unknown as { DB: D1Database; APP_ORIGIN?: string };
-  const db = vars.DB;
+  const vars = env as unknown as { APP_ORIGIN?: string };
+  const db = locals.db;
   if (!token) return new Response('Not found', { status: 404 });
 
   const person = await db

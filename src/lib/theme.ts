@@ -1,6 +1,7 @@
 // Active visual theme. Per-church settings drive this (see getActiveTheme
 // below); tokens.generated.css ships all three theme blocks, so flipping the
 // stored theme.name restyles the whole site.
+import type { AppDb } from './appDb';
 import { getTheme } from './settings';
 
 export const THEMES = ['sanctuary', 'harvest', 'midnight'] as const;
@@ -47,7 +48,7 @@ export function clearThemeCache(): void {
  * back to the chosen theme's intrinsic default. May throw if the DB is unavailable —
  * callers that render before auth (middleware, layouts) guard it to THEME_DEFAULT.
  */
-export async function getActiveTheme(db: D1Database): Promise<ActiveTheme> {
+export async function getActiveTheme(db: AppDb): Promise<ActiveTheme> {
   const now = Date.now();
   if (cache && cache.expiresAt > now) return cache.value;
   const stored = await getTheme(db);

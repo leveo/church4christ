@@ -2,7 +2,6 @@
 // Service types CRUD (admin only): bilingual name + optional start/end times +
 // sort. Service types carry plans and bulletins/sermons, so this is the one place
 // they are created and retired (soft delete). Ported from the reference stack.
-import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
@@ -11,7 +10,7 @@ import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
-const db = (env as { DB: D1Database }).DB;
+const db = Astro.locals.db;
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 const TIME_RE = /^\d{2}:\d{2}$/;
 const timeOf = (v: FormDataEntryValue | null): string | null => (TIME_RE.test(String(v ?? '')) ? String(v) : null);

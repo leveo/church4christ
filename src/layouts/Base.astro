@@ -9,7 +9,6 @@ import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
-import { env } from 'cloudflare:workers';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
@@ -33,7 +32,7 @@ const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
 // falls back to the theme's intrinsic default rather than 500ing the page.
 let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
 try {
-  defaultMode = (await getActiveTheme((env as { DB: D1Database }).DB)).defaultMode;
+  defaultMode = (await getActiveTheme(Astro.locals.db)).defaultMode;
 } catch {
   /* keep the theme's intrinsic default mode */
 }
@@ -43,7 +42,7 @@ try {
 // back to the built-in i18n default rather than blanking the title.
 let siteName = t(locale, 'site.name');
 try {
-  const identity = await getSiteIdentity((env as { DB: D1Database }).DB, locale);
+  const identity = await getSiteIdentity(Astro.locals.db, locale);
   if (identity.name) siteName = identity.name;
 } catch {
   /* keep the i18n default when settings are unavailable */

@@ -5,6 +5,8 @@
 // the reference stack's endpoint, adapted so name/email are optional and the redirect
 // target is derived from a sanitized Referer instead of a fixed home path.
 
+import type { AppDb } from './appDb';
+
 const MAX_MESSAGE = 4000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -38,7 +40,7 @@ export function safeReturnPath(referer: string | null, origin: string): string {
  * failure is logged + returned as 'error'. name/email are optional; when
  * present the email must look like one.
  */
-export async function submitPrayerRequest(db: D1Database, form: FormData): Promise<PrayerOutcome> {
+export async function submitPrayerRequest(db: AppDb, form: FormData): Promise<PrayerOutcome> {
   // Honeypot: real visitors never fill the hidden `website` field. Pretend it
   // worked so bots get no signal, but write nothing.
   if (String(form.get('website') ?? '') !== '') return 'sent';

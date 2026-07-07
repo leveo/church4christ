@@ -3,6 +3,8 @@
 // additionally refuses to serve any stored SVG inline (defense in depth).
 // Keys are content-addressed (sha256 of the bytes) so re-uploading identical
 // image bytes reuses the same R2 object and the media table row.
+import type { AppDb } from './appDb';
+
 export const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -53,7 +55,7 @@ export interface MediaInput {
  * same bytes always produce the same key, so a re-upload is a no-op rather than
  * a UNIQUE(r2_key) throw — ON CONFLICT DO NOTHING keeps the original row.
  */
-export async function registerMedia(db: D1Database, m: MediaInput): Promise<void> {
+export async function registerMedia(db: AppDb, m: MediaInput): Promise<void> {
   await db
     .prepare(
       `INSERT INTO media (r2_key, filename, content_type, size, uploaded_by)

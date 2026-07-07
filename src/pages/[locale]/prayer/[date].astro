@@ -1,7 +1,6 @@
 ---
 // A specific dated prayer sheet. The date param must be a real YYYY-MM-DD;
 // anything else, or a date with no published sheet, 404s.
-import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import PrayerSheetView from '../../../components/PrayerSheetView.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -23,7 +22,7 @@ if (!isValidDateStr(date)) {
 
 let sheet: PrayerSheetRow | null = null;
 try {
-  const db = (env as { DB: D1Database }).DB;
+  const db = Astro.locals.db;
   sheet = await getPrayerSheet(db, date);
 } catch (err) {
   console.error('prayer date: load failed', err);

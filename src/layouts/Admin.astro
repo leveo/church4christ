@@ -10,7 +10,6 @@ import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
-import { env } from 'cloudflare:workers';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
 import type { ModuleKey } from '../lib/modules';
@@ -29,20 +28,29 @@ const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
 // falls back to the theme's intrinsic default rather than 500ing the page.
 let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
 try {
-  defaultMode = (await getActiveTheme((env as { DB: D1Database }).DB)).defaultMode;
+  defaultMode = (await getActiveTheme(Astro.locals.db)).defaultMode;
 } catch {
   /* keep the theme's intrinsic default mode */
 }
 const appName = t(lang, 'admin.title');
 const fullTitle = title ? `${title} · ${appName}` : appName;
 
-// Nav renders by role. Everyone who reaches /admin sees the dashboard; content
-// (bulletins/sermons/prayer-sheets) + news (announcements/events) + the prayer
-// wall need editor∪admin; people + settings are admin-only. Team leaders (no
+// Nav renders by role. The dashboard shows for console-class users (admin ∪
+// editor ∪ team leader); content (bulletins/sermons/prayer-sheets) + news
+// (announcements/events) + the prayer wall need editor∪admin; people + settings
+// are admin-only; giving is admin ∪ finance-flagged. Team leaders (no
 // editor/admin) therefore see the dashboard only — their console lands in slice 6.
 // Links to pages built later this slice (tasks 2–4) are intentionally live.
 const isStaff = !!(user?.isEditor || user?.isAdmin);
 const isAdmin = !!user?.isAdmin;
+// Giving admin (finance route class): a finance-flagged member reaches it without
+// full site-admin, so its nav link shows for admins AND finance-flagged members.
+const isFinance = isAdmin || user?.finance === 1;
+// /admin (the dashboard) is the 'console' route class — admin ∪ editor ∪ team
+// leader (mirrors routePolicy.canAccess). A finance-only member renders this
+// shell on /admin/giving but would 403 on /admin itself, so the Dashboard link
+// must not show for them.
+const isConsole = isStaff || (user?.leaderTeamIds.length ?? 0) > 0;
 
 // A nav entry with a `module` hides when that module is off (settings itself has
 // none — it is core). Groups drop out once every child is hidden.
@@ -53,7 +61,7 @@ type NavItem = { label: string; href: string; module?: ModuleKey };
 type NavSection = { label: string; href?: string; show: boolean; module?: ModuleKey; children?: NavItem[] };
 
 const rawSections: NavSection[] = [
-  { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: true },
+  { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: isConsole },
   {
     label: t(lang, 'admin.nav.content'),
     show: isStaff,
@@ -75,6 +83,8 @@ const rawSections: NavSection[] = [
   },
   { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff, module: 'prayer-wall' },
   { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin, module: 'people' },
+  { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving' },
+  { label: t(lang, 'admin.reg.title'), href: '/admin/registration', show: isStaff, module: 'registration' },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
 ];
 
