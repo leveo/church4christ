@@ -184,6 +184,11 @@ clicks. The guide covers the first-admin setup and email so a real congregation 
 using the site the same day. Deployment is manual on purpose — your Cloudflare keys never
 have to touch a public repo.
 
+**Choosing your database.** The default setup uses Cloudflare **D1** and needs no extra
+accounts. It runs everything except online **Giving** and **Registration**, which need
+Postgres and Stripe and run on a free **Supabase** database instead. Want those two? Follow
+[**`docs/supabase-setup.md`**](docs/supabase-setup.md). You can start on D1 and switch later.
+
 ---
 
 ## What's under the hood
