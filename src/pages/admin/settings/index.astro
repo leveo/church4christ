@@ -64,7 +64,9 @@ if (Astro.request.method === 'POST') {
       // Server-side hardening: module.* keys are ONLY writable through the
       // modules form above — a general save that smuggled them in would flip
       // toggles while busting the wrong (theme) cache, so strip them here.
-      const data = Object.fromEntries(Object.entries(parsed.data).filter(([k]) => !k.startsWith('module.')));
+      const data = Object.fromEntries(
+        Object.entries(parsed.data).filter(([k]) => !k.startsWith('module.') && k !== 'site.hero_image_key'),
+      );
       const heroFile = fd.get('hero_image');
       if (heroFile instanceof File && heroFile.size > 0) {
         try {
@@ -102,7 +104,7 @@ const g = (key: string): string => (fd ? String(fd.get(key) ?? '') : (cur[key] ?
 const selectedTheme = g('theme.name') || 'sanctuary';
 const selectedMode = g('theme.default_mode') || 'light';
 const selectedLocale = g('locale.default') || 'en';
-const heroImageKey = g('site.hero_image_key');
+const heroImageKey = cur['site.hero_image_key'] ?? '';
 const heroImage = mediaPath(heroImageKey);
 const themeLabel = (name: string) => t(lang, `admin.settings.themeName.${name}`);
 const hasErrors = Object.keys(errors).length > 0;
@@ -128,7 +130,6 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
   <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl space-y-6">
-    <input type="hidden" name="site.hero_image_key" value={heroImageKey} />
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.identityTitle')}</h2>
       <div class="grid gap-4 sm:grid-cols-2">

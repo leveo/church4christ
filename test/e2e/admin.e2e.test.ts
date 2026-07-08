@@ -420,6 +420,16 @@ describe('revision restore round-trips public content', () => {
 });
 
 describe('settings identity flows to the public site', () => {
+  const setHeroKey = (value: string) =>
+    env.DB.prepare(
+      `INSERT INTO settings (key, value) VALUES ('site.hero_image_key', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+      .bind(value)
+      .run();
+  const getHeroKey = async () =>
+    (await env.DB.prepare(`SELECT value FROM settings WHERE key = 'site.hero_image_key'`).first<{ value: string }>())?.value ?? '';
+
   it('admin uploads a homepage hero image from settings and the public home page renders it', async () => {
     const cookie = await sessionCookie(1, 'admin@example.com');
     const form = new FormData();
@@ -450,8 +460,69 @@ describe('settings identity flows to the public site', () => {
     expect(res.status).toBe(303);
 
     const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'hero.png');
+    expect(await getHeroKey()).toBe(key);
     const html = await (await get('/en')).text();
     expect(html).toContain(`/media/${key}`);
+  });
+
+  it('normal settings save does not persist a posted homepage hero key', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const existingKey = 'uploads/current-hero.webp';
+    await setHeroKey(existingKey);
+
+    const res = await post(
+      '/admin/settings',
+      new URLSearchParams({
+        'site.name.en': 'Church4Christ',
+        'site.hero_image_key': 'https://example.com/x.png',
+      }).toString(),
+      { cookie },
+    );
+    expect(res.status).toBe(303);
+    expect(await getHeroKey()).toBe(existingKey);
+  });
+
+  it('admin removes an existing homepage hero image from settings', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    await setHeroKey('uploads/current-hero.webp');
+
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.hero_image_key', 'uploads/current-hero.webp');
+    form.set('remove_hero_image', 'on');
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    expect(await getHeroKey()).toBe('');
+  });
+
+  it('invalid homepage hero image upload re-renders and leaves the existing hero key unchanged', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const existingKey = 'uploads/current-hero.webp';
+    await setHeroKey(existingKey);
+
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.hero_image_key', 'https://example.com/x.png');
+    form.set('hero_image', new File(['not an image'], 'hero.txt', { type: 'text/plain' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Unsupported image format. Use JPG, PNG, WebP, or GIF.');
+    expect(html).toContain(`/media/${existingKey}`);
+    expect(html).not.toContain('https://example.com/x.png');
+    expect(await getHeroKey()).toBe(existingKey);
   });
 
   it('admin updates site.name.en → the public home <title> reflects it, then restores', async () => {
