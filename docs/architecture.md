@@ -98,6 +98,13 @@ outside `uploads/` — so the `backups/` prefix (where the nightly database dump
 never publicly reachable. Uploads are restricted to a small allowlist of image types
 (no SVG) with a size cap; see [`SECURITY.md`](../SECURITY.md).
 
+Local demo media uses the same path as real uploads. The generated image pack in
+`seed/media/` contains WebP hero, event, ministry-cover, and profile-avatar images plus a
+manifest of their content-addressed `uploads/...` keys. `npm run db:seed-media:local`
+verifies those keys from the file bytes, writes the objects to local R2, registers them in
+the `media` table, and refreshes the local D1 references. Because keys are content based,
+the command is idempotent and can be rerun after `npm run db:seed:local`.
+
 ## Scheduled work: cron triggers
 
 The Worker's `scheduled` handler (`src/worker.ts`) dispatches three cron triggers
