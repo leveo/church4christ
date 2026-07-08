@@ -9,12 +9,17 @@
 // Sunday = sunday(0)); person 3 (sarah) has a confirmed assignment on the same
 // plan. Plan/bulletin dates are relative (see seed header), so date assertions
 // use the sunday() helper rather than a pinned calendar date.
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { get, icalDate, post, sunday } from './helpers';
+import { get, icalDate, ORIGIN, post, sunday } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
+import { uploadKey } from '../../src/lib/upload';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+// Minimal 1x1 PNG. Keep this as a fresh Uint8Array so uploadKey hashes exactly
+// the bytes sent in the multipart upload.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
 
 async function sessionCookie(id: number, email: string): Promise<string> {
   const jwt = await mintSession(SECRET, { id, email, sessionEpoch: 0 });
@@ -362,5 +367,30 @@ describe('/en/serve/opportunities (public board)', () => {
     const apply = await get('/en/serve/apply?team=1');
     expect(apply.status).toBe(200);
     expect(await apply.text()).toContain('name="team_id" value="1"');
+  });
+});
+
+describe('/en/ministries (public ministry index)', () => {
+  it('admin uploads a ministry cover image and the public ministry index renders it', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const form = new FormData();
+    form.set('_action', 'updateCover');
+    form.set('ministry_id', '1');
+    form.set('cover_image', new File([pngBytes], 'worship-cover.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/ministries?tab=ministries`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'worship-cover.png');
+    const row = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = 1').first<{ cover_key: string }>();
+    expect(row?.cover_key).toBe(key);
+
+    const html = await (await get('/en/ministries')).text();
+    expect(html).toContain(`/media/${key}`);
   });
 });

@@ -155,7 +155,7 @@ const infoCards = [
           {ministriesPreview.length > 0 && (
             <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {ministriesPreview.map((m) => (
-                <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} />
+                <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} coverKey={m.coverKey} />
               ))}
             </div>
           )}
