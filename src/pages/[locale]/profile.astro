@@ -9,10 +9,13 @@
 // parsePersonForm runs, so a crafted `role=admin` / `active` / `email=` field
 // in the body is discarded server-side and the row keeps its current values.
 import Base from '../../layouts/Base.astro';
+import { env } from 'cloudflare:workers';
 import ServingHistory from '../../components/ServingHistory.astro';
 import { localePath, parseLocale, LOCALES } from '../../lib/locales';
 import { t } from '../../lib/i18n';
-import { getPerson, savePerson } from '../../lib/adminDb';
+import { getPerson, savePerson, setPersonAvatar } from '../../lib/adminDb';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../lib/mediaUpload';
+import { normalizeAvatarUrl } from '../../lib/mediaRef';
 import {
   getLatestGiftResult,
   listBlockouts,
@@ -42,6 +45,7 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 // People module gates the membership-profile depth (birthday/address) and the
 // household card; the auth basics (name/phone/lang, teams, gifts, interests,
 // history) always render.
@@ -150,9 +154,20 @@ if (Astro.request.method === 'POST') {
             .bind(parsed.data.birthday, parsed.data.address, user.id)
             .run();
         }
-        return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
+        const avatarFile = fd.get('avatar');
+        if (avatarFile instanceof File && avatarFile.size > 0) {
+          try {
+            const key = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
+            await setPersonAvatar(db, user.id, `/media/${key}`);
+          } catch (e) {
+            errorKeys = [uploadErrorKey(e)];
+          }
+        } else if (fd.get('remove_avatar')) {
+          await setPersonAvatar(db, user.id, null);
+        }
+        if (errorKeys.length === 0) return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
       }
-      errorKeys = [...new Set(Object.values(result.errors))];
+      if (!result.ok) errorKeys = [...new Set(Object.values(result.errors))];
     } else {
       errorKeys = [...new Set(Object.values(parsed.errors))];
     }
@@ -173,6 +188,7 @@ const [person, teams, history, blockouts, gift, myInterests] = await Promise.all
 ]);
 if (!person) return new Response(null, { status: 404 });
 const interestSet = new Set(myInterests);
+const avatarUrl = normalizeAvatarUrl(person.avatar_url);
 
 // Membership-profile depth + household card (people module only).
 let household: HouseholdWithMembers | null = null;
@@ -202,7 +218,31 @@ const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.rol
     {householdSaved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.household.saved')}</p>}
     {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
 
-    <form method="post" class="mt-6 grid gap-4 rounded-lg border border-border bg-surface-raised p-6 sm:grid-cols-2">
+    <form method="post" enctype="multipart/form-data" class="mt-6 grid gap-4 rounded-lg border border-border bg-surface-raised p-6 sm:grid-cols-2">
+      <div class="sm:col-span-2">
+        <span class={lab}>{t(locale, 'profile.avatar')}</span>
+        <div class="mt-2 flex flex-wrap items-center gap-4">
+          {avatarUrl && (
+            <img
+              src={avatarUrl}
+              alt={t(locale, 'profile.currentAvatar')}
+              class="h-20 w-20 rounded-full border border-border object-cover"
+            />
+          )}
+          <div class="min-w-56 flex-1">
+            <label class="block">
+              <span class={lab}>{t(locale, 'profile.changeAvatar')}</span>
+              <input type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" class={`${tin} file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-on-primary`} />
+            </label>
+            {avatarUrl && (
+              <label class="mt-2 flex items-center gap-2 text-sm">
+                <input type="checkbox" name="remove_avatar" />
+                <span>{t(locale, 'profile.removeAvatar')}</span>
+              </label>
+            )}
+          </div>
+        </div>
+      </div>
       <label class="block sm:col-span-2">
         <span class={lab}>{t(locale, 'profile.name')}</span>
         <input name="display_name" required value={person.display_name} class={tin} />

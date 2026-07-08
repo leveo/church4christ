@@ -566,6 +566,60 @@ describe('settings identity flows to the public site', () => {
   });
 });
 
+describe('profile avatar uploads', () => {
+  it('member uploads their own profile avatar', async () => {
+    const cookie = await sessionCookie(3, 'sarah.johnson@example.com');
+    const form = new FormData();
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('phone', '');
+    form.set('lang', 'en');
+    form.set('avatar', new File([pngBytes], 'sarah.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/en/profile`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'sarah.png');
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string }>();
+    expect(row?.avatar_url).toBe(`/media/${key}`);
+  });
+
+  it('admin uploads a profile avatar for another person', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const form = new FormData();
+    form.set('action', 'save');
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('email', 'sarah.johnson@example.com');
+    form.set('phone', '');
+    form.set('role', 'member');
+    form.set('active', '1');
+    form.set('lang', 'en');
+    form.set('birthday', '');
+    form.set('address', '');
+    form.set('membership_status', 'member');
+    form.set('joined_on', '2020-01-01');
+    form.set('avatar', new File([pngBytes], 'sarah-admin.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/people/3`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'sarah-admin.png');
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string }>();
+    expect(row?.avatar_url).toBe(`/media/${key}`);
+  });
+});
+
 describe('deactivation locks a session out immediately', () => {
   it('setting the editor active=0 makes their still-valid cookie 303 to signin on the next request', async () => {
     const cookie = await sessionCookie(2, 'pastor.david@example.com');
