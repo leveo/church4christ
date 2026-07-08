@@ -10,6 +10,10 @@ import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { uploadKey } from '../../src/lib/upload';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+// Minimal 1x1 PNG (67 bytes). A fresh Uint8Array so its .buffer is exactly the
+// image bytes - uploadKey hashes it to derive the content-addressed R2 key.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
 
 /** A `cookie:` header carrying a freshly minted session JWT for a seeded person. */
 async function sessionCookie(id: number, email: string): Promise<string> {
@@ -138,11 +142,6 @@ describe('content console pages render for editors and 403 for members', () => {
 });
 
 describe('announcements + events console + media upload loop', () => {
-  // Minimal 1×1 PNG (67 bytes). A fresh Uint8Array so its .buffer is exactly the
-  // image bytes — uploadKey hashes it to derive the content-addressed R2 key.
-  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-  const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
-
   it('announcements + events consoles render for an editor and 403 for a member', async () => {
     const editor = await sessionCookie(2, 'pastor.david@example.com');
     const member = await sessionCookie(3, 'sarah.johnson@example.com');
@@ -421,6 +420,40 @@ describe('revision restore round-trips public content', () => {
 });
 
 describe('settings identity flows to the public site', () => {
+  it('admin uploads a homepage hero image from settings and the public home page renders it', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.name.zh', '四方基督教会');
+    form.set('site.tagline.en', 'A church for the city');
+    form.set('site.tagline.zh', '城市中的教会');
+    form.set('site.service_times.en', 'Sundays');
+    form.set('site.service_times.zh', '主日');
+    form.set('site.address', '123 Grace Avenue');
+    form.set('site.email', 'hello@example.com');
+    form.set('site.phone', '(555) 010-4444');
+    form.set('site.map_url', 'https://maps.example.com');
+    form.set('site.giving_url', 'https://give.example.com');
+    form.set('site.youtube_url', 'https://youtube.example.com');
+    form.set('theme.name', 'sanctuary');
+    form.set('theme.default_mode', 'light');
+    form.set('locale.default', 'en');
+    form.set('site.hero_image_key', '');
+    form.set('hero_image', new File([pngBytes], 'hero.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'hero.png');
+    const html = await (await get('/en')).text();
+    expect(html).toContain(`/media/${key}`);
+  });
+
   it('admin updates site.name.en → the public home <title> reflects it, then restores', async () => {
     const cookie = await sessionCookie(1, 'admin@example.com');
     const newName = 'Living Water Community E2E';

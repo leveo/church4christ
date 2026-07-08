@@ -3,17 +3,21 @@
 // re-checks isAdmin and 403s anyone else). A grouped form over the site.* / theme.*
 // / locale.* settings: identity (per-locale name/tagline/service times), contact,
 // links, and appearance (theme radio cards with generated swatches, default color
-// mode, default language). Save → parseSettingsForm (15-key allowlist, URL/email/
-// enum validated) → setSettings batch → clearThemeCache() so a theme change takes
-// effect on the very next render → 303 ?saved=1. The Admin shell reads the active
-// theme, so this page (and the whole site) restyles immediately after a save.
+// mode, default language, homepage hero image). Save → parseSettingsForm
+// (fixed allowlist, URL/email/enum validated) → optional hero upload →
+// setSettings batch → clearThemeCache() so a theme change takes effect on the
+// very next render → 303 ?saved=1. The Admin shell reads the active theme, so
+// this page (and the whole site) restyles immediately after a save.
 import Admin from '../../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
 import { MODULE_KEYS, MODULES, clearModuleCache, type ModuleKey } from '../../../lib/modules';
 import { THEME_META } from '../../../lib/themeMeta.generated';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
+import { mediaPath } from '../../../lib/mediaRef';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
@@ -23,11 +27,12 @@ const user = Astro.locals.user;
 if (!user || !user.isAdmin) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 
 const KEYS = [
   'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',
   'site.service_times.en', 'site.service_times.zh',
-  'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url',
+  'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url', 'site.hero_image_key',
   'theme.name', 'theme.default_mode', 'locale.default',
 ];
 
@@ -54,19 +59,38 @@ if (Astro.request.method === 'POST') {
       // Drop the per-isolate enabled-set cache so the toggle takes effect on the
       // next request in this isolate (this redirect's GET already reflects it).
       clearModuleCache();
+      return Astro.redirect('/admin/settings?saved=1', 303);
     } else {
       // Server-side hardening: module.* keys are ONLY writable through the
       // modules form above — a general save that smuggled them in would flip
       // toggles while busting the wrong (theme) cache, so strip them here.
       const data = Object.fromEntries(Object.entries(parsed.data).filter(([k]) => !k.startsWith('module.')));
-      await setSettings(db, data);
-      // The theme may have changed — drop the per-isolate cache so the next render
-      // (this redirect's GET) already reflects the new theme.name / default_mode.
-      clearThemeCache();
+      const heroFile = fd.get('hero_image');
+      if (heroFile instanceof File && heroFile.size > 0) {
+        try {
+          data['site.hero_image_key'] = await saveImageUpload({
+            db,
+            media,
+            file: heroFile,
+            uploadedBy: user.email,
+          });
+        } catch (e) {
+          errors['site.hero_image_key'] = uploadErrorKey(e);
+        }
+      } else if (fd.get('remove_hero_image')) {
+        data['site.hero_image_key'] = '';
+      }
+      if (Object.keys(errors).length === 0) {
+        await setSettings(db, data);
+        // The theme may have changed — drop the per-isolate cache so the next render
+        // (this redirect's GET) already reflects the new theme.name / default_mode.
+        clearThemeCache();
+        return Astro.redirect('/admin/settings?saved=1', 303);
+      }
     }
-    return Astro.redirect('/admin/settings?saved=1', 303);
+  } else {
+    errors = parsed.errors;
   }
-  errors = parsed.errors;
 }
 
 const cur = await getSettings(db, KEYS);
@@ -78,6 +102,8 @@ const g = (key: string): string => (fd ? String(fd.get(key) ?? '') : (cur[key] ?
 const selectedTheme = g('theme.name') || 'sanctuary';
 const selectedMode = g('theme.default_mode') || 'light';
 const selectedLocale = g('locale.default') || 'en';
+const heroImageKey = g('site.hero_image_key');
+const heroImage = mediaPath(heroImageKey);
 const themeLabel = (name: string) => t(lang, `admin.settings.themeName.${name}`);
 const hasErrors = Object.keys(errors).length > 0;
 const h2 = 'font-display text-heading-sm font-bold';
@@ -101,7 +127,8 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
-  <form method="post" class="mt-6 max-w-2xl space-y-6">
+  <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl space-y-6">
+    <input type="hidden" name="site.hero_image_key" value={heroImageKey} />
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.identityTitle')}</h2>
       <div class="grid gap-4 sm:grid-cols-2">
@@ -173,6 +200,24 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.appearanceTitle')}</h2>
       <p class="text-sm text-ink-muted">{t(lang, 'admin.settings.currentTheme', { theme: themeLabel(selectedTheme) })}</p>
+      <div class="space-y-2">
+        {
+          heroImage && (
+            <div class="space-y-1">
+              <span class={lab}>{t(lang, 'admin.settings.currentHeroImage')}</span>
+              <img src={heroImage} alt="" class="w-full max-w-md rounded border border-border" loading="lazy" />
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="remove_hero_image" /> {t(lang, 'admin.settings.removeHeroImage')}
+              </label>
+            </div>
+          )
+        }
+        <label class="block">
+          <span class={lab}>{heroImage ? t(lang, 'admin.settings.changeHeroImage') : t(lang, 'admin.settings.heroImage')}</span>
+          <input type="file" name="hero_image" accept="image/jpeg,image/png,image/webp,image/gif" class="text-sm" />
+        </label>
+        {errors['site.hero_image_key'] && <span class={errorText}>{t(lang, errors['site.hero_image_key'])}</span>}
+      </div>
       <fieldset>
         <legend class={lab}>{t(lang, 'admin.settings.theme')}</legend>
         <div class="grid gap-3 sm:grid-cols-3">
