@@ -47,7 +47,8 @@ function wranglerBin() {
 
 function runWrangler(args) {
   const bin = wranglerBin();
-  const finalArgs = bin.endsWith('npx') || bin.endsWith('npx.cmd') ? ['wrangler', ...args] : args;
+  const persistedArgs = process.env.WRANGLER_PERSIST_TO ? [...args, '--persist-to', process.env.WRANGLER_PERSIST_TO] : args;
+  const finalArgs = bin.endsWith('npx') || bin.endsWith('npx.cmd') ? ['wrangler', ...persistedArgs] : persistedArgs;
   if (dryRun) {
     console.log([bin, ...finalArgs].join(' '));
     return;
