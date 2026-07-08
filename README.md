@@ -152,13 +152,14 @@ npm run cf-typegen
 npm run tokens
 npm run db:migrate:local
 npm run db:seed:local
+npm run db:seed-media:local
 
 # 4. Start it
 npm run dev
 ```
 
 Open the address it prints (usually `http://localhost:4321`). You will see the full
-public site with sample sermons, bulletins, events, and ministries.
+public site with sample sermons, bulletins, events, ministries, and local demo images.
 
 **Signing in to the admin area.** There is no password. On the sign-in page, enter
 `admin@example.com` and request a link — because local email is set to print instead of
