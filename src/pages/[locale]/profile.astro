@@ -10,6 +10,7 @@
 // in the body is discarded server-side and the row keeps its current values.
 import Base from '../../layouts/Base.astro';
 import { env } from 'cloudflare:workers';
+import AvatarInitials from '../../components/AvatarInitials.astro';
 import ServingHistory from '../../components/ServingHistory.astro';
 import { localePath, parseLocale, LOCALES } from '../../lib/locales';
 import { t } from '../../lib/i18n';
@@ -142,32 +143,34 @@ if (Astro.request.method === 'POST') {
 
     const parsed = parsePersonForm(fd);
     if (parsed.ok) {
-      const result = await savePerson(db, { id: user.id, ...parsed.data }, user.email);
-      if (result.ok) {
-        // birthday/address are self-service membership fields that savePerson does
-        // not touch (membership_status/joined_on are admin-only and never parsed
-        // here). Persist just these two columns, scoped to the signed-in person,
-        // only while the people module is on.
-        if (hasPeople) {
-          await db
-            .prepare(`UPDATE people SET birthday = ?, address = ?, updated_at = datetime('now') WHERE id = ?`)
-            .bind(parsed.data.birthday, parsed.data.address, user.id)
-            .run();
+      const avatarFile = fd.get('avatar');
+      let avatarKey: string | null = null;
+      if (avatarFile instanceof File && avatarFile.size > 0) {
+        try {
+          avatarKey = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
+        } catch (e) {
+          errorKeys = [uploadErrorKey(e)];
         }
-        const avatarFile = fd.get('avatar');
-        if (avatarFile instanceof File && avatarFile.size > 0) {
-          try {
-            const key = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
-            await setPersonAvatar(db, user.id, `/media/${key}`);
-          } catch (e) {
-            errorKeys = [uploadErrorKey(e)];
-          }
-        } else if (fd.get('remove_avatar')) {
-          await setPersonAvatar(db, user.id, null);
-        }
-        if (errorKeys.length === 0) return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
       }
-      if (!result.ok) errorKeys = [...new Set(Object.values(result.errors))];
+      if (errorKeys.length === 0) {
+        const result = await savePerson(db, { id: user.id, ...parsed.data }, user.email);
+        if (result.ok) {
+          // birthday/address are self-service membership fields that savePerson does
+          // not touch (membership_status/joined_on are admin-only and never parsed
+          // here). Persist just these two columns, scoped to the signed-in person,
+          // only while the people module is on.
+          if (hasPeople) {
+            await db
+              .prepare(`UPDATE people SET birthday = ?, address = ?, updated_at = datetime('now') WHERE id = ?`)
+              .bind(parsed.data.birthday, parsed.data.address, user.id)
+              .run();
+          }
+          if (avatarKey) await setPersonAvatar(db, user.id, `/media/${avatarKey}`);
+          else if (fd.get('remove_avatar')) await setPersonAvatar(db, user.id, null);
+          return Astro.redirect(localePath(locale, '/profile?saved=1'), 303);
+        }
+        errorKeys = [...new Set(Object.values(result.errors))];
+      }
     } else {
       errorKeys = [...new Set(Object.values(parsed.errors))];
     }
@@ -229,6 +232,7 @@ const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.rol
               class="h-20 w-20 rounded-full border border-border object-cover"
             />
           )}
+          {!avatarUrl && <AvatarInitials name={person.display_name} sizeClass="h-20 w-20 text-2xl" />}
           <div class="min-w-56 flex-1">
             <label class="block">
               <span class={lab}>{t(locale, 'profile.changeAvatar')}</span>
