@@ -393,4 +393,90 @@ describe('/en/ministries (public ministry index)', () => {
     const html = await (await get('/en/ministries')).text();
     expect(html).toContain(`/media/${key}`);
   });
+
+  it('remove_cover clears an existing cover and ignores an included file', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    await env.DB.prepare(`UPDATE ministries SET cover_key = 'uploads/existing-cover.png' WHERE id = 2`).run();
+    const attemptedKey = await uploadKey(pngBytes.buffer as ArrayBuffer, 'ignored-cover.png');
+
+    const form = new FormData();
+    form.set('_action', 'updateCover');
+    form.set('ministry_id', '2');
+    form.set('remove_cover', '1');
+    form.set('cover_image', new File([pngBytes], 'ignored-cover.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/ministries?tab=ministries`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+
+    const row = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = 2').first<{ cover_key: string | null }>();
+    expect(row?.cover_key).toBeNull();
+    const mediaRow = await env.DB.prepare('SELECT r2_key FROM media WHERE r2_key = ?').bind(attemptedKey).first();
+    expect(mediaRow).toBeNull();
+  });
+
+  it('invalid MIME upload preserves the existing cover and re-renders with the image error', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    await env.DB.prepare(`UPDATE ministries SET cover_key = 'uploads/current-cover.webp' WHERE id = 3`).run();
+
+    const form = new FormData();
+    form.set('_action', 'updateCover');
+    form.set('ministry_id', '3');
+    form.set('cover_image', new File(['not an image'], 'cover.txt', { type: 'text/plain' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/ministries?tab=ministries`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('Unsupported image format');
+
+    const row = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = 3').first<{ cover_key: string | null }>();
+    expect(row?.cover_key).toBe('uploads/current-cover.webp');
+  });
+
+  it('leader-scoped cover updates allow managed ministries and ignore unmanaged ones', async () => {
+    // Seed anchors: Ben (person 8) leads AV Team (team 2), which belongs to
+    // ministry 10. Hospitality (ministry 9) is led by Faithful (person 6).
+    const cookie = await sessionCookie(8, 'ben.wu@example.com');
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE ministries SET cover_key = NULL WHERE id = 10`),
+      env.DB.prepare(`UPDATE ministries SET cover_key = 'uploads/hospitality-current.webp' WHERE id = 9`),
+    ]);
+    const managedKey = await uploadKey(pngBytes.buffer as ArrayBuffer, 'ben-av.png');
+
+    const managed = new FormData();
+    managed.set('_action', 'updateCover');
+    managed.set('ministry_id', '10');
+    managed.set('cover_image', new File([pngBytes], 'ben-av.png', { type: 'image/png' }));
+    const managedRes = await SELF.fetch(`${ORIGIN}/admin/ministries?tab=ministries`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: managed,
+      redirect: 'manual',
+    });
+    expect(managedRes.status).toBe(303);
+    const av = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = 10').first<{ cover_key: string | null }>();
+    expect(av?.cover_key).toBe(managedKey);
+
+    const unmanaged = new FormData();
+    unmanaged.set('_action', 'updateCover');
+    unmanaged.set('ministry_id', '9');
+    unmanaged.set('cover_image', new File([pngBytes], 'ben-hospitality.png', { type: 'image/png' }));
+    const unmanagedRes = await SELF.fetch(`${ORIGIN}/admin/ministries?tab=ministries`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: unmanaged,
+      redirect: 'manual',
+    });
+    expect(unmanagedRes.status).toBe(303);
+    const hospitality = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = 9').first<{ cover_key: string | null }>();
+    expect(hospitality?.cover_key).toBe('uploads/hospitality-current.webp');
+  });
 });

@@ -123,15 +123,15 @@ if (Astro.request.method === 'POST') {
     const mid = idOf(fd.get('ministry_id'));
     if (mid && (await canManageMinistry(db, user, mid))) {
       const file = fd.get('cover_image');
-      if (file instanceof File && file.size > 0) {
+      if (fd.get('remove_cover')) {
+        await setMinistryCoverKey(db, mid, null);
+      } else if (file instanceof File && file.size > 0) {
         try {
           const coverKey = await saveImageUpload({ db, media, file, uploadedBy: user.email });
           await setMinistryCoverKey(db, mid, coverKey);
         } catch (e) {
           errKey = uploadErrorKey(e);
         }
-      } else if (fd.get('remove_cover')) {
-        await setMinistryCoverKey(db, mid, null);
       }
     }
     if (!errKey) return to('ministries');
