@@ -5,6 +5,7 @@ import { t } from '../../lib/i18n';
 import type { Locale } from '../../lib/locales';
 import type { MinistrySummary, MinistryEditRow } from '../../lib/ministryDb';
 import { card, th, td, tin, lab, btn, badge, badgeActive, badgeInactive } from '../../lib/adminUi';
+import { mediaPath } from '../../lib/mediaRef';
 
 interface Props {
   lang: Locale;
@@ -41,6 +42,7 @@ const editOf = (id: number) => editRows.find((r) => r.id === id);
         <tbody>
           {ministries.map((m) => {
             const e = editOf(m.id);
+            const coverSrc = mediaPath(e?.coverKey);
             return (
               <>
                 <tr class="border-t border-border">
@@ -85,6 +87,27 @@ const editOf = (id: number) => editRows.find((r) => r.id === id);
                           </label>
                           <div class="sm:col-span-2">
                             <button name="_action" value="updateBasics" class={btn}>{t(lang, 'admin.console.saveBasics')}</button>
+                          </div>
+                        </form>
+                        <form method="post" enctype="multipart/form-data" class="mt-3 grid gap-2 border-t border-border pt-3">
+                          <input type="hidden" name="ministry_id" value={m.id} />
+                          {
+                            coverSrc && (
+                              <div class="space-y-1">
+                                <span class={lab}>{t(lang, 'admin.console.currentCover')}</span>
+                                <img src={coverSrc} alt="" class="h-32 w-full max-w-md rounded-md border border-border object-cover" loading="lazy" />
+                              </div>
+                            )
+                          }
+                          <label class="block">
+                            <span class={lab}>{coverSrc ? t(lang, 'admin.console.changeCover') : t(lang, 'admin.console.coverImage')}</span>
+                            <input type="file" name="cover_image" accept="image/jpeg,image/png,image/webp,image/gif" class="text-sm" />
+                          </label>
+                          <label class="flex items-center gap-2 text-sm">
+                            <input type="checkbox" name="remove_cover" /> {t(lang, 'admin.console.removeCover')}
+                          </label>
+                          <div>
+                            <button name="_action" value="updateCover" class={btn}>{t(lang, 'admin.console.saveCover')}</button>
                           </div>
                         </form>
                       </details>

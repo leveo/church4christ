@@ -8,6 +8,7 @@ import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { getMinistryBySlug, type MinistryDetail } from '../../../lib/ministryDb';
+import { mediaPath } from '../../../lib/mediaRef';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -28,6 +29,7 @@ if (!ministry) {
 }
 
 const sep = locale === 'zh' ? '、' : ', ';
+const coverSrc = mediaPath(ministry.coverKey);
 ---
 
 <Base title={ministry.name} description={ministry.intro} locale={locale}>
@@ -48,6 +50,7 @@ const sep = locale === 'zh' ? '、' : ', ';
           </p>
         )
       }
+      {coverSrc && <img src={coverSrc} alt="" class="mt-8 aspect-[3/1] w-full rounded-lg border border-border object-cover" loading="lazy" />}
     </div>
   </div>
 

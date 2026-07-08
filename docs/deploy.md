@@ -68,6 +68,10 @@ npm run db:migrate:remote
 This creates every table. It does **not** load the demo content — a real deployment starts
 empty, and you add your church's content through the admin area.
 
+The local `npm run db:seed-media:local` command is only for the developer demo. Production
+media starts empty too; admins can upload the homepage hero, event images, ministry covers,
+and profile pictures through the admin area or profile pages after the site is live.
+
 ## 4. Set the session secret
 
 Sessions are signed with `SESSION_SECRET`. Generate a strong random value (32+ bytes) and

@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "generatedWith": "gpt-image-2",
+  "contentType": "image/webp",
+  "uploadedBy": "admin@example.com",
+  "assets": [
+    {
+      "file": "hero-worship-gathering.webp",
+      "key": "uploads/c69a962386c72642-hero-worship-gathering.webp",
+      "target": { "type": "setting", "key": "site.hero_image_key" }
+    },
+    {
+      "file": "event-summer-bible-camp.webp",
+      "key": "uploads/40f5b98116a62896-event-summer-bible-camp.webp",
+      "target": { "type": "event", "id": 1 }
+    },
+    {
+      "file": "event-baptism-sunday.webp",
+      "key": "uploads/642d06377d239e71-event-baptism-sunday.webp",
+      "target": { "type": "event", "id": 2 }
+    },
+    {
+      "file": "event-easter-celebration.webp",
+      "key": "uploads/fdbd2ae3fa492026-event-easter-celebration.webp",
+      "target": { "type": "event", "id": 3 }
+    },
+    {
+      "file": "ministry-worship.webp",
+      "key": "uploads/9671f1fd3e756140-ministry-worship.webp",
+      "target": { "type": "ministry", "id": 1 }
+    },
+    {
+      "file": "ministry-children.webp",
+      "key": "uploads/58145914a7b1b4ac-ministry-children.webp",
+      "target": { "type": "ministry", "id": 2 }
+    },
+    {
+      "file": "ministry-youth.webp",
+      "key": "uploads/5299e7e1e2a360a0-ministry-youth.webp",
+      "target": { "type": "ministry", "id": 3 }
+    },
+    {
+      "file": "ministry-college.webp",
+      "key": "uploads/152c97361f2c15e9-ministry-college.webp",
+      "target": { "type": "ministry", "id": 4 }
+    },
+    {
+      "file": "ministry-family.webp",
+      "key": "uploads/25cf15f0049db1fb-ministry-family.webp",
+      "target": { "type": "ministry", "id": 5 }
+    },
+    {
+      "file": "ministry-seniors.webp",
+      "key": "uploads/3a25836b4b621331-ministry-seniors.webp",
+      "target": { "type": "ministry", "id": 6 }
+    },
+    {
+      "file": "avatar-david-chen.webp",
+      "key": "uploads/c954a9f2fdd4b08d-avatar-david-chen.webp",
+      "target": { "type": "person", "id": 2 }
+    },
+    {
+      "file": "avatar-sarah-johnson.webp",
+      "key": "uploads/24f8da6ed4434eb3-avatar-sarah-johnson.webp",
+      "target": { "type": "person", "id": 3 }
+    },
+    {
+      "file": "avatar-grace-lin.webp",
+      "key": "uploads/1a0ee9b979516044-avatar-grace-lin.webp",
+      "target": { "type": "person", "id": 4 }
+    },
+    {
+      "file": "avatar-mark-liu.webp",
+      "key": "uploads/0da5e291631d6175-avatar-mark-liu.webp",
+      "target": { "type": "person", "id": 5 }
+    },
+    {
+      "file": "avatar-faithful-wang.webp",
+      "key": "uploads/06eabb4919549133-avatar-faithful-wang.webp",
+      "target": { "type": "person", "id": 6 }
+    },
+    {
+      "file": "avatar-amy-chen.webp",
+      "key": "uploads/c0126d218e4f4462-avatar-amy-chen.webp",
+      "target": { "type": "person", "id": 7 }
+    },
+    {
+      "file": "avatar-ben-wu.webp",
+      "key": "uploads/624b72ae921a3faf-avatar-ben-wu.webp",
+      "target": { "type": "person", "id": 8 }
+    },
+    {
+      "file": "avatar-esther-lin.webp",
+      "key": "uploads/05218adece952076-avatar-esther-lin.webp",
+      "target": { "type": "person", "id": 9 }
+    }
+  ]
+}

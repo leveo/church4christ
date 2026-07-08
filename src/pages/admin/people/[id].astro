@@ -9,9 +9,12 @@
 // locals.modules.has('people'); a crafted POST while off is ignored.
 import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { t } from '../../../lib/i18n';
-import { getPerson, savePerson, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
+import { getPerson, savePerson, setPersonAvatar, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
 import { parsePersonForm, MEMBERSHIP_STATUSES } from '../../../lib/validate';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
+import { normalizeAvatarUrl } from '../../../lib/mediaRef';
 import {
   getLiveHouseholdForPerson,
   createHousehold,
@@ -53,6 +56,7 @@ import {
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 const hasPeople = Astro.locals.modules.has('people');
 const hasGiving = Astro.locals.modules.has('giving');
 const ROLES = ['member', 'editor', 'admin'] as const;
@@ -172,9 +176,24 @@ if (Astro.request.method === 'POST') {
     // the people module is on; while off, a core save leaves them untouched.
     const parsed = parsePersonForm(fd, { admin: hasPeople });
     if (parsed.ok) {
-      const result = await savePerson(db, { ...parsed.data, id }, user.email);
-      if (result.ok) return Astro.redirect('/admin/people/?saved=1', 303);
-      errors = result.errors;
+      const avatarFile = fd.get('avatar');
+      let avatarKey: string | null = null;
+      if (avatarFile instanceof File && avatarFile.size > 0) {
+        try {
+          avatarKey = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
+        } catch (e) {
+          errors.avatar = uploadErrorKey(e);
+        }
+      }
+      if (Object.keys(errors).length === 0) {
+        const result = await savePerson(db, { ...parsed.data, id }, user.email);
+        if (result.ok) {
+          if (avatarKey) await setPersonAvatar(db, result.id, `/media/${avatarKey}`);
+          else if (fd.get('remove_avatar')) await setPersonAvatar(db, result.id, null);
+          return Astro.redirect('/admin/people/?saved=1', 303);
+        }
+        errors = result.errors;
+      }
     } else {
       errors = parsed.errors;
     }
@@ -201,6 +220,7 @@ const v = {
   membership_status: values.membership_status ?? person?.membership_status ?? 'visitor',
   joined_on: values.joined_on ?? person?.joined_on ?? '',
 };
+const avatarUrl = normalizeAvatarUrl(person?.avatar_url);
 
 // People-module panel data (household / notes / applications / invite targets).
 let household: HouseholdWithMembers | null = null;
@@ -219,6 +239,7 @@ if (hasPeople && person) {
 }
 
 const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person.editTitle');
+const avatarName = v.display_name || heading;
 
 // Only display_name and email carry inline error slots; anything else the
 // parser can reject (role/lang option errors) surfaces in one summary banner
@@ -244,7 +265,7 @@ const summaryErrors = Object.entries(errors)
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
   {summaryErrors.length > 0 && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{summaryErrors.join(' ')}</p>}
 
-  <form method="post" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
+  <form method="post" enctype="multipart/form-data" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
     <input type="hidden" name="action" value="save" />
     {/* On edit, role/active live in the flags form; carry current values so the
         identity save validates and never clobbers them. */}
@@ -252,6 +273,32 @@ const summaryErrors = Object.entries(errors)
     {!isNew && v.active && <input type="hidden" name="active" value="1" />}
 
     <h2 class="font-semibold sm:col-span-2">{t(lang, 'admin.person.detailsTitle')}</h2>
+
+    <div class="sm:col-span-2">
+      <span class={lab}>{t(lang, 'admin.person.avatar')}</span>
+      <div class="mt-2 flex flex-wrap items-center gap-4">
+        {avatarUrl && (
+          <img
+            src={avatarUrl}
+            alt={t(lang, 'admin.person.currentAvatar')}
+            class="h-20 w-20 rounded-full border border-border object-cover"
+          />
+        )}
+        {!avatarUrl && <AvatarInitials name={avatarName} sizeClass="h-20 w-20 text-2xl" />}
+        <div class="min-w-56 flex-1">
+          <label class="block">
+            <span class="sr-only">{t(lang, 'admin.person.changeAvatar')}</span>
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" class={`${tin} file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-on-primary`} />
+          </label>
+          {avatarUrl && (
+            <label class="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" name="remove_avatar" />
+              <span>{t(lang, 'admin.person.removeAvatar')}</span>
+            </label>
+          )}
+        </div>
+      </div>
+    </div>
 
     <label class="block sm:col-span-2">
       <span class={lab}>{t(lang, 'admin.person.displayName')} *</span>
