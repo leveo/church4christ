@@ -17,7 +17,7 @@ import { localePath, parseLocale } from '../../lib/locales';
 import { t } from '../../lib/i18n';
 import { todayInTz } from '../../lib/dates';
 import { listMinistries } from '../../lib/db';
-import { getSiteIdentity } from '../../lib/settings';
+import { getHeroImageKey, getSiteIdentity } from '../../lib/settings';
 import {
   listActiveAnnouncements,
   listActiveEvents,
@@ -44,15 +44,17 @@ let ministries: Awaited<ReturnType<typeof listMinistries>> = [];
 let serviceTimes = '';
 let address = '';
 let phone = '';
+let heroImageKey = '';
 try {
   const db = Astro.locals.db;
   const today = todayInTz();
-  const [a, e, s, m, identity] = await Promise.all([
+  const [a, e, s, m, identity, heroKey] = await Promise.all([
     listActiveAnnouncements(db, locale, today),
     listActiveEvents(db, locale, today, 3),
     latestPublishedSermon(db),
     listMinistries(db, locale),
     getSiteIdentity(db, locale),
+    getHeroImageKey(db),
   ]);
   announcements = a;
   events = e;
@@ -61,6 +63,7 @@ try {
   serviceTimes = identity.serviceTimes;
   address = identity.address;
   phone = identity.phone;
+  heroImageKey = heroKey;
 } catch (err) {
   console.error('home: data load failed', err);
 }
@@ -81,7 +84,7 @@ const infoCards = [
 ---
 
 <Base title={t(locale, 'home.welcome')} locale={locale}>
-  <Hero locale={locale} />
+  <Hero locale={locale} heroImageKey={heroImageKey} />
 
   {modules.has('events') && <Ticker announcements={announcements} locale={locale} />}
 
@@ -152,7 +155,7 @@ const infoCards = [
           {ministriesPreview.length > 0 && (
             <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {ministriesPreview.map((m) => (
-                <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} />
+                <MinistryCard icon={m.icon} name={m.name} intro={m.intro} slug={m.slug} locale={locale} coverKey={m.coverKey} />
               ))}
             </div>
           )}

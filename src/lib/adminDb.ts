@@ -41,6 +41,7 @@ export interface PersonListRow {
 /** Full row for the edit form. */
 export interface AdminPersonRow extends PersonListRow {
   lang: 'en' | 'zh' | null;
+  avatar_url: string | null;
   birthday: string | null;
   address: string | null;
   joined_on: string | null;
@@ -122,7 +123,7 @@ export async function getPerson(db: AppDb, id: number): Promise<AdminPersonRow |
   return db
     .prepare(
       `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
-              p.role, p.active, p.membership_status, p.lang, p.birthday, p.address, p.joined_on, p.finance,
+              p.role, p.active, p.membership_status, p.lang, p.avatar_url, p.birthday, p.address, p.joined_on, p.finance,
               h.name AS household_name
        FROM people p
        LEFT JOIN household_members hm ON hm.person_id = p.id
@@ -201,6 +202,13 @@ export async function savePerson(
     throw e;
   }
   return { ok: true, id: input.id };
+}
+
+export async function setPersonAvatar(db: AppDb, personId: number, avatarUrl: string | null): Promise<void> {
+  await db
+    .prepare(`UPDATE people SET avatar_url = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL`)
+    .bind(avatarUrl, personId)
+    .run();
 }
 
 /** Shared UNIQUE-constraint detector (also used by householdDb/teamDb race mapping). */

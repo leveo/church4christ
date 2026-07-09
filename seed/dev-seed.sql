@@ -431,3 +431,48 @@ INSERT INTO settings (key, value) VALUES
   ('theme.name', 'sanctuary'),
   ('theme.default_mode', 'light'),
   ('locale.default', 'en');
+
+-- Generated demo media. SQL registers metadata and references, while
+-- npm run db:seed-media:local writes the matching objects into local R2.
+INSERT INTO media (r2_key, filename, content_type, size, uploaded_by) VALUES
+  ('uploads/c69a962386c72642-hero-worship-gathering.webp', 'hero-worship-gathering.webp', 'image/webp', 2077844, 'admin@example.com'),
+  ('uploads/40f5b98116a62896-event-summer-bible-camp.webp', 'event-summer-bible-camp.webp', 'image/webp', 1576678, 'admin@example.com'),
+  ('uploads/642d06377d239e71-event-baptism-sunday.webp', 'event-baptism-sunday.webp', 'image/webp', 1390614, 'admin@example.com'),
+  ('uploads/fdbd2ae3fa492026-event-easter-celebration.webp', 'event-easter-celebration.webp', 'image/webp', 1419232, 'admin@example.com'),
+  ('uploads/9671f1fd3e756140-ministry-worship.webp', 'ministry-worship.webp', 'image/webp', 1301514, 'admin@example.com'),
+  ('uploads/58145914a7b1b4ac-ministry-children.webp', 'ministry-children.webp', 'image/webp', 1408968, 'admin@example.com'),
+  ('uploads/5299e7e1e2a360a0-ministry-youth.webp', 'ministry-youth.webp', 'image/webp', 1487918, 'admin@example.com'),
+  ('uploads/152c97361f2c15e9-ministry-college.webp', 'ministry-college.webp', 'image/webp', 1459502, 'admin@example.com'),
+  ('uploads/25cf15f0049db1fb-ministry-family.webp', 'ministry-family.webp', 'image/webp', 1624436, 'admin@example.com'),
+  ('uploads/3a25836b4b621331-ministry-seniors.webp', 'ministry-seniors.webp', 'image/webp', 1438024, 'admin@example.com'),
+  ('uploads/c954a9f2fdd4b08d-avatar-david-chen.webp', 'avatar-david-chen.webp', 'image/webp', 954570, 'admin@example.com'),
+  ('uploads/24f8da6ed4434eb3-avatar-sarah-johnson.webp', 'avatar-sarah-johnson.webp', 'image/webp', 991284, 'admin@example.com'),
+  ('uploads/1a0ee9b979516044-avatar-grace-lin.webp', 'avatar-grace-lin.webp', 'image/webp', 968132, 'admin@example.com'),
+  ('uploads/0da5e291631d6175-avatar-mark-liu.webp', 'avatar-mark-liu.webp', 'image/webp', 978082, 'admin@example.com'),
+  ('uploads/06eabb4919549133-avatar-faithful-wang.webp', 'avatar-faithful-wang.webp', 'image/webp', 1082376, 'admin@example.com'),
+  ('uploads/c0126d218e4f4462-avatar-amy-chen.webp', 'avatar-amy-chen.webp', 'image/webp', 964960, 'admin@example.com'),
+  ('uploads/624b72ae921a3faf-avatar-ben-wu.webp', 'avatar-ben-wu.webp', 'image/webp', 840180, 'admin@example.com'),
+  ('uploads/05218adece952076-avatar-esther-lin.webp', 'avatar-esther-lin.webp', 'image/webp', 930548, 'admin@example.com');
+
+INSERT INTO settings (key, value) VALUES
+  ('site.hero_image_key', 'uploads/c69a962386c72642-hero-worship-gathering.webp');
+
+UPDATE events SET image_key = 'uploads/40f5b98116a62896-event-summer-bible-camp.webp' WHERE id = 1;
+UPDATE events SET image_key = 'uploads/642d06377d239e71-event-baptism-sunday.webp' WHERE id = 2;
+UPDATE events SET image_key = 'uploads/fdbd2ae3fa492026-event-easter-celebration.webp' WHERE id = 3;
+
+UPDATE ministries SET cover_key = 'uploads/9671f1fd3e756140-ministry-worship.webp' WHERE id = 1;
+UPDATE ministries SET cover_key = 'uploads/58145914a7b1b4ac-ministry-children.webp' WHERE id = 2;
+UPDATE ministries SET cover_key = 'uploads/5299e7e1e2a360a0-ministry-youth.webp' WHERE id = 3;
+UPDATE ministries SET cover_key = 'uploads/152c97361f2c15e9-ministry-college.webp' WHERE id = 4;
+UPDATE ministries SET cover_key = 'uploads/25cf15f0049db1fb-ministry-family.webp' WHERE id = 5;
+UPDATE ministries SET cover_key = 'uploads/3a25836b4b621331-ministry-seniors.webp' WHERE id = 6;
+
+UPDATE people SET avatar_url = '/media/uploads/c954a9f2fdd4b08d-avatar-david-chen.webp' WHERE id = 2;
+UPDATE people SET avatar_url = '/media/uploads/24f8da6ed4434eb3-avatar-sarah-johnson.webp' WHERE id = 3;
+UPDATE people SET avatar_url = '/media/uploads/1a0ee9b979516044-avatar-grace-lin.webp' WHERE id = 4;
+UPDATE people SET avatar_url = '/media/uploads/0da5e291631d6175-avatar-mark-liu.webp' WHERE id = 5;
+UPDATE people SET avatar_url = '/media/uploads/06eabb4919549133-avatar-faithful-wang.webp' WHERE id = 6;
+UPDATE people SET avatar_url = '/media/uploads/c0126d218e4f4462-avatar-amy-chen.webp' WHERE id = 7;
+UPDATE people SET avatar_url = '/media/uploads/624b72ae921a3faf-avatar-ben-wu.webp' WHERE id = 8;
+UPDATE people SET avatar_url = '/media/uploads/05218adece952076-avatar-esther-lin.webp' WHERE id = 9;

@@ -10,6 +10,10 @@ import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { uploadKey } from '../../src/lib/upload';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+// Minimal 1x1 PNG (67 bytes). A fresh Uint8Array so its .buffer is exactly the
+// image bytes - uploadKey hashes it to derive the content-addressed R2 key.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
 
 /** A `cookie:` header carrying a freshly minted session JWT for a seeded person. */
 async function sessionCookie(id: number, email: string): Promise<string> {
@@ -138,11 +142,6 @@ describe('content console pages render for editors and 403 for members', () => {
 });
 
 describe('announcements + events console + media upload loop', () => {
-  // Minimal 1×1 PNG (67 bytes). A fresh Uint8Array so its .buffer is exactly the
-  // image bytes — uploadKey hashes it to derive the content-addressed R2 key.
-  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-  const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
-
   it('announcements + events consoles render for an editor and 403 for a member', async () => {
     const editor = await sessionCookie(2, 'pastor.david@example.com');
     const member = await sessionCookie(3, 'sarah.johnson@example.com');
@@ -421,6 +420,111 @@ describe('revision restore round-trips public content', () => {
 });
 
 describe('settings identity flows to the public site', () => {
+  const setHeroKey = (value: string) =>
+    env.DB.prepare(
+      `INSERT INTO settings (key, value) VALUES ('site.hero_image_key', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+      .bind(value)
+      .run();
+  const getHeroKey = async () =>
+    (await env.DB.prepare(`SELECT value FROM settings WHERE key = 'site.hero_image_key'`).first<{ value: string }>())?.value ?? '';
+
+  it('admin uploads a homepage hero image from settings and the public home page renders it', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.name.zh', '四方基督教会');
+    form.set('site.tagline.en', 'A church for the city');
+    form.set('site.tagline.zh', '城市中的教会');
+    form.set('site.service_times.en', 'Sundays');
+    form.set('site.service_times.zh', '主日');
+    form.set('site.address', '123 Grace Avenue');
+    form.set('site.email', 'hello@example.com');
+    form.set('site.phone', '(555) 010-4444');
+    form.set('site.map_url', 'https://maps.example.com');
+    form.set('site.giving_url', 'https://give.example.com');
+    form.set('site.youtube_url', 'https://youtube.example.com');
+    form.set('theme.name', 'sanctuary');
+    form.set('theme.default_mode', 'light');
+    form.set('locale.default', 'en');
+    form.set('site.hero_image_key', '');
+    form.set('hero_image', new File([pngBytes], 'hero.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'hero.png');
+    expect(await getHeroKey()).toBe(key);
+    const html = await (await get('/en')).text();
+    expect(html).toContain(`/media/${key}`);
+  });
+
+  it('normal settings save does not persist a posted homepage hero key', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const existingKey = 'uploads/current-hero.webp';
+    await setHeroKey(existingKey);
+
+    const res = await post(
+      '/admin/settings',
+      new URLSearchParams({
+        'site.name.en': 'Church4Christ',
+        'site.hero_image_key': 'https://example.com/x.png',
+      }).toString(),
+      { cookie },
+    );
+    expect(res.status).toBe(303);
+    expect(await getHeroKey()).toBe(existingKey);
+  });
+
+  it('admin removes an existing homepage hero image from settings', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    await setHeroKey('uploads/current-hero.webp');
+
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.hero_image_key', 'uploads/current-hero.webp');
+    form.set('remove_hero_image', 'on');
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    expect(await getHeroKey()).toBe('');
+  });
+
+  it('invalid homepage hero image upload re-renders and leaves the existing hero key unchanged', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const existingKey = 'uploads/current-hero.webp';
+    await setHeroKey(existingKey);
+
+    const form = new FormData();
+    form.set('site.name.en', 'Church4Christ');
+    form.set('site.hero_image_key', 'https://example.com/x.png');
+    form.set('hero_image', new File(['not an image'], 'hero.txt', { type: 'text/plain' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/settings`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Unsupported image format. Use JPG, PNG, WebP, or GIF.');
+    expect(html).toContain(`/media/${existingKey}`);
+    expect(html).not.toContain('https://example.com/x.png');
+    expect(await getHeroKey()).toBe(existingKey);
+  });
+
   it('admin updates site.name.en → the public home <title> reflects it, then restores', async () => {
     const cookie = await sessionCookie(1, 'admin@example.com');
     const newName = 'Living Water Community E2E';
@@ -459,6 +563,220 @@ describe('settings identity flows to the public site', () => {
       // Restore the seeded zh identity for later files sharing this baseline.
       await setName('四方基督教会');
     }
+  });
+});
+
+describe('profile avatar uploads', () => {
+  it('invalid avatar on new admin person re-renders without creating a duplicate-email trap', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const email = 'avatar.new.e2e@example.com';
+    await env.DB.prepare('DELETE FROM people WHERE email = ?').bind(email).run();
+
+    const invalid = new FormData();
+    invalid.set('action', 'save');
+    invalid.set('display_name', 'Avatar New');
+    invalid.set('first_name', 'Avatar');
+    invalid.set('last_name', 'New');
+    invalid.set('email', email);
+    invalid.set('phone', '');
+    invalid.set('role', 'member');
+    invalid.set('active', '1');
+    invalid.set('lang', 'en');
+    invalid.set('birthday', '');
+    invalid.set('address', '');
+    invalid.set('membership_status', 'member');
+    invalid.set('joined_on', '');
+    invalid.set('avatar', new File(['not an image'], 'avatar.txt', { type: 'text/plain' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/people/new`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: invalid,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('Unsupported image format. Use JPG, PNG, WebP, or GIF.');
+    const missing = await env.DB.prepare('SELECT COUNT(*) AS n FROM people WHERE email = ?').bind(email).first<{ n: number }>();
+    expect(missing?.n).toBe(0);
+
+    const retry = new FormData();
+    retry.set('action', 'save');
+    retry.set('display_name', 'Avatar New');
+    retry.set('first_name', 'Avatar');
+    retry.set('last_name', 'New');
+    retry.set('email', email);
+    retry.set('phone', '');
+    retry.set('role', 'member');
+    retry.set('active', '1');
+    retry.set('lang', 'en');
+    retry.set('birthday', '');
+    retry.set('address', '');
+    retry.set('membership_status', 'member');
+    retry.set('joined_on', '');
+    const created = await SELF.fetch(`${ORIGIN}/admin/people/new`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: retry,
+      redirect: 'manual',
+    });
+    expect(created.status).toBe(303);
+    const row = await env.DB.prepare('SELECT id, avatar_url FROM people WHERE email = ?').bind(email).first<{ id: number; avatar_url: string | null }>();
+    expect(row).toMatchObject({ avatar_url: null });
+  });
+
+  it('invalid avatar on profile preserves existing identity and avatar', async () => {
+    const cookie = await sessionCookie(3, 'sarah.johnson@example.com');
+    const existingAvatar = '/media/uploads/existing-profile.png';
+    await env.DB
+      .prepare(
+        `UPDATE people
+         SET display_name = 'Sarah Original', first_name = 'Sarah', last_name = 'Johnson', phone = '555-0103', lang = 'en', avatar_url = ?
+         WHERE id = 3`,
+      )
+      .bind(existingAvatar)
+      .run();
+
+    const form = new FormData();
+    form.set('display_name', 'Sarah Changed');
+    form.set('first_name', 'Changed');
+    form.set('last_name', 'Person');
+    form.set('phone', '555-9999');
+    form.set('lang', 'zh');
+    form.set('avatar', new File(['not an image'], 'avatar.txt', { type: 'text/plain' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/en/profile`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('Unsupported image format. Use JPG, PNG, WebP, or GIF.');
+    const row = await env.DB
+      .prepare('SELECT display_name, first_name, last_name, phone, lang, avatar_url FROM people WHERE id = 3')
+      .first<{ display_name: string; first_name: string; last_name: string; phone: string | null; lang: string | null; avatar_url: string | null }>();
+    expect(row).toMatchObject({
+      display_name: 'Sarah Original',
+      first_name: 'Sarah',
+      last_name: 'Johnson',
+      phone: '555-0103',
+      lang: 'en',
+      avatar_url: existingAvatar,
+    });
+  });
+
+  it('member removes their profile avatar', async () => {
+    const cookie = await sessionCookie(3, 'sarah.johnson@example.com');
+    await env.DB
+      .prepare(
+        `UPDATE people
+         SET display_name = 'Sarah Johnson 莎拉', first_name = 'Sarah', last_name = 'Johnson', phone = NULL, lang = 'en', avatar_url = '/media/uploads/remove-me.png'
+         WHERE id = 3`,
+      )
+      .run();
+
+    const form = new FormData();
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('phone', '');
+    form.set('lang', 'en');
+    form.set('remove_avatar', 'on');
+
+    const res = await SELF.fetch(`${ORIGIN}/en/profile`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string | null }>();
+    expect(row?.avatar_url).toBeNull();
+  });
+
+  it('crafted posted avatar URL fields without a file are ignored', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const existingAvatar = '/media/uploads/current-safe.png';
+    await env.DB.prepare('UPDATE people SET avatar_url = ? WHERE id = 3').bind(existingAvatar).run();
+
+    const form = new FormData();
+    form.set('action', 'save');
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('email', 'sarah.johnson@example.com');
+    form.set('phone', '');
+    form.set('role', 'member');
+    form.set('active', '1');
+    form.set('lang', 'en');
+    form.set('birthday', '');
+    form.set('address', '');
+    form.set('membership_status', 'member');
+    form.set('joined_on', '2020-01-01');
+    form.set('avatar_url', 'https://example.com/evil.png');
+    form.set('avatar_key', 'uploads/evil.png');
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/people/3`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string | null }>();
+    expect(row?.avatar_url).toBe(existingAvatar);
+  });
+
+  it('member uploads their own profile avatar', async () => {
+    const cookie = await sessionCookie(3, 'sarah.johnson@example.com');
+    const form = new FormData();
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('phone', '');
+    form.set('lang', 'en');
+    form.set('avatar', new File([pngBytes], 'sarah.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/en/profile`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'sarah.png');
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string }>();
+    expect(row?.avatar_url).toBe(`/media/${key}`);
+  });
+
+  it('admin uploads a profile avatar for another person', async () => {
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const form = new FormData();
+    form.set('action', 'save');
+    form.set('display_name', 'Sarah Johnson 莎拉');
+    form.set('first_name', 'Sarah');
+    form.set('last_name', 'Johnson');
+    form.set('email', 'sarah.johnson@example.com');
+    form.set('phone', '');
+    form.set('role', 'member');
+    form.set('active', '1');
+    form.set('lang', 'en');
+    form.set('birthday', '');
+    form.set('address', '');
+    form.set('membership_status', 'member');
+    form.set('joined_on', '2020-01-01');
+    form.set('avatar', new File([pngBytes], 'sarah-admin.png', { type: 'image/png' }));
+
+    const res = await SELF.fetch(`${ORIGIN}/admin/people/3`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, cookie },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    const key = await uploadKey(pngBytes.buffer as ArrayBuffer, 'sarah-admin.png');
+    const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = 3').first<{ avatar_url: string }>();
+    expect(row?.avatar_url).toBe(`/media/${key}`);
   });
 });
 

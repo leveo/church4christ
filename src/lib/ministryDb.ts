@@ -243,6 +243,7 @@ export interface MinistryEditRow {
   name_zh: string | null;
   intro_en: string | null;
   intro_zh: string | null;
+  coverKey: string | null;
   category: string;
   icon: string;
   leader_person_id: number | null;
@@ -253,6 +254,7 @@ export async function listMinistryEditRows(db: AppDb): Promise<MinistryEditRow[]
   const { results } = await db
     .prepare(
       `SELECT m.id AS id, m.category AS category, m.icon AS icon, m.leader_person_id AS leader_person_id,
+              m.cover_key AS "coverKey",
               en.name AS name_en, zh.name AS name_zh, en.intro AS intro_en, zh.intro AS intro_zh
        FROM ministries m
        LEFT JOIN ministry_i18n en ON en.ministry_id = m.id AND en.locale = 'en'
@@ -301,6 +303,12 @@ export async function leaderMinistryIds(db: AppDb, user: SessionUser): Promise<n
 
 export async function toggleMinistryActive(db: AppDb, id: number, active: boolean): Promise<void> {
   await db.prepare(`UPDATE ministries SET active = ? WHERE id = ?`).bind(active ? 1 : 0, id).run();
+}
+
+export async function setMinistryCoverKey(db: AppDb, ministryId: number, coverKey: string | null): Promise<void> {
+  await db.prepare(`UPDATE ministries SET cover_key = ?1 WHERE id = ?2 AND deleted_at IS NULL`)
+    .bind(coverKey, ministryId)
+    .run();
 }
 
 export interface MinistryBasics {

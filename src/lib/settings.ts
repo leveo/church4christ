@@ -100,3 +100,7 @@ export async function getTheme(db: AppDb): Promise<{ theme: string; defaultMode:
     defaultMode: s['theme.default_mode'] ?? 'light',
   };
 }
+
+export async function getHeroImageKey(db: AppDb): Promise<string> {
+  return getSetting(db, 'site.hero_image_key', '');
+}

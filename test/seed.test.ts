@@ -95,6 +95,25 @@ describe('demo seed: announcements and events are bilingual', () => {
   });
 });
 
+describe('demo seed: media references', () => {
+  it('seeds media-backed demo image references', async () => {
+    const hero = await env.DB.prepare("SELECT value FROM settings WHERE key = 'site.hero_image_key'").first<{ value: string }>();
+    expect(hero?.value).toMatch(/^uploads\/[a-f0-9]{16}-hero-worship-gathering\.webp$/);
+
+    const events = await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE image_key LIKE 'uploads/%'").first<{ n: number }>();
+    expect(events?.n).toBe(3);
+
+    const covers = await env.DB.prepare("SELECT COUNT(*) AS n FROM ministries WHERE cover_key LIKE 'uploads/%'").first<{ n: number }>();
+    expect(covers?.n).toBe(6);
+
+    const avatars = await env.DB.prepare("SELECT COUNT(*) AS n FROM people WHERE avatar_url LIKE '/media/uploads/%'").first<{ n: number }>();
+    expect(avatars?.n).toBe(8);
+
+    const media = await env.DB.prepare("SELECT COUNT(*) AS n FROM media WHERE r2_key LIKE 'uploads/%' AND content_type = 'image/webp'").first<{ n: number }>();
+    expect(media?.n).toBeGreaterThanOrEqual(18);
+  });
+});
+
 describe('demo seed: settings cover every reader key', () => {
   it('getSiteIdentity returns non-empty values in both locales', async () => {
     for (const locale of ['en', 'zh'] as const) {

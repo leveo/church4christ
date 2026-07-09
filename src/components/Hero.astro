@@ -1,16 +1,19 @@
 ---
-// Full-width hero band. An original, abstract inline SVG scene (light rays
-// fanning over a gathered congregation, reduced to arches + heads) sits on the
-// brand-primary band, dimmed by a scrim gradient so the heading + CTAs stay
-// legible. All SVG fills are CSS vars (var(--color-*)) at low opacity — no color
-// literals — so the scene re-tints per active theme/mode.
+// Full-width hero band. A configured media image renders behind the scrim when
+// present; otherwise an original abstract SVG scene (light rays fanning over a
+// gathered congregation, reduced to arches + heads) fills the band. SVG fills
+// are CSS vars (var(--color-*)) at low opacity so the fallback re-tints per
+// active theme/mode.
 import { localePath, type Locale } from '../lib/locales';
 import { t } from '../lib/i18n';
+import { mediaPath } from '../lib/mediaRef';
 
 interface Props {
   locale: Locale;
+  heroImageKey?: string;
 }
-const { locale } = Astro.props;
+const { locale, heroImageKey = '' } = Astro.props;
+const heroImage = mediaPath(heroImageKey);
 
 // Light-ray beams fanning from a point above the band. Each is a thin triangle
 // from the apex to a slice of the horizon; widths + opacities alternate for a
@@ -34,32 +37,34 @@ const sermonsOn = Astro.locals.modules.has('sermons');
 ---
 
 <section class="relative isolate overflow-hidden bg-primary text-on-primary">
-  <svg
-    class="absolute inset-0 h-full w-full"
-    viewBox="0 0 1200 600"
-    preserveAspectRatio="xMidYMid slice"
-    aria-hidden="true"
-    fill="none"
-  >
-    <circle cx={APEX_X} cy="30" r="240" fill="var(--color-accent)" opacity="0.12"></circle>
-    {beams.map((b) => <polygon points={b.points} fill="var(--color-on-primary)" opacity={b.opacity} />)}
-    {
-      backRow.map((x) => (
-        <g fill="var(--color-on-primary)" opacity="0.13">
-          <path d={`M ${x - 55} 600 L ${x - 55} 470 A 55 55 0 0 1 ${x + 55} 470 L ${x + 55} 600 Z`} />
-          <circle cx={x} cy="452" r="26" />
-        </g>
-      ))
-    }
-    {
-      frontRow.map((x) => (
-        <g fill="var(--color-on-primary)" opacity="0.22">
-          <path d={`M ${x - 48} 600 L ${x - 48} 522 A 48 48 0 0 1 ${x + 48} 522 L ${x + 48} 600 Z`} />
-          <circle cx={x} cy="506" r="22" />
-        </g>
-      ))
-    }
-  </svg>
+  {
+    heroImage ? (
+      <img src={heroImage} alt="" class="absolute inset-0 h-full w-full object-cover" fetchpriority="high" />
+    ) : (
+      <svg
+        class="absolute inset-0 h-full w-full"
+        viewBox="0 0 1200 600"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        fill="none"
+      >
+        <circle cx={APEX_X} cy="30" r="240" fill="var(--color-accent)" opacity="0.12" />
+        {beams.map((b) => <polygon points={b.points} fill="var(--color-on-primary)" opacity={b.opacity} />)}
+        {backRow.map((x) => (
+          <g fill="var(--color-on-primary)" opacity="0.13">
+            <path d={`M ${x - 55} 600 L ${x - 55} 470 A 55 55 0 0 1 ${x + 55} 470 L ${x + 55} 600 Z`} />
+            <circle cx={x} cy="452" r="26" />
+          </g>
+        ))}
+        {frontRow.map((x) => (
+          <g fill="var(--color-on-primary)" opacity="0.22">
+            <path d={`M ${x - 48} 600 L ${x - 48} 522 A 48 48 0 0 1 ${x + 48} 522 L ${x + 48} 600 Z`} />
+            <circle cx={x} cy="506" r="22" />
+          </g>
+        ))}
+      </svg>
+    )
+  }
 
   <div class="absolute inset-0 bg-gradient-to-t from-scrim to-transparent" aria-hidden="true"></div>
 

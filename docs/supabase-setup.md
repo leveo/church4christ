@@ -312,7 +312,9 @@ site still runs on Cloudflare, exactly as `deploy.md` describes:
 
 - **The website itself** — still a single Cloudflare **Worker**.
 - **R2 media** — images you upload in the admin area still live in your Cloudflare **R2**
-  bucket (the `MEDIA` binding). Supabase holds no files, only data.
+  bucket (the `MEDIA` binding). Supabase holds no files, only data. The local D1 demo media
+  seed is separate from the Supabase data seed; for a real church, upload images through
+  the admin and profile pages after launch.
 - **Email** — sign-in links, volunteer reminders, and the weekly digest still send through
   the Cloudflare **Email** binding.
 - **Scheduled jobs (crons)** — the nightly and weekly tasks in `wrangler.jsonc` (publishing
