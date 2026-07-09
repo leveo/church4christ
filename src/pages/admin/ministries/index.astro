@@ -32,6 +32,7 @@ import {
   leaderMinistryIds,
   listMinistryEditRows,
   listMinistrySummaries,
+  setMinistryCoverKey,
   toggleMinistryActive,
   updateMinistryBasics,
   type MinistryWizardInput,
@@ -48,11 +49,13 @@ import {
 } from '../../../lib/emailSettingsDb';
 import { sendApplicationResult } from '../../../lib/notify';
 import { sendEmail, type EmailEnv } from '../../../lib/email';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const vars = env as unknown as EmailEnv;
 const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 
 // Page-level gate: the volunteer console is for team leaders and admins only.
 const canAdmin = user.isAdmin;
@@ -114,6 +117,24 @@ if (Astro.request.method === 'POST') {
       });
     }
     return to('ministries');
+  }
+
+  if (action === 'updateCover') {
+    const mid = idOf(fd.get('ministry_id'));
+    if (mid && (await canManageMinistry(db, user, mid))) {
+      const file = fd.get('cover_image');
+      if (fd.get('remove_cover')) {
+        await setMinistryCoverKey(db, mid, null);
+      } else if (file instanceof File && file.size > 0) {
+        try {
+          const coverKey = await saveImageUpload({ db, media, file, uploadedBy: user.email });
+          await setMinistryCoverKey(db, mid, coverKey);
+        } catch (e) {
+          errKey = uploadErrorKey(e);
+        }
+      }
+    }
+    if (!errKey) return to('ministries');
   }
 
   if (action === 'createMinistry') {
@@ -183,7 +204,7 @@ if (Astro.request.method === 'POST') {
     return to('email', `&tpl=${key}&test=1`);
   }
 
-  return to(url.searchParams.get('tab') ?? 'overview');
+  if (!errKey) return to(url.searchParams.get('tab') ?? 'overview');
 }
 
 // ── GET: resolve tab + load its data ──

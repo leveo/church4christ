@@ -119,6 +119,19 @@ describe('announcement ticker shows the active announcement per locale', () => {
   });
 });
 
+describe('homepage hero image', () => {
+  it('renders a configured homepage hero image through /media', async () => {
+    await env.DB.prepare(
+      `INSERT INTO settings (key, value)
+       VALUES ('site.hero_image_key', 'uploads/hero-test.webp')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run();
+    const res = await get('/en');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('/media/uploads/hero-test.webp');
+  });
+});
+
 describe('per-locale document attributes + hreflang', () => {
   it('/en/ reflects the seeded theme setting (data-theme) and both hreflang alternates', async () => {
     // data-theme is now settings-driven: middleware reads theme.name via the

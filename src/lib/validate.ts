@@ -619,6 +619,7 @@ const SETTINGS_KEYS = [
   'site.map_url',
   'site.giving_url',
   'site.youtube_url',
+  'site.hero_image_key',
   'site.service_times.en',
   'site.service_times.zh',
   'theme.name',

@@ -147,18 +147,22 @@ npm install
 # 2. Create your local settings (safe demo values, already filled in)
 cp .dev.vars.example .dev.vars
 
-# 3. Generate types, build the theme colors, create and fill the local database
+# 3. Generate types, build the theme colors, create and fill the local demo
 npm run cf-typegen
 npm run tokens
 npm run db:migrate:local
 npm run db:seed:local
+npm run db:seed-media:local
 
 # 4. Start it
 npm run dev
 ```
 
 Open the address it prints (usually `http://localhost:4321`). You will see the full
-public site with sample sermons, bulletins, events, and ministries.
+public site with sample sermons, bulletins, events, ministries, and local demo images.
+The media step copies the generated image pack from `seed/media/` into local R2 and
+updates the local D1 rows that point at those objects. It is safe to run again after
+reseeding the database.
 
 **Signing in to the admin area.** There is no password. On the sign-in page, enter
 `admin@example.com` and request a link — because local email is set to print instead of
