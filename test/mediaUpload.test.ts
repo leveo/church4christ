@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppDb } from '../src/lib/appDb';
 import type { MediaBucket } from '../src/lib/mediaUpload';
 import { saveImageUpload, uploadErrorKey } from '../src/lib/mediaUpload';
-import { uploadKey } from '../src/lib/upload';
+import { MAX_IMAGE_BYTES, uploadKey } from '../src/lib/upload';
 
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 const pngBytes = Uint8Array.from(atob(PNG_B64), (c) => c.charCodeAt(0));
@@ -48,6 +48,15 @@ describe('saveImageUpload', () => {
       file: new File(['x'], 'x.svg', { type: 'image/svg+xml' }),
       uploadedBy: 'admin@example.com',
     })).rejects.toThrow('image_type');
+  });
+
+  it('rejects images over the size cap', async () => {
+    await expect(saveImageUpload({
+      db: testEnv.DB,
+      media,
+      file: new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], 'huge.png', { type: 'image/png' }),
+      uploadedBy: 'admin@example.com',
+    })).rejects.toThrow('image_too_large');
   });
 });
 

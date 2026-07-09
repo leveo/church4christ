@@ -2,9 +2,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const root = resolve(new URL('../..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const manifestPath = join(root, 'seed/media/manifest.json');
 const mediaDir = join(root, 'seed/media');
 const dryRun = process.argv.includes('--dry-run');
@@ -39,16 +40,19 @@ function readBucketName() {
   return match?.[1] ?? 'church4christ-media';
 }
 
-function wranglerBin() {
-  if (process.env.WRANGLER_BIN) return process.env.WRANGLER_BIN;
-  const local = join(root, 'node_modules/.bin', process.platform === 'win32' ? 'wrangler.cmd' : 'wrangler');
-  return existsSync(local) ? local : process.platform === 'win32' ? 'npx.cmd' : 'npx';
+function wranglerCommand() {
+  if (process.env.WRANGLER_BIN) return [process.env.WRANGLER_BIN];
+  // Run wrangler's JS entry with the current Node binary — identical on every
+  // platform, and avoids spawning .cmd shims, which Node refuses without a shell.
+  const local = join(root, 'node_modules/wrangler/bin/wrangler.js');
+  if (!existsSync(local)) throw new Error('wrangler not found — run `npm install` first (or set WRANGLER_BIN)');
+  return [process.execPath, local];
 }
 
 function runWrangler(args) {
-  const bin = wranglerBin();
+  const [bin, ...prefix] = wranglerCommand();
   const persistedArgs = process.env.WRANGLER_PERSIST_TO ? [...args, '--persist-to', process.env.WRANGLER_PERSIST_TO] : args;
-  const finalArgs = bin.endsWith('npx') || bin.endsWith('npx.cmd') ? ['wrangler', ...persistedArgs] : persistedArgs;
+  const finalArgs = [...prefix, ...persistedArgs];
   if (dryRun) {
     console.log([bin, ...finalArgs].join(' '));
     return;

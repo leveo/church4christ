@@ -3,7 +3,7 @@
 This page explains **who this project is for**, the **problems it solves**, and **why it is
 built the way it is** — why Cloudflare instead of a server on AWS/Azure/GCP, why the
 Astro + Tailwind + TypeScript stack, and why you might (or might not) prefer a mature
-service like Planning Center. It is written to be honest about the trade-offs, not to
+church-management SaaS instead. It is written to be honest about the trade-offs, not to
 claim this is right for everyone.
 
 ## Who this is for
@@ -21,8 +21,8 @@ claim this is right for everyone.
   [`cloudflare-setup.md`](./cloudflare-setup.md).
 
 If your church wants **zero technical involvement**, has budget for a subscription, and
-needs a deep church-management suite (giving, check-ins, membership), a mature product
-like **Planning Center** is likely the better fit — see the section below. This project is
+needs a deep church-management suite (giving, check-ins, membership), a mature
+commercial product is likely the better fit — see the section below. This project is
 for the churches that want **$0 cost, full control, and are fine with a little setup**.
 
 ## The pain points it solves
@@ -118,13 +118,14 @@ The theme throughout: **fewer moving parts.** No client framework, no plugin eco
 server to babysit — a smaller thing that a small team (or one person and an AI) can actually
 keep running for years.
 
-## Why not Planning Center (or another mature church SaaS)?
+## Why not a mature church-management SaaS?
 
-**Planning Center is genuinely good, and this project is not trying to out-feature it.**
-If you want a polished, zero-maintenance, deeply integrated church-management suite and you
-have the budget, it is an excellent choice. The difference is in what you optimize for:
+**The established church-management suites are genuinely good, and this project is not
+trying to out-feature them.** If you want a polished, zero-maintenance, deeply integrated
+church-management suite and you have the budget, they are an excellent choice. The
+difference is in what you optimize for:
 
-- **Cost and model.** Planning Center and similar tools are subscription SaaS, often priced
+- **Cost and model.** Those tools are subscription SaaS, often priced
   per module and scaling with congregation size and features. This project is **free and
   yours** — no monthly bill, no per-seat math.
 - **Ownership and control.** With SaaS, your members' data lives on the vendor's servers
