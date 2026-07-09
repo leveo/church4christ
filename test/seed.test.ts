@@ -5,6 +5,7 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import seedSql from '../seed/dev-seed.sql?raw';
+import manifest from '../seed/media/manifest.json';
 import { getSiteIdentity, getTheme } from '../src/lib/settings';
 
 // The seed file never uses ';' except to terminate statements and keeps every
@@ -96,6 +97,39 @@ describe('demo seed: announcements and events are bilingual', () => {
 });
 
 describe('demo seed: media references', () => {
+  // The content-addressed keys in seed/media/manifest.json are duplicated by hand
+  // in dev-seed.sql (media rows + hero/event/ministry/avatar references). If an
+  // image is regenerated its key changes, and every copy must move together —
+  // these checks fail when manifest.json and dev-seed.sql drift apart.
+  it('dev-seed.sql references exactly the manifest asset keys', () => {
+    const sqlKeys = new Set([...seedSql.matchAll(/'(?:\/media\/)?(uploads\/[^']+)'/g)].map((m) => m[1]));
+    const manifestKeys = new Set(manifest.assets.map((a) => a.key));
+    expect([...sqlKeys].sort()).toEqual([...manifestKeys].sort());
+  });
+
+  it('every manifest target row carries its manifest key after seeding', async () => {
+    for (const asset of manifest.assets) {
+      const target = asset.target as { type: string; key?: string; id?: number };
+      if (target.type === 'setting') {
+        const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(target.key).first<{ value: string }>();
+        expect(row?.value).toBe(asset.key);
+      } else if (target.type === 'event') {
+        const row = await env.DB.prepare('SELECT image_key FROM events WHERE id = ?').bind(target.id).first<{ image_key: string }>();
+        expect(row?.image_key).toBe(asset.key);
+      } else if (target.type === 'ministry') {
+        const row = await env.DB.prepare('SELECT cover_key FROM ministries WHERE id = ?').bind(target.id).first<{ cover_key: string }>();
+        expect(row?.cover_key).toBe(asset.key);
+      } else if (target.type === 'person') {
+        const row = await env.DB.prepare('SELECT avatar_url FROM people WHERE id = ?').bind(target.id).first<{ avatar_url: string }>();
+        expect(row?.avatar_url).toBe(`/media/${asset.key}`);
+      } else {
+        throw new Error(`unknown manifest target type: ${target.type}`);
+      }
+      const media = await env.DB.prepare('SELECT filename FROM media WHERE r2_key = ?').bind(asset.key).first<{ filename: string }>();
+      expect(media?.filename).toBe(asset.file);
+    }
+  });
+
   it('seeds media-backed demo image references', async () => {
     const hero = await env.DB.prepare("SELECT value FROM settings WHERE key = 'site.hero_image_key'").first<{ value: string }>();
     expect(hero?.value).toMatch(/^uploads\/[a-f0-9]{16}-hero-worship-gathering\.webp$/);
