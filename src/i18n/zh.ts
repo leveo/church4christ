@@ -198,6 +198,7 @@ export default {
   'give.ctaNote': '点击后将在新标签页打开我们的安全奉献平台。',
   'give.unavailable': '在线奉献功能正在筹备中，其间可先与牧者联系。',
   'give.title': '奉献',
+  'give.intro': '支持我们教会的事工与使命。',
   'give.fund': '奉献项目',
   'give.amount': '金额',
   'give.frequency': '频率',

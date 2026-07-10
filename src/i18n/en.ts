@@ -200,6 +200,7 @@ export default {
   'give.ctaNote': 'You’ll be taken to our secure giving partner in a new tab.',
   'give.unavailable': 'Online giving is being set up. Please speak with a pastor in the meantime.',
   'give.title': 'Give',
+  'give.intro': 'Support the ministries and mission of our church.',
   'give.fund': 'Fund',
   'give.amount': 'Amount',
   'give.frequency': 'Frequency',
