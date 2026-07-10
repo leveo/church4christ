@@ -39,6 +39,7 @@ describe('admin role matrix (anon 303 / member 403 / editor content-only / admin
     { path: '/admin/revisions/bulletin/1', kind: 'content' }, // seeded bulletin id 1
     { path: '/admin/people', kind: 'adminOnly' },
     { path: '/admin/settings', kind: 'adminOnly' },
+    { path: '/admin/navigation', kind: 'adminOnly' },
   ];
 
   for (const { path, kind } of SECTIONS) {

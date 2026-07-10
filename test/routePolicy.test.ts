@@ -96,6 +96,7 @@ describe('classifyRoute', () => {
     ['/admin/settings', 'adminOnly'],
     ['/admin/reports', 'adminOnly'],
     ['/admin/teams', 'adminOnly'],
+    ['/admin/navigation', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

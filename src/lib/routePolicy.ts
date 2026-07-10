@@ -65,7 +65,7 @@ const PUBLIC_PREFIXES = [
 ];
 
 // Site-admin-only areas under /admin. Checked BEFORE the console list.
-const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams'];
+const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams', '/admin/navigation'];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).
 // Any /admin path in NEITHER list fails closed to adminOnly.
