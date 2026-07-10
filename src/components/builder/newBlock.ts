@@ -3,11 +3,12 @@
 // except image, which starts with src:'' (validation allows the empty src;
 // the public renderer skips the <img> until one is chosen).
 import type { AnyNode } from '../../lib/pageLayout';
+import { uid } from './uid';
 
 const l10n = (en = '') => ({ en, zh: '' });
 
 export function newBlock(type: AnyNode['type']): AnyNode {
-  const id = crypto.randomUUID();
+  const id = uid();
   switch (type) {
     case 'section':
       return { id, type, props: { bg: 'none', width: 'content', padY: 'md' }, children: [] };

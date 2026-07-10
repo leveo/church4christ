@@ -2,6 +2,7 @@
 // rules, and an undo-capable reducer. React components stay thin views; every
 // tree mutation lives here where it is unit-tested (test/builderModel.test.ts).
 import type { AnyNode, ColumnsNode, PageLayout } from '../../lib/pageLayout';
+import { uid } from './uid';
 
 export type ContainerRef = 'root' | `sec:${string}` | `col:${string}:${number}`;
 
@@ -85,7 +86,7 @@ export function findNode(
 function withFreshIds<T extends AnyNode>(node: T): T {
   const clone = structuredClone(node);
   const stamp = (n: AnyNode): void => {
-    n.id = crypto.randomUUID();
+    n.id = uid();
     if (n.type === 'section') n.children.forEach(stamp);
     if (n.type === 'columns') n.columns.forEach((col) => col.forEach(stamp));
   };

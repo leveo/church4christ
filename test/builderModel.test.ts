@@ -1,8 +1,9 @@
 // Builder island tree ops (pure reducer — the React components are thin
 // views over this). Runs in the workers pool like every other unit test;
 // crypto.randomUUID is available there.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { builderReducer, canDrop, findNode, initialState } from '../src/components/builder/model';
+import { uid } from '../src/components/builder/uid';
 import { newBlock } from '../src/components/builder/newBlock';
 import type { ColumnsNode, PageLayout, SectionNode } from '../src/lib/pageLayout';
 
@@ -102,5 +103,25 @@ describe('builderReducer', () => {
     expect(s.layout).toEqual(before);
     s = builderReducer(s, { type: 'redo' });
     expect(findNode(s.layout, h.id)).toBeNull();
+  });
+});
+
+// Insecure-context regression: crypto.randomUUID exists only on https/localhost,
+// so an admin on a plain-http LAN dev server crashed on the first palette click.
+// uid() must mint valid, unique ids from getRandomValues when randomUUID is absent.
+describe('uid fallback (insecure context)', () => {
+  it('mints ID_RE-valid unique ids without crypto.randomUUID', () => {
+    const stripped = {
+      getRandomValues: crypto.getRandomValues.bind(crypto),
+    } as unknown as Crypto;
+    vi.stubGlobal('crypto', stripped);
+    try {
+      const a = uid();
+      const b = uid();
+      expect(a).toMatch(/^[A-Za-z0-9_-]{1,36}$/);
+      expect(a).not.toBe(b);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
