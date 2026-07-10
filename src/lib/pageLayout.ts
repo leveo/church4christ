@@ -48,43 +48,70 @@ const oneOf = <T,>(x: unknown, values: readonly T[]): x is T => values.includes(
 
 const ALIGNS = ['left', 'center', 'right'] as const;
 
-function checkLeaf(node: Record<string, unknown>): boolean {
+/** Copy only {en, zh} so unknown keys inside an l10n object are dropped too. */
+const l10nCopy = (x: L10nString): L10nString => ({ en: x.en, zh: x.zh });
+
+// Validate AND rebuild a leaf from only its known fields (strict allowlist):
+// unknown node types or bad props return null; unknown/extra keys never make
+// it into the returned node, so the caller persists exactly the schema.
+function buildLeaf(id: string, node: Record<string, unknown>): LeafNode | null {
   const p = node.props;
-  if (!isObj(p)) return false;
+  if (!isObj(p)) return null;
   switch (node.type) {
-    case 'heading':
-      return oneOf(p.level, [1, 2, 3] as const) && isL10n(p.text, LAYOUT_LIMITS.maxShortLen) &&
-        oneOf(p.align, ALIGNS) && oneOf(p.size, ['sm', 'md', 'lg', 'xl'] as const) &&
-        (p.customSizePx === undefined || (typeof p.customSizePx === 'number' && p.customSizePx >= 10 && p.customSizePx <= 120));
-    case 'text':
-      return isL10n(p.md, LAYOUT_LIMITS.maxTextLen) && oneOf(p.align, ALIGNS);
-    case 'image':
+    case 'heading': {
+      const { level, text, align, size, customSizePx } = p;
+      if (!oneOf(level, [1, 2, 3] as const) || !isL10n(text, LAYOUT_LIMITS.maxShortLen) ||
+          !oneOf(align, ALIGNS) || !oneOf(size, ['sm', 'md', 'lg', 'xl'] as const)) return null;
+      if (customSizePx !== undefined && !(typeof customSizePx === 'number' && customSizePx >= 10 && customSizePx <= 120)) return null;
+      const props: HeadingNode['props'] = { level, text: l10nCopy(text), align, size };
+      if (customSizePx !== undefined) props.customSizePx = customSizePx;
+      return { id, type: 'heading', props };
+    }
+    case 'text': {
+      const { md, align } = p;
+      if (!isL10n(md, LAYOUT_LIMITS.maxTextLen) || !oneOf(align, ALIGNS)) return null;
+      return { id, type: 'text', props: { md: l10nCopy(md), align } };
+    }
+    case 'image': {
+      const { src, alt, width, rounded, align } = p;
       // '' allowed: a freshly dropped image block has no src yet (the public
       // renderer skips the <img> until one is chosen).
-      return typeof p.src === 'string' && (p.src === '' || SAFE_IMG_SRC.test(p.src)) && p.src.length <= LAYOUT_LIMITS.maxShortLen &&
-        isL10n(p.alt, LAYOUT_LIMITS.maxShortLen) &&
-        oneOf(p.width, ['full', 'wide', 'medium', 'small'] as const) &&
-        typeof p.rounded === 'boolean' && oneOf(p.align, ALIGNS);
-    case 'button':
-      return isL10n(p.label, LAYOUT_LIMITS.maxShortLen) &&
-        typeof p.href === 'string' && SAFE_HREF.test(p.href) && p.href.length <= LAYOUT_LIMITS.maxShortLen &&
-        oneOf(p.variant, ['primary', 'secondary'] as const) && oneOf(p.align, ALIGNS);
-    case 'spacer':
-      return oneOf(p.size, ['sm', 'md', 'lg', 'xl'] as const);
+      if (typeof src !== 'string' || !(src === '' || SAFE_IMG_SRC.test(src)) || src.length > LAYOUT_LIMITS.maxShortLen ||
+          !isL10n(alt, LAYOUT_LIMITS.maxShortLen) ||
+          !oneOf(width, ['full', 'wide', 'medium', 'small'] as const) ||
+          typeof rounded !== 'boolean' || !oneOf(align, ALIGNS)) return null;
+      return { id, type: 'image', props: { src, alt: l10nCopy(alt), width, rounded, align } };
+    }
+    case 'button': {
+      const { label, href, variant, align } = p;
+      if (!isL10n(label, LAYOUT_LIMITS.maxShortLen) ||
+          typeof href !== 'string' || !SAFE_HREF.test(href) || href.length > LAYOUT_LIMITS.maxShortLen ||
+          !oneOf(variant, ['primary', 'secondary'] as const) || !oneOf(align, ALIGNS)) return null;
+      return { id, type: 'button', props: { label: l10nCopy(label), href, variant, align } };
+    }
+    case 'spacer': {
+      const { size } = p;
+      if (!oneOf(size, ['sm', 'md', 'lg', 'xl'] as const)) return null;
+      return { id, type: 'spacer', props: { size } };
+    }
     case 'divider':
-      return true;
+      return { id, type: 'divider', props: {} };
     default:
-      return false;
+      return null;
   }
 }
 
 /**
- * Parse + validate an untrusted layout JSON string. Returns the parsed tree on
- * success so callers render/persist exactly what was validated. Error codes
- * (not prose): bad_json, too_large, bad_root, too_many_nodes, bad_node.
+ * Parse + validate an untrusted layout JSON string. On success the returned
+ * layout is REBUILT from only the known fields (never the parsed object), so
+ * unknown/extra properties are stripped and callers render/persist exactly
+ * the schema. Error codes (not prose): bad_json, too_large, bad_root,
+ * too_many_nodes, bad_node.
  */
 export function validateLayout(raw: string): { ok: true; layout: PageLayout } | Fail {
-  if (raw.length > LAYOUT_LIMITS.maxJsonBytes) return fail('too_large');
+  // Byte-accurate cap: CJK text is 1 UTF-16 code unit but ~3 UTF-8 bytes, so
+  // raw.length would under-count Chinese-heavy layouts by ~3x.
+  if (new TextEncoder().encode(raw).length > LAYOUT_LIMITS.maxJsonBytes) return fail('too_large');
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -95,36 +122,57 @@ export function validateLayout(raw: string): { ok: true; layout: PageLayout } | 
 
   const seen = new Set<string>();
   let count = 0;
-  const claimId = (node: Record<string, unknown>): boolean => {
+  const claimId = (node: Record<string, unknown>): string | null => {
     count += 1;
-    if (typeof node.id !== 'string' || !ID_RE.test(node.id) || seen.has(node.id)) return false;
-    seen.add(node.id);
-    return true;
+    const id = node.id;
+    if (typeof id !== 'string' || !ID_RE.test(id) || seen.has(id)) return null;
+    seen.add(id);
+    return id;
   };
 
+  const blocks: SectionNode[] = [];
   for (const sec of parsed.blocks) {
-    if (!isObj(sec) || sec.type !== 'section' || !claimId(sec)) return fail('bad_node');
+    if (!isObj(sec) || sec.type !== 'section') return fail('bad_node');
+    const secId = claimId(sec);
     const sp = sec.props;
-    if (!isObj(sp) || !oneOf(sp.bg, ['none', 'soft', 'primary', 'accent'] as const) ||
-        !oneOf(sp.width, ['narrow', 'content', 'wide'] as const) ||
-        !oneOf(sp.padY, ['sm', 'md', 'lg'] as const) || !Array.isArray(sec.children)) return fail('bad_node');
+    if (!secId || !isObj(sp)) return fail('bad_node');
+    const { bg, width, padY } = sp;
+    if (!oneOf(bg, ['none', 'soft', 'primary', 'accent'] as const) ||
+        !oneOf(width, ['narrow', 'content', 'wide'] as const) ||
+        !oneOf(padY, ['sm', 'md', 'lg'] as const) || !Array.isArray(sec.children)) return fail('bad_node');
+    const children: (ColumnsNode | LeafNode)[] = [];
     for (const child of sec.children) {
-      if (!isObj(child) || !claimId(child)) return fail('bad_node');
+      if (!isObj(child)) return fail('bad_node');
+      const childId = claimId(child);
+      if (!childId) return fail('bad_node');
       if (child.type === 'columns') {
         const cp = child.props;
-        if (!isObj(cp) || !oneOf(cp.count, [2, 3, 4] as const) || !oneOf(cp.gap, ['sm', 'md', 'lg'] as const) ||
-            !Array.isArray(child.columns) || child.columns.length !== cp.count) return fail('bad_node');
+        if (!isObj(cp)) return fail('bad_node');
+        const { count: colCount, gap } = cp;
+        if (!oneOf(colCount, [2, 3, 4] as const) || !oneOf(gap, ['sm', 'md', 'lg'] as const) ||
+            !Array.isArray(child.columns) || child.columns.length !== colCount) return fail('bad_node');
+        const columns: LeafNode[][] = [];
         for (const col of child.columns) {
           if (!Array.isArray(col)) return fail('bad_node');
+          const leaves: LeafNode[] = [];
           for (const leaf of col) {
-            if (!isObj(leaf) || !claimId(leaf) || !checkLeaf(leaf)) return fail('bad_node');
+            if (!isObj(leaf)) return fail('bad_node');
+            const leafId = claimId(leaf);
+            const built = leafId ? buildLeaf(leafId, leaf) : null;
+            if (!built) return fail('bad_node');
+            leaves.push(built);
           }
+          columns.push(leaves);
         }
-      } else if (!checkLeaf(child)) {
-        return fail('bad_node');
+        children.push({ id: childId, type: 'columns', props: { count: colCount, gap }, columns });
+      } else {
+        const built = buildLeaf(childId, child);
+        if (!built) return fail('bad_node');
+        children.push(built);
       }
     }
+    blocks.push({ id: secId, type: 'section', props: { bg, width, padY }, children });
   }
   if (count > LAYOUT_LIMITS.maxNodes) return fail('too_many_nodes');
-  return { ok: true, layout: parsed as unknown as PageLayout };
+  return { ok: true, layout: { v: 1, blocks } };
 }

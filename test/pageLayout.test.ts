@@ -61,6 +61,27 @@ describe('validateLayout', () => {
     expect(validateLayout(wrap([section('s1', [emptyImg])])).ok).toBe(true); // fresh block, no src chosen yet
   });
 
+  it('strips unknown props during rebuild (strict allowlist)', () => {
+    const sec = {
+      id: 's1', type: 'section', props: { bg: 'none', width: 'content', padY: 'md', evil: 'x' },
+      children: [{ ...heading('h1'), onClick: 'alert(1)' }],
+    };
+    const res = validateLayout(JSON.stringify({ v: 1, blocks: [sec] }));
+    if (!res.ok) throw new Error(`expected ok, got ${res.error}`);
+    const json = JSON.stringify(res.layout);
+    expect(json).not.toContain('evil');
+    expect(json).not.toContain('onClick');
+  });
+
+  it('enforces the size cap in UTF-8 bytes, not UTF-16 code units', () => {
+    // 8 text blocks x 15k CJK chars = ~120k UTF-16 units (under the 200k cap)
+    // but ~360KB UTF-8 — the byte cap must still trip.
+    const blocks = Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, type: 'text', props: { md: l10n('中'.repeat(15_000)), align: 'left' } }));
+    const layout = wrap([section('s1', blocks)]);
+    expect(layout.length).toBeLessThan(LAYOUT_LIMITS.maxJsonBytes); // sanity: a UTF-16 length check would pass this
+    expect(validateLayout(layout)).toEqual({ ok: false, error: 'too_large' });
+  });
+
   it('clamps customSizePx and enforces node count cap', () => {
     const sized = { ...heading('h1'), props: { ...heading().props, customSizePx: 9 } };
     expect(validateLayout(wrap([section('s1', [sized])])).ok).toBe(false); // below 10
