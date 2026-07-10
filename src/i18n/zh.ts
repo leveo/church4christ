@@ -1405,6 +1405,8 @@ export default {
   'admin.children.stat.activeEvents': '进行中的活动',
   'admin.children.chart.title': '每周签到趋势',
   'admin.children.chart.empty': '暂无签到记录，家庭在签到台使用后图表会自动生成。',
+  'admin.children.chart.colWeek': '周起始日',
+  'admin.children.chart.colTotal': '签到人数',
   'admin.children.events.name': '活动名称',
   'admin.children.events.weekday': '星期',
   'admin.children.events.anyDay': '不限星期',

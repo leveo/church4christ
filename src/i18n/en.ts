@@ -1407,6 +1407,8 @@ export default {
   'admin.children.stat.activeEvents': 'Active events',
   'admin.children.chart.title': 'Weekly check-ins',
   'admin.children.chart.empty': 'No check-ins yet. The chart fills in as families use the kiosk.',
+  'admin.children.chart.colWeek': 'Week of',
+  'admin.children.chart.colTotal': 'Check-ins',
   'admin.children.events.name': 'Event name',
   'admin.children.events.weekday': 'Weekday',
   'admin.children.events.anyDay': 'Any day',
