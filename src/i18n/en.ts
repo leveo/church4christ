@@ -925,6 +925,11 @@ export default {
   'admin.pages.unpublish': 'Unpublish',
   'admin.pages.cancelEdit': 'Cancel edit',
   'admin.pages.deleteConfirm': 'Delete this page?',
+  'admin.pages.formatBuilder': 'Builder',
+  'admin.pages.design': 'Design',
+  'admin.pages.newBuilder': 'New page (builder)',
+  'admin.pages.builderNote': 'This page is designed with the page builder — its content is edited there.',
+  'admin.pages.openBuilder': 'Open in builder',
 
   // Page builder (admin island)
   'admin.builder.title': 'Page builder',

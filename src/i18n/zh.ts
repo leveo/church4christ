@@ -924,6 +924,11 @@ export default {
   'admin.pages.unpublish': '取消发布',
   'admin.pages.cancelEdit': '取消编辑',
   'admin.pages.deleteConfirm': '确定删除此页面？',
+  'admin.pages.formatBuilder': '构建器',
+  'admin.pages.design': '设计',
+  'admin.pages.newBuilder': '新建页面（构建器）',
+  'admin.pages.builderNote': '此页面使用页面构建器设计——内容请在构建器中编辑。',
+  'admin.pages.openBuilder': '在构建器中打开',
 
   // Page builder (admin island)
   'admin.builder.title': '页面构建器',

@@ -167,3 +167,41 @@ describe('builder admin route', () => {
     expect((await res.json<{ error: string }>()).error).toBe('errors.imageType');
   });
 });
+
+describe('classic pages admin integrates the builder', () => {
+  it('shows the New page (builder) button and per-row Design links to editors', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    await savePageLayout(env.DB, {
+      id: null, slug: 'e2e-list-builder', published: false,
+      title_en: 'Listed', title_zh: '', layoutJson: JSON.stringify({ v: 1, blocks: [] }), updatedBy: 'e@x',
+    });
+    const res = await get('/admin/pages', { cookie: editor });
+    const html = await res.text();
+    expect(html).toContain('/admin/pages/builder/new');   // the new-page button
+    // pastor.david's seeded lang is 'zh' — the admin console renders per user.lang.
+    expect(html).toContain(t('zh', 'admin.pages.formatBuilder')); // badge on the builder row
+    expect(html).toMatch(/\/admin\/pages\/builder\/[0-9a-f-]{36}/); // per-row Design link
+  });
+
+  it('classic edit form for a builder page hides body textareas, links to the builder, and does not wipe the layout on save', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const created = await savePageLayout(env.DB, {
+      id: null, slug: 'e2e-classic-edit', published: false,
+      title_en: 'CE', title_zh: '', layoutJson: JSON.stringify({ v: 1, blocks: [] }), updatedBy: 'e@x',
+    });
+    if (!created.ok) throw new Error('seed failed');
+
+    const form = await get(`/admin/pages?edit=${created.id}`, { cookie: editor });
+    const html = await form.text();
+    // pastor.david's seeded lang is 'zh' — the admin console renders per user.lang.
+    expect(html).toContain(t('zh', 'admin.pages.builderNote'));
+    expect(html).not.toContain('name="body_en"');
+
+    // Classic save (slug/title/publish) must leave format/layout intact.
+    const body = new URLSearchParams({ action: 'save', id: created.id, slug: 'e2e-classic-edit', title_en: 'CE2', title_zh: '', body_en: '', body_zh: '' });
+    await post('/admin/pages', body.toString(), { cookie: editor });
+    const row = await env.DB.prepare(`SELECT format, layout_json FROM custom_pages WHERE id = ?1`).bind(created.id).first<{ format: string; layout_json: string }>();
+    expect(row!.format).toBe('builder');
+    expect(row!.layout_json).toBe(JSON.stringify({ v: 1, blocks: [] }));
+  });
+});
