@@ -101,7 +101,13 @@ const leaderGroupIds = myGroups.filter((g) => g.is_leader === 1).map((g) => g.id
 const pendingGroupApplications = hasPortal
   ? await listPendingApplicationsForGroups(db, leaderGroupIds, locale)
   : [];
-const nextRegistrations = upcomingRegistrations.filter((r) => r.starts_at.slice(0, 10) >= today).slice(0, 2);
+// listRegistrationsForPerson returns starts_at DESC (that ordering serves
+// /my/events); re-sort ascending here so the dashboard card shows the two
+// SOONEST upcoming events rather than the two farthest-out ones.
+const nextRegistrations = upcomingRegistrations
+  .filter((r) => r.starts_at.slice(0, 10) >= today)
+  .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  .slice(0, 2);
 // Applications matter most to people not on a team yet, or with one pending.
 const showApplications =
   applications.length > 0 && (user.memberTeamIds.length === 0 || applications.some((a) => a.status === 'P'));

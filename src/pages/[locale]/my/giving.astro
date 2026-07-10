@@ -97,7 +97,9 @@ const statusChip: Record<string, string> = {
 
     {/* ── Household giving history ─────────────────────────────────────────── */}
     <section class="mt-8">
-      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.giving.household')}</h2>
+      <h2 class="font-display text-lg font-semibold">
+        {t(locale, owner ? 'my.giving.household' : 'portal.giving.ownHistory')}
+      </h2>
       {
         gifts.length === 0 ? (
           <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>
@@ -139,6 +141,7 @@ const statusChip: Record<string, string> = {
 
     {/* ── Per-year household totals ───────────────────────────────────────── */}
     <section class="mt-8">
+      {!owner && <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.giving.ownTotals')}</h2>}
       {
         yearTotals.length === 0 ? (
           <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>

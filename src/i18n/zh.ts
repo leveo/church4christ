@@ -663,6 +663,8 @@ export default {
 
   // 会友门户奉献页面（/my/giving）范围说明。
   'portal.giving.ownScopeNote': '当前显示您本人的奉献记录。全家庭的奉献报表仅家庭户主可见。',
+  'portal.giving.ownHistory': '您的奉献记录',
+  'portal.giving.ownTotals': '您的年度奉献汇总',
 
   // 会友门户家庭页面（/my/household）。
   'portal.household.title': '我的家庭',

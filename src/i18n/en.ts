@@ -664,6 +664,8 @@ export default {
 
   // Member portal giving page (/my/giving) scope note.
   'portal.giving.ownScopeNote': 'Showing your own giving. Household statements are visible to household owners.',
+  'portal.giving.ownHistory': 'Your giving history',
+  'portal.giving.ownTotals': 'Your totals by year',
 
   // Member portal household page (/my/household).
   'portal.household.title': 'My Household',
