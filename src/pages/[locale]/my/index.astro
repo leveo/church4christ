@@ -30,6 +30,7 @@ import { type EmailEnv } from '../../../lib/email';
 import { getPortalHousehold } from '../../../lib/portalDb';
 import { listMyGroups, listPendingApplicationsForGroups } from '../../../lib/groupDb';
 import { listRegistrationsForPerson } from '../../../lib/regDb';
+import { listPendingForApprover } from '../../../lib/prayerDb';
 import { badge, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -84,14 +85,20 @@ const today = todayInTz();
 // D1 (portal always off, see modules.ts) never touches those tables.
 const hasPortal = Astro.locals.modules.has('portal');
 const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
-const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations] = await Promise.all([
-  listPersonAssignments(db, user.id, today, locale),
-  listOpenSlotsForPerson(db, user.id, locale),
-  listApplicationsByPerson(db, user.id, locale),
-  hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
-  hasPortal ? listMyGroups(db, user.id, locale) : Promise.resolve([]),
-  hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
-]);
+// listPendingForApprover takes the real user.isAdmin (church admins approve
+// every scope, per the spec's §Permission model) — the same deliberate
+// divergence the Task-4 download route documents; it's confined to this one
+// approval-queue read, not a general admin-authority leak into /my.
+const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations, pendingPrayerItems] =
+  await Promise.all([
+    listPersonAssignments(db, user.id, today, locale),
+    listOpenSlotsForPerson(db, user.id, locale),
+    listApplicationsByPerson(db, user.id, locale),
+    hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
+    hasPortal ? listMyGroups(db, user.id, locale) : Promise.resolve([]),
+    hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
+    hasPortal ? listPendingForApprover(db, user.id, user.isAdmin, locale) : Promise.resolve([]),
+  ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');
 
@@ -158,13 +165,20 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
             )}
           </a>
 
-          {pendingGroupApplications.length > 0 && (
+          {(pendingGroupApplications.length > 0 || pendingPrayerItems.length > 0) && (
             <a
-              href={localePath(locale, '/my/groups')}
+              href={localePath(locale, pendingGroupApplications.length > 0 ? '/my/groups' : '/my/prayer')}
               class="block rounded-lg border border-warn bg-warn-soft p-5 hover:shadow-md"
             >
-              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApplications')}</p>
-              <p class="mt-2 font-semibold text-warn">{pendingGroupApplications.length}</p>
+              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
+              <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
+                {pendingGroupApplications.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingGroupApplications.length })}</p>
+                )}
+                {pendingPrayerItems.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingPrayerItems', { count: pendingPrayerItems.length })}</p>
+                )}
+              </div>
             </a>
           )}
 
