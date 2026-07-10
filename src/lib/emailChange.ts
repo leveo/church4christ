@@ -14,6 +14,7 @@
 // hard-deleted, so the 3/hour rate limit — which counts tokens created in the
 // window — stays countable; a deleted row would erase that history.
 import type { AppDb } from './appDb';
+import { isUniqueViolation } from './adminDb';
 import { EMAIL_CHANGE_RATE_LIMIT, consumeToken, createEmailChangeToken, peekToken } from './auth';
 
 // Deliberately conservative: a single @, no whitespace, a dotted domain. This is
@@ -100,6 +101,13 @@ export async function peekEmailChange(
  * touching the live email. On success it swaps people.email, clears pending_email,
  * and bumps session_epoch (revoking every session), returning old+new for the
  * notice to the former address.
+ *
+ * The pre-check above filters `deleted_at IS NULL`, so it can pass while the
+ * UNIQUE(email) index still blocks the write (a soft-deleted row keeps the
+ * address), and two concurrent consumes can also race past the pre-check
+ * together. Either way the final UPDATE is wrapped so a unique-constraint
+ * failure degrades to the same graceful `taken` outcome instead of an
+ * unhandled 500 with the token already burned.
  */
 export async function consumeEmailChange(
   db: AppDb,
@@ -123,11 +131,20 @@ export async function consumeEmailChange(
     return { error: 'taken' };
   }
 
-  await db
-    .prepare(
-      `UPDATE people SET email = ?1, pending_email = NULL, session_epoch = session_epoch + 1 WHERE id = ?2`,
-    )
-    .bind(newEmail, personId)
-    .run();
+  try {
+    await db
+      .prepare(
+        `UPDATE people SET email = ?1, pending_email = NULL, session_epoch = session_epoch + 1 WHERE id = ?2`,
+      )
+      .bind(newEmail, personId)
+      .run();
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    // A soft-deleted row still holding the address, or a concurrent consume
+    // that won the race between our pre-check and this write. Same graceful
+    // outcome as the pre-check collision above: abandon the pending change.
+    await db.prepare('UPDATE people SET pending_email = NULL WHERE id = ?').bind(personId).run();
+    return { error: 'taken' };
+  }
   return { personId, oldEmail: person.email, newEmail };
 }

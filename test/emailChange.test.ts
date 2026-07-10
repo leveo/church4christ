@@ -125,4 +125,24 @@ describe('consumeEmailChange', () => {
     expect(after.email).toBe('p1@example.com'); // unchanged
     expect(after.pending_email).toBeNull(); // cleared
   });
+
+  it('a soft-deleted occupant still holding the address degrades to taken instead of throwing', async () => {
+    // Person 3 holds the target address, then is soft-deleted: the deleted_at
+    // IS NULL pre-check now passes, but the UNIQUE(email) index still blocks
+    // the final UPDATE — must degrade to `taken`, not an unhandled 500.
+    await env.DB.prepare("UPDATE people SET deleted_at = datetime('now') WHERE id = ?").bind(3).run();
+    const req = (await requestEmailChange(env.DB, 1, 'p3@example.com')) as { raw: string };
+    const res = await consumeEmailChange(env.DB, req.raw);
+    expect(res).toEqual({ error: 'taken' });
+    const after = await readPerson(1);
+    expect(after.email).toBe('p1@example.com'); // unchanged
+    expect(after.pending_email).toBeNull(); // cleared
+  });
+
+  it('a superseded token fails to consume directly', async () => {
+    const first = (await requestEmailChange(env.DB, 1, 'first@example.com')) as { raw: string };
+    await requestEmailChange(env.DB, 1, 'second@example.com');
+    expect(await consumeEmailChange(env.DB, first.raw)).toEqual({ error: 'invalid' });
+    expect((await readPerson(1)).email).toBe('p1@example.com');
+  });
 });
