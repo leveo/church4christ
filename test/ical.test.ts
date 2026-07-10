@@ -167,6 +167,39 @@ describe('regToICalEvent', () => {
     expect(e.startTime).toBeNull();
     expect(e.endTime).toBeNull();
   });
+
+  it('renders an overnight registration (19:00 -> next-day 07:00 local) as a 2-day all-day span', () => {
+    // Local (America/Chicago, CDT UTC-5): starts 2026-07-12T19:00, ends 2026-07-13T07:00.
+    const e = regToICalEvent(
+      regOf({ starts_at: '2026-07-13 00:00:00', ends_at: '2026-07-13 12:00:00' }),
+      'church.example',
+    );
+    expect(e.date).toBe('2026-07-12');
+    expect(e.endDate).toBe('2026-07-13');
+    expect(e.startTime).toBeNull();
+    expect(e.endTime).toBeNull();
+
+    const ics = buildICal('c', [e], STAMP);
+    expect(ics).toContain('DTSTART;VALUE=DATE:20260712');
+    expect(ics).toContain('DTEND;VALUE=DATE:20260714');
+    expect(ics.indexOf('DTSTART')).toBeLessThan(ics.indexOf('DTEND'));
+  });
+
+  it('renders a 3-day retreat as an all-day span (DTEND exclusive of the day after the last day)', () => {
+    // Local: starts 2026-07-10T09:00, ends 2026-07-12T16:00 — three calendar days.
+    const e = regToICalEvent(
+      regOf({ starts_at: '2026-07-10 14:00:00', ends_at: '2026-07-12 21:00:00' }),
+      'church.example',
+    );
+    expect(e.date).toBe('2026-07-10');
+    expect(e.endDate).toBe('2026-07-12');
+    expect(e.startTime).toBeNull();
+    expect(e.endTime).toBeNull();
+
+    const ics = buildICal('c', [e], STAMP);
+    expect(ics).toContain('DTSTART;VALUE=DATE:20260710');
+    expect(ics).toContain('DTEND;VALUE=DATE:20260713');
+  });
 });
 
 describe('calendar token lifecycle', () => {

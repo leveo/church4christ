@@ -9,7 +9,7 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { buildICal, meetingToICalEvent, regToICalEvent, type ICalEvent } from '../../lib/ical';
 import { i18nJoin } from '../../lib/db';
-import { addDays, todayInTz } from '../../lib/dates';
+import { addDays, todayInTz, utcToDatetimeLocal } from '../../lib/dates';
 import { listMeetingOccurrencesForPerson } from '../../lib/groupDb';
 import { listRegistrationsForPerson } from '../../lib/regDb';
 
@@ -96,7 +96,7 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
     ]);
     for (const m of meetings) events.push(meetingToICalEvent(m, host));
     for (const r of registrations) {
-      if (r.starts_at.slice(0, 10) >= from) events.push(regToICalEvent(r, host));
+      if (utcToDatetimeLocal(r.starts_at).slice(0, 10) >= from) events.push(regToICalEvent(r, host));
     }
   }
 
