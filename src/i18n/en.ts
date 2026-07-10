@@ -1320,6 +1320,8 @@ export default {
   'modules.people.desc': 'Member profiles, households, and pastoral notes.',
   'modules.children.label': 'Children',
   'modules.children.desc': "Children's check-in kiosk, events, and pickup security codes.",
+  'modules.page-builder.label': 'Page Builder',
+  'modules.page-builder.desc': 'Drag-and-drop layout editor for custom pages. Published pages keep rendering when this is off.',
   'modules.giving.label': 'Giving',
   'modules.giving.desc': 'Online giving, pledges, and member giving history.',
   'modules.registration.label': 'Registration',

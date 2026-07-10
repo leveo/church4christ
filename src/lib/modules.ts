@@ -9,7 +9,7 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 14 module keys, in display order (drives the admin Modules panel + nav).
+// The 15 module keys, in display order (drives the admin Modules panel + nav).
 // `giving` and `registration` are appended last: they are backend-gated (Supabase
 // only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
@@ -25,6 +25,7 @@ export const MODULE_KEYS = [
   'fellowships',
   'people',
   'children',
+  'page-builder',
   'giving',
   'registration',
 ] as const;
@@ -124,6 +125,15 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   children: {
     publicPrefixes: ['/kiosk'],
     adminPrefixes: ['/admin/children'],
+    navKeys: [],
+    uses: [],
+  },
+  'page-builder': {
+    // Gates AUTHORING only: published builder pages keep rendering when off
+    // (the /p/ route and block renderer are core, like the people module's
+    // panels) — a module toggle never breaks live content.
+    publicPrefixes: [],
+    adminPrefixes: ['/admin/pages/builder'],
     navKeys: [],
     uses: [],
   },

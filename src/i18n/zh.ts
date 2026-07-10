@@ -1318,6 +1318,8 @@ export default {
   'modules.people.desc': '成员档案、家庭与牧养记录。',
   'modules.children.label': '儿童事工',
   'modules.children.desc': '儿童签到台、活动设置与接送安全码。',
+  'modules.page-builder.label': '页面构建器',
+  'modules.page-builder.desc': '自定义页面的拖放布局编辑器。关闭后已发布的页面仍会正常显示。',
   'modules.giving.label': '奉献',
   'modules.giving.desc': '在线奉献、认献与个人奉献记录。',
   'modules.registration.label': '活动报名',

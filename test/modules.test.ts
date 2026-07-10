@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 14 module keys in display order', () => {
+  it('has all 15 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -22,6 +22,7 @@ describe('MODULES registry', () => {
       'fellowships',
       'people',
       'children',
+      'page-builder',
       'giving',
       'registration',
     ]);
@@ -152,5 +153,15 @@ describe('moduleForPath (longest-prefix wins)', () => {
     expect(moduleForPath('/serve/gifts/')).toBe('gifts');
     expect(moduleForPath('/bulletin/')).toBe('bulletins');
     expect(moduleForPath('/kiosk/')).toBe('children');
+  });
+});
+
+describe('page-builder module', () => {
+  it('owns the builder admin prefix; the classic pages admin stays core', () => {
+    expect(moduleForPath('/admin/pages/builder')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages/builder/new')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages/builder/123-abc')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages')).toBeNull();
+    expect(moduleForPath('/p/about')).toBeNull(); // public rendering never gated
   });
 });
