@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 13 module keys in display order', () => {
+  it('has all 14 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -21,6 +21,7 @@ describe('MODULES registry', () => {
       'articles',
       'fellowships',
       'people',
+      'children',
       'giving',
       'registration',
     ]);
@@ -114,6 +115,10 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/testimonies', 'testimonies'],
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
+    ['/admin/children', 'children'],
+    // ── children's check-in kiosk ──
+    ['/kiosk', 'children'],
+    ['/kiosk/abc123', 'children'],
     // ── always-on core → null ──
     ['/', null],
     ['/profile', null], // auth surface stays core
@@ -146,5 +151,6 @@ describe('moduleForPath (longest-prefix wins)', () => {
     expect(moduleForPath('/serve/')).toBe('serve');
     expect(moduleForPath('/serve/gifts/')).toBe('gifts');
     expect(moduleForPath('/bulletin/')).toBe('bulletins');
+    expect(moduleForPath('/kiosk/')).toBe('children');
   });
 });

@@ -51,6 +51,9 @@ describe('classifyRoute', () => {
     ['/register', 'public'],
     ['/register/thanks', 'public'],
     ['/api/register/submit', 'public'],
+    // ── children's check-in kiosk (T4): token-gated, not session-gated ──
+    ['/kiosk', 'public'],
+    ['/kiosk/abc123def456', 'public'],
     // ── admin-authored custom pages (T4): no explicit rule, falls through the
     // "everything else is public" default so the route itself enforces
     // published/preview visibility and 404s.
@@ -97,6 +100,8 @@ describe('classifyRoute', () => {
     ['/admin/reports', 'adminOnly'],
     ['/admin/teams', 'adminOnly'],
     ['/admin/navigation', 'adminOnly'],
+    ['/admin/children', 'adminOnly'],
+    ['/admin/children/kiosk', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

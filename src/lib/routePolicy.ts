@@ -62,10 +62,13 @@ const PUBLIC_PREFIXES = [
   // policy is not re-touched later; harmless while the module is disabled.
   '/register',
   '/api/register',
+  // The children's check-in kiosk: no session, gated by the token in the URL
+  // itself (/kiosk/<token>), not by the route policy.
+  '/kiosk',
 ];
 
 // Site-admin-only areas under /admin. Checked BEFORE the console list.
-const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams', '/admin/navigation'];
+const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams', '/admin/navigation', '/admin/children'];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).
 // Any /admin path in NEITHER list fails closed to adminOnly.
