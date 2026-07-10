@@ -232,6 +232,28 @@ describe('check-in/out, roster, and weekly stats', () => {
       expect(results).toHaveLength(1);
     });
 
+    it('re-checking in a checked-out child re-opens the row instead of silently no-op-ing', async () => {
+      const first = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      const checkin = await env.DB
+        .prepare(`SELECT id FROM checkins WHERE household_id = ? AND household_member_id = ?`)
+        .bind(chenId, ethanId)
+        .first<{ id: number }>();
+      const out = await checkOutChild(env.DB, { checkinId: checkin!.id, code: first.code });
+      expect(out).toBe(true);
+
+      const second = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      expect(second.code).toBe(first.code);
+      expect(second.checkedIn).toEqual(['Ethan Chen']);
+
+      const { results } = await env.DB
+        .prepare(`SELECT id, checked_out_at AS checkedOutAt, security_code AS code FROM checkins WHERE household_id = ? AND household_member_id = ?`)
+        .bind(chenId, ethanId)
+        .all<{ id: number; checkedOutAt: string | null; code: string }>();
+      expect(results).toHaveLength(1);
+      expect(results[0].checkedOutAt).toBeNull();
+      expect(results[0].code).toBe(first.code);
+    });
+
     it('same household, different event gets a different code (not reused across events)', async () => {
       const otherEventId = await saveEvent(env.DB, { name: "Kids' Church", weekday: null });
 

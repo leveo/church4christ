@@ -109,6 +109,7 @@ export async function searchHouseholds(db: AppDb, q: string): Promise<KioskHouse
              (h.phone IS NOT NULL AND ${digitStripExpr('h.phone')} LIKE '%' || ? || '%' ESCAPE '\\')
              OR (p.phone IS NOT NULL AND ${digitStripExpr('p.phone')} LIKE '%' || ? || '%' ESCAPE '\\')
            )
+         ORDER BY h.name
          LIMIT 10`,
       )
       .bind(likeEscape(digits), likeEscape(digits))
@@ -122,6 +123,7 @@ export async function searchHouseholds(db: AppDb, q: string): Promise<KioskHouse
          FROM households h
          JOIN household_members c ON c.household_id = h.id AND c.role = 'child'
          WHERE h.deleted_at IS NULL AND LOWER(c.display_name) LIKE LOWER(?) ESCAPE '\\'
+         ORDER BY h.name
          LIMIT 10`,
       )
       .bind(like)
@@ -209,7 +211,12 @@ function weekStartOf(dateStr: string): string {
  * checking in together share one security code (reused if the household
  * already has a code for this event+date, otherwise freshly generated).
  * Re-checking in an already-checked-in child is idempotent: the duplicate
- * insert is swallowed via `isUniqueViolation` and treated as success.
+ * insert is swallowed via `isUniqueViolation` and treated as success. A child
+ * who was already checked OUT today (the kiosk makes them pickable again)
+ * hits the same unique violation on `(event_id, household_member_id,
+ * checkin_date)` — in that case this is a genuine re-admission, so the
+ * existing row is re-opened (`checked_out_at` cleared) rather than left
+ * checked out under a confirmation that did nothing.
  */
 export async function checkInChildren(
   db: AppDb,
@@ -244,6 +251,13 @@ export async function checkInChildren(
         .run();
     } catch (e) {
       if (!isUniqueViolation(e)) throw e;
+      // Row already exists for this event/child/day — either a duplicate
+      // submit (already checked in, no-op) or a re-admission (was checked
+      // out, so re-open it).
+      await db
+        .prepare(`UPDATE checkins SET checked_out_at = NULL WHERE event_id = ? AND household_member_id = ? AND checkin_date = ?`)
+        .bind(eventId, child.id, date)
+        .run();
     }
   }
 

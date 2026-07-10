@@ -1444,6 +1444,7 @@ export default {
   'kiosk.noResults': '未找到家庭信息，请联系接待人员协助。',
   'kiosk.noEvents': '当前没有开放的签到活动。',
   'kiosk.adults': '家长',
+  'kiosk.childrenCount': '{count} 个孩子',
   'kiosk.selectChildren': '点选要签到的孩子',
   'kiosk.event': '活动',
   'kiosk.checkIn': '签到',

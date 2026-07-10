@@ -79,9 +79,14 @@ const kioskNotice =
                   class="block w-full rounded-2xl border border-border bg-surface-raised p-6 shadow-sm hover:bg-surface-sunken"
                 >
                   <p class="text-2xl font-bold">{h.name}</p>
-                  {h.adults.length > 0 && <p class="mt-1 text-ink-muted">{h.adults.join(', ')}</p>}
+                  {h.adults.length > 0 && (
+                    <p class="mt-1 text-ink-muted">
+                      <span class="text-sm text-ink-subtle">{t(lang, 'kiosk.adults')}: </span>
+                      {h.adults.join(', ')}
+                    </p>
+                  )}
                   {h.phone && <p class="mt-1 text-ink-muted">{maskPhone(h.phone)}</p>}
-                  <p class="mt-1 text-ink-muted">{h.children.length}</p>
+                  <p class="mt-1 text-ink-muted">{t(lang, 'kiosk.childrenCount', { count: h.children.length })}</p>
                 </a>
               ))
             )}

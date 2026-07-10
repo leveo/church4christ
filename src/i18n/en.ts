@@ -1446,6 +1446,7 @@ export default {
   'kiosk.noResults': 'No family found — please ask a greeter for help.',
   'kiosk.noEvents': 'No check-in events are open right now.',
   'kiosk.adults': 'Adults',
+  'kiosk.childrenCount': '{count} children',
   'kiosk.selectChildren': 'Tap the children to check in',
   'kiosk.event': 'Event',
   'kiosk.checkIn': 'Check in',

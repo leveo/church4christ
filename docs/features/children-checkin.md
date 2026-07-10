@@ -3,8 +3,8 @@
 ## What it does
 
 A touch-friendly **kiosk** — meant for a tablet at the check-in table — where a parent
-finds their family, checks their kids in for the morning, and walks away with a printed
-or on-screen **pickup code**. No badges to print, no clipboard, and no separate
+finds their family, checks their kids in for the morning, and walks away with an
+on-screen **pickup code**. No badges to print, no clipboard, and no separate
 registration step: every child already recorded under a household in People is
 check-in-able the moment this feature is turned on.
 
