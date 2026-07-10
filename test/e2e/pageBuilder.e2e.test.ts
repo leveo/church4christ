@@ -2,11 +2,13 @@
 // zero-JS rendering path (builder-format pages render their layout tree as
 // plain HTML with no island); test/e2e/customPages.e2e.test.ts still covers
 // the markdown path. Admin/builder-route cases are appended by Task 7.
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { get } from './helpers';
+import { get, post, ORIGIN } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { savePageLayout } from '../../src/lib/pagesDb';
+import { t } from '../../src/lib/i18n';
+import { MODULE_KEYS } from '../../src/lib/modules';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 
@@ -71,5 +73,97 @@ describe('builder pages render zero-JS on the public route', () => {
 
     const editor = await get('/en/p/e2e-corrupt', { cookie: await sessionCookie(2, 'pastor.david@example.com') });
     expect(await editor.text()).toContain('invalid layout data');
+  });
+});
+
+function jsonPost(path: string, body: unknown, cookie: string): Promise<Response> {
+  return SELF.fetch(`${ORIGIN}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
+    body: JSON.stringify(body),
+    redirect: 'manual',
+  });
+}
+
+describe('builder admin route', () => {
+  it('anon GET redirects to signin; editor GET mounts the island', async () => {
+    const anon = await get('/admin/pages/builder/new');
+    expect(anon.status).toBe(303);
+
+    const editor = await get('/admin/pages/builder/new', { cookie: await sessionCookie(2, 'pastor.david@example.com') });
+    expect(editor.status).toBe(200);
+    const html = await editor.text();
+    expect(html).toContain('astro-island'); // client:only mount point
+  });
+
+  it('module off → 404; back on → 200 (modules panel round-trip, admin session)', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    // Disable: write every module row except page-builder as '1' (full write,
+    // like the panel does) — mirrors modules.e2e.test.ts's modulesBody helper.
+    const off = new URLSearchParams({ action: 'modules' });
+    for (const key of MODULE_KEYS) if (key !== 'page-builder') off.append(`module.${key}`, '1');
+    await post('/admin/settings', off.toString(), { cookie: admin });
+
+    const gated = await get('/admin/pages/builder/new', { cookie: admin });
+    expect(gated.status).toBe(404);
+    // Classic pages admin stays reachable (core, not module-owned).
+    const classic = await get('/admin/pages', { cookie: admin });
+    expect(classic.status).toBe(200);
+
+    const on = new URLSearchParams({ action: 'modules' });
+    for (const key of MODULE_KEYS) on.append(`module.${key}`, '1');
+    await post('/admin/settings', on.toString(), { cookie: admin });
+    const back = await get('/admin/pages/builder/new', { cookie: admin });
+    expect(back.status).toBe(200);
+  });
+
+  it('JSON save creates a builder page that renders publicly; id echoes back', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const res = await jsonPost('/admin/pages/builder/new', {
+      action: 'save', id: null, slug: 'e2e-saved', published: true,
+      title_en: 'Saved', title_zh: '', layout: {
+        v: 1,
+        blocks: [{ id: 's1', type: 'section', props: { bg: 'none', width: 'content', padY: 'md' },
+          children: [{ id: 'h1', type: 'heading', props: { level: 2, text: { en: 'From the island', zh: '' }, align: 'left', size: 'md' } }] }],
+      },
+    }, editor);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; id: string }>();
+    expect(body.ok).toBe(true);
+    expect(body.id).toBeTruthy();
+
+    const pub = await get('/en/p/e2e-saved');
+    expect(pub.status).toBe(200);
+    expect(await pub.text()).toContain('From the island');
+  });
+
+  it('rejects a hostile layout (400 invalid_layout) and a duplicate slug (409)', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const evil = await jsonPost('/admin/pages/builder/new', {
+      action: 'save', id: null, slug: 'e2e-evil', published: false, title_en: 'X', title_zh: '',
+      layout: { v: 1, blocks: [{ id: 's1', type: 'section', props: { bg: 'none', width: 'content', padY: 'md' },
+        children: [{ id: 'b1', type: 'button', props: { label: { en: 'x', zh: '' }, href: 'javascript:alert(1)', variant: 'primary', align: 'left' } }] }] },
+    }, editor);
+    expect(evil.status).toBe(400);
+    expect((await evil.json<{ error: string }>()).error).toBe('invalid_layout');
+
+    const dup = await jsonPost('/admin/pages/builder/new', {
+      action: 'save', id: null, slug: 'e2e-saved', published: false, title_en: 'Dup', title_zh: '',
+      layout: { v: 1, blocks: [] },
+    }, editor);
+    expect(dup.status).toBe(409);
+    expect((await dup.json<{ error: string }>()).error).toBe('slug_taken');
+  });
+
+  it('upload rejects a non-image with the mapped i18n error key', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const fd = new FormData();
+    fd.append('action', 'upload');
+    fd.append('file', new File(['hello'], 'x.txt', { type: 'text/plain' }));
+    const res = await SELF.fetch(`${ORIGIN}/admin/pages/builder/new`, {
+      method: 'POST', headers: { origin: ORIGIN, cookie: editor }, body: fd, redirect: 'manual',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('errors.imageType');
   });
 });
