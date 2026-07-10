@@ -74,6 +74,7 @@ describe('classifyRoute', () => {
     ['/admin/prayer-sheets', 'console'],
     ['/admin/announcements', 'console'],
     ['/admin/events', 'console'],
+    ['/admin/pages', 'console'],
     ['/admin/prayer-wall', 'console'],
     ['/admin/revisions', 'console'],
     ['/admin/ministries', 'console'],

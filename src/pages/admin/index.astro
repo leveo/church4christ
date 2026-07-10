@@ -80,13 +80,14 @@ const stats = [
   ...(isStaff && modules.has('prayer-sheets') ? [{ label: t(lang, 'admin.dashboard.prayerSheets'), value: `${prayerCounts.published} / ${prayerCounts.draft}` }] : []),
 ];
 
-// Revision entity → edit-page href (announcement/event have no per-id editor yet).
+// Revision entity → edit-page href (announcement/event/custom_page have no per-id editor).
 const REV_BASE: Record<string, string> = {
   bulletin: '/admin/bulletins',
   sermon: '/admin/sermons',
   prayer_sheet: '/admin/prayer-sheets',
   announcement: '/admin/announcements',
   event: '/admin/events',
+  custom_page: '/admin/pages',
 };
 function revHref(r: RecentRevisionRow): string {
   const base = REV_BASE[r.entity] ?? '/admin';

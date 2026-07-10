@@ -1,0 +1,229 @@
+---
+// Custom pages admin (console class — re-checks editor∪admin, 403s a bare team
+// leader). Same inline add/edit model as events (?edit=<id>, save/toggle/delete):
+// pages are admin-authored static Markdown content (src/lib/markdown.ts,
+// XSS-safe), each with a unique slug and per-locale title + body. The preview
+// panel renders the last SAVED body (no live JS preview — classic form only).
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseCustomPageForm } from '../../../lib/validate';
+import { listCustomPages, getCustomPage, saveCustomPage, deleteCustomPage } from '../../../lib/pagesDb';
+import { renderMarkdown } from '../../../lib/markdown';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { localePath, type Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+let badRequest = false; // unparseable POST body → generic localized banner, not a 500
+
+if (Astro.request.method === 'POST') {
+  // A malformed body (bad content type, truncated stream) throws here;
+  // re-render with a banner instead of surfacing a 500.
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    badRequest = true;
+  }
+  if (fd) {
+    const action = String(fd.get('action') ?? '');
+    const idRaw = String(fd.get('id') ?? '').trim();
+    const id = idRaw || null;
+    if (action === 'delete' && id !== null) {
+      await deleteCustomPage(db, id);
+      return Astro.redirect('/admin/pages?deleted=1', 303);
+    }
+    if (action === 'toggle' && id !== null) {
+      // No dedicated toggle helper on the data layer (Task 2's pagesDb exports
+      // only save/get/list/delete) — flip published via a normal save so the
+      // toggle still snapshots a revision like every other pages write.
+      const page = await getCustomPage(db, id);
+      if (page) {
+        await saveCustomPage(db, {
+          id: page.id,
+          slug: page.slug,
+          published: !page.published,
+          title_en: page.i18n.en.title,
+          title_zh: page.i18n.zh.title,
+          body_en: page.i18n.en.body_md,
+          body_zh: page.i18n.zh.body_md,
+          updatedBy: user.email,
+        });
+      }
+      return Astro.redirect('/admin/pages?saved=1', 303);
+    }
+    if (action === 'save') {
+      const parsed = parseCustomPageForm(fd);
+      if (!parsed.ok) {
+        errors = parsed.errors;
+        failedId = id === null ? '' : id;
+      } else {
+        const res = await saveCustomPage(db, { ...parsed.data, updatedBy: user.email });
+        if (!res.ok) {
+          errors = { slug: 'errors.slugTaken' };
+          failedId = id === null ? '' : id;
+        } else {
+          return Astro.redirect('/admin/pages?saved=1', 303);
+        }
+      }
+    }
+  }
+}
+
+const rows = await listCustomPages(db);
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : (editParam ?? '');
+const editingPage = editId ? await getCustomPage(db, editId) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const echoing = fd !== null && failedId !== null;
+const v = echoing
+  ? {
+      slug: g('slug'), published: fd!.get('published') !== null,
+      titleEn: g('title_en'), titleZh: g('title_zh'), bodyEn: g('body_en'), bodyZh: g('body_zh'),
+    }
+  : editingPage
+    ? {
+        slug: editingPage.slug, published: editingPage.published,
+        titleEn: editingPage.i18n.en.title, titleZh: editingPage.i18n.zh.title,
+        bodyEn: editingPage.i18n.en.body_md, bodyZh: editingPage.i18n.zh.body_md,
+      }
+    : { slug: '', published: false, titleEn: '', titleZh: '', bodyEn: '', bodyZh: '' };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.pages.title');
+const formHeading = editId ? t(lang, 'admin.pages.editTitle') : t(lang, 'admin.pages.newTitle');
+const viewHref = editingPage?.published ? localePath(lang, `/p/${editingPage.slug}`) : null;
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.pages.slug')}</span>
+        <input name="slug" value={v.slug} class={`${tin} font-mono`} />
+        <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.pages.slugHint')}</p>
+        {errors.slug && <span class={errorText}>{t(lang, errors.slug)}</span>}
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="published" checked={v.published} /> {t(lang, 'admin.status.published')}
+      </label>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.pages.titleEn')}</span>
+          <input name="title_en" value={v.titleEn} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.pages.titleZh')}</span>
+          <input name="title_zh" value={v.titleZh} class={tin} />
+        </label>
+      </div>
+      {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.hint')}</p>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.pages.bodyEn')}</span>
+          <textarea name="body_en" rows="14" class={`${tin} font-mono`}>{v.bodyEn}</textarea>
+          {errors.body_en && <span class={errorText}>{t(lang, errors.body_en)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.pages.bodyZh')}</span>
+          <textarea name="body_zh" rows="14" class={`${tin} font-mono`}>{v.bodyZh}</textarea>
+          {errors.body_zh && <span class={errorText}>{t(lang, errors.body_zh)}</span>}
+        </label>
+      </div>
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.markdownHint')}</p>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {viewHref && <a href={viewHref} class="text-sm text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
+        {editId && <a href="/admin/pages" class="text-sm text-primary hover:underline">{t(lang, 'admin.pages.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  {
+    editingPage && (
+      <section class={`${card} mt-6 max-w-2xl`}>
+        <h2 class={h2}>{t(lang, 'admin.pages.previewTitle')}</h2>
+        <div class="prose" set:html={renderMarkdown(editingPage.i18n[lang].body_md)} />
+      </section>
+    )
+  }
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.pages.existing')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.pages.colSlug')}</th>
+          <th class={th}>{t(lang, 'admin.pages.colTitle')}</th>
+          <th class={th}>{t(lang, 'admin.pages.colStatus')}</th>
+          <th class={th}>{t(lang, 'admin.pages.colUpdated')}</th>
+          <th class={th}>{t(lang, 'admin.pages.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.pages.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={`${td} font-mono`}>{r.slug}</td>
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
+                </td>
+                <td class={td}>
+                  <span class={`${badge} ${r.published ? badgeActive : badgeInactive}`}>
+                    {r.published ? t(lang, 'admin.status.published') : t(lang, 'admin.status.draft')}
+                  </span>
+                </td>
+                <td class={`${td} text-ink-muted`}>{r.updated_at}</td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/pages?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>
+                        {r.published ? t(lang, 'admin.pages.unpublish') : t(lang, 'admin.pages.publish')}
+                      </button>
+                    </form>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.pages.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

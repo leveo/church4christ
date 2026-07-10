@@ -34,6 +34,7 @@ describe('admin role matrix (anon 303 / member 403 / editor content-only / admin
     { path: '/admin/prayer-sheets', kind: 'content' },
     { path: '/admin/announcements', kind: 'content' },
     { path: '/admin/events', kind: 'content' },
+    { path: '/admin/pages', kind: 'content' },
     { path: '/admin/prayer-wall', kind: 'content' },
     { path: '/admin/revisions/bulletin/1', kind: 'content' }, // seeded bulletin id 1
     { path: '/admin/people', kind: 'adminOnly' },

@@ -75,6 +75,7 @@ const ADMIN_CONSOLE = [
   '/admin/prayer-sheets',
   '/admin/announcements',
   '/admin/events',
+  '/admin/pages',
   '/admin/prayer-wall',
   '/admin/revisions',
   '/admin/ministries',
