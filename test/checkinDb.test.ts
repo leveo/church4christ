@@ -2,15 +2,23 @@
 // admin CRUD (list/save/toggle) and the kiosk household search — digit-mode vs
 // name-mode dispatch, LIKE-escaping, phone digit-stripping across households.phone
 // and an adult member's people.phone, and the "only households with a child"
-// filter. Check-in/checkout/stats land in a later task.
+// filter. Task 3 adds check-in/checkout, the kiosk household status view, the
+// roster, and weekly stats.
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   listEventsAdmin,
   listActiveEvents,
   saveEvent,
   toggleEventActive,
   searchHouseholds,
+  checkInChildren,
+  checkOutChild,
+  staffCheckOut,
+  getHouseholdForKiosk,
+  todayRoster,
+  weeklyStats,
+  generateSecurityCode,
 } from '../src/lib/checkinDb';
 
 async function reset(): Promise<void> {
@@ -157,5 +165,222 @@ describe('searchHouseholds', () => {
   it('empty query returns []', async () => {
     expect(await searchHouseholds(env.DB, '')).toEqual([]);
     expect(await searchHouseholds(env.DB, '   ')).toEqual([]);
+  });
+});
+
+describe('check-in/out, roster, and weekly stats', () => {
+  // Fixed Sunday so week-start math ('weekStartOf') is deterministic; never
+  // todayInTz() in these unit tests.
+  const date = '2026-07-05';
+
+  let chenId: number;
+  let linId: number;
+  let ethanId: number;
+  let miaId: number;
+  let davidAdultId: number;
+  let noahId: number;
+  let graceAdultMemberId: number;
+  let eventId: number;
+
+  beforeEach(async () => {
+    await seedHouseholds();
+    chenId = (await env.DB.prepare(`SELECT id FROM households WHERE name = 'Chen Family'`).first<{ id: number }>())!.id;
+    linId = (await env.DB.prepare(`SELECT id FROM households WHERE name = 'Lin Family'`).first<{ id: number }>())!.id;
+    ethanId = (
+      await env.DB.prepare(`SELECT id FROM household_members WHERE household_id = ? AND display_name = 'Ethan Chen'`).bind(chenId).first<{ id: number }>()
+    )!.id;
+    miaId = (
+      await env.DB.prepare(`SELECT id FROM household_members WHERE household_id = ? AND display_name = 'Mia Chen'`).bind(chenId).first<{ id: number }>()
+    )!.id;
+    davidAdultId = (
+      await env.DB.prepare(`SELECT id FROM household_members WHERE household_id = ? AND display_name = 'David Chen'`).bind(chenId).first<{ id: number }>()
+    )!.id;
+    noahId = (
+      await env.DB.prepare(`SELECT id FROM household_members WHERE household_id = ? AND display_name = 'Noah Lin'`).bind(linId).first<{ id: number }>()
+    )!.id;
+    graceAdultMemberId = (
+      await env.DB.prepare(`SELECT id FROM household_members WHERE household_id = ? AND display_name = 'Grace Lin'`).bind(linId).first<{ id: number }>()
+    )!.id;
+    eventId = await saveEvent(env.DB, { name: 'Nursery', weekday: 0 });
+  });
+
+  describe('checkInChildren', () => {
+    it('inserts rows, siblings share one code, names returned', async () => {
+      const result = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId, miaId], date });
+      expect(result.code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/);
+      expect(result.checkedIn.slice().sort()).toEqual(['Ethan Chen', 'Mia Chen']);
+
+      const { results } = await env.DB
+        .prepare(`SELECT security_code AS code FROM checkins WHERE household_id = ? ORDER BY id`)
+        .bind(chenId)
+        .all<{ code: string }>();
+      expect(results).toHaveLength(2);
+      expect(results[0].code).toBe(result.code);
+      expect(results[1].code).toBe(result.code);
+    });
+
+    it('second check-in same child/event/date is idempotent and keeps the code', async () => {
+      const first = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      const second = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      expect(second.code).toBe(first.code);
+      expect(second.checkedIn).toEqual(['Ethan Chen']);
+
+      const { results } = await env.DB
+        .prepare(`SELECT id FROM checkins WHERE household_id = ? AND household_member_id = ?`)
+        .bind(chenId, ethanId)
+        .all();
+      expect(results).toHaveLength(1);
+    });
+
+    it('same household, different event gets a different code (not reused across events)', async () => {
+      const otherEventId = await saveEvent(env.DB, { name: "Kids' Church", weekday: null });
+
+      // Force distinct codes deterministically: first call's 4 Math.random()
+      // draws map to early alphabet letters, the second call's to late ones —
+      // avoids a real (if astronomically unlikely) flake from letting two
+      // independently-random 4-char codes collide.
+      const draws = [0, 0.1, 0.2, 0.3, 0.9, 0.8, 0.7, 0.6];
+      let i = 0;
+      vi.spyOn(Math, 'random').mockImplementation(() => draws[i++]);
+      try {
+        const first = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+        const second = await checkInChildren(env.DB, { eventId: otherEventId, householdId: chenId, memberIds: [miaId], date });
+        expect(second.code).not.toBe(first.code);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
+    it('rejects member ids from another household', async () => {
+      await expect(
+        checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [graceAdultMemberId], date }),
+      ).rejects.toThrow('no_children');
+    });
+
+    it('rejects an adult member id even within the same household', async () => {
+      await expect(
+        checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [davidAdultId], date }),
+      ).rejects.toThrow('no_children');
+    });
+
+    it('rejects an empty memberIds list', async () => {
+      await expect(checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [], date })).rejects.toThrow('no_children');
+    });
+  });
+
+  describe('getHouseholdForKiosk', () => {
+    it('shows checked-in status per event', async () => {
+      await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+
+      const result = await getHouseholdForKiosk(env.DB, chenId, date);
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe('Chen Family');
+
+      const ethan = result!.children.find((c) => c.name === 'Ethan Chen')!;
+      expect(ethan.checkins).toHaveLength(1);
+      expect(ethan.checkins[0].eventName).toBe('Nursery');
+      expect(ethan.checkins[0].checkedOutAt).toBeNull();
+
+      const mia = result!.children.find((c) => c.name === 'Mia Chen')!;
+      expect(mia.checkins).toHaveLength(0);
+    });
+
+    it('returns null for a missing or deleted household', async () => {
+      expect(await getHouseholdForKiosk(env.DB, 999999, date)).toBeNull();
+    });
+  });
+
+  describe('checkOutChild / staffCheckOut', () => {
+    it('wrong code returns false and leaves the row open', async () => {
+      const { code } = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      const checkin = await env.DB.prepare(`SELECT id FROM checkins WHERE household_member_id = ?`).bind(ethanId).first<{ id: number }>();
+      const wrongCode = code === 'QQQQ' ? 'PPPP' : 'QQQQ';
+
+      const ok = await checkOutChild(env.DB, { checkinId: checkin!.id, code: wrongCode });
+      expect(ok).toBe(false);
+
+      const row = await env.DB.prepare(`SELECT checked_out_at FROM checkins WHERE id = ?`).bind(checkin!.id).first<{ checked_out_at: string | null }>();
+      expect(row!.checked_out_at).toBeNull();
+    });
+
+    it('right code (case-insensitive) sets checked_out_at once, and a second attempt fails', async () => {
+      const { code } = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      const checkin = await env.DB.prepare(`SELECT id FROM checkins WHERE household_member_id = ?`).bind(ethanId).first<{ id: number }>();
+
+      const ok = await checkOutChild(env.DB, { checkinId: checkin!.id, code: code.toLowerCase() });
+      expect(ok).toBe(true);
+
+      const row = await env.DB.prepare(`SELECT checked_out_at FROM checkins WHERE id = ?`).bind(checkin!.id).first<{ checked_out_at: string | null }>();
+      expect(row!.checked_out_at).not.toBeNull();
+
+      const again = await checkOutChild(env.DB, { checkinId: checkin!.id, code });
+      expect(again).toBe(false);
+    });
+
+    it('staffCheckOut needs no code', async () => {
+      await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
+      const checkin = await env.DB.prepare(`SELECT id FROM checkins WHERE household_member_id = ?`).bind(ethanId).first<{ id: number }>();
+
+      await staffCheckOut(env.DB, checkin!.id);
+
+      const row = await env.DB.prepare(`SELECT checked_out_at FROM checkins WHERE id = ?`).bind(checkin!.id).first<{ checked_out_at: string | null }>();
+      expect(row!.checked_out_at).not.toBeNull();
+    });
+  });
+
+  describe('todayRoster', () => {
+    it('returns joined child/household/event rows for the date only', async () => {
+      await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId, miaId], date });
+      await checkInChildren(env.DB, { eventId, householdId: linId, memberIds: [noahId], date: '2026-07-06' });
+
+      const roster = await todayRoster(env.DB, date);
+      expect(roster).toHaveLength(2);
+      expect(roster.map((r) => r.childName).slice().sort()).toEqual(['Ethan Chen', 'Mia Chen']);
+      expect(roster.every((r) => r.householdName === 'Chen Family')).toBe(true);
+      expect(roster.every((r) => r.eventName === 'Nursery')).toBe(true);
+      expect(roster.every((r) => r.checkedOutAt === null)).toBe(true);
+    });
+  });
+
+  describe('weeklyStats', () => {
+    it('zero-fills 12 weeks, buckets Sat/Sun boundary correctly', async () => {
+      // 2026-06-27 is a Saturday (week starting 2026-06-21); 2026-06-28 is the
+      // very next day, a Sunday (week starting on itself) — different weeks.
+      await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date: '2026-06-27' });
+      await checkInChildren(env.DB, { eventId, householdId: linId, memberIds: [noahId], date: '2026-06-28' });
+      await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [miaId], date });
+
+      const stats = await weeklyStats(env.DB, { today: date });
+
+      expect(stats.weeks).toHaveLength(12);
+      expect(stats.weeks.every((w) => new Date(`${w.weekStart}T00:00:00Z`).getUTCDay() === 0)).toBe(true);
+      expect(stats.weeks[stats.weeks.length - 1].weekStart).toBe(date);
+
+      const satWeek = stats.weeks.find((w) => w.weekStart === '2026-06-21')!;
+      const sunWeek = stats.weeks.find((w) => w.weekStart === '2026-06-28')!;
+      expect(satWeek.total).toBe(1);
+      expect(sunWeek.total).toBe(1);
+
+      expect(stats.thisWeek).toBe(1);
+      expect(stats.distinctChildrenThisMonth).toBe(1); // only the 'date' (July) check-in
+      expect(stats.activeEvents).toBe(1);
+
+      const eventStats = stats.byEvent.find((e) => e.eventId === eventId)!;
+      expect(eventStats.name).toBe('Nursery');
+      expect(eventStats.counts).toHaveLength(4);
+      expect(eventStats.counts[3]).toBe(1); // last (this week) bucket
+    });
+  });
+});
+
+describe('generateSecurityCode', () => {
+  it('is 4 chars from the unambiguous alphabet (no 0/O/1/I/L)', () => {
+    const code = generateSecurityCode();
+    expect(code).toHaveLength(4);
+    expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/);
+  });
+
+  it('is deterministic given a rand function', () => {
+    expect(generateSecurityCode(() => 0)).toBe('AAAA');
   });
 });
