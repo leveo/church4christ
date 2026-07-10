@@ -23,6 +23,7 @@ import {
   listGroupMembers,
   listGroups,
   listGroupsAdmin,
+  listMeetingOccurrencesForPerson,
   listMyGroups,
   listPendingApplicationsForGroups,
   removeGroupMember,
@@ -244,6 +245,38 @@ describe('membership', () => {
     expect(mine[0].is_leader).toBe(1);
     expect(mine[1].name).toBe('Second'); // no zh row -> en fallback
     expect(mine[1].is_leader).toBe(0);
+  });
+});
+
+describe('listMeetingOccurrencesForPerson', () => {
+  it("computes occurrences across all of a person's groups, localized and sorted by date", async () => {
+    const g1 = await saveGroup(env.DB, null, { ...baseInput, slug: 'g1' }); // weekly, Sunday
+    const g2 = await saveGroup(env.DB, null, {
+      ...baseInput,
+      slug: 'g2',
+      meetingWeekday: 3, // Wednesday
+      meetingFrequency: 'monthly',
+      meetingTime: null,
+      meetingLocation: null,
+      nameEn: 'Wednesday Class',
+      nameZh: null,
+    });
+    const otherGroup = await saveGroup(env.DB, null, { ...baseInput, slug: 'g3' });
+    await addGroupMember(env.DB, g1, 1, false);
+    await addGroupMember(env.DB, g2, 1, false);
+    await addGroupMember(env.DB, otherGroup, 2, false); // person 1 is not a member of this one
+
+    const occurrences = await listMeetingOccurrencesForPerson(env.DB, 1, '2026-07-01', '2026-07-15', 'zh');
+    expect(occurrences).toEqual([
+      { date: '2026-07-01', group_id: g2, group_name: 'Wednesday Class', meeting_time: null, meeting_location: null },
+      { date: '2026-07-05', group_id: g1, group_name: '恩典团契', meeting_time: '10:00', meeting_location: 'Room 1' },
+      { date: '2026-07-12', group_id: g1, group_name: '恩典团契', meeting_time: '10:00', meeting_location: 'Room 1' },
+    ]);
+  });
+
+  it('returns [] for a person with no groups', async () => {
+    const occurrences = await listMeetingOccurrencesForPerson(env.DB, 99, '2026-07-01', '2026-07-15', 'en');
+    expect(occurrences).toEqual([]);
   });
 });
 

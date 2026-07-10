@@ -11,6 +11,7 @@
 import type { AppDb } from './appDb';
 import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
+import { addDays, nextWeekday } from './dates';
 
 export type GroupKind = 'fellowship' | 'sunday_school';
 
@@ -28,6 +29,7 @@ export interface MemberGroup {
   open_signup: number;
   active: number;
   sort: number;
+  created_at: string;
   name: string; // i18nJoin-coalesced
   description: string | null; // i18nJoin-coalesced
 }
@@ -36,7 +38,7 @@ const GROUP_COLS = `g.id AS id, g.slug AS slug, g.kind AS kind, g.term_label AS 
               g.term_start AS term_start, g.term_end AS term_end, g.meeting_weekday AS meeting_weekday,
               g.meeting_time AS meeting_time, g.meeting_frequency AS meeting_frequency,
               g.meeting_location AS meeting_location, g.open_signup AS open_signup, g.active AS active,
-              g.sort AS sort`;
+              g.sort AS sort, g.created_at AS created_at`;
 
 /** Public/portal list: active, non-deleted, localized. kind filter optional. Portable SQL (runs on D1). */
 export async function listGroups(db: AppDb, locale: Locale, opts?: { kind?: GroupKind }): Promise<MemberGroup[]> {
@@ -479,4 +481,112 @@ export async function decideGroupApplication(
   }
   await db.batch(statements);
   return row;
+}
+
+// ---- meeting occurrence computation (portal calendar + ICS feed) ----
+
+const DAY_MS = 86_400_000;
+
+/** Day difference (b - a), computed on the date string at UTC midnight —
+ *  same DST-immune convention as addDays/nextWeekday in dates.ts. */
+function diffDays(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY_MS);
+}
+
+/** 'YYYY-MM' key of the month after `ym`. */
+function nextYearMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+export interface MeetingOccurrence {
+  date: string;
+  group_id: number;
+  group_name: string;
+  meeting_time: string | null;
+  meeting_location: string | null;
+}
+
+/**
+ * Pure date math: the meeting dates a group falls on within [from, to]
+ * (inclusive 'YYYY-MM-DD' bounds), clipped to the group's term when set.
+ * meeting_weekday follows the migration's 0=Sunday convention (the same
+ * convention nextWeekday uses). A null weekday means "no fixed schedule" ->
+ * []; a null frequency is treated as weekly (the column allows unset, though
+ * no shipped group combines that with a weekday).
+ *  - weekly: every matching weekday in range.
+ *  - biweekly: every 14 days from an anchor — the group's term_start, or
+ *    (for a long-running group with no term) its created_at — so the
+ *    two-week cadence is stable across queries instead of drifting with
+ *    whatever `from` happens to be.
+ *  - monthly: the first matching weekday of each calendar month in range.
+ */
+export function computeMeetingDates(
+  group: {
+    meeting_weekday: number | null;
+    meeting_frequency: string | null;
+    term_start: string | null;
+    term_end: string | null;
+    created_at: string;
+  },
+  from: string,
+  to: string,
+): string[] {
+  if (group.meeting_weekday === null) return [];
+  const weekday = group.meeting_weekday;
+  const effectiveFrom = group.term_start && group.term_start > from ? group.term_start : from;
+  const effectiveTo = group.term_end && group.term_end < to ? group.term_end : to;
+  if (effectiveFrom > effectiveTo) return [];
+
+  const frequency = group.meeting_frequency ?? 'weekly';
+  const dates: string[] = [];
+
+  if (frequency === 'monthly') {
+    let ym = effectiveFrom.slice(0, 7);
+    const toYm = effectiveTo.slice(0, 7);
+    while (ym <= toYm) {
+      const occurrence = nextWeekday(`${ym}-01`, weekday);
+      if (occurrence >= effectiveFrom && occurrence <= effectiveTo) dates.push(occurrence);
+      ym = nextYearMonth(ym);
+    }
+    return dates;
+  }
+
+  const step = frequency === 'biweekly' ? 14 : 7;
+  let anchor = nextWeekday(effectiveFrom, weekday);
+  if (frequency === 'biweekly') {
+    const anchorBase = group.term_start ?? group.created_at.slice(0, 10);
+    const biweeklyAnchor = nextWeekday(anchorBase, weekday);
+    const cycles = Math.ceil(diffDays(biweeklyAnchor, effectiveFrom) / step);
+    anchor = addDays(biweeklyAnchor, cycles * step);
+  }
+  for (let d = anchor; d <= effectiveTo; d = addDays(d, step)) dates.push(d);
+  return dates;
+}
+
+/** Occurrences for all of the person's groups in [from,to] (uses
+ *  listMyGroups; Supabase-only — caller gates on the portal module). Sorted
+ *  by date, then group id for a stable tie-break. */
+export async function listMeetingOccurrencesForPerson(
+  db: AppDb,
+  personId: number,
+  from: string,
+  to: string,
+  locale: Locale,
+): Promise<MeetingOccurrence[]> {
+  const groups = await listMyGroups(db, personId, locale);
+  const occurrences: MeetingOccurrence[] = [];
+  for (const g of groups) {
+    for (const date of computeMeetingDates(g, from, to)) {
+      occurrences.push({
+        date,
+        group_id: g.id,
+        group_name: g.name,
+        meeting_time: g.meeting_time,
+        meeting_location: g.meeting_location,
+      });
+    }
+  }
+  occurrences.sort((a, b) => (a.date === b.date ? a.group_id - b.group_id : a.date < b.date ? -1 : 1));
+  return occurrences;
 }
