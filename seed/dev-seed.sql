@@ -496,16 +496,16 @@ INSERT INTO checkin_events (id, name, weekday, active) VALUES
   (1, 'Sunday Kids 主日儿童', 0, 1);
 
 INSERT INTO checkins (id, event_id, household_id, household_member_id, child_name, security_code, checkin_date, checked_in_at) VALUES
-  (1, 1, 1, 3, 'Ethan Chen 陈以恒', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','+9 hours')),
-  (2, 1, 1, 7, 'Mia Chen 陈米娅', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','+9 hours')),
-  (3, 1, 2, 8, 'Noah Lin 林诺亚', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','+9 hours')),
-  (4, 1, 2, 9, 'Lily Lin 林莉莉', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','+9 hours')),
-  (5, 1, 1, 3, 'Ethan Chen 陈以恒', 'P2R8', date('now','weekday 0','-21 days'), datetime('now','weekday 0','-21 days','+9 hours')),
-  (6, 1, 1, 7, 'Mia Chen 陈米娅', 'T5V3', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','+9 hours')),
-  (7, 1, 2, 8, 'Noah Lin 林诺亚', 'W9Y4', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','+9 hours')),
-  (8, 1, 2, 9, 'Lily Lin 林莉莉', 'C6D2', date('now','weekday 0','-35 days'), datetime('now','weekday 0','-35 days','+9 hours')),
-  (9, 1, 1, 3, 'Ethan Chen 陈以恒', 'F8G5', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','+9 hours')),
-  (10, 1, 2, 8, 'Noah Lin 林诺亚', 'H4J7', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','+9 hours'));
+  (1, 1, 1, 3, 'Ethan Chen 陈以恒', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
+  (2, 1, 1, 7, 'Mia Chen 陈米娅', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
+  (3, 1, 2, 8, 'Noah Lin 林诺亚', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
+  (4, 1, 2, 9, 'Lily Lin 林莉莉', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
+  (5, 1, 1, 3, 'Ethan Chen 陈以恒', 'P2R8', date('now','weekday 0','-21 days'), datetime('now','weekday 0','-21 days','start of day','+9 hours')),
+  (6, 1, 1, 7, 'Mia Chen 陈米娅', 'T5V3', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
+  (7, 1, 2, 8, 'Noah Lin 林诺亚', 'W9Y4', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
+  (8, 1, 2, 9, 'Lily Lin 林莉莉', 'C6D2', date('now','weekday 0','-35 days'), datetime('now','weekday 0','-35 days','start of day','+9 hours')),
+  (9, 1, 1, 3, 'Ethan Chen 陈以恒', 'F8G5', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours')),
+  (10, 1, 2, 8, 'Noah Lin 林诺亚', 'H4J7', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours'));
 
 -- Kiosk token: fixed (not random) so the kiosk works immediately after a local
 -- seed. With the default `astro dev` port, open:
