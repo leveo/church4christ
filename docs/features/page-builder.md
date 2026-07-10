@@ -27,6 +27,8 @@ dragging blocks over writing Markdown.
   a photo you already uploaded elsewhere from a "recent uploads" picker — no separate
   media step.
 
+![The page builder: block palette, canvas, and properties panel](../images/admin/page-builder.png)
+
 ## How your team uses it
 
 **Starting a new page.** From **Pages** in the admin area, click **New page (builder)**.
@@ -61,6 +63,8 @@ A page built this way loads exactly like any other page on the site — fast, wi
 visible difference between a hand-coded page and one you dragged together. There is
 nothing extra running in the visitor's browser: the editing tool itself never ships to a
 visitor, only the finished page.
+
+![The published page, exactly as visitors see it](../images/public/page-builder-page.png)
 
 ## Turning it off
 
