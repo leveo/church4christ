@@ -103,4 +103,42 @@ describe('public custom-page route (/[locale]/p/[slug])', () => {
     expect(html).toContain('Fallback Title EN');
     expect(html).toContain('Fallback body EN.');
   });
+
+  it('fallback is per-field: zh title set + zh body empty renders the zh title with the en body', async () => {
+    // Guards the INDEPENDENT title/body fallback — a coarser whole-object
+    // fallback (loc-or-fallback as one unit) would render the en title here.
+    await saveCustomPage(env.DB, {
+      id: null,
+      slug: 'e2e-mixed-fallback',
+      published: true,
+      title_en: 'Mixed Title EN',
+      title_zh: '中文标题 E2E',
+      body_en: 'Mixed body EN.',
+      body_zh: '',
+      updatedBy: 'pastor.david@example.com',
+    });
+
+    const res = await get('/zh/p/e2e-mixed-fallback');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('中文标题 E2E');
+    expect(html).toContain('Mixed body EN.');
+    expect(html).not.toContain('Mixed Title EN');
+  });
+
+  it('a published page empty in BOTH locales still renders 200 (no invented 404)', async () => {
+    await saveCustomPage(env.DB, {
+      id: null,
+      slug: 'e2e-empty',
+      published: true,
+      title_en: '',
+      title_zh: '',
+      body_en: '',
+      body_zh: '',
+      updatedBy: 'pastor.david@example.com',
+    });
+
+    expect((await get('/en/p/e2e-empty')).status).toBe(200);
+    expect((await get('/zh/p/e2e-empty')).status).toBe(200);
+  });
 });
