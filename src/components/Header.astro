@@ -13,10 +13,19 @@ const home = localePath(locale, '/');
 const give = localePath(locale, '/give');
 
 const db = Astro.locals.db;
-const identity = await getSiteIdentity(db, locale);
-const siteName = identity.name || t(locale, 'site.name');
-const logoKey = await getLogoImageKey(db);
-const logoSrc = logoKey ? mediaPath(logoKey) : '';
+// Site identity + logo come from admin-editable settings; a DB hiccup falls
+// back to the pre-feature hardcoded name and no logo rather than 500ing the
+// header on every public page (mirrors Base.astro's identity guard).
+let siteName = t(locale, 'site.name');
+let logoSrc = '';
+try {
+  const identity = await getSiteIdentity(db, locale);
+  siteName = identity.name || t(locale, 'site.name');
+  const logoKey = await getLogoImageKey(db);
+  logoSrc = logoKey ? (mediaPath(logoKey) ?? '') : '';
+} catch {
+  /* keep the hardcoded site name and no logo when settings are unavailable */
+}
 
 const nav: { key: string; path: string }[] = [
   { key: 'nav.visit', path: '/visit' },
