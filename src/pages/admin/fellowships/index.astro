@@ -8,6 +8,7 @@ import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
 import { listGroupsAdmin, saveGroup, type GroupInput, type GroupKind, type MemberGroupAdminRow } from '../../../lib/groupDb';
+import { SLUG_RE } from '../../../lib/validate';
 import { card, tin, lab, btn, th, td, badge, badgeActive, badgeInactive, noticeErr } from '../../../lib/adminUi';
 
 const user = Astro.locals.user;
@@ -21,12 +22,14 @@ let errKey: string | null = null;
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData();
   if (fd.get('_action') === 'create') {
-    const slug = String(fd.get('slug') ?? '').trim();
+    const slug = String(fd.get('slug') ?? '').trim().toLowerCase();
     const kindRaw = String(fd.get('kind') ?? '');
     const kind = KINDS.find((k) => k === kindRaw);
     const nameEn = String(fd.get('name_en') ?? '').trim();
     if (!slug || !kind || !nameEn) {
       errKey = 'errors.required';
+    } else if (slug.length > 64 || !SLUG_RE.test(slug)) {
+      errKey = 'errors.slugInvalid';
     } else {
       const input: GroupInput = {
         slug,

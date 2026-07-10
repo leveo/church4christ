@@ -15,12 +15,14 @@ import {
   applyToGroup,
   decideGroupApplication,
   getGroup,
+  getGroupAdmin,
   getGroupBySlug,
   hasPendingGroupApplication,
   isGroupLeader,
   isGroupMember,
   listGroupMembers,
   listGroups,
+  listGroupsAdmin,
   listMyGroups,
   listPendingApplicationsForGroups,
   removeGroupMember,
@@ -146,6 +148,36 @@ describe('getGroupBySlug / getGroup', () => {
     expect((await getGroup(env.DB, id, 'en'))?.id).toBe(id);
     await softDeleteGroup(env.DB, id);
     expect(await getGroup(env.DB, id, 'en')).toBeNull();
+  });
+});
+
+describe('listGroupsAdmin', () => {
+  it('includes inactive groups but excludes soft-deleted ones', async () => {
+    const activeId = await saveGroup(env.DB, null, { ...baseInput, slug: 'active-1' });
+    const inactiveId = await saveGroup(env.DB, null, { ...baseInput, slug: 'inactive-1', active: false });
+    const deletedId = await saveGroup(env.DB, null, { ...baseInput, slug: 'deleted-1' });
+    await softDeleteGroup(env.DB, deletedId);
+    const groups = await listGroupsAdmin(env.DB);
+    expect(groups.map((g) => g.id).sort()).toEqual([activeId, inactiveId].sort());
+    expect(groups.map((g) => g.id)).not.toContain(deletedId);
+  });
+});
+
+describe('getGroupAdmin', () => {
+  it('returns raw (uncoalesced) en/zh name and description pairs', async () => {
+    const id = await saveGroup(env.DB, null, baseInput);
+    const row = await getGroupAdmin(env.DB, id);
+    expect(row?.name_en).toBe('Grace Fellowship');
+    expect(row?.name_zh).toBe('恩典团契');
+    expect(row?.desc_en).toBe('A fellowship group');
+    expect(row?.desc_zh).toBeNull();
+  });
+
+  it('finds an inactive group by id, not a deleted one', async () => {
+    const id = await saveGroup(env.DB, null, { ...baseInput, active: false });
+    expect((await getGroupAdmin(env.DB, id))?.id).toBe(id);
+    await softDeleteGroup(env.DB, id);
+    expect(await getGroupAdmin(env.DB, id)).toBeNull();
   });
 });
 

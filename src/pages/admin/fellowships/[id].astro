@@ -20,6 +20,7 @@ import {
   type GroupKind,
 } from '../../../lib/groupDb';
 import { listActivePeople } from '../../../lib/teamDb';
+import { SLUG_RE } from '../../../lib/validate';
 import { tin, lab, card, errorText, btn, btnDanger, btnSecondary, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 
 const user = Astro.locals.user;
@@ -69,7 +70,7 @@ if (Astro.request.method === 'POST') {
   }
 
   if (action === 'save') {
-    const slug = String(fd.get('slug') ?? '').trim();
+    const slug = String(fd.get('slug') ?? '').trim().toLowerCase();
     const kindRaw = String(fd.get('kind') ?? '');
     const kind = KINDS.find((k) => k === kindRaw);
     const nameEn = String(fd.get('name_en') ?? '').trim();
@@ -79,6 +80,7 @@ if (Astro.request.method === 'POST') {
     const freqOk = freqRaw === '' || (FREQS as readonly string[]).includes(freqRaw);
 
     if (!slug) errors.slug = 'errors.required';
+    else if (slug.length > 64 || !SLUG_RE.test(slug)) errors.slug = 'errors.slugInvalid';
     if (!kind) errors.kind = 'errors.invalidOption';
     if (!nameEn) errors.name_en = 'errors.required';
     if (!weekdayOk) errors.meeting_weekday = 'errors.invalidOption';
