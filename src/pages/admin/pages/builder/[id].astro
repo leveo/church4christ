@@ -50,7 +50,7 @@ if (Astro.request.method === 'POST') {
       updatedBy: user.email,
     });
     if (!saved.ok) return json(409, { ok: false, error: 'slug_taken' });
-    return json(200, { ok: true, id: saved.id });
+    return json(200, { ok: true, id: saved.id, slug: parsed.data.slug });
   }
 
   if (ct.includes('multipart/form-data')) {

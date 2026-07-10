@@ -165,8 +165,6 @@ export function builderReducer(state: BuilderState, action: BuilderAction): Buil
       if (node.type === 'columns' && count !== undefined) {
         node.props.count = count;
         reflowColumns(node, count);
-      } else if (count !== undefined) {
-        (node as { props: Record<string, unknown> }).props = { ...node.props, count };
       }
       return commit(state, next, state.selectedId);
     }

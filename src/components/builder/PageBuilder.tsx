@@ -108,7 +108,7 @@ export default function PageBuilder(props: PageBuilderProps) {
           title_en: meta.titleEn, title_zh: meta.titleZh, layout: state.layout,
         }),
       });
-      const body = (await res.json()) as { ok: boolean; id?: string; error?: string };
+      const body = (await res.json()) as { ok: boolean; id?: string; slug?: string; error?: string };
       if (!body.ok) {
         setError(
           body.error === 'slug_taken' ? props.strings['err.slugTaken']
@@ -117,7 +117,7 @@ export default function PageBuilder(props: PageBuilderProps) {
         );
         return;
       }
-      const newMeta = { ...meta, published };
+      const newMeta = { ...meta, published, slug: body.slug ?? meta.slug };
       setMeta(newMeta);
       if (body.id && !pageId) {
         setPageId(body.id);

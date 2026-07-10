@@ -137,6 +137,21 @@ describe('builder admin route', () => {
     expect(await pub.text()).toContain('From the island');
   });
 
+  it('save echoes the normalized slug so "View on site" resolves', async () => {
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const res = await jsonPost('/admin/pages/builder/new', {
+      action: 'save', id: null, slug: 'About-US', published: true,
+      title_en: 'About Us E2E', title_zh: '', layout: { v: 1, blocks: [] },
+    }, editor);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; slug: string }>();
+    expect(body.ok).toBe(true);
+    expect(body.slug).toBe('about-us');
+
+    const pub = await get('/en/p/about-us');
+    expect(pub.status).toBe(200);
+  });
+
   it('rejects a hostile layout (400 invalid_layout) and a duplicate slug (409)', async () => {
     const editor = await sessionCookie(2, 'pastor.david@example.com');
     const evil = await jsonPost('/admin/pages/builder/new', {

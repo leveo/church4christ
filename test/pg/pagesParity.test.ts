@@ -16,6 +16,7 @@ import {
   listCustomPages,
   listPublishedPageTitles,
   saveCustomPage,
+  savePageLayout,
 } from '../../src/lib/pagesDb';
 import { saveEvent, getRevision, listRecentRevisions } from '../../src/lib/adminDb';
 
@@ -135,5 +136,46 @@ describe.skipIf(!hasPg)('custom pages parity (Postgres)', () => {
     // …while custom_page rows keep their UUID strings side by side.
     const pageRow = recent.find((r) => r.entity === 'custom_page')!;
     expect(typeof pageRow.entity_id).toBe('string');
+  });
+
+  it('savePageLayout create → update round-trip, preserving body_md from a prior saveCustomPage', async () => {
+    const LAYOUT = JSON.stringify({ v: 1, blocks: [] });
+
+    const created = await savePageLayout(db, {
+      id: null, slug: 'built', published: false,
+      title_en: 'Built', title_zh: '构建', layoutJson: LAYOUT, updatedBy: 'e@x',
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const page = await getCustomPage(db, created.id);
+    expect(page?.format).toBe('builder');
+    expect(page?.layout_json).toBe(LAYOUT);
+    expect(page?.i18n.en.title).toBe('Built');
+    expect(page?.i18n.zh.title).toBe('构建');
+
+    // Now seed a markdown page's body via saveCustomPage on the SAME row, then
+    // update it through savePageLayout with a new title + layout — the classic
+    // body_md must survive the flip back to (and within) builder format.
+    const seeded = await saveCustomPage(db, {
+      id: created.id, slug: 'built', published: false,
+      title_en: 'Built', title_zh: '构建', body_en: 'keep me', body_zh: '保留', updatedBy: 'e@x',
+    });
+    expect(seeded).toEqual({ ok: true, id: created.id });
+
+    const NEW_LAYOUT = JSON.stringify({ v: 1, blocks: [{ id: 's1', type: 'section', props: {}, children: [] }] });
+    const updated = await savePageLayout(db, {
+      id: created.id, slug: 'built', published: true,
+      title_en: 'Built 2', title_zh: '构建 2', layoutJson: NEW_LAYOUT, updatedBy: 'e@x',
+    });
+    expect(updated).toEqual({ ok: true, id: created.id });
+
+    const final = await getCustomPage(db, created.id);
+    expect(final?.format).toBe('builder');
+    expect(final?.published).toBe(true);
+    expect(final?.layout_json).toBe(NEW_LAYOUT);
+    expect(final?.i18n.en.title).toBe('Built 2');
+    expect(final?.i18n.zh.title).toBe('构建 2');
+    expect(final?.i18n.en.body_md).toBe('keep me');
+    expect(final?.i18n.zh.body_md).toBe('保留');
   });
 });
