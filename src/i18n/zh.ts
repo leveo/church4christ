@@ -542,6 +542,7 @@ export default {
   'admin.nav.people': '会众',
   'admin.nav.settings': '设置',
   'admin.nav.navigation': '导航',
+  'admin.nav.viewSite': '查看网站',
 
   'admin.dashboard.title': '仪表板',
   'admin.dashboard.welcome': '你好，{name}。',
@@ -927,6 +928,7 @@ export default {
   'admin.navigation.saved': '导航菜单已保存。',
   'admin.navigation.itemsTitle': '菜单项',
   'admin.navigation.empty': '暂无菜单项，请在下方添加。',
+  'admin.navigation.removeItem': '移除',
   'admin.navigation.typeBuiltin': '内置',
   'admin.navigation.typePage': '页面',
   'admin.navigation.typeLink': '链接',
@@ -987,6 +989,8 @@ export default {
   'admin.dashboard.newRequests': '{count} 个新请求',
   'admin.dashboard.testimonies': '见证',
   'admin.dashboard.pendingReview': '{count} 个待审核',
+  'admin.dashboard.prayerAlert': '{count} 个新代祷请求等待处理，请尽快关怀回应。',
+  'admin.dashboard.prayerAlertCta': '前往祷告墙',
 
   // Testimony review queue
   'admin.testimonies.title': '见证审核',

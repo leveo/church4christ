@@ -543,6 +543,7 @@ export default {
   'admin.nav.people': 'People',
   'admin.nav.settings': 'Settings',
   'admin.nav.navigation': 'Navigation',
+  'admin.nav.viewSite': 'View site',
 
   'admin.dashboard.title': 'Dashboard',
   'admin.dashboard.welcome': 'Welcome, {name}.',
@@ -928,6 +929,7 @@ export default {
   'admin.navigation.saved': 'Navigation menu saved.',
   'admin.navigation.itemsTitle': 'Menu items',
   'admin.navigation.empty': 'No menu items yet — add one below.',
+  'admin.navigation.removeItem': 'Remove',
   'admin.navigation.typeBuiltin': 'Built-in',
   'admin.navigation.typePage': 'Page',
   'admin.navigation.typeLink': 'Link',
@@ -988,6 +990,8 @@ export default {
   'admin.dashboard.newRequests': '{count} new',
   'admin.dashboard.testimonies': 'Testimonies',
   'admin.dashboard.pendingReview': '{count} to review',
+  'admin.dashboard.prayerAlert': '{count} new prayer requests are waiting — please respond soon.',
+  'admin.dashboard.prayerAlertCta': 'Go to prayer wall',
 
   // Testimony review queue
   'admin.testimonies.title': 'Testimonies',

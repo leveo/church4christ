@@ -14,7 +14,7 @@ import { BUILTIN_NAV, NAV_SETTING_KEY, parseNavItems, resolveNav, serializeNavIt
 import { deleteSetting, getSetting, setSetting } from '../../../lib/settings';
 import { listCustomPages } from '../../../lib/pagesDb';
 import { isHttpUrl } from '../../../lib/validate';
-import { tin, lab, card, errorText, btn, badge, badgeInactive, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, card, errorText, btn, btnDanger, badge, badgeInactive, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -182,7 +182,7 @@ const h2 = 'font-display text-heading-sm font-bold';
               <form method="post">
                 <input type="hidden" name="action" value="remove" />
                 <input type="hidden" name="idx" value={i} />
-                <button type="submit" class={btn} aria-label={t(lang, 'admin.form.remove')}>
+                <button type="submit" class={btn} aria-label={t(lang, 'admin.navigation.removeItem')} title={t(lang, 'admin.navigation.removeItem')}>
                   ✕
                 </button>
               </form>
@@ -283,7 +283,7 @@ const h2 = 'font-display text-heading-sm font-bold';
   <section class="mt-6 max-w-2xl">
     <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.navigation.resetConfirm'))})`}>
       <input type="hidden" name="action" value="reset" />
-      <button type="submit" class={btn}>
+      <button type="submit" class={btnDanger}>
         {t(lang, 'admin.navigation.reset')}
       </button>
     </form>
