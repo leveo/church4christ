@@ -82,6 +82,7 @@ export default {
   'home.prayerError': '送出失败，请确认已填写留言后再试一次。',
 
   'content.notTranslated': '本页尚未翻译，当前显示的是英文版本。',
+  'pages.draftNotice': '草稿——仅管理员可见。',
 
   'sermons.title': '讲道',
   'sermons.intro': '观看并回顾近期的主日信息。',

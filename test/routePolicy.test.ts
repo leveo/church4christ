@@ -51,6 +51,11 @@ describe('classifyRoute', () => {
     ['/register', 'public'],
     ['/register/thanks', 'public'],
     ['/api/register/submit', 'public'],
+    // ── admin-authored custom pages (T4): no explicit rule, falls through the
+    // "everything else is public" default so the route itself enforces
+    // published/preview visibility and 404s.
+    ['/p/anything', 'public'],
+    ['/p/about', 'public'],
     // ── finance (giving admin) ──
     ['/admin/giving', 'finance'],
     ['/admin/giving/funds', 'finance'],

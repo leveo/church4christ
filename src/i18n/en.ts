@@ -83,6 +83,7 @@ export default {
   'home.prayerError': 'Something went wrong. Please make sure your message is filled in, then try again.',
 
   'content.notTranslated': 'This page hasn’t been translated yet — you’re reading the English version.',
+  'pages.draftNotice': 'Draft — visible to editors and admins only.',
 
   'sermons.title': 'Sermons',
   'sermons.intro': 'Watch and revisit recent Sunday messages.',
