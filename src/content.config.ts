@@ -28,27 +28,6 @@ const articles = defineCollection({
   }),
 });
 
-// Small-group fellowships. `order` sorts the directory; `leaders` is a list of
-// {name, role?} rendered on the card + detail page.
-const fellowships = defineCollection({
-  loader: glob({ pattern: '**/*.md', base: './src/content/fellowships' }),
-  schema: z.object({
-    name: z.string(),
-    meetingTime: z.string(),
-    location: z.string(),
-    audience: z.string().optional(),
-    order: z.number(),
-    leaders: z
-      .array(
-        z.object({
-          name: z.string(),
-          role: z.string().optional(),
-        }),
-      )
-      .default([]),
-  }),
-});
-
 // Team members. `group` buckets the staff index (pastoral / elders / staff);
 // `order` sorts within a group. `avatar` is an optional local SVG path — when
 // unset the UI falls back to AvatarInitials.
@@ -64,4 +43,4 @@ const staff = defineCollection({
   }),
 });
 
-export const collections = { pages, articles, fellowships, staff };
+export const collections = { pages, articles, staff };
