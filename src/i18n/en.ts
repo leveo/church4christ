@@ -1619,4 +1619,7 @@ export default {
   'admin.reg.cancelled': 'Registration cancelled.',
   'admin.reg.backToList': '← All events',
   'admin.reg.cancelEdit': 'Cancel',
+  'admin.reg.stats.openEvents': 'Open events',
+  'admin.reg.stats.activeRegistrations': 'Active registrations',
+  'admin.reg.stats.seatsRemaining': 'Seats remaining',
 } satisfies Record<string, string>;

@@ -10,7 +10,7 @@ import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { parseRegEventForm } from '../../../lib/regForms';
 import { listEventsAdmin, saveEvent } from '../../../lib/regDb';
-import { utcToDatetimeLocal } from '../../../lib/dates';
+import { utcToDatetimeLocal, toUtcSql } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
@@ -40,6 +40,26 @@ if (Astro.request.method === 'POST') {
 
 const rows = await listEventsAdmin(db);
 const saved = Astro.url.searchParams.get('saved') === '1';
+
+// Summary row — counts derive from the admin event list already loaded above
+// (same seat counts the table renders), no extra query. "Open" mirrors the
+// public listOpenEvents window (active + within its opens_at/closes_at range).
+// Seats remaining only sums events with a capacity cap (uncapped events don't
+// contribute a bounded number).
+const nowSql = toUtcSql();
+const openEvents = rows.filter(
+  (r) => r.active === 1 && (r.opens_at === null || r.opens_at <= nowSql) && (r.closes_at ?? r.starts_at) > nowSql,
+);
+const activeRegistrations = rows.reduce((sum, r) => sum + r.confirmed_count, 0);
+const seatsRemaining = openEvents.reduce(
+  (sum, r) => sum + (r.capacity == null ? 0 : Math.max(0, r.capacity - r.taken_count)),
+  0,
+);
+const stats = [
+  { label: t(lang, 'admin.reg.stats.openEvents'), value: String(openEvents.length) },
+  { label: t(lang, 'admin.reg.stats.activeRegistrations'), value: String(activeRegistrations) },
+  { label: t(lang, 'admin.reg.stats.seatsRemaining'), value: String(seatsRemaining) },
+];
 
 const editParam = Astro.url.searchParams.get('edit');
 const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
@@ -73,6 +93,15 @@ const h2 = 'font-display text-heading-sm font-bold';
 <Admin title={heading}>
   <h1 class="font-display text-heading-md font-bold">{heading}</h1>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {stats.map((s) => (
+      <div class={card}>
+        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
+        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
+      </div>
+    ))}
+  </div>
 
   <form method="post" class="mt-6 max-w-2xl">
     <section class={`${card} space-y-4`}>

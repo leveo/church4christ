@@ -1616,4 +1616,7 @@ export default {
   'admin.reg.cancelled': '已取消报名。',
   'admin.reg.backToList': '← 所有活动',
   'admin.reg.cancelEdit': '取消',
+  'admin.reg.stats.openEvents': '开放活动',
+  'admin.reg.stats.activeRegistrations': '有效报名',
+  'admin.reg.stats.seatsRemaining': '剩余名额',
 } satisfies Record<string, string>;
