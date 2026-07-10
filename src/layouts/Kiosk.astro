@@ -1,0 +1,36 @@
+---
+// Minimal full-screen shell for the public /kiosk/<token> pages: reuses
+// Base.astro's <head> essentials (token CSS import, fonts) but skips the
+// header/footer/nav — a kiosk tablet has no site chrome, just the current
+// step. Deliberately dependency-light: no theme/db lookups (a wrong token
+// already 404s in the page before this layout renders).
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/space-grotesk';
+import '../styles/base.css';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <slot name="head" />
+  </head>
+  <body class="min-h-screen bg-surface text-2xl text-ink">
+    <div class="mx-auto flex min-h-screen max-w-3xl flex-col items-center px-6 py-10">
+      <slot />
+    </div>
+  </body>
+</html>

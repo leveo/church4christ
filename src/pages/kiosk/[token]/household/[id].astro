@@ -1,0 +1,180 @@
+---
+// Kiosk page 2: pick children to check in (POST action=checkin), see today's
+// checkins and check a child out with their pickup code (POST action=checkout),
+// and — right after a successful checkin — a confirmation state showing the
+// security code exactly once (re-rendered here, never redirected, so a page
+// reload can't silently drop the one-time code).
+import Kiosk from '../../../../layouts/Kiosk.astro';
+import { getKioskToken } from '../../../../lib/kioskToken';
+import { getHouseholdForKiosk, listActiveEvents, checkInChildren, checkOutChild } from '../../../../lib/checkinDb';
+import { todayInTz } from '../../../../lib/dates';
+import { t } from '../../../../lib/i18n';
+import type { Locale } from '../../../../lib/locales';
+import { noticeErr } from '../../../../lib/adminUi';
+
+const db = Astro.locals.db;
+const token = await getKioskToken(db);
+if (!token || Astro.params.token !== token) return new Response(null, { status: 404 });
+
+const lang: Locale = Astro.url.searchParams.get('lang') === 'zh' ? 'zh' : 'en';
+const q = Astro.url.searchParams.get('q') ?? '';
+const backHref = `/kiosk/${token}/?lang=${lang}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+const searchHref = `/kiosk/${token}/?lang=${lang}`;
+
+const date = todayInTz();
+const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+
+const rawId = Astro.params.id ?? '';
+if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const householdId = Number(rawId);
+
+let household = await getHouseholdForKiosk(db, householdId, date);
+if (!household) return new Response(null, { status: 404 });
+
+let confirmation: { code: string; checkedIn: string[] } | null = null;
+let checkoutErrorId: number | null = null;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('action');
+
+  if (action === 'checkin') {
+    const eventId = Number(fd.get('event'));
+    const memberIds = fd.getAll('member').map(Number).filter((n) => Number.isInteger(n));
+    if (Number.isInteger(eventId) && memberIds.length > 0) {
+      try {
+        confirmation = await checkInChildren(db, { eventId, householdId, memberIds, date });
+      } catch (e) {
+        if (!(e instanceof Error && e.message === 'no_children')) throw e;
+        // No valid children selected — fall through and re-render the picker unchanged.
+      }
+    }
+  } else if (action === 'checkout') {
+    const checkinId = Number(fd.get('checkinId'));
+    const code = String(fd.get('code') ?? '');
+    if (Number.isInteger(checkinId)) {
+      const ok = await checkOutChild(db, { checkinId, code });
+      if (!ok) checkoutErrorId = checkinId;
+    }
+  }
+
+  // Refresh from the DB after any mutation (checkout) or a no-op POST, so the
+  // page reflects current state. A successful checkin renders the confirmation
+  // view instead, which doesn't need `household`.
+  if (!confirmation) {
+    household = await getHouseholdForKiosk(db, householdId, date);
+    if (!household) return new Response(null, { status: 404 });
+  }
+}
+
+const events = await listActiveEvents(db, weekday);
+const notCheckedIn = confirmation ? [] : household!.children.filter((c) => c.checkins.length === 0);
+const checkedIn = confirmation ? [] : household!.children.filter((c) => c.checkins.length > 0);
+
+const bigBtn = 'w-full rounded-2xl bg-primary px-8 py-4 text-2xl font-semibold text-on-primary hover:bg-primary-hover';
+---
+
+<Kiosk title={t(lang, 'kiosk.title')}>
+  {
+    confirmation && (
+      <Fragment slot="head">
+        <meta http-equiv="refresh" content={`20;url=/kiosk/${token}?lang=${lang}`} />
+      </Fragment>
+    )
+  }
+
+  {
+    confirmation ? (
+      <div class="flex w-full flex-col items-center gap-6 text-center">
+        <p class="text-2xl">{t(lang, 'kiosk.codeIntro')}</p>
+        <p class="text-display-lg font-bold tracking-widest">{confirmation.code}</p>
+        <p class="text-2xl font-semibold">{confirmation.checkedIn.join(', ')}</p>
+        <p class="text-ink-muted">{t(lang, 'kiosk.codeNote')}</p>
+        <a href={searchHref} class={bigBtn}>{t(lang, 'kiosk.backToStart')}</a>
+      </div>
+    ) : (
+      <div class="flex w-full flex-col gap-8">
+        <div class="flex items-center justify-between gap-4">
+          <h1 class="font-display text-display-lg font-bold">{household!.name}</h1>
+          <a href={backHref} class="text-lg font-semibold text-primary hover:underline">&larr; {t(lang, 'kiosk.backToStart')}</a>
+        </div>
+
+        {events.length === 0 ? (
+          <p class={`w-full text-center ${noticeErr}`}>{t(lang, 'kiosk.noEvents')}</p>
+        ) : notCheckedIn.length > 0 && (
+          <form method="post" class="flex w-full flex-col gap-6">
+            <input type="hidden" name="action" value="checkin" />
+            <input type="hidden" name="lang" value={lang} />
+
+            <h2 class="text-2xl font-semibold">{t(lang, 'kiosk.selectChildren')}</h2>
+            <div class="grid grid-cols-2 gap-4">
+              {notCheckedIn.map((c) => (
+                <label class="block cursor-pointer">
+                  <input type="checkbox" name="member" value={c.memberId} class="peer sr-only" />
+                  <span class="block rounded-2xl border-2 border-border bg-surface-raised p-6 text-center text-2xl font-bold peer-checked:border-primary peer-checked:bg-primary-soft">
+                    {c.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {events.length === 1 ? (
+              <input type="hidden" name="event" value={events[0].id} />
+            ) : (
+              <fieldset class="flex flex-col gap-3">
+                <legend class="text-2xl font-semibold">{t(lang, 'kiosk.event')}</legend>
+                {events.map((e, i) => (
+                  <label class="flex items-center gap-3 rounded-2xl border-2 border-border bg-surface-raised p-4 text-2xl">
+                    <input type="radio" name="event" value={e.id} checked={i === 0} class="h-6 w-6" />
+                    {e.name}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+
+            <button type="submit" class={bigBtn}>{t(lang, 'kiosk.checkIn')}</button>
+          </form>
+        )}
+
+        {checkedIn.length > 0 && (
+          <div class="flex w-full flex-col gap-4">
+            {checkedIn.map((c) => (
+              <div class="rounded-2xl border-2 border-border bg-surface-raised p-6">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class="text-2xl font-bold">{c.name}</span>
+                  <span class="rounded-full bg-success-soft px-3 py-1 text-base font-semibold text-success">
+                    {t(lang, 'kiosk.checkedIn')}
+                  </span>
+                </div>
+                {c.checkins.filter((ci) => !ci.checkedOutAt).map((ci) => (
+                  <div class="mt-4">
+                    <p class="text-lg text-ink-muted">{ci.eventName}</p>
+                    {checkoutErrorId === ci.checkinId && (
+                      <p class={`mt-2 ${noticeErr}`}>{t(lang, 'kiosk.wrongCode')}</p>
+                    )}
+                    <form method="post" class="mt-2 flex flex-wrap items-center gap-3">
+                      <input type="hidden" name="action" value="checkout" />
+                      <input type="hidden" name="lang" value={lang} />
+                      <input type="hidden" name="checkinId" value={ci.checkinId} />
+                      <input
+                        type="text"
+                        name="code"
+                        maxlength="4"
+                        autocapitalize="characters"
+                        placeholder={t(lang, 'kiosk.enterCode')}
+                        class="w-40 rounded-2xl border border-border bg-surface px-4 py-3 text-2xl uppercase focus:border-primary focus:outline-none"
+                      />
+                      <button type="submit" class="rounded-2xl bg-primary px-6 py-3 text-xl font-semibold text-on-primary hover:bg-primary-hover">
+                        {t(lang, 'kiosk.checkOut')}
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+</Kiosk>
