@@ -19,6 +19,21 @@ export async function getPortalHousehold(db: AppDb, viewerPersonId: number): Pro
   return { ...household, viewerIsOwner: viewer?.is_owner === 1 };
 }
 
+/** True when the person holds an is_owner=1 row in their LIVE household (a
+ *  soft-deleted household's former owner reads back false). */
+export async function isHouseholdOwner(db: AppDb, personId: number): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS one
+       FROM household_members hm
+       JOIN households h ON h.id = hm.household_id AND h.deleted_at IS NULL
+       WHERE hm.person_id = ? AND hm.is_owner = 1`,
+    )
+    .bind(personId)
+    .first<{ one: number }>();
+  return row !== null;
+}
+
 /**
  * Promote/demote a co-owner. The actor must already be an owner of the same
  * household, or an admin (isAdmin bypasses every other actor check, including

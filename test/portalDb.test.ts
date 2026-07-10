@@ -5,7 +5,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addDependent, createHousehold, getHousehold, linkPersonToHousehold } from '../src/lib/householdDb';
-import { getPortalHousehold, setOwner, updateMemberProfile, type MemberProfilePatch } from '../src/lib/portalDb';
+import { getPortalHousehold, isHouseholdOwner, setOwner, updateMemberProfile, type MemberProfilePatch } from '../src/lib/portalDb';
 
 async function reset(): Promise<void> {
   await env.DB.batch([
@@ -48,6 +48,37 @@ describe('getPortalHousehold', () => {
     await setOwner(env.DB, { householdId: id, memberId: m1, isOwner: true, actorPersonId: 1, isAdmin: true });
     const portal = await getPortalHousehold(env.DB, 1);
     expect(portal!.viewerIsOwner).toBe(true);
+  });
+});
+
+describe('isHouseholdOwner', () => {
+  it('is true for an owner in their live household', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    const m1 = await memberIdFor(id, 1);
+    await setOwner(env.DB, { householdId: id, memberId: m1, isOwner: true, actorPersonId: 999, isAdmin: true });
+    expect(await isHouseholdOwner(env.DB, 1)).toBe(true);
+  });
+
+  it('is false for a non-owner member', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    await linkPersonToHousehold(env.DB, id, 2, 'adult');
+    const m1 = await memberIdFor(id, 1);
+    await setOwner(env.DB, { householdId: id, memberId: m1, isOwner: true, actorPersonId: 999, isAdmin: true });
+    expect(await isHouseholdOwner(env.DB, 2)).toBe(false);
+  });
+
+  it('is false once the owner\'s household is soft-deleted', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    const m1 = await memberIdFor(id, 1);
+    await setOwner(env.DB, { householdId: id, memberId: m1, isOwner: true, actorPersonId: 999, isAdmin: true });
+    expect(await isHouseholdOwner(env.DB, 1)).toBe(true);
+
+    await env.DB.prepare(`UPDATE households SET deleted_at = datetime('now') WHERE id = ?`).bind(id).run();
+    expect(await isHouseholdOwner(env.DB, 1)).toBe(false);
+  });
+
+  it('is false for a person in no household', async () => {
+    expect(await isHouseholdOwner(env.DB, 1)).toBe(false);
   });
 });
 
