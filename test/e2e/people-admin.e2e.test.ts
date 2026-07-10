@@ -60,6 +60,59 @@ describe('admin person editor (people module on)', () => {
     expect(hm).toMatchObject({ name: 'Wang Home', role: 'adult', is_primary: 1 });
   });
 
+  it('promotes and demotes a household owner from the admin console', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    // Household 1 (Chen Family) / member 1 is David Chen (person 2, adult, linked, has email).
+    const promote = await post('/admin/people/2', 'action=setOwner&member_id=1&household_id=1', { cookie: admin });
+    expect(promote.status).toBe(303);
+
+    const afterPromote = await env.DB
+      .prepare('SELECT is_owner FROM household_members WHERE id = 1')
+      .first<{ is_owner: number }>();
+    expect(afterPromote?.is_owner).toBe(1);
+
+    const pageAfterPromote = await (await get('/admin/people/2', { cookie: admin })).text();
+    expect(pageAfterPromote).toContain('value="unsetOwner"');
+
+    const demote = await post('/admin/people/2', 'action=unsetOwner&member_id=1&household_id=1', { cookie: admin });
+    expect(demote.status).toBe(303);
+
+    const afterDemote = await env.DB
+      .prepare('SELECT is_owner FROM household_members WHERE id = 1')
+      .first<{ is_owner: number }>();
+    expect(afterDemote?.is_owner).toBe(0);
+  });
+
+  it('surfaces owner_limit as a page notice instead of a crash', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    // Fill household 1 (Chen Family) to the 2-owner cap with its two seeded
+    // adults (members 1 and 2), then add a third eligible adult (person 5,
+    // Mark — has email, not seeded into any household) directly and try to
+    // promote them past the cap.
+    await post('/admin/people/2', 'action=setOwner&member_id=1&household_id=1', { cookie: admin });
+    await post('/admin/people/2', 'action=setOwner&member_id=2&household_id=1', { cookie: admin });
+
+    const third = await env.DB
+      .prepare(
+        `INSERT INTO household_members (household_id, person_id, display_name, role, is_primary)
+         VALUES (1, 5, 'Mark Liu', 'adult', 0) RETURNING id`,
+      )
+      .first<{ id: number }>();
+
+    const res = await post('/admin/people/2', `action=setOwner&member_id=${third!.id}&household_id=1`, { cookie: admin });
+    expect(res.status).toBe(200); // falls through to re-render with a notice, no redirect
+    expect(await res.text()).toContain('maximum of 2 owners');
+
+    const owners = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM household_members WHERE household_id = 1 AND is_owner = 1')
+      .first<{ n: number }>();
+    expect(owners?.n).toBe(2);
+
+    // Clean up so later tests in this file see the seeded state unchanged.
+    await env.DB.prepare('DELETE FROM household_members WHERE id = ?').bind(third!.id).run();
+    await env.DB.prepare('UPDATE household_members SET is_owner = 0 WHERE household_id = 1').run();
+  });
+
   it('shows a pastoral note to the admin but never on a leader profile view (privacy)', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
     const leader = await sessionCookie(3, 'sarah.johnson@example.com');

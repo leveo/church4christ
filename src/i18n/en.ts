@@ -634,6 +634,14 @@ export default {
   'admin.person.household.errNotFound': 'That household no longer exists.',
   'admin.person.household.errGeneric': 'Could not update the household.',
 
+  // Household ownership — shared with the member-portal self-service pages.
+  'portal.owner': 'Owner',
+  'portal.owner.set': 'Make owner',
+  'portal.owner.unset': 'Remove owner',
+  'portal.owner.none': 'No owner',
+  'portal.owner.errLimit': 'This household already has the maximum of 2 owners.',
+  'portal.owner.errNotEligible': 'Only adult members with a linked account can become an owner.',
+
   'admin.person.notes.title': 'Pastoral notes',
   'admin.person.notes.hint': 'Admin-only — ministry leaders never see these notes.',
   'admin.person.notes.empty': 'No notes yet.',

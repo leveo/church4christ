@@ -633,6 +633,14 @@ export default {
   'admin.person.household.errNotFound': '该家庭已不存在。',
   'admin.person.household.errGeneric': '无法更新家庭信息。',
 
+  // 家庭户主管理 — 与会员门户自助页面共用。
+  'portal.owner': '户主',
+  'portal.owner.set': '设为户主',
+  'portal.owner.unset': '移除户主',
+  'portal.owner.none': '无户主',
+  'portal.owner.errLimit': '该家庭户主人数已达上限（最多 2 位）。',
+  'portal.owner.errNotEligible': '只有已关联账户的成人成员才能被设为户主。',
+
   'admin.person.notes.title': '牧养备注',
   'admin.person.notes.hint': '仅管理员可见——事工同工永远看不到这些备注。',
   'admin.person.notes.empty': '暂无备注。',

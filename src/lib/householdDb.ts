@@ -54,6 +54,7 @@ export interface HouseholdSummary {
   address: string | null;
   phone: string | null;
   member_count: number;
+  owner_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -421,7 +422,9 @@ export async function listHouseholds(db: AppDb, opts: { q?: string } = {}): Prom
   const { results } = await db
     .prepare(
       `SELECT h.id, h.name, h.address, h.phone, h.created_at, h.updated_at,
-              COUNT(hm.id) AS member_count
+              COUNT(hm.id) AS member_count,
+              (SELECT COUNT(*) FROM household_members hm2
+               WHERE hm2.household_id = h.id AND hm2.is_owner = 1) AS owner_count
        FROM households h
        LEFT JOIN household_members hm ON hm.household_id = h.id
        WHERE h.deleted_at IS NULL
