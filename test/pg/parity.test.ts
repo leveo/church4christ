@@ -295,17 +295,17 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
 
   // ── modules: getEnabledModules with the supabase backend ────────────────────
   describe('modules', () => {
-    it("enables all 14 modules on 'supabase' (giving + registration present)", async () => {
+    it("enables all 15 modules on 'supabase' (giving + registration present)", async () => {
       clearModuleCache();
       const enabled = await getEnabledModules(db, 'supabase');
-      expect(enabled.size).toBe(14);
+      expect(enabled.size).toBe(15);
       expect(enabled.has('giving')).toBe(true);
       expect(enabled.has('registration')).toBe(true);
     });
     it("backend gate drops giving/registration on 'd1'", async () => {
       clearModuleCache();
       const enabled = await getEnabledModules(db, 'd1');
-      expect(enabled.size).toBe(12);
+      expect(enabled.size).toBe(13);
       expect(enabled.has('giving')).toBe(false);
       expect(enabled.has('registration')).toBe(false);
     });

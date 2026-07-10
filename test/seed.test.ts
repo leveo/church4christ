@@ -179,9 +179,11 @@ describe('demo seed: people module — households, notes, statuses', () => {
     expect(results.map((r) => r.name)).toEqual(['Chen Family 陈家', 'Lin Family 林家', 'Zhao Household 赵家']);
   });
 
-  it('seeds six household members with exactly one primary per household', async () => {
+  it('seeds nine household members with exactly one primary per household', async () => {
+    // 6 original members (Task 5) + 3 children's check-in dependents (Task 7):
+    // Mia Chen (household 1), Noah Lin + Lily Lin (household 2).
     const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM household_members').first<{ n: number }>();
-    expect(total?.n).toBe(6);
+    expect(total?.n).toBe(9);
     const notPrimaryExactlyOne = await env.DB
       .prepare(
         `SELECT COUNT(*) AS n FROM households h
@@ -192,7 +194,7 @@ describe('demo seed: people module — households, notes, statuses', () => {
     expect(notPrimaryExactlyOne?.n).toBe(0);
   });
 
-  it('gives the Chen household two real adults plus a name-only child dependent', async () => {
+  it('gives the Chen household two real adults plus two name-only child dependents', async () => {
     const { results } = await env.DB
       .prepare('SELECT person_id, role, is_primary FROM household_members WHERE household_id = 1 ORDER BY id')
       .all<{ person_id: number | null; role: string; is_primary: number }>();
@@ -200,11 +202,13 @@ describe('demo seed: people module — households, notes, statuses', () => {
       { person_id: 2, role: 'adult', is_primary: 1 }, // David Chen, primary
       { person_id: 7, role: 'adult', is_primary: 0 }, // Amy Chen
       { person_id: null, role: 'child', is_primary: 0 }, // Ethan — name-only dependent
+      { person_id: null, role: 'child', is_primary: 0 }, // Mia — name-only dependent (Task 7)
     ]);
+    // 4 name-only dependents total: Ethan + Mia (Chen), Noah + Lily (Lin).
     const dependents = await env.DB
       .prepare(`SELECT COUNT(*) AS n FROM household_members WHERE person_id IS NULL`)
       .first<{ n: number }>();
-    expect(dependents?.n).toBe(1);
+    expect(dependents?.n).toBe(4);
   });
 
   it('never assigns a real person to more than one household', async () => {

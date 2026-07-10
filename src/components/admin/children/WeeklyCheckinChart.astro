@@ -1,0 +1,149 @@
+---
+// Server-rendered bar chart (inline SVG, no charting library) of weekly
+// children's check-in totals. Token colors only (var(--color-*)) so
+// `tokens:check` passes; a screen-reader-only table mirrors the same data.
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import type { Locale } from '../../../lib/locales';
+
+interface Props {
+  weeks: { weekStart: string; total: number }[];
+  locale: Locale;
+}
+const { weeks, locale } = Astro.props;
+
+const VIEW_W = 720;
+const VIEW_H = 260;
+const MARGIN = { top: 20, right: 10, bottom: 34, left: 40 };
+const chartW = VIEW_W - MARGIN.left - MARGIN.right;
+const chartH = VIEW_H - MARGIN.top - MARGIN.bottom;
+
+const rawMax = Math.max(0, ...weeks.map((w) => w.total));
+const isEmpty = weeks.length === 0 || rawMax === 0;
+
+/** Smallest {1,2,5}×10^n at or above `value` — a "nice" axis ceiling. */
+function niceMax(value: number): number {
+  if (value <= 0) return 1;
+  const exp = Math.floor(Math.log10(value));
+  const base = 10 ** exp;
+  const norm = value / base;
+  const niceNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return niceNorm * base;
+}
+
+const axisMax = niceMax(rawMax);
+const TICK_COUNT = 4; // 0, axisMax/3, axisMax*2/3, axisMax
+// De-duplicated: a small axisMax (e.g. 1 or 2) rounds several of the 4 evenly
+// spaced steps to the same integer, which would otherwise draw overlapping
+// gridlines/labels.
+const ticks = [...new Set(Array.from({ length: TICK_COUNT }, (_, i) => Math.round((axisMax * i) / (TICK_COUNT - 1))))];
+
+const slotW = weeks.length > 0 ? chartW / weeks.length : chartW;
+const barW = Math.min(28, slotW * 0.6);
+const MIN_BAR_H = 2;
+
+function barHeight(total: number): number {
+  if (total <= 0) return 0;
+  const h = (total / axisMax) * chartH;
+  return Math.max(h, MIN_BAR_H);
+}
+
+/** 'YYYY-MM-DD' -> 'M/D', for the compact x-axis labels. */
+function shortLabel(dateStr: string): string {
+  const [, m, d] = dateStr.split('-').map(Number);
+  return `${m}/${d}`;
+}
+
+// Beyond ~8 bars the M/D labels crowd the axis, so only every other one renders.
+const showAllLabels = weeks.length <= 8;
+
+// Kept brief per ARIA authoring practice — the full per-week breakdown lives
+// in the visually-hidden <table> right after the <svg>, not duplicated here.
+const ariaLabel = weeks.length > 0
+  ? `${t(locale, 'admin.children.chart.title')}: ${formatDate(weeks[0].weekStart, locale)} – ${formatDate(weeks[weeks.length - 1].weekStart, locale)}`
+  : t(locale, 'admin.children.chart.title');
+---
+
+{
+  isEmpty ? (
+    <p class="text-sm text-ink-muted">{t(locale, 'admin.children.chart.empty')}</p>
+  ) : (
+    <div class="overflow-x-auto">
+      <div class="min-w-[720px] text-ink-muted">
+        <svg
+          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          width={VIEW_W}
+          height={VIEW_H}
+          role="img"
+          aria-label={ariaLabel}
+        >
+          {/* Gridlines + y-axis tick labels. */}
+          {ticks.map((tick) => {
+            const y = MARGIN.top + chartH - (tick / axisMax) * chartH;
+            return (
+              <g>
+                <line
+                  x1={MARGIN.left}
+                  x2={VIEW_W - MARGIN.right}
+                  y1={y}
+                  y2={y}
+                  style="stroke: var(--color-border, currentColor)"
+                  stroke-width="1"
+                />
+                <text x={MARGIN.left - 8} y={y} text-anchor="end" dominant-baseline="middle" class="text-xs" fill="currentColor">
+                  {tick}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Bars + x-axis week labels. */}
+          {weeks.map((w, i) => {
+            const h = barHeight(w.total);
+            const slotX = MARGIN.left + i * slotW;
+            const barX = slotX + (slotW - barW) / 2;
+            const barY = MARGIN.top + chartH - h;
+            const labelX = slotX + slotW / 2;
+            const labelY = MARGIN.top + chartH + 16;
+            return (
+              <g>
+                {w.total > 0 && (
+                  <rect x={barX} y={barY} width={barW} height={h} rx="4" style="fill: var(--color-primary)">
+                    <title>{`${formatDate(w.weekStart, locale)}: ${w.total}`}</title>
+                  </rect>
+                )}
+                {(showAllLabels || i % 2 === 0) && (
+                  <text x={labelX} y={labelY} text-anchor="middle" class="text-xs" fill="currentColor">
+                    {shortLabel(w.weekStart)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+{
+  !isEmpty && (
+    <table class="sr-only">
+      <caption>{t(locale, 'admin.children.chart.title')}</caption>
+      <thead>
+        <tr>
+          <th>{t(locale, 'admin.children.chart.colWeek')}</th>
+          <th>{t(locale, 'admin.children.chart.colTotal')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {weeks.map((w) => (
+          <tr>
+            <td>{formatDate(w.weekStart, locale)}</td>
+            <td>{w.total}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}

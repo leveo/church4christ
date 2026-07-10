@@ -68,6 +68,9 @@ const PUBLIC_PREFIXES = [
   '/groups',
   '/signup',
   '/attendance',
+  // The children's check-in kiosk: no session, gated by the token in the URL
+  // itself (/kiosk/<token>), not by the route policy.
+  '/kiosk',
 ];
 
 // Site-admin-only areas under /admin. Checked BEFORE the console list.
@@ -81,6 +84,7 @@ const ADMIN_ONLY = [
   // Group admins manage their own group at /groups/<id>/manage (in-page auth);
   // /admin/groups is the site-admin CRUD console, so it stays adminOnly.
   '/admin/groups',
+  '/admin/children',
 ];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).

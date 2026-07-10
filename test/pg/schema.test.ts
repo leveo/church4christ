@@ -5,7 +5,7 @@ import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
 
 // The D1 migration files whose CREATE TABLE / ADD COLUMN statements define the
 // shared schema this port must match. 0004 adds the two people giving columns.
-const D1_FILES = ['0001_init.sql', '0002_email.sql', '0003_people.sql', '0004_giving_people.sql'];
+const D1_FILES = ['0001_init.sql', '0002_email.sql', '0003_people.sql', '0004_giving_people.sql', '0005_custom_pages.sql', '0006_groups.sql', '0007_children_checkin.sql'];
 
 describe.skipIf(!hasPg)('Postgres schema port', () => {
   const sql = hasPg ? pgClient() : (null as never);

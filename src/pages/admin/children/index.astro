@@ -1,0 +1,386 @@
+---
+// Admin children's check-in console (admin-only; enforced by routePolicy's
+// ADMIN_ONLY list + the 'children' module gate in middleware). Four tabs —
+// dashboard (stats + weekly chart), today (live roster + staff checkout),
+// events (create/edit/toggle check-in events), kiosk (link + regenerate) —
+// switched via `?tab=`, mirroring the ministries console pattern. Every
+// mutation is a same-page POST keyed on a hidden `action` field, 303-redirected
+// back to the tab it came from.
+import Admin from '../../../layouts/Admin.astro';
+import WeeklyCheckinChart from '../../../components/admin/children/WeeklyCheckinChart.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { todayInTz, formatDate, utcToDatetimeLocal } from '../../../lib/dates';
+import {
+  listEventsAdmin,
+  saveEvent,
+  toggleEventActive,
+  todayRoster,
+  staffCheckOut,
+  weeklyStats,
+  type CheckinEvent,
+  type RosterRow,
+  type WeeklyStats,
+} from '../../../lib/checkinDb';
+import { ensureKioskToken, regenerateKioskToken } from '../../../lib/kioskToken';
+import { card, th, td, tin, lab, btn, btnSecondary, btnDanger, badge, badgeActive, badgeInactive } from '../../../lib/adminUi';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+const TABS = ['dashboard', 'today', 'events', 'kiosk'] as const;
+type Tab = (typeof TABS)[number];
+
+/** Positive-integer form field (autoincrement PK ids never start at 0). */
+const idOf = (v: FormDataEntryValue | null): number | null => {
+  const s = String(v ?? '');
+  return /^[1-9]\d*$/.test(s) ? Number(s) : null;
+};
+
+const url = new URL(Astro.request.url);
+const tabParam = url.searchParams.get('tab') ?? '';
+const tab: Tab = (TABS as readonly string[]).includes(tabParam) ? (tabParam as Tab) : 'dashboard';
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('action');
+  const to = (dest: Tab) => Astro.redirect(`/admin/children?tab=${dest}`, 303);
+
+  if (action === 'save-event') {
+    const idRaw = fd.get('id');
+    const hasId = typeof idRaw === 'string' && idRaw.trim() !== '';
+    const id = hasId ? idOf(idRaw) : null;
+    const name = String(fd.get('name') ?? '').trim();
+    const weekdayRaw = String(fd.get('weekday') ?? '');
+    const weekdayOk = weekdayRaw === '' || /^[0-6]$/.test(weekdayRaw);
+    // Invalid input (missing name, name too long, a bogus weekday, or an
+    // unresolvable id on an edit) is a silent no-op — the form re-renders with
+    // whatever was last saved rather than a partial/garbage write.
+    if (name && name.length <= 120 && weekdayOk && !(hasId && id === null)) {
+      await saveEvent(db, {
+        ...(id !== null ? { id } : {}),
+        name,
+        weekday: weekdayRaw === '' ? null : Number(weekdayRaw),
+      });
+    }
+    return to('events');
+  }
+
+  if (action === 'toggle-event') {
+    const id = idOf(fd.get('id'));
+    const activeRaw = fd.get('active');
+    if (id !== null && (activeRaw === '0' || activeRaw === '1')) {
+      await toggleEventActive(db, id, activeRaw === '1');
+    }
+    return to('events');
+  }
+
+  if (action === 'checkout') {
+    const checkinId = idOf(fd.get('checkinId'));
+    if (checkinId !== null) await staffCheckOut(db, checkinId);
+    return to('today');
+  }
+
+  if (action === 'regen-token') {
+    await regenerateKioskToken(db);
+    return to('kiosk');
+  }
+
+  return to(tab);
+}
+
+// ── GET: load only the active tab's data ──
+const today = todayInTz();
+let stats: WeeklyStats | null = null;
+let roster: RosterRow[] = [];
+let events: CheckinEvent[] = [];
+let kioskToken = '';
+
+if (tab === 'dashboard') stats = await weeklyStats(db, { today });
+else if (tab === 'today') roster = await todayRoster(db, today);
+else if (tab === 'events') events = await listEventsAdmin(db);
+else if (tab === 'kiosk') kioskToken = await ensureKioskToken(db);
+
+const kioskUrl = kioskToken ? `${Astro.url.origin}/kiosk/${kioskToken}` : '';
+const last4Weeks = stats ? stats.weeks.slice(-4) : [];
+
+/** 'YYYY-MM-DD' -> 'M/D', for the compact per-event week columns. */
+function shortLabel(dateStr: string): string {
+  const [, m, d] = dateStr.split('-').map(Number);
+  return `${m}/${d}`;
+}
+
+/** UTC 'YYYY-MM-DD HH:MM:SS' -> local 'HH:MM' (roster is always "today", so
+ * the date portion is redundant on screen). */
+function timeOf(utcSql: string | null): string {
+  if (!utcSql) return '—';
+  const local = utcToDatetimeLocal(utcSql);
+  return local ? local.split('T')[1] : '—';
+}
+
+const weekdayLabel = (weekday: number | null) =>
+  weekday === null ? t(lang, 'admin.children.events.anyDay') : t(lang, `admin.children.weekday.${weekday}`);
+---
+
+<Admin title={t(lang, 'admin.children.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.children.title')}</h1>
+
+  <nav class="mt-5 flex gap-1 flex-wrap border-b border-border" aria-label={t(lang, 'admin.children.title')}>
+    {TABS.map((tb) => (
+      <a
+        href={`/admin/children?tab=${tb}`}
+        class:list={['px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}
+      >
+        {t(lang, `admin.children.tab.${tb}`)}
+      </a>
+    ))}
+  </nav>
+
+  <div class="mt-6">
+    {
+      tab === 'dashboard' && stats && (
+        <>
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class={card}>
+              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.thisWeek')}</div>
+              <div class="mt-2 text-display-lg font-bold">{stats.thisWeek}</div>
+            </div>
+            <div class={card}>
+              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.fourWeekAvg')}</div>
+              <div class="mt-2 text-display-lg font-bold">{stats.fourWeekAvg}</div>
+            </div>
+            <div class={card}>
+              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.distinctMonth')}</div>
+              <div class="mt-2 text-display-lg font-bold">{stats.distinctChildrenThisMonth}</div>
+            </div>
+            <div class={card}>
+              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.activeEvents')}</div>
+              <div class="mt-2 text-display-lg font-bold">{stats.activeEvents}</div>
+            </div>
+          </div>
+
+          <section class={`mt-6 ${card}`}>
+            <h2 class="font-semibold">{t(lang, 'admin.children.chart.title')}</h2>
+            <div class="mt-4">
+              <WeeklyCheckinChart weeks={stats.weeks} locale={lang} />
+            </div>
+          </section>
+
+          {
+            stats.byEvent.length > 0 && (
+              <section class="mt-6 overflow-x-auto rounded-xl border border-border bg-surface-raised">
+                <table class="w-full border-collapse text-sm">
+                  <thead class="bg-surface-sunken">
+                    <tr>
+                      <th class={th}>{t(lang, 'admin.children.events.name')}</th>
+                      {last4Weeks.map((w) => (
+                        <th class={`${th} text-center`}>{shortLabel(w.weekStart)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.byEvent.map((row) => (
+                      <tr class="border-t border-border">
+                        <td class={`${td} font-medium`}>{row.name}</td>
+                        {row.counts.map((n) => (
+                          <td class={`${td} text-center tabular-nums`}>{n}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            )
+          }
+        </>
+      )
+    }
+
+    {
+      tab === 'today' && (
+        <div class="overflow-x-auto rounded-xl border border-border bg-surface-raised">
+          <table class="w-full border-collapse text-sm">
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.children.today.child')}</th>
+                <th class={th}>{t(lang, 'admin.children.today.household')}</th>
+                <th class={th}>{t(lang, 'admin.children.today.event')}</th>
+                <th class={th}>{t(lang, 'admin.children.today.code')}</th>
+                <th class={th}>{t(lang, 'admin.children.today.in')}</th>
+                <th class={th}>{t(lang, 'admin.children.today.out')}</th>
+                <th class={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {roster.length === 0 ? (
+                <tr>
+                  <td colspan="7" class={`${td} text-ink-muted`}>{t(lang, 'admin.children.today.empty')}</td>
+                </tr>
+              ) : (
+                roster.map((row) => (
+                  <tr class="border-t border-border">
+                    <td class={`${td} font-medium`}>{row.childName}</td>
+                    <td class={td}>{row.householdName}</td>
+                    <td class={td}>{row.eventName}</td>
+                    <td class={`${td} tabular-nums`}>{row.securityCode}</td>
+                    <td class={`${td} tabular-nums`}>{timeOf(row.checkedInAt)}</td>
+                    <td class={`${td} tabular-nums`}>{timeOf(row.checkedOutAt)}</td>
+                    <td class={td}>
+                      {row.checkedOutAt === null && (
+                        <form method="post">
+                          <input type="hidden" name="action" value="checkout" />
+                          <input type="hidden" name="checkinId" value={row.checkinId} />
+                          <button type="submit" class="text-xs font-semibold text-primary hover:underline">
+                            {t(lang, 'admin.children.today.checkout')}
+                          </button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+
+    {
+      tab === 'events' && (
+        <>
+          <form method="post" class={`${card} flex flex-wrap items-end gap-3`}>
+            <input type="hidden" name="action" value="save-event" />
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.children.events.name')}</span>
+              <input type="text" name="name" maxlength="120" required class={tin} />
+            </label>
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.children.events.weekday')}</span>
+              <select name="weekday" class={tin}>
+                <option value="">{t(lang, 'admin.children.events.anyDay')}</option>
+                {WEEKDAYS.map((d) => (
+                  <option value={String(d)}>{t(lang, `admin.children.weekday.${d}`)}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btn}>{t(lang, 'admin.children.events.add')}</button>
+          </form>
+
+          <div class="mt-4 overflow-x-auto rounded-xl border border-border bg-surface-raised">
+            <table class="w-full border-collapse text-sm">
+              <thead class="bg-surface-sunken">
+                <tr>
+                  <th class={th}>{t(lang, 'admin.children.events.name')}</th>
+                  <th class={th}>{t(lang, 'admin.children.events.weekday')}</th>
+                  <th class={th}>{t(lang, 'admin.children.events.active')}</th>
+                  <th class={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.length === 0 ? (
+                  <tr>
+                    <td colspan="4" class={`${td} text-ink-muted`}>{t(lang, 'admin.children.events.empty')}</td>
+                  </tr>
+                ) : (
+                  events.map((ev) => (
+                    <>
+                      <tr class="border-t border-border">
+                        <td class={`${td} font-medium`}>{ev.name}</td>
+                        <td class={td}>{weekdayLabel(ev.weekday)}</td>
+                        <td class={td}>
+                          <span class={`${badge} ${ev.active === 1 ? badgeActive : badgeInactive}`}>
+                            {t(lang, ev.active === 1 ? 'admin.console.active' : 'admin.console.disabled')}
+                          </span>
+                        </td>
+                        <td class={`${td} text-right whitespace-nowrap`}>
+                          <form method="post" class="inline">
+                            <input type="hidden" name="action" value="toggle-event" />
+                            <input type="hidden" name="id" value={ev.id} />
+                            <input type="hidden" name="active" value={ev.active === 1 ? '0' : '1'} />
+                            <button type="submit" class="text-xs font-semibold text-ink-muted hover:text-danger">
+                              {t(lang, ev.active === 1 ? 'admin.children.events.deactivate' : 'admin.children.events.reactivate')}
+                            </button>
+                          </form>
+                        </td>
+                      </tr>
+                      <tr class="border-t border-border bg-surface-sunken">
+                        <td colspan="4" class="px-3 py-2">
+                          <details>
+                            <summary class="cursor-pointer text-xs font-semibold text-primary">{t(lang, 'admin.console.editBasics')}</summary>
+                            <form method="post" class="mt-3 flex flex-wrap items-end gap-3">
+                              <input type="hidden" name="action" value="save-event" />
+                              <input type="hidden" name="id" value={ev.id} />
+                              <label class="block">
+                                <span class={lab}>{t(lang, 'admin.children.events.name')}</span>
+                                <input type="text" name="name" value={ev.name} maxlength="120" required class={tin} />
+                              </label>
+                              <label class="block">
+                                <span class={lab}>{t(lang, 'admin.children.events.weekday')}</span>
+                                <select name="weekday" class={tin}>
+                                  <option value="" selected={ev.weekday === null}>{t(lang, 'admin.children.events.anyDay')}</option>
+                                  {WEEKDAYS.map((d) => (
+                                    <option value={String(d)} selected={ev.weekday === d}>{t(lang, `admin.children.weekday.${d}`)}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <button type="submit" class={btn}>{t(lang, 'admin.children.events.save')}</button>
+                            </form>
+                          </details>
+                        </td>
+                      </tr>
+                    </>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )
+    }
+
+    {
+      tab === 'kiosk' && (
+        <div class={`${card} max-w-2xl`}>
+          <h2 class="font-semibold">{t(lang, 'admin.children.kiosk.heading')}</h2>
+          <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.instructions')}</p>
+
+          <label class="mt-4 block">
+            <span class={lab}>{t(lang, 'admin.children.kiosk.url')}</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <input id="kiosk-url" type="text" readonly value={kioskUrl} class={`${tin} flex-1 min-w-64`} />
+              <button type="button" data-copy-target="kiosk-url" class={btnSecondary}>{t(lang, 'admin.children.kiosk.copy')}</button>
+            </div>
+          </label>
+
+          <details class="mt-6">
+            <summary class="cursor-pointer text-sm font-semibold text-danger">{t(lang, 'admin.children.kiosk.regenerate')}</summary>
+            <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.regenerateConfirm')}</p>
+            <form method="post" class="mt-2">
+              <input type="hidden" name="action" value="regen-token" />
+              <button type="submit" class={btnDanger}>{t(lang, 'admin.children.kiosk.regenerate')}</button>
+            </form>
+          </details>
+        </div>
+      )
+    }
+  </div>
+</Admin>
+
+<script>
+  // Tiny vanilla island: copy the kiosk URL to the clipboard. Only present on
+  // the kiosk tab; a no-op elsewhere since the selector matches nothing.
+  document.querySelectorAll<HTMLButtonElement>('[data-copy-target]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const targetId = button.dataset.copyTarget;
+      const input = targetId ? document.getElementById(targetId) : null;
+      if (!(input instanceof HTMLInputElement)) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+      } catch {
+        input.select();
+      }
+    });
+  });
+</script>
