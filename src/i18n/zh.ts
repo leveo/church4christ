@@ -726,6 +726,10 @@ export default {
   'admin.form.badRequest': '提交的表单无法读取，请重试。',
 
   'admin.giving.title': '奉献管理',
+  'admin.giving.stats.monthTotal': '本月总额',
+  'admin.giving.stats.monthGifts': '本月奉献笔数',
+  'admin.giving.stats.ytdTotal': '年度累计',
+  'admin.giving.stats.activeFunds': '活跃奉献项目',
   'admin.giving.funds': '奉献项目',
   'admin.giving.fundNumber': '项目编号',
   'admin.giving.fundName': '名称',

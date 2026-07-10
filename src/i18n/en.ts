@@ -728,6 +728,10 @@ export default {
   'admin.form.badRequest': 'The submitted form could not be read. Please try again.',
 
   'admin.giving.title': 'Giving',
+  'admin.giving.stats.monthTotal': 'This month',
+  'admin.giving.stats.monthGifts': 'Gifts this month',
+  'admin.giving.stats.ytdTotal': 'Year to date',
+  'admin.giving.stats.activeFunds': 'Active funds',
   'admin.giving.funds': 'Funds',
   'admin.giving.fundNumber': 'Fund number',
   'admin.giving.fundName': 'Name',
