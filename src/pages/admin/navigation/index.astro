@@ -1,0 +1,303 @@
+---
+// Admin navigation editor (adminOnly — routePolicy covers /admin/navigation; this
+// page re-checks isAdmin and 403s anyone else). Edits the ordered `nav.items`
+// setting (src/lib/nav.ts) with classic form-per-action posts: reorder (up/down),
+// remove, add a builtin/page/link entry, or reset to the hardcoded default. Every
+// mutating branch re-reads the current items, applies exactly one change, and
+// writes back — reset instead deletes the setting so the next read falls back to
+// DEFAULT_NAV. A live preview (resolveNav, en + zh) shows what the public header
+// will actually render, since a module-gated builtin or an unpublished page drops
+// out of the real nav even though it stays listed here for the admin to manage.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { BUILTIN_NAV, NAV_SETTING_KEY, parseNavItems, resolveNav, serializeNavItems, type NavItem } from '../../../lib/nav';
+import { deleteSetting, getSetting, setSetting } from '../../../lib/settings';
+import { listCustomPages } from '../../../lib/pagesDb';
+import { isHttpUrl } from '../../../lib/validate';
+import { tin, lab, card, errorText, btn, btnDanger, badge, badgeInactive, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !user.isAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let badRequest = false;
+
+/** idx names an existing row (integer, 0 ≤ idx < len); anything else (missing,
+ *  empty, negative, non-numeric, out of range — e.g. a stale double-submit) is
+ *  treated as -1, so the caller silently no-ops instead of erroring. A plain
+ *  `Number(...)` coercion would treat '' or a missing field as 0, so the raw
+ *  value is checked against a strict digit-string pattern first. */
+function idxOf(form: FormData, len: number): number {
+  const raw = String(form.get('idx') ?? '');
+  if (!/^\d+$/.test(raw)) return -1;
+  const n = Number(raw);
+  return n < len ? n : -1;
+}
+
+if (Astro.request.method === 'POST') {
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    badRequest = true;
+  }
+  if (fd) {
+    const action = String(fd.get('action') ?? '');
+    const items = parseNavItems(await getSetting(db, NAV_SETTING_KEY, ''));
+
+    if (action === 'up' || action === 'down') {
+      const idx = idxOf(fd, items.length);
+      const swapWith = action === 'up' ? idx - 1 : idx + 1;
+      if (idx >= 0 && swapWith >= 0 && swapWith < items.length) {
+        [items[idx], items[swapWith]] = [items[swapWith], items[idx]];
+        await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
+      }
+      return Astro.redirect('/admin/navigation?saved=1', 303);
+    }
+
+    if (action === 'remove') {
+      const idx = idxOf(fd, items.length);
+      if (idx >= 0) {
+        items.splice(idx, 1);
+        await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
+      }
+      return Astro.redirect('/admin/navigation?saved=1', 303);
+    }
+
+    if (action === 'add-builtin') {
+      const key = String(fd.get('key') ?? '');
+      if (BUILTIN_NAV.some((b) => b.key === key) && !items.some((i) => i.type === 'builtin' && i.key === key)) {
+        items.push({ type: 'builtin', key });
+        await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
+      }
+      return Astro.redirect('/admin/navigation?saved=1', 303);
+    }
+
+    if (action === 'add-page') {
+      const slug = String(fd.get('slug') ?? '');
+      const pages = await listCustomPages(db);
+      if (pages.some((p) => p.slug === slug) && !items.some((i) => i.type === 'page' && i.slug === slug)) {
+        items.push({ type: 'page', slug });
+        await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
+      }
+      return Astro.redirect('/admin/navigation?saved=1', 303);
+    }
+
+    if (action === 'add-link') {
+      const url = String(fd.get('url') ?? '').trim();
+      const labelEn = String(fd.get('label_en') ?? '').trim();
+      const labelZh = String(fd.get('label_zh') ?? '').trim();
+      const errs: Record<string, string> = {};
+      if (!isHttpUrl(url) && !url.startsWith('/')) errs.url = 'admin.navigation.urlInvalid';
+      if (!labelEn && !labelZh) errs.label = 'admin.navigation.labelRequired';
+      if (Object.keys(errs).length === 0) {
+        items.push({ type: 'link', url, label: { en: labelEn, zh: labelZh } });
+        await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
+        return Astro.redirect('/admin/navigation?saved=1', 303);
+      }
+      errors = errs;
+    }
+
+    if (action === 'reset') {
+      await deleteSetting(db, NAV_SETTING_KEY);
+      return Astro.redirect('/admin/navigation?saved=1', 303);
+    }
+  }
+}
+
+const items = parseNavItems(await getSetting(db, NAV_SETTING_KEY, ''));
+const pages = await listCustomPages(db);
+const pageBySlug = new Map(pages.map((p) => [p.slug, p]));
+const availableBuiltins = BUILTIN_NAV.filter((b) => !items.some((i) => i.type === 'builtin' && i.key === b.key));
+const availablePages = pages.filter((p) => !items.some((i) => i.type === 'page' && i.slug === p.slug));
+
+const previewEn = await resolveNav(db, 'en', Astro.locals.modules);
+const previewZh = await resolveNav(db, 'zh', Astro.locals.modules);
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const hasErrors = Object.keys(errors).length > 0;
+const g = (n: string) => String(fd?.get(n) ?? '');
+
+function typeLabel(item: NavItem): string {
+  if (item.type === 'builtin') return t(lang, 'admin.navigation.typeBuiltin');
+  if (item.type === 'page') return t(lang, 'admin.navigation.typePage');
+  return t(lang, 'admin.navigation.typeLink');
+}
+function labelsOf(item: NavItem): { en: string; zh: string; target: string } {
+  if (item.type === 'builtin') {
+    const path = BUILTIN_NAV.find((b) => b.key === item.key)!.path;
+    return { en: t('en', item.key), zh: t('zh', item.key), target: path };
+  }
+  if (item.type === 'page') {
+    const p = pageBySlug.get(item.slug);
+    return { en: p?.title_en || item.slug, zh: p?.title_zh || item.slug, target: `/p/${item.slug}` };
+  }
+  return { en: item.label.en || item.label.zh, zh: item.label.zh || item.label.en, target: item.url };
+}
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={t(lang, 'admin.navigation.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.navigation.title')}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.navigation.saved')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
+
+  <section class="mt-6 max-w-2xl space-y-3">
+    <h2 class={h2}>{t(lang, 'admin.navigation.itemsTitle')}</h2>
+    {items.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.navigation.empty')}</p>}
+    {
+      items.map((item, i) => {
+        const { en, zh, target } = labelsOf(item);
+        return (
+          <div class={`${card} flex items-center justify-between gap-4`}>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class={`${badge} ${badgeInactive}`}>{typeLabel(item)}</span>
+                <span class="font-semibold text-ink">{en}</span>
+              </div>
+              <p class="text-sm text-ink-muted">
+                {zh} · {target}
+              </p>
+            </div>
+            <div class="flex shrink-0 gap-2">
+              <form method="post">
+                <input type="hidden" name="action" value="up" />
+                <input type="hidden" name="idx" value={i} />
+                <button type="submit" class={btn} disabled={i === 0} aria-label={t(lang, 'admin.form.moveUp')}>
+                  ↑
+                </button>
+              </form>
+              <form method="post">
+                <input type="hidden" name="action" value="down" />
+                <input type="hidden" name="idx" value={i} />
+                <button type="submit" class={btn} disabled={i === items.length - 1} aria-label={t(lang, 'admin.form.moveDown')}>
+                  ↓
+                </button>
+              </form>
+              <form method="post">
+                <input type="hidden" name="action" value="remove" />
+                <input type="hidden" name="idx" value={i} />
+                <button type="submit" class={btn} aria-label={t(lang, 'admin.navigation.removeItem')} title={t(lang, 'admin.navigation.removeItem')}>
+                  ✕
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      })
+    }
+  </section>
+
+  <section class={`${card} mt-6 max-w-2xl space-y-6`}>
+    <h2 class={h2}>{t(lang, 'admin.navigation.addSectionTitle')}</h2>
+
+    <div>
+      {
+        availableBuiltins.length > 0 ? (
+          <form method="post" class="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="action" value="add-builtin" />
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.navigation.addBuiltinTitle')}</span>
+              <select name="key" class={tin}>
+                {availableBuiltins.map((b) => (
+                  <option value={b.key}>{t(lang, b.key)}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btn}>
+              {t(lang, 'admin.navigation.addButton')}
+            </button>
+          </form>
+        ) : (
+          <>
+            <h3 class="text-sm font-semibold text-ink">{t(lang, 'admin.navigation.addBuiltinTitle')}</h3>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.navigation.allBuiltinsAdded')}</p>
+          </>
+        )
+      }
+    </div>
+
+    <div>
+      {
+        availablePages.length > 0 ? (
+          <form method="post" class="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="action" value="add-page" />
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.navigation.addPageTitle')}</span>
+              <select name="slug" class={tin}>
+                {availablePages.map((p) => (
+                  <option value={p.slug}>
+                    {p.slug} — {p.title_en || t(lang, 'admin.navigation.untitled')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btn}>
+              {t(lang, 'admin.navigation.addButton')}
+            </button>
+          </form>
+        ) : (
+          <>
+            <h3 class="text-sm font-semibold text-ink">{t(lang, 'admin.navigation.addPageTitle')}</h3>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.navigation.noPagesAvailable')}</p>
+          </>
+        )
+      }
+      <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.navigation.unpublishedHint')}</p>
+    </div>
+
+    <div>
+      <h3 class="text-sm font-semibold text-ink">{t(lang, 'admin.navigation.addLinkTitle')}</h3>
+      {hasErrors && <p class={`mt-2 ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <form method="post" class="mt-2 grid gap-3 sm:grid-cols-3">
+        <input type="hidden" name="action" value="add-link" />
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.navigation.linkUrl')}</span>
+          <input name="url" value={g('url')} class={tin} placeholder="https://example.com" />
+          <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.navigation.linkUrlHint')}</p>
+          {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.navigation.linkLabelEn')}</span>
+          <input name="label_en" value={g('label_en')} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.navigation.linkLabelZh')}</span>
+          <input name="label_zh" value={g('label_zh')} class={tin} />
+        </label>
+        {errors.label && <p class={`sm:col-span-3 ${errorText}`}>{t(lang, errors.label)}</p>}
+        <div class="sm:col-span-3">
+          <button type="submit" class={btn}>
+            {t(lang, 'admin.navigation.addButton')}
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="mt-6 max-w-2xl">
+    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.navigation.resetConfirm'))})`}>
+      <input type="hidden" name="action" value="reset" />
+      <button type="submit" class={btnDanger}>
+        {t(lang, 'admin.navigation.reset')}
+      </button>
+    </form>
+  </section>
+
+  <section class="mt-8 max-w-2xl">
+    <h2 class={h2}>{t(lang, 'admin.navigation.previewTitle')}</h2>
+    <div class="mt-2 space-y-2 text-sm text-ink-muted">
+      <p>
+        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewEn')}:</span> {previewEn.map((l) => l.label).join(' · ') || '—'}
+      </p>
+      <p>
+        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewZh')}:</span> {previewZh.map((l) => l.label).join(' · ') || '—'}
+      </p>
+    </div>
+  </section>
+</Admin>

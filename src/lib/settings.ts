@@ -32,6 +32,11 @@ export async function setSetting(db: AppDb, key: string, value: string): Promise
     .run();
 }
 
+/** Remove a setting by key (a missing key is a harmless no-op). */
+export async function deleteSetting(db: AppDb, key: string): Promise<void> {
+  await db.prepare('DELETE FROM settings WHERE key = ?').bind(key).run();
+}
+
 /** Upsert several settings in ONE atomic batch — the admin settings form save,
  *  so a partial write can never leave identity/theme half-applied. */
 export async function setSettings(db: AppDb, values: Record<string, string>): Promise<void> {
@@ -103,4 +108,8 @@ export async function getTheme(db: AppDb): Promise<{ theme: string; defaultMode:
 
 export async function getHeroImageKey(db: AppDb): Promise<string> {
   return getSetting(db, 'site.hero_image_key', '');
+}
+
+export async function getLogoImageKey(db: AppDb): Promise<string> {
+  return getSetting(db, 'site.logo_image_key', '');
 }
