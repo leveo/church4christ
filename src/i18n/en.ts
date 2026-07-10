@@ -1194,6 +1194,7 @@ export default {
   'admin.prayerWall.status.waiting': 'Waiting on God',
   'admin.prayerWall.status.answered': 'Answered',
   'admin.prayerWall.status.cancelled': 'Closed',
+  'admin.prayerWall.stats.total': 'Total',
   'admin.prayerWall.empty': 'No requests.',
   'admin.prayerWall.mailAria': 'Email {name}',
   'admin.prayerWall.expand': 'Show full message',

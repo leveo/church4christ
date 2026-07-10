@@ -1191,6 +1191,7 @@ export default {
   'admin.prayerWall.status.waiting': '等候神',
   'admin.prayerWall.status.answered': '已蒙应允',
   'admin.prayerWall.status.cancelled': '已结束',
+  'admin.prayerWall.stats.total': '总数',
   'admin.prayerWall.empty': '暂无请求',
   'admin.prayerWall.mailAria': '寄邮件给 {name}',
   'admin.prayerWall.expand': '展开全文',
