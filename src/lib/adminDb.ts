@@ -930,9 +930,22 @@ export async function listWeekPrep(db: AppDb, date: string, locale: Locale): Pro
 export interface RecentRevisionRow {
   id: number;
   entity: string;
-  entity_id: number;
+  /** number for the integer-id entities, string for custom_page (UUID ids) —
+   *  see normalizeEntityId. */
+  entity_id: number | string;
   edited_by: string;
   edited_at: string;
+}
+
+/** revisions.entity_id read normalization. D1 declares the column INTEGER
+ *  (affinity-only, so custom_page UUID ids store — and read back — as TEXT),
+ *  but the Postgres port widened the column itself to TEXT
+ *  (migrations-supabase/0004), where the driver returns EVERY entity_id as a
+ *  string. Normalizing at the read seam keeps the two backends identical:
+ *  canonical integer ids come back as JS numbers everywhere, custom_page UUIDs
+ *  stay strings. */
+export function normalizeEntityId(v: number | string): number | string {
+  return typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
 }
 
 /** The most recent revision rows across all entities (dashboard activity). */
@@ -941,7 +954,7 @@ export async function listRecentRevisions(db: AppDb, limit: number): Promise<Rec
     .prepare(`SELECT id, entity, entity_id, edited_by, edited_at FROM revisions ORDER BY edited_at DESC, id DESC LIMIT ?1`)
     .bind(limit)
     .all<RecentRevisionRow>();
-  return results;
+  return results.map((r) => ({ ...r, entity_id: normalizeEntityId(r.entity_id) }));
 }
 
 // ===========================================================================
@@ -1341,12 +1354,15 @@ export async function listRevisions(db: AppDb, entity: string, entityId: number)
   return results;
 }
 
-/** One revision by id (used to validate + read a snapshot before restoring). */
-export async function getRevision(db: AppDb, id: number): Promise<{ entity: string; entity_id: number; snapshot_json: string } | null> {
-  return db
+/** One revision by id (used to validate + read a snapshot before restoring).
+ *  entity_id is number | string (custom_page uses UUID ids; the pg column is
+ *  TEXT) — normalized so integer ids are numbers on both backends. */
+export async function getRevision(db: AppDb, id: number): Promise<{ entity: string; entity_id: number | string; snapshot_json: string } | null> {
+  const row = await db
     .prepare(`SELECT entity, entity_id, snapshot_json FROM revisions WHERE id = ?1`)
     .bind(id)
-    .first<{ entity: string; entity_id: number; snapshot_json: string }>();
+    .first<{ entity: string; entity_id: number | string; snapshot_json: string }>();
+  return row ? { ...row, entity_id: normalizeEntityId(row.entity_id) } : null;
 }
 
 export type RestoreResult =
@@ -1385,6 +1401,10 @@ export async function restoreRevision(db: AppDb, entity: string, revisionId: num
   if (!content) return { ok: false, error: 'bad_snapshot' };
 
   const id = rev.entity_id;
+  // Every entity this switch can restore has an integer id; a non-numeric
+  // entity_id (a custom_page UUID — not restorable here) is treated like an
+  // entity mismatch. Also narrows `id` to number for the save calls below.
+  if (typeof id !== 'number') return { ok: false, error: 'not_found' };
 
   // Rowid-reuse guard: restoring a deleted-item snapshot would upsert under the
   // original id, but that id may now belong to a NEWER live announcement/event.
