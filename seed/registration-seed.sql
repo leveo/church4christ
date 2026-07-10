@@ -88,6 +88,13 @@ INSERT INTO registrations (id, event_id, person_id, name, email, status, amount_
 -- Answers, keyed to the exact registration + question ids above. Select values are
 -- among each question's options, yes/no is normalized 'yes'/'no', and optional
 -- questions are simply absent for the registrations that skipped them.
+-- Link the paid dinner (event 910) to the seeded public group "Young Adults"
+-- (groups.id = 1 from dev-seed.sql) via the Supabase-only group_reg_events table,
+-- so groupRegDb reads and the pg parity suite always have a linked special event
+-- with a real confirmed count. Explicit id 920 stays clear of other id ranges.
+INSERT INTO group_reg_events (id, group_id, reg_event_id) VALUES
+  (920, 1, 910);
+
 INSERT INTO reg_answers (registration_id, question_id, value) VALUES
   (900, 901, 'M'),
   (900, 902, 'Vegetarian meals please, no peanuts'),

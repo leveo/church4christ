@@ -23,6 +23,7 @@ import {
   type PersonGroupRow,
 } from '../../../lib/groupDb';
 import { listUpcomingOccurrencesForGroup, type UpcomingOccurrence } from '../../../lib/groupEventDb';
+import { listOpenSpecialEventsForGroup } from '../../../lib/groupRegDb';
 import { badge, badgeRole, btn } from '../../../lib/adminUi';
 
 const GROUP_TZ = 'America/Chicago';
@@ -102,6 +103,18 @@ const memberCount = members.length;
 const adminNames = members.filter((m) => m.is_admin === 1).map((m) => m.display_name);
 const canSeeRoster = isMember || isSiteAdmin;
 
+// Special events (registration module only — Supabase-backed; the section is
+// hidden entirely when the module is off or no linked event is currently open).
+const hasRegistration = Astro.locals.modules.has('registration');
+let specialEvents: Array<{ id: number; title: string; starts_at: string }> = [];
+if (hasRegistration) {
+  try {
+    specialEvents = await listOpenSpecialEventsForGroup(db, group.id, locale);
+  } catch (err) {
+    console.error('group detail: special events load failed', err);
+  }
+}
+
 const occurrenceWhen = (o: UpcomingOccurrence) => {
   const time = utcToDatetimeLocal(o.starts_at, GROUP_TZ).slice(11, 16);
   return `${formatDate(o.occurs_on, locale)} · ${time}`;
@@ -149,6 +162,27 @@ const occurrenceWhen = (o: UpcomingOccurrence) => {
         )
       }
     </section>
+
+    {
+      hasRegistration && specialEvents.length > 0 && (
+        <section class="mt-8">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'groups.special.title')}</h2>
+          <ul class="mt-3 flex flex-col gap-3">
+            {specialEvents.map((s) => (
+              <li class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised p-4">
+                <div>
+                  <p class="font-semibold">{s.title}</p>
+                  <p class="mt-1 text-sm text-ink-muted tabular-nums">{formatDate(s.starts_at.slice(0, 10), locale)}</p>
+                </div>
+                <a href={localePath(locale, `/register/${s.id}`)} class="text-sm font-semibold text-primary hover:underline">
+                  {t(locale, 'groups.special.register')} →
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
 
     <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
       {

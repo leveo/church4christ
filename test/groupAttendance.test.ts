@@ -10,6 +10,7 @@ import {
   canRecordAttendance,
   claimOccurrenceForEmail,
   createAttendanceToken,
+  getAttendanceMap,
   saveAttendance,
   sendAttendanceEmails,
   verifyAttendanceToken,
@@ -124,6 +125,20 @@ describe('saveAttendance', () => {
     // Re-save flips the set (upsert, not insert).
     await saveAttendance(env.DB, occId, [m3], 1);
     expect(await presentSet(occId)).toEqual({ [m1]: 0, [m2]: 0, [m3]: 1 });
+  });
+});
+
+describe('getAttendanceMap', () => {
+  it('returns member_id → present for recorded rows only (unrecorded members absent)', async () => {
+    const { groupId, occId } = await scaffold();
+    const m1 = (await env.DB.prepare(`INSERT INTO group_members (group_id, person_id, display_name) VALUES (?1, 1, 'One') RETURNING id`).bind(groupId).first<{ id: number }>())!.id;
+    const m2 = (await env.DB.prepare(`INSERT INTO group_members (group_id, person_id, display_name) VALUES (?1, 2, 'Two') RETURNING id`).bind(groupId).first<{ id: number }>())!.id;
+    const m3 = (await env.DB.prepare(`INSERT INTO group_members (group_id, display_name) VALUES (?1, 'Guest') RETURNING id`).bind(groupId).first<{ id: number }>())!.id;
+
+    expect(await getAttendanceMap(env.DB, occId)).toEqual({}); // nothing recorded yet
+
+    await saveAttendance(env.DB, occId, [m1], 1); // m1 present, m2/m3 absent
+    expect(await getAttendanceMap(env.DB, occId)).toEqual({ [m1]: 1, [m2]: 0, [m3]: 0 });
   });
 });
 

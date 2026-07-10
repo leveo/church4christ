@@ -1,0 +1,59 @@
+---
+import Base from '../../../layouts/Base.astro';
+import AttendanceSheet from '../../../components/AttendanceSheet.astro';
+import { t } from '../../../lib/i18n';
+import { DEFAULT_LOCALE, type Locale } from '../../../lib/locales';
+import { getOccurrenceWithEvent } from '../../../lib/groupEventDb';
+import { listMembers } from '../../../lib/groupDb';
+import { canRecordAttendance, saveAttendance, getAttendanceMap } from '../../../lib/groupAttendance';
+
+// Session-authed attendance sheet (the manage page links here). Locale-free under
+// /attendance like the token page — renders in the signed-in user's own language.
+// Auth mirrors the manage page: occurrence-missing → 404; !user → 303 to signin;
+// a signed-in user who is neither a site admin nor a group admin of the
+// occurrence's group → 404 (anti-enumeration — never a signin redirect). The guard
+// runs on every request, so it re-checks before the POST write. CSRF is the
+// middleware's same-origin check.
+const db = Astro.locals.db;
+
+const idRaw = Astro.params.id ?? '';
+const occId = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+const occurrence = occId !== null ? await getOccurrenceWithEvent(db, occId) : null;
+if (!occurrence) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect(`/${DEFAULT_LOCALE}/signin`, 303);
+
+if (!(await canRecordAttendance(db, occurrence.id, user.id))) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const locale: Locale = user.lang === 'zh' ? 'zh' : 'en';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const memberIds = form.getAll('member').map((v) => Number(v)).filter((n) => Number.isInteger(n));
+  await saveAttendance(db, occurrence.id, memberIds, user.id);
+  return Astro.redirect(`${Astro.url.pathname}?saved=1`, 303);
+}
+
+const [members, attendance] = await Promise.all([
+  listMembers(db, occurrence.group_id),
+  getAttendanceMap(db, occurrence.id),
+]);
+const saved = Astro.url.searchParams.has('saved');
+---
+<Base title={t(locale, 'attendance.title')} locale={locale} noindex>
+  <AttendanceSheet
+    locale={locale}
+    occurrence={occurrence}
+    members={members}
+    attendance={attendance}
+    actionUrl={Astro.url.pathname}
+    saved={saved}
+  />
+</Base>

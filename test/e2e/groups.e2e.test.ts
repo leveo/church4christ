@@ -126,6 +126,68 @@ describe('POST /en/groups/1 — request to join', () => {
   });
 });
 
+describe('/attendance/[token] — tracker page', () => {
+  async function sha256Hex(value: string): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  it('an unknown token renders the friendly invalid page with a 404 status (no detail leak)', async () => {
+    const res = await get('/attendance/not-a-real-token');
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).toContain('Link expired or invalid');
+    expect(body).not.toContain('Young Adults'); // occurrence detail must not leak
+  });
+
+  it('a valid token renders the sheet, and POST records attendance', async () => {
+    // Bind a known raw token to seeded occurrence 1 (group 1 "Young Adults"),
+    // owned by its group admin Ben (person 8). Seed attendance for occurrence 1:
+    // member 1 present, member 2 present, member 3 absent.
+    const raw = 'e2e-attendance-token-occ1';
+    await env.DB
+      .prepare(
+        `INSERT INTO group_attendance_tokens (occurrence_id, person_id, token_hash, expires_at)
+         VALUES (1, 8, ?1, datetime('now','+72 hours'))`,
+      )
+      .bind(await sha256Hex(raw))
+      .run();
+
+    const getRes = await get(`/attendance/${raw}`);
+    expect(getRes.status).toBe(200);
+    const body = await getRes.text();
+    expect(body).toContain('Mark Liu'); // a roster member renders
+    expect(body).toContain('Save attendance');
+
+    // Mark only member 1 present; everyone else (incl. the name-only member) → absent.
+    const postRes = await post(`/attendance/${raw}`, `token=${raw}&member=1`);
+    expect(postRes.status).toBe(303);
+    expect(postRes.headers.get('location')).toBe(`/attendance/${raw}?saved=1`);
+
+    const { results } = await env.DB
+      .prepare('SELECT member_id, present FROM group_attendance WHERE occurrence_id = 1 ORDER BY member_id')
+      .all<{ member_id: number; present: number }>();
+    const map = Object.fromEntries(results.map((r) => [r.member_id, r.present]));
+    expect(map[1]).toBe(1); // checked
+    expect(map[2]).toBe(0); // unchecked → recorded absent
+    expect(map[3]).toBe(0);
+    expect(map[4]).toBe(0); // name-only member also gets a row
+  });
+
+  it('POST with a tampered hidden token records nothing', async () => {
+    const before = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM group_attendance WHERE occurrence_id = 2')
+      .first<{ n: number }>();
+    const res = await post('/attendance/whatever', 'token=forged-token&member=1');
+    // Invalid token → the page falls through to the 404 invalid state, no write.
+    expect(res.status).toBe(404);
+    const after = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM group_attendance WHERE occurrence_id = 2')
+      .first<{ n: number }>();
+    expect(after?.n).toBe(before?.n);
+  });
+});
+
 describe('GET /en/signup', () => {
   it('200s and renders the sign-up form', async () => {
     const res = await get('/en/signup');

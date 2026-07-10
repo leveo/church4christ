@@ -139,6 +139,20 @@ export async function saveAttendance(
   );
 }
 
+/**
+ * The existing attendance for an occurrence as a `member_id → present (0|1)` map
+ * — what the attendance sheet pre-checks its boxes from. A member absent from the
+ * map has no recorded row yet (rendered unchecked); present = 1 is checked, a
+ * recorded present = 0 stays unchecked.
+ */
+export async function getAttendanceMap(db: AppDb, occurrenceId: number): Promise<Record<number, number>> {
+  const { results } = await db
+    .prepare(`SELECT member_id, present FROM group_attendance WHERE occurrence_id = ?1`)
+    .bind(occurrenceId)
+    .all<{ member_id: number; present: number }>();
+  return Object.fromEntries(results.map((r) => [r.member_id, r.present]));
+}
+
 // ── Cron: attendance emails ─────────────────────────────────────────────────
 
 /** Atomically claim an occurrence for the attendance email so two concurrent cron

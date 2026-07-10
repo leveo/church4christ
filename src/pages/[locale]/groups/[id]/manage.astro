@@ -38,6 +38,16 @@ import {
   type PastOccurrence,
 } from '../../../../lib/groupEventDb';
 import { parseGroupEventForm, parseInlineMemberForm } from '../../../../lib/groupEventForms';
+import { parseRegEventForm } from '../../../../lib/regForms';
+import {
+  createSpecialEvent,
+  linkSpecialEvent,
+  unlinkSpecialEvent,
+  listSpecialEventsForGroup,
+  listLinkableEvents,
+  type GroupSpecialEvent,
+  type LinkableEvent,
+} from '../../../../lib/groupRegDb';
 import { btn, btnSecondary, card, errorText, lab, noticeErr, noticeOk, rowBtn, tin, td, badge } from '../../../../lib/adminUi';
 
 const TZ = 'America/Chicago';
@@ -80,10 +90,23 @@ const [members, joinRequests, events, upcoming] = await Promise.all([
 const upcomingByEvent = new Map<number, number>();
 for (const o of upcoming) upcomingByEvent.set(o.event_id, (upcomingByEvent.get(o.event_id) ?? 0) + 1);
 
+// Special events (registration module only — Supabase-backed; groupRegDb is never
+// reached on a D1 request because of this gate). Loaded once, pre-mutation, so the
+// create-form echo path renders against a consistent snapshot like the others.
+let specialEvents: GroupSpecialEvent[] = [];
+let linkableEvents: LinkableEvent[] = [];
+if (hasRegistration) {
+  [specialEvents, linkableEvents] = await Promise.all([
+    listSpecialEventsForGroup(db, group.id, locale),
+    listLinkableEvents(db, group.id),
+  ]);
+}
+
 // ── POST (self-page, hidden `action`) ───────────────────────────────────────
 let eventErrors: Record<string, string> = {};
 let eventFailedId: string | null = null; // id whose event form failed ('' = the create form)
 let inlineErrors: Record<string, string> = {};
+let specialErrors: Record<string, string> = {};
 let postFd: FormData | null = null;
 
 if (Astro.request.method === 'POST') {
@@ -173,6 +196,42 @@ if (Astro.request.method === 'POST') {
     const eid = idOf(fd.get('event_id'));
     if (eid !== null && events.some((e) => e.id === eid)) await softDeleteEvent(db, eid);
     return savedRedirect();
+  } else if (hasRegistration && action === 'link-special') {
+    // Link an existing reg event — scope to ids the picker actually offered
+    // (active + not-yet-linked) so a forged id can't attach an arbitrary event.
+    const regEventId = idOf(fd.get('reg_event_id'));
+    if (regEventId !== null && linkableEvents.some((e) => e.id === regEventId)) {
+      await linkSpecialEvent(db, group.id, regEventId);
+    }
+    return savedRedirect();
+  } else if (hasRegistration && action === 'unlink-special') {
+    // Unlink — scope to rows already linked to THIS group (listSpecialEventsForGroup).
+    const regEventId = idOf(fd.get('reg_event_id'));
+    if (regEventId !== null && specialEvents.some((e) => e.id === regEventId)) {
+      await unlinkSpecialEvent(db, group.id, regEventId);
+    }
+    return savedRedirect();
+  } else if (hasRegistration && action === 'create-special') {
+    // Reuse the registration event parser (title_en + starts_at required, UTC
+    // datetime conversion, capacity/price handling). The group form omits
+    // opens_at/closes_at/active/price — createSpecialEvent forces active=1 and
+    // defaults free; a blank zh title reuses the en title.
+    const parsed = parseRegEventForm(fd);
+    if (!parsed.ok) specialErrors = parsed.errors;
+    else {
+      await createSpecialEvent(db, group.id, {
+        title_en: parsed.data.title_en,
+        title_zh: parsed.data.title_zh,
+        description_en: parsed.data.description_en,
+        description_zh: parsed.data.description_zh,
+        starts_at: parsed.data.starts_at,
+        ends_at: parsed.data.ends_at,
+        location: parsed.data.location,
+        capacity: parsed.data.capacity,
+        price_cents: parsed.data.price_cents,
+      });
+      return savedRedirect();
+    }
   }
 }
 
@@ -209,6 +268,10 @@ const ev = echoing
 // Inline add-member echo.
 const inlineEchoing = postFd !== null && Object.keys(inlineErrors).length > 0;
 const gi = (n: string) => (inlineEchoing ? String(postFd?.get(n) ?? '') : '');
+
+// Create-special-event echo (registration module only).
+const specialEchoing = postFd !== null && Object.keys(specialErrors).length > 0;
+const gsp = (n: string) => (specialEchoing ? String(postFd?.get(n) ?? '') : '');
 
 // Attendance history: recent past occurrences per tracked event.
 const trackedEvents = events.filter((e) => e.track_attendance === 1);
@@ -512,7 +575,94 @@ const dateOf = (s: string) => formatDate(s.slice(0, 10), locale);
       <section class={`mt-8 ${card}`}>
         <h2 class={h2}>{t(locale, 'groups.manage.special.title')}</h2>
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.special.note')}</p>
-        <!-- slice-g:special-events -->
+
+        {/* Linked special events */}
+        {specialEvents.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'groups.manage.special.none')}</p>
+        ) : (
+          <ul class="mt-3 flex flex-col gap-2">
+            {specialEvents.map((s) => (
+              <li class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2 first:border-0 first:pt-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium">{s.title}</span>
+                  <span class="text-sm text-ink-muted tabular-nums">{dateOf(s.starts_at)}</span>
+                  <span class={`${badge} ${s.active === 0 ? 'bg-surface-sunken text-ink-muted' : s.is_open === 1 ? 'bg-success-soft text-success' : 'bg-surface-sunken text-ink-muted'}`}>
+                    {t(locale, s.active === 0 ? 'groups.manage.special.inactive' : s.is_open === 1 ? 'groups.manage.special.open' : 'groups.manage.special.closed')}
+                  </span>
+                  <span class="text-xs text-ink-subtle">{t(locale, 'groups.manage.special.confirmed', { count: String(s.confirmed_count) })}</span>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <a href={localePath(locale, `/register/${s.id}`)} class="text-sm text-primary hover:underline">{t(locale, 'groups.manage.special.view')}</a>
+                  <form method="post" class="inline" onsubmit={`return confirm(${JSON.stringify(t(locale, 'groups.manage.special.unlinkConfirm'))})`}>
+                    <input type="hidden" name="action" value="unlink-special" />
+                    <input type="hidden" name="reg_event_id" value={s.id} />
+                    <button type="submit" class={`${rowBtn} text-danger`}>{t(locale, 'groups.manage.special.unlink')}</button>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Link an existing event */}
+        <div class="mt-6 border-t border-border pt-5">
+          <p class="text-sm font-semibold">{t(locale, 'groups.manage.special.linkTitle')}</p>
+          {linkableEvents.length === 0 ? (
+            <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.special.linkNone')}</p>
+          ) : (
+            <form method="post" class="mt-2 flex flex-wrap items-center gap-2">
+              <input type="hidden" name="action" value="link-special" />
+              <select name="reg_event_id" class={`${tin} max-w-xs`}>
+                <option value="">{t(locale, 'groups.manage.special.linkSelect')}</option>
+                {linkableEvents.map((e) => (
+                  <option value={e.id}>{(e.title_en || e.title_zh || '—')} · {e.starts_at.slice(0, 10)}</option>
+                ))}
+              </select>
+              <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.special.linkButton')}</button>
+            </form>
+          )}
+        </div>
+
+        {/* Create a new special event */}
+        <form method="post" class="mt-6 grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+          <input type="hidden" name="action" value="create-special" />
+          <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'groups.manage.special.createTitle')}</p>
+          <p class="text-sm text-ink-muted sm:col-span-2">{t(locale, 'groups.manage.special.createHint')}</p>
+          {Object.keys(specialErrors).length > 0 && <p class={`sm:col-span-2 ${noticeErr}`}>{t(locale, 'groups.manage.fixErrors')}</p>}
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.titleEn')}</span>
+            <input name="title_en" value={gsp('title_en')} class={tin} />
+            {specialErrors.title_en && <span class={errorText}>{t(locale, specialErrors.title_en)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.titleZh')}</span>
+            <input name="title_zh" value={gsp('title_zh')} class={tin} />
+            <span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'groups.manage.special.titleZhHint')}</span>
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.starts')}</span>
+            <input type="datetime-local" name="starts_at" value={gsp('starts_at')} class={tin} />
+            {specialErrors.starts_at && <span class={errorText}>{t(locale, specialErrors.starts_at)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.ends')}</span>
+            <input type="datetime-local" name="ends_at" value={gsp('ends_at')} class={tin} />
+            {specialErrors.ends_at && <span class={errorText}>{t(locale, specialErrors.ends_at)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.location')}</span>
+            <input name="location" value={gsp('location')} class={tin} />
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.capacity')}</span>
+            <input name="capacity" value={gsp('capacity')} class={tin} inputmode="numeric" />
+            {specialErrors.capacity && <span class={errorText}>{t(locale, specialErrors.capacity)}</span>}
+            <span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'groups.manage.special.capacityHint')}</span>
+          </label>
+          <div class="sm:col-span-2">
+            <button type="submit" class={btn}>{t(locale, 'groups.manage.special.create')}</button>
+          </div>
+        </form>
       </section>
     )}
   </div>
