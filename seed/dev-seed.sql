@@ -512,3 +512,22 @@ INSERT INTO checkins (id, event_id, household_id, household_member_id, child_nam
 --   http://localhost:4321/kiosk/devkiosk1234567890abcdef12345678
 INSERT INTO settings (key, value) VALUES
   ('children.kiosk_token', 'devkiosk1234567890abcdef12345678');
+
+-- Member portal (Task 7): the Chen household's primary adult (David, member id
+-- 1) is its first owner, so /my/household has real owner-only demo data
+-- (promote/demote a co-owner) without any manual setup.
+UPDATE household_members SET is_owner = 1 WHERE id = 1;
+
+-- Two member_groups (Phase 2 data): one long-running fellowship, one seasonal
+-- Sunday School class carrying term_label/term_start/term_end. term_start/
+-- term_end are relative (date('now', ...)) so the class always reads as
+-- "in session" on a freshly seeded DB, same convention as the worship dates above.
+INSERT INTO member_groups (id, slug, kind, term_label, term_start, term_end, active, sort) VALUES
+  (1, 'young-adults', 'fellowship', NULL, NULL, NULL, 1, 1),
+  (2, 'foundations-of-faith', 'sunday_school', '2026 Fall', date('now','-30 days'), date('now','+60 days'), 1, 2);
+
+INSERT INTO member_group_i18n (group_id, locale, name, description) VALUES
+  (1, 'en', 'Young Adults Fellowship', 'College grads and young professionals meeting weekly for food, discussion, and prayer.'),
+  (1, 'zh', '青年团契', '大学毕业生与青年专业人士每周聚会，一同用餐、分享与祷告。'),
+  (2, 'en', 'Foundations of Faith', 'A Sunday School class walking through the basics of Christian belief and practice.'),
+  (2, 'zh', '信仰基础', '主日学课程，带领学员认识基督教信仰与实践的基础。');
