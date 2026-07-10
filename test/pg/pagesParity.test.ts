@@ -62,6 +62,8 @@ describe.skipIf(!hasPg)('custom pages parity (Postgres)', () => {
       id,
       slug: 'about',
       published: true,
+      format: 'markdown',
+      layout_json: null,
       i18n: {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
