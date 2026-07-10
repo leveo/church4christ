@@ -34,6 +34,7 @@ export interface HouseholdMember {
   display_name: string;
   role: HouseholdRole;
   is_primary: number; // 0 | 1
+  is_owner: number; // 0 | 1
   created_at: string;
 }
 
@@ -57,7 +58,7 @@ export interface HouseholdSummary {
   updated_at: string;
 }
 
-const MEMBER_COL_NAMES = ['id', 'household_id', 'person_id', 'display_name', 'role', 'is_primary', 'created_at'];
+const MEMBER_COL_NAMES = ['id', 'household_id', 'person_id', 'display_name', 'role', 'is_primary', 'is_owner', 'created_at'];
 const MEMBER_COLS = MEMBER_COL_NAMES.join(', ');
 const MEMBER_COLS_HM = MEMBER_COL_NAMES.map((c) => `hm.${c}`).join(', ');
 
@@ -180,7 +181,7 @@ export async function getLiveHouseholdForPerson(
     .prepare(
       `SELECT hm.id AS id, hm.household_id AS household_id, hm.person_id AS person_id,
               COALESCE(p.display_name, hm.display_name) AS display_name,
-              hm.role AS role, hm.is_primary AS is_primary, hm.created_at AS created_at
+              hm.role AS role, hm.is_primary AS is_primary, hm.is_owner AS is_owner, hm.created_at AS created_at
        FROM household_members hm
        LEFT JOIN people p ON p.id = hm.person_id AND p.deleted_at IS NULL
        WHERE hm.household_id = ?
