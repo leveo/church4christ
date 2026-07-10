@@ -1319,6 +1319,8 @@ export default {
   'modules.people.desc': 'Member profiles, households, and pastoral notes.',
   'modules.children.label': 'Children',
   'modules.children.desc': "Children's check-in kiosk, events, and pickup security codes.",
+  'modules.portal.label': 'Member Portal',
+  'modules.portal.desc': 'Member self-service: household profiles, groups, events, serving, calendar, prayer wall. Requires Supabase.',
   'modules.giving.label': 'Giving',
   'modules.giving.desc': 'Online giving, pledges, and member giving history.',
   'modules.registration.label': 'Registration',

@@ -9,9 +9,9 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 14 module keys, in display order (drives the admin Modules panel + nav).
-// `giving` and `registration` are appended last: they are backend-gated (Supabase
-// only) and stay off on the D1 backend regardless of their settings row.
+// The 15 module keys, in display order (drives the admin Modules panel + nav).
+// `portal`, `giving`, and `registration` are appended last: they are backend-gated
+// (Supabase only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
   'bulletins',
   'sermons',
@@ -25,6 +25,7 @@ export const MODULE_KEYS = [
   'fellowships',
   'people',
   'children',
+  'portal',
   'giving',
   'registration',
 ] as const;
@@ -53,7 +54,8 @@ export interface ModuleDef {
 // pre-existing CORE routes (`/profile`, `/admin/people`) and its opportunity
 // board is under `/serve` (the `serve` module). The People module therefore
 // gates only its added panels/sections via `locals.modules.has('people')` in
-// those pages (slice 9), never whole routes.
+// those pages (slice 9), never whole routes. `portal` owns `/admin/fellowships`
+// (member group management), not the `fellowships` module, which stays public-only.
 export const MODULES: Record<ModuleKey, ModuleDef> = {
   bulletins: {
     publicPrefixes: ['/bulletin'],
@@ -126,6 +128,13 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     adminPrefixes: ['/admin/children'],
     navKeys: [],
     uses: [],
+  },
+  portal: {
+    publicPrefixes: ['/my/household', '/my/groups', '/my/events', '/my/serving', '/my/prayer', '/email-change'],
+    adminPrefixes: ['/admin/fellowships'],
+    navKeys: [],
+    uses: ['serve', 'fellowships'],
+    requiresBackend: 'supabase',
   },
   giving: {
     publicPrefixes: ['/give/checkout', '/my/giving', '/api/giving'],
