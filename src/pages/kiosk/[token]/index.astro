@@ -1,0 +1,98 @@
+---
+// Kiosk page 1: household search. Gated by the token in the URL itself (no
+// session) — see routePolicy.ts's `/kiosk` public prefix. `?lang=` (not the
+// site's locale-prefixed routing) drives i18n here since this tree lives
+// outside `[locale]`.
+import Kiosk from '../../../layouts/Kiosk.astro';
+import { getKioskToken } from '../../../lib/kioskToken';
+import { listActiveEvents, searchHouseholds } from '../../../lib/checkinDb';
+import { todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+const db = Astro.locals.db;
+const token = await getKioskToken(db);
+if (!token || Astro.params.token !== token) return new Response(null, { status: 404 });
+
+const lang: Locale = Astro.url.searchParams.get('lang') === 'zh' ? 'zh' : 'en';
+const otherLang: Locale = lang === 'zh' ? 'en' : 'zh';
+
+const date = todayInTz();
+const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+const events = await listActiveEvents(db, weekday);
+
+const q = Astro.url.searchParams.get('q') ?? '';
+const searched = events.length > 0 && q.trim().length > 0;
+const results = searched ? await searchHouseholds(db, q) : [];
+
+/** Last 4 digits of a phone number, e.g. '(555) 010-2000' -> '(…)-2000'. */
+function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) return phone;
+  return `(…)-${digits.slice(-4)}`;
+}
+
+const toggleHref = `?lang=${otherLang}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+
+// Kiosk-scale notice: same danger tokens as admin's noticeErr, sized up for a
+// tablet read from arm's length.
+const kioskNotice =
+  'w-full rounded-2xl border border-danger bg-danger-soft px-6 py-4 text-center text-xl text-danger';
+---
+
+<Kiosk title={t(lang, 'kiosk.title')} lang={lang}>
+  <div class="flex w-full items-center justify-between">
+    <h1 class="font-display text-display-lg font-bold">{t(lang, 'kiosk.title')}</h1>
+    <a href={toggleHref} class="rounded-2xl px-4 py-2 text-lg font-semibold text-primary hover:underline">
+      {t(lang, 'kiosk.langToggle')}
+    </a>
+  </div>
+
+  {
+    events.length === 0 ? (
+      <p class={`mt-10 ${kioskNotice}`}>{t(lang, 'kiosk.noEvents')}</p>
+    ) : (
+      <>
+        <form method="get" class="mt-10 flex w-full flex-col gap-4">
+          <input type="hidden" name="lang" value={lang} />
+          <input
+            type="text"
+            name="q"
+            value={q}
+            placeholder={t(lang, 'kiosk.searchPlaceholder')}
+            class="w-full rounded-2xl border border-border bg-surface px-6 py-4 text-2xl focus:border-primary focus:outline-none"
+            autofocus
+          />
+          <button type="submit" class="w-full rounded-2xl bg-primary px-8 py-4 text-2xl font-semibold text-on-primary hover:bg-primary-hover">
+            {t(lang, 'kiosk.search')}
+          </button>
+        </form>
+
+        {searched && (
+          <div class="mt-8 flex w-full flex-col gap-4">
+            {results.length === 0 ? (
+              <p class={kioskNotice}>{t(lang, 'kiosk.noResults')}</p>
+            ) : (
+              results.map((h) => (
+                <a
+                  href={`/kiosk/${token}/household/${h.id}?lang=${lang}&q=${encodeURIComponent(q)}`}
+                  class="block w-full rounded-2xl border border-border bg-surface-raised p-6 shadow-sm hover:bg-surface-sunken"
+                >
+                  <p class="text-2xl font-bold">{h.name}</p>
+                  {h.adults.length > 0 && (
+                    <p class="mt-1 text-ink-muted">
+                      <span class="text-sm text-ink-subtle">{t(lang, 'kiosk.adults')}: </span>
+                      {h.adults.join(', ')}
+                    </p>
+                  )}
+                  {h.phone && <p class="mt-1 text-ink-muted">{maskPhone(h.phone)}</p>}
+                  <p class="mt-1 text-ink-muted">{t(lang, 'kiosk.childrenCount', { count: h.children.length })}</p>
+                </a>
+              ))
+            )}
+          </div>
+        )}
+      </>
+    )
+  }
+</Kiosk>
