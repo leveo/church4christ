@@ -50,6 +50,13 @@ try {
           </a>
         ))
       }
+      {
+        Astro.locals.user && modules.has('portal') && (
+          <a href={localePath(locale, '/my')} class="px-3 py-2 rounded-md hover:bg-surface-raised">
+            {t(locale, 'portal.nav.myPortal')}
+          </a>
+        )
+      }
     </nav>
 
     <div class="hidden lg:flex items-center gap-3 shrink-0">
@@ -97,6 +104,13 @@ try {
               {link.label}
             </a>
           ))
+        }
+        {
+          Astro.locals.user && modules.has('portal') && (
+            <a href={localePath(locale, '/my')} class="block py-2.5">
+              {t(locale, 'portal.nav.myPortal')}
+            </a>
+          )
         }
         <a
           href={give}
