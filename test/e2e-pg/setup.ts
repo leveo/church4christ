@@ -8,6 +8,13 @@
 import { env } from 'cloudflare:test';
 import postgres from 'postgres';
 import seedSql from '../../seed/dev-seed.sql?raw';
+// Member-groups membership/applications are Supabase-only tables (no D1
+// counterpart), so they live in their own seed file — see seed/portal-seed.sql's
+// header — loaded here the same way scripts/db/seed-supabase.mjs loads it for a
+// real local Postgres. Unlike giving-seed.sql/registration-seed.sql (deliberately
+// NOT loaded here — see smoke.test.ts), portal-groups.test.ts depends on this
+// data, so it's loaded unconditionally.
+import portalSeedSql from '../../seed/portal-seed.sql?raw';
 
 // Same comment-strip + ';'-split the D1 setup and seed-supabase.mjs use, so both
 // backends load the identical statements.
@@ -43,6 +50,9 @@ try {
   }
 
   for (const statement of seedStatements(seedSql)) {
+    await sql.unsafe(statement);
+  }
+  for (const statement of seedStatements(portalSeedSql)) {
     await sql.unsafe(statement);
   }
 

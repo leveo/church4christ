@@ -554,3 +554,12 @@ INSERT INTO member_group_i18n (group_id, locale, name, description) VALUES
   (6, 'zh', '学生团契', '为大专院校学生预备的团契，周四晚上一同诚实地查考圣经，建立长久的友谊。'),
   (7, 'en', 'English Young Adults', 'A community for those who do life mostly in English, meeting after Sunday services over coffee to read Scripture and share life together.'),
   (7, 'zh', '英语青年团契', '为以英语为主要生活语言的青年预备的团契，主日聚会后一同喝咖啡、读经、分享生活。');
+
+-- Member portal groups (Phase 2 Task 6): open Foundations of Faith (group 2) for
+-- self-service sign-up, so /my/groups' "Open for sign-up" section has a real
+-- class on a freshly seeded DB. Portable — member_groups/open_signup exists on
+-- both backends. Membership (David leads group 1, Amy is a member) and one
+-- pending application are Supabase-only rows — see seed/portal-seed.sql, loaded
+-- only on the Postgres backend (group_members/group_applications have no D1
+-- counterpart).
+UPDATE member_groups SET open_signup = 1 WHERE id = 2;
