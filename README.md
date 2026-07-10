@@ -204,13 +204,15 @@ Postgres and Stripe and run on a free **Supabase** database instead. Want those 
 For the curious: Church4Christ is built with **[Astro](https://astro.build/)** rendering
 pages on the server, running as a single **Cloudflare Worker**. Data lives in Cloudflare
 **D1** (a SQL database) and uploaded images in Cloudflare **R2** (object storage); email
-goes out through Cloudflare's email binding. There is **no client-side JavaScript
-framework** — pages are plain, fast HTML with a sprinkle of vanilla script — which is a
-big part of why the site loads quickly and costs so little to run.
+goes out through Cloudflare's email binding. Visitor-facing pages ship **no client-side
+JavaScript framework** — they are plain, fast HTML with a sprinkle of vanilla script —
+which is a big part of why the site loads quickly and costs so little to run. (The one
+exception lives behind the staff login: the drag-and-drop page builder is a small React
+editor that only your team ever downloads; the pages it publishes are still plain HTML.)
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 900 automated
+each with a light and a dark mode. And the code is held together by **over 1,000 automated
 tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
 
 **Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;
