@@ -1521,6 +1521,13 @@ export default {
   'admin.reg.cancelled': 'Registration cancelled.',
   'admin.reg.backToList': '← All events',
   'admin.reg.cancelEdit': 'Cancel',
+  'admin.reg.eventAdmins.title': 'Event admins',
+  'admin.reg.eventAdmins.hint': 'Event admins can approve or reject prayer requests submitted for this event.',
+  'admin.reg.eventAdmins.portalOff': 'Event admins require the member portal module.',
+  'admin.reg.eventAdmins.empty': 'No event admins yet.',
+  'admin.reg.eventAdmins.selectPerson': 'Person',
+  'admin.reg.eventAdmins.add': 'Add admin',
+  'admin.reg.eventAdmins.remove': 'Remove',
 
   'admin.children.title': 'Children check-in',
   'admin.children.tab.dashboard': 'Dashboard',

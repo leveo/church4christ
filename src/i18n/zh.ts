@@ -1518,6 +1518,13 @@ export default {
   'admin.reg.cancelled': '已取消报名。',
   'admin.reg.backToList': '← 所有活动',
   'admin.reg.cancelEdit': '取消',
+  'admin.reg.eventAdmins.title': '活动负责人',
+  'admin.reg.eventAdmins.hint': '活动负责人可以审核该活动收到的代祷请求。',
+  'admin.reg.eventAdmins.portalOff': '活动负责人功能需要启用会众门户模块。',
+  'admin.reg.eventAdmins.empty': '暂无活动负责人。',
+  'admin.reg.eventAdmins.selectPerson': '人员',
+  'admin.reg.eventAdmins.add': '添加负责人',
+  'admin.reg.eventAdmins.remove': '移除',
 
   'admin.children.title': '儿童签到',
   'admin.children.tab.dashboard': '仪表板',

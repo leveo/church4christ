@@ -370,6 +370,20 @@ export async function listEventAdmins(
   return results;
 }
 
+/** Active people who can sign in to the portal (email set) — the pool eligible
+ *  for the event-admin picker, since an admin must be able to log in to
+ *  moderate the event's prayer requests. */
+export async function listPeopleWithAccount(db: AppDb): Promise<{ id: number; display_name: string }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, display_name FROM people
+       WHERE active = 1 AND deleted_at IS NULL AND email IS NOT NULL AND email <> ''
+       ORDER BY display_name`,
+    )
+    .all<{ id: number; display_name: string }>();
+  return results;
+}
+
 /** Grant event-admin. Idempotent via UNIQUE(reg_event_id, person_id). */
 export async function addEventAdmin(db: AppDb, regEventId: number, personId: number): Promise<void> {
   await db
