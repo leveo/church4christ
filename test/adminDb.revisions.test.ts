@@ -14,6 +14,9 @@ import {
   deleteAnnouncement,
   listAnnouncements,
   listRevisions,
+  listRecentRevisions,
+  getRevision,
+  normalizeEntityId,
   restoreRevision,
   type SaveBulletinInput,
   type SaveAnnouncementInput,
@@ -165,5 +168,45 @@ describe('restoreRevision — guards', () => {
       .bind(id)
       .run();
     expect(await restoreRevision(env.DB, 'bulletin', r.meta.last_row_id as number, 'admin')).toEqual({ ok: false, error: 'bad_snapshot' });
+  });
+});
+
+describe('revisions entity_id normalization (pg TEXT column parity)', () => {
+  // migrations-supabase/0004 widened revisions.entity_id to TEXT (custom_page
+  // ids are UUIDs), so postgres.js returns EVERY entity_id as a string there.
+  // The readers normalize at the seam: canonical integer ids come back as
+  // numbers on both backends; custom_page UUIDs stay strings.
+  it('normalizeEntityId: numeric string → number, UUID stays string, number passes through', () => {
+    expect(normalizeEntityId('42')).toBe(42);
+    expect(normalizeEntityId(42)).toBe(42);
+    expect(normalizeEntityId('3fa85f64-5717-4562-b3fc-2c963f66afa6')).toBe('3fa85f64-5717-4562-b3fc-2c963f66afa6');
+  });
+
+  it('getRevision + listRecentRevisions: number ids for integer entities, UUID string for custom_page', async () => {
+    const uuid = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+    const bulletinId = idOf(await saveBulletin(env.DB, bInput(), 'ed'));
+    const inserted = await env.DB
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('custom_page', ?1, '{"v":1,"input":{}}', 'ed')`)
+      .bind(uuid)
+      .run();
+
+    const pageRev = await getRevision(env.DB, inserted.meta.last_row_id as number);
+    expect(pageRev!.entity_id).toBe(uuid); // NOT coerced to NaN or a number
+
+    const recent = await listRecentRevisions(env.DB, 10);
+    const bulletinRow = recent.find((r) => r.entity === 'bulletin')!;
+    expect(bulletinRow.entity_id).toBe(bulletinId);
+    expect(typeof bulletinRow.entity_id).toBe('number');
+    expect(recent.find((r) => r.entity === 'custom_page')!.entity_id).toBe(uuid);
+  });
+
+  it('restoreRevision refuses a non-numeric entity_id as not_found (custom_page is not restorable here)', async () => {
+    const inserted = await env.DB
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('custom_page', '3fa85f64-5717-4562-b3fc-2c963f66afa6', '{"v":1,"input":{}}', 'ed')`)
+      .run();
+    expect(await restoreRevision(env.DB, 'custom_page', inserted.meta.last_row_id as number, 'admin')).toEqual({
+      ok: false,
+      error: 'not_found',
+    });
   });
 });
