@@ -4,7 +4,7 @@
 // reader's defaults.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { getHeroImageKey, getSetting, getSettings, getSiteIdentity, getTheme, setSetting } from '../src/lib/settings';
+import { deleteSetting, getHeroImageKey, getSetting, getSettings, getSiteIdentity, getTheme, setSetting } from '../src/lib/settings';
 
 // Storage is isolated per test file but not per test in this pool config; wipe
 // the flat settings table before each test so reads see only that test's writes.
@@ -38,6 +38,14 @@ describe('getSettings / getSetting / setSetting', () => {
     expect(await getSetting(db, 'theme.name')).toBe('harvest');
     const count = await db.prepare("SELECT COUNT(*) AS n FROM settings WHERE key = 'theme.name'").first<{ n: number }>();
     expect(count?.n).toBe(1);
+  });
+
+  it('deleteSetting removes a key so the next read falls back to the default; a missing key is a harmless no-op', async () => {
+    const db = env.DB;
+    await setSetting(db, 'nav.items', '[]');
+    await deleteSetting(db, 'nav.items');
+    expect(await getSetting(db, 'nav.items', 'fallback')).toBe('fallback');
+    await deleteSetting(db, 'nav.items'); // already gone — no-op, does not throw
   });
 });
 

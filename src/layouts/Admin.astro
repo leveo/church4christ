@@ -1,7 +1,8 @@
 ---
-// Admin shell: shared theme/mode wiring, a role-gated top nav, a repeat-row
-// editor island (progressive enhancement for the content forms), and a footer
-// bar showing the signed-in email + a signout POST. Admin UI language follows
+// Admin shell: shared theme/mode wiring, a role-gated dark sidebar nav (top bar
+// + checkbox-hack disclosure on mobile), a repeat-row editor island
+// (progressive enhancement for the content forms), and a sidebar-bottom block
+// showing the signed-in email + a signout POST. Admin UI language follows
 // the signed-in person's `lang` (falling back to English). Fonts are imported
 // the same way Base.astro does so admin renders in the brand faces.
 import '@fontsource-variable/fraunces';
@@ -12,6 +13,8 @@ import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { t } from '../lib/i18n';
+import { getLogoImageKey } from '../lib/settings';
+import { mediaPath } from '../lib/mediaRef';
 import type { ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
 
@@ -34,6 +37,17 @@ try {
 }
 const appName = t(lang, 'admin.title');
 const fullTitle = title ? `${title} · ${appName}` : appName;
+
+// Church logo mark for the sidebar/mobile-bar brand block, fetched the same
+// guarded way Header.astro does — a settings hiccup renders no logo rather
+// than 500ing the whole admin shell.
+let logoSrc = '';
+try {
+  const logoKey = await getLogoImageKey(Astro.locals.db);
+  logoSrc = logoKey ? (mediaPath(logoKey) ?? '') : '';
+} catch {
+  /* no logo when settings are unavailable */
+}
 
 // Nav renders by role. The dashboard shows for console-class users (admin ∪
 // editor ∪ team leader); content (bulletins/sermons/prayer-sheets) + news
@@ -70,6 +84,7 @@ const rawSections: NavSection[] = [
       { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons', module: 'sermons' },
       { label: t(lang, 'admin.nav.prayerSheets'), href: '/admin/prayer-sheets', module: 'prayer-sheets' },
       { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies', module: 'testimonies' },
+      { label: t(lang, 'admin.nav.pages'), href: '/admin/pages' },
     ],
   },
   {
@@ -87,6 +102,7 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving' },
   { label: t(lang, 'admin.reg.title'), href: '/admin/registration', show: isStaff, module: 'registration' },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
+  { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isAdmin },
 ];
 
 const sections: NavSection[] = rawSections
@@ -96,8 +112,10 @@ const sections: NavSection[] = rawSections
 
 const current = Astro.url.pathname.replace(/\/+$/, '') || '/admin';
 const isActive = (href: string) => current === href || (href !== '/admin' && current.startsWith(href));
-const linkClass = (href: string) =>
-  `whitespace-nowrap rounded px-2 py-1 hover:underline ${isActive(href) ? 'font-semibold underline' : ''}`;
+// Rounded nav row on the dark sidebar surface: active gets a lighter overlay +
+// semibold, hover gets the same overlay at rest.
+const itemClass = (href: string) =>
+  `block rounded-md px-3 py-2 text-sm ${isActive(href) ? 'bg-footer-ink/10 font-semibold' : 'hover:bg-footer-ink/10'}`;
 ---
 
 <!doctype html>
@@ -127,52 +145,124 @@ const linkClass = (href: string) =>
       })();
     </script>
   </head>
-  <body class="min-h-screen flex flex-col bg-surface text-ink">
-    <header class="bg-header-bg text-header-ink border-b border-border">
-      <div class="container-wide h-14 flex items-center gap-6">
-        <a href="/admin" class="font-display font-semibold whitespace-nowrap">{appName}</a>
-        <nav class="flex items-center gap-3 text-sm overflow-x-auto" aria-label={t(lang, 'admin.nav.label')}>
-          {
-            sections.map((section) =>
-              section.children ? (
-                <span class="flex items-center gap-2">
-                  <span class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{section.label}</span>
-                  {section.children.map((c) => (
-                    <a href={c.href} class={linkClass(c.href)}>
-                      {c.label}
-                    </a>
-                  ))}
-                </span>
-              ) : (
-                <a href={section.href} class={linkClass(section.href!)}>
-                  {section.label}
-                </a>
-              ),
-            )
-          }
-        </nav>
+  <body class="min-h-screen flex flex-col lg:flex-row bg-surface text-ink">
+    {/* Mobile top bar (<lg): brand + a sr-only checkbox-hack disclosure, the
+    same no-JS idiom Header.astro uses for its own mobile menu. */}
+    <div class="lg:hidden bg-footer-bg text-footer-ink">
+      {/* The checkbox must be a sibling of <nav> (not nested inside the bar
+      row) for Tailwind's peer-checked sibling selector below to reach it —
+      the sr-only input stays visually hidden regardless of DOM position. */}
+      <input type="checkbox" id="c4c-admin-nav" class="peer sr-only" />
+      <div class="h-14 px-4 flex items-center justify-between gap-4">
+        <a href="/admin" class="flex items-center gap-2 font-display font-bold">
+          {logoSrc && <img src={logoSrc} alt="" class="h-7 w-auto" />}
+          <span>{appName}</span>
+        </a>
+        <label
+          for="c4c-admin-nav"
+          class="cursor-pointer p-2 min-w-11 min-h-11 flex flex-col items-center justify-center gap-1.5"
+          aria-label={t(lang, 'admin.nav.label')}
+        >
+          <span class="block w-6 h-0.5 bg-current"></span>
+          <span class="block w-6 h-0.5 bg-current"></span>
+          <span class="block w-6 h-0.5 bg-current"></span>
+        </label>
       </div>
-    </header>
-    <main class="container-wide py-8 flex-1">
-      <slot />
-    </main>
-    {
-      user && (
-        <footer class="border-t border-border bg-surface-raised">
-          <div class="container-wide h-14 flex items-center justify-between text-sm text-ink-muted">
-            <span>{user.email}</span>
+      <nav
+        class="hidden peer-checked:block border-t border-footer-ink/10 px-3 py-3 max-h-[80vh] overflow-y-auto"
+        aria-label={t(lang, 'admin.nav.label')}
+      >
+        {
+          sections.map((section) =>
+            section.children ? (
+              <div class="pt-3 first:pt-0">
+                <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-caps text-footer-ink/60">{section.label}</p>
+                {section.children.map((c) => (
+                  <a href={c.href} aria-current={isActive(c.href) ? 'page' : undefined} class={itemClass(c.href)}>
+                    {c.label}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <a href={section.href} aria-current={isActive(section.href!) ? 'page' : undefined} class={itemClass(section.href!)}>
+                {section.label}
+              </a>
+            ),
+          )
+        }
+        {
+          user && (
+            <div class="mt-3 border-t border-footer-ink/10 pt-3 space-y-2">
+              <p class="px-3 text-xs text-footer-ink/70 truncate">{user.email}</p>
+              <a href="/" class="block rounded-md px-3 py-2 text-sm hover:bg-footer-ink/10">
+                {t(lang, 'admin.nav.viewSite')}
+              </a>
+              <form method="post" action="/signout" class="px-3">
+                <button
+                  type="submit"
+                  class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10"
+                >
+                  {t(lang, 'common.signOut')}
+                </button>
+              </form>
+            </div>
+          )
+        }
+      </nav>
+    </div>
+
+    {/* Desktop sidebar (lg+): fixed width, dark surface, own scroll if the nav
+    grows taller than the viewport. */}
+    <aside class="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto bg-footer-bg text-footer-ink">
+      <a href="/admin" class="flex items-center gap-2 px-4 py-5 font-display font-bold">
+        {logoSrc && <img src={logoSrc} alt="" class="h-8 w-auto" />}
+        <span>{appName}</span>
+      </a>
+      <nav class="flex-1 px-3 space-y-1" aria-label={t(lang, 'admin.nav.label')}>
+        {
+          sections.map((section) =>
+            section.children ? (
+              <div class="pt-4 first:pt-0">
+                <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-caps text-footer-ink/60">{section.label}</p>
+                {section.children.map((c) => (
+                  <a href={c.href} aria-current={isActive(c.href) ? 'page' : undefined} class={itemClass(c.href)}>
+                    {c.label}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <a href={section.href} aria-current={isActive(section.href!) ? 'page' : undefined} class={itemClass(section.href!)}>
+                {section.label}
+              </a>
+            ),
+          )
+        }
+      </nav>
+      {
+        user && (
+          <div class="mt-auto border-t border-footer-ink/10 px-4 py-4 space-y-2">
+            <p class="text-xs text-footer-ink/70 truncate">{user.email}</p>
+            <a href="/" class="block text-sm hover:underline">
+              {t(lang, 'admin.nav.viewSite')}
+            </a>
             <form method="post" action="/signout">
               <button
                 type="submit"
-                class="rounded-md border border-border px-3 py-1.5 font-semibold hover:bg-surface-sunken"
+                class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10"
               >
                 {t(lang, 'common.signOut')}
               </button>
             </form>
           </div>
-        </footer>
-      )
-    }
+        )
+      }
+    </aside>
+
+    <main class="flex-1 min-w-0 bg-surface">
+      <div class="mx-auto max-w-wide px-4 sm:px-6 lg:px-10 py-8">
+        <slot />
+      </div>
+    </main>
     <script>
       // Repeat-rows editor island (ported from the reference stack): progressive
       // enhancement over a <template data-repeat-template> plus [data-repeat-row]

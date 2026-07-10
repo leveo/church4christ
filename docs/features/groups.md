@@ -90,7 +90,7 @@ member's profile as activity history.
   `/attendance`; admin prefix `/admin/groups` (site-admin route class); soft `uses` of
   `people` and `registration`. Works on both backends; only the Registration link-up is
   Supabase-gated (by the `registration` module's own backend requirement).
-- **Schema:** `migrations/0005_groups.sql` and `migrations-supabase/0004_groups.sql` —
+- **Schema:** `migrations/0006_groups.sql` and `migrations-supabase/0005_groups.sql` —
   `groups`, `group_members` (nullable `person_id` = name-only member, the household-dependents
   precedent), `group_join_requests` (partial unique index on pending), `group_events` +
   materialized `group_event_occurrences` (the `ensureWeeklyPlans` precedent, generalized to

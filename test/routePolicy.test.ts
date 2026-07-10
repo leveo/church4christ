@@ -56,6 +56,11 @@ describe('classifyRoute', () => {
     ['/groups/7', 'public'],
     ['/signup', 'public'],
     ['/attendance/abc123', 'public'],
+    // ── admin-authored custom pages (T4): no explicit rule, falls through the
+    // "everything else is public" default so the route itself enforces
+    // published/preview visibility and 404s.
+    ['/p/anything', 'public'],
+    ['/p/about', 'public'],
     // ── finance (giving admin) ──
     ['/admin/giving', 'finance'],
     ['/admin/giving/funds', 'finance'],
@@ -79,6 +84,7 @@ describe('classifyRoute', () => {
     ['/admin/prayer-sheets', 'console'],
     ['/admin/announcements', 'console'],
     ['/admin/events', 'console'],
+    ['/admin/pages', 'console'],
     ['/admin/prayer-wall', 'console'],
     ['/admin/revisions', 'console'],
     ['/admin/ministries', 'console'],
@@ -97,6 +103,7 @@ describe('classifyRoute', () => {
     ['/admin/teams', 'adminOnly'],
     ['/admin/groups', 'adminOnly'],
     ['/admin/groups/7', 'adminOnly'],
+    ['/admin/navigation', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

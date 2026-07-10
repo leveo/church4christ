@@ -3,44 +3,40 @@
 // screens a checkbox-hack disclosure menu (no JS required for open/close).
 import { localePath } from '../lib/locales';
 import { t } from '../lib/i18n';
-import { MODULE_KEYS, MODULES } from '../lib/modules';
+import { getSiteIdentity, getLogoImageKey } from '../lib/settings';
+import { mediaPath } from '../lib/mediaRef';
+import { resolveDefaultNav, resolveNav } from '../lib/nav';
 import LocaleSwitch from './LocaleSwitch.astro';
 
 const locale = Astro.locals.locale;
 const home = localePath(locale, '/');
 const give = localePath(locale, '/give');
 
-const nav: { key: string; path: string }[] = [
-  { key: 'nav.visit', path: '/visit' },
-  { key: 'nav.about', path: '/about' },
-  { key: 'nav.sermons', path: '/sermons' },
-  { key: 'nav.bulletin', path: '/bulletin' },
-  { key: 'nav.events', path: '/events' },
-  { key: 'nav.register', path: '/register' },
-  { key: 'nav.ministries', path: '/ministries' },
-  { key: 'nav.serve', path: '/serve' },
-  { key: 'nav.opportunities', path: '/serve/opportunities' },
-  { key: 'nav.fellowships', path: '/fellowships' },
-  { key: 'nav.groups', path: '/groups' },
-  { key: 'nav.articles', path: '/articles' },
-];
-
-// A nav item hides when its owning module is disabled. Build navKey → module
-// from the registry; items with no owning module (visit/about/give) are core
-// and always show — ministries is owned by serve via nav.ministries.
-const navKeyModule = new Map<string, string>();
-for (const key of MODULE_KEYS) for (const nk of MODULES[key].navKeys) navKeyModule.set(nk, key);
+const db = Astro.locals.db;
 const modules = Astro.locals.modules;
-const visibleNav = nav.filter((item) => {
-  const owner = navKeyModule.get(item.key);
-  return !owner || modules.has(owner);
-});
+// Site identity + logo + the nav menu come from admin-editable settings; a DB
+// hiccup falls back to the pre-feature hardcoded name, no logo, and the
+// module-gated default nav rather than 500ing the header on every public page
+// (mirrors Base.astro's identity guard).
+let siteName = t(locale, 'site.name');
+let logoSrc = '';
+let links = resolveDefaultNav(locale, modules);
+try {
+  const identity = await getSiteIdentity(db, locale);
+  siteName = identity.name || t(locale, 'site.name');
+  const logoKey = await getLogoImageKey(db);
+  logoSrc = logoKey ? (mediaPath(logoKey) ?? '') : '';
+  links = await resolveNav(db, locale, modules);
+} catch {
+  /* keep the hardcoded site name, no logo, and the default nav when settings are unavailable */
+}
 ---
 
 <header class="sticky top-0 z-40 bg-header-bg text-header-ink border-b border-border">
   <div class="container-wide flex items-center gap-4 h-16">
-    <a href={home} class="font-display font-bold text-lg whitespace-nowrap shrink-0">
-      {t(locale, 'site.name')}
+    <a href={home} class="font-display font-bold text-lg whitespace-nowrap shrink-0 flex items-center gap-2">
+      {logoSrc && <img src={logoSrc} alt="" class="h-8 w-auto" />}
+      <span>{siteName}</span>
     </a>
 
     <nav
@@ -48,9 +44,9 @@ const visibleNav = nav.filter((item) => {
       aria-label={t(locale, 'common.menu')}
     >
       {
-        visibleNav.map((item) => (
-          <a href={localePath(locale, item.path)} class="px-3 py-2 rounded-md hover:bg-surface-raised">
-            {t(locale, item.key)}
+        links.map((link) => (
+          <a href={link.href} class="px-3 py-2 rounded-md hover:bg-surface-raised">
+            {link.label}
           </a>
         ))
       }
@@ -96,9 +92,9 @@ const visibleNav = nav.filter((item) => {
     >
       <div class="container-wide py-4 flex flex-col gap-1">
         {
-          visibleNav.map((item) => (
-            <a href={localePath(locale, item.path)} class="block py-2.5">
-              {t(locale, item.key)}
+          links.map((link) => (
+            <a href={link.href} class="block py-2.5">
+              {link.label}
             </a>
           ))
         }

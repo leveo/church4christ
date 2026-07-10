@@ -77,6 +77,7 @@ const ADMIN_ONLY = [
   '/admin/settings',
   '/admin/reports',
   '/admin/teams',
+  '/admin/navigation',
   // Group admins manage their own group at /groups/<id>/manage (in-page auth);
   // /admin/groups is the site-admin CRUD console, so it stays adminOnly.
   '/admin/groups',
@@ -90,6 +91,7 @@ const ADMIN_CONSOLE = [
   '/admin/prayer-sheets',
   '/admin/announcements',
   '/admin/events',
+  '/admin/pages',
   '/admin/prayer-wall',
   '/admin/revisions',
   '/admin/ministries',

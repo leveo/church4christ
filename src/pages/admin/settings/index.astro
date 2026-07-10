@@ -33,6 +33,7 @@ const KEYS = [
   'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',
   'site.service_times.en', 'site.service_times.zh',
   'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url', 'site.hero_image_key',
+  'site.logo_image_key',
   'theme.name', 'theme.default_mode', 'locale.default',
 ];
 
@@ -65,7 +66,9 @@ if (Astro.request.method === 'POST') {
       // modules form above — a general save that smuggled them in would flip
       // toggles while busting the wrong (theme) cache, so strip them here.
       const data = Object.fromEntries(
-        Object.entries(parsed.data).filter(([k]) => !k.startsWith('module.') && k !== 'site.hero_image_key'),
+        Object.entries(parsed.data).filter(
+          ([k]) => !k.startsWith('module.') && k !== 'site.hero_image_key' && k !== 'site.logo_image_key',
+        ),
       );
       const heroFile = fd.get('hero_image');
       if (heroFile instanceof File && heroFile.size > 0) {
@@ -81,6 +84,21 @@ if (Astro.request.method === 'POST') {
         }
       } else if (fd.get('remove_hero_image')) {
         data['site.hero_image_key'] = '';
+      }
+      const logoFile = fd.get('logo_image');
+      if (logoFile instanceof File && logoFile.size > 0) {
+        try {
+          data['site.logo_image_key'] = await saveImageUpload({
+            db,
+            media,
+            file: logoFile,
+            uploadedBy: user.email,
+          });
+        } catch (e) {
+          errors['site.logo_image_key'] = uploadErrorKey(e);
+        }
+      } else if (fd.get('logo_image_remove')) {
+        data['site.logo_image_key'] = '';
       }
       if (Object.keys(errors).length === 0) {
         await setSettings(db, data);
@@ -106,6 +124,8 @@ const selectedMode = g('theme.default_mode') || 'light';
 const selectedLocale = g('locale.default') || 'en';
 const heroImageKey = cur['site.hero_image_key'] ?? '';
 const heroImage = mediaPath(heroImageKey);
+const logoImageKey = cur['site.logo_image_key'] ?? '';
+const logoImage = mediaPath(logoImageKey);
 const themeLabel = (name: string) => t(lang, `admin.settings.themeName.${name}`);
 const hasErrors = Object.keys(errors).length > 0;
 const h2 = 'font-display text-heading-sm font-bold';
@@ -218,6 +238,24 @@ const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
           <input type="file" name="hero_image" accept="image/jpeg,image/png,image/webp,image/gif" class="text-sm" />
         </label>
         {errors['site.hero_image_key'] && <span class={errorText}>{t(lang, errors['site.hero_image_key'])}</span>}
+      </div>
+      <div class="space-y-2">
+        {
+          logoImage && (
+            <div class="space-y-1">
+              <span class={lab}>{t(lang, 'admin.settings.currentLogoImage')}</span>
+              <img src={logoImage} alt="" class="h-16 w-auto rounded border border-border" loading="lazy" />
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="logo_image_remove" /> {t(lang, 'admin.settings.removeLogoImage')}
+              </label>
+            </div>
+          )
+        }
+        <label class="block">
+          <span class={lab}>{logoImage ? t(lang, 'admin.settings.changeLogoImage') : t(lang, 'admin.settings.logoImage')}</span>
+          <input type="file" name="logo_image" accept="image/jpeg,image/png,image/webp,image/gif" class="text-sm" />
+        </label>
+        {errors['site.logo_image_key'] && <span class={errorText}>{t(lang, errors['site.logo_image_key'])}</span>}
       </div>
       <fieldset>
         <legend class={lab}>{t(lang, 'admin.settings.theme')}</legend>

@@ -1,7 +1,7 @@
 // Group ↔ Registration bridge (Supabase-ONLY, like regDb.ts). The registration
 // module is Supabase-backed, so its tables (reg_events / reg_event_i18n /
 // registrations) and the link table group_reg_events (migrations-supabase/
-// 0004_groups.sql) exist ONLY on Postgres. Every caller gates on
+// 0005_groups.sql) exist ONLY on Postgres. Every caller gates on
 // `Astro.locals.modules.has('registration')`, so none of these functions is ever
 // reached on a D1 request — but the file must still typecheck against the AppDb
 // seam, so it is written the same portable way as regDb.ts. Tests run against real
