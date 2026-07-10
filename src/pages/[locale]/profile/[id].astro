@@ -27,6 +27,7 @@ import { type EmailEnv } from '../../../lib/email';
 import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
 import { giftLabel } from '../../../lib/giftQuiz';
 import { btn, lab, tin, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -37,7 +38,7 @@ const user = Astro.locals.user!;
 const db = Astro.locals.db;
 
 // Stricter than the route class: leaders of ANY team or admins only.
-const canViewOthers = user.isAdmin || user.leaderTeamIds.length > 0;
+const canViewOthers = hasAreaAccess(user, 'serve') || user.leaderTeamIds.length > 0;
 if (!canViewOthers) return new Response(null, { status: 403 });
 
 const personId = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
@@ -61,7 +62,7 @@ if (Astro.request.method === 'POST') {
   if (fd.get('_action') === 'invite') {
     const teamId = /^\d+$/.test(String(fd.get('team_id') ?? '')) ? Number(fd.get('team_id')) : null;
     if (teamId === null) return new Response(null, { status: 400 });
-    if (!user.isAdmin && !user.leaderTeamIds.includes(teamId)) return new Response(null, { status: 403 });
+    if (!hasAreaAccess(user, 'serve') && !user.leaderTeamIds.includes(teamId)) return new Response(null, { status: 403 });
     // Honest outcome: false (inactive/no-email invitee or missing team) → ?invited=0.
     const sent = await sendServeInvite(env as unknown as EmailEnv, db, { personId, teamId, invitedByEmail: user.email });
     return Astro.redirect(localePath(locale, `/profile/${personId}?invited=${sent ? '1' : '0'}`), 303);
@@ -72,7 +73,7 @@ if (Astro.request.method === 'POST') {
 const invited = Astro.url.searchParams.get('invited') === '1';
 const inviteFailed = Astro.url.searchParams.get('invited') === '0';
 const inviteTeams: TeamSummary[] = hasPeople
-  ? (await listTeamSummaries(db, locale)).filter((tm) => user.isAdmin || user.leaderTeamIds.includes(tm.id))
+  ? (await listTeamSummaries(db, locale)).filter((tm) => hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(tm.id))
   : [];
 
 const [teams, history, blockouts, gift, interests] = await Promise.all([
@@ -82,7 +83,7 @@ const [teams, history, blockouts, gift, interests] = await Promise.all([
   getLatestGiftResult(db, personId),
   listPersonInterests(db, personId),
 ]);
-const visibleBlockouts = user.isAdmin ? blockouts : blockouts.map((b) => ({ ...b, reason: null }));
+const visibleBlockouts = hasAreaAccess(user, 'serve') ? blockouts : blockouts.map((b) => ({ ...b, reason: null }));
 const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
 ---
 

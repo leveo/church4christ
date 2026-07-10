@@ -23,11 +23,12 @@ import {
 } from '../../../lib/adminDb';
 import { tin, badge, badgeActive, badgeInactive, btn, rowBtn, noticeOk, noticeErr, card } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 export const prerender = false;
 
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+if (!user || !(user.isEditor || hasAreaAccess(user, 'prayer-wall'))) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 const WALL = '/admin/prayer-wall';

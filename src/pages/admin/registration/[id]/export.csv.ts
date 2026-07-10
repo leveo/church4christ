@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getEventAdmin, registrationsCsv } from '../../../../lib/regDb';
 import type { Locale } from '../../../../lib/locales';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 export const prerender = false;
 
@@ -14,7 +15,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
   // registration pages do — BEFORE any DB read. Without this a leader 403'd off the
   // roster page could still download the CSV.
   const user = locals.user;
-  if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+  if (!user || !(user.isEditor || hasAreaAccess(user, 'registration'))) return new Response(null, { status: 403 });
 
   const db = locals.db;
   const rawId = params.id ?? '';

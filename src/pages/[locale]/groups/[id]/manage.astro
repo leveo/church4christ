@@ -4,7 +4,8 @@
 // of self-POST sections (hidden `action` field, 303 → ?saved=1 on success,
 // echo-on-error for the validated forms). All writes go through the lib layer.
 //
-// Authorization: a signed-in site admin (user.isAdmin) OR an active group admin of
+// Authorization: a signed-in site admin with the groups grant
+// (hasAreaAccess(user, 'groups')) OR an active group admin of
 // THIS group. Anyone else gets a 404 rewrite — identical to a private group they
 // aren't in (anti-enumeration). The guard runs on every request, so it also
 // re-checks before every POST write.
@@ -49,6 +50,7 @@ import {
   type LinkableEvent,
 } from '../../../../lib/groupRegDb';
 import { btn, btnSecondary, card, errorText, lab, noticeErr, noticeOk, rowBtn, tin, td, badge } from '../../../../lib/adminUi';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 const TZ = 'America/Chicago';
 
@@ -70,7 +72,7 @@ if (!group) {
 const user = Astro.locals.user;
 if (!user) return Astro.redirect(localePath(locale, '/signin'), 303);
 
-const authorized = user.isAdmin || (await isGroupAdmin(db, group.id, user.id));
+const authorized = hasAreaAccess(user, 'groups') || (await isGroupAdmin(db, group.id, user.id));
 if (!authorized) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

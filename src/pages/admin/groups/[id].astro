@@ -22,9 +22,10 @@ import {
 } from '../../../lib/groupDb';
 import { tin, lab, card, btn, btnSecondary, rowBtn, badge, badgeRole, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import { localePath, type Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user?.isAdmin) return new Response(null, { status: 403 });
+if (!user || !hasAreaAccess(user, 'groups')) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

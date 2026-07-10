@@ -8,6 +8,7 @@ import { localePath, parseLocale } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { createTeam, listMinistryOptions, listTeamSummaries } from '../../../../lib/teamDb';
 import { btn, lab, noticeErr, tin } from '../../../../lib/adminUi';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -19,7 +20,7 @@ const db = Astro.locals.db;
 
 let errorKey: string | null = null;
 if (Astro.request.method === 'POST') {
-  if (!user.isAdmin) return new Response(null, { status: 403 });
+  if (!hasAreaAccess(user, 'serve')) return new Response(null, { status: 403 });
   const fd = await Astro.request.formData();
   if (fd.get('_action') === 'create') {
     const ministryId = /^\d+$/.test(String(fd.get('ministry_id') ?? '')) ? Number(fd.get('ministry_id')) : null;
@@ -35,7 +36,7 @@ if (Astro.request.method === 'POST') {
 }
 
 const teams = await listTeamSummaries(db, locale);
-const ministries = user.isAdmin ? await listMinistryOptions(db, locale) : [];
+const ministries = hasAreaAccess(user, 'serve') ? await listMinistryOptions(db, locale) : [];
 const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
 ---
 
@@ -86,7 +87,7 @@ const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
     </div>
 
     {
-      user.isAdmin && (
+      hasAreaAccess(user, 'serve') && (
         <section class="mt-10 rounded-lg border border-border bg-surface-raised p-6">
           <h2 class="mb-4 font-display text-lg font-semibold">{t(locale, 'serve.teams.create')}</h2>
           {errorKey && <p class={`mb-3 ${noticeErr}`}>{t(locale, errorKey)}</p>}

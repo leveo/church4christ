@@ -599,6 +599,11 @@ export default {
   'admin.role.editor': 'Editor',
   'admin.role.admin': 'Admin',
 
+  // Grantable-area labels with no existing nav/section title of their own
+  // (the rest of GRANTABLE_AREAS reuse admin.nav.*/admin.giving.title/admin.reg.title).
+  'admin.areas.people': 'Member management',
+  'admin.areas.serve': 'Volunteer ministry',
+
   'admin.people.title': 'People',
   'admin.people.new': 'New person',
   'admin.people.search': 'Search',
@@ -647,6 +652,10 @@ export default {
   'admin.person.role': 'Role',
   'admin.person.activeLabel': 'Active',
   'admin.person.flagsTitle': 'Access & status',
+  'admin.person.superAdmin': 'Super admin',
+  'admin.person.areasTitle': 'Module access',
+  'admin.person.areasHint': 'Prayer wall and the member directory are always available to every admin.',
+  'admin.person.lastSuperErr': 'At least one super admin must remain.',
   'admin.person.save': 'Save',
   'admin.person.updateFlags': 'Update flags',
   'admin.person.delete': 'Delete person',
@@ -695,6 +704,11 @@ export default {
   'admin.person.apps.viewTeam': 'View team',
 
   'admin.person.groups.title': 'Group activity',
+
+  'admin.person.giving.title': 'Giving history',
+  'admin.person.giving.ytd': 'This year: {amount}',
+  'admin.person.giving.empty': 'No gifts recorded.',
+  'admin.person.giving.viewAll': 'Open giving admin',
 
   'invite.title': 'Invite to serve',
   'invite.hint': 'Send a warm invitation to serve on a team.',

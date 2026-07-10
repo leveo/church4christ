@@ -168,6 +168,8 @@ function makeUser(over: Partial<SessionUser> = {}): SessionUser {
     role: 'member',
     isAdmin: false,
     isEditor: false,
+    isSuperAdmin: false,
+    adminAreas: [],
     memberTeamIds: [],
     leaderTeamIds: [],
     lang: null,

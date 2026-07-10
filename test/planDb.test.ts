@@ -34,6 +34,8 @@ const asUser = (
   role: opts.admin ? 'admin' : 'member',
   isAdmin: !!opts.admin,
   isEditor: false,
+  isSuperAdmin: false,
+  adminAreas: [],
   finance: 0,
   memberTeamIds: opts.member ?? [],
   leaderTeamIds: opts.leader ?? [],

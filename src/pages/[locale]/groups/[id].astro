@@ -25,6 +25,7 @@ import {
 import { listUpcomingOccurrencesForGroup, type UpcomingOccurrence } from '../../../lib/groupEventDb';
 import { listOpenSpecialEventsForGroup } from '../../../lib/groupRegDb';
 import { badge, badgeRole, btn } from '../../../lib/adminUi';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const GROUP_TZ = 'America/Chicago';
 
@@ -46,7 +47,7 @@ if (!group) {
   return Astro.rewrite('/404');
 }
 
-const isSiteAdmin = user?.isAdmin ?? false;
+const isSiteAdmin = hasAreaAccess(user, 'groups');
 
 // The viewer's own membership row for THIS group (if any) — listGroupsForPerson
 // includes private memberships, so this is also how we know whether a signed-in

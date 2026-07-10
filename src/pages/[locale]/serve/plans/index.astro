@@ -12,6 +12,7 @@ import { createPlan, ensureWeeklyPlans, listPlans } from '../../../../lib/planDb
 import { listPlanFills, listServiceTypes } from '../../../../lib/teamDb';
 import { addDays, formatDate, isValidDateStr, nextWeekday, todayInTz } from '../../../../lib/dates';
 import { btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -24,7 +25,7 @@ const db = Astro.locals.db;
 // Creating/generating plans defines the church-wide service schedule — an
 // admin function. Leaders manage positions & assignments within an existing
 // plan (scoped by canEditPosition on the detail page), not the plan structure.
-const canCreate = user.isAdmin;
+const canCreate = hasAreaAccess(user, 'serve');
 
 const idOf = (v: FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;

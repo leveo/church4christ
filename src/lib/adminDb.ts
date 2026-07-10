@@ -18,6 +18,7 @@ import type {
   EventInput,
 } from './validate';
 import { LOCALES, type Locale } from './locales';
+import { parseAdminAreas } from './adminAreas';
 
 type Role = PersonInput['role'];
 
@@ -46,6 +47,8 @@ export interface AdminPersonRow extends PersonListRow {
   address: string | null;
   joined_on: string | null;
   finance: number; // finance-team flag (giving admin access); D1 raw 0/1
+  super_admin: number; // D1 raw 0/1 — feeds the flags form's super-admin checkbox
+  admin_areas: string | null; // CSV grant list — parsed via parseAdminAreas for the areas fieldset
 }
 
 /** Directory filters (people module). serving/household are tri-state: undefined
@@ -124,6 +127,7 @@ export async function getPerson(db: AppDb, id: number): Promise<AdminPersonRow |
     .prepare(
       `SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
               p.role, p.active, p.membership_status, p.lang, p.avatar_url, p.birthday, p.address, p.joined_on, p.finance,
+              p.super_admin, p.admin_areas,
               h.name AS household_name
        FROM people p
        LEFT JOIN household_members hm ON hm.person_id = p.id
@@ -165,6 +169,12 @@ export async function savePerson(
     if (existing) {
       if (existing.deleted_at === null) return emailTaken;
       await writePerson(db, existing.id, input); // revive: clears deleted_at
+      // A resurrected account must re-earn admin privilege explicitly through the
+      // super-only flags form — never inherit the soft-deleted row's super/grants.
+      await db
+        .prepare(`UPDATE people SET super_admin = 0, admin_areas = '' WHERE id = ?`)
+        .bind(existing.id)
+        .run();
       return { ok: true, id: existing.id };
     }
     try {
@@ -258,18 +268,60 @@ function writePerson(db: AppDb, id: number, input: PersonInput): Promise<unknown
     .run();
 }
 
+/** True when this person is the LAST active super admin — the guard that keeps
+ *  grant management from being bricked (spec §5). */
+async function isLastSuperAdmin(db: AppDb, id: number): Promise<boolean> {
+  const target = await db
+    .prepare(`SELECT super_admin FROM people WHERE id = ? AND role = 'admin' AND active = 1 AND deleted_at IS NULL`)
+    .bind(id)
+    .first<{ super_admin: number }>();
+  if (!target || target.super_admin !== 1) return false;
+  const others = await db
+    .prepare(`SELECT COUNT(*) AS n FROM people WHERE role = 'admin' AND super_admin = 1 AND active = 1 AND deleted_at IS NULL AND id != ?`)
+    .bind(id)
+    .first<{ n: number }>();
+  return (others?.n ?? 0) === 0;
+}
+
+// Atomic backstop for the last-super-admin guard. isLastSuperAdmin above is a
+// separate read before the UPDATE, so two concurrent demotions of the only two
+// super admins could both pass that pre-check and leave zero active super admins.
+// Appending this condition to the UPDATE's WHERE clause closes the gap: the row
+// updates only if the target is NOT currently an active super admin, OR another
+// active super admin still exists. SQLite and Postgres both evaluate one UPDATE
+// statement atomically, so a raced write degrades to a silent no-op instead of
+// violating the invariant — the pre-check above already gives the clean
+// `last_super_admin` error in the normal (non-raced, sequential) case. `people.id`
+// refers to the outer UPDATE's target row (no alias needed there); `p2` is the
+// correlated subquery's own alias.
+const KEEPS_A_SUPER_ADMIN = `(super_admin = 0 OR role != 'admin' OR active = 0 OR deleted_at IS NOT NULL
+  OR (SELECT COUNT(*) FROM people p2
+      WHERE p2.role = 'admin' AND p2.super_admin = 1 AND p2.active = 1
+        AND p2.deleted_at IS NULL AND p2.id != people.id) > 0)`;
+
 /**
- * Update just the role, active, and/or finance flags (each written only when
- * present, so a caller can touch one without clobbering the others).
- * Deactivation (active = 0) takes effect on the person's next request — the
- * middleware reloads the row and its `active = 1` check rejects an inactive
- * session. `finance` grants the giving-admin (finance) route class.
+ * Update just the role, active, finance, superAdmin, and/or adminAreas flags
+ * (each written only when present, so a caller can touch one without
+ * clobbering the others). Deactivation (active = 0) takes effect on the
+ * person's next request — the middleware reloads the row and its `active = 1`
+ * check rejects an inactive session. `finance` grants the giving-admin
+ * (finance) route class; `superAdmin` grants full access + grant management;
+ * `adminAreas` is the per-admin module grant list, validated through
+ * parseAdminAreas (unknown/duplicate entries dropped) and stored as CSV.
+ * Refuses (throws `Error('last_super_admin')`) any change that would leave
+ * zero active super admins — see isLastSuperAdmin.
  */
 export async function setPersonFlags(
   db: AppDb,
   id: number,
-  flags: { role?: Role; active?: boolean; finance?: boolean },
+  flags: { role?: Role; active?: boolean; finance?: boolean; superAdmin?: boolean; adminAreas?: string[] },
 ): Promise<void> {
+  // Refuse any change that would leave zero active super admins: unsetting the
+  // flag, demoting the role, or deactivating — each on the last super admin.
+  const losesSuper =
+    flags.superAdmin === false || (flags.role !== undefined && flags.role !== 'admin') || flags.active === false;
+  if (losesSuper && (await isLastSuperAdmin(db, id))) throw new Error('last_super_admin');
+
   const sets: string[] = [];
   const binds: (string | number)[] = [];
   if (flags.role !== undefined) {
@@ -284,17 +336,36 @@ export async function setPersonFlags(
     sets.push('finance = ?');
     binds.push(flags.finance ? 1 : 0);
   }
+  if (flags.superAdmin !== undefined) {
+    sets.push('super_admin = ?');
+    binds.push(flags.superAdmin ? 1 : 0);
+  }
+  if (flags.adminAreas !== undefined) {
+    sets.push('admin_areas = ?');
+    binds.push(parseAdminAreas(flags.adminAreas.join(',')).join(','));
+  }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");
   binds.push(id);
-  await db.prepare(`UPDATE people SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run();
+  // The atomic backstop only needs to apply when this write could remove super
+  // status (see KEEPS_A_SUPER_ADMIN); a write that can't lose super status can't
+  // race the invariant, so it skips the extra correlated-subquery cost.
+  const where = losesSuper ? `id = ? AND ${KEEPS_A_SUPER_ADMIN}` : 'id = ?';
+  await db.prepare(`UPDATE people SET ${sets.join(', ')} WHERE ${where}`).bind(...binds).run();
 }
 
 /** Soft-delete: hides the person from listPeople and revokes their session
- *  (middleware rejects a deleted_at row). Assignment history is preserved. */
+ *  (middleware rejects a deleted_at row). Assignment history is preserved.
+ *  Refuses (throws `Error('last_super_admin')`) when the target is the last
+ *  active super admin — see isLastSuperAdmin. */
 export async function softDeletePerson(db: AppDb, id: number): Promise<void> {
+  if (await isLastSuperAdmin(db, id)) throw new Error('last_super_admin');
+  // A soft-delete always removes any super-admin status the row currently has, so
+  // the atomic backstop (see KEEPS_A_SUPER_ADMIN) always applies here.
   await db
-    .prepare(`UPDATE people SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    .prepare(
+      `UPDATE people SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND ${KEEPS_A_SUPER_ADMIN}`,
+    )
     .bind(id)
     .run();
 }

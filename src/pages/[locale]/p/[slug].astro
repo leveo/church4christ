@@ -2,13 +2,15 @@
 // Public route for admin-authored custom pages (src/pages/admin/pages/index.astro
 // is the editor). Renders through ContentPage exactly like privacy.astro. An
 // unpublished page 404s for anonymous visitors but is previewable (with a draft
-// banner) for an editor/admin session; title and body each fall back to the en
-// i18n row independently when the requested locale's value is empty.
+// banner) for an editor session or an admin holding the pages grant — the same
+// audience that can edit it on /admin/pages; title and body each fall back to
+// the en i18n row independently when the requested locale's value is empty.
 import ContentPage from '../../../components/ContentPage.astro';
 import { parseLocale } from '../../../lib/locales';
 import { getCustomPageBySlug } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
 import { t } from '../../../lib/i18n';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -18,7 +20,7 @@ if (!locale) {
 
 const page = await getCustomPageBySlug(Astro.locals.db, Astro.params.slug ?? '');
 const user = Astro.locals.user;
-const canPreview = !!user && (user.isEditor || user.isAdmin);
+const canPreview = !!user && (user.isEditor || hasAreaAccess(user, 'pages'));
 if (!page || (!page.published && !canPreview)) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

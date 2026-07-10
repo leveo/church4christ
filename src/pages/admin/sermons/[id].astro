@@ -10,9 +10,10 @@ import { getSermonForEdit, saveSermon, softDeleteSermon, listServiceTypeOptions 
 import { todayInTz, nextWeekday, addDays } from '../../../lib/dates';
 import { localePath, type Locale } from '../../../lib/locales';
 import { tin, lab, card, errorText, btn, btnDanger, noticeErr } from '../../../lib/adminUi';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+if (!user || !(user.isEditor || hasAreaAccess(user, 'sermons'))) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

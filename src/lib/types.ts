@@ -15,4 +15,10 @@ export type SessionUser = {
   memberTeamIds: number[];
   leaderTeamIds: number[];
   lang: 'en' | 'zh' | null;
+  // Per-admin module permissions (spec 2026-07-10): super admins see every admin
+  // area and manage other admins' grants; adminAreas holds a limited admin's
+  // granted area keys (validated against src/lib/adminAreas.ts, [] for
+  // non-admins). Loaded fresh each request, so revocation is immediate.
+  isSuperAdmin: boolean;
+  adminAreas: string[];
 };

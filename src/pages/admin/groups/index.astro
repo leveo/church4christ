@@ -1,8 +1,9 @@
 ---
 // Site-admin groups console (adminOnly — routePolicy covers /admin/groups; this
-// page re-checks isAdmin and 403s anyone else, the stricter site-admin-only
-// check used by other ADMIN_ONLY pages like admin/settings, not the console-class
-// editor∪admin check used by e.g. admin/events). Group admins themselves manage
+// page re-checks the groups grant (hasAreaAccess) and 403s anyone else — an
+// admin-plus-grant check, stricter than the console-class editor∪admin check
+// used by e.g. admin/events, but looser than the super-admin-only pages like
+// admin/settings). Group admins themselves manage
 // their own group at /groups/<id>/manage (in-page auth) — this console is CRUD
 // over every group plus who its admins are, for the site administrator.
 // Same inline add/edit model as announcements/events (?edit=<id>, save/delete),
@@ -13,9 +14,10 @@ import { parseGroupForm } from '../../../lib/groupForms';
 import { listGroups, createGroup, updateGroup, softDeleteGroup, listMembers } from '../../../lib/groupDb';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user?.isAdmin) return new Response(null, { status: 403 });
+if (!user || !hasAreaAccess(user, 'groups')) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

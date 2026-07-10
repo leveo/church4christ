@@ -597,6 +597,11 @@ export default {
   'admin.role.editor': '编辑',
   'admin.role.admin': '管理员',
 
+  // Grantable-area labels with no existing nav/section title of their own
+  // (the rest of GRANTABLE_AREAS reuse admin.nav.*/admin.giving.title/admin.reg.title).
+  'admin.areas.people': '会员管理',
+  'admin.areas.serve': '义工事工',
+
   'admin.people.title': '会众',
   'admin.people.new': '新增会众',
   'admin.people.search': '搜索',
@@ -645,6 +650,10 @@ export default {
   'admin.person.role': '角色',
   'admin.person.activeLabel': '启用',
   'admin.person.flagsTitle': '权限与状态',
+  'admin.person.superAdmin': '总管理员',
+  'admin.person.areasTitle': '模块权限',
+  'admin.person.areasHint': '祷告墙和会员名录对所有管理员始终开放。',
+  'admin.person.lastSuperErr': '必须保留至少一位总管理员。',
   'admin.person.save': '保存',
   'admin.person.updateFlags': '更新权限',
   'admin.person.delete': '删除会众',
@@ -693,6 +702,11 @@ export default {
   'admin.person.apps.viewTeam': '查看团队',
 
   'admin.person.groups.title': '小组活动',
+
+  'admin.person.giving.title': '奉献记录',
+  'admin.person.giving.ytd': '今年累计：{amount}',
+  'admin.person.giving.empty': '暂无奉献记录。',
+  'admin.person.giving.viewAll': '打开奉献管理',
 
   'invite.title': '邀请服事',
   'invite.hint': '发送一封温暖的邀请，邀请对方参与团队服事。',

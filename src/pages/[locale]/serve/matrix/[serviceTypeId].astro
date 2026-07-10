@@ -18,6 +18,7 @@ import { getMatrix, listServiceTypes, listTeamMembers } from '../../../../lib/te
 import { addDays, isValidDateStr, todayInTz } from '../../../../lib/dates';
 import { sendSchedulingRequest } from '../../../../lib/notify';
 import { type EmailEnv } from '../../../../lib/email';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -78,7 +79,7 @@ const cellAssignments = (planId: number, positionId: number) =>
   assignments.filter((a) => a.plan_id === planId && a.position_id === positionId);
 
 const teams = [...new Map(rows.map((r) => [r.team_id, r.team_name])).entries()];
-const editableTeamIds = teams.map(([id]) => id).filter((id) => user.isAdmin || user.leaderTeamIds.includes(id));
+const editableTeamIds = teams.map(([id]) => id).filter((id) => hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(id));
 const membersByTeam = new Map(
   await Promise.all(editableTeamIds.map(async (id) => [id, await listTeamMembers(db, id)] as const)),
 );
@@ -164,7 +165,7 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
             </thead>
             <tbody>
               {teams.map(([teamId, teamName]) => {
-                const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+                const canEdit = hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
                 const members = membersByTeam.get(teamId) ?? [];
                 return (
                   <>
