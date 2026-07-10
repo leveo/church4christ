@@ -40,6 +40,8 @@ description, and public or private. From the group's page the site admin searche
 assigns one or more **group admins**. That is the whole setup — everything after this point is
 the group admin's job.
 
+![The admin Groups page: create a group, set it public or private, and assign group admins](../images/admin/groups.png)
+
 **Running a group (group admin).** A group admin opens their group and follows **Manage
 group** to a single page with everything: the member roster (add by search or by typing a
 name, remove, promote another admin), pending join requests with Approve/Reject buttons, the
@@ -52,6 +54,8 @@ it. A signed-in visitor can request to join on the spot; a signed-out one is inv
 in or create an account first — a name and an email is all it takes, and the confirmation
 link arrives by email as usual. Members see their own groups — including private ones — at
 the top of the directory.
+
+![The public groups directory, listing every public group](../images/groups/directory.png)
 
 **Tracking attendance.** When creating a routine event, the group admin ticks **Track
 attendance**. After each occurrence ends, the hourly background job mails every group admin a
