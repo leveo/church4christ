@@ -109,7 +109,7 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       const all = await listHouseholds(db);
       expect(all).toHaveLength(3);
       const chen = all.find((h) => h.name.startsWith('Chen Family'));
-      expect(chen?.member_count).toBe(3); // David + Amy + dependent Ethan
+      expect(chen?.member_count).toBe(4); // David + Amy + dependents Ethan & Mia
 
       const filtered = await listHouseholds(db, { q: 'lin' });
       expect(filtered).toHaveLength(1);
