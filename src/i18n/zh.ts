@@ -83,6 +83,7 @@ export default {
 
   'content.notTranslated': '本页尚未翻译，当前显示的是英文版本。',
   'pages.draftNotice': '草稿——仅管理员可见。',
+  'pages.layoutInvalid': '此页面的布局数据无效，请在页面构建器中重新保存。',
 
   'sermons.title': '讲道',
   'sermons.intro': '观看并回顾近期的主日信息。',
