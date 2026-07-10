@@ -12,7 +12,7 @@ import { parseManualGiftForm } from '../../../lib/validate';
 import { listFunds, listFundsAdmin } from '../../../lib/fundDb';
 import { listGifts, fundTotals, recordManualGift } from '../../../lib/givingDb';
 import { listPeople } from '../../../lib/adminDb';
-import { isValidDateStr } from '../../../lib/dates';
+import { isValidDateStr, todayInTz, monthRange } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
@@ -62,13 +62,32 @@ const to = isValidDateStr(toParam) ? toParam : undefined;
 const methodParam = params.get('method') ?? '';
 const filterMethod = (METHODS as readonly string[]).includes(methodParam) ? methodParam : undefined;
 
-const [allFunds, activeFunds, people, gifts, totals] = await Promise.all([
+// Stat-row windows: current calendar month (in the church's tz) and year-to-date.
+const today = todayInTz();
+const { start: monthStart, end: monthEnd } = monthRange(today.slice(0, 7));
+const yearStart = `${today.slice(0, 4)}-01-01`;
+
+const [allFunds, activeFunds, people, gifts, totals, monthTotals, ytdTotals] = await Promise.all([
   listFundsAdmin(db),
   listFunds(db, lang, { activeOnly: true }),
   listPeople(db, {}),
   listGifts(db, lang, { fundId: filterFundId, from, to, method: filterMethod, limit: 500 }),
   fundTotals(db, lang, { from, to }),
+  fundTotals(db, lang, { from: monthStart, to: monthEnd }),
+  fundTotals(db, lang, { from: yearStart, to: today }),
 ]);
+// Stat row totals: fundTotals is already per-fund, so sum across funds for the
+// month/YTD window headline figures (no new db query — reuses the same fn the
+// per-fund totals table below calls).
+const monthTotalCents = monthTotals.reduce((sum, r) => sum + r.total_cents, 0);
+const monthGiftCount = monthTotals.reduce((sum, r) => sum + r.gift_count, 0);
+const ytdTotalCents = ytdTotals.reduce((sum, r) => sum + r.total_cents, 0);
+const stats = [
+  { label: t(lang, 'admin.giving.stats.monthTotal'), value: formatCents(monthTotalCents) },
+  { label: t(lang, 'admin.giving.stats.monthGifts'), value: String(monthGiftCount) },
+  { label: t(lang, 'admin.giving.stats.ytdTotal'), value: formatCents(ytdTotalCents) },
+  { label: t(lang, 'admin.giving.stats.activeFunds'), value: String(activeFunds.length) },
+];
 const activePeople = people.filter((p) => p.active === 1);
 // Resolve a member gift's donor from the people we already loaded (listGifts only
 // carries the free-text donor_name, not the linked member's name).
@@ -99,6 +118,15 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
   </div>
 
   {recorded && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.giving.recorded')}</p>}
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {stats.map((s) => (
+      <div class={card}>
+        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
+        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
+      </div>
+    ))}
+  </div>
 
   {/* (1) Manual entry */}
   <section class={`mt-6 ${card} max-w-3xl space-y-4`}>

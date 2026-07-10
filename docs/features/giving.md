@@ -44,7 +44,9 @@ succeeds, the gift lands in the ledger automatically.
 member list (or type a guest's name), pick the fund, enter the amount, mark it a check or
 cash, add the check number and the date it was received, and save. Below the form, a
 filterable **ledger** lists every gift — online and offline together — and a **Totals by
-fund** table adds up what each fund has received over the date window you choose.
+fund** table adds up what each fund has received over the date window you choose. A row of
+summary cards above the form shows this month's total and gift count, the year-to-date
+total, and how many funds are active, at a glance.
 
 ![The giving admin: record a check or cash gift, with the filterable ledger and per-fund totals below](../images/admin/giving.png)
 

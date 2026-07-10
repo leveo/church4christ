@@ -36,7 +36,8 @@ of six columns, and each column has a plain meaning:
 - **Cancelled** — withdrawn, a duplicate, or no longer relevant.
 
 Drag a card to a new column as things progress; each card can also record that someone prayed,
-or hold a short comment from the team.
+or hold a short comment from the team. A row of summary cards at the top shows how many
+requests are New, Praying, and Answered, and the board's total, at a glance.
 
 ![The prayer wall kanban board](../images/admin/prayer-wall.png)
 

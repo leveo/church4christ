@@ -21,7 +21,7 @@ import {
   type PrayerRequestRow,
   type PrayerActivityRow,
 } from '../../../lib/adminDb';
-import { tin, badge, badgeActive, badgeInactive, btn, rowBtn, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, badge, badgeActive, badgeInactive, btn, rowBtn, noticeOk, noticeErr, card } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -89,6 +89,17 @@ const cardDate = (utc: string) => utc.slice(0, 10);
 const actTime = (utc: string) => utc.slice(0, 16);
 const preview = (msg: string) => [...msg].slice(0, 90).join('');
 const isLong = (msg: string) => [...msg].length > 120;
+
+// Summary row above the kanban — counts come from the board already loaded
+// above, no extra query. Total reflects whatever's currently on the board
+// (subject to the 90-day fold on answered/cancelled unless ?all=1).
+const totalCount = PRAYER_STATUSES.reduce((sum, s) => sum + board[s].length, 0);
+const stats = [
+  { label: statusLabel('new'), value: String(newCount) },
+  { label: statusLabel('praying'), value: String(board.praying.length) },
+  { label: statusLabel('answered'), value: String(board.answered.length) },
+  { label: t(lang, 'admin.prayerWall.stats.total'), value: String(totalCount) },
+];
 ---
 
 <Admin title={t(lang, 'admin.prayerWall.title')}>
@@ -97,6 +108,15 @@ const isLong = (msg: string) => [...msg].length > 120;
   {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.dbError')}</p>}
   {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.actionError')}</p>}
   {showDeleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.prayerWall.deleted')}</p>}
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {stats.map((s) => (
+      <div class={card}>
+        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
+        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
+      </div>
+    ))}
+  </div>
 
   <div id="kanban" class="mt-6 flex gap-4 overflow-x-auto pb-4" data-move-error={t(lang, 'admin.prayerWall.moveError')}>
     {

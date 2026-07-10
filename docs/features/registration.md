@@ -53,7 +53,9 @@ dollars (leave it blank or `0` for a free event). Two optional fields — **Open
 until it starts, but you can open sign-ups later or close them early. Below the form, a table
 lists every event with how many have registered, its price, and whether it is active. Editing an
 event reuses the same form, and unchecking **Active** hides an event without deleting it (its
-registrations stay on the roster).
+registrations stay on the roster). A row of summary cards above the form shows how many events
+are currently open, how many active registrations there are, and how many seats remain across
+those events, at a glance.
 
 ![The registration admin: create or edit an event, with the events table below](../images/admin/registration.png)
 
