@@ -77,6 +77,11 @@ const MIN_BYTES = 20 * 1024;
 //   mode   — inject data-mode (light | dark) after load
 //   anchor — heading text to frame: clip the 1280x800 shot to start just above
 //            the first heading containing it (for below-the-fold panels)
+//   postForm — after load, click every element matching `checkAll` (if given)
+//            then `requestSubmit()` the element matching `form` and wait for
+//            the resulting navigation before continuing. Used for the one shot
+//            that needs to show a *real* server response (the kiosk pickup
+//            code), which only exists after an actual check-in POST.
 const PAGES = [
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
@@ -102,6 +107,23 @@ const PAGES = [
   { path: '/en/serve/opportunities', out: 'docs/images/serve/opportunities.png' },
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
+
+  // Children's check-in (Task 8). The kiosk needs no session — the token in
+  // the URL is the gate — so it captures in the same admin-bypass pass. The
+  // dev seed fixes the kiosk token and gives Chen Family two children, which
+  // `kiosk-search.png` finds by name. `kiosk-code.png` performs a REAL
+  // check-in via a native form POST (the `postForm` step below) so the
+  // confirmation screen shows a genuine pickup code; it must run BEFORE
+  // `children-today.png`, which depends on that same check-in appearing in
+  // the day's roster. Keep them in this order.
+  { path: '/kiosk/devkiosk1234567890abcdef12345678/?lang=en&q=Chen', out: 'docs/images/public/kiosk-search.png' },
+  {
+    path: '/kiosk/devkiosk1234567890abcdef12345678/household/1?lang=en&q=Chen',
+    out: 'docs/images/public/kiosk-code.png',
+    postForm: { checkAll: 'input[name="member"]', form: 'form[method="post"]' },
+  },
+  { path: '/admin/children?tab=dashboard', out: 'docs/images/admin/children-dashboard.png', admin: true },
+  { path: '/admin/children?tab=today', out: 'docs/images/admin/children-today.png', admin: true },
 
   // Theme matrix — 3 themes x light/dark, home page, applied via injection.
   { path: '/en/', out: 'docs/images/themes/home-sanctuary-light.png', theme: 'sanctuary', mode: 'light' },
@@ -232,6 +254,20 @@ async function capture(cdp, base, row) {
     const loaded = onceEvent('Page.loadEventFired', sessionId, 20000).catch(() => {});
     await send('Page.navigate', { url }, sessionId);
     await loaded;
+
+    // A scripted form submission: check every box matching `checkAll`, then
+    // submit the form and wait for the real server-rendered response page
+    // (a native POST navigation, not a fetch) before capturing.
+    if (row.postForm) {
+      if (row.postForm.checkAll) {
+        await send('Runtime.evaluate',
+          { expression: `document.querySelectorAll(${JSON.stringify(row.postForm.checkAll)}).forEach((el) => el.click())` }, sessionId);
+      }
+      const resubmitted = onceEvent('Page.loadEventFired', sessionId, 20000).catch(() => {});
+      await send('Runtime.evaluate',
+        { expression: `document.querySelector(${JSON.stringify(row.postForm.form)}).requestSubmit()` }, sessionId);
+      await resubmitted;
+    }
 
     // Wait for webfonts, then for the 繁 conversion (lang flips to zh-Hant) if applicable.
     await send('Runtime.evaluate',
