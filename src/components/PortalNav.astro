@@ -1,9 +1,9 @@
 ---
-// Shared tab strip for the /my/* member-portal pages. Dashboard/Household/
-// Calendar always render; Giving only when the `giving` module is on;
-// Groups/Events/Serving/Prayer only when `portal` is on — this component is
-// shared with /my (the serve-only schedule page), which runs without the
-// portal module.
+// Shared tab strip for the /my/* member-portal pages. Dashboard/Calendar
+// always render; Giving only when the `giving` module is on;
+// Household/Groups/Events/Serving/Prayer only when `portal` is on — this
+// component is shared with /my (the serve-only schedule page), which runs
+// without the portal module.
 import { localePath, type Locale } from '../lib/locales';
 import { t } from '../lib/i18n';
 
@@ -19,7 +19,9 @@ const modules = Astro.locals.modules;
 
 const tabs: { key: PortalNavTab; href: string; label: string }[] = [
   { key: 'dashboard', href: localePath(locale, '/my'), label: t(locale, 'portal.nav.dashboard') },
-  { key: 'household', href: localePath(locale, '/my/household'), label: t(locale, 'portal.nav.household') },
+  ...(modules.has('portal')
+    ? [{ key: 'household' as const, href: localePath(locale, '/my/household'), label: t(locale, 'portal.nav.household') }]
+    : []),
   ...(modules.has('giving')
     ? [{ key: 'giving' as const, href: localePath(locale, '/my/giving'), label: t(locale, 'portal.nav.giving') }]
     : []),

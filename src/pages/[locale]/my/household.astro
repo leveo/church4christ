@@ -14,7 +14,7 @@ import { getPortalHousehold, setOwner, updateMemberProfile, type MemberProfilePa
 import { requestEmailChange } from '../../../lib/emailChange';
 import { sendEmailChangeLink } from '../../../lib/notify';
 import { setPersonAvatar } from '../../../lib/adminDb';
-import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
+import { saveImageUpload, type MediaBucket } from '../../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../../lib/mediaRef';
 import { type EmailEnv } from '../../../lib/email';
 import { badge, badgeScheduled, btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
@@ -32,16 +32,19 @@ const str = (v: FormDataEntryValue | null): string => String(v ?? '').trim();
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 
 // setOwner/updateMemberProfile throw one of a fixed set of error codes; map the
-// two a member can realistically hit here to copy, everything else (not_found /
-// not_authorized / cannot_demote_self — none reachable through this page's own
-// UI gating) to a generic fallback.
-const MUTATION_ERR: Record<string, string> = {
-  owner_limit: 'portal.owner.errLimit',
-  not_eligible: 'portal.owner.errNotEligible',
+// two a member can realistically hit here to a short ?err= code, everything
+// else (not_found/not_authorized/cannot_demote_self — none reachable through
+// this page's own UI gating) to a generic fallback. Codes are resolved back
+// to i18n keys on GET via ERR_MSG below, symmetric with OK_MSG/?ok=.
+const mapMutationErrCode = (e: unknown): string => {
+  const msg = e instanceof Error ? e.message : '';
+  return msg === 'owner_limit' || msg === 'not_eligible' ? msg : 'generic';
 };
-const mapMutationError = (e: unknown): string => MUTATION_ERR[e instanceof Error ? e.message : ''] ?? 'portal.household.errGeneric';
-
-let errKey: string | null = null;
+const mapUploadErrCode = (e: unknown): string => {
+  if (e instanceof Error && e.message === 'image_type') return 'upload_type';
+  if (e instanceof Error && e.message === 'image_too_large') return 'upload_too_large';
+  return 'upload_bad_request';
+};
 
 let household = await getPortalHousehold(db, user.id);
 
@@ -49,6 +52,7 @@ if (Astro.request.method === 'POST' && household) {
   const fd = await Astro.request.formData();
   const action = str(fd.get('_action'));
   const done = (ok: string) => Astro.redirect(localePath(locale, `/my/household?ok=${ok}`), 303);
+  const fail = (err: string) => Astro.redirect(localePath(locale, `/my/household?err=${err}`), 303);
 
   if (action === 'updateProfile') {
     const memberId = idOf(fd.get('member_id'));
@@ -64,10 +68,10 @@ if (Astro.request.method === 'POST' && household) {
       const roleRaw = fd.get('dependent_role');
       const dependentRole = roleRaw === 'child' ? 'child' : roleRaw === 'adult' ? 'adult' : undefined;
       try {
-        await updateMemberProfile(db, { actorPersonId: user.id, isAdmin: user.isAdmin, memberId, patch, dependentRole });
+        await updateMemberProfile(db, { actorPersonId: user.id, isAdmin: false, memberId, patch, dependentRole });
         return done('profile');
       } catch (e) {
-        errKey = mapMutationError(e);
+        return fail(mapMutationErrCode(e));
       }
     }
   } else if (action === 'setOwner' || action === 'unsetOwner') {
@@ -79,22 +83,19 @@ if (Astro.request.method === 'POST' && household) {
           memberId,
           isOwner: action === 'setOwner',
           actorPersonId: user.id,
-          isAdmin: user.isAdmin,
+          isAdmin: false,
         });
         return done('owner');
       } catch (e) {
-        errKey = mapMutationError(e);
+        return fail(mapMutationErrCode(e));
       }
     }
   } else if (action === 'requestEmailChange') {
     const result = await requestEmailChange(db, user.id, str(fd.get('new_email')));
     if ('error' in result) {
-      errKey =
-        {
-          invalid: 'errors.emailInvalid',
-          taken: 'errors.emailTaken',
-          rate_limited: 'portal.household.emailChangeErrRateLimited',
-        }[result.error] ?? 'portal.household.errGeneric';
+      return fail(
+        { invalid: 'email_invalid', taken: 'email_taken', rate_limited: 'email_rate_limited' }[result.error] ?? 'generic',
+      );
     } else {
       await sendEmailChangeLink(
         env as unknown as EmailEnv,
@@ -110,26 +111,34 @@ if (Astro.request.method === 'POST' && household) {
     const memberId = idOf(fd.get('member_id'));
     const target = household.members.find((m) => m.id === memberId);
     const targetPersonId = target?.person_id ?? null;
-    const authorized = targetPersonId !== null && (targetPersonId === user.id || household.viewerIsOwner || user.isAdmin);
-    if (authorized && targetPersonId !== null) {
-      const avatarFile = fd.get('avatar');
-      let avatarKey: string | null = null;
-      if (avatarFile instanceof File && avatarFile.size > 0) {
-        try {
-          avatarKey = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
-        } catch (e) {
-          errKey = uploadErrorKey(e);
-        }
-      }
-      if (!errKey) {
-        if (avatarKey) await setPersonAvatar(db, targetPersonId, `/media/${avatarKey}`);
-        else if (fd.get('remove_avatar')) await setPersonAvatar(db, targetPersonId, null);
-        return done('avatar');
+    const authorized = targetPersonId !== null && (targetPersonId === user.id || household.viewerIsOwner);
+    if (!authorized || targetPersonId === null) {
+      return fail('generic');
+    }
+    const avatarFile = fd.get('avatar');
+    let avatarKey: string | null = null;
+    if (avatarFile instanceof File && avatarFile.size > 0) {
+      try {
+        avatarKey = await saveImageUpload({ db, media, file: avatarFile, uploadedBy: user.email });
+      } catch (e) {
+        return fail(mapUploadErrCode(e));
       }
     }
+    if (avatarKey) {
+      await setPersonAvatar(db, targetPersonId, `/media/${avatarKey}`);
+      return done('avatar');
+    }
+    if (fd.get('remove_avatar')) {
+      await setPersonAvatar(db, targetPersonId, null);
+      return done('avatar');
+    }
+    // No file chosen and no removal requested: a no-op, not a save.
+    return Astro.redirect(localePath(locale, '/my/household'), 303);
   }
 
-  // A failed mutation still renders the current (unchanged) household state.
+  // Invalid/missing member_id on updateProfile/setOwner (unreachable through
+  // this page's own UI) falls through and re-renders the current, unchanged
+  // household state.
   household = await getPortalHousehold(db, user.id);
 }
 
@@ -172,6 +181,20 @@ const OK_MSG: Record<string, string> = {
   emailChange: 'portal.household.emailChangeSent',
 };
 const okKey = okParam ? (OK_MSG[okParam] ?? null) : null;
+
+const errParam = Astro.url.searchParams.get('err');
+const ERR_MSG: Record<string, string> = {
+  owner_limit: 'portal.owner.errLimit',
+  not_eligible: 'portal.owner.errNotEligible',
+  email_invalid: 'errors.emailInvalid',
+  email_taken: 'errors.emailTaken',
+  email_rate_limited: 'portal.household.emailChangeErrRateLimited',
+  upload_type: 'errors.imageType',
+  upload_too_large: 'errors.imageTooLarge',
+  upload_bad_request: 'admin.form.badRequest',
+  generic: 'portal.household.errGeneric',
+};
+const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
 ---
 
 <Base title={t(locale, 'portal.household.title')} locale={locale} noindex>
