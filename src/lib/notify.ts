@@ -433,3 +433,102 @@ export async function sendApplicationResult(
     console.error(`application-result notice failed for application ${applicationId}`, e);
   }
 }
+
+// ── Groups (member portal: fellowships + Sunday School classes) — mirrors the
+// team-application pair above (getApplicationDetail/listTeamLeaders/
+// sendApplicationReceived/sendApplicationResult), adapted to group_applications'
+// shape (no position_id; group_members carries is_leader the same way
+// team_members does). ──
+
+interface GroupApplicationDetail {
+  person_id: number;
+  applicant_name: string;
+  applicant_email: string | null;
+  applicant_lang: string | null;
+  group_id: number;
+  group_name: string;
+}
+
+async function getGroupApplicationDetail(db: AppDb, applicationId: number): Promise<GroupApplicationDetail | null> {
+  const gJ = i18nJoin('member_group_i18n', 'g', 'group_id', ['name'], 'en');
+  return db
+    .prepare(
+      `SELECT ga.person_id AS person_id, people.display_name AS applicant_name,
+              people.email AS applicant_email, people.lang AS applicant_lang,
+              g.id AS group_id, COALESCE(g_l.name, g_d.name) AS group_name
+       FROM group_applications ga
+       JOIN people ON people.id = ga.person_id
+       JOIN member_groups g ON g.id = ga.group_id
+       ${gJ.joins}
+       WHERE ga.id = ?`,
+    )
+    .bind(applicationId)
+    .first<GroupApplicationDetail>();
+}
+
+async function listGroupLeaders(db: AppDb, groupId: number): Promise<LeaderRecipient[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT people.email AS email, people.display_name AS name, people.lang AS lang
+       FROM group_members gm
+       JOIN people ON people.id = gm.person_id
+         AND people.deleted_at IS NULL AND people.active = 1 AND people.email IS NOT NULL
+       WHERE gm.group_id = ? AND gm.is_leader = 1
+       ORDER BY people.display_name`,
+    )
+    .bind(groupId)
+    .all<LeaderRecipient>();
+  return results;
+}
+
+/** Notify a group's leaders that a new membership application is awaiting review. */
+export async function sendGroupApplicationReceived(env: EmailEnv, db: AppDb, applicationId: number): Promise<void> {
+  try {
+    const a = await getGroupApplicationDetail(db, applicationId);
+    if (!a) return;
+    const leaders = await listGroupLeaders(db, a.group_id);
+    const origin = env.APP_ORIGIN ?? '';
+    for (const ldr of leaders) {
+      const only = toLang(ldr.lang);
+      const link = `${origin}/${only ?? 'en'}/my/groups/${a.group_id}`;
+      const built = bilingualEmail({
+        subjectKey: 'email.groupAppReceivedSubject',
+        bodyKey: 'email.groupAppReceivedBody',
+        vars: { name: a.applicant_name, group: a.group_name },
+        link,
+        only,
+      });
+      await sendEmail(env, db, { to: ldr.email, toName: ldr.name, kind: 'groupAppReceived', detail: a.group_name, ...built });
+    }
+  } catch (e) {
+    console.error(`group application-received notice failed for application ${applicationId}`, e);
+  }
+}
+
+/** Tell the applicant whether their group membership application was approved or rejected. */
+export async function sendGroupApplicationResult(
+  env: EmailEnv,
+  db: AppDb,
+  applicationId: number,
+  approved: boolean,
+): Promise<void> {
+  try {
+    const a = await getGroupApplicationDetail(db, applicationId);
+    if (!a?.applicant_email) return;
+    const only = toLang(a.applicant_lang);
+    // Links to the portal groups index, not the group detail page: a rejected
+    // applicant is never a member, so /my/groups/<id> (member-gated) would 404
+    // for them — the same reasoning sendApplicationResult applies for teams.
+    const link = `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/my/groups`;
+    const built = bilingualEmail({
+      subjectKey: approved ? 'email.groupAppApprovedSubject' : 'email.groupAppRejectedSubject',
+      bodyKey: approved ? 'email.groupAppApprovedBody' : 'email.groupAppRejectedBody',
+      vars: { name: a.applicant_name, group: a.group_name },
+      link,
+      only,
+    });
+    await sendEmail(env, db, { to: a.applicant_email, toName: a.applicant_name, kind: 'groupAppResult', detail: a.group_name, ...built });
+  } catch (e) {
+    console.error(`group application-result notice failed for application ${applicationId}`, e);
+  }
+}
