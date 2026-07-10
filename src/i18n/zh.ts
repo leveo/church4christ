@@ -706,6 +706,22 @@ export default {
   'portal.groups.appApproved': '申请已批准。',
   'portal.groups.appRejected': '申请已拒绝。',
 
+  'portal.events.title': '活动',
+  'portal.events.mine': '我的报名',
+  'portal.events.mineEmpty': '你还没有报名任何活动。',
+  'portal.events.status.pending': '待处理',
+  'portal.events.status.confirmed': '已确认',
+  'portal.events.open': '开放报名',
+  'portal.events.openEmpty': '目前没有开放报名的活动。',
+  'portal.events.spotsLeft': '剩余 {count} 个名额',
+
+  'portal.serving.title': '事奉',
+  'portal.serving.myTeams': '我的团队',
+  'portal.serving.myTeamsEmpty': '你还没有加入任何团队。',
+  'portal.serving.history': '事奉记录',
+  'portal.serving.historyEmpty': '暂无事奉记录。',
+  'portal.serving.applicationsEmpty': '你还没有申请加入任何团队。',
+
   'admin.person.notes.title': '牧养备注',
   'admin.person.notes.hint': '仅管理员可见——事工同工永远看不到这些备注。',
   'admin.person.notes.empty': '暂无备注。',

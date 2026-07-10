@@ -707,6 +707,22 @@ export default {
   'portal.groups.appApproved': 'Application approved.',
   'portal.groups.appRejected': 'Application rejected.',
 
+  'portal.events.title': 'Events',
+  'portal.events.mine': 'My registrations',
+  'portal.events.mineEmpty': "You haven't registered for any events yet.",
+  'portal.events.status.pending': 'Pending',
+  'portal.events.status.confirmed': 'Confirmed',
+  'portal.events.open': 'Open for registration',
+  'portal.events.openEmpty': 'No events are open for registration right now.',
+  'portal.events.spotsLeft': '{count} spots left',
+
+  'portal.serving.title': 'Serving',
+  'portal.serving.myTeams': 'My teams',
+  'portal.serving.myTeamsEmpty': "You're not on any teams yet.",
+  'portal.serving.history': 'Serving history',
+  'portal.serving.historyEmpty': 'No serving history yet.',
+  'portal.serving.applicationsEmpty': "You haven't applied to any teams yet.",
+
   'admin.person.notes.title': 'Pastoral notes',
   'admin.person.notes.hint': 'Admin-only — ministry leaders never see these notes.',
   'admin.person.notes.empty': 'No notes yet.',

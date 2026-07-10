@@ -1,0 +1,104 @@
+---
+// /my/events: the member-facing event hub (Member Portal Phase 3, Task 2).
+// Two READ-ONLY sections — "My registrations" (listRegistrationsForPerson,
+// matched by person_id OR email, status-badged, amount shown when paid) and,
+// gated on the `registration` module, "Open for registration" (listOpenEvents,
+// mirroring the public /register index card) linking out to the existing public
+// registration flow at /register/<id>. No POST handler here: registering and
+// cancelling both stay on that public flow, which already handles Stripe
+// checkout and capacity races.
+import Base from '../../../layouts/Base.astro';
+import PortalNav from '../../../components/PortalNav.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
+import { listOpenEvents, listRegistrationsForPerson, type RegEvent } from '../../../lib/regDb';
+import { badge, badgeInactive } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+
+const myRegistrations = await listRegistrationsForPerson(db, locale, user.id, user.email);
+const openEvents = Astro.locals.modules.has('registration') ? await listOpenEvents(db, locale) : [];
+
+const statusChip: Record<'pending' | 'confirmed', string> = {
+  pending: 'bg-warn-soft text-warn',
+  confirmed: 'bg-success-soft text-success',
+};
+
+const when = (startsAt: string) => `${formatDate(startsAt.slice(0, 10), locale)} ${startsAt.slice(11, 16)}`;
+const priceLabel = (e: RegEvent) =>
+  e.price_cents !== null && e.price_cents > 0 ? formatCents(e.price_cents, e.currency) : t(locale, 'register.free');
+const isFull = (e: RegEvent) => e.capacity !== null && e.taken_count >= e.capacity;
+const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity - e.taken_count) : null);
+---
+
+<Base title={t(locale, 'portal.events.title')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.events.title')}</h1>
+    <PortalNav locale={locale} active="events" />
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.events.mine')}</h2>
+      {
+        myRegistrations.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.events.mineEmpty')}</p>
+        ) : (
+          <ul class="mt-4 flex flex-col gap-4">
+            {myRegistrations.map((r) => (
+              <li class="rounded-lg border border-border bg-surface-raised p-5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold">{r.event_title}</span>
+                  <span class={`${badge} ${statusChip[r.status]}`}>{t(locale, `portal.events.status.${r.status}`)}</span>
+                </div>
+                <p class="mt-1 text-sm text-ink-muted">{when(r.starts_at)}</p>
+                {r.location && <p class="text-sm text-ink-muted">{r.location}</p>}
+                {r.amount_cents > 0 && (
+                  <p class="mt-2 text-sm font-semibold tabular-nums">{formatCents(r.amount_cents, r.currency)}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    {
+      Astro.locals.modules.has('registration') && (
+        <section class="mt-10">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.events.open')}</h2>
+          {openEvents.length === 0 ? (
+            <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.events.openEmpty')}</p>
+          ) : (
+            <ul class="mt-4 grid gap-4 sm:grid-cols-2">
+              {openEvents.map((e) => (
+                <li class="rounded-lg border border-border bg-surface-raised p-5">
+                  <div class="flex items-start justify-between gap-3">
+                    <h3 class="font-display font-bold">
+                      <a href={localePath(locale, `/register/${e.id}`)} class="hover:underline">
+                        {e.title}
+                      </a>
+                    </h3>
+                    {isFull(e) && <span class={`${badge} ${badgeInactive}`}>{t(locale, 'register.full')}</span>}
+                  </div>
+                  <p class="mt-2 text-sm text-ink-muted">{when(e.starts_at)}</p>
+                  {e.location && <p class="text-sm text-ink-muted">{e.location}</p>}
+                  <p class="mt-3 text-sm font-semibold">{priceLabel(e)}</p>
+                  {!isFull(e) && spotsLeft(e) !== null && (
+                    <p class="mt-1 text-xs text-ink-subtle">{t(locale, 'portal.events.spotsLeft', { count: spotsLeft(e)! })}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )
+    }
+  </div>
+</Base>
