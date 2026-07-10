@@ -12,6 +12,7 @@ import {
   listCustomPages,
   listPublishedPageTitles,
   saveCustomPage,
+  toggleCustomPagePublished,
 } from '../src/lib/pagesDb';
 
 beforeEach(async () => {
@@ -141,6 +142,46 @@ describe('saveCustomPage — update', () => {
     expect(revs).toHaveLength(2);
 
     expect(await listCustomPages(env.DB)).toHaveLength(1); // update, not a second row
+  });
+});
+
+describe('toggleCustomPagePublished', () => {
+  it('flips published both ways WITHOUT touching slug or i18n content', async () => {
+    const { id } = (await saveCustomPage(env.DB, input({ published: true }))) as { ok: true; id: string };
+
+    await toggleCustomPagePublished(env.DB, id);
+    let detail = await getCustomPage(env.DB, id);
+    expect(detail!.published).toBe(false);
+
+    await toggleCustomPagePublished(env.DB, id);
+    detail = await getCustomPage(env.DB, id);
+    expect(detail!.published).toBe(true);
+
+    // The atomic flip must not read-modify-write content: slug + both i18n
+    // rows stay byte-identical to what saveCustomPage wrote.
+    expect(detail).toEqual({
+      id,
+      slug: 'about',
+      published: true,
+      i18n: {
+        en: { title: 'About Us', body_md: 'We are a **church**.' },
+        zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
+      },
+    });
+  });
+
+  it('writes no revision snapshot (quick list action, mirrors toggleEventActive)', async () => {
+    const { id } = (await saveCustomPage(env.DB, input())) as { ok: true; id: string };
+    await toggleCustomPagePublished(env.DB, id);
+    const { results } = await env.DB
+      .prepare(`SELECT id FROM revisions WHERE entity = 'custom_page' AND entity_id = ?1`)
+      .bind(id)
+      .all();
+    expect(results).toHaveLength(1); // only the save's snapshot, none from the toggle
+  });
+
+  it('an unknown id is a harmless no-op', async () => {
+    await expect(toggleCustomPagePublished(env.DB, 'does-not-exist')).resolves.toBeUndefined();
   });
 });
 

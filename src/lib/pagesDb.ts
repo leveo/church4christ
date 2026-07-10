@@ -122,6 +122,17 @@ export async function saveCustomPage(
   return { ok: true, id };
 }
 
+/** Flip a page's published flag (quick list action, no snapshot). Atomic
+ *  single-statement UPDATE — never a read-modify-write, so a concurrent
+ *  content edit can't be reverted by a toggle. Mirrors toggleEventActive;
+ *  updated_at uses the same expression as the save path. */
+export async function toggleCustomPagePublished(db: AppDb, id: string): Promise<void> {
+  await db
+    .prepare(`UPDATE custom_pages SET published = 1 - published, updated_at = datetime('now') WHERE id = ?1`)
+    .bind(id)
+    .run();
+}
+
 /** Hard-delete a page and its i18n rows. A missing id is a harmless no-op. */
 export async function deleteCustomPage(db: AppDb, id: string): Promise<void> {
   await db.batch([

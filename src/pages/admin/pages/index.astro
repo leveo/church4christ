@@ -7,7 +7,7 @@
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { parseCustomPageForm } from '../../../lib/validate';
-import { listCustomPages, getCustomPage, saveCustomPage, deleteCustomPage } from '../../../lib/pagesDb';
+import { listCustomPages, getCustomPage, saveCustomPage, deleteCustomPage, toggleCustomPagePublished } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import { localePath, type Locale } from '../../../lib/locales';
@@ -39,22 +39,7 @@ if (Astro.request.method === 'POST') {
       return Astro.redirect('/admin/pages?deleted=1', 303);
     }
     if (action === 'toggle' && id !== null) {
-      // No dedicated toggle helper on the data layer (Task 2's pagesDb exports
-      // only save/get/list/delete) — flip published via a normal save so the
-      // toggle still snapshots a revision like every other pages write.
-      const page = await getCustomPage(db, id);
-      if (page) {
-        await saveCustomPage(db, {
-          id: page.id,
-          slug: page.slug,
-          published: !page.published,
-          title_en: page.i18n.en.title,
-          title_zh: page.i18n.zh.title,
-          body_en: page.i18n.en.body_md,
-          body_zh: page.i18n.zh.body_md,
-          updatedBy: user.email,
-        });
-      }
+      await toggleCustomPagePublished(db, id);
       return Astro.redirect('/admin/pages?saved=1', 303);
     }
     if (action === 'save') {
