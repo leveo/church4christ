@@ -149,6 +149,29 @@ describe('setOwner', () => {
       setOwner(env.DB, { householdId: id, memberId: 99999, isOwner: true, actorPersonId: 1, isAdmin: true }),
     ).rejects.toThrow('not_found');
   });
+
+  it('throws not_found for a real memberId that belongs to a different household', async () => {
+    const idA = await createHousehold(env.DB, HH, 1);
+    const idB = await createHousehold(env.DB, HH, 5);
+    const m1A = await memberIdFor(idA, 1);
+    const m5B = await memberIdFor(idB, 5);
+    await setOwner(env.DB, { householdId: idA, memberId: m1A, isOwner: true, actorPersonId: 999, isAdmin: true });
+
+    await expect(
+      setOwner(env.DB, { householdId: idA, memberId: m5B, isOwner: true, actorPersonId: 1, isAdmin: false }),
+    ).rejects.toThrow('not_found');
+  });
+
+  it('rejects a non-owner actor demoting a co-owner', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    await linkPersonToHousehold(env.DB, id, 2, 'adult');
+    const m1 = await memberIdFor(id, 1);
+    await setOwner(env.DB, { householdId: id, memberId: m1, isOwner: true, actorPersonId: 999, isAdmin: true });
+
+    await expect(
+      setOwner(env.DB, { householdId: id, memberId: m1, isOwner: false, actorPersonId: 2, isAdmin: false }),
+    ).rejects.toThrow('not_authorized');
+  });
 });
 
 describe('updateMemberProfile', () => {
@@ -249,5 +272,47 @@ describe('updateMemberProfile', () => {
     await expect(
       updateMemberProfile(env.DB, { actorPersonId: 1, isAdmin: true, memberId: 99999, patch: {} }),
     ).rejects.toThrow('not_found');
+  });
+
+  it('lets an admin actor edit a member profile directly', async () => {
+    const id = await createHousehold(env.DB, HH, 1);
+    await linkPersonToHousehold(env.DB, id, 2, 'adult');
+    const m2 = await memberIdFor(id, 2);
+
+    await updateMemberProfile(env.DB, {
+      actorPersonId: 999,
+      isAdmin: true,
+      memberId: m2,
+      patch: { phone: '555-8888' },
+    });
+
+    const person = await env.DB.prepare('SELECT phone FROM people WHERE id = ?').bind(2).first<{
+      phone: string | null;
+    }>();
+    expect(person?.phone).toBe('555-8888');
+  });
+
+  it('throws (not_found) when an actor who owned a now-soft-deleted household reuses a stale memberId from it', async () => {
+    const idA = await createHousehold(env.DB, HH, 1);
+    await linkPersonToHousehold(env.DB, idA, 2, 'adult');
+    const m1A = await memberIdFor(idA, 1);
+    const m2A = await memberIdFor(idA, 2);
+    await setOwner(env.DB, { householdId: idA, memberId: m1A, isOwner: true, actorPersonId: 999, isAdmin: true });
+
+    await env.DB.prepare(`UPDATE households SET deleted_at = datetime('now') WHERE id = ?`).bind(idA).run();
+
+    await expect(
+      updateMemberProfile(env.DB, {
+        actorPersonId: 1,
+        isAdmin: false,
+        memberId: m2A,
+        patch: { phone: '555-6666' },
+      }),
+    ).rejects.toThrow('not_found');
+
+    const person = await env.DB.prepare('SELECT phone FROM people WHERE id = ?').bind(2).first<{
+      phone: string | null;
+    }>();
+    expect(person?.phone).not.toBe('555-6666');
   });
 });

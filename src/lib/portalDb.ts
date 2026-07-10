@@ -38,7 +38,12 @@ export async function setOwner(
 
   if (!isAdmin) {
     const actor = await db
-      .prepare(`SELECT is_owner FROM household_members WHERE household_id = ? AND person_id = ?`)
+      .prepare(
+        `SELECT hm.is_owner AS is_owner
+         FROM household_members hm
+         JOIN households h ON h.id = hm.household_id
+         WHERE hm.household_id = ? AND hm.person_id = ? AND h.deleted_at IS NULL`,
+      )
       .bind(householdId, actorPersonId)
       .first<{ is_owner: number }>();
     if (!actor || actor.is_owner !== 1) throw new Error('not_authorized');
@@ -48,8 +53,9 @@ export async function setOwner(
     .prepare(
       `SELECT hm.id, hm.person_id, hm.role, hm.is_owner, p.email
        FROM household_members hm
+       JOIN households h ON h.id = hm.household_id
        LEFT JOIN people p ON p.id = hm.person_id AND p.deleted_at IS NULL
-       WHERE hm.id = ? AND hm.household_id = ?`,
+       WHERE hm.id = ? AND hm.household_id = ? AND h.deleted_at IS NULL`,
     )
     .bind(memberId, householdId)
     .first<{ id: number; person_id: number | null; role: string; is_owner: number; email: string | null }>();
@@ -102,14 +108,24 @@ export async function updateMemberProfile(
 ): Promise<void> {
   const { actorPersonId, isAdmin, memberId, patch, dependentRole } = args;
   const member = await db
-    .prepare(`SELECT id, household_id, person_id FROM household_members WHERE id = ?`)
+    .prepare(
+      `SELECT hm.id, hm.household_id, hm.person_id
+       FROM household_members hm
+       JOIN households h ON h.id = hm.household_id
+       WHERE hm.id = ? AND h.deleted_at IS NULL`,
+    )
     .bind(memberId)
     .first<{ id: number; household_id: number; person_id: number | null }>();
   if (!member) throw new Error('not_found');
 
   if (!isAdmin && member.person_id !== actorPersonId) {
     const actor = await db
-      .prepare(`SELECT is_owner FROM household_members WHERE household_id = ? AND person_id = ?`)
+      .prepare(
+        `SELECT hm.is_owner AS is_owner
+         FROM household_members hm
+         JOIN households h ON h.id = hm.household_id
+         WHERE hm.household_id = ? AND hm.person_id = ? AND h.deleted_at IS NULL`,
+      )
       .bind(member.household_id, actorPersonId)
       .first<{ is_owner: number }>();
     if (!actor || actor.is_owner !== 1) throw new Error('not_authorized');
