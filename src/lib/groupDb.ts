@@ -83,6 +83,84 @@ export async function getGroup(db: AppDb, id: number, locale: Locale): Promise<M
     .first<MemberGroup>();
 }
 
+export interface MemberGroupEditRow {
+  id: number;
+  slug: string;
+  kind: GroupKind;
+  term_label: string | null;
+  term_start: string | null;
+  term_end: string | null;
+  meeting_weekday: number | null;
+  meeting_time: string | null;
+  meeting_frequency: 'weekly' | 'biweekly' | 'monthly' | null;
+  meeting_location: string | null;
+  open_signup: number;
+  active: number;
+  sort: number;
+  name_en: string;
+  name_zh: string | null;
+  desc_en: string | null;
+  desc_zh: string | null;
+}
+
+/** Single non-deleted group (active or inactive, like getGroup) with both locale
+ *  names/descriptions, for the admin edit form's en/zh field pairs. */
+export async function getGroupAdmin(db: AppDb, id: number): Promise<MemberGroupEditRow | null> {
+  return db
+    .prepare(
+      `SELECT g.id AS id, g.slug AS slug, g.kind AS kind, g.term_label AS term_label,
+              g.term_start AS term_start, g.term_end AS term_end, g.meeting_weekday AS meeting_weekday,
+              g.meeting_time AS meeting_time, g.meeting_frequency AS meeting_frequency,
+              g.meeting_location AS meeting_location, g.open_signup AS open_signup, g.active AS active,
+              g.sort AS sort, en.name AS name_en, en.description AS desc_en,
+              zh.name AS name_zh, zh.description AS desc_zh
+       FROM member_groups g
+       LEFT JOIN member_group_i18n en ON en.group_id = g.id AND en.locale = 'en'
+       LEFT JOIN member_group_i18n zh ON zh.group_id = g.id AND zh.locale = 'zh'
+       WHERE g.id = ? AND g.deleted_at IS NULL`,
+    )
+    .bind(id)
+    .first<MemberGroupEditRow>();
+}
+
+export interface MemberGroupAdminRow {
+  id: number;
+  slug: string;
+  kind: GroupKind;
+  term_label: string | null;
+  meeting_weekday: number | null;
+  meeting_time: string | null;
+  meeting_frequency: 'weekly' | 'biweekly' | 'monthly' | null;
+  meeting_location: string | null;
+  open_signup: number;
+  active: number;
+  sort: number;
+  name_en: string;
+  name_zh: string | null;
+}
+
+/** Non-deleted groups (active + inactive), both locale names, for the admin table.
+ *  Mirrors teamDb.ts's listServiceTypesAdmin (hand-rolled en/zh joins so both
+ *  names are available separately, unlike the coalesced i18nJoin used by the
+ *  public listGroups). */
+export async function listGroupsAdmin(db: AppDb): Promise<MemberGroupAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT g.id AS id, g.slug AS slug, g.kind AS kind, g.term_label AS term_label,
+              g.meeting_weekday AS meeting_weekday, g.meeting_time AS meeting_time,
+              g.meeting_frequency AS meeting_frequency, g.meeting_location AS meeting_location,
+              g.open_signup AS open_signup, g.active AS active, g.sort AS sort,
+              en.name AS name_en, zh.name AS name_zh
+       FROM member_groups g
+       LEFT JOIN member_group_i18n en ON en.group_id = g.id AND en.locale = 'en'
+       LEFT JOIN member_group_i18n zh ON zh.group_id = g.id AND zh.locale = 'zh'
+       WHERE g.deleted_at IS NULL
+       ORDER BY g.sort, g.id`,
+    )
+    .all<MemberGroupAdminRow>();
+  return results;
+}
+
 export interface GroupInput {
   slug: string;
   kind: GroupKind;

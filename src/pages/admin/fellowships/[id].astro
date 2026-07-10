@@ -1,0 +1,350 @@
+---
+// Edit a group (fellowship / Sunday School class) — console class, staff-level
+// (re-checks editor∪admin, like sermons/[id].astro). `_action=save` upserts the
+// definition (both backends); `_action=delete` soft-deletes it. The members/
+// leaders roster below the main form is Supabase-only (group_members), so it
+// gates in-page on `Astro.locals.modules.has('portal')` rather than a route —
+// a D1 church still gets the full definition editor, just without the roster.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import {
+  getGroupAdmin,
+  saveGroup,
+  softDeleteGroup,
+  listGroupMembers,
+  addGroupMember,
+  setGroupLeader,
+  removeGroupMember,
+  type GroupInput,
+  type GroupKind,
+} from '../../../lib/groupDb';
+import { listActivePeople } from '../../../lib/teamDb';
+import { tin, lab, card, errorText, btn, btnDanger, btnSecondary, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const hasPortal = Astro.locals.modules.has('portal');
+
+const rawId = Astro.params.id ?? '';
+if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const id = Number(rawId);
+
+const existing = await getGroupAdmin(db, id);
+if (!existing) return new Response(null, { status: 404 });
+
+const KINDS: GroupKind[] = ['fellowship', 'sunday_school'];
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+const FREQS = ['weekly', 'biweekly', 'monthly'] as const;
+const TIME_RE = /^\d{2}:\d{2}$/;
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+const timeOf = (v: FormDataEntryValue | null): string | null => (TIME_RE.test(String(v ?? '')) ? String(v) : null);
+const strOrNull = (v: FormDataEntryValue | null): string | null => {
+  const s = String(v ?? '').trim();
+  return s === '' ? null : s;
+};
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  fd = await Astro.request.formData();
+  const action = fd.get('_action');
+
+  if (action === 'delete') {
+    await softDeleteGroup(db, id);
+    return Astro.redirect('/admin/fellowships?deleted=1', 303);
+  }
+
+  if (hasPortal && (action === 'addMember' || action === 'toggleLeader' || action === 'removeMember')) {
+    const personId = idOf(fd.get('person_id'));
+    if (personId !== null) {
+      if (action === 'addMember') await addGroupMember(db, id, personId, fd.get('is_leader') === '1');
+      else if (action === 'toggleLeader') await setGroupLeader(db, id, personId, fd.get('leader') === '1');
+      else if (action === 'removeMember') await removeGroupMember(db, id, personId);
+    }
+    return Astro.redirect(`/admin/fellowships/${id}?saved=1`, 303);
+  }
+
+  if (action === 'save') {
+    const slug = String(fd.get('slug') ?? '').trim();
+    const kindRaw = String(fd.get('kind') ?? '');
+    const kind = KINDS.find((k) => k === kindRaw);
+    const nameEn = String(fd.get('name_en') ?? '').trim();
+    const weekdayRaw = String(fd.get('meeting_weekday') ?? '');
+    const weekdayOk = weekdayRaw === '' || /^[0-6]$/.test(weekdayRaw);
+    const freqRaw = String(fd.get('meeting_frequency') ?? '');
+    const freqOk = freqRaw === '' || (FREQS as readonly string[]).includes(freqRaw);
+
+    if (!slug) errors.slug = 'errors.required';
+    if (!kind) errors.kind = 'errors.invalidOption';
+    if (!nameEn) errors.name_en = 'errors.required';
+    if (!weekdayOk) errors.meeting_weekday = 'errors.invalidOption';
+    if (!freqOk) errors.meeting_frequency = 'errors.invalidOption';
+
+    if (Object.keys(errors).length === 0 && kind) {
+      const input: GroupInput = {
+        slug,
+        kind,
+        termLabel: strOrNull(fd.get('term_label')),
+        termStart: strOrNull(fd.get('term_start')),
+        termEnd: strOrNull(fd.get('term_end')),
+        meetingWeekday: weekdayRaw === '' ? null : Number(weekdayRaw),
+        meetingTime: timeOf(fd.get('meeting_time')),
+        meetingFrequency: freqRaw === '' ? null : freqRaw,
+        meetingLocation: strOrNull(fd.get('meeting_location')),
+        openSignup: fd.get('open_signup') !== null,
+        active: fd.get('active') !== null,
+        sort: Number(String(fd.get('sort') ?? '0')) || 0,
+        nameEn,
+        nameZh: strOrNull(fd.get('name_zh')),
+        descEn: strOrNull(fd.get('desc_en')),
+        descZh: strOrNull(fd.get('desc_zh')),
+      };
+      try {
+        await saveGroup(db, id, input);
+        return Astro.redirect(`/admin/fellowships/${id}?saved=1`, 303);
+      } catch (e) {
+        errors.slug = e instanceof Error && e.message === 'slug_taken' ? 'errors.slugTaken' : 'errors.required';
+      }
+    }
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const hasErrors = Object.keys(errors).length > 0;
+
+// Failed save echoes submitted values; otherwise the stored row.
+const g = (n: string) => String(fd?.get(n) ?? '');
+const v = fd
+  ? {
+      slug: g('slug'),
+      kind: g('kind') as GroupKind,
+      term_label: g('term_label'),
+      term_start: g('term_start'),
+      term_end: g('term_end'),
+      meeting_weekday: g('meeting_weekday'),
+      meeting_time: g('meeting_time'),
+      meeting_frequency: g('meeting_frequency'),
+      meeting_location: g('meeting_location'),
+      open_signup: fd.get('open_signup') !== null,
+      active: fd.get('active') !== null,
+      sort: g('sort'),
+      name_en: g('name_en'),
+      name_zh: g('name_zh'),
+      desc_en: g('desc_en'),
+      desc_zh: g('desc_zh'),
+    }
+  : {
+      slug: existing.slug,
+      kind: existing.kind,
+      term_label: existing.term_label ?? '',
+      term_start: existing.term_start ?? '',
+      term_end: existing.term_end ?? '',
+      meeting_weekday: existing.meeting_weekday === null ? '' : String(existing.meeting_weekday),
+      meeting_time: existing.meeting_time ?? '',
+      meeting_frequency: existing.meeting_frequency ?? '',
+      meeting_location: existing.meeting_location ?? '',
+      open_signup: existing.open_signup === 1,
+      active: existing.active === 1,
+      sort: String(existing.sort),
+      name_en: existing.name_en,
+      name_zh: existing.name_zh ?? '',
+      desc_en: existing.desc_en ?? '',
+      desc_zh: existing.desc_zh ?? '',
+    };
+
+const heading = `${t(lang, 'admin.groups.editTitle')} · ${lang === 'zh' ? existing.name_zh ?? existing.name_en : existing.name_en}`;
+
+let members: Awaited<ReturnType<typeof listGroupMembers>> = [];
+let people: Awaited<ReturnType<typeof listActivePeople>> = [];
+if (hasPortal) {
+  [members, people] = await Promise.all([listGroupMembers(db, id), listActivePeople(db)]);
+}
+---
+<Admin title={heading}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <a href="/admin/fellowships" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.groups.back')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {hasErrors && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+  <form method="post" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
+    <input type="hidden" name="_action" value="save" />
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.slug')} *</span>
+      <input type="text" name="slug" value={v.slug} class={tin} />
+      {errors.slug && <span class={errorText}>{t(lang, errors.slug)}</span>}
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.kindLabel')} *</span>
+      <select name="kind" class={tin}>
+        {KINDS.map((k) => (
+          <option value={k} selected={v.kind === k}>{t(lang, `admin.groups.kind.${k}`)}</option>
+        ))}
+      </select>
+      {errors.kind && <span class={errorText}>{t(lang, errors.kind)}</span>}
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.nameEn')} *</span>
+      <input type="text" name="name_en" value={v.name_en} class={tin} />
+      {errors.name_en && <span class={errorText}>{t(lang, errors.name_en)}</span>}
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.nameZh')}</span>
+      <input type="text" name="name_zh" value={v.name_zh} class={tin} />
+    </label>
+
+    <label class="block sm:col-span-2">
+      <span class={lab}>{t(lang, 'admin.groups.descEn')}</span>
+      <textarea name="desc_en" rows="2" class={tin}>{v.desc_en}</textarea>
+    </label>
+    <label class="block sm:col-span-2">
+      <span class={lab}>{t(lang, 'admin.groups.descZh')}</span>
+      <textarea name="desc_zh" rows="2" class={tin}>{v.desc_zh}</textarea>
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.termLabel')}</span>
+      <input type="text" name="term_label" value={v.term_label} class={tin} />
+    </label>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.termStart')}</span>
+        <input type="date" name="term_start" value={v.term_start} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.termEnd')}</span>
+        <input type="date" name="term_end" value={v.term_end} class={tin} />
+      </label>
+    </div>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.meetingWeekday')}</span>
+      <select name="meeting_weekday" class={tin}>
+        <option value="" selected={v.meeting_weekday === ''}>{t(lang, 'admin.children.events.anyDay')}</option>
+        {WEEKDAYS.map((d) => (
+          <option value={String(d)} selected={v.meeting_weekday === String(d)}>{t(lang, `admin.children.weekday.${d}`)}</option>
+        ))}
+      </select>
+      {errors.meeting_weekday && <span class={errorText}>{t(lang, errors.meeting_weekday)}</span>}
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.meetingTime')}</span>
+      <input type="time" name="meeting_time" value={v.meeting_time} class={tin} />
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.meetingFrequency')}</span>
+      <select name="meeting_frequency" class={tin}>
+        <option value="" selected={v.meeting_frequency === ''}>{t(lang, 'admin.groups.freqNone')}</option>
+        {FREQS.map((f) => (
+          <option value={f} selected={v.meeting_frequency === f}>{t(lang, `admin.groups.freq.${f}`)}</option>
+        ))}
+      </select>
+      {errors.meeting_frequency && <span class={errorText}>{t(lang, errors.meeting_frequency)}</span>}
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.meetingLocation')}</span>
+      <input type="text" name="meeting_location" value={v.meeting_location} class={tin} />
+    </label>
+
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.groups.sort')}</span>
+      <input type="text" name="sort" value={v.sort} class={tin} />
+    </label>
+
+    <div class="flex items-center gap-6 sm:col-span-2">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="open_signup" checked={v.open_signup} />
+        <span class="text-sm">{t(lang, 'admin.groups.openSignup')}</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="active" checked={v.active} />
+        <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
+      </label>
+    </div>
+
+    <div class="sm:col-span-2">
+      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+    </div>
+  </form>
+
+  {
+    hasPortal && (
+      <section class={`mt-6 ${card} max-w-2xl`}>
+        <h2 class="font-semibold">{t(lang, 'admin.groups.members.title')}</h2>
+        {members.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.groups.members.empty')}</p>
+        ) : (
+          <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+            <table class="w-full border-collapse text-sm">
+              <tbody>
+                {members.map((m) => (
+                  <tr class="border-t border-border first:border-t-0">
+                    <td class={td}>
+                      {m.display_name}
+                      {m.is_leader === 1 && <span class="ml-2 text-xs font-semibold text-primary">{t(lang, 'admin.groups.members.leader')}</span>}
+                    </td>
+                    <td class={`${td} text-right whitespace-nowrap`}>
+                      <form method="post" class="inline">
+                        <input type="hidden" name="_action" value="toggleLeader" />
+                        <input type="hidden" name="person_id" value={m.person_id} />
+                        <input type="hidden" name="leader" value={m.is_leader === 1 ? '0' : '1'} />
+                        <button type="submit" class="text-xs font-semibold text-primary hover:underline">
+                          {t(lang, m.is_leader === 1 ? 'admin.groups.members.removeLeader' : 'admin.groups.members.makeLeader')}
+                        </button>
+                      </form>
+                      <form method="post" class="ml-3 inline">
+                        <input type="hidden" name="_action" value="removeMember" />
+                        <input type="hidden" name="person_id" value={m.person_id} />
+                        <button type="submit" class="text-xs font-semibold text-danger hover:underline">
+                          {t(lang, 'admin.groups.members.remove')}
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {people.length > 0 && (
+          <form method="post" class="mt-4 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="_action" value="addMember" />
+            <label class="flex-1 min-w-48">
+              <span class={lab}>{t(lang, 'admin.groups.members.selectPerson')}</span>
+              <select name="person_id" class={tin}>
+                {people.map((p) => (
+                  <option value={p.id}>{p.display_name}</option>
+                ))}
+              </select>
+            </label>
+            <label class="flex items-center gap-2 pb-2">
+              <input type="checkbox" name="is_leader" value="1" />
+              <span class="text-sm">{t(lang, 'admin.groups.members.asLeader')}</span>
+            </label>
+            <button type="submit" class={btnSecondary}>{t(lang, 'admin.groups.members.add')}</button>
+          </form>
+        )}
+      </section>
+    )
+  }
+  {!hasPortal && <p class="mt-6 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.groups.members.portalOff')}</p>}
+
+  <form
+    method="post"
+    class="mt-6 max-w-2xl"
+    onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.groups.deleteConfirm'))})`}
+  >
+    <input type="hidden" name="_action" value="delete" />
+    <button type="submit" class={btnDanger}>{t(lang, 'admin.form.delete')}</button>
+  </form>
+</Admin>

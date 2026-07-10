@@ -93,6 +93,9 @@ const ADMIN_CONSOLE = [
   // is console (editor ∪ admin ∪ leader), not adminOnly. The module gate (off by
   // default) still 404s it when registration is disabled.
   '/admin/registration',
+  // Group (fellowship/Sunday School) definitions: same access tier as ministries
+  // (editor ∪ admin ∪ leader); the page itself narrows to editor ∪ admin.
+  '/admin/fellowships',
 ];
 
 /** Strip a single trailing slash (but keep the bare root `/`). */

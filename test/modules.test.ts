@@ -128,7 +128,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
     ['/admin/children', 'children'],
-    ['/admin/fellowships', 'portal'], // portal owns fellowship group management
+    ['/admin/fellowships', 'fellowships'], // fellowships owns group-definition admin (D1-safe)
     // ── children's check-in kiosk ──
     ['/kiosk', 'children'],
     ['/kiosk/abc123', 'children'],
