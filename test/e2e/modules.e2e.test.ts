@@ -77,6 +77,34 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     expect(homeOn).toContain('Latest Sermon');
   });
 
+  it('disabling groups 404s its public routes (directory, detail, signup); re-enabling restores', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+
+    // Baseline: groups on → the directory, a seeded detail page, and signup all serve.
+    expect((await get('/en/groups')).status).toBe(200);
+    expect((await get('/en/groups/1')).status).toBe(200);
+    expect((await get('/en/signup')).status).toBe(200);
+
+    const off = await post('/admin/settings', modulesBody(['groups']), { cookie: admin });
+    expect(off.status).toBe(303);
+
+    // Every route the groups module owns 404s — public and self-service alike.
+    expect((await get('/en/groups')).status).toBe(404);
+    expect((await get('/en/groups/1')).status).toBe(404);
+    expect((await get('/en/signup')).status).toBe(404);
+
+    // The home page still renders but carries no Groups cross-link.
+    const homeOff = await (await get('/en/')).text();
+    expect(homeOff).not.toContain('/en/groups');
+
+    // Restore → routes + home cross-link return.
+    const on = await post('/admin/settings', modulesBody([]), { cookie: admin });
+    expect(on.status).toBe(303);
+    expect((await get('/en/groups')).status).toBe(200);
+    expect((await get('/en/signup')).status).toBe(200);
+    expect(await (await get('/en/')).text()).toContain('/en/groups');
+  });
+
   it('disabling serve 404s /serve, /my, and /ministries and drops the Ministries nav link; re-enabling restores', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
     const member = await sessionCookie(3, 'sarah.johnson@example.com');

@@ -95,6 +95,17 @@ export async function updateEvent(db: AppDb, id: number, input: GroupEventInput)
   return r.meta.changes > 0;
 }
 
+/** Activate / deactivate an event without touching its other fields (the manage
+ *  editor's Active checkbox — GroupEventInput deliberately omits `active`, an
+ *  admin-lifecycle flag). Returns true when a live row changed. */
+export async function setEventActive(db: AppDb, id: number, active: boolean): Promise<boolean> {
+  const r = await db
+    .prepare(`UPDATE group_events SET active = ?2, updated_at = datetime('now') WHERE id = ?1 AND deleted_at IS NULL`)
+    .bind(id, active ? 1 : 0)
+    .run();
+  return r.meta.changes > 0;
+}
+
 /** Soft-delete an event and its future occurrences (past occurrences keep their
  *  attendance history). Returns nothing. */
 export async function softDeleteEvent(db: AppDb, id: number, now: Date = new Date()): Promise<void> {
@@ -245,6 +256,39 @@ export async function listUpcomingOccurrencesForGroup(
     )
     .bind(groupId, today)
     .all<UpcomingOccurrence>();
+  return results;
+}
+
+export interface PastOccurrence {
+  id: number;
+  event_id: number;
+  occurs_on: string;
+  starts_at: string;
+  ends_at: string;
+  present_count: number;
+}
+
+/** The most recent PAST occurrences (occurs_on < today, site TZ) for one event,
+ *  each with the count of members marked present — the manage-page attendance
+ *  history. Newest first, capped at `limit` (default 10). */
+export async function listRecentPastOccurrences(
+  db: AppDb,
+  eventId: number,
+  limit = 10,
+  now: Date = new Date(),
+): Promise<PastOccurrence[]> {
+  const today = todayInTz(TZ, now);
+  const { results } = await db
+    .prepare(
+      `SELECT geo.id AS id, geo.event_id AS event_id, geo.occurs_on AS occurs_on,
+              geo.starts_at AS starts_at, geo.ends_at AS ends_at,
+              (SELECT COUNT(*) FROM group_attendance ga WHERE ga.occurrence_id = geo.id AND ga.present = 1) AS present_count
+       FROM group_event_occurrences geo
+       WHERE geo.event_id = ?1 AND geo.deleted_at IS NULL AND geo.occurs_on < ?2
+       ORDER BY geo.occurs_on DESC, geo.id DESC LIMIT ?3`,
+    )
+    .bind(eventId, today, limit)
+    .all<PastOccurrence>();
   return results;
 }
 
