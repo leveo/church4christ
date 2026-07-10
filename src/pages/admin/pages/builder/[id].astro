@@ -1,0 +1,124 @@
+---
+// Drag-and-drop page builder (page-builder module — middleware 404s this
+// whole prefix when the module is off; console class via the /admin/pages
+// prefix, narrowed to editor∪admin here like the classic pages admin).
+// GET mounts the React island (client:only — the ONLY client-framework
+// island in the app; public pages never ship it). POST is the island's
+// same-page API, discriminated by content type:
+//   application/json    → save (parseBuilderSave + validateLayout + savePageLayout)
+//   multipart/form-data → image upload (saveImageUpload, same pipeline as settings)
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import PageBuilder from '../../../../components/builder/PageBuilder';
+import { t } from '../../../../lib/i18n';
+import type { Locale } from '../../../../lib/locales';
+import { getCustomPage, savePageLayout } from '../../../../lib/pagesDb';
+import { validateLayout, emptyLayout } from '../../../../lib/pageLayout';
+import { parseBuilderSave } from '../../../../lib/validate';
+import { listRecentImages } from '../../../../lib/upload';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../../lib/mediaUpload';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+if (Astro.request.method === 'POST') {
+  const ct = Astro.request.headers.get('content-type') ?? '';
+
+  if (ct.includes('application/json')) {
+    let body: unknown;
+    try {
+      body = await Astro.request.json();
+    } catch {
+      return json(400, { ok: false, error: 'bad_request' });
+    }
+    const parsed = parseBuilderSave(body);
+    if (!parsed.ok) return json(400, { ok: false, error: parsed.errors.slug ? 'slug' : 'title' });
+    const layoutRes = validateLayout(JSON.stringify(parsed.data.layout ?? null));
+    if (!layoutRes.ok) return json(400, { ok: false, error: 'invalid_layout' });
+    const saved = await savePageLayout(db, {
+      id: parsed.data.id,
+      slug: parsed.data.slug,
+      published: parsed.data.published,
+      title_en: parsed.data.title_en,
+      title_zh: parsed.data.title_zh,
+      layoutJson: JSON.stringify(layoutRes.layout),
+      updatedBy: user.email,
+    });
+    if (!saved.ok) return json(409, { ok: false, error: 'slug_taken' });
+    return json(200, { ok: true, id: saved.id, slug: parsed.data.slug });
+  }
+
+  if (ct.includes('multipart/form-data')) {
+    let fd: FormData;
+    try {
+      fd = await Astro.request.formData();
+    } catch {
+      return json(400, { ok: false, error: 'bad_request' });
+    }
+    const file = fd.get('file');
+    if (!(file instanceof File)) return json(400, { ok: false, error: 'bad_request' });
+    try {
+      const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
+      const key = await saveImageUpload({ db, media, file, uploadedBy: user.email });
+      return json(200, { ok: true, key, path: `/media/${key}` });
+    } catch (e) {
+      return json(400, { ok: false, error: uploadErrorKey(e) });
+    }
+  }
+
+  return json(400, { ok: false, error: 'bad_request' });
+}
+
+const idParam = Astro.params.id ?? '';
+const page = idParam === 'new' ? null : await getCustomPage(db, idParam);
+if (idParam !== 'new' && !page) return new Response(null, { status: 404 });
+
+// A markdown page opened here converts to builder format on first save (its
+// body_md is preserved by savePageLayout's title-only i18n upsert).
+const stored = page?.layout_json ?? '';
+const parsedStored = stored ? validateLayout(stored) : null;
+const layoutJson = JSON.stringify(parsedStored?.ok ? parsedStored.layout : emptyLayout());
+
+const media = await listRecentImages(db);
+
+// The island gets pre-translated copy — it never touches the i18n dicts.
+const S = (k: string) => t(lang, `admin.builder.${k}`);
+const strings = Object.fromEntries(
+  [
+    'title', 'back', 'save', 'savePublish', 'saving', 'saved', 'unsaved', 'undo', 'redo',
+    'editingIn', 'localeEn', 'localeZh', 'slug', 'titleEn', 'titleZh', 'published', 'view',
+    'blocks', 'dragHint', 'emptyCanvas', 'emptySection',
+    'block.section', 'block.columns', 'block.heading', 'block.text', 'block.image',
+    'block.button', 'block.spacer', 'block.divider',
+    'props', 'propsNone', 'prop.level', 'prop.size', 'prop.customSize', 'prop.align',
+    'prop.text', 'prop.markdownHint', 'prop.background', 'prop.width', 'prop.padding',
+    'prop.columns', 'prop.gap', 'prop.imageUrl', 'prop.altText', 'prop.rounded',
+    'prop.label', 'prop.href', 'prop.variant', 'prop.variantPrimary', 'prop.variantSecondary',
+    'prop.height', 'upload', 'uploading', 'recentUploads', 'delete', 'duplicate',
+    'opt.none', 'opt.soft', 'opt.primary', 'opt.accent', 'opt.narrow', 'opt.content',
+    'opt.wide', 'opt.left', 'opt.center', 'opt.right', 'opt.sm', 'opt.md', 'opt.lg',
+    'opt.xl', 'opt.full',
+    'err.saveFailed', 'err.slugTaken', 'err.invalidLayout', 'err.uploadFailed', 'confirmLeave',
+  ].map((k) => [k, S(k)]),
+);
+---
+
+<Admin title={t(lang, 'admin.builder.title')}>
+  <PageBuilder
+    client:only="react"
+    pageId={page?.id ?? null}
+    slug={page?.slug ?? ''}
+    published={page?.published ?? false}
+    titleEn={page?.i18n.en.title ?? ''}
+    titleZh={page?.i18n.zh.title ?? ''}
+    layoutJson={layoutJson}
+    media={media}
+    strings={strings}
+    uiLang={lang}
+  />
+</Admin>

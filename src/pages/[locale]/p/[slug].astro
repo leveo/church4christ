@@ -5,9 +5,12 @@
 // banner) for an editor/admin session; title and body each fall back to the en
 // i18n row independently when the requested locale's value is empty.
 import ContentPage from '../../../components/ContentPage.astro';
+import Base from '../../../layouts/Base.astro';
+import PageBlocks from '../../../components/blocks/PageBlocks.astro';
 import { parseLocale } from '../../../lib/locales';
 import { getCustomPageBySlug } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
+import { validateLayout } from '../../../lib/pageLayout';
 import { t } from '../../../lib/i18n';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -27,17 +30,44 @@ if (!page || (!page.published && !canPreview)) {
 const loc = page.i18n[locale];
 const fallback = page.i18n.en;
 const title = loc.title || fallback.title;
+
+// Builder pages: validate the stored tree; a corrupt blob renders an empty
+// page (defensive-parse convention) plus a notice only editors can see.
+const isBuilder = page.format === 'builder';
+const layoutResult = isBuilder ? validateLayout(page.layout_json ?? '') : null;
+const layout = layoutResult?.ok ? layoutResult.layout : null;
+
 const bodyMd = loc.body_md || fallback.body_md;
-const html = renderMarkdown(bodyMd);
+const html = isBuilder ? '' : renderMarkdown(bodyMd);
 ---
 
-<ContentPage title={title} locale={locale}>
-  {
-    !page.published && (
-      <div slot="before" class="rounded-md border border-border bg-info-soft text-info px-4 py-3 text-sm">
-        {t(locale, 'pages.draftNotice')}
-      </div>
-    )
-  }
-  <Fragment set:html={html} />
-</ContentPage>
+{
+  isBuilder ? (
+    <Base title={title} locale={locale}>
+      {(!page.published || (canPreview && !layout)) && (
+        <div class="container-content pt-6 space-y-3">
+          {!page.published && (
+            <div class="rounded-md border border-border bg-info-soft text-info px-4 py-3 text-sm">
+              {t(locale, 'pages.draftNotice')}
+            </div>
+          )}
+          {canPreview && !layout && (
+            <div class="rounded-md border border-warn bg-warn-soft text-warn px-4 py-3 text-sm">
+              {t(locale, 'pages.layoutInvalid')}
+            </div>
+          )}
+        </div>
+      )}
+      {layout && <PageBlocks layout={layout} locale={locale} />}
+    </Base>
+  ) : (
+    <ContentPage title={title} locale={locale}>
+      {!page.published && (
+        <div slot="before" class="rounded-md border border-border bg-info-soft text-info px-4 py-3 text-sm">
+          {t(locale, 'pages.draftNotice')}
+        </div>
+      )}
+      <Fragment set:html={html} />
+    </ContentPage>
+  )
+}

@@ -1,0 +1,54 @@
+---
+// One leaf block → plain HTML. Class/style come from src/lib/blockStyles (the
+// module shared with the builder canvas); text falls back per-field to the
+// other locale, mirroring the site-wide i18n convention. Text blocks go
+// through renderMarkdown (XSS-safe: input is fully escaped before transforms).
+import { renderMarkdown } from '../../lib/markdown';
+import {
+  headingRender, textClass, imageRender, buttonRender, spacerClass, dividerClass,
+} from '../../lib/blockStyles';
+import type { LeafNode, L10nString } from '../../lib/pageLayout';
+import type { Locale } from '../../lib/locales';
+
+interface Props { node: LeafNode; locale: Locale }
+const { node, locale } = Astro.props;
+const pick = (s: L10nString): string => (locale === 'zh' ? s.zh || s.en : s.en || s.zh);
+---
+
+{
+  node.type === 'heading' &&
+    (() => {
+      const r = headingRender(node.props);
+      const Tag = `h${node.props.level}` as 'h1' | 'h2' | 'h3';
+      return (
+        <Tag class={r.className} style={r.style}>
+          {pick(node.props.text)}
+        </Tag>
+      );
+    })()
+}
+{node.type === 'text' && <div class={textClass(node.props)} set:html={renderMarkdown(pick(node.props.md))} />}
+{
+  node.type === 'image' && node.props.src &&
+    (() => {
+      const r = imageRender(node.props);
+      return (
+        <div class={r.wrapperClass}>
+          <img src={node.props.src} alt={pick(node.props.alt)} class={r.imgClass} loading="lazy" />
+        </div>
+      );
+    })()
+}
+{
+  node.type === 'button' &&
+    (() => {
+      const r = buttonRender(node.props);
+      return (
+        <div class={r.wrapperClass}>
+          <a href={node.props.href} class={r.linkClass}>{pick(node.props.label)}</a>
+        </div>
+      );
+    })()
+}
+{node.type === 'spacer' && <div class={spacerClass(node.props)} aria-hidden="true" />}
+{node.type === 'divider' && <hr class={dividerClass()} />}

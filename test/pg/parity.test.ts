@@ -12,7 +12,7 @@ import { getNeedsAttention } from '../../src/lib/adminOverviewDb';
 import type { SessionUser } from '../../src/lib/types';
 import { listPlans } from '../../src/lib/planDb';
 import { listActiveEvents } from '../../src/lib/publicDb';
-import { getEnabledModules, clearModuleCache } from '../../src/lib/modules';
+import { getEnabledModules, clearModuleCache, MODULE_KEYS } from '../../src/lib/modules';
 import { addNote, listNotes } from '../../src/lib/notesDb';
 
 // Cross-backend parity: every core *Db module runs unchanged against Postgres.
@@ -233,17 +233,17 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
 
   // ── modules: getEnabledModules with the supabase backend ────────────────────
   describe('modules', () => {
-    it("enables all 14 modules on 'supabase' (giving + registration present)", async () => {
+    it("enables all modules on 'supabase' (giving + registration present)", async () => {
       clearModuleCache();
       const enabled = await getEnabledModules(db, 'supabase');
-      expect(enabled.size).toBe(14);
+      expect(enabled.size).toBe(MODULE_KEYS.length);
       expect(enabled.has('giving')).toBe(true);
       expect(enabled.has('registration')).toBe(true);
     });
     it("backend gate drops giving/registration on 'd1'", async () => {
       clearModuleCache();
       const enabled = await getEnabledModules(db, 'd1');
-      expect(enabled.size).toBe(12);
+      expect(enabled.size).toBe(MODULE_KEYS.length - 2);
       expect(enabled.has('giving')).toBe(false);
       expect(enabled.has('registration')).toBe(false);
     });
