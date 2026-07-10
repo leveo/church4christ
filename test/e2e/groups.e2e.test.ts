@@ -10,12 +10,21 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { get, post } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
+import { MODULE_KEYS } from '../../src/lib/modules';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 
 async function sessionCookie(id: number, email: string): Promise<string> {
   const jwt = await mintSession(SECRET, { id, email, sessionEpoch: 0 });
   return `${SESSION_COOKIE}=${jwt}`;
+}
+
+/** ?action=modules body for /admin/settings: every module ON except `disabled`. */
+function modulesBody(disabled: string[]): string {
+  const body = new URLSearchParams();
+  body.append('action', 'modules');
+  for (const key of MODULE_KEYS) if (!disabled.includes(key)) body.append(`module.${key}`, '1');
+  return body.toString();
 }
 
 describe('GET /en/groups — public directory', () => {
@@ -195,6 +204,75 @@ describe('GET /en/signup', () => {
     const body = await res.text();
     expect(body).toContain('name="first_name"');
     expect(body).toContain('name="email"');
+  });
+});
+
+describe('GET /admin/people/[id] — group activity panel (Slice H)', () => {
+  it('shows the seeded group name and attendance history for a group member (Ben, group admin)', async () => {
+    // Ben (person 8) is the group-admin member of "Young Adults" and was present
+    // at both seeded occurrences (group_attendance rows 1 and 4).
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const res = await get('/admin/people/8', { cookie: admin });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Young Adults');
+    expect(body).toContain('Friday Bible Study');
+    expect(body).toContain('Group activity');
+  });
+
+  it('shows a mixed present/absent attendance history for a plain member (Mark)', async () => {
+    // Mark (person 5, group_members.id 2) seeds present at occurrence 1 / absent
+    // at occurrence 2 — but an earlier test in this file (the attendance-token
+    // POST above) rewrites occurrence 1's attendance for every roster member, so
+    // pin both rows explicitly here rather than depend on file execution order.
+    await env.DB.prepare(`UPDATE group_attendance SET present = 1 WHERE occurrence_id = 1 AND member_id = 2`).run();
+    await env.DB.prepare(`UPDATE group_attendance SET present = 0 WHERE occurrence_id = 2 AND member_id = 2`).run();
+
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const res = await get('/admin/people/5', { cookie: admin });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Young Adults');
+    expect(body).toContain('Present');
+    expect(body).toContain('Absent');
+  });
+
+  it('hides the group activity panel when the groups module is off', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    try {
+      const off = await post('/admin/settings', modulesBody(['groups']), { cookie: admin });
+      expect(off.status).toBe(303);
+      const res = await get('/admin/people/8', { cookie: admin });
+      expect(res.status).toBe(200);
+      expect(await res.text()).not.toContain('Group activity');
+    } finally {
+      // Restore every module ON so later tests in this file (and other suites
+      // sharing the isolate) see groups/registration back on.
+      await post('/admin/settings', modulesBody([]), { cookie: admin });
+    }
+  });
+});
+
+// A signed-in member session for the [locale]/profile.astro page would exercise
+// the same GroupActivity component from the member's own side, but this suite's
+// helpers only mint a *session* cookie (id/email/sessionEpoch) — profile.astro
+// is core auth surface guarded purely by that session, so `sessionCookie(5, ...)`
+// (Mark, a seeded group member) is enough to sign in as a member here (no
+// separate "member auth" helper exists or is needed). Covered below.
+describe('GET /en/profile — group activity section for a signed-in member (Slice H)', () => {
+  it("shows Mark's group membership and mixed attendance history on his own profile", async () => {
+    // Pin both attendance rows explicitly (see the admin-panel test above for
+    // why this suite cannot rely on the seeded values surviving file order).
+    await env.DB.prepare(`UPDATE group_attendance SET present = 1 WHERE occurrence_id = 1 AND member_id = 2`).run();
+    await env.DB.prepare(`UPDATE group_attendance SET present = 0 WHERE occurrence_id = 2 AND member_id = 2`).run();
+
+    const mark = await sessionCookie(5, 'mark.liu@example.com');
+    const res = await get('/en/profile', { cookie: mark });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Young Adults');
+    expect(body).toContain('Present');
+    expect(body).toContain('Absent');
   });
 });
 

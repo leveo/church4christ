@@ -1,0 +1,117 @@
+---
+// Group activity block for the profile pages (Slice H): the person's own group
+// memberships (name + admin badge), their attendance history for tracked group
+// events (capped at the 20 most recent rows), and — only when the registration
+// module is on and there is at least one row — their special-event
+// registrations. Mirrors ServingHistory.astro's markup/styling approach: no
+// page chrome of its own, token utility classes only, everything pre-fetched by
+// the caller (groupDb.listPersonGroupActivity + groupRegDb.listRegistrationsForPerson,
+// the latter gated by the caller on modules.has('registration') — this
+// component just hides the section when the array is empty).
+import { t } from '../lib/i18n';
+import type { Locale } from '../lib/locales';
+import type { PersonAttendance, PersonMembership } from '../lib/groupDb';
+import type { PersonRegistration } from '../lib/groupRegDb';
+import { formatDate } from '../lib/dates';
+import { badge, badgeRole, th, td } from '../lib/adminUi';
+
+interface Props {
+  locale: Locale;
+  memberships: PersonMembership[];
+  attendance: PersonAttendance[];
+  registrations: PersonRegistration[];
+}
+const { locale, memberships, attendance, registrations } = Astro.props;
+
+// The attendance table can grow without bound over a person's history; cap the
+// rendered rows and note the overflow rather than shipping an ever-growing page.
+const ATTENDANCE_CAP = 20;
+const shownAttendance = attendance.slice(0, ATTENDANCE_CAP);
+const hiddenCount = attendance.length - shownAttendance.length;
+
+const REG_STATUS_CLASS: Record<string, string> = {
+  confirmed: 'bg-success-soft text-success',
+  pending: 'bg-warn-soft text-warn',
+  cancelled: 'bg-surface-sunken text-ink-muted',
+};
+---
+
+<div>
+  <section>
+    <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.groups.title')}</h2>
+    {
+      memberships.length === 0 ? (
+        <p class="mt-3 text-sm text-ink-muted">{t(locale, 'profile.groups.none')}</p>
+      ) : (
+        <ul class="mt-3 flex flex-wrap gap-2">
+          {memberships.map((m) => (
+            <li class="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-sm text-on-primary-soft">
+              {m.group_name}
+              {m.is_admin === 1 && <span class={`${badge} ${badgeRole.admin}`}>{t(locale, 'groups.admin')}</span>}
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+
+  <section class="mt-8">
+    <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.groups.attendanceTitle')}</h2>
+    {
+      shownAttendance.length === 0 ? (
+        <p class="mt-3 text-sm text-ink-muted">{t(locale, 'profile.groups.attendanceNone')}</p>
+      ) : (
+        <>
+          <div class="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table class="w-full text-left">
+              <thead class="bg-surface-sunken">
+                <tr>
+                  <th class={th}>{t(locale, 'profile.groups.colDate')}</th>
+                  <th class={th}>{t(locale, 'profile.groups.colGroup')}</th>
+                  <th class={th}>{t(locale, 'profile.groups.colEvent')}</th>
+                  <th class={th}>{t(locale, 'profile.groups.colStatus')}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                {shownAttendance.map((a) => (
+                  <tr>
+                    <td class={`${td} tabular-nums`}>{formatDate(a.occurs_on, locale)}</td>
+                    <td class={td}>{a.group_name}</td>
+                    <td class={td}>{a.event_title}</td>
+                    <td class={td}>
+                      <span class={`${badge} ${a.present === 1 ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>
+                        {t(locale, a.present === 1 ? 'profile.groups.present' : 'profile.groups.absent')}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {hiddenCount > 0 && (
+            <p class="mt-2 text-xs text-ink-muted">{t(locale, 'profile.groups.moreNote', { n: attendance.length })}</p>
+          )}
+        </>
+      )
+    }
+  </section>
+
+  {
+    registrations.length > 0 && (
+      <section class="mt-8">
+        <h2 class="font-display text-lg font-semibold">{t(locale, 'profile.groups.registrationsTitle')}</h2>
+        <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+          {registrations.map((r) => (
+            <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+              <span class="font-semibold tabular-nums">{formatDate(r.starts_at.slice(0, 10), locale)}</span>
+              <span class="font-medium">{r.title}</span>
+              <span class={`ml-auto ${badge} ${REG_STATUS_CLASS[r.status] ?? 'bg-surface-sunken text-ink-muted'}`}>
+                {t(locale, `profile.groups.regStatus.${r.status}`)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</div>
