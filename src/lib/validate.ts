@@ -29,6 +29,7 @@ const ERR = {
   option: 'errors.invalidOption',
   timePair: 'errors.timePair',
   amount: 'errors.amountInvalid',
+  slug: 'errors.slugInvalid',
 } as const;
 
 const ROLES = ['member', 'editor', 'admin'] as const;
@@ -390,6 +391,52 @@ export function parseEventForm(fd: FormData): FormResult<EventInput> {
 }
 
 // ---------------------------------------------------------------------------
+// Custom pages (admin-authored static pages, per-locale Markdown body)
+// ---------------------------------------------------------------------------
+export interface CustomPageFormInput {
+  id: string | null;
+  slug: string;
+  published: boolean;
+  title_en: string;
+  title_zh: string;
+  body_en: string;
+  body_zh: string;
+}
+
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_BODY_LENGTH = 100_000;
+
+/**
+ * Parse the custom-page form. slug is required and lowercased before
+ * validation; it must then be lowercase a-z0-9 groups joined by single
+ * hyphens (no leading/trailing/doubled hyphens), max 64 chars. At least one
+ * of title_en/title_zh is required. published is a checkbox. Bodies pass
+ * through as-is, each capped at 100,000 characters.
+ */
+export function parseCustomPageForm(fd: FormData): FormResult<CustomPageFormInput> {
+  const errors: Record<string, string> = {};
+  const id = str(fd, 'id') || null;
+
+  const slug = str(fd, 'slug').toLowerCase();
+  if (!slug) errors.slug = ERR.required;
+  else if (slug.length > 64 || !SLUG_RE.test(slug)) errors.slug = ERR.slug;
+
+  const title_en = str(fd, 'title_en');
+  const title_zh = str(fd, 'title_zh');
+  if (!title_en && !title_zh) errors.title = ERR.required;
+
+  const published = checkbox(fd, 'published');
+
+  const body_en = str(fd, 'body_en');
+  if (body_en.length > MAX_BODY_LENGTH) errors.body_en = ERR.tooLong;
+  const body_zh = str(fd, 'body_zh');
+  if (body_zh.length > MAX_BODY_LENGTH) errors.body_zh = ERR.tooLong;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { id, slug, published, title_en, title_zh, body_en, body_zh } };
+}
+
+// ---------------------------------------------------------------------------
 // People (member / editor / admin superset)
 // ---------------------------------------------------------------------------
 export interface PersonInput {
@@ -620,6 +667,7 @@ const SETTINGS_KEYS = [
   'site.giving_url',
   'site.youtube_url',
   'site.hero_image_key',
+  'site.logo_image_key',
   'site.service_times.en',
   'site.service_times.zh',
   'theme.name',

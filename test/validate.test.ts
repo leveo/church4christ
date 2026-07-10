@@ -6,6 +6,7 @@ import {
   parsePrayerSheetForm,
   parseAnnouncementForm,
   parseEventForm,
+  parseCustomPageForm,
   parsePersonForm,
   parseHouseholdForm,
   parseDependentForm,
@@ -245,6 +246,93 @@ describe('parseEventForm', () => {
   });
 });
 
+describe('parseCustomPageForm', () => {
+  it('parses a valid page, no id (create) and published unchecked → false', () => {
+    const r = parseCustomPageForm(fdOf({
+      slug: 'about-us', title_en: 'About Us', title_zh: '关于我们',
+      body_en: 'We are a **church**.', body_zh: '我们是一间**教会**。',
+    }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({
+      id: null, slug: 'about-us', published: false,
+      title_en: 'About Us', title_zh: '关于我们',
+      body_en: 'We are a **church**.', body_zh: '我们是一间**教会**。',
+    });
+  });
+
+  it('carries a non-empty id through and reads the published checkbox', () => {
+    const r = parseCustomPageForm(fdOf({
+      id: 'abc-123', slug: 'give', published: 'on', title_en: 'Give', title_zh: '',
+      body_en: 'Body', body_zh: '',
+    }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.id).toBe('abc-123');
+    expect(r.data.published).toBe(true);
+  });
+
+  it('lowercases an uppercase slug before validating', () => {
+    const r = parseCustomPageForm(fdOf({ slug: 'About-US', title_en: 'About' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.slug).toBe('about-us');
+  });
+
+  it('requires a slug', () => {
+    const r = parseCustomPageForm(fdOf({ slug: '', title_en: 'About' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.slug).toBe('errors.required');
+  });
+
+  it('rejects a slug with invalid characters, double hyphens, leading/trailing hyphens', () => {
+    for (const bad of ['about_us', 'about--us', '-about', 'about-', 'About Us']) {
+      const r = parseCustomPageForm(fdOf({ slug: bad, title_en: 'About' }));
+      expect(r.ok, bad).toBe(false);
+      if (r.ok) continue;
+      expect(r.errors.slug, bad).toBe('errors.slugInvalid');
+    }
+  });
+
+  it('rejects a slug over 64 characters', () => {
+    const r = parseCustomPageForm(fdOf({ slug: 'a'.repeat(65), title_en: 'About' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.slug).toBe('errors.slugInvalid');
+  });
+
+  it('accepts a slug at exactly 64 characters', () => {
+    const r = parseCustomPageForm(fdOf({ slug: 'a'.repeat(64), title_en: 'About' }));
+    expect(r.ok).toBe(true);
+  });
+
+  it('requires at least one locale title', () => {
+    const r = parseCustomPageForm(fdOf({ slug: 'about', title_en: '', title_zh: '' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.title).toBe('errors.required');
+  });
+
+  it('accepts a single-locale title', () => {
+    const r = parseCustomPageForm(fdOf({ slug: 'about', title_en: '', title_zh: '关于我们' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.title_en).toBe('');
+    expect(r.data.title_zh).toBe('关于我们');
+  });
+
+  it('passes bodies through and rejects a body over 100,000 characters', () => {
+    const ok = parseCustomPageForm(fdOf({ slug: 'about', title_en: 'About', body_en: 'x'.repeat(100_000) }));
+    expect(ok.ok).toBe(true);
+
+    const tooLong = parseCustomPageForm(fdOf({ slug: 'about', title_en: 'About', body_en: 'x'.repeat(100_001) }));
+    expect(tooLong.ok).toBe(false);
+    if (tooLong.ok) return;
+    expect(tooLong.errors.body_en).toBe('errors.tooLong');
+  });
+});
+
 describe('parsePersonForm', () => {
   it('parses a full person, lowercasing the email', () => {
     const r = parsePersonForm(fdOf({
@@ -443,6 +531,10 @@ describe('parseSettingsForm', () => {
   it('allows the homepage hero image key setting', () => {
     const r = parseSettingsForm(fdOf({ 'site.hero_image_key': 'uploads/hero.webp' }));
     expect(r).toEqual({ ok: true, data: { 'site.hero_image_key': 'uploads/hero.webp' } });
+  });
+  it('allows the logo image key setting', () => {
+    const r = parseSettingsForm(fdOf({ 'site.logo_image_key': 'uploads/abc-logo.png' }));
+    expect(r).toEqual({ ok: true, data: { 'site.logo_image_key': 'uploads/abc-logo.png' } });
   });
   it('accepts module.<key> toggles with a 0/1 value and rejects anything else', () => {
     const ok = parseSettingsForm(fdOf({ 'module.sermons': '1', 'module.serve': '0' }));
