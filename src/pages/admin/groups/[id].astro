@@ -1,0 +1,203 @@
+---
+// Site-admin view of a single group (adminOnly — same in-page re-check as
+// admin/groups/index.astro). Full roster (name/phone/linked-person indicator/
+// admin badge) doubles as the "current group admins" list — admins are just the
+// rows with the admin badge — with promote/demote/remove actions per row via
+// groupDb.setMemberAdmin/removeMember. A GET people-search (?q=) over
+// groupDb.searchPeopleForGroup lets the site admin add someone new straight in
+// as a group admin (addMemberByPerson(..., isAdmin=true), then setMemberAdmin
+// to force the flag even if they were already an active non-admin member).
+// Pending join requests are shown as a COUNT only — group admins triage them on
+// their own /groups/<id>/manage console, not here.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import {
+  getGroup,
+  listMembers,
+  setMemberAdmin,
+  removeMember,
+  addMemberByPerson,
+  searchPeopleForGroup,
+  listJoinRequests,
+} from '../../../lib/groupDb';
+import { tin, lab, card, btn, btnSecondary, rowBtn, badge, badgeRole, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { localePath, type Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user?.isAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const rawId = Astro.params.id ?? '';
+if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+const id = Number(rawId);
+
+const group = await getGroup(db, id);
+if (!group) return new Response(null, { status: 404 });
+
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+let addAdminError = false;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? '');
+  const back = () => Astro.redirect(`/admin/groups/${id}?saved=1`, 303);
+
+  if (action === 'promote') {
+    const memberId = idOf(fd.get('member_id'));
+    if (memberId !== null) await setMemberAdmin(db, memberId, true);
+    return back();
+  }
+  if (action === 'demote') {
+    const memberId = idOf(fd.get('member_id'));
+    if (memberId !== null) await setMemberAdmin(db, memberId, false);
+    return back();
+  }
+  if (action === 'remove') {
+    const memberId = idOf(fd.get('member_id'));
+    if (memberId !== null) await removeMember(db, memberId);
+    return back();
+  }
+  if (action === 'addAdmin') {
+    const personId = idOf(fd.get('person_id'));
+    if (personId !== null) {
+      try {
+        const memberId = await addMemberByPerson(db, id, personId, true);
+        // addMemberByPerson leaves an already-active membership's admin flag
+        // untouched (it's idempotent on the membership row, not the flag), so
+        // force it here — this button always means "make them a group admin",
+        // whether they were already a plain member or brand new.
+        await setMemberAdmin(db, memberId, true);
+        return back();
+      } catch {
+        addAdminError = true; // person_not_found — raced with a deleted person
+      }
+    }
+  }
+}
+
+const members = await listMembers(db, id);
+const joinRequestCount = (await listJoinRequests(db, id)).length;
+
+const q = Astro.url.searchParams.get('q')?.trim() ?? '';
+const searchResults = q ? await searchPeopleForGroup(db, q) : [];
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const manageHref = localePath(lang, `/groups/${id}/manage`);
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={group.name}>
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{group.name}</h1>
+    <a href="/admin/groups" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.groups.back')}</a>
+  </div>
+
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {addAdminError && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.groups.addAdminError')}</p>}
+
+  <section class={`mt-6 ${card} max-w-2xl space-y-2`}>
+    <div class="flex items-center gap-2">
+      <span class={`${badge} ${group.is_public ? badgeActive : badgeInactive}`}>
+        {group.is_public ? t(lang, 'admin.groups.public') : t(lang, 'admin.groups.private')}
+      </span>
+    </div>
+    {group.description && <p class="text-sm text-ink-muted whitespace-pre-wrap">{group.description}</p>}
+    <p class="text-sm text-ink-muted">
+      {t(lang, 'admin.groups.joinRequestsCount', { count: joinRequestCount })}
+      {' '}
+      {t(lang, 'admin.groups.joinRequestsNote')}
+      {' '}
+      <a href={manageHref} class="text-primary hover:underline">{t(lang, 'admin.groups.manageLink')}</a>
+    </p>
+  </section>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.groups.membersTitle')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.groups.colName')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colPhone')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colLinked')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colRole')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          members.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.groups.emptyMembers')}
+              </td>
+            </tr>
+          ) : (
+            members.map((m) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>{m.display_name}</td>
+                <td class={`${td} text-ink-muted`}>{m.phone ?? '—'}</td>
+                <td class={td}>{m.person_id !== null ? t(lang, 'admin.groups.linkedYes') : t(lang, 'admin.groups.linkedNo')}</td>
+                <td class={td}>
+                  <span class={`${badge} ${badgeRole[m.is_admin === 1 ? 'admin' : 'member']}`}>
+                    {t(lang, m.is_admin === 1 ? 'admin.groups.roleAdmin' : 'admin.groups.roleMember')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <form method="post">
+                      <input type="hidden" name="action" value={m.is_admin === 1 ? 'demote' : 'promote'} />
+                      <input type="hidden" name="member_id" value={m.id} />
+                      <button type="submit" class={rowBtn}>
+                        {t(lang, m.is_admin === 1 ? 'admin.groups.demote' : 'admin.groups.promote')}
+                      </button>
+                    </form>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.groups.removeConfirm'))})`}>
+                      <input type="hidden" name="action" value="remove" />
+                      <input type="hidden" name="member_id" value={m.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.groups.removeMember')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <section class={`mt-8 ${card} max-w-2xl space-y-4`}>
+    <h2 class={h2}>{t(lang, 'admin.groups.addAdminTitle')}</h2>
+    <p class="text-sm text-ink-muted">{t(lang, 'admin.groups.addAdminHint')}</p>
+    <form method="get" class="flex flex-wrap items-end gap-3">
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.searchLabel')}</span>
+        <input type="search" name="q" value={q} placeholder={t(lang, 'admin.groups.searchPlaceholder')} class={`${tin} min-w-56`} />
+      </label>
+      <button type="submit" class={btnSecondary}>{t(lang, 'admin.groups.search')}</button>
+    </form>
+    {
+      q && (
+        searchResults.length === 0 ? (
+          <p class="text-sm text-ink-muted">{t(lang, 'admin.groups.searchEmpty')}</p>
+        ) : (
+          <ul class="divide-y divide-border">
+            {searchResults.map((p) => (
+              <li class="flex flex-wrap items-center gap-3 py-2 text-sm">
+                <span class="font-medium">{p.display_name}</span>
+                <span class="text-ink-muted">{p.email}</span>
+                <form method="post" class="ml-auto">
+                  <input type="hidden" name="action" value="addAdmin" />
+                  <input type="hidden" name="person_id" value={p.id} />
+                  <button type="submit" class={btn}>{t(lang, 'admin.groups.addAsAdmin')}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )
+      )
+    }
+  </section>
+</Admin>
