@@ -51,6 +51,11 @@ describe('classifyRoute', () => {
     ['/register', 'public'],
     ['/register/thanks', 'public'],
     ['/api/register/submit', 'public'],
+    // ── groups public surfaces ──
+    ['/groups', 'public'],
+    ['/groups/7', 'public'],
+    ['/signup', 'public'],
+    ['/attendance/abc123', 'public'],
     // ── finance (giving admin) ──
     ['/admin/giving', 'finance'],
     ['/admin/giving/funds', 'finance'],
@@ -90,6 +95,8 @@ describe('classifyRoute', () => {
     ['/admin/settings', 'adminOnly'],
     ['/admin/reports', 'adminOnly'],
     ['/admin/teams', 'adminOnly'],
+    ['/admin/groups', 'adminOnly'],
+    ['/admin/groups/7', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

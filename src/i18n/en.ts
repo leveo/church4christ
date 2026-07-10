@@ -15,6 +15,7 @@ export default {
   'nav.give': 'Give',
   'nav.articles': 'Articles',
   'nav.fellowships': 'Fellowships',
+  'nav.groups': 'Groups',
   'nav.prayer': 'Prayer',
   'nav.opportunities': 'Opportunities',
   'nav.register': 'Register',
@@ -537,6 +538,7 @@ export default {
   'admin.nav.events': 'Events',
   'admin.nav.prayerWall': 'Prayer Wall',
   'admin.nav.people': 'People',
+  'admin.nav.groups': 'Groups',
   'admin.nav.settings': 'Settings',
 
   'admin.dashboard.title': 'Dashboard',
@@ -911,6 +913,11 @@ export default {
   'auth.email.subject': 'Your sign-in link for {site}',
   'auth.email.body': 'Click the link below to sign in. It expires in 15 minutes and can be used once. If you didn’t request this, you can ignore this email.',
 
+  'attendance.email.subject': 'Attendance for {group}: {title}',
+  'attendance.email.intro': 'Hi {name}, please record who attended {title} for {group} on {date}.',
+  'attendance.email.cta': 'Record attendance',
+  'attendance.email.expiry': 'This link expires in 72 hours.',
+
   'respond.title': 'Your serving request',
   'respond.summary': 'You’ve been asked to serve as {position} for {service} on {date}.',
   'respond.accept': 'Accept',
@@ -929,6 +936,7 @@ export default {
   'admin.dashboard.newRequests': '{count} new',
   'admin.dashboard.testimonies': 'Testimonies',
   'admin.dashboard.pendingReview': '{count} to review',
+  'admin.dashboard.groups': 'Groups',
 
   // Testimony review queue
   'admin.testimonies.title': 'Testimonies',
@@ -1247,6 +1255,8 @@ export default {
   'modules.articles.desc': 'Long-form articles and devotional writing.',
   'modules.fellowships.label': 'Fellowships',
   'modules.fellowships.desc': 'Fellowship groups and their gathering details.',
+  'modules.groups.label': 'Groups',
+  'modules.groups.desc': 'A group directory with membership, routine events with attendance, and special events through Registration.',
   'modules.people.label': 'People',
   'modules.people.desc': 'Member profiles, households, and pastoral notes.',
   'modules.giving.label': 'Giving',

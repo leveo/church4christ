@@ -49,7 +49,7 @@ if (Astro.request.method === 'POST') {
   const parsed = parseSettingsForm(fd);
   if (parsed.ok) {
     if (isModules) {
-      // The Modules panel is its OWN form: it writes ALL 13 module.<key> rows
+      // The Modules panel is its OWN form: it writes ALL 14 module.<key> rows
       // explicitly — a checked box posts '1' (in parsed.data), an unchecked box
       // is absent → we write '0'. This deliberate full write does NOT rely on the
       // parser's partial-update semantics, so unchecking truly disables a module.
@@ -118,7 +118,7 @@ const enabledModules = Astro.locals.modules;
 const dbBackend = Astro.locals.dbBackend;
 const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
   { titleKey: 'admin.settings.modulesContentGroup', keys: ['bulletins', 'sermons', 'prayer-sheets', 'articles', 'fellowships'] },
-  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people', 'giving', 'registration'] },
+  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people', 'groups', 'giving', 'registration'] },
   { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: ['serve', 'gifts'] },
 ];
 ---

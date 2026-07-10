@@ -14,6 +14,7 @@ export default {
   'nav.give': '奉献',
   'nav.articles': '文章',
   'nav.fellowships': '团契',
+  'nav.groups': '小组',
   'nav.prayer': '代祷',
   'nav.opportunities': '服事机会',
   'nav.register': '活动报名',
@@ -536,6 +537,7 @@ export default {
   'admin.nav.events': '活动',
   'admin.nav.prayerWall': '祷告墙',
   'admin.nav.people': '会众',
+  'admin.nav.groups': '小组',
   'admin.nav.settings': '设置',
 
   'admin.dashboard.title': '仪表板',
@@ -910,6 +912,11 @@ export default {
   'auth.email.subject': '你在 {site} 的登录链接',
   'auth.email.body': '请点击下方链接登录。链接将在 15 分钟后失效，且仅可使用一次。如果这不是你本人的操作，可忽略此邮件。',
 
+  'attendance.email.subject': '{group} 的出席记录：{title}',
+  'attendance.email.intro': '{name} 你好，请记录 {date} {group} 的 {title} 的出席情况。',
+  'attendance.email.cta': '记录出席',
+  'attendance.email.expiry': '此链接将在 72 小时后失效。',
+
   'respond.title': '你的服事邀请',
   'respond.summary': '诚邀你于 {date} 的 {service} 担任 {position} 服事。',
   'respond.accept': '接受',
@@ -928,6 +935,7 @@ export default {
   'admin.dashboard.newRequests': '{count} 个新请求',
   'admin.dashboard.testimonies': '见证',
   'admin.dashboard.pendingReview': '{count} 个待审核',
+  'admin.dashboard.groups': '小组',
 
   // Testimony review queue
   'admin.testimonies.title': '见证审核',
@@ -1245,6 +1253,8 @@ export default {
   'modules.articles.desc': '长文与灵修文章。',
   'modules.fellowships.label': '团契',
   'modules.fellowships.desc': '团契小组及其聚会信息。',
+  'modules.groups.label': '小组',
+  'modules.groups.desc': '小组名录、成员管理、常规聚会与出席记录，并可通过报名模块创建特别活动。',
   'modules.people.label': '成员管理',
   'modules.people.desc': '成员档案、家庭与牧养记录。',
   'modules.giving.label': '奉献',

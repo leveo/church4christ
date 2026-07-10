@@ -128,6 +128,16 @@ function revHref(r: RecentRevisionRow): string {
   }
 
   {
+    user.isAdmin && modules.has('groups') && (
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        <a href="/admin/groups" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.groups')}</span>
+        </a>
+      </div>
+    )
+  }
+
+  {
     isStaff && (modules.has('prayer-wall') || modules.has('testimonies')) && (
       <div class="mt-6 grid gap-4 sm:grid-cols-2">
         {modules.has('prayer-wall') && (

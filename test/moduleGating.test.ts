@@ -94,3 +94,31 @@ describe('moduleForPath — backend-gated module prefixes', () => {
     expect(moduleForPath('/api/register')).toBe('registration');
   });
 });
+
+describe('getEnabledModules — groups module', () => {
+  it('is on by default and turns off with the exact string \'0\'', async () => {
+    expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(true);
+    await setSetting(env.DB, 'module.groups', '0');
+    clearModuleCache(); // bust the per-isolate cache so the write is visible (see above)
+    expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(false);
+  });
+
+  it('is available on both backends (no requiresBackend gate)', async () => {
+    expect((await getEnabledModules(env.DB, 'supabase')).has('groups')).toBe(true);
+    expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(true);
+  });
+});
+
+describe('moduleForPath — groups module (public + admin routes 404 when off)', () => {
+  it('resolves the public groups/signup/attendance prefixes', () => {
+    expect(moduleForPath('/groups')).toBe('groups');
+    expect(moduleForPath('/groups/7')).toBe('groups');
+    expect(moduleForPath('/signup')).toBe('groups');
+    expect(moduleForPath('/attendance/abc123')).toBe('groups');
+  });
+
+  it('resolves the /admin/groups prefix', () => {
+    expect(moduleForPath('/admin/groups')).toBe('groups');
+    expect(moduleForPath('/admin/groups/7')).toBe('groups');
+  });
+});

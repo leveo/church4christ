@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 13 module keys in display order', () => {
+  it('has all 14 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -20,18 +20,22 @@ describe('MODULES registry', () => {
       'testimonies',
       'articles',
       'fellowships',
+      'groups',
       'people',
       'giving',
       'registration',
     ]);
   });
 
-  it('gifts/people softly use serve, giving softly uses people; every other module has no deps', () => {
+  it('gifts/people softly use serve, giving softly uses people, groups softly uses people+registration; every other module has no deps', () => {
     expect(MODULES.gifts.uses).toEqual(['serve']);
     expect(MODULES.people.uses).toEqual(['serve']);
     expect(MODULES.giving.uses).toEqual(['people']);
+    expect(MODULES.groups.uses).toEqual(['people', 'registration']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving') expect(MODULES[key].uses).toEqual([]);
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups') {
+        expect(MODULES[key].uses).toEqual([]);
+      }
     }
   });
 
@@ -90,6 +94,11 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/articles', 'articles'],
     ['/articles/2026/grace', 'articles'],
     ['/fellowships', 'fellowships'],
+    ['/groups', 'groups'],
+    ['/groups/7', 'groups'],
+    ['/signup', 'groups'],
+    ['/attendance', 'groups'],
+    ['/attendance/abc123', 'groups'],
     // ── giving (backend-gated) prefixes; /my/giving beats serve's /my ──
     ['/give/checkout', 'giving'],
     ['/give/checkout/thanks', 'giving'],
@@ -112,6 +121,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/teams', 'serve'],
     ['/admin/reports', 'serve'],
     ['/admin/testimonies', 'testimonies'],
+    ['/admin/groups', 'groups'],
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
     // ── always-on core → null ──
