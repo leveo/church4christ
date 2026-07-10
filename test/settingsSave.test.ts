@@ -5,7 +5,7 @@
 // theme switch takes effect on the very next render.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { getSettings, setSettings } from '../src/lib/settings';
+import { getLogoImageKey, getSettings, setSetting, setSettings } from '../src/lib/settings';
 import { clearThemeCache, getActiveTheme } from '../src/lib/theme';
 
 beforeEach(async () => {
@@ -24,6 +24,14 @@ describe('setSettings', () => {
   it('a no-op empty update touches nothing', async () => {
     await setSettings(env.DB, {});
     expect(await getSettings(env.DB, ['site.name.en'])).toEqual({});
+  });
+});
+
+describe('getLogoImageKey', () => {
+  it('logo image key round-trips and defaults empty', async () => {
+    expect(await getLogoImageKey(env.DB)).toBe('');
+    await setSetting(env.DB, 'site.logo_image_key', 'uploads/abc-logo.png');
+    expect(await getLogoImageKey(env.DB)).toBe('uploads/abc-logo.png');
   });
 });
 

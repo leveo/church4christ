@@ -104,3 +104,7 @@ export async function getTheme(db: AppDb): Promise<{ theme: string; defaultMode:
 export async function getHeroImageKey(db: AppDb): Promise<string> {
   return getSetting(db, 'site.hero_image_key', '');
 }
+
+export async function getLogoImageKey(db: AppDb): Promise<string> {
+  return getSetting(db, 'site.logo_image_key', '');
+}

@@ -444,6 +444,10 @@ describe('parseSettingsForm', () => {
     const r = parseSettingsForm(fdOf({ 'site.hero_image_key': 'uploads/hero.webp' }));
     expect(r).toEqual({ ok: true, data: { 'site.hero_image_key': 'uploads/hero.webp' } });
   });
+  it('allows the logo image key setting', () => {
+    const r = parseSettingsForm(fdOf({ 'site.logo_image_key': 'uploads/abc-logo.png' }));
+    expect(r).toEqual({ ok: true, data: { 'site.logo_image_key': 'uploads/abc-logo.png' } });
+  });
   it('accepts module.<key> toggles with a 0/1 value and rejects anything else', () => {
     const ok = parseSettingsForm(fdOf({ 'module.sermons': '1', 'module.serve': '0' }));
     expect(ok.ok).toBe(true);
