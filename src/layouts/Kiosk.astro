@@ -11,15 +11,18 @@ import '@fontsource-variable/nunito';
 import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
 
+import type { Locale } from '../lib/locales';
+
 interface Props {
   title: string;
+  lang: Locale;
 }
 
-const { title } = Astro.props;
+const { title, lang } = Astro.props;
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={lang === 'zh' ? 'zh-Hans' : 'en'}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

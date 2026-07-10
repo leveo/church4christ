@@ -9,7 +9,6 @@ import { listActiveEvents, searchHouseholds } from '../../../lib/checkinDb';
 import { todayInTz } from '../../../lib/dates';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
-import { noticeErr } from '../../../lib/adminUi';
 
 const db = Astro.locals.db;
 const token = await getKioskToken(db);
@@ -34,9 +33,14 @@ function maskPhone(phone: string): string {
 }
 
 const toggleHref = `?lang=${otherLang}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+
+// Kiosk-scale notice: same danger tokens as admin's noticeErr, sized up for a
+// tablet read from arm's length.
+const kioskNotice =
+  'w-full rounded-2xl border border-danger bg-danger-soft px-6 py-4 text-center text-xl text-danger';
 ---
 
-<Kiosk title={t(lang, 'kiosk.title')}>
+<Kiosk title={t(lang, 'kiosk.title')} lang={lang}>
   <div class="flex w-full items-center justify-between">
     <h1 class="font-display text-display-lg font-bold">{t(lang, 'kiosk.title')}</h1>
     <a href={toggleHref} class="rounded-2xl px-4 py-2 text-lg font-semibold text-primary hover:underline">
@@ -46,7 +50,7 @@ const toggleHref = `?lang=${otherLang}${q ? `&q=${encodeURIComponent(q)}` : ''}`
 
   {
     events.length === 0 ? (
-      <p class={`mt-10 w-full text-center ${noticeErr}`}>{t(lang, 'kiosk.noEvents')}</p>
+      <p class={`mt-10 ${kioskNotice}`}>{t(lang, 'kiosk.noEvents')}</p>
     ) : (
       <>
         <form method="get" class="mt-10 flex w-full flex-col gap-4">
@@ -67,7 +71,7 @@ const toggleHref = `?lang=${otherLang}${q ? `&q=${encodeURIComponent(q)}` : ''}`
         {searched && (
           <div class="mt-8 flex w-full flex-col gap-4">
             {results.length === 0 ? (
-              <p class={`w-full text-center ${noticeErr}`}>{t(lang, 'kiosk.noResults')}</p>
+              <p class={kioskNotice}>{t(lang, 'kiosk.noResults')}</p>
             ) : (
               results.map((h) => (
                 <a
