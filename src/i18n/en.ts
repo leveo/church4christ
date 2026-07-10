@@ -358,6 +358,8 @@ export default {
   'my.cal.regenerate': 'Regenerate link',
   'my.cal.regenerateHint': 'Regenerating creates a new link and stops the old one from working.',
   'my.cal.blockedOut': 'Blocked out',
+  'portal.calendar.legendEvent': 'Event',
+  'portal.calendar.legendMeeting': 'Group meeting',
 
   'my.giving.title': 'Giving',
   'my.giving.recurring': 'Recurring giving',

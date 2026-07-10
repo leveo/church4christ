@@ -357,6 +357,8 @@ export default {
   'my.cal.regenerate': '重新生成链接',
   'my.cal.regenerateHint': '重新生成会创建新链接，旧链接将立即失效。',
   'my.cal.blockedOut': '不可服事',
+  'portal.calendar.legendEvent': '活动',
+  'portal.calendar.legendMeeting': '小组聚会',
 
   'my.giving.title': '我的奉献',
   'my.giving.recurring': '定期奉献',
