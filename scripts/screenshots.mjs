@@ -65,7 +65,7 @@ const VIEWPORT = { width: 1280, height: 800 };
 const MIN_BYTES = 20 * 1024;
 
 // --- config -----------------------------------------------------------------
-// Each row: { path, out, admin?, bypass?, hant?, theme?, mode? }
+// Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend? }
 //   path   — URL path on --base (default http://localhost:4321)
 //   out    — repo-relative PNG destination
 //   admin  — page needs an admin dev-bypass session (AUTH_DEV_BYPASS_EMAIL=
@@ -77,6 +77,11 @@ const MIN_BYTES = 20 * 1024;
 //   mode   — inject data-mode (light | dark) after load
 //   anchor — heading text to frame: clip the 1280x800 shot to start just above
 //            the first heading containing it (for below-the-fold panels)
+//   backend — documentation only, not enforced by this script: 'supabase' means
+//            the page 404s on the default D1 backend and needs its own dev-server
+//            pass with DB_BACKEND=supabase plus a migrated+seeded local Postgres
+//            (WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in .dev.vars;
+//            see docs/supabase-setup.md §9). Capture these together with --only.
 const PAGES = [
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
@@ -102,6 +107,21 @@ const PAGES = [
   { path: '/en/serve/opportunities', out: 'docs/images/serve/opportunities.png' },
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
+
+  // Groups module — public directory (one public group, seeded) and the
+  // site-admin console (CRUD over every group). D1 works fine; no backend flag.
+  { path: '/en/groups', out: 'docs/images/groups/directory.png' },
+  { path: '/admin/groups', out: 'docs/images/admin/groups.png', admin: true },
+
+  // dcfc design-parity stat rows. prayer-wall runs on D1 like the rows above;
+  // giving/registration/give-form are Supabase-only (see `backend` above) — they
+  // 404 on D1 and need a separate dev-server pass against a migrated+seeded
+  // local Postgres. give-form is the module-ON checkout branch of /en/give
+  // (distinct from the module-OFF public/give.png row above).
+  { path: '/admin/prayer-wall', out: 'docs/images/admin/prayer-wall.png', admin: true },
+  { path: '/en/give', out: 'docs/images/giving/give-form.png', backend: 'supabase' },
+  { path: '/admin/giving', out: 'docs/images/admin/giving.png', admin: true, backend: 'supabase' },
+  { path: '/admin/registration', out: 'docs/images/admin/registration.png', admin: true, backend: 'supabase' },
 
   // Theme matrix — 3 themes x light/dark, home page, applied via injection.
   { path: '/en/', out: 'docs/images/themes/home-sanctuary-light.png', theme: 'sanctuary', mode: 'light' },
