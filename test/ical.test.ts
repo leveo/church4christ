@@ -3,7 +3,17 @@
 // live D1 (workers project).
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { buildICal, generateCalendarToken, getCalendarToken, type ICalEvent } from '../src/lib/ical';
+import {
+  addHoursClamped,
+  buildICal,
+  generateCalendarToken,
+  getCalendarToken,
+  meetingToICalEvent,
+  regToICalEvent,
+  type ICalEvent,
+} from '../src/lib/ical';
+import type { MeetingOccurrence } from '../src/lib/groupDb';
+import type { MyRegistration } from '../src/lib/regDb';
 
 const STAMP = '20260706T000000Z';
 
@@ -70,6 +80,92 @@ describe('buildICal', () => {
     const ics = buildICal('c', [], STAMP);
     expect(ics).not.toContain('BEGIN:VEVENT');
     expect(ics).toContain('END:VCALENDAR\r\n');
+  });
+});
+
+describe('addHoursClamped', () => {
+  it('adds whole and partial hours within the same day', () => {
+    expect(addHoursClamped('09:30', 2)).toBe('11:30');
+    expect(addHoursClamped('00:00', 2)).toBe('02:00');
+  });
+
+  it('clamps to 23:59 rather than rolling into the next day', () => {
+    expect(addHoursClamped('22:30', 2)).toBe('23:59');
+    expect(addHoursClamped('23:00', 2)).toBe('23:59');
+    expect(addHoursClamped('22:00', 2)).toBe('23:59'); // exactly midnight — still clamped
+  });
+});
+
+describe('meetingToICalEvent', () => {
+  function meetingOf(over: Partial<MeetingOccurrence> = {}): MeetingOccurrence {
+    return {
+      date: '2026-07-12',
+      group_id: 6,
+      group_name: 'Campus Fellowship',
+      meeting_time: '19:00',
+      meeting_location: 'Room 203',
+      ...over,
+    };
+  }
+
+  it('is timed with a 2h default duration when meeting_time is set', () => {
+    const e = meetingToICalEvent(meetingOf(), 'church.example');
+    expect(e).toMatchObject({
+      uid: 'c4c-group-6-20260712@church.example',
+      date: '2026-07-12',
+      summary: 'Campus Fellowship',
+      description: 'Room 203',
+      startTime: '19:00',
+      endTime: '21:00',
+    });
+  });
+
+  it('is all-day when meeting_time is null', () => {
+    const e = meetingToICalEvent(meetingOf({ meeting_time: null }), 'church.example');
+    expect(e.startTime).toBeNull();
+    expect(e.endTime).toBeNull();
+  });
+});
+
+describe('regToICalEvent', () => {
+  function regOf(over: Partial<MyRegistration> = {}): MyRegistration {
+    return {
+      id: 9,
+      event_id: 1,
+      event_title: 'Fall Retreat',
+      starts_at: '2026-07-12 14:30:00',
+      ends_at: '2026-07-12 16:00:00',
+      location: 'Camp Hall',
+      status: 'confirmed',
+      amount_cents: 0,
+      currency: 'usd',
+      created_at: '2026-06-01 00:00:00',
+      ...over,
+    };
+  }
+
+  it('converts UTC to church-local wall clock as a timed event when both times convert', () => {
+    const e = regToICalEvent(regOf(), 'church.example');
+    expect(e).toMatchObject({
+      uid: 'c4c-reg-9@church.example',
+      date: '2026-07-12',
+      summary: 'Fall Retreat',
+      description: 'Camp Hall',
+      startTime: '09:30', // America/Chicago, CDT (UTC-5) in July
+      endTime: '11:00',
+    });
+  });
+
+  it('appends " (?)" to a pending registration, mirroring the serving convention', () => {
+    const e = regToICalEvent(regOf({ status: 'pending' }), 'church.example');
+    expect(e.summary).toBe('Fall Retreat (?)');
+  });
+
+  it('falls back to all-day on the start date when ends_at is missing', () => {
+    const e = regToICalEvent(regOf({ ends_at: null }), 'church.example');
+    expect(e.date).toBe('2026-07-12');
+    expect(e.startTime).toBeNull();
+    expect(e.endTime).toBeNull();
   });
 });
 

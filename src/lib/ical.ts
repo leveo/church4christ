@@ -6,6 +6,9 @@
 // regenerating invalidates the old subscription URL.
 
 import type { AppDb } from './appDb';
+import { utcToDatetimeLocal } from './dates';
+import type { MeetingOccurrence } from './groupDb';
+import type { MyRegistration } from './regDb';
 
 export interface ICalEvent {
   /** Full, stable UID (e.g. `c4c-assignment-42@church.example`). */
@@ -62,6 +65,60 @@ export function buildICal(calName: string, events: ICalEvent[], stamp: string): 
   }
   lines.push('END:VCALENDAR');
   return lines.join('\r\n') + '\r\n';
+}
+
+/**
+ * Add `hours` to an 'HH:MM' time, clamped to '23:59' rather than rolling into
+ * the next calendar day (a group meeting's default duration must stay a
+ * same-day timed VEVENT). Portal Task 3: group meetings have no stored end
+ * time, so the feed assumes a 2h duration from `meeting_time`.
+ */
+export function addHoursClamped(hhmm: string, hours: number): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + hours * 60;
+  if (total >= 24 * 60) return '23:59';
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * A portal group's meeting occurrence as a feed VEVENT: timed with a 2h
+ * default duration when `meeting_time` is set (see {@link addHoursClamped}),
+ * else all-day. UID is stable across requests: derived from the group id and
+ * the occurrence date, not a row id (occurrences are computed, not stored).
+ */
+export function meetingToICalEvent(m: MeetingOccurrence, host: string): ICalEvent {
+  const timed = Boolean(m.meeting_time);
+  return {
+    uid: `c4c-group-${m.group_id}-${m.date.replace(/-/g, '')}@${host}`,
+    date: m.date,
+    summary: m.group_name,
+    description: m.meeting_location ?? undefined,
+    startTime: timed ? m.meeting_time : null,
+    endTime: timed ? addHoursClamped(m.meeting_time!, 2) : null,
+  };
+}
+
+/**
+ * A member's event registration as a feed VEVENT: UTC `starts_at`/`ends_at`
+ * converted to church-local wall clock (floating time, matching the rest of
+ * the feed); timed only when both convert, else all-day on the start date. A
+ * still-pending registration (Checkout not yet confirmed) gets the same
+ * ' (?)' summary suffix the serving section uses for an unconfirmed
+ * assignment.
+ */
+export function regToICalEvent(r: MyRegistration, host: string): ICalEvent {
+  const startLocal = utcToDatetimeLocal(r.starts_at);
+  const endLocal = utcToDatetimeLocal(r.ends_at);
+  const [date, startTime] = startLocal.split('T');
+  const timed = Boolean(startTime) && Boolean(endLocal);
+  return {
+    uid: `c4c-reg-${r.id}@${host}`,
+    date,
+    summary: `${r.event_title}${r.status === 'pending' ? ' (?)' : ''}`,
+    description: r.location ?? undefined,
+    startTime: timed ? startTime : null,
+    endTime: timed ? endLocal.split('T')[1] : null,
+  };
 }
 
 /** The person's current calendar-feed token, or null when never generated. */
