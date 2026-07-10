@@ -26,7 +26,19 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
     const d1Sql = D1_FILES
       .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
       .join('\n');
-    const wanted = [...d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)/gi)].map((m) => m[1].toLowerCase());
+    // SQLite CHECK-constraint changes use the table-rebuild idiom (CREATE x_new
+    // -> copy -> DROP x -> RENAME x_new TO x); the intermediate name never
+    // exists in the final schema on either backend, so fold it into its target.
+    const renames = new Map<string, string>();
+    for (const m of d1Sql.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)/gi)) renames.set(m[1].toLowerCase(), m[2].toLowerCase());
+    const wanted = [
+      ...new Set(
+        [...d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)/gi)].map((m) => {
+          const t = m[1].toLowerCase();
+          return renames.get(t) ?? t;
+        }),
+      ),
+    ];
     expect(wanted.length).toBeGreaterThan(35);
     const rows = await sql.unsafe(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
@@ -43,8 +55,11 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
       .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
       .join('\n');
     const cols: Array<[string, string]> = [];
+    // Same rebuild-idiom fold as the tables test above.
+    const renames = new Map<string, string>();
+    for (const m of d1Sql.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)/gi)) renames.set(m[1].toLowerCase(), m[2].toLowerCase());
     for (const m of d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)\s*\(([\s\S]*?)\);/gi)) {
-      const table = m[1].toLowerCase();
+      const table = renames.get(m[1].toLowerCase()) ?? m[1].toLowerCase();
       for (const line of m[2].split('\n')) {
         const cm = line.match(/^\s*(\w+)\s+(TEXT|INTEGER|REAL|BLOB)/i);
         if (cm && !/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)$/i.test(cm[1])) cols.push([table, cm[1].toLowerCase()]);

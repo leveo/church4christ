@@ -107,7 +107,7 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       const all = await listHouseholds(db);
       expect(all).toHaveLength(3);
       const chen = all.find((h) => h.name.startsWith('Chen Family'));
-      expect(chen?.member_count).toBe(3); // David + Amy + dependent Ethan
+      expect(chen?.member_count).toBe(4); // David + Amy + dependents Ethan & Mia
 
       const filtered = await listHouseholds(db, { q: 'lin' });
       expect(filtered).toHaveLength(1);
@@ -226,8 +226,8 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       expect(titles).not.toContain('Easter Celebration'); // event 3, inactive + expired
       const camp = events.find((e) => e.title === 'Summer Bible Camp');
       expect(camp?.blurb).toContain('joyful week');
-      // imageKey is a quoted (case-preserved) alias — must be null, not undefined.
-      expect(camp?.imageKey).toBeNull();
+      // imageKey is a quoted (case-preserved) alias and the demo seed now media-backs events.
+      expect(camp?.imageKey).toBe('uploads/40f5b98116a62896-event-summer-bible-camp.webp');
     });
   });
 
