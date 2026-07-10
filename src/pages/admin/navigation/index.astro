@@ -1,6 +1,7 @@
 ---
 // Admin navigation editor (adminOnly — routePolicy covers /admin/navigation; this
-// page re-checks isAdmin and 403s anyone else). Edits the ordered `nav.items`
+// page re-checks isSuperAdmin and 403s anyone else — super admin only, grant
+// management lives here). Edits the ordered `nav.items`
 // setting (src/lib/nav.ts) with classic form-per-action posts: reorder (up/down),
 // remove, add a builtin/page/link entry, or reset to the hardcoded default. Every
 // mutating branch re-reads the current items, applies exactly one change, and
@@ -20,7 +21,7 @@ import type { Locale } from '../../../lib/locales';
 export const prerender = false;
 
 const user = Astro.locals.user;
-if (!user || !user.isAdmin) return new Response(null, { status: 403 });
+if (!user || !user.isSuperAdmin) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

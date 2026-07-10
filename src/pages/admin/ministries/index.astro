@@ -50,6 +50,7 @@ import {
 import { sendApplicationResult } from '../../../lib/notify';
 import { sendEmail, type EmailEnv } from '../../../lib/email';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
@@ -58,7 +59,7 @@ const db = Astro.locals.db;
 const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 
 // Page-level gate: the volunteer console is for team leaders and admins only.
-const canAdmin = user.isAdmin;
+const canAdmin = hasAreaAccess(user, 'serve');
 if (!canAdmin && user.leaderTeamIds.length === 0) {
   return new Response(t(lang, 'admin.console.forbidden'), { status: 403 });
 }
@@ -73,7 +74,7 @@ const scopeQ = scope === 'leader' ? '&scope=leader' : '';
 const scopeAdmin = scope === 'admin';
 
 async function leadsTeam(teamId: number): Promise<boolean> {
-  return user.isAdmin || user.leaderTeamIds.includes(teamId);
+  return hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
 }
 
 let flashKey: string | null = null;

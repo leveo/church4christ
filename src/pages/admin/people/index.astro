@@ -8,6 +8,7 @@
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { listPeople } from '../../../lib/adminDb';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 import { MEMBERSHIP_STATUSES } from '../../../lib/validate';
 import { badge, badgeRole, badgeActive, badgeInactive, btn, tin, th, td, noticeOk } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
@@ -16,6 +17,7 @@ const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 const hasPeople = Astro.locals.modules.has('people');
+const canManagePeople = hasAreaAccess(user, 'people');
 
 const params = Astro.url.searchParams;
 const q = params.get('q')?.trim() ?? '';
@@ -42,7 +44,7 @@ const colspan = hasPeople ? 7 : 5;
 <Admin title={t(lang, 'admin.people.title')}>
   <div class="flex items-center justify-between gap-4">
     <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.people.title')}</h1>
-    <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>
+    {canManagePeople && <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>}
   </div>
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}

@@ -7,6 +7,7 @@ import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
+import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
 import { openDb, type DbEnv } from './lib/dbProvider';
 
 // Baseline security headers (spec §14) live in ./lib/securityHeaders; the route
@@ -202,6 +203,20 @@ export const onRequest = defineMiddleware(async (context, next) => {
         return finish(redirect);
       }
       return finish(forbidden(context.locals.locale));
+    }
+
+    // Per-admin area gate (spec 2026-07-10): narrows LIMITED admins only — a
+    // non-admin passing canAccess (editor / leader / finance member) is exactly
+    // as authorized as before, and super admins pass everything. Runs after the
+    // role gate so the failure modes stay distinct: module off = 404 (above,
+    // pre-session), role short = 403 (canAccess), grant missing = 403 (here).
+    // Unknown /admin paths carry no area and fail closed to super-admin-only.
+    const u = context.locals.user;
+    if (u?.isAdmin && !u.isSuperAdmin && (rest === '/admin' || rest.startsWith('/admin/'))) {
+      if (rest !== '/admin') {
+        const area = adminAreaForPath(rest);
+        if (!area || !hasAreaAccess(u, area)) return finish(forbidden(context.locals.locale));
+      }
     }
 
     const res = await next();

@@ -1,6 +1,7 @@
 ---
 // Site settings (adminOnly — the route policy covers /admin/settings; this page
-// re-checks isAdmin and 403s anyone else). A grouped form over the site.* / theme.*
+// re-checks isSuperAdmin and 403s anyone else — super admin only, grant
+// management lives here). A grouped form over the site.* / theme.*
 // / locale.* settings: identity (per-locale name/tagline/service times), contact,
 // links, and appearance (theme radio cards with generated swatches, default color
 // mode, default language, homepage hero image). Save → parseSettingsForm
@@ -24,7 +25,7 @@ import type { Locale } from '../../../lib/locales';
 export const prerender = false;
 
 const user = Astro.locals.user;
-if (!user || !user.isAdmin) return new Response(null, { status: 403 });
+if (!user || !user.isSuperAdmin) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;

@@ -6,9 +6,10 @@ import { t } from '../../../lib/i18n';
 import { listSermons, listSermonYears, listServiceTypeOptions } from '../../../lib/adminDb';
 import { badge, btn, tin, th, td, noticeOk, statusBadge } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+if (!user || !(user.isEditor || hasAreaAccess(user, 'sermons'))) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

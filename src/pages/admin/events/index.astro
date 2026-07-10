@@ -14,9 +14,10 @@ import { listEvents, saveEvent, deleteEvent, toggleEventActive } from '../../../
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadKey, registerMedia } from '../../../lib/upload';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+if (!user || !(user.isEditor || hasAreaAccess(user, 'events'))) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 const media = (env as { MEDIA: R2Bucket }).MEDIA;

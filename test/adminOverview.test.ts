@@ -7,8 +7,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { getNeedsAttention, getStats } from '../src/lib/adminOverviewDb';
 import type { SessionUser } from '../src/lib/types';
 
-const admin: SessionUser = { id: 1, email: 'a@x.com', displayName: 'A', role: 'admin', isAdmin: true, isEditor: false, finance: 0, memberTeamIds: [], leaderTeamIds: [], lang: 'en' };
-const leader: SessionUser = { id: 2, email: 'l@x.com', displayName: 'L', role: 'member', isAdmin: false, isEditor: false, finance: 0, memberTeamIds: [1], leaderTeamIds: [1], lang: 'en' };
+const admin: SessionUser = { id: 1, email: 'a@x.com', displayName: 'A', role: 'admin', isAdmin: true, isEditor: false, isSuperAdmin: false, adminAreas: [], finance: 0, memberTeamIds: [], leaderTeamIds: [], lang: 'en' };
+const leader: SessionUser = { id: 2, email: 'l@x.com', displayName: 'L', role: 'member', isAdmin: false, isEditor: false, isSuperAdmin: false, adminAreas: [], finance: 0, memberTeamIds: [1], leaderTeamIds: [1], lang: 'en' };
 
 const FROM = '2030-01-01';
 const TO = '2030-12-31';

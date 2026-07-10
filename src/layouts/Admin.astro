@@ -17,6 +17,7 @@ import { getLogoImageKey } from '../lib/settings';
 import { mediaPath } from '../lib/mediaRef';
 import type { ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
+import { hasAreaAccess, type AdminAreaKey } from '../lib/adminAreas';
 
 interface Props {
   title?: string;
@@ -51,9 +52,12 @@ try {
 
 // Nav renders by role. The dashboard shows for console-class users (admin ∪
 // editor ∪ team leader); content (bulletins/sermons/prayer-sheets) + news
-// (announcements/events) + the prayer wall need editor∪admin; people + settings
-// are admin-only; giving is admin ∪ finance-flagged. Team leaders (no
-// editor/admin) therefore see the dashboard only — their console lands in slice 6.
+// (announcements/events) + the prayer wall need editor∪admin; people is
+// admin-only, settings/navigation are super-admin-only; giving is admin ∪
+// finance-flagged. Team leaders (no editor/admin) therefore see the dashboard
+// only — their console lands in slice 6. Beyond these role-based `show` flags,
+// a per-admin area grant (below) further narrows which rows an ADMIN sees —
+// editors/leaders/finance are untouched by that layer.
 // Links to pages built later this slice (tasks 2–4) are intentionally live.
 const isStaff = !!(user?.isEditor || user?.isAdmin);
 const isAdmin = !!user?.isAdmin;
@@ -70,9 +74,20 @@ const isConsole = isStaff || (user?.leaderTeamIds.length ?? 0) > 0;
 // none — it is core). Groups drop out once every child is hidden.
 const modules = Astro.locals.modules;
 const modOn = (m?: ModuleKey) => !m || modules.has(m);
+// Per-admin area filter: only narrows admins — editors/leaders/finance keep
+// their role-based rows (their `show` booleans), so non-admins pass areaOn.
+const areaOn = (a?: AdminAreaKey) => !a || !user?.isAdmin || hasAreaAccess(user, a);
+const isSuper = !!user?.isSuperAdmin;
 
-type NavItem = { label: string; href: string; module?: ModuleKey };
-type NavSection = { label: string; href?: string; show: boolean; module?: ModuleKey; children?: NavItem[] };
+type NavItem = { label: string; href: string; module?: ModuleKey; area?: AdminAreaKey };
+type NavSection = {
+  label: string;
+  href?: string;
+  show: boolean;
+  module?: ModuleKey;
+  area?: AdminAreaKey;
+  children?: NavItem[];
+};
 
 const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.dashboard'), href: '/admin', show: isConsole },
@@ -80,35 +95,53 @@ const rawSections: NavSection[] = [
     label: t(lang, 'admin.nav.content'),
     show: isStaff,
     children: [
-      { label: t(lang, 'admin.nav.bulletins'), href: '/admin/bulletins', module: 'bulletins' },
-      { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons', module: 'sermons' },
-      { label: t(lang, 'admin.nav.prayerSheets'), href: '/admin/prayer-sheets', module: 'prayer-sheets' },
-      { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies', module: 'testimonies' },
-      { label: t(lang, 'admin.nav.pages'), href: '/admin/pages' },
+      { label: t(lang, 'admin.nav.bulletins'), href: '/admin/bulletins', module: 'bulletins', area: 'bulletins' },
+      { label: t(lang, 'admin.nav.sermons'), href: '/admin/sermons', module: 'sermons', area: 'sermons' },
+      {
+        label: t(lang, 'admin.nav.prayerSheets'),
+        href: '/admin/prayer-sheets',
+        module: 'prayer-sheets',
+        area: 'prayer-sheets',
+      },
+      { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies', module: 'testimonies', area: 'testimonies' },
+      { label: t(lang, 'admin.nav.pages'), href: '/admin/pages', area: 'pages' },
     ],
   },
   {
     label: t(lang, 'admin.nav.news'),
     show: isStaff,
     module: 'events',
+    area: 'events',
     children: [
       { label: t(lang, 'admin.nav.announcements'), href: '/admin/announcements' },
       { label: t(lang, 'admin.nav.events'), href: '/admin/events' },
     ],
   },
-  { label: t(lang, 'admin.nav.prayerWall'), href: '/admin/prayer-wall', show: isStaff, module: 'prayer-wall' },
-  { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin, module: 'people' },
-  { label: t(lang, 'admin.nav.groups'), href: '/admin/groups', show: isAdmin, module: 'groups' },
-  { label: t(lang, 'admin.nav.children'), href: '/admin/children', show: isAdmin, module: 'children' },
-  { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving' },
-  { label: t(lang, 'admin.reg.title'), href: '/admin/registration', show: isStaff, module: 'registration' },
-  { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
-  { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isAdmin },
+  {
+    label: t(lang, 'admin.nav.prayerWall'),
+    href: '/admin/prayer-wall',
+    show: isStaff,
+    module: 'prayer-wall',
+    area: 'prayer-wall',
+  },
+  { label: t(lang, 'admin.nav.people'), href: '/admin/people', show: isAdmin, module: 'people', area: 'people-basic' },
+  { label: t(lang, 'admin.nav.groups'), href: '/admin/groups', show: isAdmin, module: 'groups', area: 'groups' },
+  { label: t(lang, 'admin.nav.children'), href: '/admin/children', show: isAdmin, module: 'children', area: 'children' },
+  { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving', area: 'giving' },
+  {
+    label: t(lang, 'admin.reg.title'),
+    href: '/admin/registration',
+    show: isStaff,
+    module: 'registration',
+    area: 'registration',
+  },
+  { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isSuper },
+  { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isSuper },
 ];
 
 const sections: NavSection[] = rawSections
-  .filter((s) => s.show && modOn(s.module))
-  .map((s) => (s.children ? { ...s, children: s.children.filter((c) => modOn(c.module)) } : s))
+  .filter((s) => s.show && modOn(s.module) && areaOn(s.area))
+  .map((s) => (s.children ? { ...s, children: s.children.filter((c) => modOn(c.module) && areaOn(c.area)) } : s))
   .filter((s) => !s.children || s.children.length > 0);
 
 const current = Astro.url.pathname.replace(/\/+$/, '') || '/admin';

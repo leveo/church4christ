@@ -63,6 +63,18 @@ describe('people.role CHECK constraint', () => {
   });
 });
 
+describe('people admin-permission columns', () => {
+  it('people carries admin-permission columns with safe defaults', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people (first_name, last_name, display_name, email) VALUES ('P', 'Q', 'P Q', 'pq@example.com')`,
+    ).run();
+    const row = await env.DB.prepare(
+      `SELECT super_admin, admin_areas FROM people WHERE email = 'pq@example.com'`,
+    ).first<{ super_admin: number; admin_areas: string }>();
+    expect(row).toEqual({ super_admin: 0, admin_areas: '' });
+  });
+});
+
 describe('roster_assignments UNIQUE (plan_id, position_id, person_id)', () => {
   it('rejects a duplicate assignment for the same plan/position/person', async () => {
     const db = env.DB;

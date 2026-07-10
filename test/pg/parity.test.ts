@@ -128,7 +128,7 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
   // ── adminDb: people search (LOWER LIKE) + saveEvent (RETURNING + batch) ─────
   describe('adminDb people + events', () => {
     it('listPeople returns all seeded people and searches case-insensitively', async () => {
-      expect(await listPeople(db)).toHaveLength(10);
+      expect(await listPeople(db)).toHaveLength(11);
       const chen = await listPeople(db, { q: 'CHEN' });
       expect(chen.map((p) => p.email).sort()).toEqual([
         'amy.chen@example.com',
@@ -173,7 +173,8 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
   describe('needs-attention (Postgres shortfall query)', () => {
     const adminUser: SessionUser = {
       id: 1, email: 'admin@example.com', displayName: 'Admin', role: 'admin',
-      isAdmin: true, isEditor: true, finance: 0, memberTeamIds: [], leaderTeamIds: [], lang: 'en',
+      isAdmin: true, isEditor: true, isSuperAdmin: false, adminAreas: [],
+      finance: 0, memberTeamIds: [], leaderTeamIds: [], lang: 'en',
     };
 
     it('admin scope reports the seeded pending app + testimony and the exact per-plan shortfalls', async () => {

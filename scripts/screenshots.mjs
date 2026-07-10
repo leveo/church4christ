@@ -113,6 +113,12 @@ const PAGES = [
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
 
+  // Admin permissions — a super admin's view of a limited admin's person page
+  // (person 11, Lydia Kwan), framed on the "Access & status" panel so the
+  // Module access checklist (with her granted groups/events already checked)
+  // is visible. See docs/features/admin-permissions.md.
+  { path: '/admin/people/11', out: 'docs/images/admin/person-permissions.png', admin: true, anchor: 'Access & status' },
+
   // Groups module — public directory (one public group, seeded) and the
   // site-admin console (CRUD over every group). D1 works fine; no backend flag.
   { path: '/en/groups', out: 'docs/images/groups/directory.png' },

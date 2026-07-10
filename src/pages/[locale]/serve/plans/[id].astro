@@ -28,6 +28,7 @@ import {
   setPlanPosition,
   type Conflict,
 } from '../../../../lib/planDb';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { listServiceTypes, listTeamMembers, listTeamPositions, listTeamSummaries } from '../../../../lib/teamDb';
 import { formatDate } from '../../../../lib/dates';
 import { sendSchedulingRequest } from '../../../../lib/notify';
@@ -132,7 +133,7 @@ const serviceTime =
 // the assign pickers, the needs editors, and the add-position form (teams the
 // user leads that aren't on this plan yet can still add needs).
 const allTeams = await listTeamSummaries(db, locale);
-const editableTeams = allTeams.filter((tm) => user.isAdmin || user.leaderTeamIds.includes(tm.id));
+const editableTeams = allTeams.filter((tm) => hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(tm.id));
 const membersByTeam = new Map(
   await Promise.all(editableTeams.map(async (tm) => [tm.id, await listTeamMembers(db, tm.id)] as const)),
 );
@@ -186,7 +187,7 @@ const personName = (id: number) =>
 
     {
       teams.map(([teamId, teamName]) => {
-        const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+        const canEdit = hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
         const members = membersByTeam.get(teamId) ?? [];
         return (
           <section class="mt-8">

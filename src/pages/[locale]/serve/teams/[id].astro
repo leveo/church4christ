@@ -28,6 +28,7 @@ import {
 import { sendApplicationResult, sendServeInvite } from '../../../../lib/notify';
 import { type EmailEnv } from '../../../../lib/email';
 import { btn, btnSecondary, tin } from '../../../../lib/adminUi';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -50,8 +51,8 @@ const teamId = idOf(Astro.params.id ?? null);
 if (!teamId) return new Response(null, { status: 404 });
 
 // View: members of this team + admins. Edit: leaders of this team + admins.
-const canView = user.isAdmin || user.memberTeamIds.includes(teamId) || user.leaderTeamIds.includes(teamId);
-const canEdit = user.isAdmin || user.leaderTeamIds.includes(teamId);
+const canView = hasAreaAccess(user, 'serve') || user.memberTeamIds.includes(teamId) || user.leaderTeamIds.includes(teamId);
+const canEdit = hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
 if (!canView) return Astro.redirect(localePath(locale, '/serve/teams'), 303);
 
 if (Astro.request.method === 'POST') {

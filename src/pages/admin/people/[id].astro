@@ -15,9 +15,13 @@ import { t } from '../../../lib/i18n';
 import { listPersonGroupActivity, type PersonGroupActivity } from '../../../lib/groupDb';
 import { listRegistrationsForPerson, type PersonRegistration } from '../../../lib/groupRegDb';
 import { getPerson, savePerson, setPersonAvatar, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
+import { hasAreaAccess, parseAdminAreas, GRANTABLE_AREAS, type GrantableArea } from '../../../lib/adminAreas';
 import { parsePersonForm, MEMBERSHIP_STATUSES } from '../../../lib/validate';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../../lib/mediaRef';
+import { listHouseholdGifts, householdYearTotals, type GiftRow } from '../../../lib/givingDb';
+import { formatDate } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
 import {
   getLiveHouseholdForPerson,
   createHousehold,
@@ -51,9 +55,12 @@ import {
   noticeOk,
   noticeErr,
   badge,
+  badgeRole,
   badgeActive,
   badgeInactive,
   badgeScheduled,
+  th,
+  td,
 } from '../../../lib/adminUi';
 
 const user = Astro.locals.user!;
@@ -66,14 +73,45 @@ const hasGiving = Astro.locals.modules.has('giving');
 // gate, independent of the people module.
 const hasGroups = Astro.locals.modules.has('groups');
 const ROLES = ['member', 'editor', 'admin'] as const;
+// Role/grant flags escalate privilege, so only a super admin may write them
+// (the flags form is gated on this below); deleting a person is a lighter-weight
+// action gated on the ordinary 'people' area grant instead.
+const canManagePeople = hasAreaAccess(user, 'people');
+const canGroups = hasAreaAccess(user, 'groups');
+const canRegistration = hasAreaAccess(user, 'registration');
+// hasGiving is module+backend gated (force-off on D1), so canGiving stays false
+// there regardless of the area grant — no givingDb query ever runs on D1.
+const canGiving = hasGiving && hasAreaAccess(user, 'giving');
+const isSuper = user.isSuperAdmin;
+// Per-module grant labels for the areas fieldset — reuses each area's existing
+// nav/section title so there is no new translated string per area.
+const AREA_LABEL_KEYS: Record<GrantableArea, string> = {
+  bulletins: 'admin.nav.bulletins',
+  sermons: 'admin.nav.sermons',
+  'prayer-sheets': 'admin.nav.prayerSheets',
+  testimonies: 'admin.nav.testimonies',
+  pages: 'admin.nav.pages',
+  events: 'admin.nav.news',
+  people: 'admin.areas.people',
+  groups: 'admin.nav.groups',
+  children: 'admin.nav.children',
+  giving: 'admin.giving.title',
+  registration: 'admin.reg.title',
+  serve: 'admin.areas.serve',
+};
 
 const rawId = Astro.params.id ?? '';
 const isNew = rawId === 'new';
 if (!isNew && !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
 const id = isNew ? null : Number(rawId);
+// /admin/people/new is member management too — creating a person requires the
+// people grant on both GET and POST (people-basic, reachable by every admin,
+// only covers viewing/editing the directory, not adding to it).
+if (isNew && !canManagePeople) return new Response(null, { status: 403 });
 
 const person = id !== null ? await getPerson(db, id) : null;
 if (id !== null && !person) return new Response(null, { status: 404 });
+const personAreas = parseAdminAreas(person?.admin_areas);
 
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 const HH_ERR: Record<string, string> = {
@@ -86,6 +124,7 @@ const mapHh = (e: unknown): string => HH_ERR[e instanceof Error ? e.message : ''
 let errors: Record<string, string> = {};
 let householdErrorKey: string | null = null;
 let noteErrorKey: string | null = null;
+let flagsErrorKey: string | null = null;
 const values: Record<string, string> = {};
 
 if (Astro.request.method === 'POST') {
@@ -93,27 +132,49 @@ if (Astro.request.method === 'POST') {
   const action = fd.get('action');
 
   if (action === 'delete' && id !== null) {
-    await softDeletePerson(db, id);
-    return Astro.redirect('/admin/people/?deleted=1', 303);
+    // Deleting a person requires the 'people' area grant, not just reaching this
+    // page (people-basic — GET only — is always-on for every admin).
+    if (!canManagePeople) return new Response(null, { status: 403 });
+    try {
+      await softDeletePerson(db, id);
+    } catch (e) {
+      if (e instanceof Error && e.message === 'last_super_admin') {
+        flagsErrorKey = 'admin.person.lastSuperErr';
+      } else throw e;
+    }
+    if (!flagsErrorKey) return Astro.redirect('/admin/people/?deleted=1', 303);
   }
 
   if (action === 'flags' && id !== null) {
+    // Only a super admin may touch roles / grants — closes the pre-permissions
+    // hole where any admin could promote anyone to admin.
+    if (!isSuper) return new Response(null, { status: 403 });
     const roleRaw = String(fd.get('role') ?? '');
     const role = ROLES.find((r) => r === roleRaw);
+    const nextSuper = role === 'admin' && fd.get('super_admin') !== null;
+    const areas = fd.getAll('areas').map(String);
     // The finance flag (giving admin access) is only shown — and only read — when
     // the giving module is on; a crafted POST while off is ignored, leaving it as set.
-    await setPersonFlags(db, id, {
-      role,
-      active: fd.get('active') !== null,
-      ...(hasGiving ? { finance: fd.get('finance') !== null } : {}),
-    });
-    return Astro.redirect(`/admin/people/${id}?saved=1`, 303);
+    try {
+      await setPersonFlags(db, id, {
+        role,
+        active: fd.get('active') !== null,
+        ...(hasGiving ? { finance: fd.get('finance') !== null } : {}),
+        superAdmin: nextSuper,
+        adminAreas: areas,
+      });
+      return Astro.redirect(`/admin/people/${id}?saved=1`, 303);
+    } catch (e) {
+      if (e instanceof Error && e.message === 'last_super_admin') {
+        flagsErrorKey = 'admin.person.lastSuperErr';
+      } else throw e;
+    }
   }
 
   // People-module actions (household / notes / invite) — all require an existing
-  // person and the module. On success they redirect back to this page; on error
-  // they set an error key and fall through to re-render.
-  if (hasPeople && id !== null) {
+  // person, the module, and the people area grant. On success they redirect back
+  // to this page; on error they set an error key and fall through to re-render.
+  if (hasPeople && canManagePeople && id !== null) {
     const back = () => Astro.redirect(`/admin/people/${id}?saved=1`, 303);
 
     if (action === 'createHousehold') {
@@ -177,11 +238,24 @@ if (Astro.request.method === 'POST') {
   }
 
   if (action === 'save') {
+    // Saving identity fields requires the people area grant, regardless of
+    // whether this is a new person or an edit (isNew already 403s above).
+    if (!canManagePeople) return new Response(null, { status: 403 });
     for (const [k, val] of fd.entries()) if (typeof val === 'string') values[k] = val;
     // The membership-depth fields only render (and are only parsed/persisted) when
     // the people module is on; while off, a core save leaves them untouched.
     const parsed = parsePersonForm(fd, { admin: hasPeople });
     if (parsed.ok) {
+      // Role and active status are super-admin-only concerns, editable only via
+      // the flags form (which carries the last-super-admin guard). The identity
+      // save form must never change them — a crafted POST could otherwise demote
+      // or deactivate a super admin (or promote a member) with no guard. Pin them
+      // to the stored values on edit. (New people are created by the people grant
+      // as-is; a super admin elevates them afterward via the flags form.)
+      if (person) {
+        parsed.data.role = person.role;
+        parsed.data.active = person.active === 1;
+      }
       const avatarFile = fd.get('avatar');
       let avatarKey: string | null = null;
       if (avatarFile instanceof File && avatarFile.size > 0) {
@@ -234,7 +308,7 @@ let notes: PersonNote[] = [];
 let applications: PersonApplicationRow[] = [];
 let allTeams: TeamSummary[] = [];
 let allHouseholds: HouseholdSummary[] = [];
-if (hasPeople && person) {
+if (hasPeople && canManagePeople && person) {
   [household, notes, applications, allTeams, allHouseholds] = await Promise.all([
     getLiveHouseholdForPerson(db, person.id),
     listNotes(db, person.id),
@@ -244,15 +318,33 @@ if (hasPeople && person) {
   ]);
 }
 
-// Group activity panel data (independent of the people module).
+// Group activity panel data (independent of the people module; gated on its
+// own area grant instead).
 let groupActivity: PersonGroupActivity = { memberships: [], attendance: [] };
 let personRegistrations: PersonRegistration[] = [];
-if (hasGroups && person) {
+if (hasGroups && canGroups && person) {
   groupActivity = await listPersonGroupActivity(db, person.id);
-  if (Astro.locals.modules.has('registration')) {
+  if (Astro.locals.modules.has('registration') && canRegistration) {
     personRegistrations = await listRegistrationsForPerson(db, person.id, lang);
   }
 }
+
+// Giving history panel data — only fetched when the viewer has BOTH the giving
+// module (Supabase-only, force-off on D1) and the giving area grant, so this
+// givingDb query never runs on D1 and never leaks to an ungranted admin (spec
+// requirement #4).
+let giftRows: Array<GiftRow & { giver_name: string }> = [];
+let givingYtd: Array<{ year: string; total_cents: number }> = [];
+if (canGiving && person) {
+  [giftRows, givingYtd] = await Promise.all([
+    listHouseholdGifts(db, lang, person.id),
+    householdYearTotals(db, person.id),
+  ]);
+}
+// householdYearTotals returns one row per calendar year, newest first; the
+// panel surfaces just the current year's total (0 when no gifts landed yet).
+const currentYear = String(new Date().getFullYear());
+const ytdCents = givingYtd.find((y) => y.year === currentYear)?.total_cents ?? 0;
 
 const heading = isNew ? t(lang, 'admin.person.newTitle') : t(lang, 'admin.person.editTitle');
 const avatarName = v.display_name || heading;
@@ -282,7 +374,10 @@ const summaryErrors = Object.entries(errors)
   {summaryErrors.length > 0 && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{summaryErrors.join(' ')}</p>}
 
   <form method="post" enctype="multipart/form-data" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
-    <input type="hidden" name="action" value="save" />
+    {/* Without the people grant this form is view-only: no action means a
+        crafted submit is a no-op client-side, and the server independently
+        403s any POST save regardless (defense in depth). */}
+    {canManagePeople && <input type="hidden" name="action" value="save" />}
     {/* On edit, role/active live in the flags form; carry current values so the
         identity save validates and never clobbers them. */}
     {!isNew && <input type="hidden" name="role" value={v.role} />}
@@ -290,6 +385,10 @@ const summaryErrors = Object.entries(errors)
 
     <h2 class="font-semibold sm:col-span-2">{t(lang, 'admin.person.detailsTitle')}</h2>
 
+    {/* class="contents" keeps the fieldset out of the grid layout (its children
+        still lay out as direct grid items) while `disabled` makes every field
+        inside it native-read-only for a viewer without the people grant. */}
+    <fieldset class="contents" disabled={!canManagePeople}>
     <div class="sm:col-span-2">
       <span class={lab}>{t(lang, 'admin.person.avatar')}</span>
       <div class="mt-2 flex flex-wrap items-center gap-4">
@@ -301,18 +400,20 @@ const summaryErrors = Object.entries(errors)
           />
         )}
         {!avatarUrl && <AvatarInitials name={avatarName} sizeClass="h-20 w-20 text-2xl" />}
-        <div class="min-w-56 flex-1">
-          <label class="block">
-            <span class="sr-only">{t(lang, 'admin.person.changeAvatar')}</span>
-            <input type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" class={`${tin} file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-on-primary`} />
-          </label>
-          {avatarUrl && (
-            <label class="mt-2 flex items-center gap-2 text-sm">
-              <input type="checkbox" name="remove_avatar" />
-              <span>{t(lang, 'admin.person.removeAvatar')}</span>
+        {canManagePeople && (
+          <div class="min-w-56 flex-1">
+            <label class="block">
+              <span class="sr-only">{t(lang, 'admin.person.changeAvatar')}</span>
+              <input type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" class={`${tin} file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-on-primary`} />
             </label>
-          )}
-        </div>
+            {avatarUrl && (
+              <label class="mt-2 flex items-center gap-2 text-sm">
+                <input type="checkbox" name="remove_avatar" />
+                <span>{t(lang, 'admin.person.removeAvatar')}</span>
+              </label>
+            )}
+          </div>
+        )}
       </div>
     </div>
 
@@ -396,40 +497,95 @@ const summaryErrors = Object.entries(errors)
         </>
       )
     }
+    </fieldset>
 
-    <div class="sm:col-span-2">
-      <button type="submit" class={btn}>{t(lang, 'admin.person.save')}</button>
-    </div>
+    {canManagePeople && (
+      <div class="sm:col-span-2">
+        <button type="submit" class={btn}>{t(lang, 'admin.person.save')}</button>
+      </div>
+    )}
   </form>
 
   {
     !isNew && person && (
       <>
-        <form method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
-          <input type="hidden" name="action" value="flags" />
-          <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
-          <label class="block max-w-xs">
-            <span class={lab}>{t(lang, 'admin.person.role')}</span>
-            <select name="role" class={tin}>
-              {ROLES.map((r) => (
-                <option value={r} selected={person.role === r}>{t(lang, `admin.role.${r}`)}</option>
-              ))}
-            </select>
-          </label>
-          <label class="flex items-center gap-2">
-            <input type="checkbox" name="active" checked={person.active === 1} />
-            <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
-          </label>
-          {hasGiving && (
-            <label class="flex items-center gap-2">
-              <input type="checkbox" name="finance" checked={person.finance === 1} />
-              <span class="text-sm">{t(lang, 'admin.people.finance')}</span>
+        {flagsErrorKey && <p class={`mt-6 max-w-2xl ${noticeErr}`}>{t(lang, flagsErrorKey)}</p>}
+        {/* Role / active / finance / super-admin / per-module grants all escalate
+            privilege, so only a super admin gets a form for them — every other
+            admin (this page is reachable by all of them via the always-on
+            people-basic area) sees a read-only summary instead. */}
+        {isSuper && (
+          <form method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
+            <input type="hidden" name="action" value="flags" />
+            <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
+            <label class="block max-w-xs">
+              <span class={lab}>{t(lang, 'admin.person.role')}</span>
+              <select name="role" class={tin}>
+                {ROLES.map((r) => (
+                  <option value={r} selected={person.role === r}>{t(lang, `admin.role.${r}`)}</option>
+                ))}
+              </select>
             </label>
-          )}
-          <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
-        </form>
+            <label class="flex items-center gap-2">
+              <input type="checkbox" name="active" checked={person.active === 1} />
+              <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
+            </label>
+            {hasGiving && (
+              <label class="flex items-center gap-2">
+                <input type="checkbox" name="finance" checked={person.finance === 1} />
+                <span class="text-sm">{t(lang, 'admin.people.finance')}</span>
+              </label>
+            )}
+            {person.role === 'admin' && (
+              <>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" name="super_admin" checked={person.super_admin === 1} />
+                  <span class="text-sm">{t(lang, 'admin.person.superAdmin')}</span>
+                </label>
+                <fieldset class="space-y-2">
+                  <legend class={lab}>{t(lang, 'admin.person.areasTitle')}</legend>
+                  <p class="text-xs text-ink-muted">{t(lang, 'admin.person.areasHint')}</p>
+                  {GRANTABLE_AREAS.map((a) => (
+                    <label class="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        name="areas"
+                        value={a}
+                        checked={personAreas.includes(a)}
+                        disabled={(a === 'giving' || a === 'registration') && Astro.locals.dbBackend !== 'supabase'}
+                      />
+                      <span class="text-sm">{t(lang, AREA_LABEL_KEYS[a])}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              </>
+            )}
+            <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
+          </form>
+        )}
+        {!isSuper && (
+          <div class={`mt-6 ${card} max-w-2xl`}>
+            <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
+            <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-sm">
+              <div class="flex items-center gap-2">
+                <dt class="text-ink-muted">{t(lang, 'admin.person.role')}</dt>
+                <dd><span class={`${badge} ${badgeRole[person.role] ?? badgeInactive}`}>{t(lang, `admin.role.${person.role}`)}</span></dd>
+              </div>
+              <div class="flex items-center gap-2">
+                <dt class="text-ink-muted">{t(lang, 'admin.person.activeLabel')}</dt>
+                <dd><span class={`${badge} ${person.active === 1 ? badgeActive : badgeInactive}`}>{t(lang, person.active === 1 ? 'admin.people.active' : 'admin.people.inactive')}</span></dd>
+              </div>
+              {hasGiving && (
+                <div class="flex items-center gap-2">
+                  <dt class="text-ink-muted">{t(lang, 'admin.people.finance')}</dt>
+                  <dd><span class={`${badge} ${person.finance === 1 ? badgeActive : badgeInactive}`}>{t(lang, person.finance === 1 ? 'admin.people.active' : 'admin.people.inactive')}</span></dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
 
-        {hasPeople && (
+        {hasPeople && canManagePeople && (
           <>
             {/* (b) Household panel — admin household management for this person. */}
             <section class={`mt-6 ${card} max-w-2xl`}>
@@ -596,10 +752,10 @@ const summaryErrors = Object.entries(errors)
           </>
         )}
 
-        {hasGroups && (
+        {hasGroups && canGroups && (
           /* Group activity — memberships, attendance history, and (registration
              module on) event registrations, for this person. Gated independent
-             of the people module. */
+             of the people module, on its own area grant. */
           <section class={`mt-6 ${card} max-w-2xl`}>
             <h2 class="font-semibold">{t(lang, 'admin.person.groups.title')}</h2>
             <div class="mt-3">
@@ -613,14 +769,58 @@ const summaryErrors = Object.entries(errors)
           </section>
         )}
 
-        <form
-          method="post"
-          class="mt-6 max-w-2xl"
-          onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.person.deleteConfirm'))})`}
-        >
-          <input type="hidden" name="action" value="delete" />
-          <button type="submit" class={btnDanger}>{t(lang, 'admin.person.delete')}</button>
-        </form>
+        {canGiving && (
+          /* Giving history — renders only for giving-granted admins (spec
+             requirement #4): current-year total + the 10 most recent household
+             gifts, mirroring the self-service /my/giving view but scoped to
+             this person's household and kept compact for an admin side panel. */
+          <section class={`mt-6 ${card} max-w-2xl`}>
+            <h2 class="font-semibold">{t(lang, 'admin.person.giving.title')}</h2>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.person.giving.ytd', { amount: formatCents(ytdCents) })}</p>
+            {giftRows.length === 0 ? (
+              <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.person.giving.empty')}</p>
+            ) : (
+              <div class="mt-3 overflow-x-auto rounded-lg border border-border">
+                <table class="w-full">
+                  <thead class="border-b border-border">
+                    <tr>
+                      <th class={th}>{t(lang, 'my.giving.date')}</th>
+                      <th class={th}>{t(lang, 'my.giving.fund')}</th>
+                      <th class={`${th} text-right`}>{t(lang, 'my.giving.amount')}</th>
+                      <th class={th}>{t(lang, 'my.giving.method')}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border">
+                    {giftRows.slice(0, 10).map((g) => (
+                      <tr>
+                        <td class={`${td} whitespace-nowrap tabular-nums`}>
+                          {formatDate(g.received_on ?? g.created_at.slice(0, 10), lang)}
+                        </td>
+                        <td class={td}>{g.fund_name}</td>
+                        <td class={`${td} whitespace-nowrap text-right tabular-nums`}>{formatCents(g.amount_cents, g.currency)}</td>
+                        <td class={td}>{t(lang, `giving.method.${g.method}`)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <a href="/admin/giving" class="mt-3 inline-block text-sm text-primary hover:underline">
+              {t(lang, 'admin.person.giving.viewAll')}
+            </a>
+          </section>
+        )}
+
+        {canManagePeople && (
+          <form
+            method="post"
+            class="mt-6 max-w-2xl"
+            onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.person.deleteConfirm'))})`}
+          >
+            <input type="hidden" name="action" value="delete" />
+            <button type="submit" class={btnDanger}>{t(lang, 'admin.person.delete')}</button>
+          </form>
+        )}
       </>
     )
   }

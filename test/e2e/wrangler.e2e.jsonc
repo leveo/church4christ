@@ -24,5 +24,15 @@
       "migrations_dir": "../../migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "church4christ-media-e2e" }]
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "church4christ-media-e2e" }],
+  // ASSETS mirrors the production binding (wrangler.jsonc): without it, a request
+  // whose pathname matches NO Astro route (no page.astro under it, e.g. a made-up
+  // /admin/<slug>) never reaches the SSR pipeline — the Cloudflare adapter's
+  // fallbackToAssets() throws on `env.ASSETS.fetch()` being undefined, crashing
+  // the isolate before src/middleware.ts ever runs. With ASSETS bound, that
+  // fallback resolves (404 when no static file matches either) and control
+  // continues into app.render(), which DOES run the middleware — so the
+  // per-admin area gate's fail-closed behavior on unknown /admin paths (task 4)
+  // is actually exercised, matching what a real deploy does.
+  "assets": { "directory": "../../dist/client", "binding": "ASSETS" }
 }

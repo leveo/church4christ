@@ -37,6 +37,14 @@ INSERT INTO people (id, first_name, last_name, display_name, email, phone, role,
   (9, 'Esther', 'Lin', 'Esther Lin 林以斯帖', 'esther.lin@example.com', NULL, 'member', 'zh'),
   (10, 'Joshua', 'Zhao', 'Joshua Zhao 赵约书亚', 'joshua.zhao@example.com', NULL, 'member', 'en');
 
+-- Alex Admin is the demo super admin. The migration's role='admin' backfill runs
+-- BEFORE seeding, so seeded rows must set the flag explicitly. Lydia Kwan is the
+-- demo LIMITED admin: she sees only prayer wall + member directory (defaults)
+-- plus her granted groups + news/events areas.
+UPDATE people SET super_admin = 1 WHERE id = 1;
+INSERT INTO people (id, first_name, last_name, display_name, email, phone, role, lang, super_admin, admin_areas) VALUES
+  (11, 'Lydia', 'Kwan', 'Lydia Kwan 关莉迪', 'lydia.kwan@example.com', NULL, 'admin', 'zh', 0, 'groups,events');
+
 -- Ten ministries with emoji icons and matching categories. Leaders point at the
 -- three team leaders plus the senior pastor for the care ministry.
 INSERT INTO ministries (id, slug, category, icon, leader_person_id, meeting_time, active, sort) VALUES

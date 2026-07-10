@@ -16,9 +16,10 @@ import { isValidDateStr, todayInTz, monthRange } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
+if (!user || !(hasAreaAccess(user, 'giving') || user.finance === 1)) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 

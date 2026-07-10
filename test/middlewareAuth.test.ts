@@ -46,6 +46,8 @@ describe('loadSessionUser', () => {
       role: 'editor',
       isAdmin: false,
       isEditor: true,
+      isSuperAdmin: false,
+      adminAreas: [],
       finance: 0,
       memberTeamIds: [],
       leaderTeamIds: [],
@@ -76,6 +78,24 @@ describe('loadSessionUser', () => {
     expect(u).toMatchObject({ role: 'admin', isAdmin: true, isEditor: false, lang: 'en' });
     const leader = await loadSessionUser(env.DB, 3, 0);
     expect(leader).toMatchObject({ role: 'member', isAdmin: false, isEditor: false, lang: null });
+  });
+
+  it('loads super_admin and validated admin_areas onto the session user', async () => {
+    await env.DB.prepare(
+      `INSERT INTO people (id, first_name, last_name, display_name, email, role, super_admin, admin_areas)
+       VALUES (60, 'S', 'A', 'S A', 'sup@example.com', 'admin', 1, ''),
+              (61, 'L', 'A', 'L A', 'lim@example.com', 'admin', 0, 'groups,junk,settings,events'),
+              (62, 'E', 'D', 'E D', 'ed@example.com', 'editor', 1, 'groups')`,
+    ).run();
+    const sup = await loadSessionUser(env.DB, 60, 0);
+    expect(sup?.isSuperAdmin).toBe(true);
+    const lim = await loadSessionUser(env.DB, 61, 0);
+    expect(lim?.isSuperAdmin).toBe(false);
+    expect(lim?.adminAreas).toEqual(['groups', 'events']); // junk + reserved filtered
+    // the flags are inert on a non-admin row
+    const ed = await loadSessionUser(env.DB, 62, 0);
+    expect(ed?.isSuperAdmin).toBe(false);
+    expect(ed?.adminAreas).toEqual([]);
   });
 });
 

@@ -13,6 +13,7 @@ import { t } from '../../../../lib/i18n';
 import { listRevisions, getRevision, restoreRevision } from '../../../../lib/adminDb';
 import { card, btnSecondary, noticeOk, noticeErr, badge, badgeInactive } from '../../../../lib/adminUi';
 import type { Locale } from '../../../../lib/locales';
+import { hasAreaAccess, type AdminAreaKey } from '../../../../lib/adminAreas';
 
 // entity → its editor page. bulletin/sermon/prayer_sheet have per-id editors;
 // announcements/events are managed inline on their list page.
@@ -24,12 +25,25 @@ const EDITOR_URL: Record<string, (id: number) => string> = {
   event: () => '/admin/events',
 };
 
+// entity → its owning admin area, for the per-admin grant re-check below.
+const ENTITY_AREA: Record<string, AdminAreaKey> = {
+  bulletin: 'bulletins',
+  sermon: 'sermons',
+  prayer_sheet: 'prayer-sheets',
+  announcement: 'events',
+  event: 'events',
+  custom_page: 'pages',
+};
+
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const entity = Astro.params.entity ?? '';
+const area = ENTITY_AREA[entity];
+if (!user || !(user.isEditor || (area !== undefined && hasAreaAccess(user, area)))) {
+  return new Response(null, { status: 403 });
+}
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 
-const entity = Astro.params.entity ?? '';
 const rawId = Astro.params.id ?? '';
 if (!(entity in EDITOR_URL) || !/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
 const entityId = Number(rawId);
