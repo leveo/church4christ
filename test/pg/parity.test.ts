@@ -14,6 +14,8 @@ import { listPlans } from '../../src/lib/planDb';
 import { listActiveEvents } from '../../src/lib/publicDb';
 import { getEnabledModules, clearModuleCache } from '../../src/lib/modules';
 import { addNote, listNotes } from '../../src/lib/notesDb';
+import { addMemberByPerson, listMembers, listPublicGroups } from '../../src/lib/groupDb';
+import { createEvent, ensureOccurrences, getEvent, listEventsForGroup } from '../../src/lib/groupEventDb';
 
 // Cross-backend parity: every core *Db module runs unchanged against Postgres.
 // The suite migrates + seeds a real PG database the way an operator would (the
@@ -212,6 +214,66 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       const names = new Set(plans.map((p) => p.service_type_name));
       expect(names.has('Sunday Worship (English)')).toBe(true);
       expect(names.has('Chinese Sunday Worship')).toBe(true);
+    });
+  });
+
+  // ── groupDb: public directory read + membership write ──────────────────────
+  describe('groupDb', () => {
+    it('listPublicGroups shows the seeded public group; listMembers rolls up its roster', async () => {
+      const pub = await listPublicGroups(db);
+      expect(pub.some((g) => g.name.startsWith('Young Adults'))).toBe(true);
+      expect(pub.some((g) => g.name.startsWith('Prayer Partners'))).toBe(false); // private, hidden
+
+      const ya = pub.find((g) => g.name.startsWith('Young Adults'))!;
+      const members = await listMembers(db, ya.id);
+      // Ben (admin) + Mark + Joshua + one name-only member (Hannah).
+      expect(members).toHaveLength(4);
+      expect(members[0].is_admin).toBe(1); // admins first
+      expect(members.some((m) => m.person_id === null)).toBe(true); // name-only row
+    });
+
+    it('addMemberByPerson links a real person (RETURNING id)', async () => {
+      const pub = await listPublicGroups(db);
+      const ya = pub.find((g) => g.name.startsWith('Young Adults'))!;
+      // Person 3 (Sarah) is not seeded into any group.
+      const memberId = await addMemberByPerson(db, ya.id, 3);
+      expect(typeof memberId).toBe('number');
+      expect((await listMembers(db, ya.id)).some((m) => m.person_id === 3)).toBe(true);
+    });
+  });
+
+  // ── groupEventDb: event read + occurrence generation write ──────────────────
+  describe('groupEventDb', () => {
+    it('listEventsForGroup returns the seeded weekly event', async () => {
+      const pub = await listPublicGroups(db);
+      const ya = pub.find((g) => g.name.startsWith('Young Adults'))!;
+      const events = await listEventsForGroup(db, ya.id);
+      expect(events.some((e) => e.title.startsWith('Friday Bible Study'))).toBe(true);
+      expect(events.find((e) => e.title.startsWith('Friday Bible Study'))!.recurrence).toBe('weekly');
+    });
+
+    it('createEvent + ensureOccurrences write through the ON CONFLICT upsert', async () => {
+      const pub = await listPublicGroups(db);
+      const ya = pub.find((g) => g.name.startsWith('Young Adults'))!;
+      const id = await createEvent(db, ya.id, {
+        title: 'Parity Study',
+        description: '',
+        location: null,
+        recurrence: 'none',
+        startsOn: '2030-06-07',
+        startTime: '19:00',
+        durationMin: 90,
+        endsOn: null,
+        trackAttendance: false,
+      });
+      expect((await getEvent(db, id))!.title).toBe('Parity Study');
+      const now = new Date('2030-06-01T12:00:00Z');
+      const first = await ensureOccurrences(db, (await getEvent(db, id))!, '2030-12-31', now);
+      expect(first).toBe(1);
+      // Idempotent second run (ON CONFLICT DO UPDATE) still leaves one row.
+      await ensureOccurrences(db, (await getEvent(db, id))!, '2030-12-31', now);
+      const rows = await sql.unsafe('SELECT count(*)::int AS c FROM group_event_occurrences WHERE event_id = $1', [id]);
+      expect(rows[0].c).toBe(1);
     });
   });
 
