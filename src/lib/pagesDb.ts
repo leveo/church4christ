@@ -8,10 +8,13 @@
 import type { AppDb } from './appDb';
 import type { Locale } from './locales';
 
+export type PageFormat = 'markdown' | 'builder';
+
 export interface CustomPageListRow {
   id: string;
   slug: string;
   published: boolean;
+  format: PageFormat;
   title_en: string;
   title_zh: string;
   updated_at: string;
@@ -21,6 +24,8 @@ export interface CustomPageDetail {
   id: string;
   slug: string;
   published: boolean;
+  format: PageFormat;
+  layout_json: string | null;
   i18n: { en: { title: string; body_md: string }; zh: { title: string; body_md: string } };
 }
 
@@ -39,14 +44,14 @@ export interface SaveCustomPageInput {
 export async function listCustomPages(db: AppDb): Promise<CustomPageListRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT p.id AS id, p.slug AS slug, p.published AS published, p.updated_at AS updated_at,
+      `SELECT p.id AS id, p.slug AS slug, p.published AS published, p.format AS format, p.updated_at AS updated_at,
               COALESCE(en.title, '') AS title_en, COALESCE(zh.title, '') AS title_zh
        FROM custom_pages p
        LEFT JOIN custom_page_i18n en ON en.page_id = p.id AND en.locale = 'en'
        LEFT JOIN custom_page_i18n zh ON zh.page_id = p.id AND zh.locale = 'zh'
        ORDER BY p.slug`,
     )
-    .all<{ id: string; slug: string; published: number; updated_at: string; title_en: string; title_zh: string }>();
+    .all<{ id: string; slug: string; published: number; format: PageFormat; updated_at: string; title_en: string; title_zh: string }>();
   return results.map((r) => ({ ...r, published: r.published === 1 }));
 }
 
@@ -62,24 +67,34 @@ async function loadI18n(db: AppDb, pageId: string): Promise<CustomPageDetail['i1
   };
 }
 
-function toDetail(page: { id: string; slug: string; published: number }, i18n: CustomPageDetail['i18n']): CustomPageDetail {
-  return { id: page.id, slug: page.slug, published: page.published === 1, i18n };
+function toDetail(
+  page: { id: string; slug: string; published: number; format: PageFormat; layout_json: string | null },
+  i18n: CustomPageDetail['i18n'],
+): CustomPageDetail {
+  return {
+    id: page.id,
+    slug: page.slug,
+    published: page.published === 1,
+    format: page.format,
+    layout_json: page.layout_json,
+    i18n,
+  };
 }
 
 export async function getCustomPage(db: AppDb, id: string): Promise<CustomPageDetail | null> {
   const page = await db
-    .prepare(`SELECT id, slug, published FROM custom_pages WHERE id = ?1`)
+    .prepare(`SELECT id, slug, published, format, layout_json FROM custom_pages WHERE id = ?1`)
     .bind(id)
-    .first<{ id: string; slug: string; published: number }>();
+    .first<{ id: string; slug: string; published: number; format: PageFormat; layout_json: string | null }>();
   if (!page) return null;
   return toDetail(page, await loadI18n(db, page.id));
 }
 
 export async function getCustomPageBySlug(db: AppDb, slug: string): Promise<CustomPageDetail | null> {
   const page = await db
-    .prepare(`SELECT id, slug, published FROM custom_pages WHERE slug = ?1`)
+    .prepare(`SELECT id, slug, published, format, layout_json FROM custom_pages WHERE slug = ?1`)
     .bind(slug)
-    .first<{ id: string; slug: string; published: number }>();
+    .first<{ id: string; slug: string; published: number; format: PageFormat; layout_json: string | null }>();
   if (!page) return null;
   return toDetail(page, await loadI18n(db, page.id));
 }
@@ -118,6 +133,69 @@ export async function saveCustomPage(
     db
       .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('custom_page', ?1, ?2, ?3)`)
       .bind(id, snapshotJson, updatedBy),
+  ]);
+  return { ok: true, id };
+}
+
+export interface SavePageLayoutInput {
+  id: string | null;
+  slug: string;
+  published: boolean;
+  title_en: string;
+  title_zh: string;
+  /** Validated + re-serialized JSON from pageLayout.validateLayout. */
+  layoutJson: string;
+  updatedBy: string;
+}
+
+/** Create or update a BUILDER page in one transaction (upsert + title upsert +
+ *  revision snapshot). Differs from saveCustomPage in two ways: it writes
+ *  format='builder' + layout_json, and it upserts i18n TITLES ONLY (per-locale
+ *  ON CONFLICT) instead of delete+reinsert, so any classic body_md a page had
+ *  before its builder conversion survives a later format flip back. */
+export async function savePageLayout(
+  db: AppDb,
+  input: SavePageLayoutInput,
+): Promise<{ ok: true; id: string } | { ok: false; error: 'slug_taken' }> {
+  const id = input.id ?? crypto.randomUUID();
+
+  const taken = await db
+    .prepare(`SELECT id FROM custom_pages WHERE slug = ?1 AND id <> ?2`)
+    .bind(input.slug, id)
+    .first<{ id: string }>();
+  if (taken) return { ok: false, error: 'slug_taken' };
+
+  const published = input.published ? 1 : 0;
+  const snapshotJson = JSON.stringify({
+    v: 2,
+    input: {
+      slug: input.slug, published: input.published, format: 'builder',
+      title_en: input.title_en, title_zh: input.title_zh, layout_json: input.layoutJson,
+    },
+  });
+
+  const titleUpsert = (locale: string, title: string) =>
+    db
+      .prepare(
+        `INSERT INTO custom_page_i18n (page_id, locale, title) VALUES (?1, ?2, ?3)
+         ON CONFLICT(page_id, locale) DO UPDATE SET title = ?3`,
+      )
+      .bind(id, locale, title);
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custom_pages (id, slug, published, format, layout_json, updated_at)
+         VALUES (?3, ?1, ?2, 'builder', ?4, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET slug = ?1, published = ?2, format = 'builder',
+           layout_json = ?4, updated_at = datetime('now')`,
+      )
+      .bind(input.slug, published, id, input.layoutJson),
+    titleUpsert('en', input.title_en),
+    titleUpsert('zh', input.title_zh),
+    db
+      .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('custom_page', ?1, ?2, ?3)`)
+      .bind(id, snapshotJson, input.updatedBy),
   ]);
   return { ok: true, id };
 }

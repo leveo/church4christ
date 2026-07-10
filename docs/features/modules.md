@@ -26,7 +26,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 14 modules:**
+**The 16 modules:**
 
 | Group | Module | What it includes |
 |---|---|---|
@@ -35,11 +35,13 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | Content | **Prayer Sheets** | Weekly prayer lists organized by section. |
 | Content | **Articles** | Long-form articles and devotional writing. |
 | Content | **Fellowships** | Fellowship groups and their gathering details. |
+| Content | **Page Builder** | The drag-and-drop design tool for custom pages. Turning it off only hides the design tool — any page you already built and published with it keeps rendering exactly as it was. See [`page-builder.md`](page-builder.md). |
 | Community | **Events** | Event cards and the home-page announcement ticker. |
 | Community | **Prayer Wall** | The public prayer-request form and the staff prayer board. |
 | Community | **Testimonies** | Member testimonies, with staff review before publishing. |
 | Community | **People** | Member profiles, households, pastoral notes, and invite-to-serve. Turning it off hides those panels and tools everywhere; the basic people directory that powers sign-in stays. |
 | Community | **Groups** | A public group directory, membership management, routine group events with attendance tracking, and special events created through Registration. |
+| Community | **Children** | The touch-friendly check-in kiosk for Sunday classes and a staff console with a live roster and attendance charts. See [`children-checkin.md`](children-checkin.md). |
 | Volunteering | **Serve** | Ministries, teams, scheduling, applications, and reminders. |
 | Volunteering | **Gifts Quiz** | The spiritual-gifts quiz with ministry recommendations. |
 | Giving *(needs Supabase)* | **Giving** | Online one-time and recurring giving through Stripe, a funds admin, check/cash recording, and a household giving history. See [`giving.md`](giving.md). |
@@ -94,11 +96,17 @@ soft-degrade so an off module never leaves a dangling reference.
 ## For developers
 
 - **Registry:** `src/lib/modules.ts` is the pure, tested source of truth. `MODULES` maps
-  each of the 14 keys to the locale-stripped route prefixes it owns (public and admin), its
+  each of the 16 keys to the locale-stripped route prefixes it owns (public and admin), its
   nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
   `requiresBackend: 'supabase'` for Giving and Registration. `moduleForPath` is the
   classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts` even
   though `/serve` also matches.
+- **Authoring-only exception:** `page-builder` owns only its `/admin/pages/builder` admin
+  prefix — no public prefix. Off, that admin route 404s (the design tool is gone), but the
+  public `/‹locale›/p/‹slug›` renderer is core code with no module check of its own, so a
+  page a church already built and published with the tool keeps rendering unchanged. Every
+  other module gates a whole surface, public and admin together; this one deliberately
+  gates authoring only, never already-published content.
 - **Enablement + cache:** module state lives in the `module.<key>` settings rows (absent =
   on; only the exact string `'0'` disables), then a shared `filterByBackend` helper drops any
   module whose `requiresBackend` doesn't match the current database — so a Supabase-only
@@ -115,7 +123,7 @@ soft-degrade so an off module never leaves a dangling reference.
   serving reminder and digest crons on the `serve` module; `src/worker.ts` clears the module
   cache before each scheduled run so a warm isolate reads fresh state.
 - **Admin panel:** `src/pages/admin/settings/index.astro` renders the grouped checkboxes and
-  writes all 14 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
+  writes all 16 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
   left partial), then calls `clearModuleCache()`.
 - **Tests:** `test/modules.test.ts` (registry, cache, `moduleForPath`) and
   `test/moduleGating.test.ts` (middleware 404s + hidden surfaces); module-off e2e assertions

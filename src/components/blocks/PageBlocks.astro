@@ -1,0 +1,36 @@
+---
+// Server-side renderer for the page-builder layout tree: JSON in, semantic
+// HTML out, zero client JS (the builder island exists only under /admin).
+// Sections own their own width containers, so callers render this full-bleed.
+import LeafBlock from './LeafBlock.astro';
+import { sectionOuterClass, sectionInnerClass, columnsClass } from '../../lib/blockStyles';
+import type { PageLayout } from '../../lib/pageLayout';
+import type { Locale } from '../../lib/locales';
+
+interface Props { layout: PageLayout; locale: Locale }
+const { layout, locale } = Astro.props;
+---
+
+{
+  layout.blocks.map((section) => (
+    <section class={sectionOuterClass(section.props)}>
+      <div class={`${sectionInnerClass(section.props)} space-y-6`}>
+        {section.children.map((child) =>
+          child.type === 'columns' ? (
+            <div class={columnsClass(child.props)}>
+              {child.columns.map((col) => (
+                <div class="space-y-6">
+                  {col.map((leaf) => (
+                    <LeafBlock node={leaf} locale={locale} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <LeafBlock node={child} locale={locale} />
+          ),
+        )}
+      </div>
+    </section>
+  ))
+}

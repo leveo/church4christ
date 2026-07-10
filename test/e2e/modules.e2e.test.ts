@@ -227,7 +227,7 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     const panel = await (await get('/admin/settings', { cookie: admin })).text();
     // People has no routes yet (slice 9) but is still a togglable module here.
     expect(panel).toContain('name="module.people"');
-    // All 15 keys render a checkbox (giving + registration are the backend-gated pair).
+    // All 16 keys render a checkbox (giving + registration are the backend-gated pair).
     for (const key of MODULE_KEYS) expect(panel).toContain(`name="module.${key}"`);
   });
 
