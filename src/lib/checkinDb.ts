@@ -177,12 +177,21 @@ export interface WeeklyStats {
 // to confuse when a parent reads a printed code aloud at pickup.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-/** Random 4-char security code, e.g. `4X7Q`. `rand` is injectable for tests. */
-export function generateSecurityCode(rand: () => number = Math.random): string {
+/**
+ * Random 4-char security code, e.g. `4X7Q`. The code guards child pickup, so
+ * the default path uses the CSPRNG (crypto.getRandomValues); the injectable
+ * `rand` exists for deterministic tests only. The tiny modulo bias over a
+ * 31-char alphabet is acceptable for a staff-supervised 4-char code.
+ */
+export function generateSecurityCode(rand?: () => number): string {
   let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += CODE_ALPHABET[Math.floor(rand() * CODE_ALPHABET.length)];
+  if (rand) {
+    for (let i = 0; i < 4; i++) code += CODE_ALPHABET[Math.floor(rand() * CODE_ALPHABET.length)];
+    return code;
   }
+  const buf = new Uint32Array(4);
+  crypto.getRandomValues(buf);
+  for (let i = 0; i < 4; i++) code += CODE_ALPHABET[buf[i] % CODE_ALPHABET.length];
   return code;
 }
 

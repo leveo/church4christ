@@ -235,13 +235,17 @@ describe('check-in/out, roster, and weekly stats', () => {
     it('same household, different event gets a different code (not reused across events)', async () => {
       const otherEventId = await saveEvent(env.DB, { name: "Kids' Church", weekday: null });
 
-      // Force distinct codes deterministically: first call's 4 Math.random()
-      // draws map to early alphabet letters, the second call's to late ones —
-      // avoids a real (if astronomically unlikely) flake from letting two
+      // Force distinct codes deterministically: the default code path draws
+      // from crypto.getRandomValues, so stub it — the first call's buffer is
+      // all-zero words ('AAAA'), the second all-30 words ('9999') — avoiding
+      // a real (if astronomically unlikely) flake from letting two
       // independently-random 4-char codes collide.
-      const draws = [0, 0.1, 0.2, 0.3, 0.9, 0.8, 0.7, 0.6];
-      let i = 0;
-      vi.spyOn(Math, 'random').mockImplementation(() => draws[i++]);
+      const fills = [0, 30];
+      let call = 0;
+      vi.spyOn(crypto, 'getRandomValues').mockImplementation(((buf: Uint32Array) => {
+        buf.fill(fills[call++]);
+        return buf;
+      }) as typeof crypto.getRandomValues);
       try {
         const first = await checkInChildren(env.DB, { eventId, householdId: chenId, memberIds: [ethanId], date });
         const second = await checkInChildren(env.DB, { eventId: otherEventId, householdId: chenId, memberIds: [miaId], date });
@@ -374,10 +378,14 @@ describe('check-in/out, roster, and weekly stats', () => {
 });
 
 describe('generateSecurityCode', () => {
-  it('is 4 chars from the unambiguous alphabet (no 0/O/1/I/L)', () => {
-    const code = generateSecurityCode();
-    expect(code).toHaveLength(4);
-    expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/);
+  it('is 4 chars from the unambiguous alphabet (no 0/O/1/I/L) via the default CSPRNG path', () => {
+    // No-arg calls exercise the crypto.getRandomValues path; sample repeatedly
+    // so every generated word must map into the alphabet.
+    for (let i = 0; i < 50; i++) {
+      const code = generateSecurityCode();
+      expect(code).toHaveLength(4);
+      expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/);
+    }
   });
 
   it('is deterministic given a rand function', () => {
