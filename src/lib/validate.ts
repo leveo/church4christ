@@ -50,7 +50,7 @@ export function isHttpUrl(s: string): boolean {
   return u.protocol === 'http:' || u.protocol === 'https:';
 }
 
-function isEmail(s: string): boolean {
+export function isEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 

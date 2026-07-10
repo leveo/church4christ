@@ -1,0 +1,241 @@
+---
+// Public group detail — anti-enumeration by design: a missing group and a
+// private group the viewer can't see render the EXACT same 404 (rewrite to
+// /404), so a private group's existence is never revealed by probing ids.
+// Content visible to everyone who can see the page at all: name, description,
+// upcoming routine occurrences, member count, and the group-admins' names.
+// The full roster is gated further — only an active member or a site admin
+// gets it. Join flow: signed-out visitors get a sign-in/sign-up prompt;
+// signed-in non-members get a self-page POST (action=join) that creates a
+// join request (groupDb.createJoinRequest is idempotent); members see a
+// membership notice, and group admins (or site admins) additionally get a
+// link to the manage console (Slice D — fine if it 404s until that lands).
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
+import {
+  createJoinRequest,
+  getGroup,
+  listGroupsForPerson,
+  listMembers,
+  type GroupMemberRow,
+  type PersonGroupRow,
+} from '../../../lib/groupDb';
+import { listUpcomingOccurrencesForGroup, type UpcomingOccurrence } from '../../../lib/groupEventDb';
+import { listOpenSpecialEventsForGroup } from '../../../lib/groupRegDb';
+import { badge, badgeRole, btn } from '../../../lib/adminUi';
+
+const GROUP_TZ = 'America/Chicago';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const user = Astro.locals.user;
+
+const idParam = Astro.params.id ?? '';
+const groupId = /^\d+$/.test(idParam) ? Number(idParam) : null;
+const group = groupId !== null ? await getGroup(db, groupId) : null;
+
+if (!group) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const isSiteAdmin = user?.isAdmin ?? false;
+
+// The viewer's own membership row for THIS group (if any) — listGroupsForPerson
+// includes private memberships, so this is also how we know whether a signed-in
+// visitor may see a private group at all.
+let myMembership: PersonGroupRow | null = null;
+if (user) {
+  const mine = await listGroupsForPerson(db, user.id);
+  myMembership = mine.find((g) => g.id === group.id) ?? null;
+}
+const isMember = myMembership !== null;
+const isGroupAdminViewer = isMember && myMembership!.is_admin === 1;
+
+// Private + not a member + not a site admin → behaves EXACTLY like a missing
+// group (same status, same rewrite): anti-enumeration.
+if (group.is_public !== 1 && !isMember && !isSiteAdmin) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+// Self-page POST: request to join. Only meaningful for a signed-in non-member;
+// anything else is a no-op (a member/admin posting stale markup just re-renders
+// their normal state). Redirect back (POST/redirect/GET) so a refresh never
+// resubmits and the pending state below is derived fresh from the DB either way.
+if (Astro.request.method === 'POST' && user && !isMember) {
+  const form = await Astro.request.formData();
+  if (String(form.get('action') ?? '') === 'join') {
+    await createJoinRequest(db, group.id, user.id);
+    return Astro.redirect(localePath(locale, `/groups/${group.id}`), 303);
+  }
+}
+
+// Pending join request for the signed-in non-member, so a plain GET (a fresh
+// visit, or the redirect after posting) shows the same pending notice.
+let hasPendingRequest = false;
+if (user && !isMember) {
+  const pending = await db
+    .prepare(`SELECT 1 AS x FROM group_join_requests WHERE group_id = ?1 AND person_id = ?2 AND status = 'pending'`)
+    .bind(group.id, user.id)
+    .first<{ x: number }>();
+  hasPendingRequest = pending !== null;
+}
+
+// Members + group-admin names come from the same read: the count and the admin
+// names are public content, but the full roster list below is only rendered for
+// an active member or a site admin.
+let members: GroupMemberRow[] = [];
+let occurrences: UpcomingOccurrence[] = [];
+try {
+  [members, occurrences] = await Promise.all([listMembers(db, group.id), listUpcomingOccurrencesForGroup(db, group.id)]);
+} catch (err) {
+  console.error('group detail: load failed', err);
+}
+const memberCount = members.length;
+const adminNames = members.filter((m) => m.is_admin === 1).map((m) => m.display_name);
+const canSeeRoster = isMember || isSiteAdmin;
+
+// Special events (registration module only — Supabase-backed; the section is
+// hidden entirely when the module is off or no linked event is currently open).
+const hasRegistration = Astro.locals.modules.has('registration');
+let specialEvents: Array<{ id: number; title: string; starts_at: string }> = [];
+if (hasRegistration) {
+  try {
+    specialEvents = await listOpenSpecialEventsForGroup(db, group.id, locale);
+  } catch (err) {
+    console.error('group detail: special events load failed', err);
+  }
+}
+
+const occurrenceWhen = (o: UpcomingOccurrence) => {
+  const time = utcToDatetimeLocal(o.starts_at, GROUP_TZ).slice(11, 16);
+  return `${formatDate(o.occurs_on, locale)} · ${time}`;
+};
+---
+
+<Base title={group.name} locale={locale}>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/groups')} class="text-sm text-ink-muted hover:underline">
+      {t(locale, 'groups.back')}
+    </a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{group.name}</h1>
+    {group.description && <p class="mt-3 text-ink-muted whitespace-pre-line">{group.description}</p>}
+
+    <dl class="mt-6 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+      <div class="flex gap-2">
+        <dt class="font-semibold">{t(locale, 'groups.memberCountLabel')}:</dt>
+        <dd class="text-ink-muted">{t(locale, 'groups.memberCount', { n: memberCount })}</dd>
+      </div>
+      {
+        adminNames.length > 0 && (
+          <div class="flex gap-2">
+            <dt class="font-semibold">{t(locale, 'groups.detail.adminsLabel')}:</dt>
+            <dd class="text-ink-muted">{adminNames.join(', ')}</dd>
+          </div>
+        )
+      }
+    </dl>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'groups.detail.upcomingTitle')}</h2>
+      {
+        occurrences.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.detail.noUpcoming')}</p>
+        ) : (
+          <ul class="mt-3 flex flex-col gap-3">
+            {occurrences.map((o) => (
+              <li class="rounded-lg border border-border bg-surface-raised p-4">
+                <p class="font-semibold">{o.title}</p>
+                <p class="mt-1 text-sm text-ink-muted">{occurrenceWhen(o)}</p>
+                {o.location && <p class="text-sm text-ink-muted">{o.location}</p>}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    {
+      hasRegistration && specialEvents.length > 0 && (
+        <section class="mt-8">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'groups.special.title')}</h2>
+          <ul class="mt-3 flex flex-col gap-3">
+            {specialEvents.map((s) => (
+              <li class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised p-4">
+                <div>
+                  <p class="font-semibold">{s.title}</p>
+                  <p class="mt-1 text-sm text-ink-muted tabular-nums">{formatDate(s.starts_at.slice(0, 10), locale)}</p>
+                </div>
+                <a href={localePath(locale, `/register/${s.id}`)} class="text-sm font-semibold text-primary hover:underline">
+                  {t(locale, 'groups.special.register')} →
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+      {
+        !user ? (
+          <div>
+            <p class="text-sm">{t(locale, 'groups.join.signInPrompt')}</p>
+            <p class="mt-3 flex flex-wrap gap-4 text-sm font-semibold">
+              <a href={localePath(locale, '/signin')} class="text-primary hover:underline">
+                {t(locale, 'groups.join.signIn')}
+              </a>
+              <a href={localePath(locale, '/signup')} class="text-primary hover:underline">
+                {t(locale, 'groups.join.createAccount')}
+              </a>
+            </p>
+          </div>
+        ) : isMember ? (
+          <div>
+            <p class="text-sm font-semibold text-success">{t(locale, 'groups.detail.youAreMember')}</p>
+            {isGroupAdminViewer || isSiteAdmin ? (
+              <a
+                href={localePath(locale, `/groups/${group.id}/manage`)}
+                class="mt-3 inline-block text-sm font-semibold text-primary hover:underline"
+              >
+                {t(locale, 'groups.manageLink')} →
+              </a>
+            ) : null}
+          </div>
+        ) : hasPendingRequest ? (
+          <p class="text-sm font-semibold text-ink-muted">{t(locale, 'groups.join.pending')}</p>
+        ) : (
+          <form method="post">
+            <input type="hidden" name="action" value="join" />
+            <p class="text-sm text-ink-muted">{t(locale, 'groups.join.intro')}</p>
+            <button type="submit" class={`${btn} mt-3`}>{t(locale, 'groups.join.submit')}</button>
+          </form>
+        )
+      }
+    </section>
+
+    {
+      canSeeRoster && (
+        <section class="mt-8">
+          <h2 class="font-display text-lg font-semibold">{t(locale, 'groups.detail.rosterTitle')}</h2>
+          <ul class="mt-3 flex flex-col gap-2">
+            {members.map((m) => (
+              <li class="flex items-center gap-2 text-sm">
+                <span>{m.display_name}</span>
+                {m.is_admin === 1 && <span class={`${badge} ${badgeRole.admin}`}>{t(locale, 'groups.admin')}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+  </div>
+</Base>

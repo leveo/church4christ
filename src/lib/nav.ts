@@ -22,6 +22,7 @@ export const BUILTIN_NAV: { key: string; path: string }[] = [
   { key: 'nav.serve', path: '/serve' },
   { key: 'nav.opportunities', path: '/serve/opportunities' },
   { key: 'nav.fellowships', path: '/fellowships' },
+  { key: 'nav.groups', path: '/groups' },
   { key: 'nav.articles', path: '/articles' },
 ];
 

@@ -41,6 +41,36 @@ export function nextWeekday(fromDateStr: string, weekday: number): string {
   return addDays(fromDateStr, (((weekday - cur) % 7) + 7) % 7);
 }
 
+/**
+ * From `dateStr`, the same day-of-month `n` months later ('YYYY-MM-DD'), or null
+ * when that target month has no such day (e.g. the 31st in a 30-day month).
+ * Powers monthly recurrence: "same day-of-month; skip months lacking the day".
+ * UTC-anchored, so it is immune to DST.
+ */
+export function addMonthsSameDom(dateStr: string, n: number): string | null {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const ny = Math.floor(total / 12);
+  const nm = ((total % 12) + 12) % 12; // 0-based month
+  const daysInMonth = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  if (d > daysInMonth) return null;
+  const pad = (v: number) => String(v).padStart(2, '0');
+  return `${ny}-${pad(nm + 1)}-${pad(d)}`;
+}
+
+/** Add `minutes` to a UTC 'YYYY-MM-DD HH:MM:SS' string, returning the same shape.
+ *  (datetimeLocalToUtc produces this shape; occurrence ends_at = starts_at + duration.) */
+export function addMinutesToUtcSql(utcSql: string, minutes: number): string {
+  const ms = new Date(utcSql.replace(' ', 'T') + 'Z').getTime() + minutes * 60_000;
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/** The current instant as a UTC 'YYYY-MM-DD HH:MM:SS' string, comparable with
+ *  D1's datetime('now') and the stored starts_at/ends_at occurrence columns. */
+export function toUtcSql(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 /** Human-readable date: en → 'July 5, 2026', zh → '2026年7月5日'. */
 export function formatDate(dateStr: string, locale: Locale): string {
   const [y, m, d] = dateStr.split('-').map(Number);

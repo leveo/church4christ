@@ -1,5 +1,6 @@
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
+import { sendAttendanceEmails } from './lib/groupAttendance';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
@@ -12,6 +13,7 @@ import { getBackend, openDb } from './lib/dbProvider';
 const REMINDER_CRON = '0 13 * * *'; // daily serving reminders (remind7 / remind3)
 const DIGEST_CRON = '0 14 * * 4'; // weekly serving digest (Thursday)
 const BACKUP_CRON = '0 9 * * *'; // daily D1 backup (slice 7)
+const ATTENDANCE_CRON = '0 * * * *'; // hourly group-attendance tracker emails
 
 export default {
   fetch: (request, env, ctx) => handle(request, env, ctx),
@@ -34,6 +36,11 @@ export default {
       case DIGEST_CRON: {
         const { db, end } = openDb(env as never);
         ctx.waitUntil(sendWeeklyDigest(vars, db).finally(end));
+        break;
+      }
+      case ATTENDANCE_CRON: {
+        const { db, end } = openDb(env as never);
+        ctx.waitUntil(sendAttendanceEmails(vars, db).finally(end));
         break;
       }
       case BACKUP_CRON:

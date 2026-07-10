@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": "./dist", "binding": "ASSETS" },
   // Keep these cron strings in sync with the switch in src/worker.ts.
-  "triggers": { "crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *"] },
+  "triggers": { "crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *", "0 * * * *"] },
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["serve@church.yunfei-song.com"] }],
   "vars": {
     "APP_ORIGIN": "https://church.yunfei-song.com",

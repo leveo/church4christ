@@ -1,0 +1,169 @@
+---
+// Site-admin groups console (adminOnly — routePolicy covers /admin/groups; this
+// page re-checks isAdmin and 403s anyone else, the stricter site-admin-only
+// check used by other ADMIN_ONLY pages like admin/settings, not the console-class
+// editor∪admin check used by e.g. admin/events). Group admins themselves manage
+// their own group at /groups/<id>/manage (in-page auth) — this console is CRUD
+// over every group plus who its admins are, for the site administrator.
+// Same inline add/edit model as announcements/events (?edit=<id>, save/delete),
+// soft delete only (groups.deleted_at — membership rows are kept).
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { parseGroupForm } from '../../../lib/groupForms';
+import { listGroups, createGroup, updateGroup, softDeleteGroup, listMembers } from '../../../lib/groupDb';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+const user = Astro.locals.user;
+if (!user?.isAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let fd: FormData | null = null;
+let failedId: string | null = null; // id whose form failed ('' = the create form)
+let badRequest = false; // unparseable POST body → generic localized banner, not a 500
+
+if (Astro.request.method === 'POST') {
+  // A malformed body (bad content type, truncated stream) throws here;
+  // re-render with a banner instead of surfacing a 500.
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    badRequest = true;
+  }
+  if (fd) {
+    const action = String(fd.get('action') ?? '');
+    const idRaw = String(fd.get('id') ?? '');
+    const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+    if (action === 'delete' && id !== null) {
+      await softDeleteGroup(db, id);
+      return Astro.redirect('/admin/groups?deleted=1', 303);
+    }
+    if (action === 'save') {
+      const parsed = parseGroupForm(fd);
+      if (parsed.ok) {
+        if (id !== null) await updateGroup(db, id, parsed.data);
+        else await createGroup(db, parsed.data);
+        return Astro.redirect('/admin/groups?saved=1', 303);
+      }
+      errors = parsed.errors;
+      failedId = id === null ? '' : String(id);
+    }
+  }
+}
+
+const rows = await listGroups(db);
+// Admin names per group for the "Admins" column — small admin console list, one
+// listMembers call per row (reusing the shared roster query rather than a
+// bespoke bulk SQL statement).
+const rosters = await Promise.all(rows.map((r) => listMembers(db, r.id)));
+const adminNamesByGroup = new Map(rows.map((r, i) => [r.id, rosters[i].filter((m) => m.is_admin === 1).map((m) => m.display_name)]));
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const deleted = Astro.url.searchParams.get('deleted') === '1';
+
+const editParam = Astro.url.searchParams.get('edit');
+const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
+
+const g = (n: string) => String(fd?.get(n) ?? '');
+const v =
+  fd && failedId !== null
+    ? { name: g('name'), description: g('description'), isPublic: fd.get('is_public') !== null }
+    : editingRow
+      ? { name: editingRow.name, description: editingRow.description, isPublic: editingRow.is_public === 1 }
+      : { name: '', description: '', isPublic: false };
+
+const hasErrors = Object.keys(errors).length > 0;
+const heading = t(lang, 'admin.groups.title');
+const formHeading = editId ? t(lang, 'admin.groups.editTitle') : t(lang, 'admin.groups.newTitle');
+const h2 = 'font-display text-heading-sm font-bold';
+---
+
+<Admin title={heading}>
+  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
+  {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
+
+  <form method="post" class="mt-6 max-w-2xl">
+    <section class={`${card} space-y-4`}>
+      <h2 class={h2}>{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.name')}</span>
+        <input name="name" value={v.name} class={tin} />
+        {errors.name && <span class={errorText}>{t(lang, errors.name)}</span>}
+      </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.description')}</span>
+        <textarea name="description" rows="3" class={tin}>{v.description}</textarea>
+        {errors.description && <span class={errorText}>{t(lang, errors.description)}</span>}
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="is_public" checked={v.isPublic} /> {t(lang, 'admin.groups.isPublic')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/groups" class="text-sm text-primary hover:underline">{t(lang, 'admin.groups.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.groups.existing')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.groups.colName')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colVisibility')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colMembers')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colAdmins')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.groups.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  <a href={`/admin/groups/${r.id}`} class="font-medium text-primary hover:underline">
+                    {r.name}
+                  </a>
+                </td>
+                <td class={td}>
+                  <span class={`${badge} ${r.is_public ? badgeActive : badgeInactive}`}>
+                    {r.is_public ? t(lang, 'admin.groups.public') : t(lang, 'admin.groups.private')}
+                  </span>
+                </td>
+                <td class={td}>{r.member_count}</td>
+                <td class={`${td} text-ink-muted`}>{(adminNamesByGroup.get(r.id) ?? []).join(', ') || '—'}</td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/groups/${r.id}`} class={rowBtn}>{t(lang, 'admin.groups.manageAdmins')}</a>
+                    <a href={`/admin/groups?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.groups.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</Admin>

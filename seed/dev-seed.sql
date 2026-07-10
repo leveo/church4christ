@@ -476,3 +476,38 @@ UPDATE people SET avatar_url = '/media/uploads/06eabb4919549133-avatar-faithful-
 UPDATE people SET avatar_url = '/media/uploads/c0126d218e4f4462-avatar-amy-chen.webp' WHERE id = 7;
 UPDATE people SET avatar_url = '/media/uploads/624b72ae921a3faf-avatar-ben-wu.webp' WHERE id = 8;
 UPDATE people SET avatar_url = '/media/uploads/05218adece952076-avatar-esther-lin.webp' WHERE id = 9;
+
+-- Groups module (Slice A). Two groups: a PUBLIC "Young Adults" with a weekly
+-- attendance-tracked Bible study, and a PRIVATE "Prayer Partners". Members reuse
+-- seeded people ids; group 1 carries one name-only member (person_id NULL, the
+-- household-dependent precedent) and Ben (8) as group admin, group 2 has Faithful
+-- (6) as admin. One pending join request (Grace 4 -> Young Adults). Two past
+-- occurrences with attendance rows so the profile activity section has history.
+INSERT INTO groups (id, name, description, is_public) VALUES
+  (1, 'Young Adults 青年团契', 'A community for young adults to grow in faith and friendship through weekly study and fellowship.', 1),
+  (2, 'Prayer Partners 祷告伙伴', 'A small, private circle who commit to praying for one another through the week.', 0);
+
+INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admin) VALUES
+  (1, 1, 8, 'Ben Wu 吴恩本', NULL, 1),
+  (2, 1, 5, 'Mark Liu 刘马可', NULL, 0),
+  (3, 1, 10, 'Joshua Zhao 赵约书亚', NULL, 0),
+  (4, 1, NULL, 'Hannah Guest 访客', '(555) 010-7777', 0),
+  (5, 2, 6, 'Faithful Wang 王信实', NULL, 1),
+  (6, 2, 9, 'Esther Lin 林以斯帖', NULL, 0);
+
+INSERT INTO group_join_requests (id, group_id, person_id, status) VALUES
+  (1, 1, 4, 'pending');
+
+INSERT INTO group_events (id, group_id, title, description, location, recurrence, starts_on, start_time, duration_min, ends_on, track_attendance, active) VALUES
+  (1, 1, 'Friday Bible Study 週五查經', 'Weekly study in the Gospel of John with prayer and supper.', 'Fellowship Hall 团契厅', 'weekly', date('now','weekday 5','-14 days'), '19:00', 90, NULL, 1, 1);
+
+INSERT INTO group_event_occurrences (id, event_id, occurs_on, starts_at, ends_at) VALUES
+  (1, 1, date('now','weekday 5','-14 days'), datetime('now','weekday 5','-14 days','start of day','+19 hours'), datetime('now','weekday 5','-14 days','start of day','+19 hours','+90 minutes')),
+  (2, 1, date('now','weekday 5','-7 days'), datetime('now','weekday 5','-7 days','start of day','+19 hours'), datetime('now','weekday 5','-7 days','start of day','+19 hours','+90 minutes'));
+
+INSERT INTO group_attendance (id, occurrence_id, member_id, present, recorded_by) VALUES
+  (1, 1, 1, 1, 8),
+  (2, 1, 2, 1, 8),
+  (3, 1, 3, 0, 8),
+  (4, 2, 1, 1, 8),
+  (5, 2, 2, 0, 8);

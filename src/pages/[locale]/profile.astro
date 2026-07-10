@@ -12,9 +12,12 @@ import Base from '../../layouts/Base.astro';
 import { env } from 'cloudflare:workers';
 import AvatarInitials from '../../components/AvatarInitials.astro';
 import ServingHistory from '../../components/ServingHistory.astro';
+import GroupActivity from '../../components/GroupActivity.astro';
 import { localePath, parseLocale, LOCALES } from '../../lib/locales';
 import { t } from '../../lib/i18n';
 import { getPerson, savePerson, setPersonAvatar } from '../../lib/adminDb';
+import { listPersonGroupActivity, type PersonGroupActivity } from '../../lib/groupDb';
+import { listRegistrationsForPerson, type PersonRegistration } from '../../lib/groupRegDb';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../lib/mediaRef';
 import {
@@ -56,6 +59,9 @@ const hasPeople = Astro.locals.modules.has('people');
 // whole page — /profile is core auth surface) to avoid dead-ends.
 const hasServe = Astro.locals.modules.has('serve');
 const hasGifts = Astro.locals.modules.has('gifts');
+// Groups module: "my groups" + attendance history, plus registrations when the
+// registration module is also on (Supabase-only reader — never called on D1).
+const hasGroups = Astro.locals.modules.has('groups');
 
 const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
 
@@ -207,6 +213,17 @@ if (hasPeople) {
 // Adults (real members) may edit the shared card / manage dependents; the lib
 // re-verifies this, but hiding the forms for a child-role member keeps the UI honest.
 const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.role === 'adult') ?? false;
+
+// Groups module: own memberships + attendance, and (registration module on)
+// own event registrations — the Supabase-only reader is never reached on D1.
+let groupActivity: PersonGroupActivity = { memberships: [], attendance: [] };
+let registrations: PersonRegistration[] = [];
+if (hasGroups) {
+  groupActivity = await listPersonGroupActivity(db, user.id);
+  if (Astro.locals.modules.has('registration')) {
+    registrations = await listRegistrationsForPerson(db, user.id, locale);
+  }
+}
 ---
 
 <Base title={t(locale, 'profile.title')} locale={locale} noindex>
@@ -524,5 +541,18 @@ const iAmAdult = household?.members.some((m) => m.person_id === user.id && m.rol
     <div class="mt-10">
       <ServingHistory locale={locale} history={history} blockouts={blockouts} />
     </div>
+
+    {
+      hasGroups && (
+        <div class="mt-10">
+          <GroupActivity
+            locale={locale}
+            memberships={groupActivity.memberships}
+            attendance={groupActivity.attendance}
+            registrations={registrations}
+          />
+        </div>
+      )
+    }
   </div>
 </Base>

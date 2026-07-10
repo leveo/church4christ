@@ -62,10 +62,26 @@ const PUBLIC_PREFIXES = [
   // policy is not re-touched later; harmless while the module is disabled.
   '/register',
   '/api/register',
+  // Groups: the public directory/detail pages, self-service signup, and the
+  // token-authed attendance page all do their own in-page auth (private group
+  // detail/manage 404s non-members itself), so none of these need a session.
+  '/groups',
+  '/signup',
+  '/attendance',
 ];
 
 // Site-admin-only areas under /admin. Checked BEFORE the console list.
-const ADMIN_ONLY = ['/admin/people', '/admin/service-types', '/admin/settings', '/admin/reports', '/admin/teams', '/admin/navigation'];
+const ADMIN_ONLY = [
+  '/admin/people',
+  '/admin/service-types',
+  '/admin/settings',
+  '/admin/reports',
+  '/admin/teams',
+  '/admin/navigation',
+  // Group admins manage their own group at /groups/<id>/manage (in-page auth);
+  // /admin/groups is the site-admin CRUD console, so it stays adminOnly.
+  '/admin/groups',
+];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).
 // Any /admin path in NEITHER list fails closed to adminOnly.

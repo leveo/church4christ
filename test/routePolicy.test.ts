@@ -51,6 +51,11 @@ describe('classifyRoute', () => {
     ['/register', 'public'],
     ['/register/thanks', 'public'],
     ['/api/register/submit', 'public'],
+    // ── groups public surfaces ──
+    ['/groups', 'public'],
+    ['/groups/7', 'public'],
+    ['/signup', 'public'],
+    ['/attendance/abc123', 'public'],
     // ── admin-authored custom pages (T4): no explicit rule, falls through the
     // "everything else is public" default so the route itself enforces
     // published/preview visibility and 404s.
@@ -96,6 +101,8 @@ describe('classifyRoute', () => {
     ['/admin/settings', 'adminOnly'],
     ['/admin/reports', 'adminOnly'],
     ['/admin/teams', 'adminOnly'],
+    ['/admin/groups', 'adminOnly'],
+    ['/admin/groups/7', 'adminOnly'],
     ['/admin/navigation', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…

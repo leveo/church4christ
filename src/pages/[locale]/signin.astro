@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
 import { t } from '../../lib/i18n';
-import { parseLocale } from '../../lib/locales';
+import { localePath, parseLocale } from '../../lib/locales';
 import { getPersonByEmail } from '../../lib/db';
 import { sendMagicLink } from '../../lib/notify';
 import type { EmailEnv } from '../../lib/email';
@@ -83,6 +83,16 @@ if (Astro.request.method === 'POST') {
               {t(locale, 'signin.submit')}
             </button>
           </form>
+          {
+            Astro.locals.modules.has('groups') && (
+              <p class="mt-4 text-sm text-ink-muted">
+                {t(locale, 'signin.newHere')}{' '}
+                <a href={localePath(locale, '/signup')} class="font-semibold text-primary hover:underline">
+                  {t(locale, 'signin.createAccount')}
+                </a>
+              </p>
+            )
+          }
         </>
       )
     }

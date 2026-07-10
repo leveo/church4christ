@@ -1,0 +1,87 @@
+---
+import Base from '../../layouts/Base.astro';
+import AttendanceSheet from '../../components/AttendanceSheet.astro';
+import { t } from '../../lib/i18n';
+import { DEFAULT_LOCALE, LOCALES, type Locale } from '../../lib/locales';
+import { getPersonById } from '../../lib/db';
+import { getOccurrenceWithEvent } from '../../lib/groupEventDb';
+import { listMembers } from '../../lib/groupDb';
+import { verifyAttendanceToken, saveAttendance, getAttendanceMap } from '../../lib/groupAttendance';
+
+// Locale-free attendance tracker (the /respond, /auth token-page precedent): the
+// emailed link carries a raw 72h token, verified server-side on every request.
+// The token is multi-use until expiry BY DESIGN — an admin can revisit the link
+// to correct a mistake — so GET and POST both merely *verify* (never consume) it.
+// POST re-verifies the token from the hidden field (not the URL alone) before
+// writing, then 303-redirects to itself with ?saved=1. Invalid/expired tokens get
+// a friendly bilingual 404 that leaks no occurrence detail. CSRF is covered by the
+// middleware's same-origin check.
+const raw = Astro.params.token ?? '';
+const db = Astro.locals.db;
+
+const langOf = (lang: string | null | undefined): Locale => (lang === 'zh' ? 'zh' : 'en');
+
+let valid = false;
+let saved = false;
+let locale: Locale = DEFAULT_LOCALE;
+let occurrence = null;
+let members: Awaited<ReturnType<typeof listMembers>> = [];
+let attendance: Record<number, number> = {};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  // Re-verify the SUBMITTED token, not the URL param alone.
+  const submitted = String(form.get('token') ?? '');
+  const tok = submitted ? await verifyAttendanceToken(db, submitted) : null;
+  if (tok) {
+    const memberIds = form.getAll('member').map((v) => Number(v)).filter((n) => Number.isInteger(n));
+    await saveAttendance(db, tok.occurrence_id, memberIds, tok.person_id);
+    return Astro.redirect(`${Astro.url.pathname}?saved=1`, 303);
+  }
+} else {
+  const tok = await verifyAttendanceToken(db, raw);
+  if (tok) {
+    occurrence = await getOccurrenceWithEvent(db, tok.occurrence_id);
+    if (occurrence) {
+      const person = await getPersonById(db, tok.person_id);
+      locale = langOf(person?.lang);
+      [members, attendance] = await Promise.all([
+        listMembers(db, occurrence.group_id),
+        getAttendanceMap(db, occurrence.id),
+      ]);
+      valid = true;
+      saved = Astro.url.searchParams.has('saved');
+    }
+  }
+}
+
+if (!valid) {
+  Astro.response.status = 404;
+}
+---
+{
+  valid && occurrence ? (
+    <Base title={t(locale, 'attendance.title')} locale={locale} noindex>
+      <AttendanceSheet
+        locale={locale}
+        occurrence={occurrence}
+        members={members}
+        attendance={attendance}
+        actionUrl={Astro.url.pathname}
+        token={raw}
+        saved={saved}
+      />
+    </Base>
+  ) : (
+    <Base title={LOCALES.map((l) => t(l, 'attendance.invalid.title')).join(' · ')} locale={DEFAULT_LOCALE} noindex>
+      <section class="container-narrow py-16 text-center">
+        {LOCALES.map((l) => (
+          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'attendance.invalid.title')}</h1>
+            <p class="mt-2 text-ink-muted">{t(l, 'attendance.invalid.body')}</p>
+          </div>
+        ))}
+      </section>
+    </Base>
+  )
+}

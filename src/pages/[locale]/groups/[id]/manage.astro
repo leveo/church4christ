@@ -1,0 +1,669 @@
+---
+// Group-admin console (in-page auth, like profile privacy rules — this route is
+// PUBLIC-prefixed so the router lets it through, then we gate here). A single page
+// of self-POST sections (hidden `action` field, 303 → ?saved=1 on success,
+// echo-on-error for the validated forms). All writes go through the lib layer.
+//
+// Authorization: a signed-in site admin (user.isAdmin) OR an active group admin of
+// THIS group. Anyone else gets a 404 rewrite — identical to a private group they
+// aren't in (anti-enumeration). The guard runs on every request, so it also
+// re-checks before every POST write.
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { formatDate, addDays, todayInTz } from '../../../../lib/dates';
+import {
+  getGroup,
+  isGroupAdmin,
+  updateGroup,
+  listJoinRequests,
+  decideJoinRequest,
+  listMembers,
+  addMemberByPerson,
+  addMemberInline,
+  removeMember,
+  setMemberAdmin,
+  searchPeopleForGroup,
+} from '../../../../lib/groupDb';
+import {
+  listEventsForGroup,
+  listUpcomingOccurrencesForGroup,
+  listRecentPastOccurrences,
+  createEvent,
+  updateEvent,
+  setEventActive,
+  softDeleteEvent,
+  ensureOccurrences,
+  RECURRENCES,
+  type PastOccurrence,
+} from '../../../../lib/groupEventDb';
+import { parseGroupEventForm, parseInlineMemberForm } from '../../../../lib/groupEventForms';
+import { parseRegEventForm } from '../../../../lib/regForms';
+import {
+  createSpecialEvent,
+  linkSpecialEvent,
+  unlinkSpecialEvent,
+  listSpecialEventsForGroup,
+  listLinkableEvents,
+  type GroupSpecialEvent,
+  type LinkableEvent,
+} from '../../../../lib/groupRegDb';
+import { btn, btnSecondary, card, errorText, lab, noticeErr, noticeOk, rowBtn, tin, td, badge } from '../../../../lib/adminUi';
+
+const TZ = 'America/Chicago';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const db = Astro.locals.db;
+
+const idRaw = Astro.params.id ?? '';
+const groupId = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+const group = groupId !== null ? await getGroup(db, groupId) : null;
+if (!group) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect(localePath(locale, '/signin'), 303);
+
+const authorized = user.isAdmin || (await isGroupAdmin(db, group.id, user.id));
+if (!authorized) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const hasRegistration = Astro.locals.modules.has('registration');
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+// Load render data once (successful actions redirect, so the echo paths — the two
+// validated forms — render against pre-mutation data, which is correct).
+const [members, joinRequests, events, upcoming] = await Promise.all([
+  listMembers(db, group.id),
+  listJoinRequests(db, group.id),
+  listEventsForGroup(db, group.id),
+  listUpcomingOccurrencesForGroup(db, group.id),
+]);
+const upcomingByEvent = new Map<number, number>();
+for (const o of upcoming) upcomingByEvent.set(o.event_id, (upcomingByEvent.get(o.event_id) ?? 0) + 1);
+
+// Special events (registration module only — Supabase-backed; groupRegDb is never
+// reached on a D1 request because of this gate). Loaded once, pre-mutation, so the
+// create-form echo path renders against a consistent snapshot like the others.
+let specialEvents: GroupSpecialEvent[] = [];
+let linkableEvents: LinkableEvent[] = [];
+if (hasRegistration) {
+  [specialEvents, linkableEvents] = await Promise.all([
+    listSpecialEventsForGroup(db, group.id, locale),
+    listLinkableEvents(db, group.id),
+  ]);
+}
+
+// ── POST (self-page, hidden `action`) ───────────────────────────────────────
+let eventErrors: Record<string, string> = {};
+let eventFailedId: string | null = null; // id whose event form failed ('' = the create form)
+let inlineErrors: Record<string, string> = {};
+let specialErrors: Record<string, string> = {};
+let postFd: FormData | null = null;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  postFd = fd;
+  const action = String(fd.get('action') ?? '');
+  const savedRedirect = () => Astro.redirect(localePath(locale, `/groups/${group.id}/manage?saved=1`), 303);
+
+  if (action === 'visibility') {
+    // Flip visibility, preserving name/description (updateGroup rewrites all three).
+    await updateGroup(db, group.id, { name: group.name, description: group.description, isPublic: group.is_public === 0 });
+    return savedRedirect();
+  } else if (action === 'decide') {
+    const requestId = idOf(fd.get('request_id'));
+    const decision = String(fd.get('decision') ?? '');
+    // Scope to THIS group's pending requests — a forged request_id must not reach
+    // another group (same pattern as set-admin below).
+    if (
+      requestId !== null &&
+      (decision === 'approve' || decision === 'reject') &&
+      joinRequests.some((r) => r.id === requestId)
+    ) {
+      await decideJoinRequest(db, requestId, decision === 'approve', user.id);
+    }
+    return savedRedirect();
+  } else if (action === 'add-person') {
+    const personId = idOf(fd.get('person_id'));
+    if (personId !== null) {
+      try {
+        await addMemberByPerson(db, group.id, personId);
+      } catch {
+        // person_not_found (deleted between search and add) — ignore, no dead-end.
+      }
+    }
+    return savedRedirect();
+  } else if (action === 'add-inline') {
+    const parsed = parseInlineMemberForm(fd);
+    if (!parsed.ok) inlineErrors = parsed.errors;
+    else {
+      await addMemberInline(db, group.id, parsed.data);
+      return savedRedirect();
+    }
+  } else if (action === 'remove-member') {
+    const memberId = idOf(fd.get('member_id'));
+    if (memberId !== null && members.some((m) => m.id === memberId)) await removeMember(db, memberId);
+    return savedRedirect();
+  } else if (action === 'set-admin') {
+    const memberId = idOf(fd.get('member_id'));
+    const makeAdmin = String(fd.get('make') ?? '') === '1';
+    // is_admin is only meaningful for a linked person — never promote a name-only
+    // row even if a crafted POST targets one (its button is hidden in the UI).
+    const target = members.find((m) => m.id === memberId);
+    if (memberId !== null && target && target.person_id !== null) await setMemberAdmin(db, memberId, makeAdmin);
+    return savedRedirect();
+  } else if (action === 'save-event') {
+    const eidRaw = String(fd.get('id') ?? '');
+    const eid = /^\d+$/.test(eidRaw) ? Number(eidRaw) : null;
+    const parsed = parseGroupEventForm(fd);
+    if (!parsed.ok) {
+      eventErrors = parsed.errors;
+      eventFailedId = eid === null ? '' : String(eid);
+    } else {
+      const active = fd.get('active') !== null;
+      let savedId: number;
+      if (eid !== null) {
+        // Scope to THIS group's events — a forged id must not edit another group's event.
+        if (!events.some((e) => e.id === eid)) return savedRedirect();
+        await updateEvent(db, eid, parsed.data);
+        await setEventActive(db, eid, active); // active is edit-only, outside GroupEventInput
+        savedId = eid;
+      } else {
+        savedId = await createEvent(db, group.id, parsed.data);
+      }
+      // Materialize occurrences through +35d right after save (site TZ).
+      const through = addDays(todayInTz(TZ), 35);
+      await ensureOccurrences(db, {
+        id: savedId,
+        recurrence: parsed.data.recurrence,
+        starts_on: parsed.data.startsOn,
+        start_time: parsed.data.startTime,
+        duration_min: parsed.data.durationMin,
+        ends_on: parsed.data.endsOn,
+      }, through);
+      return savedRedirect();
+    }
+  } else if (action === 'delete-event') {
+    const eid = idOf(fd.get('event_id'));
+    if (eid !== null && events.some((e) => e.id === eid)) await softDeleteEvent(db, eid);
+    return savedRedirect();
+  } else if (hasRegistration && action === 'link-special') {
+    // Link an existing reg event — scope to ids the picker actually offered
+    // (active + not-yet-linked) so a forged id can't attach an arbitrary event.
+    const regEventId = idOf(fd.get('reg_event_id'));
+    if (regEventId !== null && linkableEvents.some((e) => e.id === regEventId)) {
+      await linkSpecialEvent(db, group.id, regEventId);
+    }
+    return savedRedirect();
+  } else if (hasRegistration && action === 'unlink-special') {
+    // Unlink — scope to rows already linked to THIS group (listSpecialEventsForGroup).
+    const regEventId = idOf(fd.get('reg_event_id'));
+    if (regEventId !== null && specialEvents.some((e) => e.id === regEventId)) {
+      await unlinkSpecialEvent(db, group.id, regEventId);
+    }
+    return savedRedirect();
+  } else if (hasRegistration && action === 'create-special') {
+    // Reuse the registration event parser (title_en + starts_at required, UTC
+    // datetime conversion, capacity/price handling). The group form omits
+    // opens_at/closes_at/active/price — createSpecialEvent forces active=1 and
+    // defaults free; a blank zh title reuses the en title.
+    const parsed = parseRegEventForm(fd);
+    if (!parsed.ok) specialErrors = parsed.errors;
+    else {
+      await createSpecialEvent(db, group.id, {
+        title_en: parsed.data.title_en,
+        title_zh: parsed.data.title_zh,
+        description_en: parsed.data.description_en,
+        description_zh: parsed.data.description_zh,
+        starts_at: parsed.data.starts_at,
+        ends_at: parsed.data.ends_at,
+        location: parsed.data.location,
+        capacity: parsed.data.capacity,
+        price_cents: parsed.data.price_cents,
+      });
+      return savedRedirect();
+    }
+  }
+}
+
+const saved = Astro.url.searchParams.has('saved');
+
+// People search (add-member picker): GET ?q=.
+const q = (Astro.url.searchParams.get('q') ?? '').trim();
+const searchHits = q ? await searchPeopleForGroup(db, q) : [];
+
+// Event editor prefill: ?edit=<id>, or the echoed values when a save failed.
+const editParam = Astro.url.searchParams.get('edit');
+const editId = eventFailedId !== null ? eventFailedId : editParam && /^\d+$/.test(editParam) ? editParam : '';
+const editingRow = editId ? (events.find((e) => String(e.id) === editId) ?? null) : null;
+const echoing = postFd !== null && eventFailedId !== null;
+const g = (n: string) => String(postFd?.get(n) ?? '');
+const ev = echoing
+  ? {
+      title: g('title'), description: g('description'), location: g('location'), recurrence: g('recurrence'),
+      startsOn: g('starts_on'), startTime: g('start_time'), durationMin: g('duration_min'), endsOn: g('ends_on'),
+      trackAttendance: postFd!.get('track_attendance') !== null, active: postFd!.get('active') !== null,
+    }
+  : editingRow
+    ? {
+        title: editingRow.title, description: editingRow.description, location: editingRow.location ?? '',
+        recurrence: editingRow.recurrence, startsOn: editingRow.starts_on, startTime: editingRow.start_time,
+        durationMin: String(editingRow.duration_min), endsOn: editingRow.ends_on ?? '',
+        trackAttendance: editingRow.track_attendance === 1, active: editingRow.active === 1,
+      }
+    : {
+        title: '', description: '', location: '', recurrence: 'weekly', startsOn: '', startTime: '',
+        durationMin: '90', endsOn: '', trackAttendance: true, active: true,
+      };
+
+// Inline add-member echo.
+const inlineEchoing = postFd !== null && Object.keys(inlineErrors).length > 0;
+const gi = (n: string) => (inlineEchoing ? String(postFd?.get(n) ?? '') : '');
+
+// Create-special-event echo (registration module only).
+const specialEchoing = postFd !== null && Object.keys(specialErrors).length > 0;
+const gsp = (n: string) => (specialEchoing ? String(postFd?.get(n) ?? '') : '');
+
+// Attendance history: recent past occurrences per tracked event.
+const trackedEvents = events.filter((e) => e.track_attendance === 1);
+const pastByEvent = new Map<number, PastOccurrence[]>();
+for (const e of trackedEvents) pastByEvent.set(e.id, await listRecentPastOccurrences(db, e.id, 10));
+
+const pageTitle = t(locale, 'groups.manage.title', { group: group.name });
+const h2 = 'font-display text-lg font-semibold';
+const dateOf = (s: string) => formatDate(s.slice(0, 10), locale);
+---
+
+<Base title={pageTitle} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, `/groups/${group.id}`)} class="text-sm text-ink-muted hover:text-primary">
+      {t(locale, 'groups.manage.back')}
+    </a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{pageTitle}</h1>
+    {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'groups.manage.saved')}</p>}
+
+    {/* 1 ── Visibility ─────────────────────────────────────────── */}
+    <section class={`mt-8 ${card}`}>
+      <h2 class={h2}>{t(locale, 'groups.manage.visibility.title')}</h2>
+      <p class="mt-2 text-sm text-ink-muted">
+        {t(locale, group.is_public === 1 ? 'groups.manage.visibility.publicNow' : 'groups.manage.visibility.privateNow')}
+      </p>
+      <form method="post" class="mt-3">
+        <input type="hidden" name="action" value="visibility" />
+        <button type="submit" class={btnSecondary}>
+          {t(locale, group.is_public === 1 ? 'groups.manage.visibility.makePrivate' : 'groups.manage.visibility.makePublic')}
+        </button>
+      </form>
+    </section>
+
+    {/* 2 ── Join requests ─────────────────────────────────────── */}
+    <section class={`mt-8 ${card}`}>
+      <h2 class={h2}>{t(locale, 'groups.manage.requests.title')}</h2>
+      {joinRequests.length === 0 ? (
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.requests.none')}</p>
+      ) : (
+        <ul class="mt-3 flex flex-col gap-3">
+          {joinRequests.map((r) => (
+            <li class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 first:border-0 first:pt-0">
+              <div>
+                <p class="font-medium">{r.display_name}</p>
+                <p class="text-sm text-ink-muted">{r.email}</p>
+                <p class="text-xs text-ink-subtle">{t(locale, 'groups.manage.requests.requested', { date: dateOf(r.created_at) })}</p>
+              </div>
+              <div class="flex gap-2">
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="decide" />
+                  <input type="hidden" name="request_id" value={r.id} />
+                  <input type="hidden" name="decision" value="approve" />
+                  <button type="submit" class={btn}>{t(locale, 'groups.manage.requests.approve')}</button>
+                </form>
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="decide" />
+                  <input type="hidden" name="request_id" value={r.id} />
+                  <input type="hidden" name="decision" value="reject" />
+                  <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.requests.reject')}</button>
+                </form>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+
+    {/* 3 ── Members ────────────────────────────────────────────── */}
+    <section class={`mt-8 ${card}`}>
+      <h2 class={h2}>{t(locale, 'groups.manage.members.title')}</h2>
+      {members.length === 0 ? (
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.members.none')}</p>
+      ) : (
+        <ul class="mt-3 flex flex-col gap-2">
+          {members.map((m) => (
+            <li class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2 first:border-0 first:pt-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-medium">{m.display_name}</span>
+                {m.phone && <span class="text-sm text-ink-muted">{m.phone}</span>}
+                {m.is_admin === 1 && <span class={`${badge} bg-primary-soft text-on-primary-soft`}>{t(locale, 'groups.manage.members.admin')}</span>}
+                {m.person_id === null && <span class={`${badge} bg-surface-sunken text-ink-muted`}>{t(locale, 'groups.manage.members.nameOnly')}</span>}
+              </div>
+              <div class="flex flex-wrap gap-2">
+                {/* Promote/demote only for linked people — name-only rows cannot be
+                    admins (no person to attach the flag to); button hidden + guarded
+                    server-side in the set-admin action. */}
+                {m.person_id !== null && (
+                  <form method="post" class="inline">
+                    <input type="hidden" name="action" value="set-admin" />
+                    <input type="hidden" name="member_id" value={m.id} />
+                    <input type="hidden" name="make" value={m.is_admin === 1 ? '0' : '1'} />
+                    <button type="submit" class={rowBtn}>
+                      {t(locale, m.is_admin === 1 ? 'groups.manage.members.demote' : 'groups.manage.members.promote')}
+                    </button>
+                  </form>
+                )}
+                <form method="post" class="inline" onsubmit={`return confirm(${JSON.stringify(t(locale, 'groups.manage.members.removeConfirm'))})`}>
+                  <input type="hidden" name="action" value="remove-member" />
+                  <input type="hidden" name="member_id" value={m.id} />
+                  <button type="submit" class={`${rowBtn} text-danger`}>{t(locale, 'groups.manage.members.remove')}</button>
+                </form>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* 3a ── Search existing people (GET ?q=) ──────────────── */}
+      <div class="mt-6 border-t border-border pt-5">
+        <p class="text-sm font-semibold">{t(locale, 'groups.manage.members.searchTitle')}</p>
+        <form method="get" class="mt-2 flex flex-wrap gap-2">
+          <input name="q" value={q} placeholder={t(locale, 'groups.manage.members.searchPlaceholder')} class={`${tin} max-w-xs`} />
+          <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.members.search')}</button>
+        </form>
+        {q && (
+          searchHits.length === 0 ? (
+            <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.members.noResults')}</p>
+          ) : (
+            <ul class="mt-3 flex flex-col gap-2">
+              {searchHits.map((p) => (
+                <li class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span class="font-medium">{p.display_name}</span>
+                    <span class="ml-2 text-sm text-ink-muted">{p.email}</span>
+                  </div>
+                  <form method="post" class="inline">
+                    <input type="hidden" name="action" value="add-person" />
+                    <input type="hidden" name="person_id" value={p.id} />
+                    <button type="submit" class={rowBtn}>{t(locale, 'groups.manage.members.add')}</button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </div>
+
+      {/* 3b ── Inline create ─────────────────────────────────── */}
+      <form method="post" class="mt-6 grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+        <input type="hidden" name="action" value="add-inline" />
+        <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'groups.manage.members.inlineTitle')}</p>
+        <p class="text-sm text-ink-muted sm:col-span-2">{t(locale, 'groups.manage.members.inlineHint')}</p>
+        {Object.keys(inlineErrors).length > 0 && <p class={`sm:col-span-2 ${noticeErr}`}>{t(locale, 'groups.manage.fixErrors')}</p>}
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.members.firstName')}</span>
+          <input name="first_name" value={gi('first_name')} class={tin} />
+          {inlineErrors.first_name && <span class={errorText}>{t(locale, inlineErrors.first_name)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.members.lastName')}</span>
+          <input name="last_name" value={gi('last_name')} class={tin} />
+          {inlineErrors.last_name && <span class={errorText}>{t(locale, inlineErrors.last_name)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.members.email')}</span>
+          <input name="email" value={gi('email')} class={tin} />
+          {inlineErrors.email && <span class={errorText}>{t(locale, inlineErrors.email)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.members.phone')}</span>
+          <input name="phone" value={gi('phone')} class={tin} />
+          {inlineErrors.phone && <span class={errorText}>{t(locale, inlineErrors.phone)}</span>}
+        </label>
+        <div class="sm:col-span-2">
+          <button type="submit" class={btn}>{t(locale, 'groups.manage.members.addButton')}</button>
+        </div>
+      </form>
+    </section>
+
+    {/* 4 ── Routine events ─────────────────────────────────────── */}
+    <section class={`mt-8 ${card}`}>
+      <h2 class={h2}>{t(locale, 'groups.manage.events.title')}</h2>
+
+      {events.length === 0 ? (
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.events.none')}</p>
+      ) : (
+        <ul class="mt-3 flex flex-col gap-2">
+          {events.map((e) => (
+            <li class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2 first:border-0 first:pt-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-medium">{e.title}</span>
+                <span class="text-sm text-ink-muted">{t(locale, `groups.manage.recur.${e.recurrence}`)}</span>
+                <span class="text-xs text-ink-subtle">{t(locale, 'groups.manage.events.upcoming', { count: String(upcomingByEvent.get(e.id) ?? 0) })}</span>
+                {e.active === 0 && <span class={`${badge} bg-surface-sunken text-ink-muted`}>{t(locale, 'groups.manage.events.inactive')}</span>}
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <a href={`${localePath(locale, `/groups/${group.id}/manage`)}?edit=${e.id}#event-editor`} class={rowBtn}>{t(locale, 'groups.manage.events.edit')}</a>
+                <form method="post" class="inline" onsubmit={`return confirm(${JSON.stringify(t(locale, 'groups.manage.events.deleteConfirm'))})`}>
+                  <input type="hidden" name="action" value="delete-event" />
+                  <input type="hidden" name="event_id" value={e.id} />
+                  <button type="submit" class={`${rowBtn} text-danger`}>{t(locale, 'groups.manage.events.delete')}</button>
+                </form>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Inline create / edit form (?edit=<id>) */}
+      <form id="event-editor" method="post" class="mt-6 grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+        <input type="hidden" name="action" value="save-event" />
+        {editId && <input type="hidden" name="id" value={editId} />}
+        <p class="text-sm font-semibold sm:col-span-2">
+          {t(locale, editId ? 'groups.manage.events.editTitle' : 'groups.manage.events.newTitle')}
+        </p>
+        {Object.keys(eventErrors).length > 0 && <p class={`sm:col-span-2 ${noticeErr}`}>{t(locale, 'groups.manage.fixErrors')}</p>}
+        <label class="block sm:col-span-2">
+          <span class={lab}>{t(locale, 'groups.manage.events.eventTitle')}</span>
+          <input name="title" value={ev.title} class={tin} />
+          {eventErrors.title && <span class={errorText}>{t(locale, eventErrors.title)}</span>}
+        </label>
+        <label class="block sm:col-span-2">
+          <span class={lab}>{t(locale, 'groups.manage.events.description')}</span>
+          <textarea name="description" rows="2" class={tin}>{ev.description}</textarea>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.location')}</span>
+          <input name="location" value={ev.location} class={tin} />
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.recurrence')}</span>
+          <select name="recurrence" class={tin}>
+            {RECURRENCES.map((r) => (
+              <option value={r} selected={ev.recurrence === r}>{t(locale, `groups.manage.recur.${r}`)}</option>
+            ))}
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.startsOn')}</span>
+          <input type="date" name="starts_on" value={ev.startsOn} class={tin} />
+          {eventErrors.starts_on && <span class={errorText}>{t(locale, eventErrors.starts_on)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.startTime')}</span>
+          <input type="time" name="start_time" value={ev.startTime} class={tin} />
+          {eventErrors.start_time && <span class={errorText}>{t(locale, eventErrors.start_time)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.duration')}</span>
+          <input name="duration_min" value={ev.durationMin} class={tin} inputmode="numeric" />
+          {eventErrors.duration_min && <span class={errorText}>{t(locale, eventErrors.duration_min)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'groups.manage.events.endsOn')}</span>
+          <input type="date" name="ends_on" value={ev.endsOn} class={tin} />
+          {eventErrors.ends_on && <span class={errorText}>{t(locale, eventErrors.ends_on)}</span>}
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="track_attendance" checked={ev.trackAttendance} /> {t(locale, 'groups.manage.events.trackAttendance')}
+        </label>
+        {editId && (
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="active" checked={ev.active} /> {t(locale, 'groups.manage.events.active')}
+          </label>
+        )}
+        <div class="flex items-center gap-4 sm:col-span-2">
+          <button type="submit" class={btn}>{t(locale, 'groups.manage.events.save')}</button>
+          {editId && (
+            <a href={localePath(locale, `/groups/${group.id}/manage`)} class="text-sm text-primary hover:underline">
+              {t(locale, 'groups.manage.events.cancelEdit')}
+            </a>
+          )}
+        </div>
+      </form>
+    </section>
+
+    {/* 5 ── Attendance history ─────────────────────────────────── */}
+    <section class={`mt-8 ${card}`}>
+      <h2 class={h2}>{t(locale, 'groups.manage.attendance.title')}</h2>
+      {trackedEvents.length === 0 || trackedEvents.every((e) => (pastByEvent.get(e.id) ?? []).length === 0) ? (
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.attendance.none')}</p>
+      ) : (
+        <div class="mt-3 flex flex-col gap-5">
+          {trackedEvents.map((e) => {
+            const past = pastByEvent.get(e.id) ?? [];
+            return past.length === 0 ? null : (
+              <div>
+                <p class="text-sm font-semibold">{e.title}</p>
+                <table class="mt-2 w-full border-collapse">
+                  <tbody>
+                    {past.map((o) => (
+                      <tr class="border-t border-border">
+                        <td class={`${td} tabular-nums`}>{dateOf(o.occurs_on)}</td>
+                        <td class={`${td} text-ink-muted`}>{t(locale, 'groups.manage.attendance.present', { count: String(o.present_count) })}</td>
+                        <td class={td}>
+                          <a href={`/attendance/o/${o.id}`} class="text-primary hover:underline">{t(locale, 'groups.manage.attendance.sheet')}</a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+
+    {/* 6 ── Special events (registration module only) ──────────── */}
+    {hasRegistration && (
+      <section class={`mt-8 ${card}`}>
+        <h2 class={h2}>{t(locale, 'groups.manage.special.title')}</h2>
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.special.note')}</p>
+
+        {/* Linked special events */}
+        {specialEvents.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'groups.manage.special.none')}</p>
+        ) : (
+          <ul class="mt-3 flex flex-col gap-2">
+            {specialEvents.map((s) => (
+              <li class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2 first:border-0 first:pt-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium">{s.title}</span>
+                  <span class="text-sm text-ink-muted tabular-nums">{dateOf(s.starts_at)}</span>
+                  <span class={`${badge} ${s.active === 0 ? 'bg-surface-sunken text-ink-muted' : s.is_open === 1 ? 'bg-success-soft text-success' : 'bg-surface-sunken text-ink-muted'}`}>
+                    {t(locale, s.active === 0 ? 'groups.manage.special.inactive' : s.is_open === 1 ? 'groups.manage.special.open' : 'groups.manage.special.closed')}
+                  </span>
+                  <span class="text-xs text-ink-subtle">{t(locale, 'groups.manage.special.confirmed', { count: String(s.confirmed_count) })}</span>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <a href={localePath(locale, `/register/${s.id}`)} class="text-sm text-primary hover:underline">{t(locale, 'groups.manage.special.view')}</a>
+                  <form method="post" class="inline" onsubmit={`return confirm(${JSON.stringify(t(locale, 'groups.manage.special.unlinkConfirm'))})`}>
+                    <input type="hidden" name="action" value="unlink-special" />
+                    <input type="hidden" name="reg_event_id" value={s.id} />
+                    <button type="submit" class={`${rowBtn} text-danger`}>{t(locale, 'groups.manage.special.unlink')}</button>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Link an existing event */}
+        <div class="mt-6 border-t border-border pt-5">
+          <p class="text-sm font-semibold">{t(locale, 'groups.manage.special.linkTitle')}</p>
+          {linkableEvents.length === 0 ? (
+            <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.special.linkNone')}</p>
+          ) : (
+            <form method="post" class="mt-2 flex flex-wrap items-center gap-2">
+              <input type="hidden" name="action" value="link-special" />
+              <select name="reg_event_id" class={`${tin} max-w-xs`}>
+                <option value="">{t(locale, 'groups.manage.special.linkSelect')}</option>
+                {linkableEvents.map((e) => (
+                  <option value={e.id}>{(e.title_en || e.title_zh || '—')} · {e.starts_at.slice(0, 10)}</option>
+                ))}
+              </select>
+              <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.special.linkButton')}</button>
+            </form>
+          )}
+        </div>
+
+        {/* Create a new special event */}
+        <form method="post" class="mt-6 grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+          <input type="hidden" name="action" value="create-special" />
+          <p class="text-sm font-semibold sm:col-span-2">{t(locale, 'groups.manage.special.createTitle')}</p>
+          <p class="text-sm text-ink-muted sm:col-span-2">{t(locale, 'groups.manage.special.createHint')}</p>
+          {Object.keys(specialErrors).length > 0 && <p class={`sm:col-span-2 ${noticeErr}`}>{t(locale, 'groups.manage.fixErrors')}</p>}
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.titleEn')}</span>
+            <input name="title_en" value={gsp('title_en')} class={tin} />
+            {specialErrors.title_en && <span class={errorText}>{t(locale, specialErrors.title_en)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.titleZh')}</span>
+            <input name="title_zh" value={gsp('title_zh')} class={tin} />
+            <span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'groups.manage.special.titleZhHint')}</span>
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.starts')}</span>
+            <input type="datetime-local" name="starts_at" value={gsp('starts_at')} class={tin} />
+            {specialErrors.starts_at && <span class={errorText}>{t(locale, specialErrors.starts_at)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.ends')}</span>
+            <input type="datetime-local" name="ends_at" value={gsp('ends_at')} class={tin} />
+            {specialErrors.ends_at && <span class={errorText}>{t(locale, specialErrors.ends_at)}</span>}
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.location')}</span>
+            <input name="location" value={gsp('location')} class={tin} />
+          </label>
+          <label class="block">
+            <span class={lab}>{t(locale, 'groups.manage.special.capacity')}</span>
+            <input name="capacity" value={gsp('capacity')} class={tin} inputmode="numeric" />
+            {specialErrors.capacity && <span class={errorText}>{t(locale, specialErrors.capacity)}</span>}
+            <span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'groups.manage.special.capacityHint')}</span>
+          </label>
+          <div class="sm:col-span-2">
+            <button type="submit" class={btn}>{t(locale, 'groups.manage.special.create')}</button>
+          </div>
+        </form>
+      </section>
+    )}
+  </div>
+</Base>

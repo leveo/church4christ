@@ -9,7 +9,7 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 13 module keys, in display order (drives the admin Modules panel + nav).
+// The 14 module keys, in display order (drives the admin Modules panel + nav).
 // `giving` and `registration` are appended last: they are backend-gated (Supabase
 // only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
@@ -23,6 +23,7 @@ export const MODULE_KEYS = [
   'testimonies',
   'articles',
   'fellowships',
+  'groups',
   'people',
   'giving',
   'registration',
@@ -113,6 +114,12 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     adminPrefixes: [],
     navKeys: ['nav.fellowships'],
     uses: [],
+  },
+  groups: {
+    publicPrefixes: ['/groups', '/signup', '/attendance'],
+    adminPrefixes: ['/admin/groups'],
+    navKeys: ['nav.groups'],
+    uses: ['people', 'registration'],
   },
   people: {
     publicPrefixes: [],
