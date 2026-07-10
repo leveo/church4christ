@@ -147,7 +147,8 @@ describe('Postgres-backed worker: /my (dashboard portal cards)', () => {
     expect(body).toContain('4 members'); // portal.dashboard.memberCount — David, Amy, Ethan, Mia
     expect(body).toContain('1 groups'); // portal.dashboard.groupCount — David leads group 1 only
     expect(body).toContain('Young Adults Fellowship'); // myGroups name preview
-    expect(body).toContain('Pending applications'); // leader of group 1: Sarah's seeded pending app
+    expect(body).toContain('Pending approvals'); // portal.dashboard.pendingApprovals card heading
+    expect(body).toContain('1 applications'); // portal.dashboard.pendingApplications: leader of group 1, Sarah's seeded pending app
   });
 });
 
