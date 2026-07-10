@@ -103,8 +103,8 @@ export async function searchHouseholds(db: AppDb, q: string): Promise<KioskHouse
          WHERE h.deleted_at IS NULL
            AND EXISTS (SELECT 1 FROM household_members c WHERE c.household_id = h.id AND c.role = 'child')
            AND (
-             (h.phone IS NOT NULL AND ${digitStripExpr('h.phone')} LIKE '%' || ? ESCAPE '\\')
-             OR (p.phone IS NOT NULL AND ${digitStripExpr('p.phone')} LIKE '%' || ? ESCAPE '\\')
+             (h.phone IS NOT NULL AND ${digitStripExpr('h.phone')} LIKE '%' || ? || '%' ESCAPE '\\')
+             OR (p.phone IS NOT NULL AND ${digitStripExpr('p.phone')} LIKE '%' || ? || '%' ESCAPE '\\')
            )
          LIMIT 10`,
       )

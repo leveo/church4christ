@@ -134,6 +134,13 @@ describe('searchHouseholds', () => {
     expect(hits.map((h) => h.name)).toEqual(['Chen Family']);
   });
 
+  it('matches a leading/middle digit substring of a stored phone (contains, not ends-with)', async () => {
+    // '55501' spans the area code into the prefix of '(555) 010-2000' —
+    // neither a suffix nor a full number, so only a CONTAINS match finds it.
+    const hits = await searchHouseholds(env.DB, '55501');
+    expect(hits.map((h) => h.name)).toEqual(['Chen Family']);
+  });
+
   it('search by adult person phone finds the household', async () => {
     const hits = await searchHouseholds(env.DB, '3334444');
     expect(hits.map((h) => h.name)).toEqual(['Lin Family']);
