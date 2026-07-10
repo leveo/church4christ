@@ -9,7 +9,7 @@ import { t } from '../../../lib/i18n';
 import { parseCustomPageForm } from '../../../lib/validate';
 import { listCustomPages, getCustomPage, saveCustomPage, deleteCustomPage, toggleCustomPagePublished } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
-import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import { localePath, type Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -89,10 +89,15 @@ const heading = t(lang, 'admin.pages.title');
 const formHeading = editId ? t(lang, 'admin.pages.editTitle') : t(lang, 'admin.pages.newTitle');
 const viewHref = editingPage?.published ? localePath(lang, `/p/${editingPage.slug}`) : null;
 const h2 = 'font-display text-heading-sm font-bold';
+const canBuild = Astro.locals.modules.has('page-builder');
+const editingBuilderPage = editingPage?.format === 'builder';
 ---
 
 <Admin title={heading}>
   <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  {canBuild && (
+    <a href="/admin/pages/builder/new" class={`${btn} mt-4 inline-block`}>{t(lang, 'admin.pages.newBuilder')}</a>
+  )}
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
@@ -124,19 +129,30 @@ const h2 = 'font-display text-heading-sm font-bold';
       </div>
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.hint')}</p>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.pages.bodyEn')}</span>
-          <textarea name="body_en" rows="14" class={`${tin} font-mono`}>{v.bodyEn}</textarea>
-          {errors.body_en && <span class={errorText}>{t(lang, errors.body_en)}</span>}
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.pages.bodyZh')}</span>
-          <textarea name="body_zh" rows="14" class={`${tin} font-mono`}>{v.bodyZh}</textarea>
-          {errors.body_zh && <span class={errorText}>{t(lang, errors.body_zh)}</span>}
-        </label>
-      </div>
-      <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.markdownHint')}</p>
+      {editingBuilderPage ? (
+        <p class="text-sm text-ink-muted">
+          {t(lang, 'admin.pages.builderNote')}
+          {canBuild && (
+            <a href={`/admin/pages/builder/${editId}`} class="ml-2 text-primary hover:underline">{t(lang, 'admin.pages.openBuilder')}</a>
+          )}
+        </p>
+      ) : (
+        <>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.pages.bodyEn')}</span>
+              <textarea name="body_en" rows="14" class={`${tin} font-mono`}>{v.bodyEn}</textarea>
+              {errors.body_en && <span class={errorText}>{t(lang, errors.body_en)}</span>}
+            </label>
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.pages.bodyZh')}</span>
+              <textarea name="body_zh" rows="14" class={`${tin} font-mono`}>{v.bodyZh}</textarea>
+              {errors.body_zh && <span class={errorText}>{t(lang, errors.body_zh)}</span>}
+            </label>
+          </div>
+          <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.markdownHint')}</p>
+        </>
+      )}
       <div class="flex items-center gap-4">
         <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
         {viewHref && <a href={viewHref} class="text-sm text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
@@ -186,10 +202,14 @@ const h2 = 'font-display text-heading-sm font-bold';
                   <span class={`${badge} ${r.published ? badgeActive : badgeInactive}`}>
                     {r.published ? t(lang, 'admin.status.published') : t(lang, 'admin.status.draft')}
                   </span>
+                  {r.format === 'builder' && <span class={`${badge} ${badgeScheduled} ml-1`}>{t(lang, 'admin.pages.formatBuilder')}</span>}
                 </td>
                 <td class={`${td} text-ink-muted`}>{r.updated_at}</td>
                 <td class={td}>
                   <div class="flex flex-wrap gap-2">
+                    {canBuild && r.format === 'builder' && (
+                      <a href={`/admin/pages/builder/${r.id}`} class={rowBtn}>{t(lang, 'admin.pages.design')}</a>
+                    )}
                     <a href={`/admin/pages?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
                     <form method="post">
                       <input type="hidden" name="action" value="toggle" />

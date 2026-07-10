@@ -436,6 +436,40 @@ export function parseCustomPageForm(fd: FormData): FormResult<CustomPageFormInpu
   return { ok: true, data: { id, slug, published, title_en, title_zh, body_en, body_zh } };
 }
 
+export interface BuilderSaveInput {
+  id: string | null;
+  slug: string;
+  published: boolean;
+  title_en: string;
+  title_zh: string;
+  /** The raw layout subtree, NOT yet validated — route passes it to validateLayout. */
+  layout: unknown;
+}
+
+/**
+ * Parse the builder island's JSON save body (same rules as parseCustomPageForm
+ * for slug/titles; no bodies — builder pages carry a layout tree instead).
+ * The layout itself is validated separately by pageLayout.validateLayout.
+ */
+export function parseBuilderSave(body: unknown): FormResult<BuilderSaveInput> {
+  if (typeof body !== 'object' || body === null) return { ok: false, errors: { form: ERR.required } };
+  const b = body as Record<string, unknown>;
+  const errors: Record<string, string> = {};
+
+  const id = typeof b.id === 'string' && b.id.trim() ? b.id.trim() : null;
+
+  const slug = String(b.slug ?? '').trim().toLowerCase();
+  if (!slug) errors.slug = ERR.required;
+  else if (slug.length > 64 || !SLUG_RE.test(slug)) errors.slug = ERR.slug;
+
+  const title_en = String(b.title_en ?? '').trim();
+  const title_zh = String(b.title_zh ?? '').trim();
+  if (!title_en && !title_zh) errors.title = ERR.required;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, data: { id, slug, published: b.published === true, title_en, title_zh, layout: b.layout } };
+}
+
 // ---------------------------------------------------------------------------
 // People (member / editor / admin superset)
 // ---------------------------------------------------------------------------

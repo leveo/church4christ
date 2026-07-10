@@ -48,12 +48,14 @@ site costs **nothing per month** to host.
 | **Bilingual** | Built in (English + Chinese) | Add-on plugin | Add-on / manual | Limited |
 | **Public website + CMS + volunteers** | All in one, free | Website only (add plugins) | Website only | Strong on management; website often separate |
 | **Set-up difficulty** | Needs one technical volunteer or an AI assistant, once | Moderate | Easy | Easy |
-| **Drag-and-drop page builder** | No | Yes (plugins) | Yes | Varies |
+| **Drag-and-drop page builder** | Yes, for your own pages (optional) | Yes (plugins) | Yes | Varies |
 
-**The honest trade-offs.** Church4Christ has **no drag-and-drop page builder** — you
-edit content through clear admin forms, not by dragging boxes around a canvas. WordPress's
-huge plugin ecosystem can also extend a site in thousands of ready-made directions that
-this project simply does not try to match. Mature church platforms like **Planning
+**The honest trade-offs.** The built-in pages — home, sermons, bulletins, and the rest —
+are still shaped by the theme, not something you drag around; the drag-and-drop canvas is
+for your own custom pages only, and its blocks are simpler than a WordPress page-builder
+plugin's. WordPress's huge plugin ecosystem can also extend a site in thousands of
+ready-made directions that this project simply does not try to match. Mature church
+platforms like **Planning
 Center** are genuinely excellent at internal church management (giving, check-ins,
 membership) and ask nothing technical of you — this project is **not trying to out-feature
 them**; it trades their polish and hands-off convenience for **$0 cost, full control, and
@@ -121,6 +123,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/person-detail.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Give everyone a profile — families, membership status, private pastoral notes, and a board that connects members to serving. |
 | [![](docs/images/groups/directory.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, join requests, routine and special events, and email-link attendance tracking. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
+| [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Receive card gifts online through Stripe, record checks and cash by hand, and let every family see its own giving history. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Put events online for sign-up — free or paid through Stripe — with your own questions and a roster you can export. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
@@ -203,13 +206,15 @@ Postgres and Stripe and run on a free **Supabase** database instead. Want those 
 For the curious: Church4Christ is built with **[Astro](https://astro.build/)** rendering
 pages on the server, running as a single **Cloudflare Worker**. Data lives in Cloudflare
 **D1** (a SQL database) and uploaded images in Cloudflare **R2** (object storage); email
-goes out through Cloudflare's email binding. There is **no client-side JavaScript
-framework** — pages are plain, fast HTML with a sprinkle of vanilla script — which is a
-big part of why the site loads quickly and costs so little to run.
+goes out through Cloudflare's email binding. Visitor-facing pages ship **no client-side
+JavaScript framework** — they are plain, fast HTML with a sprinkle of vanilla script —
+which is a big part of why the site loads quickly and costs so little to run. (The one
+exception lives behind the staff login: the drag-and-drop page builder is a small React
+editor that only your team ever downloads; the pages it publishes are still plain HTML.)
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 900 automated
+each with a light and a dark mode. And the code is held together by **over 1,000 automated
 tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
 
 **Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;
