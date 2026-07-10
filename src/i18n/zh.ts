@@ -908,7 +908,7 @@ export default {
   'admin.pages.titleZh': '标题（中文）',
   'admin.pages.bodyEn': '内容（English）',
   'admin.pages.bodyZh': '内容（中文）',
-  'admin.pages.markdownHint': 'Markdown 语法：# 标题、**粗体**、[链接](url)、- 列表',
+  'admin.pages.markdownHint': 'Markdown 语法：## 标题、**粗体**、[链接](url)、- 列表',
   'admin.pages.previewTitle': '预览',
   'admin.pages.hint': '至少需填写一种语言的标题。',
   'admin.pages.existing': '现有页面',

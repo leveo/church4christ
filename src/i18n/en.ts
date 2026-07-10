@@ -909,7 +909,7 @@ export default {
   'admin.pages.titleZh': 'Title (中文)',
   'admin.pages.bodyEn': 'Content (English)',
   'admin.pages.bodyZh': 'Content (中文)',
-  'admin.pages.markdownHint': 'Markdown: # heading, **bold**, [link](url), - list',
+  'admin.pages.markdownHint': 'Markdown: ## heading, **bold**, [link](url), - list',
   'admin.pages.previewTitle': 'Preview',
   'admin.pages.hint': 'At least one language title is required.',
   'admin.pages.existing': 'Current pages',
@@ -990,7 +990,7 @@ export default {
   'admin.dashboard.newRequests': '{count} new',
   'admin.dashboard.testimonies': 'Testimonies',
   'admin.dashboard.pendingReview': '{count} to review',
-  'admin.dashboard.prayerAlert': '{count} new prayer requests are waiting — please respond soon.',
+  'admin.dashboard.prayerAlert': 'New prayer requests waiting: {count} — please respond soon.',
   'admin.dashboard.prayerAlertCta': 'Go to prayer wall',
 
   // Testimony review queue
