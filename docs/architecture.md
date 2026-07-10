@@ -42,7 +42,7 @@ the whole thing fast worldwide because the Worker runs close to each visitor.
 | **Middleware** | Auth, CSRF, route policy, locale, theme, headers | `src/middleware.ts` |
 | **Pages & API** | Public site under `[locale]/`, admin under `/admin`, JSON under `/api` | `src/pages/**` |
 | **Data helpers** | One module per domain (admin, plans, prayer, email, …) | `src/lib/*Db.ts` |
-| **Database (D1)** | Content, people, schedules, revisions, logs | binding `DB` |
+| **Database (D1)** | Content, people, schedules, check-ins, revisions, logs | binding `DB` |
 | **Object storage (R2)** | Uploaded media (`uploads/`) and nightly backups (`backups/`) | binding `MEDIA` |
 | **Email** | Transactional mail through one choke point | binding `EMAIL` |
 

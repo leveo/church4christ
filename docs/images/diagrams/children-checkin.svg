@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="Children's check-in: every household's children feed the kiosk, where a parent searches by name or phone, picks their children, and receives one shared pickup code; the kiosk and the admin console both read and write the same check-ins, so the dashboard chart, today's roster, and staff checkout are always up to date">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="560" fill="#F7F5F0"/>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">The kiosk and the admin console share one set of check-ins</text>
+
+  <!-- Left card: households feed the kiosk -->
+  <rect x="30" y="80" width="180" height="230" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M40,80 H200 Q210,80 210,90 V114 H30 V90 Q30,80 40,80 Z" fill="#31487A"/>
+  <text x="46" y="102" font-size="14" font-weight="700" fill="#FFFFFF">Households</text>
+
+  <text x="46" y="138" font-size="13" font-weight="700" fill="#232630">Chen Family 陈家</text>
+  <text x="60" y="158" font-size="12" fill="#565B6B">Ethan Chen · Mia Chen</text>
+  <text x="46" y="186" font-size="13" font-weight="700" fill="#232630">Lin Family 林家</text>
+  <text x="60" y="206" font-size="12" fill="#565B6B">Noah Lin · Lily Lin</text>
+
+  <text x="46" y="244" font-size="12" fill="#565B6B">Every child dependent already</text>
+  <text x="46" y="262" font-size="12" fill="#565B6B">recorded under a household is</text>
+  <text x="46" y="280" font-size="12" fill="#565B6B">check-in-able right away &#8212; no</text>
+  <text x="46" y="298" font-size="12" fill="#565B6B">separate sign-up.</text>
+
+  <line x1="212" y1="195" x2="248" y2="195" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Kiosk card -->
+  <rect x="250" y="80" width="222" height="230" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M260,80 H462 Q472,80 472,90 V114 H250 V90 Q250,80 260,80 Z" fill="#31487A"/>
+  <text x="266" y="102" font-size="14" font-weight="700" fill="#FFFFFF">Kiosk (tablet at the door)</text>
+
+  <text x="266" y="136" font-size="12" fill="#232630">1. Parent searches by child</text>
+  <text x="278" y="152" font-size="12" fill="#232630">name or their phone number</text>
+  <text x="266" y="176" font-size="12" fill="#232630">2. Taps their children, taps</text>
+  <text x="278" y="192" font-size="12" fill="#232630">Check in</text>
+  <text x="266" y="216" font-size="12" fill="#232630">3. Gets one 4-character</text>
+  <text x="278" y="232" font-size="12" fill="#232630">pickup code, shared by</text>
+  <text x="278" y="248" font-size="12" fill="#232630">siblings checked in together</text>
+
+  <rect x="266" y="264" width="190" height="30" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="361" y="284" font-size="13" font-weight="700" fill="#232630" text-anchor="middle" letter-spacing="2">2 V H F</text>
+
+  <!-- Kiosk -> Check-ins -->
+  <line x1="474" y1="180" x2="500" y2="180" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="487" y="169" font-size="8" fill="#565B6B" text-anchor="middle">writes</text>
+
+  <!-- Central data store: Check-ins, in the gap between Kiosk and Admin console -->
+  <path d="M503,140 h56 a8,8 0 0 1 8,8 v64 a8,20 0 0 1 -8,20 h-56 a8,20 0 0 1 -8,-20 v-64 a8,8 0 0 1 8,-8 z" fill="#FFFFFF" stroke="#C29A5B" stroke-width="2"/>
+  <ellipse cx="531" cy="148" rx="28" ry="8" fill="#FFFFFF" stroke="#C29A5B" stroke-width="2"/>
+  <text x="531" y="188" font-size="12" font-weight="700" fill="#232630" text-anchor="middle">Check-</text>
+  <text x="531" y="202" font-size="12" font-weight="700" fill="#232630" text-anchor="middle">ins</text>
+  <text x="531" y="222" font-size="9" fill="#565B6B" text-anchor="middle">roster +</text>
+  <text x="531" y="234" font-size="9" fill="#565B6B" text-anchor="middle">history</text>
+
+  <!-- Check-ins -> Admin console -->
+  <line x1="562" y1="180" x2="588" y2="180" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="575" y="169" font-size="8" fill="#565B6B" text-anchor="middle">reads</text>
+
+  <!-- Admin console card -->
+  <rect x="590" y="80" width="200" height="230" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <path d="M600,80 H780 Q790,80 790,90 V114 H590 V90 Q590,80 600,80 Z" fill="#31487A"/>
+  <text x="606" y="102" font-size="13" font-weight="700" fill="#FFFFFF">Admin console (admin-only)</text>
+
+  <rect x="606" y="126" width="82" height="42" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="647" y="144" font-size="11" font-weight="600" fill="#232630" text-anchor="middle">Dashboard</text>
+  <text x="647" y="160" font-size="10" fill="#565B6B" text-anchor="middle">chart + stats</text>
+
+  <rect x="696" y="126" width="82" height="42" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="737" y="144" font-size="11" font-weight="600" fill="#232630" text-anchor="middle">Today</text>
+  <text x="737" y="160" font-size="10" fill="#565B6B" text-anchor="middle">live roster</text>
+
+  <rect x="606" y="178" width="82" height="42" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="647" y="196" font-size="11" font-weight="600" fill="#232630" text-anchor="middle">Events</text>
+  <text x="647" y="212" font-size="10" fill="#565B6B" text-anchor="middle">weekly schedule</text>
+
+  <rect x="696" y="178" width="82" height="42" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="737" y="196" font-size="11" font-weight="600" fill="#232630" text-anchor="middle">Kiosk</text>
+  <text x="737" y="212" font-size="10" fill="#565B6B" text-anchor="middle">link + regenerate</text>
+
+  <text x="606" y="246" font-size="11" fill="#565B6B">Staff can check a child out</text>
+  <text x="606" y="262" font-size="11" fill="#565B6B">here too, no code needed &#8212;</text>
+  <text x="606" y="278" font-size="11" fill="#565B6B">this writes back to Check-ins.</text>
+
+  <!-- Privacy + token band -->
+  <rect x="30" y="346" width="480" height="150" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="46" y="374" font-size="14" font-weight="600" fill="#232630">Who can see it</text>
+  <text x="46" y="400" font-size="12" fill="#565B6B">&#8226; The kiosk's URL carries a long, unguessable token &#8212;</text>
+  <text x="58" y="418" font-size="12" fill="#565B6B">that token is the only gate, checked on every page.</text>
+  <text x="46" y="440" font-size="12" fill="#565B6B">&#8226; Regenerating the link retires any lost or stolen device</text>
+  <text x="58" y="458" font-size="12" fill="#565B6B">immediately &#8212; the old link stops working.</text>
+  <text x="46" y="480" font-size="12" fill="#565B6B">&#8226; Children only ever appear on the admin console and the</text>
+  <text x="58" y="498" font-size="12" fill="#565B6B">physically supervised kiosk &#8212; never a public page.</text>
+
+  <rect x="530" y="346" width="260" height="150" rx="10" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="546" y="374" font-size="14" font-weight="600" fill="#232630">A pickup code guards a child</text>
+  <text x="546" y="396" font-size="12" fill="#565B6B">Checking a child out at the kiosk</text>
+  <text x="546" y="414" font-size="12" fill="#565B6B">needs the 4-character code shown</text>
+  <text x="546" y="432" font-size="12" fill="#565B6B">once at check-in. Staff on the</text>
+  <text x="546" y="450" font-size="12" fill="#565B6B">Today tab can override it, since</text>
+  <text x="546" y="468" font-size="12" fill="#565B6B">they can see who is standing in</text>
+  <text x="546" y="486" font-size="12" fill="#565B6B">front of them.</text>
+</svg>
