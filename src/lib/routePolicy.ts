@@ -47,6 +47,10 @@ const PUBLIC_PREFIXES = [
   '/prayer',
   '/auth/',
   '/respond/',
+  // The email-change confirm page is gated by the token in the URL, not a
+  // session — the epoch bump on confirm has already revoked the member's
+  // session, so they land here signed out. Mirrors /auth and /respond.
+  '/email-change/',
   '/cal/',
   '/media/',
   // Giving: the public give sub-pages (`/give/thanks`, `/give/checkout`) and the

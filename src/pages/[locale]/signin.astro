@@ -21,6 +21,9 @@ const db = Astro.locals.db;
 // magic-link flow always lands on /{locale}/my, so we never propagate it into
 // the emailed link.
 const next = Astro.url.searchParams.get('next');
+// After confirming an email change the member is signed out and bounced here with
+// ?changed=1 so we can tell them to sign in with the new address.
+const changed = Astro.url.searchParams.get('changed') === '1';
 let sent = false;
 
 if (Astro.request.method === 'POST') {
@@ -45,6 +48,11 @@ if (Astro.request.method === 'POST') {
 ---
 <Base title={t(locale, 'signin.title')} locale={locale} noindex>
   <section class="container-narrow py-16">
+    {changed && !sent && (
+      <div class="mb-6 rounded-lg border border-border bg-surface-raised p-4 text-ink-muted">
+        {t(locale, 'signin.changed')}
+      </div>
+    )}
     {
       sent ? (
         <div class="bg-surface-raised border border-border rounded-lg p-6">

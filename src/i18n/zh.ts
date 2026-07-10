@@ -969,6 +969,19 @@ export default {
   'signin.submit': '给我发送登录链接',
   'signin.sentTitle': '请查收邮件',
   'signin.sentBody': '如果该邮箱已注册，登录链接正在发送途中。链接将在 15 分钟后失效。',
+  'signin.changed': '你的电子邮箱已更新，请使用新邮箱重新登录。',
+
+  // 邮箱变更（成员门户）：确认页、发往新邮箱的链接邮件、发往旧邮箱的通知邮件。
+  'portal.emailChange.confirm.title': '确认你的新邮箱',
+  'portal.emailChange.confirm.body': '你即将把登录邮箱更改为 {email}。确认后，你将在所有设备上退出登录，并需使用新邮箱重新登录。',
+  'portal.emailChange.confirm.button': '确认新邮箱',
+  'portal.emailChange.error.title': '此链接已失效',
+  'portal.emailChange.error.body': '邮箱变更链接在 60 分钟后失效，且仅可使用一次。',
+  'portal.emailChange.error.retry': '前往登录',
+  'portal.emailChange.email.subject': '确认你在 {site} 的新邮箱',
+  'portal.emailChange.email.body': '请点击下方链接确认将此邮箱设为你的新登录邮箱。链接将在 60 分钟后失效，且仅可使用一次。如果这不是你本人的操作，可忽略此邮件。',
+  'portal.emailChange.notice.subject': '你的登录邮箱已变更',
+  'portal.emailChange.notice.body': '{name} 你好，你账户的登录邮箱刚刚被更改为 {email}。如果这不是你本人的操作，请立即与我们联系。',
 
   'auth.confirm.title': '确认登录',
   'auth.confirm.body': '你即将登录 {site}，请点击下方按钮继续。',

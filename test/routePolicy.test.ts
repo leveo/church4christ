@@ -37,6 +37,7 @@ describe('classifyRoute', () => {
     ['/signin', 'public'],
     ['/auth/abc123', 'public'],
     ['/respond/tok', 'public'],
+    ['/email-change/tok123', 'public'],
     ['/cal/feed.ics', 'public'],
     ['/media/covers/x.jpg', 'public'],
     ['/api/prayer-request', 'public'],

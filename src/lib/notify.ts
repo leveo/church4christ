@@ -59,6 +59,74 @@ export async function sendMagicLink(
   });
 }
 
+/**
+ * Email the confirmation link for a pending email change to the NEW address (the
+ * caller has already minted `raw` via requestEmailChange). Written in the
+ * person's saved language when they have one, otherwise bilingually. Delivery to
+ * the new address is itself the proof the member controls it.
+ */
+export async function sendEmailChangeLink(
+  env: EmailEnv,
+  db: AppDb,
+  person: MagicLinkPerson,
+  raw: string,
+  newEmail: string,
+  locale: Locale,
+): Promise<boolean> {
+  const link = `${env.APP_ORIGIN ?? ''}/email-change/${raw}`;
+  const langs: Locale[] =
+    person.lang === 'en' || person.lang === 'zh'
+      ? [person.lang]
+      : locale === 'zh'
+        ? ['zh', 'en']
+        : ['en', 'zh'];
+
+  const subject = langs
+    .map((l) => t(l, 'portal.emailChange.email.subject', { site: t(l, 'site.name') }))
+    .join(' · ');
+  const text = `${langs.map((l) => t(l, 'portal.emailChange.email.body')).join('\n\n')}\n\n${link}\n`;
+  const html = `${langs.map((l) => `<p>${t(l, 'portal.emailChange.email.body')}</p>`).join('')}<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`;
+
+  return sendEmail(env, db, {
+    to: newEmail,
+    toName: person.display_name,
+    kind: 'emailchange',
+    subject,
+    html,
+    text,
+  });
+}
+
+/**
+ * After an email change is confirmed, notify the FORMER address so a hijack is
+ * visible to the original owner. Best-effort (swallows its own errors). Written
+ * in the member's saved language, otherwise both stacked.
+ */
+export async function sendEmailChangedNotice(
+  env: EmailEnv,
+  db: AppDb,
+  args: { oldEmail: string; newEmail: string; name: string; lang: string | null },
+): Promise<void> {
+  try {
+    const only = toLang(args.lang);
+    const built = bilingualEmail({
+      subjectKey: 'portal.emailChange.notice.subject',
+      bodyKey: 'portal.emailChange.notice.body',
+      vars: { name: args.name, email: args.newEmail },
+      only,
+    });
+    await sendEmail(env, db, {
+      to: args.oldEmail,
+      toName: args.name,
+      kind: 'emailchangeNotice',
+      detail: args.newEmail,
+      ...built,
+    });
+  } catch (e) {
+    console.error(`email-changed notice failed for ${args.oldEmail}`, e);
+  }
+}
+
 // ── Bilingual message builder (shared by every scheduling touchpoint) ──
 
 /** Narrow a stored `lang` value to a Locale, or null (→ send both stacked). */
