@@ -653,6 +653,17 @@ export default {
   'portal.nav.calendar': '日历',
   'portal.nav.prayer': '祷告',
 
+  // 会友门户概览页卡片（/my，portal 模块开启时）。
+  'portal.dashboard.household': '家庭',
+  'portal.dashboard.memberCount': '{count} 位成员',
+  'portal.dashboard.groups': '我的小组',
+  'portal.dashboard.groupCount': '{count} 个小组',
+  'portal.dashboard.pendingApplications': '待审核申请',
+  'portal.dashboard.upcomingEvents': '即将参加的活动',
+
+  // 会友门户奉献页面（/my/giving）范围说明。
+  'portal.giving.ownScopeNote': '当前显示您本人的奉献记录。全家庭的奉献报表仅家庭户主可见。',
+
   // 会友门户家庭页面（/my/household）。
   'portal.household.title': '我的家庭',
   'portal.household.emptyBody': '你还不属于任何家庭。可以在个人资料页创建家庭、加入家庭成员，或离开家庭。',

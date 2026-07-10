@@ -654,6 +654,17 @@ export default {
   'portal.nav.calendar': 'Calendar',
   'portal.nav.prayer': 'Prayer',
 
+  // Member portal dashboard cards (/my, portal module on).
+  'portal.dashboard.household': 'Household',
+  'portal.dashboard.memberCount': '{count} members',
+  'portal.dashboard.groups': 'My groups',
+  'portal.dashboard.groupCount': '{count} groups',
+  'portal.dashboard.pendingApplications': 'Pending applications',
+  'portal.dashboard.upcomingEvents': 'Upcoming events',
+
+  // Member portal giving page (/my/giving) scope note.
+  'portal.giving.ownScopeNote': 'Showing your own giving. Household statements are visible to household owners.',
+
   // Member portal household page (/my/household).
   'portal.household.title': 'My Household',
   'portal.household.emptyBody': 'You’re not part of a household yet. Create one, join family members, or leave a household from your profile.',
