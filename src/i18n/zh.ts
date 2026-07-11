@@ -1647,6 +1647,8 @@ export default {
   'modules.giving.desc': '在线奉献、认献与个人奉献记录。',
   'modules.registration.label': '活动报名',
   'modules.registration.desc': '活动报名与报名者管理。',
+  'modules.portal.label': '会友门户',
+  'modules.portal.desc': '会友自助服务：家庭档案、活动、服事与祷告墙。需要 Supabase 数据库。',
 
   'register.title': '活动报名',
   'register.intro': '报名参加即将举行的活动与聚会。',

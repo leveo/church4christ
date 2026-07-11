@@ -1650,6 +1650,8 @@ export default {
   'modules.giving.desc': 'Online giving, pledges, and member giving history.',
   'modules.registration.label': 'Registration',
   'modules.registration.desc': 'Event registration and attendee management.',
+  'modules.portal.label': 'Member Portal',
+  'modules.portal.desc': 'Member self-service: household profiles, events, serving, and the prayer wall. Requires Supabase.',
 
   'register.title': 'Event registration',
   'register.intro': 'Sign up for upcoming events and gatherings.',

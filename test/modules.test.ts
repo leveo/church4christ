@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 15 module keys in display order', () => {
+  it('has all 17 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -26,39 +26,43 @@ describe('MODULES registry', () => {
       'page-builder',
       'giving',
       'registration',
+      'portal',
     ]);
   });
 
-  it('gifts/people softly use serve, giving softly uses people, groups softly uses people+registration; every other module has no deps', () => {
+  it('gifts/people softly use serve, giving softly uses people, groups softly uses people+registration, portal softly uses serve+groups; every other module has no deps', () => {
     expect(MODULES.gifts.uses).toEqual(['serve']);
     expect(MODULES.people.uses).toEqual(['serve']);
     expect(MODULES.giving.uses).toEqual(['people']);
     expect(MODULES.groups.uses).toEqual(['people', 'registration']);
+    expect(MODULES.portal.uses).toEqual(['serve', 'groups']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups') {
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal') {
         expect(MODULES[key].uses).toEqual([]);
       }
     }
   });
 
-  it('giving and registration require the supabase backend; no other module does', () => {
+  it('giving, registration and portal require the supabase backend; no other module does', () => {
     expect(MODULES.giving.requiresBackend).toBe('supabase');
     expect(MODULES.registration.requiresBackend).toBe('supabase');
+    expect(MODULES.portal.requiresBackend).toBe('supabase');
     for (const key of MODULE_KEYS) {
-      if (key !== 'giving' && key !== 'registration') expect(MODULES[key].requiresBackend).toBeUndefined();
+      if (key !== 'giving' && key !== 'registration' && key !== 'portal') expect(MODULES[key].requiresBackend).toBeUndefined();
     }
   });
 });
 
 describe('filterByBackend (middleware fail-safe + getEnabledModules share it)', () => {
-  it("on 'd1', drops the supabase-only modules (giving/registration)", () => {
+  it("on 'd1', drops the supabase-only modules (giving/registration/portal)", () => {
     const enabled = filterByBackend(MODULE_KEYS, 'd1');
     expect(enabled.has('giving')).toBe(false);
     expect(enabled.has('registration')).toBe(false);
+    expect(enabled.has('portal')).toBe(false);
     // Every non-backend-gated module survives.
-    expect(enabled.size).toBe(MODULE_KEYS.length - 2);
+    expect(enabled.size).toBe(MODULE_KEYS.length - 3);
     for (const key of MODULE_KEYS) {
-      if (key !== 'giving' && key !== 'registration') expect(enabled.has(key)).toBe(true);
+      if (key !== 'giving' && key !== 'registration' && key !== 'portal') expect(enabled.has(key)).toBe(true);
     }
   });
 
@@ -111,6 +115,13 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/register', 'registration'],
     ['/register/summer-camp', 'registration'],
     ['/api/register', 'registration'],
+    // ── portal (backend-gated); /my/* prefixes beat serve's /my by longest match ──
+    ['/my/household', 'portal'],
+    ['/my/events', 'portal'],
+    ['/my/serving', 'portal'],
+    ['/my/prayer', 'portal'],
+    ['/email-change', 'portal'],
+    ['/email-change/abc123', 'portal'],
     // ── admin prefixes ──
     ['/admin/bulletins', 'bulletins'],
     ['/admin/sermons', 'sermons'],
