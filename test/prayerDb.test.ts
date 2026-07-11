@@ -3,7 +3,7 @@
 // moderation queue, decide/delete authority, and the event_admins helpers.
 // prayer_items/event_admins and the reg_events/reg_event_i18n/registrations and
 // group_members they lean on are Supabase-only (migrations-supabase/
-// 0006_member_portal.sql / 0003_registration.sql have no D1 counterpart), so per
+// 0007_member_portal.sql / 0003_registration.sql have no D1 counterpart), so per
 // groupDb.test.ts's documented fallback we CREATE TABLE IF NOT EXISTS them here,
 // matching the PG DDL minus identity (plain INTEGER PRIMARY KEY). member_groups/
 // member_group_i18n/people already exist in the D1 schema. The real PG DDL is

@@ -1,7 +1,7 @@
 -- Member portal (spec: docs/superpowers/specs/2026-07-10-member-portal-design.md).
 -- Shared-backend DDL only; portal-only tables (group_members,
 -- group_applications, group_files, event_admins, prayer_items) are
--- Supabase-only — see migrations-supabase/0006_member_portal.sql.
+-- Supabase-only — see migrations-supabase/0007_member_portal.sql.
 
 -- Household ownership: max 2 owners per household (app-layer enforced);
 -- an owner must be an adult member with a linked person (portalDb checks).

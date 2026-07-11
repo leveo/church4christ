@@ -2,7 +2,7 @@
 // group listings, admin CRUD, membership, and applications. Group definitions
 // (member_groups/member_group_i18n) live in both backends; membership and
 // applications (group_members/group_applications) are Supabase-only — reachable
-// only when the portal module is on (migrations-supabase/0006_member_portal.sql).
+// only when the portal module is on (migrations-supabase/0007_member_portal.sql).
 // Patterns mirror teamDb.ts (saveServiceType's i18n-pair upsert;
 // createApplication/decideApplication's P/A/R flow), adapted to
 // group_applications' shape (no position_id, field is `note`, and — unlike

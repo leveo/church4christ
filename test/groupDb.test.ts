@@ -1,8 +1,8 @@
 // groupDb (workers project, live D1). Covers Task 1's group data layer: public/
 // portal group listings + localized fallback, admin CRUD (slug_taken), and the
 // membership/application flows. member_groups/member_group_i18n come from the D1
-// migration (migrations/0007_member_portal.sql); group_members/group_applications
-// are Supabase-only (migrations-supabase/0006_member_portal.sql has no D1
+// migration (migrations/0008_member_portal.sql); group_members/group_applications
+// are Supabase-only (migrations-supabase/0007_member_portal.sql has no D1
 // counterpart) — no CREATE-TABLE precedent exists for fabricating Supabase-only
 // tables in the SQLite unit harness elsewhere in test/, so per the task brief's
 // documented fallback we CREATE TABLE IF NOT EXISTS them here, matching the PG

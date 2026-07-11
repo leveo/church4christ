@@ -1,7 +1,7 @@
 // Prayer-wall data layer (member portal): posting, scoped tab reads, the
 // approver's moderation queue, decide/delete, and the event_admins helpers that
 // serve event-scoped moderation. Supabase-only module (schema in
-// migrations-supabase/0006_member_portal.sql) — reachable only when the portal
+// migrations-supabase/0007_member_portal.sql) — reachable only when the portal
 // is on; the pg e2e suite (Task 6) covers the real Postgres DDL, while this
 // module's dialect-neutral SQL is unit-tested against the D1 harness like
 // groupDb/portalDb.

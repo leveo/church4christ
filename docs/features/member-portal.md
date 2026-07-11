@@ -146,7 +146,7 @@ Supabase.
 
 ## For developers
 
-- **Schema:** `migrations-supabase/0006_member_portal.sql` — Supabase-only
+- **Schema:** `migrations-supabase/0007_member_portal.sql` — Supabase-only
   tables: `group_members`, `group_applications`, `group_files`,
   `event_admins`, `prayer_items`, plus `household_members.is_owner` and
   `people.pending_email`. `member_groups` / `member_group_i18n` (fellowship

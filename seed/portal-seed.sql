@@ -1,7 +1,7 @@
 -- Church4Christ member-groups demo seed (Phase 2, Task 6). Postgres-only — group
 -- membership and applications (group_members, group_applications) are
--- Supabase-only tables (migrations-supabase/0006_member_portal.sql has no D1
--- counterpart — see migrations/0007_member_portal.sql's header), so this file
+-- Supabase-only tables (migrations-supabase/0007_member_portal.sql has no D1
+-- counterpart — see migrations/0008_member_portal.sql's header), so this file
 -- NEVER loads on D1. It is applied by scripts/db/seed-supabase.mjs after
 -- seed/dev-seed.sql (member_groups + people already exist) and before the
 -- identity-sequence reset; test/e2e-pg/setup.ts loads it the same way for the

@@ -1,4 +1,4 @@
--- Member portal: mirror of migrations/0007_member_portal.sql plus the
+-- Member portal: mirror of migrations/0008_member_portal.sql plus the
 -- Supabase-only portal tables (giving/registration precedent).
 
 ALTER TABLE household_members ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0;
