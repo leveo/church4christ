@@ -72,10 +72,17 @@ const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) 
 const g = (n: string) => String(fd?.get(n) ?? '');
 const v =
   fd && failedId !== null
-    ? { name: g('name'), description: g('description'), isPublic: fd.get('is_public') !== null }
+    ? {
+        name: g('name'), description: g('description'), isPublic: fd.get('is_public') !== null,
+        kind: g('kind') || 'fellowship', termLabel: g('term_label'), termStart: g('term_start'), termEnd: g('term_end'),
+      }
     : editingRow
-      ? { name: editingRow.name, description: editingRow.description, isPublic: editingRow.is_public === 1 }
-      : { name: '', description: '', isPublic: false };
+      ? {
+          name: editingRow.name, description: editingRow.description, isPublic: editingRow.is_public === 1,
+          kind: editingRow.kind, termLabel: editingRow.term_label ?? '', termStart: editingRow.term_start ?? '', termEnd: editingRow.term_end ?? '',
+        }
+      : { name: '', description: '', isPublic: false, kind: 'fellowship', termLabel: '', termStart: '', termEnd: '' };
+const GROUP_KINDS = ['fellowship', 'sunday_school'] as const;
 
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.groups.title');
@@ -108,6 +115,31 @@ const h2 = 'font-display text-heading-sm font-bold';
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" name="is_public" checked={v.isPublic} /> {t(lang, 'admin.groups.isPublic')}
       </label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.groups.kind')}</span>
+        <select name="kind" class={tin}>
+          {GROUP_KINDS.map((k) => (
+            <option value={k} selected={v.kind === k}>{t(lang, `admin.groups.kind.${k}`)}</option>
+          ))}
+        </select>
+      </label>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.groups.termLabel')}</span>
+          <input name="term_label" value={v.termLabel} placeholder={t(lang, 'admin.groups.termLabelHint')} class={tin} />
+          {errors.term_label && <span class={errorText}>{t(lang, errors.term_label)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.groups.termStart')}</span>
+          <input type="date" name="term_start" value={v.termStart} class={tin} />
+          {errors.term_start && <span class={errorText}>{t(lang, errors.term_start)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.groups.termEnd')}</span>
+          <input type="date" name="term_end" value={v.termEnd} class={tin} />
+          {errors.term_end && <span class={errorText}>{t(lang, errors.term_end)}</span>}
+        </label>
+      </div>
       <div class="flex items-center gap-4">
         <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
         {editId && <a href="/admin/groups" class="text-sm text-primary hover:underline">{t(lang, 'admin.groups.cancelEdit')}</a>}

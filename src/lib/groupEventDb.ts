@@ -259,6 +259,47 @@ export async function listUpcomingOccurrencesForGroup(
   return results;
 }
 
+export interface PersonOccurrence {
+  id: number; // occurrence id — the ICS feed's stable UID source
+  group_id: number;
+  group_name: string;
+  title: string;
+  location: string | null;
+  occurs_on: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+/**
+ * Upcoming routine-event occurrences across every group the person is an ACTIVE
+ * member of (group_members.removed_at IS NULL), within [from, to] (inclusive
+ * 'YYYY-MM-DD' occurs_on bounds). Joins live active events on live groups and
+ * excludes soft-deleted occurrences. Feeds the personal calendar + ICS feed;
+ * the caller gates on the portal module. Sorted by date, then start instant,
+ * then group id for a stable tie-break.
+ */
+export async function listUpcomingOccurrencesForPerson(
+  db: AppDb,
+  personId: number,
+  from: string,
+  to: string,
+): Promise<PersonOccurrence[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT geo.id AS id, ge.group_id AS group_id, g.name AS group_name, ge.title AS title, ge.location AS location,
+              geo.occurs_on AS occurs_on, geo.starts_at AS starts_at, geo.ends_at AS ends_at
+       FROM group_event_occurrences geo
+       JOIN group_events ge ON ge.id = geo.event_id AND ge.deleted_at IS NULL AND ge.active = 1
+       JOIN groups g ON g.id = ge.group_id AND g.deleted_at IS NULL
+       JOIN group_members gm ON gm.group_id = ge.group_id AND gm.person_id = ?1 AND gm.removed_at IS NULL
+       WHERE geo.deleted_at IS NULL AND geo.occurs_on BETWEEN ?2 AND ?3
+       ORDER BY geo.occurs_on, geo.starts_at, ge.group_id, geo.id`,
+    )
+    .bind(personId, from, to)
+    .all<PersonOccurrence>();
+  return results;
+}
+
 export interface PastOccurrence {
   id: number;
   event_id: number;

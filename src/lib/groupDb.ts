@@ -8,10 +8,18 @@
 import type { AppDb, AppStatement } from './appDb';
 import { isUniqueViolation } from './adminDb';
 
+/** Fellowship (open small group) vs Sunday-school class (term-scoped). Mirrors
+ *  the groups.kind CHECK from migrations/0010_member_portal.sql. */
+export type GroupKind = 'fellowship' | 'sunday_school';
+
 export interface GroupInput {
   name: string;
   description: string;
   isPublic: boolean;
+  kind: GroupKind;
+  termLabel: string | null;
+  termStart: string | null; // 'YYYY-MM-DD' or null
+  termEnd: string | null; // 'YYYY-MM-DD' or null
 }
 
 export interface GroupRow {
@@ -19,6 +27,10 @@ export interface GroupRow {
   name: string;
   description: string;
   is_public: number; // 0 | 1
+  kind: GroupKind;
+  term_label: string | null;
+  term_start: string | null;
+  term_end: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,20 +60,24 @@ export interface GroupMemberRow {
 /** Create a group; returns the new id. */
 export async function createGroup(db: AppDb, input: GroupInput): Promise<number> {
   const created = await db
-    .prepare(`INSERT INTO groups (name, description, is_public) VALUES (?1, ?2, ?3) RETURNING id`)
-    .bind(input.name, input.description, input.isPublic ? 1 : 0)
+    .prepare(
+      `INSERT INTO groups (name, description, is_public, kind, term_label, term_start, term_end)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id`,
+    )
+    .bind(input.name, input.description, input.isPublic ? 1 : 0, input.kind, input.termLabel, input.termStart, input.termEnd)
     .first<{ id: number }>();
   return created!.id;
 }
 
-/** Update a live group's name/description/visibility. Returns true when a row changed. */
+/** Update a live group's name/description/visibility + kind/term. Returns true when a row changed. */
 export async function updateGroup(db: AppDb, id: number, input: GroupInput): Promise<boolean> {
   const r = await db
     .prepare(
-      `UPDATE groups SET name = ?1, description = ?2, is_public = ?3, updated_at = datetime('now')
+      `UPDATE groups SET name = ?1, description = ?2, is_public = ?3, kind = ?5, term_label = ?6,
+              term_start = ?7, term_end = ?8, updated_at = datetime('now')
        WHERE id = ?4 AND deleted_at IS NULL`,
     )
-    .bind(input.name, input.description, input.isPublic ? 1 : 0, id)
+    .bind(input.name, input.description, input.isPublic ? 1 : 0, id, input.kind, input.termLabel, input.termStart, input.termEnd)
     .run();
   return r.meta.changes > 0;
 }
@@ -77,7 +93,10 @@ export async function softDeleteGroup(db: AppDb, id: number): Promise<void> {
 /** A single live group, or null if missing/soft-deleted. */
 export async function getGroup(db: AppDb, id: number): Promise<GroupRow | null> {
   return db
-    .prepare(`SELECT id, name, description, is_public, created_at, updated_at FROM groups WHERE id = ?1 AND deleted_at IS NULL`)
+    .prepare(
+      `SELECT id, name, description, is_public, kind, term_label, term_start, term_end, created_at, updated_at
+       FROM groups WHERE id = ?1 AND deleted_at IS NULL`,
+    )
     .bind(id)
     .first<GroupRow>();
 }
@@ -88,8 +107,8 @@ const MEMBER_COUNT_SUBQUERY = `(SELECT COUNT(*) FROM group_members m WHERE m.gro
 export async function listGroups(db: AppDb): Promise<GroupSummary[]> {
   const { results } = await db
     .prepare(
-      `SELECT g.id, g.name, g.description, g.is_public, g.created_at, g.updated_at,
-              ${MEMBER_COUNT_SUBQUERY} AS member_count
+      `SELECT g.id, g.name, g.description, g.is_public, g.kind, g.term_label, g.term_start, g.term_end,
+              g.created_at, g.updated_at, ${MEMBER_COUNT_SUBQUERY} AS member_count
        FROM groups g WHERE g.deleted_at IS NULL ORDER BY g.name, g.id`,
     )
     .all<GroupSummary>();
@@ -100,8 +119,8 @@ export async function listGroups(db: AppDb): Promise<GroupSummary[]> {
 export async function listPublicGroups(db: AppDb): Promise<GroupSummary[]> {
   const { results } = await db
     .prepare(
-      `SELECT g.id, g.name, g.description, g.is_public, g.created_at, g.updated_at,
-              ${MEMBER_COUNT_SUBQUERY} AS member_count
+      `SELECT g.id, g.name, g.description, g.is_public, g.kind, g.term_label, g.term_start, g.term_end,
+              g.created_at, g.updated_at, ${MEMBER_COUNT_SUBQUERY} AS member_count
        FROM groups g WHERE g.deleted_at IS NULL AND g.is_public = 1 ORDER BY g.name, g.id`,
     )
     .all<GroupSummary>();
@@ -113,8 +132,8 @@ export async function listPublicGroups(db: AppDb): Promise<GroupSummary[]> {
 export async function listGroupsForPerson(db: AppDb, personId: number): Promise<PersonGroupRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT g.id, g.name, g.description, g.is_public, g.created_at, g.updated_at,
-              gm.is_admin AS is_admin, ${MEMBER_COUNT_SUBQUERY} AS member_count
+      `SELECT g.id, g.name, g.description, g.is_public, g.kind, g.term_label, g.term_start, g.term_end,
+              g.created_at, g.updated_at, gm.is_admin AS is_admin, ${MEMBER_COUNT_SUBQUERY} AS member_count
        FROM group_members gm
        JOIN groups g ON g.id = gm.group_id AND g.deleted_at IS NULL
        WHERE gm.person_id = ?1 AND gm.removed_at IS NULL
@@ -144,6 +163,16 @@ export async function listMembers(db: AppDb, groupId: number): Promise<GroupMemb
     .bind(groupId)
     .all<GroupMemberRow>();
   return results;
+}
+
+/** True when the person has an active (removed_at IS NULL) membership in the
+ *  group — the group-files download ACL and files-panel gate. */
+export async function isGroupMember(db: AppDb, groupId: number, personId: number): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS x FROM group_members WHERE group_id = ?1 AND person_id = ?2 AND removed_at IS NULL`)
+    .bind(groupId, personId)
+    .first<{ x: number }>();
+  return row !== null;
 }
 
 /** True when the person is an active admin of the group. */

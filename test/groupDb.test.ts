@@ -49,7 +49,10 @@ async function reset(): Promise<void> {
 }
 beforeEach(reset);
 
-const G = { name: 'Young Adults', description: 'Grow together', isPublic: true };
+const G = {
+  name: 'Young Adults', description: 'Grow together', isPublic: true,
+  kind: 'fellowship' as const, termLabel: null, termStart: null, termEnd: null,
+};
 
 describe('groups CRUD + visibility', () => {
   it('creates, reads, updates, and soft-deletes a group', async () => {
@@ -57,7 +60,7 @@ describe('groups CRUD + visibility', () => {
     const g = await getGroup(env.DB, id);
     expect(g).toMatchObject({ name: 'Young Adults', is_public: 1 });
 
-    expect(await updateGroup(env.DB, id, { name: 'YA', description: 'x', isPublic: false })).toBe(true);
+    expect(await updateGroup(env.DB, id, { ...G, name: 'YA', description: 'x', isPublic: false })).toBe(true);
     expect((await getGroup(env.DB, id))!.is_public).toBe(0);
 
     await softDeleteGroup(env.DB, id);
@@ -66,7 +69,7 @@ describe('groups CRUD + visibility', () => {
 
   it('listGroups counts active members; listPublicGroups hides private + deleted', async () => {
     const pub = await createGroup(env.DB, G);
-    const priv = await createGroup(env.DB, { name: 'Prayer', description: '', isPublic: false });
+    const priv = await createGroup(env.DB, { ...G, name: 'Prayer', description: '', isPublic: false });
     await addMemberByPerson(env.DB, pub, 1);
     await addMemberByPerson(env.DB, pub, 2);
 
@@ -129,7 +132,7 @@ describe('membership', () => {
   });
 
   it('setMemberAdmin + isGroupAdmin, and listGroupsForPerson surfaces the admin flag', async () => {
-    const id = await createGroup(env.DB, { name: 'Private', description: '', isPublic: false });
+    const id = await createGroup(env.DB, { ...G, name: 'Private', description: '', isPublic: false });
     const m = await addMemberByPerson(env.DB, id, 2);
     expect(await isGroupAdmin(env.DB, id, 2)).toBe(false);
     expect(await setMemberAdmin(env.DB, m, true)).toBe(true);

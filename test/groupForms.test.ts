@@ -8,18 +8,43 @@ const fdOf = (entries: Record<string, string>) => {
 };
 
 describe('parseGroupForm', () => {
-  it('parses a full form, trimming name/description and reading the checkbox', () => {
-    const r = parseGroupForm(fdOf({ name: '  Young Adults  ', description: '  Meets Fridays  ', is_public: 'on' }));
+  it('parses a full form, trimming name/description and reading the checkbox + kind/term', () => {
+    const r = parseGroupForm(
+      fdOf({
+        name: '  Young Adults  ', description: '  Meets Fridays  ', is_public: 'on',
+        kind: 'sunday_school', term_label: '  Fall 2026  ', term_start: '2026-09-01', term_end: '2026-12-15',
+      }),
+    );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data).toEqual({ name: 'Young Adults', description: 'Meets Fridays', isPublic: true });
+    expect(r.data).toEqual({
+      name: 'Young Adults', description: 'Meets Fridays', isPublic: true,
+      kind: 'sunday_school', termLabel: 'Fall 2026', termStart: '2026-09-01', termEnd: '2026-12-15',
+    });
   });
 
-  it('defaults a blank description to empty string and an absent checkbox to false', () => {
+  it('defaults a blank description to empty string, absent checkbox to false, and kind to fellowship', () => {
     const r = parseGroupForm(fdOf({ name: 'Prayer Partners' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data).toEqual({ name: 'Prayer Partners', description: '', isPublic: false });
+    expect(r.data).toEqual({
+      name: 'Prayer Partners', description: '', isPublic: false,
+      kind: 'fellowship', termLabel: null, termStart: null, termEnd: null,
+    });
+  });
+
+  it('falls back to fellowship for an unrecognized kind', () => {
+    const r = parseGroupForm(fdOf({ name: 'X', kind: 'bogus' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.kind).toBe('fellowship');
+  });
+
+  it('rejects a malformed term date', () => {
+    const r = parseGroupForm(fdOf({ name: 'X', term_start: '09/01/2026' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.term_start).toBe('errors.dateFormat');
   });
 
   it('requires a non-blank name', () => {
