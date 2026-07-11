@@ -88,7 +88,9 @@ Keep this on its **own** port and container, separate from the dev Postgres in
 [`docs/supabase-setup.md`](docs/supabase-setup.md#9-local-development): these suites reset the
 schema (`DROP SCHEMA public CASCADE`) between runs, so never point them at a database that
 holds data you care about. The Postgres end-to-end smoke test uses the same database:
-`DATABASE_URL=… npm run test:e2e:pg`.
+`DATABASE_URL=… npm run test:e2e:pg`. Changes under `src/pages/[locale]/my/` (the member
+portal) are only e2e-covered by this pg suite, so run `npm run test:e2e:pg` for any portal-page
+change.
 
 ## Pull request checklist
 

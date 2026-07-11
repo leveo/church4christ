@@ -2,7 +2,15 @@
 // My Schedule (authed via route policy): pending scheduling requests with
 // inline Accept / Decline(+reason), the upcoming confirmed list, open slots the
 // person can claim, their application status strip, and links to the calendar /
-// blockouts / profile pages. Ported from the reference stack's src/pages/my/index.astro.
+// giving (via PortalNav) / blockouts / profile pages. Ported from the reference
+// stack's src/pages/my/index.astro.
+//
+// Portal card row (Member Portal Phase 3, Task 3): when the `portal` module is
+// on (supabase-only — see modules.ts), a card row above the schedule surfaces
+// the viewer's household, groups, any pending group applications for groups
+// they lead, and — when `registration` is also on — their next upcoming event
+// registrations. Every read is gated on the module check so the D1 backend
+// (portal/registration always off there) never touches those tables.
 //
 // Authorization: respondToAssignment is called with the SESSION user's id — its
 // WHERE clause only touches that person's own assignment, so a posted
@@ -10,6 +18,7 @@
 // membership/fullness/conflicts inside claimOpenSlot (never forced).
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
+import PortalNav from '../../../components/PortalNav.astro';
 import StatusBadge from '../../../components/StatusBadge.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -18,7 +27,11 @@ import { listApplicationsByPerson, listPersonAssignments } from '../../../lib/my
 import { formatDate, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
-import { btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import { getPortalHousehold } from '../../../lib/portalDb';
+import { listMyGroups, listPendingApplicationsForGroups } from '../../../lib/groupDb';
+import { listRegistrationsForPerson } from '../../../lib/regDb';
+import { listPendingForApprover } from '../../../lib/prayerDb';
+import { badge, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -67,13 +80,41 @@ if (Astro.request.method === 'POST') {
 
 const claimed = Astro.url.searchParams.get('claimed') === '1';
 const today = todayInTz();
-const [assignments, openSlots, applications] = await Promise.all([
-  listPersonAssignments(db, user.id, today, locale),
-  listOpenSlotsForPerson(db, user.id, locale),
-  listApplicationsByPerson(db, user.id, locale),
-]);
+// The portal-gated card row below reads household/group/registration data that
+// lives only on the supabase backend — module gating gets those queries here so
+// D1 (portal always off, see modules.ts) never touches those tables.
+const hasPortal = Astro.locals.modules.has('portal');
+const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
+// listPendingForApprover takes the real user.isAdmin (church admins approve
+// every scope, per the spec's §Permission model) — the same deliberate
+// divergence the Task-4 download route documents; it's confined to this one
+// approval-queue read, not a general admin-authority leak into /my.
+const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations, pendingPrayerItems] =
+  await Promise.all([
+    listPersonAssignments(db, user.id, today, locale),
+    listOpenSlotsForPerson(db, user.id, locale),
+    listApplicationsByPerson(db, user.id, locale),
+    hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
+    hasPortal ? listMyGroups(db, user.id, locale) : Promise.resolve([]),
+    hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
+    hasPortal ? listPendingForApprover(db, user.id, user.isAdmin, locale) : Promise.resolve([]),
+  ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');
+
+// Pending applications awaiting the viewer's own review, across every group
+// they lead (only reachable when portal is on — myGroups is empty otherwise).
+const leaderGroupIds = myGroups.filter((g) => g.is_leader === 1).map((g) => g.id);
+const pendingGroupApplications = hasPortal
+  ? await listPendingApplicationsForGroups(db, leaderGroupIds, locale)
+  : [];
+// listRegistrationsForPerson returns starts_at DESC (that ordering serves
+// /my/events); re-sort ascending here so the dashboard card shows the two
+// SOONEST upcoming events rather than the two farthest-out ones.
+const nextRegistrations = upcomingRegistrations
+  .filter((r) => r.starts_at.slice(0, 10) >= today)
+  .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  .slice(0, 2);
 // Applications matter most to people not on a team yet, or with one pending.
 const showApplications =
   applications.length > 0 && (user.memberTeamIds.length === 0 || applications.some((a) => a.status === 'P'));
@@ -87,21 +128,78 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
 <Base title={t(locale, 'my.title')} locale={locale} noindex>
   <div class="container-content max-w-content py-12">
     <h1 class="font-display text-heading-md font-bold">{t(locale, 'my.welcome', { name: user.displayName })}</h1>
+    <PortalNav locale={locale} active="dashboard" />
     <div class="mt-3 flex flex-wrap gap-2 text-sm">
-      <a href={localePath(locale, '/my/calendar')} class={btnSecondary}>{t(locale, 'my.calendar')}</a>
       <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
-      {
-        Astro.locals.modules.has('giving') && (
-          <a href={localePath(locale, '/my/giving')} class={btnSecondary}>
-            {t(locale, 'my.giving.title')}
-          </a>
-        )
-      }
       <a href={localePath(locale, '/profile')} class={btnSecondary}>{t(locale, 'profile.title')}</a>
     </div>
 
     {claimed && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
     {flashKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, flashKey)}</p>}
+
+    {
+      hasPortal && (
+        <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {household && (
+            <a
+              href={localePath(locale, '/my/household')}
+              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.household')}</p>
+              <p class="mt-2 font-semibold">{household.name}</p>
+              <p class="mt-1 flex items-center gap-2 text-sm text-ink-muted">
+                {t(locale, 'portal.dashboard.memberCount', { count: household.members.length })}
+                {household.viewerIsOwner && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.owner')}</span>}
+              </p>
+            </a>
+          )}
+
+          <a
+            href={localePath(locale, '/my/groups')}
+            class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
+          >
+            <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.groups')}</p>
+            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.groupCount', { count: myGroups.length })}</p>
+            {myGroups.length > 0 && (
+              <p class="mt-1 text-sm text-ink-muted">{myGroups.slice(0, 3).map((g) => g.name).join(', ')}</p>
+            )}
+          </a>
+
+          {(pendingGroupApplications.length > 0 || pendingPrayerItems.length > 0) && (
+            <a
+              href={localePath(locale, pendingGroupApplications.length > 0 ? '/my/groups' : '/my/prayer')}
+              class="block rounded-lg border border-warn bg-warn-soft p-5 hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
+              <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
+                {pendingGroupApplications.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingGroupApplications.length })}</p>
+                )}
+                {pendingPrayerItems.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingPrayerItems', { count: pendingPrayerItems.length })}</p>
+                )}
+              </div>
+            </a>
+          )}
+
+          {hasRegistration && nextRegistrations.length > 0 && (
+            <a
+              href={localePath(locale, '/my/events')}
+              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.upcomingEvents')}</p>
+              <ul class="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
+                {nextRegistrations.map((r) => (
+                  <li>
+                    {r.event_title} · {formatDate(r.starts_at.slice(0, 10), locale)}
+                  </li>
+                ))}
+              </ul>
+            </a>
+          )}
+        </section>
+      )
+    }
 
     {
       pending.length > 0 && (

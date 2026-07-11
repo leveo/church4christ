@@ -9,9 +9,9 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 15 module keys, in display order (drives the admin Modules panel + nav).
-// `giving` and `registration` are appended last: they are backend-gated (Supabase
-// only) and stay off on the D1 backend regardless of their settings row.
+// The 16 module keys, in display order (drives the admin Modules panel + nav).
+// `portal`, `giving`, and `registration` are appended last: they are backend-gated
+// (Supabase only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
   'bulletins',
   'sermons',
@@ -26,6 +26,7 @@ export const MODULE_KEYS = [
   'people',
   'children',
   'page-builder',
+  'portal',
   'giving',
   'registration',
 ] as const;
@@ -54,7 +55,11 @@ export interface ModuleDef {
 // pre-existing CORE routes (`/profile`, `/admin/people`) and its opportunity
 // board is under `/serve` (the `serve` module). The People module therefore
 // gates only its added panels/sections via `locals.modules.has('people')` in
-// those pages (slice 9), never whole routes.
+// those pages (slice 9), never whole routes. `fellowships` owns `/admin/fellowships`
+// (member group definitions) alongside its public `/fellowships` pages, so a D1
+// church (portal off) can still manage groups once the content collection
+// retires; the members/leaders panel inside that admin page is Supabase-only and
+// gates in-page on `locals.modules.has('portal')` instead of a route prefix.
 export const MODULES: Record<ModuleKey, ModuleDef> = {
   bulletins: {
     publicPrefixes: ['/bulletin'],
@@ -112,7 +117,7 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
   },
   fellowships: {
     publicPrefixes: ['/fellowships'],
-    adminPrefixes: [],
+    adminPrefixes: ['/admin/fellowships'],
     navKeys: ['nav.fellowships'],
     uses: [],
   },
@@ -136,6 +141,13 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     adminPrefixes: ['/admin/pages/builder'],
     navKeys: [],
     uses: [],
+  },
+  portal: {
+    publicPrefixes: ['/my/household', '/my/groups', '/my/events', '/my/serving', '/my/prayer', '/email-change'],
+    adminPrefixes: [],
+    navKeys: [],
+    uses: ['serve', 'fellowships'],
+    requiresBackend: 'supabase',
   },
   giving: {
     publicPrefixes: ['/give/checkout', '/my/giving', '/api/giving'],

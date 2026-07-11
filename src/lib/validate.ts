@@ -403,7 +403,7 @@ export interface CustomPageFormInput {
   body_zh: string;
 }
 
-const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_BODY_LENGTH = 100_000;
 
 /**

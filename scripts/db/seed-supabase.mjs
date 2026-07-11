@@ -40,8 +40,15 @@ try {
   const registrationStatements = existsSync('seed/registration-seed.sql')
     ? seedStatements(readFileSync('seed/registration-seed.sql', 'utf8'))
     : [];
+  // The member-groups portal module is likewise Supabase-only (group_members,
+  // group_applications), so its demo data lives in its own seed that only this
+  // Postgres path loads. Applied after dev-seed.sql (member_groups + people
+  // already exist) and before the sequence reset, same existsSync tolerance.
+  const portalStatements = existsSync('seed/portal-seed.sql')
+    ? seedStatements(readFileSync('seed/portal-seed.sql', 'utf8'))
+    : [];
   await sql.begin(async (tx) => {
-    for (const statement of [...statements, ...givingStatements, ...registrationStatements]) {
+    for (const statement of [...statements, ...givingStatements, ...registrationStatements, ...portalStatements]) {
       await tx.unsafe(statement);
     }
     // The seed inserts explicit ids, which never advances the identity
@@ -56,7 +63,9 @@ try {
       );
     }
   });
-  console.log(`seeded ${statements.length + givingStatements.length + registrationStatements.length} statements`);
+  console.log(
+    `seeded ${statements.length + givingStatements.length + registrationStatements.length + portalStatements.length} statements`,
+  );
 } catch (err) {
   console.error(err);
   process.exitCode = 1;

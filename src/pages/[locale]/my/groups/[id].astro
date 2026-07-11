@@ -1,0 +1,275 @@
+---
+// Group detail (Member Portal Phase 2, Task 5) — MEMBERS ONLY. Church admins
+// use the /admin/fellowships console for group management; this page never
+// takes isAdmin as an authority input (portal pages carry no admin authority),
+// so a non-member admin gets the same 404 a stranger would. The download route
+// (Task 4) is the one deliberate exception that DOES grant admins read access —
+// this page's own gate is unrelated to that.
+//
+// Sections: header (name/kind/term/meeting/description), members roster,
+// files (leaders can upload/delete), and — leaders only — pending applications
+// with approve/reject. All mutations are PRG.
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import PortalNav from '../../../../components/PortalNav.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import {
+  decideGroupApplication,
+  getGroup,
+  isGroupLeader,
+  isGroupMember,
+  listGroupMembers,
+  listPendingApplicationsForGroups,
+} from '../../../../lib/groupDb';
+import { deleteGroupFile, listGroupFiles, saveGroupFile, type GroupFileBucket } from '../../../../lib/groupFiles';
+import { sendGroupApplicationResult } from '../../../../lib/notify';
+import { type EmailEnv } from '../../../../lib/email';
+import { badge, badgeScheduled, btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: GroupFileBucket }).MEDIA;
+
+const groupId = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+if (!groupId || !(await isGroupMember(db, groupId, user.id))) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const isLeader = await isGroupLeader(db, groupId, user.id);
+
+const str = (v: FormDataEntryValue | null): string => String(v ?? '').trim();
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = str(fd.get('_action'));
+  const done = (ok: string) => Astro.redirect(localePath(locale, `/my/groups/${groupId}?ok=${ok}`), 303);
+  const fail = (err: string) => Astro.redirect(localePath(locale, `/my/groups/${groupId}?err=${err}`), 303);
+
+  if (action === 'uploadFile') {
+    if (!isLeader) return new Response(null, { status: 403 });
+    const file = fd.get('file');
+    if (!(file instanceof File)) return fail('generic');
+    try {
+      await saveGroupFile(db, media, { groupId, uploadedBy: user.id, file });
+      return done('uploaded');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      return fail(msg === 'file_type' || msg === 'file_too_large' || msg === 'file_empty' ? msg : 'generic');
+    }
+  }
+  if (action === 'deleteFile') {
+    if (!isLeader) return new Response(null, { status: 403 });
+    const fileId = idOf(fd.get('file_id'));
+    if (fileId !== null) await deleteGroupFile(db, media, fileId, groupId);
+    return done('fileDeleted');
+  }
+  if (action === 'decideApp') {
+    if (!isLeader) return new Response(null, { status: 403 });
+    const applicationId = idOf(fd.get('application_id'));
+    const approve = fd.get('decision') === 'approve';
+    if (applicationId !== null) {
+      // decideGroupApplication is scoped to THIS group, so a leader can't
+      // decide another group's application by posting its id.
+      const decided = await decideGroupApplication(db, applicationId, approve, user.id, groupId);
+      if (decided) await sendGroupApplicationResult(env as unknown as EmailEnv, db, applicationId, approve);
+    }
+    return done(approve ? 'appApproved' : 'appRejected');
+  }
+  return fail('generic');
+}
+
+const group = await getGroup(db, groupId, locale);
+if (!group) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const [members, files, pendingApps] = await Promise.all([
+  listGroupMembers(db, groupId),
+  listGroupFiles(db, groupId),
+  isLeader ? listPendingApplicationsForGroups(db, [groupId], locale) : Promise.resolve([]),
+]);
+
+const kindLabel = t(locale, group.kind === 'fellowship' ? 'admin.groups.kind.fellowship' : 'admin.groups.kind.sunday_school');
+
+const meetingParts: string[] = [];
+if (group.meeting_weekday !== null) meetingParts.push(t(locale, `admin.children.weekday.${group.meeting_weekday}`));
+if (group.meeting_time) meetingParts.push(group.meeting_time);
+if (group.meeting_frequency) meetingParts.push(t(locale, `admin.groups.freq.${group.meeting_frequency}`));
+if (group.meeting_location) meetingParts.push(group.meeting_location);
+const meetingLine = meetingParts.join(' · ');
+
+const descriptionParagraphs = group.description ? group.description.split(/\n{2,}/) : [];
+
+/** Human-readable file size: "842 B" / "3.4 KB" / "1.2 MB". */
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+const okParam = Astro.url.searchParams.get('ok');
+const OK_MSG: Record<string, string> = {
+  uploaded: 'portal.groups.okUploaded',
+  fileDeleted: 'portal.groups.okFileDeleted',
+  appApproved: 'portal.groups.appApproved',
+  appRejected: 'portal.groups.appRejected',
+};
+const okKey = okParam ? (OK_MSG[okParam] ?? null) : null;
+
+const errParam = Astro.url.searchParams.get('err');
+const ERR_MSG: Record<string, string> = {
+  file_type: 'portal.groups.errFileType',
+  file_too_large: 'portal.groups.errFileTooLarge',
+  file_empty: 'portal.groups.errFileEmpty',
+  generic: 'portal.groups.errGeneric',
+};
+const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
+---
+
+<Base title={group.name} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/my/groups')} class="text-sm text-ink-muted hover:text-primary">
+      ← {t(locale, 'portal.nav.groups')}
+    </a>
+    <h1 class="mt-2 font-display text-heading-md font-bold">{group.name}</h1>
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+      <span class={`${badge} bg-surface-sunken text-ink-muted`}>{kindLabel}</span>
+      {isLeader && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.groups.leader')}</span>}
+      {group.term_label && <span class="text-sm text-ink-subtle">{group.term_label}</span>}
+    </div>
+    {
+      meetingParts.length > 0 && (
+        <p class="mt-3 text-sm">
+          <span class="font-semibold">{t(locale, 'fellowships.meets')}:</span> <span class="text-ink-muted">{meetingLine}</span>
+        </p>
+      )
+    }
+    {
+      descriptionParagraphs.length > 0 && (
+        <div class="mt-4 max-w-prose text-sm text-ink-muted">
+          {descriptionParagraphs.map((p) => (
+            <p class="mt-2">{p}</p>
+          ))}
+        </div>
+      )
+    }
+
+    <PortalNav locale={locale} active="groups" />
+
+    {okKey && <p class={`mt-6 ${noticeOk}`}>{t(locale, okKey)}</p>}
+    {errKey && <p class={`mt-6 ${noticeErr}`}>{t(locale, errKey)}</p>}
+
+    {
+      isLeader && pendingApps.length > 0 && (
+        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
+          <h2 class="font-display text-lg font-semibold text-warn">
+            {t(locale, 'portal.groups.pendingAppsTitle')} ({pendingApps.length})
+          </h2>
+          <ul class="mt-4 space-y-4">
+            {pendingApps.map((app) => (
+              <li class="rounded-md border border-border bg-surface-raised p-4">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-bold">{app.applicant_name}</span>
+                  <span class="text-sm text-ink-muted">{app.applicant_email}</span>
+                  <span class="ml-auto text-xs text-ink-subtle tabular-nums">{app.created_at.slice(0, 10)}</span>
+                </div>
+                {app.note && <p class="mt-2 text-sm text-ink-muted">{app.note}</p>}
+                <form method="post" class="mt-3 flex gap-2">
+                  <input type="hidden" name="_action" value="decideApp" />
+                  <input type="hidden" name="application_id" value={app.id} />
+                  <button type="submit" name="decision" value="approve" class={btn}>
+                    {t(locale, 'portal.groups.approve')}
+                  </button>
+                  <button type="submit" name="decision" value="reject" class={btnSecondary}>
+                    {t(locale, 'portal.groups.reject')}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">
+        {t(locale, 'portal.groups.membersTitle')} ({members.length})
+      </h2>
+      <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+        {
+          members.map((m) => (
+            <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+              <span class="font-medium">{m.display_name}</span>
+              {m.is_leader === 1 && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.groups.leader')}</span>}
+            </li>
+          ))
+        }
+        {members.length === 0 && <li class="px-4 py-3 text-sm text-ink-muted">{t(locale, 'portal.groups.noMembers')}</li>}
+      </ul>
+    </section>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.groups.filesTitle')}</h2>
+      {
+        files.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.groups.noFiles')}</p>
+        ) : (
+          <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+            {files.map((f) => (
+              <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <a href={localePath(locale, `/my/groups/${groupId}/files/${f.id}`)} class="font-medium text-primary hover:underline">
+                  {f.file_name}
+                </a>
+                <span class="text-xs text-ink-subtle">{humanSize(f.size_bytes)}</span>
+                <span class="text-xs text-ink-subtle">
+                  {f.uploader_name} · {f.created_at.slice(0, 10)}
+                </span>
+                {isLeader && (
+                  <form
+                    method="post"
+                    class="ml-auto"
+                    onsubmit={`return confirm(${JSON.stringify(t(locale, 'portal.groups.deleteFileConfirm'))})`}
+                  >
+                    <input type="hidden" name="_action" value="deleteFile" />
+                    <input type="hidden" name="file_id" value={f.id} />
+                    <button type="submit" class="text-danger hover:underline">
+                      {t(locale, 'portal.groups.deleteFile')}
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+      {
+        isLeader && (
+          <form method="post" enctype="multipart/form-data" class="mt-4 flex flex-wrap items-center gap-3">
+            <input type="hidden" name="_action" value="uploadFile" />
+            <label class="block">
+              <span class={lab}>{t(locale, 'portal.groups.uploadFile')}</span>
+              <input
+                type="file"
+                name="file"
+                required
+                class={`${tin} max-w-64 text-xs file:mr-2 file:rounded-md file:border-0 file:bg-primary file:px-2 file:py-1 file:text-xs file:font-semibold file:text-on-primary`}
+              />
+            </label>
+            <button type="submit" class={btnSecondary}>
+              {t(locale, 'portal.groups.uploadSubmit')}
+            </button>
+          </form>
+        )
+      }
+    </section>
+  </div>
+</Base>

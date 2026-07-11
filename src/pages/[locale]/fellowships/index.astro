@@ -1,10 +1,11 @@
 ---
-// Fellowships listing: cards showing name, meeting time, location and leaders,
-// ordered by the `order` field. Localized-or-en-fallback per entry.
+// Fellowships listing: cards showing name, description excerpt, and a meeting
+// line (weekday/time/frequency/location), ordered by sort. DB-driven (member_groups,
+// kind='fellowship') — replaces the old astro:content collection.
 import Base from '../../../layouts/Base.astro';
-import { localePath, parseLocale } from '../../../lib/locales';
+import { localePath, parseLocale, type Locale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { listLocalized } from '../../../lib/content';
+import { listGroups, type MemberGroup } from '../../../lib/groupDb';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -12,12 +13,31 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
-const fellowships = (await listLocalized('fellowships', locale)).sort(
-  (a, b) => a.entry.data.order - b.entry.data.order,
-);
+let fellowships: MemberGroup[] = [];
+try {
+  fellowships = await listGroups(Astro.locals.db, locale, { kind: 'fellowship' });
+} catch (err) {
+  console.error('fellowships index: load failed', err);
+}
 
-// Name-list separator is locale-specific: zh uses the enumeration comma 、.
-const sep = locale === 'zh' ? '、' : ', ';
+const EXCERPT_LEN = 160;
+
+/** First paragraph of a plain-text description, truncated for the card. */
+function excerpt(description: string | null): string | null {
+  if (!description) return null;
+  const first = description.split(/\n{2,}/)[0].trim();
+  return first.length > EXCERPT_LEN ? `${first.slice(0, EXCERPT_LEN).trimEnd()}…` : first;
+}
+
+/** "Thursday · 7:00 PM · Weekly · Room 203"-style line, omitting missing fields. */
+function meetingLine(g: MemberGroup, loc: Locale): string | null {
+  const parts: string[] = [];
+  if (g.meeting_weekday !== null) parts.push(t(loc, `admin.children.weekday.${g.meeting_weekday}`));
+  if (g.meeting_time) parts.push(g.meeting_time);
+  if (g.meeting_frequency) parts.push(t(loc, `admin.groups.freq.${g.meeting_frequency}`));
+  if (g.meeting_location) parts.push(g.meeting_location);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
 ---
 
 <Base title={t(locale, 'fellowships.title')} locale={locale}>
@@ -34,29 +54,21 @@ const sep = locale === 'zh' ? '、' : ', ';
         <p class="text-ink-muted">{t(locale, 'fellowships.empty')}</p>
       ) : (
         <div class="grid gap-6 sm:grid-cols-2">
-          {fellowships.map(({ entry, slug }) => (
+          {fellowships.map((g) => (
             <a
-              href={localePath(locale, `/fellowships/${slug}`)}
+              href={localePath(locale, `/fellowships/${g.slug}`)}
               class="block bg-surface-raised border border-border rounded-lg p-6 hover:shadow-md hover:border-border-strong transition-shadow"
             >
-              <h2 class="font-display text-heading-sm font-semibold">{entry.data.name}</h2>
-              {entry.data.audience && <p class="mt-1 text-sm text-ink-subtle">{entry.data.audience}</p>}
-              <dl class="mt-4 text-sm flex flex-col gap-1">
-                <div class="flex gap-2">
-                  <dt class="font-semibold shrink-0">{t(locale, 'fellowships.meets')}:</dt>
-                  <dd class="text-ink-muted">{entry.data.meetingTime}</dd>
-                </div>
-                <div class="flex gap-2">
-                  <dt class="font-semibold shrink-0">{t(locale, 'fellowships.location')}:</dt>
-                  <dd class="text-ink-muted">{entry.data.location}</dd>
-                </div>
-                {entry.data.leaders.length > 0 && (
-                  <div class="flex gap-2">
-                    <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
-                    <dd class="text-ink-muted">{entry.data.leaders.map((l) => l.name).join(sep)}</dd>
-                  </div>
-                )}
-              </dl>
+              <h2 class="font-display text-heading-sm font-semibold">{g.name}</h2>
+              {excerpt(g.description) && <p class="mt-2 text-sm text-ink-muted">{excerpt(g.description)}</p>}
+              {
+                meetingLine(g, locale) && (
+                  <p class="mt-4 text-sm">
+                    <span class="font-semibold">{t(locale, 'fellowships.meets')}:</span>{' '}
+                    <span class="text-ink-muted">{meetingLine(g, locale)}</span>
+                  </p>
+                )
+              }
             </a>
           ))}
         </div>

@@ -18,6 +18,7 @@ import {
   unlinkPerson,
   updateHousehold,
 } from '../src/lib/householdDb';
+import { setOwner } from '../src/lib/portalDb';
 
 async function reset(): Promise<void> {
   await env.DB.batch([
@@ -260,6 +261,22 @@ describe('listHouseholds', () => {
 
     const filtered = await listHouseholds(env.DB, { q: 'wang' });
     expect(filtered.map((h) => h.name)).toEqual(['Wang Family']);
+  });
+
+  it('reports owner_count per household, 0 until a member is promoted', async () => {
+    const chen = await createHousehold(env.DB, { name: 'Chen Family', address: null, phone: null }, 1);
+    const wang = await createHousehold(env.DB, { name: 'Wang Family', address: null, phone: null }, 2);
+
+    const before = await listHouseholds(env.DB);
+    expect(before.every((h) => h.owner_count === 0)).toBe(true);
+
+    const chenHh = await getHousehold(env.DB, chen);
+    const m1 = chenHh!.members.find((m) => m.person_id === 1)!.id;
+    await setOwner(env.DB, { householdId: chen, memberId: m1, isOwner: true, actorPersonId: 1, isAdmin: true });
+
+    const after = await listHouseholds(env.DB);
+    expect(after.find((h) => h.id === chen)!.owner_count).toBe(1);
+    expect(after.find((h) => h.id === wang)!.owner_count).toBe(0);
   });
 
   it('excludes soft-deleted households', async () => {

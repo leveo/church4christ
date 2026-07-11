@@ -7,9 +7,11 @@
 // feed for everyone), and the UID host derives from APP_ORIGIN.
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import { buildICal, type ICalEvent } from '../../lib/ical';
+import { buildICal, meetingToICalEvent, regToICalEvent, type ICalEvent } from '../../lib/ical';
 import { i18nJoin } from '../../lib/db';
-import { addDays, todayInTz } from '../../lib/dates';
+import { addDays, todayInTz, utcToDatetimeLocal } from '../../lib/dates';
+import { listMeetingOccurrencesForPerson } from '../../lib/groupDb';
+import { listRegistrationsForPerson } from '../../lib/regDb';
 
 export const GET: APIRoute = async ({ params, url, locals }) => {
   const token = params.token ?? '';
@@ -18,9 +20,9 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
   if (!token) return new Response('Not found', { status: 404 });
 
   const person = await db
-    .prepare(`SELECT id, display_name FROM people WHERE calendar_token = ? AND active = 1 AND deleted_at IS NULL`)
+    .prepare(`SELECT id, display_name, email FROM people WHERE calendar_token = ? AND active = 1 AND deleted_at IS NULL`)
     .bind(token)
-    .first<{ id: number; display_name: string }>();
+    .first<{ id: number; display_name: string; email: string }>();
   if (!person) return new Response('Not found', { status: 404 });
 
   // Rolling window: 30 days of history (so a subscriber keeps recent context)
@@ -77,6 +79,26 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
     startTime: r.start_time,
     endTime: r.end_time,
   }));
+
+  // Portal additions (spec addendum §A): group meetings, and — when
+  // registration is also on — the person's own event registrations. Gated on
+  // locals.modules, which the middleware computes (and backend-filters) for
+  // EVERY request, this public feed route included, so a D1 church (portal
+  // force-disabled there) leaves the serving section above byte-identical.
+  // `from` (30 days of history) doubles as both windows' lower bound.
+  if (locals.modules.has('portal')) {
+    const to = addDays(todayInTz(), 180);
+    const [meetings, registrations] = await Promise.all([
+      listMeetingOccurrencesForPerson(db, person.id, from, to, 'en'),
+      locals.modules.has('registration')
+        ? listRegistrationsForPerson(db, 'en', person.id, person.email)
+        : Promise.resolve([]),
+    ]);
+    for (const m of meetings) events.push(meetingToICalEvent(m, host));
+    for (const r of registrations) {
+      if (utcToDatetimeLocal(r.starts_at).slice(0, 10) >= from) events.push(regToICalEvent(r, host));
+    }
+  }
 
   const now = new Date();
   const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}T000000Z`;

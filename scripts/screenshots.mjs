@@ -125,6 +125,44 @@ const PAGES = [
   { path: '/admin/children?tab=dashboard', out: 'docs/images/admin/children-dashboard.png', admin: true },
   { path: '/admin/children?tab=today', out: 'docs/images/admin/children-today.png', admin: true },
 
+  // Member portal (Phase 2). These pages are Supabase-only (the `portal` module
+  // is `requiresBackend: 'supabase'`), so the dev server must run with
+  // DB_BACKEND=supabase against a local Postgres, not the default D1 — follow
+  // docs/supabase-setup.md §9 (Local development), then migrate + seed that DB:
+  //   SUPABASE_DB_URL=<url> npm run db:migrate:supabase
+  //   SUPABASE_DB_URL=<url> npm run db:seed:supabase   # loads dev-seed + portal-seed
+  // Every /en/my/* page renders for the signed-in member, so this whole block is
+  // David Chen's pass (he leads group 1 — the portal-seed leader). The admin
+  // fellowships console below is a separate admin pass. Two shots also need a
+  // one-off fixture row applied to that throwaway DB *before* capture, so the
+  // panel isn't empty (documented inline; the SQL lives only in the throwaway DB):
+  //   calendar — the seed leaves group 1 with no meeting time, so the month grid
+  //     shows no meeting dot. Give it one:
+  //       UPDATE member_groups SET meeting_weekday=1, meeting_time='19:30',
+  //         meeting_frequency='weekly' WHERE id=1;
+  //   prayer — the wall starts empty. Seed a couple of approved church items (the
+  //     church tab is the default view this shot captures) and one pending group
+  //     item so David's leader-only Pending tab has something to moderate:
+  //       INSERT INTO prayer_items (author_person_id, scope, body, status,
+  //         approved_by, approved_at) VALUES
+  //         (3, 'church', '…outreach…',  'approved', 1, datetime('now')),
+  //         (4, 'church', '…recovery…',  'approved', 1, datetime('now'));
+  //       INSERT INTO prayer_items (author_person_id, scope, group_id, body,
+  //         status) VALUES (7, 'group', 1, '…new job…', 'pending');
+  { path: '/en/my', out: 'docs/images/portal/portal-dashboard.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/household', out: 'docs/images/portal/portal-household.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/groups', out: 'docs/images/portal/portal-groups.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/groups/1', out: 'docs/images/portal/portal-group-detail.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/events', out: 'docs/images/portal/portal-events.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/serving', out: 'docs/images/portal/portal-serving.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/calendar', out: 'docs/images/portal/portal-calendar.png', bypass: 'pastor.david@example.com' },
+  { path: '/en/my/prayer', out: 'docs/images/portal/portal-prayer.png', bypass: 'pastor.david@example.com' },
+
+  // Admin fellowships console — the group-definitions editor (group 1). Needs an
+  // admin session, and (like the portal pages above) the Supabase backend, since
+  // member_groups is a Supabase-only table. Shoot it in the admin pass.
+  { path: '/admin/fellowships/1', out: 'docs/images/admin/admin-fellowships.png', admin: true },
+
   // Page builder: the drag-and-drop editor opened on the seeded 'welcome' page
   // (fixed id in dev-seed.sql), plus the zero-JS public page it publishes.
   { path: '/admin/pages/builder/seedbuilderwelcome0000000000pb01', out: 'docs/images/admin/page-builder.png', admin: true },

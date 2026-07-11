@@ -34,6 +34,7 @@ export interface HouseholdMember {
   display_name: string;
   role: HouseholdRole;
   is_primary: number; // 0 | 1
+  is_owner: number; // 0 | 1
   created_at: string;
 }
 
@@ -53,11 +54,12 @@ export interface HouseholdSummary {
   address: string | null;
   phone: string | null;
   member_count: number;
+  owner_count: number;
   created_at: string;
   updated_at: string;
 }
 
-const MEMBER_COL_NAMES = ['id', 'household_id', 'person_id', 'display_name', 'role', 'is_primary', 'created_at'];
+const MEMBER_COL_NAMES = ['id', 'household_id', 'person_id', 'display_name', 'role', 'is_primary', 'is_owner', 'created_at'];
 const MEMBER_COLS = MEMBER_COL_NAMES.join(', ');
 const MEMBER_COLS_HM = MEMBER_COL_NAMES.map((c) => `hm.${c}`).join(', ');
 
@@ -180,7 +182,7 @@ export async function getLiveHouseholdForPerson(
     .prepare(
       `SELECT hm.id AS id, hm.household_id AS household_id, hm.person_id AS person_id,
               COALESCE(p.display_name, hm.display_name) AS display_name,
-              hm.role AS role, hm.is_primary AS is_primary, hm.created_at AS created_at
+              hm.role AS role, hm.is_primary AS is_primary, hm.is_owner AS is_owner, hm.created_at AS created_at
        FROM household_members hm
        LEFT JOIN people p ON p.id = hm.person_id AND p.deleted_at IS NULL
        WHERE hm.household_id = ?
@@ -420,7 +422,9 @@ export async function listHouseholds(db: AppDb, opts: { q?: string } = {}): Prom
   const { results } = await db
     .prepare(
       `SELECT h.id, h.name, h.address, h.phone, h.created_at, h.updated_at,
-              COUNT(hm.id) AS member_count
+              COUNT(hm.id) AS member_count,
+              (SELECT COUNT(*) FROM household_members hm2
+               WHERE hm2.household_id = h.id AND hm2.is_owner = 1) AS owner_count
        FROM households h
        LEFT JOIN household_members hm ON hm.household_id = h.id
        WHERE h.deleted_at IS NULL

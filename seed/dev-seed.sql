@@ -513,6 +513,57 @@ INSERT INTO checkins (id, event_id, household_id, household_member_id, child_nam
 INSERT INTO settings (key, value) VALUES
   ('children.kiosk_token', 'devkiosk1234567890abcdef12345678');
 
+-- Member portal (Task 7): the Chen household's primary adult (David, member id
+-- 1) is its first owner, so /my/household has real owner-only demo data
+-- (promote/demote a co-owner) without any manual setup.
+UPDATE household_members SET is_owner = 1 WHERE id = 1;
+
+-- Two member_groups (Phase 2 data): one long-running fellowship, one seasonal
+-- Sunday School class carrying term_label/term_start/term_end. term_start/
+-- term_end are relative (date('now', ...)) so the class always reads as
+-- "in session" on a freshly seeded DB, same convention as the worship dates above.
+INSERT INTO member_groups (id, slug, kind, term_label, term_start, term_end, active, sort) VALUES
+  (1, 'young-adults', 'fellowship', NULL, NULL, NULL, 1, 1),
+  (2, 'foundations-of-faith', 'sunday_school', '2026 Fall', date('now','-30 days'), date('now','+60 days'), 1, 2);
+
+INSERT INTO member_group_i18n (group_id, locale, name, description) VALUES
+  (1, 'en', 'Young Adults Fellowship', 'College grads and young professionals meeting weekly for food, discussion, and prayer.'),
+  (1, 'zh', '青年团契', '大学毕业生与青年专业人士每周聚会，一同用餐、分享与祷告。'),
+  (2, 'en', 'Foundations of Faith', 'A Sunday School class walking through the basics of Christian belief and practice.'),
+  (2, 'zh', '信仰基础', '主日学课程，带领学员认识基督教信仰与实践的基础。');
+
+-- Five legacy fellowships (ported from the retired astro:content collection,
+-- Task 3): real meeting details as structured fields, ids continuing after the
+-- two rows above. 'campus' is referenced by test/e2e/public.test.ts.
+INSERT INTO member_groups
+  (id, slug, kind, meeting_weekday, meeting_time, meeting_frequency, meeting_location, active, sort) VALUES
+  (3, 'young-professionals', 'fellowship', 5, '19:30', 'weekly', 'Room 201', 1, 3),
+  (4, 'family', 'fellowship', 6, '17:00', 'weekly', 'Fellowship Hall', 1, 4),
+  (5, 'seniors', 'fellowship', 3, '10:00', 'weekly', 'Room 105', 1, 5),
+  (6, 'campus', 'fellowship', 4, '19:00', 'weekly', 'Room 203', 1, 6),
+  (7, 'english-young-adults', 'fellowship', 0, '13:00', 'weekly', 'Café Corner', 1, 7);
+
+INSERT INTO member_group_i18n (group_id, locale, name, description) VALUES
+  (3, 'en', 'Young Professionals Fellowship', 'A home for working adults navigating early career and adulthood, meeting Friday evenings for a meal, Scripture, and honest conversation in small groups.'),
+  (3, 'zh', '职青团契', '为在职青年预备的团契，周五晚上一同吃饭、查经，在小组中坦诚交流。'),
+  (4, 'en', 'Family Fellowship', 'A gathering for couples and parents raising children, meeting Saturday afternoons to share life, study Scripture, and pray for one another''s families — kids welcome.'),
+  (4, 'zh', '家庭团契', '为已婚夫妇及有孩子的家庭预备的聚会，周六下午一同分享生活、查考圣经，为彼此的家庭祷告，欢迎带着孩子参加。'),
+  (5, 'en', 'Seniors Fellowship', 'An unhurried, warm gathering for retirees and older members, meeting Wednesday mornings over tea and Scripture.'),
+  (5, 'zh', '长者团契', '为退休及年长弟兄姊妹预备的从容聚会，周三上午一同品茶、查考圣经。'),
+  (6, 'en', 'Campus Fellowship', 'A community for university and college students, meeting Thursday evenings to study the Bible honestly and build lasting friendships.'),
+  (6, 'zh', '学生团契', '为大专院校学生预备的团契，周四晚上一同诚实地查考圣经，建立长久的友谊。'),
+  (7, 'en', 'English Young Adults', 'A community for those who do life mostly in English, meeting after Sunday services over coffee to read Scripture and share life together.'),
+  (7, 'zh', '英语青年团契', '为以英语为主要生活语言的青年预备的团契，主日聚会后一同喝咖啡、读经、分享生活。');
+
+-- Member portal groups (Phase 2 Task 6): open Foundations of Faith (group 2) for
+-- self-service sign-up, so /my/groups' "Open for sign-up" section has a real
+-- class on a freshly seeded DB. Portable — member_groups/open_signup exists on
+-- both backends. Membership (David leads group 1, Amy is a member) and one
+-- pending application are Supabase-only rows — see seed/portal-seed.sql, loaded
+-- only on the Postgres backend (group_members/group_applications have no D1
+-- counterpart).
+UPDATE member_groups SET open_signup = 1 WHERE id = 2;
+
 -- Page builder: one seeded builder-format page (fixed id, like the kiosk token
 -- above) so /admin/pages/builder/<id> and /en/p/welcome work — and can be
 -- screenshotted — immediately after a local seed. The layout is the docs'

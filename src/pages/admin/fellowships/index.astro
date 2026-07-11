@@ -1,0 +1,155 @@
+---
+// Groups (fellowships + Sunday School classes) admin list (console class,
+// staff-level: re-checks editor∪admin like sermons/index.astro). Definitions
+// only — membership lives on the per-group edit page, gated on the portal
+// module. "New group" is a minimal inline form (slug + kind + English name);
+// the rest of GroupInput is filled in on the [id] edit page after creation.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { listGroupsAdmin, saveGroup, type GroupInput, type GroupKind, type MemberGroupAdminRow } from '../../../lib/groupDb';
+import { SLUG_RE } from '../../../lib/validate';
+import { card, tin, lab, btn, th, td, badge, badgeActive, badgeInactive, noticeErr } from '../../../lib/adminUi';
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || user.isAdmin)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+const KINDS: GroupKind[] = ['fellowship', 'sunday_school'];
+
+let errKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'create') {
+    const slug = String(fd.get('slug') ?? '').trim().toLowerCase();
+    const kindRaw = String(fd.get('kind') ?? '');
+    const kind = KINDS.find((k) => k === kindRaw);
+    const nameEn = String(fd.get('name_en') ?? '').trim();
+    if (!slug || !kind || !nameEn) {
+      errKey = 'errors.required';
+    } else if (slug.length > 64 || !SLUG_RE.test(slug)) {
+      errKey = 'errors.slugInvalid';
+    } else {
+      const input: GroupInput = {
+        slug,
+        kind,
+        termLabel: null,
+        termStart: null,
+        termEnd: null,
+        meetingWeekday: null,
+        meetingTime: null,
+        meetingFrequency: null,
+        meetingLocation: null,
+        openSignup: false,
+        active: true,
+        sort: 0,
+        nameEn,
+        nameZh: null,
+        descEn: null,
+        descZh: null,
+      };
+      try {
+        const id = await saveGroup(db, null, input);
+        return Astro.redirect(`/admin/fellowships/${id}?saved=1`, 303);
+      } catch (e) {
+        errKey = e instanceof Error && e.message === 'slug_taken' ? 'errors.slugTaken' : 'errors.required';
+      }
+    }
+  }
+}
+
+const groups = await listGroupsAdmin(db);
+
+function nameOf(row: MemberGroupAdminRow): string {
+  return (lang === 'zh' ? row.name_zh : null) ?? row.name_en;
+}
+
+function meetingSummary(row: MemberGroupAdminRow): string {
+  const parts: string[] = [];
+  if (row.meeting_weekday !== null) parts.push(t(lang, `admin.children.weekday.${row.meeting_weekday}`));
+  if (row.meeting_time) parts.push(row.meeting_time);
+  if (row.meeting_frequency) parts.push(t(lang, `admin.groups.freq.${row.meeting_frequency}`));
+  if (row.meeting_location) parts.push(row.meeting_location);
+  return parts.length > 0 ? parts.join(' · ') : '—';
+}
+---
+<Admin title={t(lang, 'admin.groups.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.groups.title')}</h1>
+  <p class="mt-1 text-ink-muted">{t(lang, 'admin.groups.intro')}</p>
+
+  {errKey && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, errKey)}</p>}
+
+  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse text-sm">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.groups.colName')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colKind')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colTerm')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colMeeting')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colOpenSignup')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colActive')}</th>
+          <th class={`${th} text-right`}>{t(lang, 'admin.groups.colSort')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          groups.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="7">
+                {t(lang, 'admin.groups.empty')}
+              </td>
+            </tr>
+          ) : (
+            groups.map((g) => (
+              <tr class="border-t border-border hover:bg-surface-sunken">
+                <td class={td}>
+                  <a href={`/admin/fellowships/${g.id}`} class="font-medium text-primary hover:underline">
+                    {nameOf(g)}
+                  </a>
+                </td>
+                <td class={td}>
+                  <span class={`${badge} bg-surface-sunken text-ink-muted`}>{t(lang, `admin.groups.kind.${g.kind}`)}</span>
+                </td>
+                <td class={`${td} text-ink-muted`}>{g.term_label ?? '—'}</td>
+                <td class={`${td} text-ink-muted`}>{meetingSummary(g)}</td>
+                <td class={td}>{t(lang, g.open_signup === 1 ? 'admin.groups.openYes' : 'admin.groups.openNo')}</td>
+                <td class={td}>
+                  <span class={`${badge} ${g.active === 1 ? badgeActive : badgeInactive}`}>
+                    {t(lang, g.active === 1 ? 'admin.console.active' : 'admin.console.disabled')}
+                  </span>
+                </td>
+                <td class={`${td} text-right text-ink-muted`}>{g.sort}</td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <section class={`mt-8 ${card} max-w-xl`}>
+    <h2 class="font-display text-heading-sm font-bold mb-4">{t(lang, 'admin.groups.new')}</h2>
+    <form method="post" class="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="_action" value="create" />
+      <label class="flex-1 min-w-40">
+        <span class={lab}>{t(lang, 'admin.groups.slug')}</span>
+        <input name="slug" required class={tin} />
+      </label>
+      <label>
+        <span class={lab}>{t(lang, 'admin.groups.kindLabel')}</span>
+        <select name="kind" class={tin}>
+          {KINDS.map((k) => (
+            <option value={k}>{t(lang, `admin.groups.kind.${k}`)}</option>
+          ))}
+        </select>
+      </label>
+      <label class="flex-1 min-w-40">
+        <span class={lab}>{t(lang, 'admin.groups.nameEn')}</span>
+        <input name="name_en" required class={tin} />
+      </label>
+      <button type="submit" class={btn}>{t(lang, 'admin.groups.create')}</button>
+    </form>
+  </section>
+</Admin>

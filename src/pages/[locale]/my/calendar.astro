@@ -11,8 +11,10 @@ import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { listBlockouts, listPersonAssignments } from '../../../lib/myDb';
 import { generateCalendarToken, getCalendarToken } from '../../../lib/ical';
-import { formatMonth, monthRange, todayInTz } from '../../../lib/dates';
+import { formatMonth, monthRange, todayInTz, utcToDatetimeLocal } from '../../../lib/dates';
 import { btn, btnSecondary, tin } from '../../../lib/adminUi';
+import { listMeetingOccurrencesForPerson } from '../../../lib/groupDb';
+import { listRegistrationsForPerson } from '../../../lib/regDb';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -43,12 +45,28 @@ if (month < 1 || month > 12) return Astro.redirect(localePath(locale, '/my/calen
 const ym = `${year}-${String(month).padStart(2, '0')}`;
 const { start: monthStart, end: monthEnd } = monthRange(ym);
 
-const [assignments, blockouts, calToken] = await Promise.all([
+// Portal group meetings + (when registration is also on) the viewer's own event
+// registrations, gated on the module so the D1 backend (portal always off there)
+// never touches those tables. Ported from the /my dashboard card's gating.
+const hasPortal = Astro.locals.modules.has('portal');
+const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
+const [assignments, blockouts, calToken, meetingOccurrences, registrations] = await Promise.all([
   listPersonAssignments(db, user.id, monthStart, locale).then((rows) => rows.filter((a) => a.plan_date <= monthEnd)),
   listBlockouts(db, user.id, monthStart).then((rows) => rows.filter((b) => b.start_date <= monthEnd)),
   getCalendarToken(db, user.id),
+  hasPortal ? listMeetingOccurrencesForPerson(db, user.id, monthStart, monthEnd, locale) : Promise.resolve([]),
+  hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
 ]);
-const marks = buildCalendarMarks(assignments, blockouts, ym);
+const meetings = meetingOccurrences.map((m) => ({
+  date: m.date,
+  title: [m.group_name, m.meeting_time, m.meeting_location].filter(Boolean).join(' · '),
+}));
+// starts_at is UTC 'YYYY-MM-DD HH:MM:SS'; convert to church-local before taking
+// the date so a late-evening UTC event lands on the correct local day/month.
+const events = registrations
+  .map((r) => ({ date: utcToDatetimeLocal(r.starts_at).slice(0, 10), title: r.event_title }))
+  .filter((e) => e.date.slice(0, 7) === ym);
+const marks = buildCalendarMarks(assignments, blockouts, ym, { events, meetings });
 
 const prev = month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
 const next = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;

@@ -1,10 +1,12 @@
 ---
-// Single fellowship: meeting details + leaders panel, then the prose body.
-import { render } from 'astro:content';
-import ContentPage from '../../../components/ContentPage.astro';
+// Single fellowship: meeting-info block, then the full description as prose
+// paragraphs. DB-driven (member_groups) — replaces the old astro:content
+// collection. No members/leaders here (not available on D1; the member portal
+// has its own group-roster surface). Unknown/inactive slugs 404.
+import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { getLocalized } from '../../../lib/content';
+import { getGroupBySlug, type MemberGroup } from '../../../lib/groupDb';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -13,60 +15,47 @@ if (!locale) {
 }
 
 const slug = Astro.params.slug ?? '';
-const found = await getLocalized('fellowships', slug, locale);
-if (!found) {
+let group: MemberGroup | null = null;
+try {
+  group = await getGroupBySlug(Astro.locals.db, slug, locale);
+} catch (err) {
+  console.error('fellowship detail: load failed', err);
+}
+if (!group) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');
 }
-const { entry, translated } = found;
-const { Content } = await render(entry);
-const { name, meetingTime, location, audience, leaders } = entry.data;
 
-// Locale-specific punctuation: zh uses the enumeration comma 、 and fullwidth
-// parentheses for leader roles; en uses ', ' and ASCII parentheses.
-const sep = locale === 'zh' ? '、' : ', ';
-const withRole = (l: { name: string; role?: string }) =>
-  l.role ? (locale === 'zh' ? `${l.name}（${l.role}）` : `${l.name} (${l.role})`) : l.name;
+const paragraphs = group.description ? group.description.split(/\n{2,}/) : [];
+
+const meetingParts: string[] = [];
+if (group.meeting_weekday !== null) meetingParts.push(t(locale, `admin.children.weekday.${group.meeting_weekday}`));
+if (group.meeting_time) meetingParts.push(group.meeting_time);
+if (group.meeting_frequency) meetingParts.push(t(locale, `admin.groups.freq.${group.meeting_frequency}`));
+if (group.meeting_location) meetingParts.push(group.meeting_location);
+const meetingLine = meetingParts.join(' · ');
 ---
 
-<ContentPage title={name} description={audience} locale={locale} translated={translated}>
-  <div slot="before" class="bg-surface-sunken border border-border rounded-lg p-5">
-    <dl class="text-sm flex flex-col gap-2">
+<Base title={group.name} locale={locale}>
+  <div class="bg-primary-soft text-on-primary-soft">
+    <div class="container-content py-12">
+      <a href={localePath(locale, '/fellowships')} class="text-sm font-semibold hover:underline">
+        {t(locale, 'fellowships.back')}
+      </a>
+      <h1 class="mt-4 font-display text-display-lg font-bold">{group.name}</h1>
       {
-        audience && (
-          <div class="flex gap-2">
-            <dt class="font-semibold shrink-0">{t(locale, 'fellowships.audience')}:</dt>
-            <dd class="text-ink-muted">{audience}</dd>
-          </div>
+        meetingParts.length > 0 && (
+          <p class="mt-4 text-sm font-semibold uppercase tracking-caps">
+            {t(locale, 'fellowships.meets')}: <span class="font-normal">{meetingLine}</span>
+          </p>
         )
       }
-      <div class="flex gap-2">
-        <dt class="font-semibold shrink-0">{t(locale, 'fellowships.meets')}:</dt>
-        <dd class="text-ink-muted">{meetingTime}</dd>
-      </div>
-      <div class="flex gap-2">
-        <dt class="font-semibold shrink-0">{t(locale, 'fellowships.location')}:</dt>
-        <dd class="text-ink-muted">{location}</dd>
-      </div>
-      {
-        leaders.length > 0 && (
-          <div class="flex gap-2">
-            <dt class="font-semibold shrink-0">{t(locale, 'fellowships.leaders')}:</dt>
-            <dd class="text-ink-muted">{leaders.map(withRole).join(sep)}</dd>
-          </div>
-        )
-      }
-    </dl>
+    </div>
   </div>
 
-  <Content />
-
-  <Fragment slot="after">
-    <a
-      href={localePath(locale, '/fellowships')}
-      class="text-ink-muted underline decoration-accent underline-offset-2 hover:text-accent"
-    >
-      {t(locale, 'fellowships.back')}
-    </a>
-  </Fragment>
-</ContentPage>
+  <div class="container-content py-10">
+    <article class="prose">
+      {paragraphs.map((p) => <p>{p}</p>)}
+    </article>
+  </div>
+</Base>

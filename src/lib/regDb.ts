@@ -99,6 +99,52 @@ export async function getOpenEvent(db: AppDb, locale: Locale, id: number): Promi
     .first<RegEvent>();
 }
 
+export interface MyRegistration {
+  id: number;
+  event_id: number;
+  event_title: string;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  status: 'pending' | 'confirmed';
+  amount_cents: number;
+  currency: string;
+  created_at: string;
+}
+
+/**
+ * A signed-in member's own registrations for the portal "My registrations"
+ * view: matched by person_id OR a case-insensitive email match (covers a
+ * registration made anonymously, before signup, with the same email), newest
+ * event first. Cancelled rows are excluded. Localized event title (en
+ * fallback), mirroring EVENT_SELECT's i18n join.
+ */
+export async function listRegistrationsForPerson(
+  db: AppDb,
+  locale: Locale,
+  personId: number,
+  email: string,
+): Promise<MyRegistration[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.id AS id, r.event_id AS event_id,
+              COALESCE(el.title, ed.title, '') AS event_title,
+              e.starts_at AS starts_at, e.ends_at AS ends_at, e.location AS location,
+              r.status AS status, r.amount_cents AS amount_cents, r.currency AS currency,
+              r.created_at AS created_at
+       FROM registrations r
+       JOIN reg_events e ON e.id = r.event_id
+       LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?1
+       LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'
+       WHERE (r.person_id = ?2 OR LOWER(r.email) = LOWER(?3))
+         AND r.status != 'cancelled'
+       ORDER BY e.starts_at DESC`,
+    )
+    .bind(locale, personId, email)
+    .all<MyRegistration>();
+  return results;
+}
+
 /** An event's questions in sort order, localized label (en fallback); options
  *  JSON-decoded to a string[] (null for non-select/checkbox or unparseable). */
 export async function listQuestions(db: AppDb, locale: Locale, eventId: number): Promise<RegQuestion[]> {

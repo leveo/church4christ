@@ -7,11 +7,39 @@ import {
   sendApplicationReceived,
   sendApplicationResult,
   sendDeclineNotice,
+  sendGroupApplicationReceived,
+  sendGroupApplicationResult,
   sendSchedulingRequest,
   sendServeInvite,
 } from '../src/lib/notify';
 
 const ENV = { EMAIL_DEV_LOG: '1', APP_ORIGIN: 'https://church.example' };
+
+// group_members/group_applications are Supabase-only (migrations-supabase/0006),
+// with no D1 counterpart — same fallback documented in test/groupDb.test.ts:
+// CREATE TABLE IF NOT EXISTS matching the PG DDL minus identity.
+await env.DB.prepare(
+  `CREATE TABLE IF NOT EXISTS group_members (
+     id INTEGER PRIMARY KEY,
+     group_id INTEGER NOT NULL REFERENCES member_groups(id),
+     person_id INTEGER NOT NULL REFERENCES people(id),
+     is_leader INTEGER NOT NULL DEFAULT 0,
+     joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+     UNIQUE (group_id, person_id)
+   )`,
+).run();
+await env.DB.prepare(
+  `CREATE TABLE IF NOT EXISTS group_applications (
+     id INTEGER PRIMARY KEY,
+     group_id INTEGER NOT NULL REFERENCES member_groups(id),
+     person_id INTEGER NOT NULL REFERENCES people(id),
+     status TEXT NOT NULL DEFAULT 'P' CHECK (status IN ('P','A','R')),
+     note TEXT,
+     decided_by INTEGER REFERENCES people(id),
+     decided_at TEXT,
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
+).run();
 
 beforeAll(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -31,6 +59,10 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO plan_positions (plan_id, position_id, needed) VALUES (1, 1, 1)`),
     env.DB.prepare(`INSERT INTO roster_assignments (id, plan_id, position_id, person_id, status) VALUES (1, 1, 1, 2, 'U')`),
     env.DB.prepare(`INSERT INTO team_applications (id, person_id, team_id, status) VALUES (1, 3, 1, 'P')`),
+    env.DB.prepare(`INSERT INTO member_groups (id, slug, kind, open_signup) VALUES (1, 'young-adults', 'fellowship', 1)`),
+    env.DB.prepare(`INSERT INTO member_group_i18n (group_id, locale, name) VALUES (1, 'en', 'Young Adults')`),
+    env.DB.prepare(`INSERT INTO group_members (group_id, person_id, is_leader) VALUES (1, 1, 1)`),
+    env.DB.prepare(`INSERT INTO group_applications (id, group_id, person_id, status) VALUES (1, 1, 3, 'P')`),
   ]);
 });
 
@@ -66,6 +98,20 @@ describe('sendApplicationResult', () => {
   it('emails the applicant', async () => {
     await sendApplicationResult(ENV, env.DB, 1, true);
     expect(await logCount('app@example.com', 'appResult')).toBe(1);
+  });
+});
+
+describe('sendGroupApplicationReceived', () => {
+  it('notifies the group leaders', async () => {
+    await sendGroupApplicationReceived(ENV, env.DB, 1);
+    expect(await logCount('leader@example.com', 'groupAppReceived')).toBe(1);
+  });
+});
+
+describe('sendGroupApplicationResult', () => {
+  it('emails the applicant', async () => {
+    await sendGroupApplicationResult(ENV, env.DB, 1, true);
+    expect(await logCount('app@example.com', 'groupAppResult')).toBe(1);
   });
 });
 

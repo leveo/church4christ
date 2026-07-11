@@ -1,19 +1,28 @@
 ---
 // My Giving (authed via route policy; owned by the `giving` module, so the
 // middleware 404s this whole route when giving is off — the page never has to
-// re-check the module). Three read-only sections scoped to the viewer's LIVE
-// household (see givingDb.ts privacy note): (1) the giver's own recurring
+// re-check the module). Three read-only sections: (1) the giver's own recurring
 // subscriptions with a status chip and a "Manage" button that POSTs to the
-// Stripe billing portal; (2) the household gift ledger (succeeded + refunded);
-// (3) per-year household totals. All money flows through formatCents — cents are
-// integers end to end. Empty states for all three so a brand-new giver sees a
-// friendly page, not blanks.
+// Stripe billing portal (always person-scoped); (2) the gift ledger; (3)
+// per-year totals. Ledger/totals are scoped to the viewer's LIVE household (see
+// givingDb.ts privacy note) for a household owner, and to the viewer's own gifts
+// only for anyone else — an explainer note clarifies the narrower scope. All
+// money flows through formatCents — cents are integers end to end. Empty states
+// for all three so a brand-new giver sees a friendly page, not blanks.
 import Base from '../../../layouts/Base.astro';
-import { localePath, parseLocale } from '../../../lib/locales';
+import PortalNav from '../../../components/PortalNav.astro';
+import { parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
-import { listRecurringForPerson, listHouseholdGifts, householdYearTotals } from '../../../lib/givingDb';
+import {
+  listRecurringForPerson,
+  listHouseholdGifts,
+  householdYearTotals,
+  listPersonGifts,
+  personYearTotals,
+} from '../../../lib/givingDb';
+import { isHouseholdOwner } from '../../../lib/portalDb';
 import { badge, btnSecondary, noticeErr, th, td } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -29,10 +38,14 @@ const db = Astro.locals.db;
 const errParam = Astro.url.searchParams.get('error');
 const errorKey = errParam ? (errParam === 'noportal' ? 'give.error.noportal' : 'give.error.invalid') : null;
 
+// A household owner sees the shared household ledger/totals (unchanged); anyone
+// else (a non-owner adult, or a household-less giver) sees only their own gifts
+// via the person-scoped siblings — a housemate's gift never appears for them.
+const owner = await isHouseholdOwner(db, user.id);
 const [recurring, gifts, yearTotals] = await Promise.all([
   listRecurringForPerson(db, locale, user.id),
-  listHouseholdGifts(db, locale, user.id),
-  householdYearTotals(db, user.id),
+  owner ? listHouseholdGifts(db, locale, user.id) : listPersonGifts(db, locale, user.id),
+  owner ? householdYearTotals(db, user.id) : personYearTotals(db, user.id),
 ]);
 
 // Recurring subscription status → chip variant (webhook constrains the set to
@@ -46,10 +59,11 @@ const statusChip: Record<string, string> = {
 
 <Base title={t(locale, 'my.giving.title')} locale={locale} noindex>
   <div class="container-content max-w-3xl py-12">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
-    <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'my.giving.title')}</h1>
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'my.giving.title')}</h1>
+    <PortalNav locale={locale} active="giving" />
 
     {errorKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, errorKey)}</p>}
+    {!owner && <p class="mt-4 text-sm text-ink-muted">{t(locale, 'portal.giving.ownScopeNote')}</p>}
 
     {/* ── Recurring giving ─────────────────────────────────────────────────── */}
     <section class="mt-8">
@@ -83,7 +97,9 @@ const statusChip: Record<string, string> = {
 
     {/* ── Household giving history ─────────────────────────────────────────── */}
     <section class="mt-8">
-      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.giving.household')}</h2>
+      <h2 class="font-display text-lg font-semibold">
+        {t(locale, owner ? 'my.giving.household' : 'portal.giving.ownHistory')}
+      </h2>
       {
         gifts.length === 0 ? (
           <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>
@@ -125,6 +141,7 @@ const statusChip: Record<string, string> = {
 
     {/* ── Per-year household totals ───────────────────────────────────────── */}
     <section class="mt-8">
+      {!owner && <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.giving.ownTotals')}</h2>}
       {
         yearTotals.length === 0 ? (
           <p class="mt-2 text-sm text-ink-muted">{t(locale, 'my.giving.empty')}</p>

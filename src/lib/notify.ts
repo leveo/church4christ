@@ -59,6 +59,74 @@ export async function sendMagicLink(
   });
 }
 
+/**
+ * Email the confirmation link for a pending email change to the NEW address (the
+ * caller has already minted `raw` via requestEmailChange). Written in the
+ * person's saved language when they have one, otherwise bilingually. Delivery to
+ * the new address is itself the proof the member controls it.
+ */
+export async function sendEmailChangeLink(
+  env: EmailEnv,
+  db: AppDb,
+  person: MagicLinkPerson,
+  raw: string,
+  newEmail: string,
+  locale: Locale,
+): Promise<boolean> {
+  const link = `${env.APP_ORIGIN ?? ''}/email-change/${raw}`;
+  const langs: Locale[] =
+    person.lang === 'en' || person.lang === 'zh'
+      ? [person.lang]
+      : locale === 'zh'
+        ? ['zh', 'en']
+        : ['en', 'zh'];
+
+  const subject = langs
+    .map((l) => t(l, 'portal.emailChange.email.subject', { site: t(l, 'site.name') }))
+    .join(' · ');
+  const text = `${langs.map((l) => t(l, 'portal.emailChange.email.body')).join('\n\n')}\n\n${link}\n`;
+  const html = `${langs.map((l) => `<p>${t(l, 'portal.emailChange.email.body')}</p>`).join('')}<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`;
+
+  return sendEmail(env, db, {
+    to: newEmail,
+    toName: person.display_name,
+    kind: 'emailchange',
+    subject,
+    html,
+    text,
+  });
+}
+
+/**
+ * After an email change is confirmed, notify the FORMER address so a hijack is
+ * visible to the original owner. Best-effort (swallows its own errors). Written
+ * in the member's saved language, otherwise both stacked.
+ */
+export async function sendEmailChangedNotice(
+  env: EmailEnv,
+  db: AppDb,
+  args: { oldEmail: string; newEmail: string; name: string; lang: string | null },
+): Promise<void> {
+  try {
+    const only = toLang(args.lang);
+    const built = bilingualEmail({
+      subjectKey: 'portal.emailChange.notice.subject',
+      bodyKey: 'portal.emailChange.notice.body',
+      vars: { name: args.name, email: args.newEmail },
+      only,
+    });
+    await sendEmail(env, db, {
+      to: args.oldEmail,
+      toName: args.name,
+      kind: 'emailchangeNotice',
+      detail: args.newEmail,
+      ...built,
+    });
+  } catch (e) {
+    console.error(`email-changed notice failed for ${args.oldEmail}`, e);
+  }
+}
+
 // ── Bilingual message builder (shared by every scheduling touchpoint) ──
 
 /** Narrow a stored `lang` value to a Locale, or null (→ send both stacked). */
@@ -363,5 +431,104 @@ export async function sendApplicationResult(
     await sendEmail(env, db, { to: a.applicant_email, toName: a.applicant_name, kind: 'appResult', detail: a.team_name, ...built });
   } catch (e) {
     console.error(`application-result notice failed for application ${applicationId}`, e);
+  }
+}
+
+// ── Groups (member portal: fellowships + Sunday School classes) — mirrors the
+// team-application pair above (getApplicationDetail/listTeamLeaders/
+// sendApplicationReceived/sendApplicationResult), adapted to group_applications'
+// shape (no position_id; group_members carries is_leader the same way
+// team_members does). ──
+
+interface GroupApplicationDetail {
+  person_id: number;
+  applicant_name: string;
+  applicant_email: string | null;
+  applicant_lang: string | null;
+  group_id: number;
+  group_name: string;
+}
+
+async function getGroupApplicationDetail(db: AppDb, applicationId: number): Promise<GroupApplicationDetail | null> {
+  const gJ = i18nJoin('member_group_i18n', 'g', 'group_id', ['name'], 'en');
+  return db
+    .prepare(
+      `SELECT ga.person_id AS person_id, people.display_name AS applicant_name,
+              people.email AS applicant_email, people.lang AS applicant_lang,
+              g.id AS group_id, COALESCE(g_l.name, g_d.name) AS group_name
+       FROM group_applications ga
+       JOIN people ON people.id = ga.person_id
+       JOIN member_groups g ON g.id = ga.group_id
+       ${gJ.joins}
+       WHERE ga.id = ?`,
+    )
+    .bind(applicationId)
+    .first<GroupApplicationDetail>();
+}
+
+async function listGroupLeaders(db: AppDb, groupId: number): Promise<LeaderRecipient[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT people.email AS email, people.display_name AS name, people.lang AS lang
+       FROM group_members gm
+       JOIN people ON people.id = gm.person_id
+         AND people.deleted_at IS NULL AND people.active = 1 AND people.email IS NOT NULL
+       WHERE gm.group_id = ? AND gm.is_leader = 1
+       ORDER BY people.display_name`,
+    )
+    .bind(groupId)
+    .all<LeaderRecipient>();
+  return results;
+}
+
+/** Notify a group's leaders that a new membership application is awaiting review. */
+export async function sendGroupApplicationReceived(env: EmailEnv, db: AppDb, applicationId: number): Promise<void> {
+  try {
+    const a = await getGroupApplicationDetail(db, applicationId);
+    if (!a) return;
+    const leaders = await listGroupLeaders(db, a.group_id);
+    const origin = env.APP_ORIGIN ?? '';
+    for (const ldr of leaders) {
+      const only = toLang(ldr.lang);
+      const link = `${origin}/${only ?? 'en'}/my/groups/${a.group_id}`;
+      const built = bilingualEmail({
+        subjectKey: 'email.groupAppReceivedSubject',
+        bodyKey: 'email.groupAppReceivedBody',
+        vars: { name: a.applicant_name, group: a.group_name },
+        link,
+        only,
+      });
+      await sendEmail(env, db, { to: ldr.email, toName: ldr.name, kind: 'groupAppReceived', detail: a.group_name, ...built });
+    }
+  } catch (e) {
+    console.error(`group application-received notice failed for application ${applicationId}`, e);
+  }
+}
+
+/** Tell the applicant whether their group membership application was approved or rejected. */
+export async function sendGroupApplicationResult(
+  env: EmailEnv,
+  db: AppDb,
+  applicationId: number,
+  approved: boolean,
+): Promise<void> {
+  try {
+    const a = await getGroupApplicationDetail(db, applicationId);
+    if (!a?.applicant_email) return;
+    const only = toLang(a.applicant_lang);
+    // Links to the portal groups index, not the group detail page: a rejected
+    // applicant is never a member, so /my/groups/<id> (member-gated) would 404
+    // for them — the same reasoning sendApplicationResult applies for teams.
+    const link = `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/my/groups`;
+    const built = bilingualEmail({
+      subjectKey: approved ? 'email.groupAppApprovedSubject' : 'email.groupAppRejectedSubject',
+      bodyKey: approved ? 'email.groupAppApprovedBody' : 'email.groupAppRejectedBody',
+      vars: { name: a.applicant_name, group: a.group_name },
+      link,
+      only,
+    });
+    await sendEmail(env, db, { to: a.applicant_email, toName: a.applicant_name, kind: 'groupAppResult', detail: a.group_name, ...built });
+  } catch (e) {
+    console.error(`group application-result notice failed for application ${applicationId}`, e);
   }
 }

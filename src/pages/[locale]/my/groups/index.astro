@@ -1,0 +1,172 @@
+---
+// /my/groups: the member-facing group hub (Member Portal Phase 2, Task 5).
+// Two sections — "My groups" (listMyGroups, leader-badged, linking to the
+// detail page) and "Open for sign-up" (every open_signup group minus the ones
+// the viewer is already in), each with an inline apply form in a <details>.
+// A friendly `already_pending` code is derived here (hasPendingGroupApplication
+// pre-check) since applyToGroup's own dedupe silently no-ops instead of
+// throwing. Applying best-effort notifies the group's leaders (mirrors
+// serve/apply.astro's sendApplicationReceived call).
+import { env } from 'cloudflare:workers';
+import Base from '../../../../layouts/Base.astro';
+import PortalNav from '../../../../components/PortalNav.astro';
+import { localePath, parseLocale, type Locale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { applyToGroup, hasPendingGroupApplication, listGroups, listMyGroups, type MemberGroup } from '../../../../lib/groupDb';
+import { sendGroupApplicationReceived } from '../../../../lib/notify';
+import { type EmailEnv } from '../../../../lib/email';
+import { badge, badgeScheduled, btn, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+
+const str = (v: FormDataEntryValue | null): string => String(v ?? '').trim();
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = str(fd.get('_action'));
+  const done = (ok: string) => Astro.redirect(localePath(locale, `/my/groups?ok=${ok}`), 303);
+  const fail = (err: string) => Astro.redirect(localePath(locale, `/my/groups?err=${err}`), 303);
+
+  if (action === 'apply') {
+    const groupId = idOf(fd.get('group_id'));
+    if (groupId === null) {
+      // fall through to fail below
+    } else if (await hasPendingGroupApplication(db, user.id, groupId)) {
+      return fail('already_pending');
+    } else {
+      const note = str(fd.get('note')) || null;
+      try {
+        const applicationId = await applyToGroup(db, user.id, groupId, note);
+        // A concurrent duplicate (WHERE-NOT-EXISTS no-op) returns null — still a
+        // success from the applicant's point of view, just nothing new to notify.
+        if (applicationId) await sendGroupApplicationReceived(env as unknown as EmailEnv, db, applicationId);
+        return done('applied');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        return fail(msg === 'closed' || msg === 'already_member' ? msg : 'generic');
+      }
+    }
+  }
+  return fail('generic');
+}
+
+const [myGroups, allGroups] = await Promise.all([listMyGroups(db, user.id, locale), listGroups(db, locale)]);
+const myGroupIds = new Set(myGroups.map((g) => g.id));
+const openGroups = allGroups.filter((g) => g.open_signup === 1 && !myGroupIds.has(g.id));
+const pendingByGroup = new Map<number, boolean>();
+await Promise.all(
+  openGroups.map(async (g) => {
+    pendingByGroup.set(g.id, await hasPendingGroupApplication(db, user.id, g.id));
+  }),
+);
+
+/** "Thursday · 7:00 PM · Weekly · Room 203"-style line, omitting missing fields
+ *  — same helper as the public fellowships page and admin groups list. */
+function meetingLine(g: MemberGroup, loc: Locale): string | null {
+  const parts: string[] = [];
+  if (g.meeting_weekday !== null) parts.push(t(loc, `admin.children.weekday.${g.meeting_weekday}`));
+  if (g.meeting_time) parts.push(g.meeting_time);
+  if (g.meeting_frequency) parts.push(t(loc, `admin.groups.freq.${g.meeting_frequency}`));
+  if (g.meeting_location) parts.push(g.meeting_location);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function kindLabel(kind: MemberGroup['kind'], loc: Locale): string {
+  return t(loc, kind === 'fellowship' ? 'admin.groups.kind.fellowship' : 'admin.groups.kind.sunday_school');
+}
+
+const okParam = Astro.url.searchParams.get('ok');
+const OK_MSG: Record<string, string> = { applied: 'portal.groups.okApplied' };
+const okKey = okParam ? (OK_MSG[okParam] ?? null) : null;
+
+const errParam = Astro.url.searchParams.get('err');
+const ERR_MSG: Record<string, string> = {
+  closed: 'portal.groups.errClosed',
+  already_member: 'portal.groups.errAlreadyMember',
+  already_pending: 'portal.groups.errAlreadyPending',
+  generic: 'portal.groups.errGeneric',
+};
+const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
+---
+
+<Base title={t(locale, 'portal.groups.title')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.groups.title')}</h1>
+    <PortalNav locale={locale} active="groups" />
+
+    {okKey && <p class={`mt-6 ${noticeOk}`}>{t(locale, okKey)}</p>}
+    {errKey && <p class={`mt-6 ${noticeErr}`}>{t(locale, errKey)}</p>}
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.groups.mine')}</h2>
+      {
+        myGroups.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.groups.mineEmpty')}</p>
+        ) : (
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            {myGroups.map((g) => (
+              <a
+                href={localePath(locale, `/my/groups/${g.id}`)}
+                class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold">{g.name}</span>
+                  <span class={`${badge} bg-surface-sunken text-ink-muted`}>{kindLabel(g.kind, locale)}</span>
+                  {g.is_leader === 1 && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.groups.leader')}</span>}
+                </div>
+                {g.term_label && <p class="mt-1 text-xs text-ink-subtle">{g.term_label}</p>}
+                {meetingLine(g, locale) && <p class="mt-2 text-sm text-ink-muted">{meetingLine(g, locale)}</p>}
+              </a>
+            ))}
+          </div>
+        )
+      }
+    </section>
+
+    <section class="mt-10">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.groups.openForSignup')}</h2>
+      {
+        openGroups.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.groups.openForSignupEmpty')}</p>
+        ) : (
+          <ul class="mt-4 flex flex-col gap-4">
+            {openGroups.map((g) => (
+              <li class="rounded-lg border border-border bg-surface-raised p-5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold">{g.name}</span>
+                  <span class={`${badge} bg-surface-sunken text-ink-muted`}>{kindLabel(g.kind, locale)}</span>
+                </div>
+                {g.term_label && <p class="mt-1 text-xs text-ink-subtle">{g.term_label}</p>}
+                {meetingLine(g, locale) && <p class="mt-2 text-sm text-ink-muted">{meetingLine(g, locale)}</p>}
+                {g.description && <p class="mt-2 text-sm text-ink-muted">{g.description}</p>}
+                {pendingByGroup.get(g.id) ? (
+                  <p class="mt-3 text-sm font-semibold text-ink-muted">{t(locale, 'portal.groups.pending')}</p>
+                ) : (
+                  <details class="mt-3">
+                    <summary class="cursor-pointer text-sm font-semibold text-primary">{t(locale, 'portal.groups.applyToggle')}</summary>
+                    <form method="post" class="mt-3 flex flex-col gap-3">
+                      <input type="hidden" name="_action" value="apply" />
+                      <input type="hidden" name="group_id" value={g.id} />
+                      <label class="block">
+                        <span class={lab}>{t(locale, 'portal.groups.applyNote')} ({t(locale, 'my.optional')})</span>
+                        <textarea name="note" rows="2" class={tin} />
+                      </label>
+                      <button type="submit" class={btn}>{t(locale, 'portal.groups.applySubmit')}</button>
+                    </form>
+                  </details>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</Base>
