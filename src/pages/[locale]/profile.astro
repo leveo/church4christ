@@ -17,7 +17,7 @@ import { localePath, parseLocale, LOCALES } from '../../lib/locales';
 import { t } from '../../lib/i18n';
 import { getPerson, savePerson, setPersonAvatar } from '../../lib/adminDb';
 import { listPersonGroupActivity, type PersonGroupActivity } from '../../lib/groupDb';
-import { listRegistrationsForPerson, type PersonRegistration } from '../../lib/groupRegDb';
+import { listRegistrationActivityForPerson, type PersonRegistration } from '../../lib/groupRegDb';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../lib/mediaRef';
 import {
@@ -221,7 +221,7 @@ let registrations: PersonRegistration[] = [];
 if (hasGroups) {
   groupActivity = await listPersonGroupActivity(db, user.id);
   if (Astro.locals.modules.has('registration')) {
-    registrations = await listRegistrationsForPerson(db, user.id, locale);
+    registrations = await listRegistrationActivityForPerson(db, user.id, locale);
   }
 }
 ---

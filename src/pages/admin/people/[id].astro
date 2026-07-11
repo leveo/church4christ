@@ -13,7 +13,7 @@ import AvatarInitials from '../../../components/AvatarInitials.astro';
 import GroupActivity from '../../../components/GroupActivity.astro';
 import { t } from '../../../lib/i18n';
 import { listPersonGroupActivity, type PersonGroupActivity } from '../../../lib/groupDb';
-import { listRegistrationsForPerson, type PersonRegistration } from '../../../lib/groupRegDb';
+import { listRegistrationActivityForPerson, type PersonRegistration } from '../../../lib/groupRegDb';
 import { getPerson, savePerson, setPersonAvatar, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
 import { hasAreaAccess, parseAdminAreas, GRANTABLE_AREAS, type GrantableArea } from '../../../lib/adminAreas';
 import { parsePersonForm, MEMBERSHIP_STATUSES } from '../../../lib/validate';
@@ -348,7 +348,7 @@ let personRegistrations: PersonRegistration[] = [];
 if (hasGroups && canGroups && person) {
   groupActivity = await listPersonGroupActivity(db, person.id);
   if (Astro.locals.modules.has('registration') && canRegistration) {
-    personRegistrations = await listRegistrationsForPerson(db, person.id, lang);
+    personRegistrations = await listRegistrationActivityForPerson(db, person.id, lang);
   }
 }
 

@@ -1,23 +1,17 @@
 ---
-// My Schedule (authed via route policy): pending scheduling requests with
-// inline Accept / Decline(+reason), the upcoming confirmed list, open slots the
-// person can claim, their application status strip, and links (via PortalNav) to
-// the calendar / giving / blockouts / profile pages. Ported from the reference
-// stack's src/pages/my/index.astro.
+// /my/serving: the member-facing serving hub (Member Portal Phase 3, Task 2).
+// Recomposes /my (src/pages/[locale]/my/index.astro)'s pending/upcoming/open-slots
+// sections — including its POST handler — under the portal chrome, and adds three
+// read-only sections /my doesn't have: my teams (listPersonTeams), full serving
+// history (listPersonServingHistory, capped to 20 rows), and my applications
+// (listApplicationsByPerson, unconditional here — /my only shows it when it's
+// most likely to matter to a space-constrained dashboard).
 //
-// Portal card row (member portal): when the `portal` module is on (supabase-only
-// — see modules.ts), a card row above the schedule surfaces the viewer's
-// household, groups (via the public groups module's listGroupsForPerson), any
-// pending join requests for groups they administer, and — when `registration` is
-// also on — their next upcoming event registrations. Every read is gated on the
-// module check so the D1 backend (portal/registration always off there) never
-// touches those tables. The pending-approvals card is structured so a later task
-// can fold prayer-item approvals into it.
-//
-// Authorization: respondToAssignment is called with the SESSION user's id — its
-// WHERE clause only touches that person's own assignment, so a posted
-// assignment_id belonging to someone else is a no-op. Claims re-derive
-// membership/fullness/conflicts inside claimOpenSlot (never forced).
+// The accept/decline/claim POST handler is DELIBERATELY duplicated from
+// my/index.astro rather than shared: /my must stay self-sufficient (it also runs
+// standalone on the D1 backend, without the `portal` module), so its handler
+// can't depend on this portal-only page or vice versa. Keep the two in sync by
+// hand if the response/claim semantics ever change.
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import PortalNav from '../../../components/PortalNav.astro';
@@ -25,10 +19,7 @@ import StatusBadge from '../../../components/StatusBadge.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { claimOpenSlot, listOpenSlotsForPerson, respondToAssignment } from '../../../lib/planDb';
-import { listApplicationsByPerson, listPersonAssignments } from '../../../lib/myDb';
-import { getPortalHousehold } from '../../../lib/portalDb';
-import { listGroupsForPerson, listJoinRequests } from '../../../lib/groupDb';
-import { listRegistrationsForPerson } from '../../../lib/regDb';
+import { listApplicationsByPerson, listPersonAssignments, listPersonServingHistory, listPersonTeams } from '../../../lib/myDb';
 import { formatDate, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
@@ -60,14 +51,14 @@ if (Astro.request.method === 'POST') {
         await sendDeclineNotice(env as unknown as EmailEnv, db, assignmentId, reason);
       }
     }
-    return Astro.redirect(localePath(locale, '/my'), 303);
+    return Astro.redirect(localePath(locale, '/my/serving'), 303);
   }
   if (action === 'claim') {
     const planId = idOf(fd.get('plan_id'));
     const positionId = idOf(fd.get('position_id'));
     if (planId && positionId) {
       const result = await claimOpenSlot(db, { planId, positionId, personId: user.id });
-      if (result === 'ok') return Astro.redirect(localePath(locale, '/my?claimed=1'), 303);
+      if (result === 'ok') return Astro.redirect(localePath(locale, '/my/serving?claimed=1'), 303);
       flashKey = {
         not_member: 'serve.plans.claimNotMember',
         closed: 'serve.plans.claimClosed',
@@ -81,40 +72,16 @@ if (Astro.request.method === 'POST') {
 
 const claimed = Astro.url.searchParams.get('claimed') === '1';
 const today = todayInTz();
-// The portal-gated card row below reads household/group/registration data that
-// lives only on the supabase backend — module gating keeps those queries off D1
-// (portal always off there, see modules.ts) so it never touches those tables.
-const hasPortal = Astro.locals.modules.has('portal');
-const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
-const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations] = await Promise.all([
+const [assignments, openSlots, teams, history, applications] = await Promise.all([
   listPersonAssignments(db, user.id, today, locale),
   listOpenSlotsForPerson(db, user.id, locale),
+  listPersonTeams(db, user.id, locale),
+  listPersonServingHistory(db, user.id, locale),
   listApplicationsByPerson(db, user.id, locale),
-  hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
-  hasPortal ? listGroupsForPerson(db, user.id) : Promise.resolve([]),
-  hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
 ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');
-
-// Pending join requests awaiting the viewer's review, across every group they
-// administer (only reachable when portal is on — myGroups is empty otherwise).
-// listJoinRequests already filters to status='pending'; capping the fan-out to
-// admined groups keeps it cheap. A later task folds prayer approvals in here.
-const adminGroupIds = myGroups.filter((g) => g.is_admin === 1).map((g) => g.id);
-const pendingJoinRequests = hasPortal
-  ? (await Promise.all(adminGroupIds.map((gid) => listJoinRequests(db, gid)))).flat()
-  : [];
-// listRegistrationsForPerson returns starts_at DESC (that ordering serves
-// /my/events); re-sort ascending here so the dashboard card shows the two
-// SOONEST upcoming events rather than the two farthest-out ones.
-const nextRegistrations = upcomingRegistrations
-  .filter((r) => r.starts_at.slice(0, 10) >= today)
-  .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
-  .slice(0, 2);
-// Applications matter most to people not on a team yet, or with one pending.
-const showApplications =
-  applications.length > 0 && (user.memberTeamIds.length === 0 || applications.some((a) => a.status === 'P'));
+const historyRows = history.slice(0, 20);
 const appBadge: Record<'P' | 'A' | 'R', string> = {
   P: 'bg-warn-soft text-warn',
   A: 'bg-success-soft text-success',
@@ -122,76 +89,13 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
 };
 ---
 
-<Base title={t(locale, 'my.title')} locale={locale} noindex>
+<Base title={t(locale, 'portal.serving.title')} locale={locale} noindex>
   <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'my.welcome', { name: user.displayName })}</h1>
-    <PortalNav locale={locale} active="dashboard" />
-    <div class="mt-3 flex flex-wrap gap-2 text-sm">
-      <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
-      <a href={localePath(locale, '/profile')} class={btnSecondary}>{t(locale, 'profile.title')}</a>
-    </div>
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.serving.title')}</h1>
+    <PortalNav locale={locale} active="serving" />
 
     {claimed && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
     {flashKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, flashKey)}</p>}
-
-    {
-      hasPortal && (
-        <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {household && (
-            <a
-              href={localePath(locale, '/my/household')}
-              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.household')}</p>
-              <p class="mt-2 font-semibold">{household.name}</p>
-              <p class="mt-1 flex items-center gap-2 text-sm text-ink-muted">
-                {t(locale, 'portal.dashboard.memberCount', { count: household.members.length })}
-                {household.viewerIsOwner && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.owner')}</span>}
-              </p>
-            </a>
-          )}
-
-          <a
-            href={localePath(locale, '/groups')}
-            class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-          >
-            <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.groups')}</p>
-            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.groupCount', { count: myGroups.length })}</p>
-            {myGroups.length > 0 && (
-              <p class="mt-1 text-sm text-ink-muted">{myGroups.slice(0, 3).map((g) => g.name).join(', ')}</p>
-            )}
-          </a>
-
-          {pendingJoinRequests.length > 0 && (
-            <a
-              href={localePath(locale, '/groups')}
-              class="block rounded-lg border border-warn bg-warn-soft p-5 hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
-              <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
-                <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingJoinRequests.length })}</p>
-              </div>
-            </a>
-          )}
-
-          {hasRegistration && nextRegistrations.length > 0 && (
-            <a
-              href={localePath(locale, '/my/events')}
-              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.upcomingEvents')}</p>
-              <ul class="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
-                {nextRegistrations.map((r) => (
-                  <li>
-                    {r.event_title} · {formatDate(r.starts_at.slice(0, 10), locale)}
-                  </li>
-                ))}
-              </ul>
-            </a>
-          )}
-        </section>
-      )
-    }
 
     {
       pending.length > 0 && (
@@ -283,13 +187,58 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
       )
     }
 
-    {
-      showApplications && (
-        <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
-          <h2 class="font-display text-lg font-semibold">{t(locale, 'my.applications')}</h2>
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.serving.myTeams')}</h2>
+      {
+        teams.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'portal.serving.myTeamsEmpty')}</p>
+        ) : (
+          <ul class="mt-3 flex flex-wrap gap-2">
+            {teams.map((tm) => (
+              <li class="flex items-center gap-1">
+                <span class={`${badge} bg-surface-sunken text-ink-muted`}>{tm.name}</span>
+                {tm.is_leader === 1 && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.groups.leader')}</span>}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.serving.history')}</h2>
+      {
+        historyRows.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'portal.serving.historyEmpty')}</p>
+        ) : (
+          <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+            {historyRows.map((h) => (
+              <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <span class="font-semibold tabular-nums">{formatDate(h.plan_date, locale)}</span>
+                <span class="font-medium">{h.position_name}</span>
+                <span class="text-ink-muted">
+                  {h.team_name} · {h.service_type_name}
+                  {h.ministry_name && ` · ${h.ministry_name}`}
+                </span>
+                <span class="ml-auto">
+                  <StatusBadge status={h.status} locale={locale} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'my.applications')}</h2>
+      {
+        applications.length === 0 ? (
+          <p class="mt-2 text-sm text-ink-muted">{t(locale, 'portal.serving.applicationsEmpty')}</p>
+        ) : (
           <ul class="mt-3 space-y-2 text-sm">
             {applications.map((a) => (
-              <li class="flex flex-wrap items-center gap-2">
+              <li class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-raised px-4 py-3">
                 <span class="font-medium">{a.team_name}</span>
                 {a.position_name && <span class="text-ink-muted">· {a.position_name}</span>}
                 <span class={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${appBadge[a.status]}`}>
@@ -298,8 +247,8 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
               </li>
             ))}
           </ul>
-        </section>
-      )
-    }
+        )
+      }
+    </section>
   </div>
 </Base>

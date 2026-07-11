@@ -194,9 +194,13 @@ export async function listLinkableEvents(db: AppDb, groupId: number): Promise<Li
   return results;
 }
 
-/** A person's registrations (localized event title, event start, status), newest
- *  first — the profile-history reader consumed by Slice H. */
-export async function listRegistrationsForPerson(db: AppDb, personId: number, locale: Locale): Promise<PersonRegistration[]> {
+/** A person's registration activity (localized event title, event start,
+ *  status), newest first — the profile/admin history feed consumed by Slice H.
+ *  Person_id only, all statuses (a cancelled registration is still activity).
+ *  The portal's /my events page and dashboard use regDb.listRegistrationsForPerson
+ *  instead, which matches on email too, drops cancelled, and carries price/venue —
+ *  the two are deliberately kept distinct (different shape and filtering). */
+export async function listRegistrationActivityForPerson(db: AppDb, personId: number, locale: Locale): Promise<PersonRegistration[]> {
   const { results } = await db
     .prepare(
       `SELECT r.id AS id, r.event_id AS event_id,

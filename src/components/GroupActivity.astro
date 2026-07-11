@@ -5,7 +5,7 @@
 // module is on and there is at least one row — their special-event
 // registrations. Mirrors ServingHistory.astro's markup/styling approach: no
 // page chrome of its own, token utility classes only, everything pre-fetched by
-// the caller (groupDb.listPersonGroupActivity + groupRegDb.listRegistrationsForPerson,
+// the caller (groupDb.listPersonGroupActivity + groupRegDb.listRegistrationActivityForPerson,
 // the latter gated by the caller on modules.has('registration') — this
 // component just hides the section when the array is empty).
 import { t } from '../lib/i18n';

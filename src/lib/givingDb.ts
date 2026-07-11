@@ -249,6 +249,57 @@ export async function householdYearTotals(
   return results;
 }
 
+/**
+ * A single person's own gift ledger (succeeded + refunded), newest first — the
+ * person-scoped sibling of listHouseholdGifts. Used on /my/giving for a viewer
+ * who is NOT a household owner: a housemate's gift never appears for them.
+ */
+export async function listPersonGifts(
+  db: AppDb,
+  locale: Locale,
+  personId: number,
+): Promise<Array<GiftRow & { giver_name: string }>> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${GIFT_COLS}, COALESCE(fl.name, fd.name, '') AS fund_name,
+              COALESCE(p.display_name, g.donor_name, '') AS giver_name
+       FROM gifts g
+       LEFT JOIN fund_i18n fl ON fl.fund_id = g.fund_id AND fl.locale = ?2
+       LEFT JOIN fund_i18n fd ON fd.fund_id = g.fund_id AND fd.locale = 'en'
+       LEFT JOIN people p ON p.id = g.person_id
+       WHERE g.person_id = ?1
+         AND g.status IN ('succeeded', 'refunded')
+       ORDER BY COALESCE(g.received_on, g.created_at) DESC, g.id DESC`,
+    )
+    .bind(personId, locale)
+    .all<GiftRow & { giver_name: string }>();
+  return results;
+}
+
+/**
+ * Per-calendar-year succeeded-money totals for a single person (the non-owner
+ * giving summary), newest year first. Refunded gifts excluded — the
+ * person-scoped sibling of householdYearTotals.
+ */
+export async function personYearTotals(
+  db: AppDb,
+  personId: number,
+): Promise<Array<{ year: string; total_cents: number }>> {
+  const { results } = await db
+    .prepare(
+      `SELECT substr(COALESCE(g.received_on, g.created_at), 1, 4) AS year,
+              COALESCE(SUM(g.amount_cents), 0) AS total_cents
+       FROM gifts g
+       WHERE g.person_id = ?1
+         AND g.status = 'succeeded'
+       GROUP BY substr(COALESCE(g.received_on, g.created_at), 1, 4)
+       ORDER BY year DESC`,
+    )
+    .bind(personId)
+    .all<{ year: string; total_cents: number }>();
+  return results;
+}
+
 /** A person's recurring subscriptions with localized fund name, newest first. */
 export async function listRecurringForPerson(
   db: AppDb,

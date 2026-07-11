@@ -1119,6 +1119,64 @@ export default {
   'portal.owner.errLimit': 'This household already has the maximum of 2 owners.',
   'portal.owner.errNotEligible': 'Only adult members with a linked account can become an owner.',
 
+  // Member-portal shell: shared tab strip, dashboard cards, and the /my/*
+  // portal pages (household / events / serving) plus the giving scope note.
+  'portal.nav.myPortal': 'My Portal',
+  'portal.nav.dashboard': 'Dashboard',
+  'portal.nav.household': 'Household',
+  'portal.nav.giving': 'Giving',
+  'portal.nav.groups': 'Groups',
+  'portal.nav.events': 'Events',
+  'portal.nav.serving': 'Serving',
+  'portal.nav.calendar': 'Calendar',
+
+  'portal.dashboard.household': 'Household',
+  'portal.dashboard.memberCount': '{count} members',
+  'portal.dashboard.groups': 'My groups',
+  'portal.dashboard.groupCount': '{count} groups',
+  'portal.dashboard.pendingApprovals': 'Pending approvals',
+  'portal.dashboard.pendingApplications': '{count} applications',
+  'portal.dashboard.upcomingEvents': 'Upcoming events',
+
+  'portal.giving.ownScopeNote': 'Showing your own giving. Household statements are visible to household owners.',
+  'portal.giving.ownHistory': 'Your giving history',
+  'portal.giving.ownTotals': 'Your totals by year',
+
+  'portal.household.title': 'My Household',
+  'portal.household.emptyBody': 'You’re not part of a household yet. Create one, join family members, or leave a household from your profile.',
+  'portal.household.manageLink': 'Manage in profile',
+  'portal.household.ownerless': 'No one manages this household yet — ask a church admin to set an owner.',
+  'portal.household.editProfile': 'Edit profile',
+  'portal.household.profileSaved': 'Profile updated.',
+  'portal.household.avatarSaved': 'Photo updated.',
+  'portal.household.ownerUpdated': 'Owner updated.',
+  'portal.household.selfTitle': 'Your account',
+  'portal.household.pendingEmail': 'Pending change to {email} — check that inbox for the confirmation link.',
+  'portal.household.newEmail': 'New email address',
+  'portal.household.emailChangeHint': 'We’ll send a confirmation link to the new address; nothing changes until you click it.',
+  'portal.household.emailChangeSubmit': 'Send confirmation link',
+  'portal.household.emailChangeSent': 'Check your new inbox for a confirmation link.',
+  'portal.household.emailChangeErrRateLimited': 'Too many email-change requests. Please try again later.',
+  'portal.household.errGeneric': 'Something went wrong. Please try again.',
+
+  'portal.groups.leader': 'Leader',
+
+  'portal.events.title': 'Events',
+  'portal.events.mine': 'My registrations',
+  'portal.events.mineEmpty': "You haven't registered for any events yet.",
+  'portal.events.status.pending': 'Pending',
+  'portal.events.status.confirmed': 'Confirmed',
+  'portal.events.open': 'Open for registration',
+  'portal.events.openEmpty': 'No events are open for registration right now.',
+  'portal.events.spotsLeft': '{count} spots left',
+
+  'portal.serving.title': 'Serving',
+  'portal.serving.myTeams': 'My teams',
+  'portal.serving.myTeamsEmpty': "You're not on any teams yet.",
+  'portal.serving.history': 'Serving history',
+  'portal.serving.historyEmpty': 'No serving history yet.',
+  'portal.serving.applicationsEmpty': "You haven't applied to any teams yet.",
+
   // Email change (member portal): confirm page, the link email to the NEW
   // address, and the notice email to the OLD address.
   'portal.emailChange.confirm.title': 'Confirm your new email address',
