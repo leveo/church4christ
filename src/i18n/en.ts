@@ -1109,6 +1109,28 @@ export default {
   'signin.submit': 'Send me a sign-in link',
   'signin.sentTitle': 'Check your email',
   'signin.sentBody': 'If that address is registered, a sign-in link is on its way. The link expires in 15 minutes.',
+  'signin.changed': 'Your email address has been updated. Please sign in again with your new address.',
+
+  // Household ownership — shared with the member-portal self-service pages.
+  'portal.owner': 'Owner',
+  'portal.owner.set': 'Make owner',
+  'portal.owner.unset': 'Remove owner',
+  'portal.owner.none': 'No owner',
+  'portal.owner.errLimit': 'This household already has the maximum of 2 owners.',
+  'portal.owner.errNotEligible': 'Only adult members with a linked account can become an owner.',
+
+  // Email change (member portal): confirm page, the link email to the NEW
+  // address, and the notice email to the OLD address.
+  'portal.emailChange.confirm.title': 'Confirm your new email address',
+  'portal.emailChange.confirm.body': 'You are about to change your sign-in email to {email}. After you confirm, you will be signed out everywhere and must sign in again with your new address.',
+  'portal.emailChange.confirm.button': 'Confirm new email',
+  'portal.emailChange.error.title': 'This link is no longer valid',
+  'portal.emailChange.error.body': 'Email-change links expire after 60 minutes and can be used only once.',
+  'portal.emailChange.error.retry': 'Go to sign in',
+  'portal.emailChange.email.subject': 'Confirm your new email for {site}',
+  'portal.emailChange.email.body': 'Click the link below to confirm this as your new sign-in email. It expires in 60 minutes and can be used once. If you didn’t request this, you can ignore this email.',
+  'portal.emailChange.notice.subject': 'Your sign-in email was changed',
+  'portal.emailChange.notice.body': 'Hi {name}, the sign-in email for your account was just changed to {email}. If you did not make this change, please contact us right away.',
 
   'auth.confirm.title': 'Confirm sign-in',
   'auth.confirm.body': 'You’re about to sign in to {site}. Click the button below to continue.',

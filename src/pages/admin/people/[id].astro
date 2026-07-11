@@ -34,6 +34,7 @@ import {
   type HouseholdWithMembers,
   type HouseholdSummary,
 } from '../../../lib/householdDb';
+import { setOwner } from '../../../lib/portalDb';
 import { listNotes, addNote, softDeleteNote, NOTE_MAX_LEN, type PersonNote } from '../../../lib/notesDb';
 import {
   listApplicationsForPerson,
@@ -118,6 +119,8 @@ const HH_ERR: Record<string, string> = {
   already_in_household: 'admin.person.household.errAlreadyIn',
   household_not_found: 'admin.person.household.errNotFound',
   person_not_found: 'admin.person.household.errGeneric',
+  owner_limit: 'portal.owner.errLimit',
+  not_eligible: 'portal.owner.errNotEligible',
 };
 const mapHh = (e: unknown): string => HH_ERR[e instanceof Error ? e.message : ''] ?? 'admin.person.household.errGeneric';
 
@@ -211,6 +214,25 @@ if (Astro.request.method === 'POST') {
       const householdId = idOf(fd.get('household_id'));
       if (memberId !== null && householdId !== null) await setPrimary(db, householdId, memberId);
       return back();
+    } else if (action === 'setOwner' || action === 'unsetOwner') {
+      const memberId = idOf(fd.get('member_id'));
+      const householdId = idOf(fd.get('household_id'));
+      if (memberId !== null && householdId !== null) {
+        try {
+          await setOwner(db, {
+            householdId,
+            memberId,
+            isOwner: action === 'setOwner',
+            actorPersonId: user.id,
+            isAdmin: true,
+          });
+          return back();
+        } catch (e) {
+          householdErrorKey = mapHh(e);
+        }
+      } else {
+        return back();
+      }
     } else if (action === 'addNote') {
       try {
         await addNote(db, id, user.email, String(fd.get('body') ?? ''));
@@ -317,6 +339,7 @@ if (hasPeople && canManagePeople && person) {
     listHouseholds(db),
   ]);
 }
+const householdHasNoOwner = household !== null && household.members.every((m) => m.is_owner !== 1);
 
 // Group activity panel data (independent of the people module; gated on its
 // own area grant instead).
@@ -593,7 +616,12 @@ const summaryErrors = Object.entries(errors)
               {householdErrorKey && <p class={`mt-3 ${noticeErr}`}>{t(lang, householdErrorKey)}</p>}
               {household ? (
                 <div class="mt-3 space-y-4">
-                  <p class="font-medium">{household.name}</p>
+                  <p class="flex flex-wrap items-center gap-2 font-medium">
+                    {household.name}
+                    {householdHasNoOwner && (
+                      <span class={`${badge} bg-danger-soft text-danger`}>{t(lang, 'portal.owner.none')}</span>
+                    )}
+                  </p>
                   <ul class="flex flex-col gap-2">
                     {household.members.map((m) => (
                       <li class="flex flex-wrap items-center gap-2 text-sm">
@@ -605,6 +633,9 @@ const summaryErrors = Object.entries(errors)
                           <span class="rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
                             {t(lang, 'admin.person.household.primary')}
                           </span>
+                        )}
+                        {m.is_owner === 1 && (
+                          <span class={`${badge} ${badgeScheduled}`}>{t(lang, 'portal.owner')}</span>
                         )}
                         <span class="ml-auto flex flex-wrap items-center gap-2">
                           <form method="post" class="flex items-center gap-1">
@@ -623,6 +654,23 @@ const summaryErrors = Object.entries(errors)
                               <input type="hidden" name="household_id" value={household.id} />
                               <button type="submit" class="text-xs text-primary hover:underline">{t(lang, 'admin.person.household.makePrimary')}</button>
                             </form>
+                          )}
+                          {m.role === 'adult' && m.person_id !== null && (
+                            m.is_owner === 1 ? (
+                              <form method="post">
+                                <input type="hidden" name="action" value="unsetOwner" />
+                                <input type="hidden" name="member_id" value={m.id} />
+                                <input type="hidden" name="household_id" value={household.id} />
+                                <button type="submit" class="text-xs text-primary hover:underline">{t(lang, 'portal.owner.unset')}</button>
+                              </form>
+                            ) : (
+                              <form method="post">
+                                <input type="hidden" name="action" value="setOwner" />
+                                <input type="hidden" name="member_id" value={m.id} />
+                                <input type="hidden" name="household_id" value={household.id} />
+                                <button type="submit" class="text-xs text-primary hover:underline">{t(lang, 'portal.owner.set')}</button>
+                              </form>
+                            )
                           )}
                         </span>
                       </li>
@@ -651,7 +699,9 @@ const summaryErrors = Object.entries(errors)
                         <span class={lab}>{t(lang, 'admin.person.household.linkTitle')}</span>
                         <select name="household_id" class={tin}>
                           {allHouseholds.map((h) => (
-                            <option value={h.id}>{h.name}</option>
+                            <option value={h.id}>
+                              {h.owner_count === 0 ? `${h.name} (${t(lang, 'portal.owner.none')})` : h.name}
+                            </option>
                           ))}
                         </select>
                       </label>

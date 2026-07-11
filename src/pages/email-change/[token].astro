@@ -1,0 +1,86 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { t } from '../../lib/i18n';
+import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
+import { consumeEmailChange, peekEmailChange } from '../../lib/emailChange';
+import { getPersonById } from '../../lib/db';
+import { sendEmailChangedNotice } from '../../lib/notify';
+import type { EmailEnv } from '../../lib/email';
+
+// Two-step consumption, same as /auth/[token]: GET only *peeks* (mail scanners
+// prefetch links and would otherwise burn a single-use token); the explicit POST
+// consumes and swaps the address. This route is locale-free, so it renders
+// bilingually (en + zh stacked). Confirming revokes the session (session_epoch
+// bump), so the member is sent to sign in again with their new address.
+const raw = Astro.params.token ?? '';
+const vars = env as unknown as EmailEnv;
+const db = Astro.locals.db;
+let state: 'confirm' | 'error' = 'error';
+let newEmail = '';
+
+if (Astro.request.method === 'POST') {
+  const result = await consumeEmailChange(db, raw);
+  if (!('error' in result)) {
+    const person = await getPersonById(db, result.personId);
+    await sendEmailChangedNotice(vars, db, {
+      oldEmail: result.oldEmail,
+      newEmail: result.newEmail,
+      name: person?.display_name ?? result.newEmail,
+      lang: person?.lang ?? null,
+    });
+    const target = person?.lang === 'en' || person?.lang === 'zh' ? person.lang : DEFAULT_LOCALE;
+    return new Response(null, { status: 303, headers: { location: `/${target}/signin?changed=1` } });
+  }
+  // fall through to the error state
+} else {
+  const peeked = await peekEmailChange(db, raw);
+  if (peeked) {
+    state = 'confirm';
+    newEmail = peeked.newEmail;
+  }
+}
+
+const title = LOCALES.map((l) =>
+  t(l, state === 'confirm' ? 'portal.emailChange.confirm.title' : 'portal.emailChange.error.title'),
+).join(' · ');
+---
+<Base title={title} locale={DEFAULT_LOCALE} noindex>
+  <section class="container-narrow py-16 text-center">
+    {
+      state === 'confirm' ? (
+        <>
+          {LOCALES.map((l) => (
+            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'portal.emailChange.confirm.title')}</h1>
+              <p class="mt-2 text-ink-muted">{t(l, 'portal.emailChange.confirm.body', { email: newEmail })}</p>
+            </div>
+          ))}
+          <form method="post" class="mt-4">
+            <button
+              type="submit"
+              class="rounded-full bg-primary text-on-primary font-semibold px-8 py-3 hover:bg-primary-hover"
+            >
+              {LOCALES.map((l) => t(l, 'portal.emailChange.confirm.button')).join(' / ')}
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          {LOCALES.map((l) => (
+            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'portal.emailChange.error.title')}</h1>
+              <p class="mt-2 text-ink-muted">{t(l, 'portal.emailChange.error.body')}</p>
+            </div>
+          ))}
+          <a
+            href={`/${DEFAULT_LOCALE}/signin`}
+            class="inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
+          >
+            {LOCALES.map((l) => t(l, 'portal.emailChange.error.retry')).join(' / ')}
+          </a>
+        </>
+      )
+    }
+  </section>
+</Base>
