@@ -64,3 +64,22 @@ export async function registerMedia(db: AppDb, m: MediaInput): Promise<void> {
     .bind(m.r2Key, m.filename, m.contentType, m.size, m.uploadedBy)
     .run();
 }
+
+export interface RecentImage {
+  /** Servable path (/media/uploads/...) — what an image block stores as src. */
+  path: string;
+  filename: string;
+}
+
+/** Latest uploaded images for the builder's media picker, newest first. */
+export async function listRecentImages(db: AppDb, limit = 50): Promise<RecentImage[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT r2_key AS key, filename FROM media
+       WHERE content_type LIKE 'image/%'
+       ORDER BY uploaded_at DESC, id DESC LIMIT ?1`,
+    )
+    .bind(limit)
+    .all<{ key: string; filename: string }>();
+  return results.map((r) => ({ path: `/media/${r.key}`, filename: r.filename }));
+}

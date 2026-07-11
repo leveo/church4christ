@@ -563,3 +563,15 @@ INSERT INTO member_group_i18n (group_id, locale, name, description) VALUES
 -- only on the Postgres backend (group_members/group_applications have no D1
 -- counterpart).
 UPDATE member_groups SET open_signup = 1 WHERE id = 2;
+
+-- Page builder: one seeded builder-format page (fixed id, like the kiosk token
+-- above) so /admin/pages/builder/<id> and /en/p/welcome work — and can be
+-- screenshotted — immediately after a local seed. The layout is the docs'
+-- "Welcome" example: a primary section with an XL heading (EN/ZH), a markdown
+-- text block, and a two-column row holding a CTA button.
+INSERT INTO custom_pages (id, slug, published, format, layout_json) VALUES
+  ('seedbuilderwelcome0000000000pb01', 'welcome', 1, 'builder',
+   '{"v":1,"blocks":[{"id":"8a42122cfe230f723e8a27993884f284","type":"section","props":{"bg":"primary","width":"content","padY":"lg"},"children":[{"id":"ec18d24da19dc231dbbef1feca2406f8","type":"heading","props":{"level":2,"text":{"en":"Welcome Home","zh":"欢迎回家"},"align":"center","size":"xl"}},{"id":"66f22c4dffd3ef54eab1de94ad61ecc1","type":"text","props":{"md":{"en":"We are **so glad** you found us. Join us every Sunday at 10am — everyone is welcome.","zh":""},"align":"left"}},{"id":"33fe395fbc1cd1ef1c0d2e19c6d65d46","type":"columns","props":{"count":2,"gap":"md"},"columns":[[{"id":"9f4471c57cb03aadeb8031c6406db823","type":"button","props":{"label":{"en":"Plan a visit","zh":"计划来访"},"href":"/en/visit","variant":"primary","align":"left"}}],[]]}]}]}');
+INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES
+  ('seedbuilderwelcome0000000000pb01', 'en', 'Welcome', ''),
+  ('seedbuilderwelcome0000000000pb01', 'zh', '欢迎', '');

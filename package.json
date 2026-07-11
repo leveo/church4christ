@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.1.0",
+    "@astrojs/react": "^6.0.1",
+    "@dnd-kit/core": "^6.3.1",
     "@fontsource-variable/bricolage-grotesque": "^5.2.10",
     "@fontsource-variable/fraunces": "^5.2.9",
     "@fontsource-variable/inter": "^5.2.8",
@@ -33,13 +35,17 @@
     "@fontsource-variable/space-grotesk": "^5.2.10",
     "astro": "^7.0.5",
     "jose": "^6.2.3",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "opencc-data": "^1.4.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",

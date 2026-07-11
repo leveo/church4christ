@@ -7,6 +7,7 @@ import {
   parseAnnouncementForm,
   parseEventForm,
   parseCustomPageForm,
+  parseBuilderSave,
   parsePersonForm,
   parseHouseholdForm,
   parseDependentForm,
@@ -330,6 +331,80 @@ describe('parseCustomPageForm', () => {
     expect(tooLong.ok).toBe(false);
     if (tooLong.ok) return;
     expect(tooLong.errors.body_en).toBe('errors.tooLong');
+  });
+});
+
+describe('parseBuilderSave', () => {
+  it('parses a valid save body, no id (create) and echoes the raw layout through unvalidated', () => {
+    const layout = { v: 1, blocks: [] };
+    const r = parseBuilderSave({
+      action: 'save', id: null, slug: 'about-us', published: true,
+      title_en: 'About Us', title_zh: '关于我们', layout,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({
+      id: null, slug: 'about-us', published: true,
+      title_en: 'About Us', title_zh: '关于我们', layout,
+    });
+  });
+
+  it('carries a non-empty id through', () => {
+    const r = parseBuilderSave({ id: 'abc-123', slug: 'give', published: false, title_en: 'Give', title_zh: '', layout: {} });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.id).toBe('abc-123');
+  });
+
+  it('lowercases an uppercase slug before validating', () => {
+    const r = parseBuilderSave({ id: null, slug: 'About-US', published: false, title_en: 'About', title_zh: '', layout: {} });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.slug).toBe('about-us');
+  });
+
+  it('requires a slug', () => {
+    const r = parseBuilderSave({ id: null, slug: '', published: false, title_en: 'About', title_zh: '', layout: {} });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.slug).toBe('errors.required');
+  });
+
+  it('rejects a slug with invalid characters', () => {
+    for (const bad of ['about_us', 'about--us', '-about', 'about-', 'About Us']) {
+      const r = parseBuilderSave({ id: null, slug: bad, published: false, title_en: 'About', title_zh: '', layout: {} });
+      expect(r.ok, bad).toBe(false);
+      if (r.ok) continue;
+      expect(r.errors.slug, bad).toBe('errors.slugInvalid');
+    }
+  });
+
+  it('rejects a slug over 64 characters', () => {
+    const r = parseBuilderSave({ id: null, slug: 'a'.repeat(65), published: false, title_en: 'About', title_zh: '', layout: {} });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.slug).toBe('errors.slugInvalid');
+  });
+
+  it('requires at least one locale title', () => {
+    const r = parseBuilderSave({ id: null, slug: 'about', published: false, title_en: '', title_zh: '', layout: {} });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.title).toBe('errors.required');
+  });
+
+  it('rejects a non-object body', () => {
+    const r = parseBuilderSave(null);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.form).toBe('errors.required');
+  });
+
+  it('published defaults to false unless the value is literally boolean true', () => {
+    const r = parseBuilderSave({ id: null, slug: 'about', published: 'true', title_en: 'About', title_zh: '', layout: {} });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.published).toBe(false);
   });
 });
 

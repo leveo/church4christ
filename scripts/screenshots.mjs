@@ -163,6 +163,11 @@ const PAGES = [
   // member_groups is a Supabase-only table. Shoot it in the admin pass.
   { path: '/admin/fellowships/1', out: 'docs/images/admin/admin-fellowships.png', admin: true },
 
+  // Page builder: the drag-and-drop editor opened on the seeded 'welcome' page
+  // (fixed id in dev-seed.sql), plus the zero-JS public page it publishes.
+  { path: '/admin/pages/builder/seedbuilderwelcome0000000000pb01', out: 'docs/images/admin/page-builder.png', admin: true },
+  { path: '/en/p/welcome', out: 'docs/images/public/page-builder-page.png' },
+
   // Theme matrix — 3 themes x light/dark, home page, applied via injection.
   { path: '/en/', out: 'docs/images/themes/home-sanctuary-light.png', theme: 'sanctuary', mode: 'light' },
   { path: '/en/', out: 'docs/images/themes/home-sanctuary-dark.png', theme: 'sanctuary', mode: 'dark' },

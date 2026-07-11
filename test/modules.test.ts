@@ -22,6 +22,7 @@ describe('MODULES registry', () => {
       'fellowships',
       'people',
       'children',
+      'page-builder',
       'portal',
       'giving',
       'registration',
@@ -182,5 +183,15 @@ describe('moduleForPath (longest-prefix wins)', () => {
   it('portal is supabase-only', () => {
     expect(filterByBackend(['portal'], 'd1').has('portal')).toBe(false);
     expect(filterByBackend(['portal'], 'supabase').has('portal')).toBe(true);
+  });
+});
+
+describe('page-builder module', () => {
+  it('owns the builder admin prefix; the classic pages admin stays core', () => {
+    expect(moduleForPath('/admin/pages/builder')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages/builder/new')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages/builder/123-abc')).toBe('page-builder');
+    expect(moduleForPath('/admin/pages')).toBeNull();
+    expect(moduleForPath('/p/about')).toBeNull(); // public rendering never gated
   });
 });

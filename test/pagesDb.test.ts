@@ -12,6 +12,7 @@ import {
   listCustomPages,
   listPublishedPageTitles,
   saveCustomPage,
+  savePageLayout,
   toggleCustomPagePublished,
 } from '../src/lib/pagesDb';
 
@@ -80,6 +81,8 @@ describe('getCustomPage / getCustomPageBySlug', () => {
       id,
       slug: 'about',
       published: true,
+      format: 'markdown',
+      layout_json: null,
       i18n: {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
@@ -129,6 +132,8 @@ describe('saveCustomPage — update', () => {
       id,
       slug: 'about',
       published: false,
+      format: 'markdown',
+      layout_json: null,
       i18n: {
         en: { title: 'About Us (updated)', body_md: 'New body.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
@@ -163,6 +168,8 @@ describe('toggleCustomPagePublished', () => {
       id,
       slug: 'about',
       published: true,
+      format: 'markdown',
+      layout_json: null,
       i18n: {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
@@ -224,5 +231,73 @@ describe('listPublishedPageTitles', () => {
 
   it('an empty slugs list returns an empty map', async () => {
     expect(await listPublishedPageTitles(env.DB, [], 'en')).toEqual(new Map());
+  });
+});
+
+describe('savePageLayout (builder pages)', () => {
+  const LAYOUT = JSON.stringify({ v: 1, blocks: [] });
+
+  it('creates a builder page: format, layout, titles persisted; body_md stays empty', async () => {
+    const res = await savePageLayout(env.DB, {
+      id: null, slug: 'built', published: false,
+      title_en: 'Built', title_zh: '构建', layoutJson: LAYOUT, updatedBy: 'e@x',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const page = await getCustomPage(env.DB, res.id);
+    expect(page?.format).toBe('builder');
+    expect(page?.layout_json).toBe(LAYOUT);
+    expect(page?.i18n.en.title).toBe('Built');
+    expect(page?.i18n.zh.title).toBe('构建');
+  });
+
+  it('updating an existing markdown page flips format and PRESERVES body_md', async () => {
+    const first = await saveCustomPage(env.DB, {
+      id: null, slug: 'flip', published: true,
+      title_en: 'Flip', title_zh: '', body_en: 'keep me', body_zh: '保留', updatedBy: 'e@x',
+    });
+    if (!first.ok) throw new Error('seed failed');
+    const res = await savePageLayout(env.DB, {
+      id: first.id, slug: 'flip', published: true,
+      title_en: 'Flip 2', title_zh: '翻转', layoutJson: LAYOUT, updatedBy: 'e@x',
+    });
+    expect(res.ok).toBe(true);
+    const page = await getCustomPage(env.DB, first.id);
+    expect(page?.format).toBe('builder');
+    expect(page?.i18n.en.title).toBe('Flip 2');
+    expect(page?.i18n.en.body_md).toBe('keep me'); // classic body untouched
+    expect(page?.i18n.zh.body_md).toBe('保留');
+  });
+
+  it('rejects a slug taken by a different page', async () => {
+    await savePageLayout(env.DB, { id: null, slug: 'a', published: false, title_en: 'A', title_zh: '', layoutJson: LAYOUT, updatedBy: 'e@x' });
+    const res = await savePageLayout(env.DB, { id: null, slug: 'a', published: false, title_en: 'B', title_zh: '', layoutJson: LAYOUT, updatedBy: 'e@x' });
+    expect(res).toEqual({ ok: false, error: 'slug_taken' });
+  });
+
+  it('writes a v2 revision snapshot', async () => {
+    const res = await savePageLayout(env.DB, { id: null, slug: 'rev', published: false, title_en: 'R', title_zh: '', layoutJson: LAYOUT, updatedBy: 'editor@x' });
+    if (!res.ok) throw new Error('save failed');
+    const row = await env.DB
+      .prepare(`SELECT snapshot_json, edited_by FROM revisions WHERE entity='custom_page' AND entity_id=?1 ORDER BY id DESC`)
+      .bind(res.id).first<{ snapshot_json: string; edited_by: string }>();
+    const snap = JSON.parse(row!.snapshot_json);
+    expect(snap.v).toBe(2);
+    expect(snap.input.format).toBe('builder');
+    expect(snap.input.layout_json).toBe(LAYOUT);
+    expect(row!.edited_by).toBe('editor@x');
+  });
+
+  it('classic saveCustomPage on a builder page leaves format/layout_json alone', async () => {
+    const created = await savePageLayout(env.DB, { id: null, slug: 'mixed', published: false, title_en: 'M', title_zh: '', layoutJson: LAYOUT, updatedBy: 'e@x' });
+    if (!created.ok) throw new Error('seed failed');
+    await saveCustomPage(env.DB, {
+      id: created.id, slug: 'mixed', published: true,
+      title_en: 'M2', title_zh: '', body_en: '', body_zh: '', updatedBy: 'e@x',
+    });
+    const page = await getCustomPage(env.DB, created.id);
+    expect(page?.format).toBe('builder');
+    expect(page?.layout_json).toBe(LAYOUT);
+    expect(page?.published).toBe(true);
   });
 });
