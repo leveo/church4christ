@@ -268,29 +268,34 @@ real Supabase project.
    docker run -d --name church-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
    ```
 
-2. **Tell the dev server to use it.** In your `.dev.vars` file (copied from
-   [`.dev.vars.example`](../.dev.vars.example)), set:
+2. **Uncomment the `hyperdrive` binding** in `wrangler.jsonc` (see step 3 above) — it must be
+   present for local dev too, even though the id in it is unused locally. Without it, the dev
+   server fails with "HYPERDRIVE binding is missing", no matter what the connection-string env
+   var below is set to.
+
+3. **Tell the dev server to use your local Postgres.** Export this in the same shell you run
+   `npm run dev` from (not `.dev.vars` — wrangler needs to see it before the dev server boots):
 
    ```bash
-   DB_BACKEND=supabase
-   WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
+   export DB_BACKEND=supabase
+   export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
    ```
 
-   That second variable points the `HYPERDRIVE` binding at your local database, so you do
-   **not** need a real Hyperdrive config for local dev.
+   That variable points the `HYPERDRIVE` binding at your local database, so you do **not** need
+   a real Hyperdrive id for local dev.
 
-3. **Migrate and seed the local database:**
+4. **Migrate and seed the local database:**
 
    ```bash
    SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres npm run db:migrate:supabase
    SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres npm run db:seed:supabase
    ```
 
-4. **Run it:** `npm run dev`, then open the address it prints (usually
+5. **Run it:** `npm run dev`, then open the address it prints (usually
    `http://localhost:4321`). Giving and Registration now appear, backed by your local
    Postgres.
 
-5. **Testing Stripe locally (optional).** Put your test keys in `.dev.vars`
+6. **Testing Stripe locally (optional).** Put your test keys in `.dev.vars`
    (`STRIPE_SECRET_KEY=sk_test_…`), and use the [Stripe CLI](https://stripe.com/docs/stripe-cli)
    to forward webhooks to your dev server:
 

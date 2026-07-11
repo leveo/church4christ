@@ -135,9 +135,6 @@ export default {
   'fellowships.intro': 'Smaller communities where we share life, study Scripture, and pray together.',
   'fellowships.empty': 'Fellowship groups will be listed here soon.',
   'fellowships.meets': 'Meets',
-  'fellowships.location': 'Location',
-  'fellowships.audience': 'Who it’s for',
-  'fellowships.leaders': 'Leaders',
   'fellowships.back': '← All fellowships',
 
   'staff.title': 'Our Team',

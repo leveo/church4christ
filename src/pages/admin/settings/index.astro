@@ -132,7 +132,7 @@ const h2 = 'font-display text-heading-sm font-bold';
 
 // Modules panel: grouped checkboxes over the `module.<key>` toggles. Current
 // state comes from locals.modules (the middleware's enabled set); absent = on.
-// `giving`/`registration` are backend-gated: on any backend other than the one
+// `giving`/`registration`/`portal` are backend-gated: on any backend other than the one
 // they require, their row renders disabled with a note (dbBackend drives that).
 const enabledModules = Astro.locals.modules;
 const dbBackend = Astro.locals.dbBackend;

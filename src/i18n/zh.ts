@@ -134,9 +134,6 @@ export default {
   'fellowships.intro': '在小组中彼此分享生活、查考圣经、一同祷告。',
   'fellowships.empty': '团契小组信息即将上线。',
   'fellowships.meets': '聚会时间',
-  'fellowships.location': '聚会地点',
-  'fellowships.audience': '适合对象',
-  'fellowships.leaders': '同工',
   'fellowships.back': '← 返回团契列表',
 
   'staff.title': '我们的团队',
