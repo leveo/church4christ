@@ -50,6 +50,28 @@ describe('shell-free setup command runner', () => {
     );
   });
 
+  it('derives multiline, URL-component, explicit, and secret environment values', async () => {
+    const url = 'postgres://alice:p%40ss@db.test/app?token=q%2Bv';
+    const input = 'API_KEY=line-one\npassword=line-two\n';
+    const env = { SAFE: 'visible', CLOUDFLARE_API_TOKEN: 'env-token', CUSTOM: 'custom-secret' };
+    const echoed = [url, 'alice', 'p%40ss', 'p@ss', 'q%2Bv', 'q+v', input, 'line-one', 'line-two', 'env-token', 'custom-secret', 'xy'].join('|');
+    const runner = createCommandRunner({ exec: async () => ({ stdout: echoed, stderr: echoed, exitCode: 3 }) });
+    const result = await runner.run('x', [url], {
+      secretArgIndexes: [0], input, env, allowNonzero: true,
+      secretValues: ['xy'], secretEnvKeys: ['CUSTOM'],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/alice|p%40ss|p@ss|q%2Bv|q\+v|line-one|line-two|env-token|custom-secret|xy/);
+    expect(result.stdout).toContain('[REDACTED]');
+  });
+
+  it('bounds real child output and times out real children', async () => {
+    const runner = createCommandRunner();
+    await expect(runner.run(process.execPath, ['-e', "process.stdout.write('x'.repeat(200))"], { maxOutputBytes: 32 }))
+      .rejects.toThrow(/output limit/i);
+    await expect(runner.run(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 50 }))
+      .rejects.toThrow(/timed out/i);
+  });
+
   it('rejects unsafe input types before execution', async () => {
     const exec = vi.fn();
     const runner = createCommandRunner({ exec });
@@ -101,6 +123,24 @@ describe('anonymous SQL bind rendering', () => {
     expect(renderAnonymousBinds(query, ['value'], (_value, position) => `$${position}`))
       .toBe("SELECT 'backslash\\' AS value, $1 AS bound");
   });
+
+  it('implements SQLite numbered, repeated, and mixed placeholder semantics', () => {
+    const params = Array.from({ length: 13 }, (_, index) => index + 1);
+    expect(renderAnonymousBinds('SELECT ?1, ?13, ?1', params)).toBe('SELECT 1, 13, 1');
+    expect(renderAnonymousBinds('SELECT ?2, ?, ?1, ?', [10, 20, 30, 40])).toBe('SELECT 20, 30, 10, 40');
+    expect(renderAnonymousBinds('SELECT ?2, ?, ?1, ?', [10, 20, 30, 40], (_value, position) => `$${position}`))
+      .toBe('SELECT $2, $3, $1, $4');
+    expect(() => renderAnonymousBinds('SELECT ?0', [1])).toThrow(/positive/i);
+    expect(() => renderAnonymousBinds('SELECT ?2', [1])).toThrow(/bind count/i);
+    expect(() => renderAnonymousBinds('SELECT ?1', [1, 2])).toThrow(/bind count/i);
+  });
+
+  it('skips PostgreSQL dollar quotes and supports nested block comments fail-closed', () => {
+    const query = 'SELECT $$?$$, $tag$?$tag$, ? /* outer ? /* inner ? */ still ? */';
+    expect(renderAnonymousBinds(query, ['ok'])).toBe("SELECT $$?$$, $tag$?$tag$, 'ok' /* outer ? /* inner ? */ still ? */");
+    expect(() => renderAnonymousBinds('SELECT $tag$ ?', [])).toThrow(/unterminated.*dollar/i);
+    expect(() => renderAnonymousBinds('SELECT /* outer /* inner */', [])).toThrow(/unterminated.*comment/i);
+  });
 });
 
 describe('D1 setup adapter', () => {
@@ -108,7 +148,8 @@ describe('D1 setup adapter', () => {
     const calls: string[][] = [];
     const runner = { run: async (_file: string, args: string[]) => {
       calls.push(args);
-      return { stdout: JSON.stringify([{ results: [{ id: 7, name: null }], success: true, meta: { changes: 1 } }]) };
+      const result = { results: [{ id: 7, name: null }], success: true, meta: { changes: 1 } };
+      return { stdout: JSON.stringify(args.includes("SELECT id FROM people WHERE email='d@example.com';\nSELECT id FROM people WHERE email='e@example.com'") ? [result, result] : [result]) };
     } };
     const db = new D1CliDb({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', persistTo: '.wrangler/state' });
     const base = db.prepare('SELECT id FROM people WHERE email=?');
@@ -132,6 +173,30 @@ describe('D1 setup adapter', () => {
     expect(() => new D1CliDb({ runner, wranglerBin: 'w', configPath: 'c', mode: 'bad' as any })).toThrow(/mode/i);
     expect(() => new D1CliDb({ runner, wranglerBin: 'w', configPath: 'c', mode: 'deploy', persistTo: 'x' })).toThrow(/persist/i);
     expect(() => new D1CliDb({ runner, wranglerBin: 'w', configPath: 'c', mode: 'local', persistTo: '--remote' })).toThrow(/persist/i);
+  });
+
+  it('rejects any failed D1 result and batches statements in one Wrangler call', async () => {
+    const failed = new D1CliDb({
+      runner: { run: async () => ({ stdout: JSON.stringify([{ success: false, results: [], meta: {} }, { success: true, results: [], meta: {} }]) }) },
+      wranglerBin: 'w', configPath: 'c', mode: 'deploy',
+    });
+    await expect(failed.prepare('SELECT 1').all()).rejects.toThrow(/unsuccessful|invalid/i);
+
+    const calls: string[][] = [];
+    const db = new D1CliDb({
+      runner: { run: async (_file: string, args: string[]) => {
+        calls.push(args);
+        return { stdout: JSON.stringify([
+          { success: true, results: [{ id: 1 }], meta: { changes: 0 } },
+          { success: true, results: [], meta: { changes: 1 } },
+        ]) };
+      } },
+      wranglerBin: 'w', configPath: 'c', mode: 'local',
+    });
+    const results = await db.batch([db.prepare('SELECT ?1').bind(1), db.prepare('DELETE FROM t WHERE id=?').bind(2)]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('SELECT 1;\nDELETE FROM t WHERE id=2');
+    expect(results).toHaveLength(2);
   });
 });
 
@@ -189,7 +254,7 @@ describe('Cloudflare resource discovery', () => {
 describe('Hyperdrive resource adapter', () => {
   const table = (rows: string[]) => [
     '📋 Listing Hyperdrive configs',
-    '┌────┬──────┬──────┬──────┬──────┬────────┬──────────┬─────────┬─────────────────────────┐',
+    '┌────┬──────┬──────┬──────┬──────┬────────┬──────────┬─────────┬──────┬─────────────────────────┐',
     '│ id │ name │ user │ host │ port │ scheme │ database │ caching │ mtls │ origin_connection_limit │',
     '├────┼──────┼──────┼──────┼──────┼────────┼──────────┼─────────┼──────┼─────────────────────────┤',
     ...rows,
@@ -200,6 +265,10 @@ describe('Hyperdrive resource adapter', () => {
     expect(parseHyperdriveTable(table(['│ abc-123 │ site-hd │ u │ h │ 5432 │ Postgres │ db │ disabled │ {} │ 5 │']))).toEqual([{ id: 'abc-123', name: 'site-hd' }]);
     expect(() => parseHyperdriveTable('id name\nabc site')).toThrow(/format/i);
     expect(() => parseHyperdriveTable(table(['│ a │ x │ u │ h │ 1 │ Postgres │ d │ x │ {} │ 1 │', '│ b │ x │ u │ h │ 1 │ Postgres │ d │ x │ {} │ 1 │']), 'x')).toThrow(/ambiguous/i);
+    const captured4107 = `\n ⛅️ wrangler 4.107.0\n────────────────────\n${table(['│ abc-123 │ site-hd │ u │ h │ 5432 │ Postgres │ db │ disabled │ {} │ 5 │'])}`;
+    expect(parseHyperdriveTable(captured4107)).toEqual([{ id: 'abc-123', name: 'site-hd' }]);
+    expect(() => parseHyperdriveTable(`unknown preamble\n${table([])}`)).toThrow(/format/i);
+    expect(() => parseHyperdriveTable(`\u001b[31m${table([])}`)).toThrow(/format/i);
   });
 
   it('lists before/create/after, redacts the connection URL argument, and ignores create prose', async () => {
@@ -210,34 +279,44 @@ describe('Hyperdrive resource adapter', () => {
       if (args[1] === 'list') return { stdout: lists++ ? table(['│ hd-id │ site-hd │ u │ h │ 5432 │ Postgres │ db │ x │ {} │ 1 │']) : table([]) };
       return { stdout: 'created secret://leak' };
     } };
-    await expect(ensureHyperdrive({ runner, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret' })).resolves.toEqual({ name: 'site-hd', id: 'hd-id', created: true });
+    await expect(ensureHyperdrive({ runner, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret', allowSecretInArgv: true })).resolves.toEqual({ name: 'site-hd', id: 'hd-id', created: true });
     expect(calls[1]).toEqual({
       args: ['hyperdrive', 'create', 'site-hd', '--connection-string', 'postgres://secret', '--config', 'c'],
       options: { secretArgIndexes: [4] },
     });
     expect(JSON.stringify(await ensureHyperdrive({ runner: { run: async () => ({ stdout: table(['│ hd-id │ site-hd │ u │ h │ 5432 │ Postgres │ db │ x │ {} │ 1 │']) }) }, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret' }))).not.toContain('postgres://secret');
   });
+
+  it('refuses Hyperdrive credential argv exposure unless explicitly allowed', async () => {
+    const runner = { run: async () => ({ stdout: table([]) }) };
+    await expect(ensureHyperdrive({ runner, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret' }))
+      .rejects.toThrow(/process-list.*short-lived scoped credentials/i);
+    await expect(ensureHyperdrive({ runner, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret', allowSecretInArgv: 'yes' as any }))
+      .rejects.toThrow(/allowSecretInArgv/i);
+  });
 });
 
 describe('Postgres setup AppDb adapter', () => {
   it('uses max:1, prepare:false, int8 mapping, placeholders, result contract, and awaited close', async () => {
     const calls: any[] = [];
-    let ended = false;
+    let endCalls = 0;
     const rows: any = [{ id: 9 }]; rows.count = 2;
     const sql: any = {
       unsafe: async (query: string, params: unknown[]) => { calls.push({ query, params }); return rows; },
       begin: async (fn: any) => fn({ unsafe: sql.unsafe }),
-      end: async () => { await Promise.resolve(); ended = true; },
+      end: async () => { await Promise.resolve(); endCalls += 1; },
     };
     const factory: any = vi.fn(() => sql);
-    const opened = openPostgresSetupDb('postgres://db', { postgresFactory: factory });
-    expect(factory).toHaveBeenCalledWith('postgres://db', expect.objectContaining({ max: 1, prepare: false }));
+    const opened = openPostgresSetupDb('postgres://user:pass@db/app', { postgresFactory: factory });
+    expect(factory).toHaveBeenCalledWith('postgres://user:pass@db/app', expect.objectContaining({ max: 1, prepare: false }));
     expect(factory.mock.calls[0][1].types.int8AsNumber.parse('12')).toBe(12);
     const stmt = opened.db.prepare(`SELECT '?' AS q, id FROM t WHERE a=? AND b=?`).bind('a', 2);
     expect(await stmt.first()).toEqual({ id: 9 });
     expect(calls[0]).toEqual({ query: `SELECT '?' AS q, id FROM t WHERE a=$1 AND b=$2`, params: ['a', 2] });
     expect(await stmt.all()).toEqual({ results: rows, meta: { changes: 2 }, success: true });
-    await opened.close();
-    expect(ended).toBe(true);
+    await Promise.all([opened.close(), opened.close()]);
+    expect(endCalls).toBe(1);
+    expect(() => openPostgresSetupDb('https://user:pass@db/app', { postgresFactory: factory })).toThrow(/Postgres.*URL/i);
+    expect(() => openPostgresSetupDb('postgres://db/app', { postgresFactory: factory })).toThrow(/credentials/i);
   });
 });

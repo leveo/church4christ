@@ -11,17 +11,21 @@ function requireOptions({ runner, wranglerBin, configPath, name }) {
   if (name !== undefined && (typeof name !== 'string' || !NAME.test(name))) throw new TypeError('resource name is invalid');
 }
 
-function normalizeD1(stdout) {
+function normalizeD1(stdout, expectedCount) {
   let parsed;
   try { parsed = JSON.parse(stdout); } catch { throw new Error('Wrangler D1 returned malformed JSON'); }
-  const result = Array.isArray(parsed) ? parsed.at(-1) : parsed;
-  if (!result || typeof result !== 'object' || Array.isArray(result) || result.success !== true ||
-      !Array.isArray(result.results) || !result.meta || typeof result.meta !== 'object' || Array.isArray(result.meta)) {
-    throw new Error('Wrangler D1 returned an invalid or unsuccessful result');
-  }
-  const changes = result.meta.changes ?? 0;
-  if (typeof changes !== 'number' || !Number.isFinite(changes)) throw new Error('Wrangler D1 returned invalid metadata');
-  return Object.freeze({ results: result.results, meta: { ...result.meta, changes }, success: true });
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  const normalized = entries.map((result) => {
+    if (!result || typeof result !== 'object' || Array.isArray(result) || result.success !== true ||
+        !Array.isArray(result.results) || !result.meta || typeof result.meta !== 'object' || Array.isArray(result.meta)) {
+      throw new Error('Wrangler D1 returned an invalid or unsuccessful result');
+    }
+    const changes = result.meta.changes ?? 0;
+    if (typeof changes !== 'number' || !Number.isFinite(changes)) throw new Error('Wrangler D1 returned invalid metadata');
+    return Object.freeze({ results: result.results, meta: { ...result.meta, changes }, success: true });
+  });
+  if (normalized.length !== expectedCount) throw new Error(`Wrangler D1 returned ${normalized.length} results; expected ${expectedCount}`);
+  return normalized;
 }
 
 class D1Statement {
@@ -58,16 +62,19 @@ export class D1CliDb {
     if (!Array.isArray(statements) || statements.some((statement) => !(statement instanceof D1Statement) || statement.db !== this)) {
       throw new TypeError('D1 batch requires statements prepared by this database');
     }
-    const output = [];
-    for (const statement of statements) output.push(await statement.run());
-    return output;
+    if (statements.length === 0) return [];
+    const sql = statements.map((statement) => renderAnonymousBinds(statement.sql, statement.params)).join(';\n');
+    return this.executeBatch(sql, statements.length);
   }
   async execute(sql) {
+    return (await this.executeBatch(sql, 1))[0];
+  }
+  async executeBatch(sql, expectedCount) {
     if (typeof sql !== 'string' || !sql) throw new TypeError('SQL must be a non-empty string');
     const args = ['d1', 'execute', 'DB', this.mode === 'deploy' ? '--remote' : '--local',
       '--command', sql, '--json', '--yes', '--config', this.configPath];
     if (this.persistTo) args.push('--persist-to', this.persistTo);
-    return normalizeD1((await this.runner.run(this.wranglerBin, args)).stdout);
+    return normalizeD1((await this.runner.run(this.wranglerBin, args)).stdout, expectedCount);
   }
 }
 
