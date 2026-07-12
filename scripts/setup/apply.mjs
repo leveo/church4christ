@@ -1,0 +1,148 @@
+import { fingerprintPlan } from './state.mjs';
+import { bootstrapFirstAdmin, initializeModuleSettings } from '../../src/lib/setupDb.mjs';
+import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
+import { ensureHyperdrive } from './providers/postgres.mjs';
+
+export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
+
+function providerStep(apply, verify, name) {
+  if (typeof verify !== 'function') throw new TypeError(`verify.${name} is required`);
+  return Object.freeze({ apply, verify });
+}
+
+function commonDatabaseSteps(options) {
+  if (!options.db || typeof options.db.prepare !== 'function') throw new TypeError('provider AppDb is required');
+  if (!Array.isArray(options.moduleKeys)) throw new TypeError('moduleKeys are required');
+  return {
+    'initialize-modules': providerStep(async ({ plan } = {}) => {
+      await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
+      return { changed: true };
+    }, options.verify?.['initialize-modules'], 'initialize-modules'),
+    'bootstrap-admin': providerStep(async ({ plan } = {}) => {
+      const outcome = await bootstrapFirstAdmin(options.db, {
+        email: plan?.adminEmail,
+        displayName: plan?.adminName,
+        locale: plan?.site?.locale,
+        promoteExisting: Boolean(options.promoteExistingAdmin),
+      });
+      return { changed: ['created', 'promoted'].includes(outcome.status) };
+    }, options.verify?.['bootstrap-admin'], 'bootstrap-admin'),
+  };
+}
+
+export function createD1Steps(options) {
+  if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
+  if (typeof options.wranglerBin !== 'string' || !options.wranglerBin) throw new TypeError('wranglerBin is required');
+  if (typeof options.configPath !== 'string' || !options.configPath) throw new TypeError('configPath is required');
+  if (!['local', 'deploy'].includes(options.mode)) throw new TypeError('D1 mode must be local or deploy');
+  const location = options.mode === 'deploy' ? '--remote' : '--local';
+  const command = (args) => options.runner.run(options.wranglerBin, args, { cwd: options.root ?? process.cwd() });
+  return Object.freeze({
+    migrate: providerStep(async () => {
+      await command(['d1', 'migrations', 'apply', 'DB', location, '--config', options.configPath]);
+      return { changed: true };
+    }, options.verify?.migrate, 'migrate'),
+    seed: providerStep(async () => {
+      await command(['d1', 'execute', 'DB', location, '--file', 'seed/dev-seed.sql', '--config', options.configPath, '--yes']);
+      return { changed: true };
+    }, options.verify?.seed, 'seed'),
+    ...commonDatabaseSteps(options),
+  });
+}
+
+export function createSupabaseSteps(options) {
+  if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
+  if (typeof options.root !== 'string' || !options.root) throw new TypeError('root is required');
+  if (typeof options.dbUrl !== 'string' || !/^postgres(?:ql)?:\/\//.test(options.dbUrl)) throw new TypeError('Supabase database URL is required');
+  const command = (script) => options.runner.run(process.execPath, [script], {
+    cwd: options.root,
+    env: { ...process.env, SUPABASE_DB_URL: options.dbUrl },
+    secretEnvKeys: ['SUPABASE_DB_URL'],
+  });
+  return Object.freeze({
+    migrate: providerStep(async () => { await command('scripts/db/migrate-supabase.mjs'); return { changed: true }; }, options.verify?.migrate, 'migrate'),
+    seed: providerStep(async () => { await command('scripts/db/seed-supabase.mjs'); return { changed: true }; }, options.verify?.seed, 'seed'),
+    ...commonDatabaseSteps(options),
+  });
+}
+
+export function createResourceStep(options) {
+  if (!options?.plan || !['d1', 'supabase'].includes(options.plan.backend)) throw new TypeError('resource plan backend is required');
+  if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
+  if (typeof options.verify !== 'function') throw new TypeError('resource verify is required');
+  return providerStep(async () => {
+    const { plan } = options;
+    if (plan.resources) return { changed: false, resolvedResources: Object.freeze({ ...plan.resources }) };
+    const names = {
+      d1DatabaseName: `${plan.site.slug}-db`,
+      r2BucketName: `${plan.site.slug}-media`,
+    };
+    if (plan.mode === 'local') {
+      return { changed: false, resolvedResources: Object.freeze({
+        d1DatabaseName: plan.backend === 'd1' ? names.d1DatabaseName : null,
+        d1DatabaseId: plan.backend === 'd1' ? 'local' : null,
+        r2BucketName: names.r2BucketName,
+        hyperdriveId: plan.backend === 'supabase' ? 'local' : null,
+      }) };
+    }
+    const shared = { runner: options.runner, wranglerBin: options.wranglerBin, configPath: options.configPath };
+    const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
+    if (plan.backend === 'd1') {
+      const database = await ensureD1Database({ ...shared, name: names.d1DatabaseName });
+      return { changed: bucket.created || database.created, resolvedResources: Object.freeze({ d1DatabaseName: database.name, d1DatabaseId: database.id, r2BucketName: bucket.name, hyperdriveId: null }) };
+    }
+    const hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+    return { changed: bucket.created || hyperdrive.created, resolvedResources: Object.freeze({ d1DatabaseName: null, d1DatabaseId: null, r2BucketName: bucket.name, hyperdriveId: hyperdrive.id }) };
+  }, options.verify, 'ensure-resources');
+}
+
+function validate(plan, steps) {
+  if (!plan || typeof plan !== 'object' || !Array.isArray(plan.actions)) throw new TypeError('setup plan actions are required');
+  const seen = new Set(); let previous = -1;
+  for (const name of plan.actions) {
+    const index = SETUP_ACTION_ORDER.indexOf(name);
+    if (index < 0) throw new Error(`Unknown setup action: ${String(name)}`);
+    if (seen.has(name)) throw new Error(`Duplicate setup action: ${name}`);
+    if (index <= previous) throw new Error('Setup actions are not in canonical order');
+    seen.add(name); previous = index;
+  }
+  for (const name of plan.actions) {
+    const step = steps?.[name];
+    if (!step || typeof step.apply !== 'function' || typeof step.verify !== 'function') throw new Error(`Setup step ${name} must provide apply and verify`);
+  }
+  return [...plan.actions];
+}
+
+export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
+  if (typeof dryRun !== 'boolean') throw new TypeError('dryRun must be a boolean');
+  const actions = validate(plan, steps);
+  if (dryRun) return { status: 'dry-run', actions, results: [] };
+  if (!stateStore || typeof stateStore.load !== 'function' || typeof stateStore.has !== 'function' || typeof stateStore.mark !== 'function') throw new TypeError('stateStore load/has/mark are required');
+  await stateStore.load(fingerprintPlan(plan));
+  const results = []; let resolvedResources = plan.resources;
+  for (const name of actions) {
+    const completed = await stateStore.has(name);
+    if (completed && name === 'ensure-resources' && typeof stateStore.getEvidence === 'function') {
+        const evidence = await stateStore.getEvidence(name);
+        if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
+        resolvedResources = Object.freeze({ ...evidence });
+    }
+    const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
+    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources });
+    if (completed && await steps[name].verify(context)) {
+      results.push({ step: name, status: 'already-complete' });
+      continue;
+    }
+    const raw = await steps[name].apply(context);
+    const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    if (name === 'ensure-resources') {
+      if (!result.resolvedResources || typeof result.resolvedResources !== 'object' || Array.isArray(result.resolvedResources)) throw new Error('Setup step ensure-resources did not return resolvedResources');
+      resolvedResources = Object.freeze({ ...result.resolvedResources });
+    }
+    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources }));
+    if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
+    await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null));
+    results.push({ step: name, status: result.changed ? 'changed' : 'verified' });
+  }
+  return { status: 'applied', actions, results };
+}
