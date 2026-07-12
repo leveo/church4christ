@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const manifestPath = join(root, 'seed/media/manifest.json');
 const mediaDir = join(root, 'seed/media');
+const portalFilesManifestPath = join(root, 'seed/portal-files/manifest.json');
+const portalFilesDir = join(root, 'seed/portal-files');
 const dryRun = process.argv.includes('--dry-run');
 
 function sanitizeFilename(filename) {
@@ -79,6 +81,9 @@ function targetSql(asset, key) {
 }
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const portalFilesManifest = existsSync(portalFilesManifestPath)
+  ? JSON.parse(readFileSync(portalFilesManifestPath, 'utf8'))
+  : { files: [] };
 const bucket = readBucketName();
 const contentType = manifest.contentType ?? 'image/webp';
 const uploadedBy = manifest.uploadedBy ?? 'admin@example.com';
@@ -109,10 +114,30 @@ for (const asset of manifest.assets) {
   statements.push(targetSql(asset, key));
 }
 
+// group_files is a portal-only Postgres table, so its metadata is seeded by
+// seed/portal-seed.sql rather than this D1-oriented script. The object bytes do
+// still belong in local R2, using the exact stable portal-seed key.
+for (const file of portalFilesManifest.files) {
+  const filePath = join(portalFilesDir, file.file);
+  if (!existsSync(filePath)) throw new Error(`Portal seed file missing: ${file.file}`);
+  runWrangler([
+    'r2',
+    'object',
+    'put',
+    `${bucket}/${file.key}`,
+    '--file',
+    filePath,
+    '--content-type',
+    file.contentType,
+    '--local',
+    '--force',
+  ]);
+}
+
 const command = statements.join('; ');
 if (dryRun) {
   console.log(command);
 } else {
   runWrangler(['d1', 'execute', 'DB', '--local', '--command', command]);
-  console.log(`Seeded ${manifest.assets.length} media assets into local R2 and D1`);
+  console.log(`Seeded ${manifest.assets.length} media assets and ${portalFilesManifest.files.length} portal files into local R2 and D1`);
 }

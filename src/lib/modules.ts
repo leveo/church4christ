@@ -9,9 +9,9 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 16 module keys, in display order (drives the admin Modules panel + nav).
-// `giving` and `registration` are appended last: they are backend-gated (Supabase
-// only) and stay off on the D1 backend regardless of their settings row.
+// The 17 module keys, in display order (drives the admin Modules panel + nav).
+// `giving`, `registration` and `portal` are appended last: they are backend-gated
+// (Supabase only) and stay off on the D1 backend regardless of their settings row.
 export const MODULE_KEYS = [
   'bulletins',
   'sermons',
@@ -29,6 +29,7 @@ export const MODULE_KEYS = [
   'page-builder',
   'giving',
   'registration',
+  'portal',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -156,6 +157,17 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
     adminPrefixes: ['/admin/registration'],
     navKeys: ['nav.register'],
     uses: [],
+    requiresBackend: 'supabase',
+  },
+  // Member self-service. Fuses onto the existing groups module (kind/term live in
+  // /admin/groups, event_admins in /admin/registration — no admin prefixes of its
+  // own; the Groups tab links to the shared /groups). Supabase-only (household
+  // owners, prayer wall + files live in the Supabase-only portal tables).
+  portal: {
+    publicPrefixes: ['/my/household', '/my/events', '/my/serving', '/my/prayer', '/email-change'],
+    adminPrefixes: [],
+    navKeys: [],
+    uses: ['serve', 'groups'],
     requiresBackend: 'supabase',
   },
 };

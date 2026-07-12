@@ -1,0 +1,57 @@
+---
+// Shared tab strip for the /my/* member-portal pages. Dashboard/Calendar
+// always render; Giving only when the `giving` module is on; the Groups tab
+// links to the existing public groups directory (/groups) and shows only when
+// the `groups` module is on; Household/Events/Serving only when `portal` is on
+// — this component is shared with /my (the serve-only schedule page), which
+// runs without the portal module. The Prayer tab is portal-gated too.
+import { localePath, type Locale } from '../lib/locales';
+import { t } from '../lib/i18n';
+
+export type PortalNavTab = 'dashboard' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer';
+
+interface Props {
+  locale: Locale;
+  active: PortalNavTab;
+}
+
+const { locale, active } = Astro.props;
+const modules = Astro.locals.modules;
+
+const tabs: { key: PortalNavTab; href: string; label: string }[] = [
+  { key: 'dashboard', href: localePath(locale, '/my'), label: t(locale, 'portal.nav.dashboard') },
+  ...(modules.has('portal')
+    ? [{ key: 'household' as const, href: localePath(locale, '/my/household'), label: t(locale, 'portal.nav.household') }]
+    : []),
+  ...(modules.has('giving')
+    ? [{ key: 'giving' as const, href: localePath(locale, '/my/giving'), label: t(locale, 'portal.nav.giving') }]
+    : []),
+  ...(modules.has('groups')
+    ? [{ key: 'groups' as const, href: localePath(locale, '/groups'), label: t(locale, 'portal.nav.groups') }]
+    : []),
+  ...(modules.has('portal')
+    ? [
+        { key: 'events' as const, href: localePath(locale, '/my/events'), label: t(locale, 'portal.nav.events') },
+        { key: 'serving' as const, href: localePath(locale, '/my/serving'), label: t(locale, 'portal.nav.serving') },
+        { key: 'prayer' as const, href: localePath(locale, '/my/prayer'), label: t(locale, 'portal.nav.prayer') },
+      ]
+    : []),
+  { key: 'calendar', href: localePath(locale, '/my/calendar'), label: t(locale, 'portal.nav.calendar') },
+];
+---
+
+<nav class="mt-4 flex gap-1 overflow-x-auto border-b border-border text-sm" aria-label={t(locale, 'portal.nav.myPortal')}>
+  {
+    tabs.map((tab) => (
+      <a
+        href={tab.href}
+        aria-current={tab.key === active ? 'page' : undefined}
+        class={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 font-medium ${
+          tab.key === active ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink'
+        }`}
+      >
+        {tab.label}
+      </a>
+    ))
+  }
+</nav>

@@ -6,16 +6,19 @@
 
 import type { AppDb } from './appDb';
 
-export type TokenPurpose = 'login' | 'respond';
+export type TokenPurpose = 'login' | 'respond' | 'email_change';
 
 export const LOGIN_TTL_MIN = 15;
 export const RESPOND_TTL_DAYS = 14;
 export const LOGIN_RATE_LIMIT = 3;
 export const LOGIN_RATE_WINDOW_MIN = 15;
+export const EMAIL_CHANGE_TTL_MIN = 60;
+export const EMAIL_CHANGE_RATE_LIMIT = 3; // per person per hour
 
 const TTL_SQL: Record<TokenPurpose, string> = {
   login: `+${LOGIN_TTL_MIN} minutes`,
   respond: `+${RESPOND_TTL_DAYS} days`,
+  email_change: `+${EMAIL_CHANGE_TTL_MIN} minutes`,
 };
 
 /** A validated token's owning person and (for respond tokens) assignment. */
@@ -79,6 +82,12 @@ export async function createLoginToken(
     return { rateLimited: true };
   }
   return { raw: await insertToken(db, personId, 'login', null) };
+}
+
+/** Issue an email-change confirmation token. Rate limiting and prior-token
+ *  invalidation are the caller's responsibility (see emailChange.ts). */
+export async function createEmailChangeToken(db: AppDb, personId: number): Promise<{ raw: string }> {
+  return { raw: await insertToken(db, personId, 'email_change', null) };
 }
 
 /** Issue an accept/decline token bound to a roster assignment. Not rate limited. */

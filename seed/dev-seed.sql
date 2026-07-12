@@ -416,6 +416,11 @@ INSERT INTO household_members (id, household_id, person_id, display_name, role, 
   (5, 2, 9, 'Esther Lin 林以斯帖', 'adult', 0),
   (6, 3, 10, 'Joshua Zhao 赵约书亚', 'adult', 1);
 
+-- Member portal: David is the Chen household's initial owner. He is a linked
+-- adult and primary member, so the seeded household can exercise owner-only
+-- actions (including promoting Amy) without manual setup.
+UPDATE household_members SET is_owner = 1 WHERE id = 1;
+
 -- Two admin-authored pastoral notes on two different people. Notes are an
 -- admin-only surface and never render on any public or leader page.
 INSERT INTO person_notes (id, person_id, author_email, body) VALUES
@@ -485,15 +490,19 @@ UPDATE people SET avatar_url = '/media/uploads/c0126d218e4f4462-avatar-amy-chen.
 UPDATE people SET avatar_url = '/media/uploads/624b72ae921a3faf-avatar-ben-wu.webp' WHERE id = 8;
 UPDATE people SET avatar_url = '/media/uploads/05218adece952076-avatar-esther-lin.webp' WHERE id = 9;
 
--- Groups module (Slice A). Two groups: a PUBLIC "Young Adults" with a weekly
--- attendance-tracked Bible study, and a PRIVATE "Prayer Partners". Members reuse
--- seeded people ids; group 1 carries one name-only member (person_id NULL, the
--- household-dependent precedent) and Ben (8) as group admin, group 2 has Faithful
--- (6) as admin. One pending join request (Grace 4 -> Young Adults). Two past
--- occurrences with attendance rows so the profile activity section has history.
-INSERT INTO groups (id, name, description, is_public) VALUES
-  (1, 'Young Adults 青年团契', 'A community for young adults to grow in faith and friendship through weekly study and fellowship.', 1),
-  (2, 'Prayer Partners 祷告伙伴', 'A small, private circle who commit to praying for one another through the week.', 0);
+-- Groups module (Slice A). Young Adults is a public fellowship with a weekly
+-- attendance-tracked Bible study, Prayer Partners remains private, and
+-- Foundations of Faith is an in-session public Sunday School class. Members
+-- reuse seeded people ids; group 1 carries one name-only member (person_id NULL,
+-- the household-dependent precedent) and Ben (8) as group admin, group 2 has
+-- Faithful (6) as admin. One pending join request (Grace 4 -> Young Adults). Two
+-- past occurrences with attendance rows give the profile activity history.
+-- Term dates float around today so the seasonal class is visibly in session in a
+-- fresh demo without disturbing the long-running fellowship/private-group cases.
+INSERT INTO groups (id, name, description, is_public, kind, term_label, term_start, term_end) VALUES
+  (1, 'Young Adults 青年团契', 'A community for young adults to grow in faith and friendship through weekly study and fellowship.', 1, 'fellowship', NULL, NULL, NULL),
+  (2, 'Prayer Partners 祷告伙伴', 'A small, private circle who commit to praying for one another through the week.', 0, 'fellowship', NULL, NULL, NULL),
+  (3, 'Foundations of Faith 信仰基础', 'A Sunday School class exploring the foundations of Christian belief and everyday discipleship.', 1, 'sunday_school', 'Foundations of Faith 信仰基础', date('now','-30 days'), date('now','+60 days'));
 
 INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admin) VALUES
   (1, 1, 8, 'Ben Wu 吴恩本', NULL, 1),
@@ -501,7 +510,9 @@ INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admi
   (3, 1, 10, 'Joshua Zhao 赵约书亚', NULL, 0),
   (4, 1, NULL, 'Hannah Guest 访客', '(555) 010-7777', 0),
   (5, 2, 6, 'Faithful Wang 王信实', NULL, 1),
-  (6, 2, 9, 'Esther Lin 林以斯帖', NULL, 0);
+  (6, 2, 9, 'Esther Lin 林以斯帖', NULL, 0),
+  (7, 3, 2, '陈大卫 David Chen', NULL, 1),
+  (8, 3, 4, 'Grace Lin 林恩慈', NULL, 0);
 
 INSERT INTO group_join_requests (id, group_id, person_id, status) VALUES
   (1, 1, 4, 'pending');

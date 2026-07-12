@@ -9,7 +9,7 @@ import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { listGroupsForPerson, listPublicGroups, type GroupSummary, type PersonGroupRow } from '../../../lib/groupDb';
-import { badge, badgeRole } from '../../../lib/adminUi';
+import { badge, badgeRole, badgeScheduled } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -94,6 +94,14 @@ function excerpt(text: string, max = 140): string {
                 class="block rounded-lg border border-border bg-surface-raised p-6 hover:shadow-md hover:border-border-strong transition-shadow"
               >
                 <h3 class="font-display text-heading-sm font-semibold">{g.name}</h3>
+                {(g.kind === 'sunday_school' || g.term_label) && (
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    {g.kind === 'sunday_school' && (
+                      <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'groups.kind.sunday_school')}</span>
+                    )}
+                    {g.term_label && <span class="text-xs text-ink-subtle">{g.term_label}</span>}
+                  </div>
+                )}
                 {g.description && <p class="mt-2 text-sm text-ink-muted">{excerpt(g.description)}</p>}
                 <p class="mt-4 text-sm font-semibold text-ink-subtle">
                   {t(locale, 'groups.memberCount', { n: g.member_count })}

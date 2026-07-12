@@ -5,8 +5,11 @@
 Church4Christ is a full church website and admin system: a bilingual public site
 (home, sermons, weekly bulletins, events, ministries, staff, articles, a prayer
 form) plus a private area where your staff and volunteers update content, care for
-prayer requests, schedule people to serve, and manage members and households. It runs on a free hosting plan, loads
-fast anywhere in the world, and is yours to keep — the site and the code both.
+prayer requests, schedule people to serve, and manage members and households. Its
+optional **Member Portal** gives each member one signed-in place for their household,
+groups, registrations, serving, calendar, and prayers. It runs on a free hosting
+plan, loads fast anywhere in the world, and is yours to keep — the site and the code
+both.
 
 |  |  |  |
 |---|---|---|
@@ -126,6 +129,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Receive card gifts online through Stripe, record checks and cash by hand, and let every family see its own giving history. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Put events online for sign-up — free or paid through Stripe — with your own questions and a roster you can export. |
+| 🔒 | **[Member portal](docs/features/member-portal.md)** | A signed-in home for members — household profiles, groups, events, serving, calendar, giving, and a scoped prayer wall. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and a weekly digest that send themselves. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
@@ -136,6 +140,22 @@ Everything starts on (which is why the demo shows it all), but a church that onl
 service times and sermons can hide the rest in a click: the module's pages, links, and
 emails disappear together, and nothing is ever deleted, so you can turn any of it back on
 later. See [**`docs/features/modules.md`**](docs/features/modules.md).
+
+### A home for your members
+
+The optional **Member Portal** turns the records your church already maintains into a
+useful signed-in experience. Members can update household details, see their giving,
+join or manage groups, register for events, review serving commitments, subscribe to a
+personal calendar, and share prayers with their church, a group, an event, or only
+themselves. Household owners can manage their family's details and view household giving;
+group and event leaders can moderate the prayers in their care. It uses the same
+passwordless sign-in links as the rest of Church4Christ — no new account or password to
+remember.
+
+The portal requires the optional **Supabase (Postgres)** backend because it adds member
+relationships, protected group files, and scoped prayer moderation. Churches using the
+default D1 backend simply do not see the portal controls or routes. Learn more in
+[**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
 

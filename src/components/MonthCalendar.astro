@@ -56,6 +56,8 @@ const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
                   {mark?.statuses.map((s) => (
                     <span class={`h-2 w-2 rounded-full ${dot[s]}`} title={t(locale, `serve.status.${s}`)} />
                   ))}
+                  {mark?.events?.map((name) => <span class="h-2 w-2 rounded-full bg-info" title={name} />)}
+                  {mark?.meetings?.map((name) => <span class="h-2 w-2 rounded-full bg-accent" title={name} />)}
                 </div>
               </>
             )}
@@ -70,4 +72,6 @@ const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
   <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn"></span>{t(locale, 'serve.status.U')}</span>
   <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-danger"></span>{t(locale, 'serve.status.D')}</span>
   <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded border border-border bg-surface-sunken"></span>{t(locale, 'my.cal.blockedOut')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-info"></span>{t(locale, 'portal.calendar.legendEvent')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-accent"></span>{t(locale, 'portal.calendar.legendMeeting')}</span>
 </div>

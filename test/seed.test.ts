@@ -256,6 +256,32 @@ describe('demo seed: people module — households, notes, statuses', () => {
   });
 });
 
+describe('demo seed: member portal shared fixtures', () => {
+  it('makes David Chen the Chen household owner', async () => {
+    const row = await env.DB
+      .prepare('SELECT is_owner FROM household_members WHERE household_id = 1 AND person_id = 2')
+      .first<{ is_owner: number }>();
+    expect(row?.is_owner).toBe(1);
+  });
+
+  it('includes an in-session Sunday School group with a term', async () => {
+    const row = await env.DB
+      .prepare(
+        `SELECT kind, term_label, term_start, term_end
+         FROM groups
+         WHERE kind = 'sunday_school'
+           AND term_label IS NOT NULL
+           AND term_start <= date('now')
+           AND term_end >= date('now')`,
+      )
+      .first<{ kind: string; term_label: string; term_start: string; term_end: string }>();
+    expect(row).toMatchObject({
+      kind: 'sunday_school',
+      term_label: 'Foundations of Faith 信仰基础',
+    });
+  });
+});
+
 describe('demo seed: referential integrity', () => {
   it('has no foreign-key violations', async () => {
     const { results } = await env.DB.prepare('PRAGMA foreign_key_check').all();

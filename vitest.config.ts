@@ -11,7 +11,7 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-worker
 // workers/D1 tests need no registration and can never be silently skipped. If a
 // pure test ever fails under the workers pool for an environmental reason, add
 // it here with a comment.
-const NODE_ONLY = ['test/tokens.test.ts', 'test/themeMeta.test.ts'];
+const NODE_ONLY = ['test/tokens.test.ts', 'test/themeMeta.test.ts', 'test/portalMediaSeed.test.ts'];
 
 // Three projects in one config, classified by convention (see NODE_ONLY above):
 //  - `node`:    pure logic tests that need a real node filesystem/process.

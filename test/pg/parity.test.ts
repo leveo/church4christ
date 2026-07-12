@@ -303,12 +303,13 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       expect(enabled.has('giving')).toBe(true);
       expect(enabled.has('registration')).toBe(true);
     });
-    it("backend gate drops giving/registration on 'd1'", async () => {
+    it("backend gate drops giving/registration/portal on 'd1'", async () => {
       clearModuleCache();
       const enabled = await getEnabledModules(db, 'd1');
-      expect(enabled.size).toBe(MODULE_KEYS.length - 2);
+      expect(enabled.size).toBe(MODULE_KEYS.length - 3);
       expect(enabled.has('giving')).toBe(false);
       expect(enabled.has('registration')).toBe(false);
+      expect(enabled.has('portal')).toBe(false);
     });
   });
 

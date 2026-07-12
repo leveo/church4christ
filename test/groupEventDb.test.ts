@@ -12,9 +12,12 @@ import {
   listEventsForGroup,
   listOccurrencesNeedingAttendance,
   listUpcomingOccurrencesForGroup,
+  listUpcomingOccurrencesForPerson,
+  setEventActive,
   softDeleteEvent,
   type GroupEventInput,
 } from '../src/lib/groupEventDb';
+import { addMemberByPerson, createGroup, removeMember } from '../src/lib/groupDb';
 
 const TZ = 'America/Chicago';
 
@@ -23,6 +26,7 @@ async function reset(): Promise<number> {
     env.DB.prepare('DELETE FROM group_attendance'),
     env.DB.prepare('DELETE FROM group_event_occurrences'),
     env.DB.prepare('DELETE FROM group_events'),
+    env.DB.prepare('DELETE FROM group_members'),
     env.DB.prepare('DELETE FROM groups'),
   ]);
   const g = await env.DB.prepare(`INSERT INTO groups (name) VALUES ('G') RETURNING id`).first<{ id: number }>();
@@ -188,3 +192,71 @@ async function occurrenceRow(eventId: number): Promise<number> {
   const row = await env.DB.prepare(`SELECT id FROM group_event_occurrences WHERE event_id = ?1`).bind(eventId).first<{ id: number }>();
   return row!.id;
 }
+
+describe('listUpcomingOccurrencesForPerson', () => {
+  const NOW = new Date('2030-06-01T12:00:00Z');
+  const groupInput = { description: '', isPublic: true, kind: 'fellowship' as const, termLabel: null, termStart: null, termEnd: null };
+
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM group_attendance'),
+      env.DB.prepare('DELETE FROM group_event_occurrences'),
+      env.DB.prepare('DELETE FROM group_events'),
+      env.DB.prepare('DELETE FROM group_members'),
+      env.DB.prepare('DELETE FROM groups'),
+      env.DB.prepare('DELETE FROM people'),
+    ]);
+    await env.DB.batch(
+      [1, 2].map((id) =>
+        env.DB.prepare('INSERT INTO people (id, display_name, email) VALUES (?, ?, ?)').bind(id, `Person ${id}`, `p${id}@example.com`),
+      ),
+    );
+  });
+
+  it('returns only occurrences of groups the person actively belongs to, within the window', async () => {
+    const gA = await createGroup(env.DB, { ...groupInput, name: 'Alpha' });
+    const gB = await createGroup(env.DB, { ...groupInput, name: 'Beta' });
+    await addMemberByPerson(env.DB, gA, 1); // person 1 is a member of Alpha only
+    const eA = await createEvent(env.DB, gA, { ...base, title: 'A study' });
+    const eB = await createEvent(env.DB, gB, { ...base, title: 'B study' });
+    await ensureOccurrences(env.DB, (await getEvent(env.DB, eA))!, '2030-06-21', NOW);
+    await ensureOccurrences(env.DB, (await getEvent(env.DB, eB))!, '2030-06-21', NOW);
+
+    const rows = await listUpcomingOccurrencesForPerson(env.DB, 1, '2030-06-07', '2030-06-21');
+    expect(rows.every((r) => r.group_id === gA)).toBe(true);
+    expect(rows.map((r) => r.occurs_on)).toEqual(['2030-06-07', '2030-06-14', '2030-06-21']);
+    expect(rows[0]).toMatchObject({ group_name: 'Alpha', title: 'A study', location: 'Hall' });
+    expect(typeof rows[0].id).toBe('number');
+    expect(typeof rows[0].starts_at).toBe('string');
+  });
+
+  it('clips to [from, to] and drops a removed membership', async () => {
+    const gA = await createGroup(env.DB, { ...groupInput, name: 'Alpha' });
+    const memberId = await addMemberByPerson(env.DB, gA, 1);
+    const eA = await createEvent(env.DB, gA, { ...base });
+    await ensureOccurrences(env.DB, (await getEvent(env.DB, eA))!, '2030-06-28', NOW);
+
+    const win = await listUpcomingOccurrencesForPerson(env.DB, 1, '2030-06-10', '2030-06-21');
+    expect(win.map((r) => r.occurs_on)).toEqual(['2030-06-14', '2030-06-21']);
+
+    await removeMember(env.DB, memberId);
+    expect(await listUpcomingOccurrencesForPerson(env.DB, 1, '2030-06-07', '2030-06-28')).toEqual([]);
+  });
+
+  it('excludes inactive events and soft-deleted occurrences', async () => {
+    const gA = await createGroup(env.DB, { ...groupInput, name: 'Alpha' });
+    await addMemberByPerson(env.DB, gA, 1);
+    const eActive = await createEvent(env.DB, gA, { ...base, title: 'Active' });
+    const eInactive = await createEvent(env.DB, gA, { ...base, title: 'Inactive' });
+    await ensureOccurrences(env.DB, (await getEvent(env.DB, eActive))!, '2030-06-14', NOW);
+    await ensureOccurrences(env.DB, (await getEvent(env.DB, eInactive))!, '2030-06-14', NOW);
+    await setEventActive(env.DB, eInactive, false);
+
+    const rows = await listUpcomingOccurrencesForPerson(env.DB, 1, '2030-06-07', '2030-06-21');
+    expect(rows.every((r) => r.title === 'Active')).toBe(true);
+
+    await env.DB.prepare(`UPDATE group_event_occurrences SET deleted_at = datetime('now') WHERE occurs_on = '2030-06-07'`).run();
+    const after = await listUpcomingOccurrencesForPerson(env.DB, 1, '2030-06-07', '2030-06-21');
+    expect(after.map((r) => r.occurs_on)).toEqual(['2030-06-14']);
+  });
+});

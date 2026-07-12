@@ -18,7 +18,7 @@ import {
   listSpecialEventsForGroup,
   listOpenSpecialEventsForGroup,
   listLinkableEvents,
-  listRegistrationsForPerson,
+  listRegistrationActivityForPerson,
 } from '../../src/lib/groupRegDb';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -80,21 +80,21 @@ describe.skipIf(!hasPg)('groupRegDb (Postgres)', () => {
     expect((await listLinkableEvents(db, 2)).some((e) => e.id === 910)).toBe(true);
   });
 
-  it('listRegistrationsForPerson returns the person\'s registrations, newest first (localized)', async () => {
+  it('listRegistrationActivityForPerson returns the person\'s registrations, newest first (localized)', async () => {
     // Seeded: person 8 has one pending registration for event 910.
-    const seeded = await listRegistrationsForPerson(db, 8, 'en');
+    const seeded = await listRegistrationActivityForPerson(db, 8, 'en');
     const dinner = seeded.find((r) => r.event_id === 910)!;
     expect(dinner).toBeDefined();
     expect(dinner.title).toBe('Marriage Enrichment Dinner');
     expect(dinner.status).toBe('pending');
-    expect((await listRegistrationsForPerson(db, 8, 'zh')).find((r) => r.event_id === 910)!.title).toBe('婚姻加添晚宴');
+    expect((await listRegistrationActivityForPerson(db, 8, 'zh')).find((r) => r.event_id === 910)!.title).toBe('婚姻加添晚宴');
 
     // Add a newer registration for person 8 → it sorts ahead of the seeded one.
     const ev = await saveEvent(db, { title_en: 'Newer', title_zh: '', starts_at: ts(DAY), active: 1 });
     await createRegistration(db, {
       eventId: ev, personId: 8, name: 'Ben Wu', email: 'ben.wu@example.com', status: 'confirmed', amountCents: 0, currency: 'usd', answers: [],
     });
-    const after = await listRegistrationsForPerson(db, 8, 'en');
+    const after = await listRegistrationActivityForPerson(db, 8, 'en');
     expect(after[0].event_id).toBe(ev); // newest first
     expect(after.length).toBe(seeded.length + 1);
   });

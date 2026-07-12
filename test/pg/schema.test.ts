@@ -14,6 +14,7 @@ const D1_FILES = [
   '0006_groups.sql',
   '0007_children_checkin.sql',
   '0008_admin_permissions.sql',
+  '0010_member_portal.sql',
 ];
 
 describe.skipIf(!hasPg)('Postgres schema port', () => {
