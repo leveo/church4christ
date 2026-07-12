@@ -102,6 +102,28 @@ describe('concrete provider actions', () => {
     expect(order).toEqual(['hyperdrive list --config']);
   });
 
+  it('rejects an imported Hyperdrive name match with a different ID before touching R2', async () => {
+    const table = (id: string) => [
+      '📋 Listing Hyperdrive configs',
+      '┌────┬──────┬──────┬──────┬──────┬────────┬──────────┬─────────┬──────┬─────────────────────────┐',
+      '│ id │ name │ user │ host │ port │ scheme │ database │ caching │ mtls │ origin_connection_limit │',
+      '├────┼──────┼──────┼──────┼──────┼────────┼──────────┼─────────┼──────┼─────────────────────────┤',
+      `│ ${id} │ church-db │ u │ h │ 5432 │ Postgres │ db │ x │ {} │ 1 │`,
+      '└────┴──────┴──────┴──────┴──────┴────────┴──────────┴─────────┴──────┴─────────────────────────┘',
+    ].join('\n');
+    let r2Calls = 0;
+    const plan: any = { backend: 'supabase', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'imported-media', hyperdriveId: 'old-id' } };
+    const makeStep = (id: string) => createResourceStep({ plan, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', dbUrl: 'postgres://u:p@db.test/church', verify: async () => true, runner: { run: async (_file: string, args: string[]) => {
+      if (args[0] === 'hyperdrive') return { stdout: table(id), stderr: '', exitCode: 0 };
+      if (args.slice(0, 3).join(' ') === 'r2 bucket info') { r2Calls += 1; return { stdout: JSON.stringify({ name: 'imported-media' }), stderr: '', exitCode: 0 }; }
+      throw new Error(`unexpected ${args.join(' ')}`);
+    } } });
+    await expect(makeStep('other-id').apply()).rejects.toThrow(/Hyperdrive.*(?:ambiguous|mismatch)/i);
+    expect(r2Calls).toBe(0);
+    await expect(makeStep('old-id').apply()).resolves.toMatchObject({ resolvedResources: { hyperdriveId: 'old-id', r2BucketName: 'imported-media' } });
+    expect(r2Calls).toBe(1);
+  });
+
   it('preserves imported D1 and R2 names while re-resolving stale IDs', async () => {
     const calls: string[][] = [];
     const runner = { run: async (_file: string, args: string[]) => {

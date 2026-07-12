@@ -121,6 +121,9 @@ export function createResourceStep(options) {
     } else {
       hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
     }
+    if (plan.resources?.hyperdriveId && hyperdrive.id !== plan.resources.hyperdriveId) {
+      throw new Error('Imported Hyperdrive name is ambiguous: resolved ID mismatches the recorded Hyperdrive ID');
+    }
     const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
     return { changed: bucket.created || hyperdrive.created, resolvedResources: Object.freeze({ d1DatabaseName: null, d1DatabaseId: null, r2BucketName: bucket.name, hyperdriveId: hyperdrive.id }) };
   }, options.verify, 'ensure-resources');
