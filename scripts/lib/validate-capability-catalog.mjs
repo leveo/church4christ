@@ -42,6 +42,7 @@ export function validateCapabilityCatalog(input) {
 
   for (const [provider, rawDef] of Object.entries(providersObject)) {
     const def = objectField(rawDef, `provider ${provider}`);
+    if (!isNonblank(def.label)) fail(`provider ${provider}.label is required`);
     for (const field of ['requiredServices', 'optionalServices']) {
       for (const service of arrayField(def[field], `provider ${provider}.${field}`)) {
         if (!services.has(service)) fail(`provider ${provider} has unknown service ${service}`);
@@ -67,19 +68,41 @@ export function validateCapabilityCatalog(input) {
       fail(`${key} has unknown provider ${String(def.requiresBackend)}`);
     }
 
+    const arrays = {};
+    for (const field of [
+      'publicPrefixes',
+      'adminPrefixes',
+      'navKeys',
+      'uses',
+      'dependsOn',
+      'requiredServices',
+      'optionalServices',
+      'seedProfiles',
+      'readinessChecks',
+    ]) {
+      const values = arrayField(def[field], `${key}.${field}`);
+      arrays[field] = values;
+      for (const value of values) {
+        if (!isNonblank(value)) fail(`${key}.${field} entries must be nonblank strings`);
+      }
+    }
+
     for (const field of ['uses', 'dependsOn']) {
-      for (const ref of arrayField(def[field], `${key}.${field}`)) {
+      for (const ref of arrays[field]) {
+        if (!isNonblank(ref)) continue;
         if (!known.has(ref)) fail(`${key} has unknown capability ${ref}`);
       }
     }
     for (const field of ['requiredServices', 'optionalServices']) {
-      for (const service of arrayField(def[field], `${key}.${field}`)) {
+      for (const service of arrays[field]) {
+        if (!isNonblank(service)) continue;
         if (!services.has(service)) fail(`${key} has unknown service ${service}`);
       }
     }
     for (const field of ['publicPrefixes', 'adminPrefixes']) {
-      for (const prefix of arrayField(def[field], `${key}.${field}`)) {
-        if (typeof prefix !== 'string' || !prefix.startsWith('/')) {
+      for (const prefix of arrays[field]) {
+        if (!isNonblank(prefix)) continue;
+        if (!prefix.startsWith('/')) {
           fail(`${key}.${field} contains invalid route; every route prefix must start with a slash`);
           continue;
         }

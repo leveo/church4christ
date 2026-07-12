@@ -78,6 +78,60 @@ describe('canonical capability catalog', () => {
 });
 
 describe('capability catalog validation', () => {
+  test('rejects a missing or blank provider label', () => {
+    expectInvalid((catalog) => {
+      delete catalog.providers.d1.label;
+    }, /provider d1\.label.*required/i);
+    expectInvalid((catalog) => {
+      catalog.providers.supabase.label = ' ';
+    }, /provider supabase\.label.*required/i);
+  });
+
+  test.each([
+    'publicPrefixes',
+    'adminPrefixes',
+    'navKeys',
+    'uses',
+    'dependsOn',
+    'requiredServices',
+    'optionalServices',
+    'seedProfiles',
+    'readinessChecks',
+  ])(
+    'requires capability %s to be an array',
+    (field) => {
+      expectInvalid((catalog) => {
+        catalog.capabilities.bulletins[field] = field === 'navKeys' ? 'nav.bulletin' : {};
+      }, new RegExp(`bulletins\\.${field}.*array`, 'i'));
+    },
+  );
+
+  test.each([
+    ['providers', []],
+    ['services', {}],
+    ['groups', {}],
+  ])('rejects malformed top-level %s shape', (field, value) => {
+    expectInvalid((catalog) => {
+      catalog[field] = value;
+    }, new RegExp(`${field} must be an? (?:object|array)`, 'i'));
+  });
+
+  test.each([
+    ['publicPrefixes', [42]],
+    ['adminPrefixes', [' ']],
+    ['navKeys', [42]],
+    ['uses', [' ']],
+    ['dependsOn', [42]],
+    ['requiredServices', [' ']],
+    ['optionalServices', [42]],
+    ['seedProfiles', [' ']],
+    ['readinessChecks', [{}]],
+  ])('requires nonblank string elements in capability %s', (field, value) => {
+    expectInvalid((catalog) => {
+      catalog.capabilities.bulletins[field] = value;
+    }, new RegExp(`bulletins\\.${field}.*nonblank string`, 'i'));
+  });
+
   test.each([
     ['capability label', (c: any) => (c.capabilities.bulletins.labels.zh = ' ')],
     ['capability description', (c: any) => delete c.capabilities.sermons.descriptions.en],
