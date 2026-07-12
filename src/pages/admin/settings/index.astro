@@ -14,7 +14,7 @@ import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
-import { MODULE_GROUPS, MODULE_KEYS, MODULES, clearModuleCache } from '../../../lib/modules';
+import { MODULE_GROUPS, MODULE_KEYS, MODULES, clearModuleCache, moduleBackendRequirementKey } from '../../../lib/modules';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
@@ -324,7 +324,7 @@ const moduleGroups = MODULE_GROUPS;
                   <span>
                     <span class="block text-sm font-semibold text-ink">{t(lang, `modules.${key}.label`)}</span>
                     <span class="block text-sm text-ink-muted">{t(lang, `modules.${key}.desc`)}</span>
-                    {gated && <span class="block text-sm text-ink-muted">{t(lang, 'admin.modules.requiresSupabase')}</span>}
+                    {gated && req && <span class="block text-sm text-ink-muted">{t(lang, moduleBackendRequirementKey(req))}</span>}
                   </span>
                 </label>
               );

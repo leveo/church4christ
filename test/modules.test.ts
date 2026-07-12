@@ -14,12 +14,18 @@ import {
   MODULE_GROUPS,
   MODULE_KEYS,
   MODULES,
+  moduleBackendRequirementKey,
   buildModuleGroups,
   filterByBackend,
   moduleForPath,
 } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
+  it('maps each supported backend to its requirement label key', () => {
+    expect(moduleBackendRequirementKey('supabase')).toBe('admin.modules.requiresSupabase');
+    expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
+  });
+
   it('has all 16 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',

@@ -1542,6 +1542,7 @@ export default {
   'admin.settings.modulesVolunteeringGroup': 'Volunteering',
   'admin.settings.saveModules': 'Save modules',
   'admin.modules.requiresSupabase': 'Requires the Supabase database',
+  'admin.modules.requiresD1': 'Requires the Cloudflare D1 database',
   'modules.bulletins.label': 'Bulletins',
   'modules.bulletins.desc': 'Weekly service bulletins with program, offering, and announcements.',
   'modules.sermons.label': 'Sermons',

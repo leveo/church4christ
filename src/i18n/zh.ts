@@ -1539,6 +1539,7 @@ export default {
   'admin.settings.modulesVolunteeringGroup': '服事',
   'admin.settings.saveModules': '保存模块',
   'admin.modules.requiresSupabase': '需要 Supabase 数据库',
+  'admin.modules.requiresD1': '需要 Cloudflare D1 数据库',
   'modules.bulletins.label': '周报',
   'modules.bulletins.desc': '每周礼拜程序单，含程序、奉献与通告。',
   'modules.sermons.label': '讲道',

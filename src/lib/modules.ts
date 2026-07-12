@@ -20,6 +20,15 @@ import { getSettings } from './settings';
 export const MODULE_KEYS = CAPABILITY_KEYS;
 export type ModuleKey = CapabilityKey;
 
+const BACKEND_REQUIREMENT_KEYS = {
+  d1: 'admin.modules.requiresD1',
+  supabase: 'admin.modules.requiresSupabase',
+} as const satisfies Record<DbBackend, string>;
+
+export function moduleBackendRequirementKey(backend: DbBackend): string {
+  return BACKEND_REQUIREMENT_KEYS[backend];
+}
+
 export interface ModuleDef {
   /** Locale-stripped public route prefixes this module owns. */
   publicPrefixes: string[];
