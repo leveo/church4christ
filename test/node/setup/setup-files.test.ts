@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import {
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
 import {
   GENERATED_MARKER,
+  _syncParentDirectory,
   classifyConfig,
   writeAtomic,
 } from '../../../scripts/setup/files.mjs';
@@ -95,6 +96,11 @@ describe('installation manifest', () => {
     ['unsafe resource name', { ...manifest(), resources: { ...manifest().resources, r2BucketName: '../media' } }],
     ['D1 manifest with Hyperdrive', { ...manifest(), resources: { ...manifest().resources, hyperdriveId: 'hd-id' } }],
     ['malformed sender', { ...manifest(), site: { ...manifest().site, emailFrom: 'serve..team@example.com' } }],
+    ['noncanonical sender casing', { ...manifest(), site: { ...manifest().site, emailFrom: 'Serve@Example.com' } }],
+    ['sender whitespace', { ...manifest(), site: { ...manifest().site, emailFrom: ' serve@example.com ' } }],
+    ['noncanonical origin casing', { ...manifest(), site: { ...manifest().site, appOrigin: 'https://Example.com' } }],
+    ['origin trailing slash', { ...manifest(), site: { ...manifest().site, appOrigin: 'https://example.com/' } }],
+    ['origin whitespace', { ...manifest(), site: { ...manifest().site, appOrigin: ' https://example.com ' } }],
   ])('rejects %s', (_label, value) => {
     expect(() => validateManifest(value, raw)).toThrow(/manifest|schema|unknown|duplicate|invalid|must/i);
   });
@@ -290,6 +296,118 @@ describe('file ownership and atomic writes', () => {
     })).rejects.toThrow(/changed.*refusing/i);
     expect(await readFile(path, 'utf8')).toBe('changed by another writer');
     expect((await readdir(dir)).filter((name) => name.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('serializes approval so concurrent writers cannot both replace the same snapshot', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'approved config');
+    let releaseFirst!: () => void;
+    let announceBarrier!: () => void;
+    const atBarrier = new Promise<void>((resolve) => { announceBarrier = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = writeAtomic(path, 'first config', {
+      allowReplace: true,
+      beforeReplace: async () => {
+        announceBarrier();
+        await barrier;
+      },
+    });
+    await atBarrier;
+
+    await expect(writeAtomic(path, 'second config', { allowReplace: true })).rejects.toThrow(
+      /configuration write already in progress/i,
+    );
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ changed: true });
+    expect(await readFile(path, 'utf8')).toBe('first config');
+  });
+
+  it('reclaims a demonstrably stale dead-owner ticket and preserves the target', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const lockDir = `${path}.setup-lock`;
+    await writeFile(path, 'approved config');
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, 'owner'), JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      createdAt: 0,
+      token: 'dead',
+    }));
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).resolves.toMatchObject({ changed: true });
+    expect(await readFile(path, 'utf8')).toBe('new config');
+  });
+
+  it('recovers when both the owner and stale-reclamation guard are demonstrably dead', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const lockDir = `${path}.setup-lock`;
+    const stale = JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: 0, token: 'dead' });
+    await writeFile(path, 'approved config');
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, 'owner'), stale);
+    await writeFile(join(lockDir, 'reclaim'), stale);
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).resolves.toMatchObject({ changed: true });
+    expect(await readFile(path, 'utf8')).toBe('new config');
+  });
+
+  it.each([
+    ['malformed', 'not json'],
+    ['recent unknown', JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: Date.now(), token: 'recent' })],
+  ])('refuses a %s lock instead of guessing ownership', async (_label, owner) => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const lockDir = `${path}.setup-lock`;
+    await writeFile(path, 'approved config');
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, 'owner'), owner);
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).rejects.toThrow(
+      /cannot safely reclaim|already in progress/i,
+    );
+    expect(await readFile(path, 'utf8')).toBe('approved config');
+  });
+
+  it('refuses a symbolic-link lock directory', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const redirected = join(dir, 'redirected');
+    await writeFile(path, 'approved config');
+    await mkdir(redirected);
+    await symlink(redirected, `${path}.setup-lock`);
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).rejects.toThrow(/lock.*symbolic|refus/i);
+    expect(await readdir(redirected)).toEqual([]);
+  });
+
+  it('clearly refuses a non-directory lock path', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'approved config');
+    await writeFile(`${path}.setup-lock`, 'unknown lock');
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).rejects.toThrow(/refusing.*lock/i);
+    expect(await readFile(path, 'utf8')).toBe('approved config');
+  });
+
+  it('ignores only documented unsupported directory-sync errors', async () => {
+    const unsupported = {
+      sync: () => Promise.reject(Object.assign(new Error('unsupported'), { code: 'EINVAL' })),
+      close: () => Promise.resolve(),
+    };
+    await expect(_syncParentDirectory('/tmp/file', async () => unsupported)).resolves.toBeUndefined();
+    await expect(_syncParentDirectory('/tmp/file', async () => {
+      throw Object.assign(new Error('unsupported open'), { code: 'ENOTSUP' });
+    })).resolves.toBeUndefined();
+
+    const failed = {
+      sync: () => Promise.reject(Object.assign(new Error('disk failure'), { code: 'EIO' })),
+      close: () => Promise.resolve(),
+    };
+    await expect(_syncParentDirectory('/tmp/file', async () => failed)).rejects.toThrow(/disk failure/i);
   });
 
   it('cleans its exclusive temporary file when writing fails', async () => {

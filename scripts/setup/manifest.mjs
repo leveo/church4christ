@@ -92,12 +92,14 @@ export function validateManifest(value, catalog) {
   if (typeof value.site.name !== 'string' || !value.site.name.trim()) throw new Error('manifest site.name is invalid');
   if (!['en', 'zh'].includes(value.site.locale)) throw new Error('manifest site.locale must be en or zh');
   try {
-    if (!normalizeOrigin(value.site.appOrigin, value.mode, 'manifest site.appOrigin')) throw new Error();
+    const canonicalOrigin = normalizeOrigin(value.site.appOrigin, value.mode, 'manifest site.appOrigin');
+    if (!canonicalOrigin || canonicalOrigin !== value.site.appOrigin) throw new Error();
   } catch {
     throw new Error('manifest site.appOrigin is invalid');
   }
   try {
-    if (!normalizeEmail(value.site.emailFrom, 'manifest site.emailFrom')) throw new Error();
+    const canonicalEmail = normalizeEmail(value.site.emailFrom, 'manifest site.emailFrom');
+    if (!canonicalEmail || canonicalEmail !== value.site.emailFrom) throw new Error();
   } catch {
     throw new Error('manifest site.emailFrom is invalid');
   }
