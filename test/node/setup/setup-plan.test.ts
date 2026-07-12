@@ -97,6 +97,20 @@ describe('buildSetupPlan', () => {
   });
 
   it.each([
+    'http://localhost:4321',
+    'http://127.0.0.1:4321',
+    'http://[::1]:4321',
+  ])('accepts HTTP loopback origin in local mode: %s', (appOrigin) => {
+    expect(buildSetupPlan({ ...base, preset: 'website', appOrigin }, raw).site.appOrigin).toBe(appOrigin);
+  });
+
+  it('rejects HTTP loopback origins in deploy mode and deceptive local hostnames', () => {
+    const deploy = { ...base, mode: 'deploy', preset: 'website', emailFrom: 'serve@example.com' };
+    expect(() => buildSetupPlan({ ...deploy, appOrigin: 'http://localhost:4321' }, raw)).toThrow(/app-origin/i);
+    expect(() => buildSetupPlan({ ...base, preset: 'website', appOrigin: 'http://localhost.evil' }, raw)).toThrow(/app-origin/i);
+  });
+
+  it.each([
     [{ mode: 'remote' }, /mode.*local.*deploy/i],
     [{ locale: 'fr' }, /locale.*en.*zh/i],
     [{ siteSlug: 'Grace_Church' }, /site-slug.*kebab/i],

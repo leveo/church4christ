@@ -11,7 +11,7 @@ const optionalString = (value, option) => {
 
 const optionalIdentifier = (value, option) => optionalString(value, option) || undefined;
 
-function normalizeEmail(value, option) {
+export function normalizeEmail(value, option) {
   const address = optionalIdentifier(value, option)?.toLowerCase();
   if (!address) return undefined;
   const at = address.indexOf('@');
@@ -36,24 +36,25 @@ function normalizeEmail(value, option) {
   return address;
 }
 
-function normalizeOrigin(value) {
-  const input = optionalIdentifier(value, '--app-origin');
+export function normalizeOrigin(value, mode, option = '--app-origin') {
+  const input = optionalIdentifier(value, option);
   if (!input) return undefined;
   let url;
   try {
     url = new URL(input);
   } catch {
-    throw new Error('--app-origin must be an HTTPS origin without a path, query, or hash');
+    throw new Error(`${option} must be an HTTPS origin, or an HTTP loopback origin in local mode, without a path, query, or hash`);
   }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if (
-    url.protocol !== 'https:' ||
     url.username ||
     url.password ||
     url.pathname !== '/' ||
     url.search ||
-    url.hash
+    url.hash ||
+    (url.protocol !== 'https:' && !(mode === 'local' && url.protocol === 'http:' && loopback))
   ) {
-    throw new Error('--app-origin must be an HTTPS origin without a path, query, or hash');
+    throw new Error(`${option} must be an HTTPS origin, or an HTTP loopback origin in local mode, without a path, query, or hash`);
   }
   return url.origin;
 }
@@ -112,7 +113,7 @@ export function normalizeSetupAnswers(input, catalog) {
     locale,
     adminEmail: normalizeEmail(input.adminEmail, '--admin-email'),
     adminName: optionalString(input.adminName, '--admin-name'),
-    appOrigin: normalizeOrigin(input.appOrigin),
+    appOrigin: normalizeOrigin(input.appOrigin, mode),
     emailFrom: normalizeEmail(input.emailFrom, '--email-from'),
     backendOverride,
     demoData: input.demoData ?? false,

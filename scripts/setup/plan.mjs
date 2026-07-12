@@ -1,5 +1,6 @@
 import { missingAnswers, normalizeSetupAnswers } from './answers.mjs';
 import { resolveProvider } from './resolve-provider.mjs';
+import { validateProviderResources } from './manifest.mjs';
 
 const deepFreeze = (value) => {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -32,6 +33,9 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
       `Existing ${currentState.existingBackend} installation cannot change to ${resolved.backend}: ${migrationDetail}`,
     );
   }
+  const existingResources = currentState.resources
+    ? { ...validateProviderResources(currentState.resources, resolved.backend, { requireBindingIds: true }) }
+    : undefined;
 
   const enabled = new Set(resolved.modules);
   const moduleSettings = Object.fromEntries(
@@ -76,6 +80,7 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
     providerReasons: resolved.reasons,
     addedDependencies: resolved.addedDependencies,
     services,
+    ...(existingResources ? { resources: existingResources } : {}),
     demoData: Boolean(normalized.demoData),
     actions,
   });

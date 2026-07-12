@@ -15,6 +15,7 @@ import {
   writeAtomic,
 } from '../../../scripts/setup/files.mjs';
 import { importExistingInstallation } from '../../../scripts/setup/import-existing.mjs';
+import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 
 const dirs: string[] = [];
 const temp = async () => {
@@ -24,6 +25,7 @@ const temp = async () => {
 };
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -40,7 +42,7 @@ const plan = {
   },
   adminEmail: 'admin@example.com',
   adminName: 'Grace Admin',
-  preset: 'website',
+  preset: null,
   modules: ['sermons'],
   backend: 'd1',
   demoData: true,
@@ -85,12 +87,14 @@ describe('installation manifest', () => {
     ['unknown module', { ...manifest(), modules: ['not-a-module'] }],
     ['module incompatible with D1', { ...manifest(), modules: ['giving'] }],
     ['duplicate module', { ...manifest(), modules: ['sermons', 'sermons'] }],
+    ['preset/module mismatch', { ...manifest(), preset: 'website', modules: ['sermons'] }],
     ['unsafe slug', { ...manifest(), site: { ...manifest().site, slug: '../church' } }],
     ['URL with credentials', { ...manifest(), site: { ...manifest().site, appOrigin: 'https://user:pass@example.com' } }],
     ['URL with a path', { ...manifest(), site: { ...manifest().site, appOrigin: 'https://example.com/path' } }],
     ['non-local HTTP URL', { ...manifest(), site: { ...manifest().site, appOrigin: 'http://example.com' } }],
     ['unsafe resource name', { ...manifest(), resources: { ...manifest().resources, r2BucketName: '../media' } }],
     ['D1 manifest with Hyperdrive', { ...manifest(), resources: { ...manifest().resources, hyperdriveId: 'hd-id' } }],
+    ['malformed sender', { ...manifest(), site: { ...manifest().site, emailFrom: 'serve..team@example.com' } }],
   ])('rejects %s', (_label, value) => {
     expect(() => validateManifest(value, raw)).toThrow(/manifest|schema|unknown|duplicate|invalid|must/i);
   });
@@ -107,6 +111,16 @@ describe('installation manifest', () => {
         r2BucketName: 'grace-church-media',
         hyperdriveId: '0123456789abcdef0123456789abcdef',
       },
+    };
+
+    expect(validateManifest(value, raw)).toEqual(value);
+  });
+
+  it('accepts preset modules only when membership exactly matches the preset', () => {
+    const value = {
+      ...manifest(),
+      preset: 'website',
+      modules: [...raw.presets.website.modules],
     };
 
     expect(validateManifest(value, raw)).toEqual(value);
@@ -145,6 +159,19 @@ describe('Wrangler rendering', () => {
     expect(output).not.toContain('"d1_databases"');
   });
 
+  it('renders local Supabase with a non-secret placeholder id and no connection string', async () => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const localPlan = { ...plan, backend: 'supabase', resources: undefined };
+    const localManifest = manifestFromPlan(localPlan, raw);
+    const output = renderWrangler(template, localManifest);
+
+    expect(localManifest.resources.hyperdriveId).toBe('local');
+    expect(output).toContain('"binding": "HYPERDRIVE"');
+    expect(output).toContain('"id": "local"');
+    expect(output).not.toContain('"null"');
+    expect(output).not.toMatch(/connection/i);
+  });
+
   it.each([
     ['D1 database id', { ...manifest(), mode: 'deploy', resources: { ...manifest().resources, d1DatabaseId: null } }],
     ['Hyperdrive id', {
@@ -157,6 +184,22 @@ describe('Wrangler rendering', () => {
   ])('requires a deploy %s', async (_label, value) => {
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
     expect(() => renderWrangler(template, value)).toThrow(/requires/i);
+  });
+
+  it.each([
+    ['unknown database', { ...manifest(), database: 'neon' }],
+    ['missing D1 name', { ...manifest(), resources: { ...manifest().resources, d1DatabaseName: null } }],
+    ['missing local D1 id', { ...manifest(), resources: { ...manifest().resources, d1DatabaseId: null } }],
+    ['missing local Hyperdrive id', {
+      ...manifest(),
+      database: 'supabase',
+      resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-media', hyperdriveId: null },
+    }],
+    ['missing R2 bucket', { ...manifest(), resources: { ...manifest().resources, r2BucketName: null } }],
+    ['unsafe R2 bucket', { ...manifest(), resources: { ...manifest().resources, r2BucketName: '../media' } }],
+  ])('rejects direct rendering with %s', async (_label, value) => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    expect(() => renderWrangler(template, value)).toThrow(/database|requires|resource/i);
   });
 
   it('requires every controlled token exactly once', async () => {
@@ -218,6 +261,35 @@ describe('file ownership and atomic writes', () => {
     expect(result.backupPath).toMatch(/wrangler\.jsonc\.bak-\d{4}-\d{2}-\d{2}T/);
     expect(await readFile(result.backupPath!, 'utf8')).toBe('old config');
     expect(await readFile(path, 'utf8')).toBe('new config');
+  });
+
+  it('creates a new exclusive backup name when the timestamped name already exists', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:34:56.789Z'));
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const collision = `${path}.bak-2026-07-12T12-34-56-789Z`;
+    await writeFile(path, 'approved config');
+    await writeFile(collision, 'other backup');
+
+    const result = await writeAtomic(path, 'new config', { allowReplace: true, backup: true });
+
+    expect(result.backupPath).toBe(`${collision}-1`);
+    expect(await readFile(collision, 'utf8')).toBe('other backup');
+    expect(await readFile(result.backupPath!, 'utf8')).toBe('approved config');
+  });
+
+  it('refuses replacement when the approved target changes before rename', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'approved config');
+
+    await expect(writeAtomic(path, 'new config', {
+      allowReplace: true,
+      beforeReplace: () => writeFile(path, 'changed by another writer'),
+    })).rejects.toThrow(/changed.*refusing/i);
+    expect(await readFile(path, 'utf8')).toBe('changed by another writer');
+    expect((await readdir(dir)).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });
 
   it('cleans its exclusive temporary file when writing fails', async () => {
@@ -289,6 +361,85 @@ describe('existing installation import', () => {
     expect(proposal.modules).toContain('bulletins');
   });
 
+  it('defaults a missing legacy backend to D1 and round-trips deployed resources through planning', () => {
+    const settings = Object.fromEntries(raw.order.map((key) => [
+      `module.${key}`,
+      ['portal', 'giving', 'registration'].includes(key) ? '0' : '1',
+    ]));
+    const proposal = importExistingInstallation({
+      catalog: raw,
+      config: {
+        siteSlug: 'existing',
+        appOrigin: 'https://existing.example',
+        emailFrom: 'serve@existing.example',
+        resources: {
+          d1DatabaseName: 'existing-db',
+          d1DatabaseId: 'existing-id',
+          r2BucketName: 'existing-media',
+          hyperdriveId: null,
+        },
+      },
+      settings: {
+        ...settings,
+        'site.name.en': 'Existing Church',
+        'locale.default': 'en',
+      },
+      admins: [{ email: 'owner@example.com', display_name: 'Owner' }],
+    });
+
+    const importedPlan = buildSetupPlan(proposal, raw, proposal.currentState);
+    const importedManifest = manifestFromPlan(importedPlan, raw);
+    expect(proposal.existingBackend).toBe('d1');
+    expect(proposal.currentState).toEqual({
+      existingBackend: 'd1',
+      resources: {
+        d1DatabaseName: 'existing-db',
+        d1DatabaseId: 'existing-id',
+        r2BucketName: 'existing-media',
+        hyperdriveId: null,
+      },
+    });
+    expect(importedPlan.resources).toEqual(proposal.currentState.resources);
+    expect(importedManifest.resources).toEqual(proposal.currentState.resources);
+    expect(() => buildSetupPlan({ ...proposal, modules: ['portal'], backendOverride: undefined }, raw, proposal.currentState)).toThrow(
+      /D1-to-Supabase content migration is not implemented/i,
+    );
+  });
+
+  it.each([
+    [{ backend: 'neon', resources: {} }, /backend/i],
+    [{ backend: 'd1', resources: { d1DatabaseName: '../unsafe', d1DatabaseId: 'id', r2BucketName: 'media', hyperdriveId: null } }, /d1DatabaseName/i],
+    [{ backend: 'd1', resources: { d1DatabaseName: 'db', d1DatabaseId: 'id', r2BucketName: 'media', hyperdriveId: null, password: 'unsafe' } }, /unknown fields/i],
+  ])('rejects unsafe imported provider state', (config, error) => {
+    expect(() => importExistingInstallation({ catalog: raw, config, settings: {}, admins: [] })).toThrow(error);
+  });
+
+  it.each([
+    ['http://localhost:4321', 'local'],
+    ['http://127.0.0.1:4321', 'local'],
+    ['http://[::1]:4321', 'local'],
+    ['https://localhost.evil', 'deploy'],
+  ])('infers %s as %s mode using parsed hostnames', (appOrigin, mode) => {
+    const proposal = importExistingInstallation({
+      catalog: raw,
+      config: {
+        siteSlug: 'existing',
+        appOrigin,
+        resources: {
+          d1DatabaseName: 'existing-db',
+          d1DatabaseId: 'existing-id',
+          r2BucketName: 'existing-media',
+          hyperdriveId: null,
+        },
+      },
+      settings: {},
+      admins: [],
+    });
+
+    expect(proposal.mode).toBe(mode);
+    expect(proposal.appOrigin).toBe(appOrigin);
+  });
+
   it.each([
     { admins: [] },
     { admins: [{ email: 'one@example.com', display_name: 'One' }, { email: 'two@example.com', display_name: 'Two' }] },
@@ -297,7 +448,16 @@ describe('existing installation import', () => {
     ({ admins }) => {
       const proposal = importExistingInstallation({
         catalog: raw,
-        config: { backend: 'supabase', siteSlug: 'existing', resources: {} },
+        config: {
+          backend: 'supabase',
+          siteSlug: 'existing',
+          resources: {
+            d1DatabaseName: null,
+            d1DatabaseId: null,
+            r2BucketName: 'existing-media',
+            hyperdriveId: 'existing-hyperdrive',
+          },
+        },
         settings: {},
         admins,
       });
@@ -307,8 +467,8 @@ describe('existing installation import', () => {
       expect(proposal.resources).toEqual({
         d1DatabaseName: null,
         d1DatabaseId: null,
-        r2BucketName: null,
-        hyperdriveId: null,
+        r2BucketName: 'existing-media',
+        hyperdriveId: 'existing-hyperdrive',
       });
       expect(proposal.mutations).toEqual([]);
     },

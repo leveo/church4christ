@@ -1,3 +1,5 @@
+import { validateProviderResources } from './manifest.mjs';
+
 const TOKEN_NAMES = [
   'WORKER_NAME',
   'APP_ORIGIN',
@@ -11,13 +13,19 @@ const EXPECTED_OCCURRENCES = { EMAIL_FROM: 2 };
 const jsonContent = (value) => JSON.stringify(String(value)).slice(1, -1);
 const quote = (value) => JSON.stringify(String(value));
 
+function requireString(value, label) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`Wrangler resource requires ${label}`);
+}
+
 export function renderWrangler(template, manifest) {
-  if (manifest.mode === 'deploy' && manifest.database === 'd1' && !manifest.resources.d1DatabaseId) {
-    throw new Error('deploy D1 config requires a database id');
+  if (!manifest || !['d1', 'supabase'].includes(manifest.database)) {
+    throw new Error('Wrangler database must be d1 or supabase');
   }
-  if (manifest.mode === 'deploy' && manifest.database === 'supabase' && !manifest.resources.hyperdriveId) {
-    throw new Error('deploy Supabase config requires a Hyperdrive id');
-  }
+  if (!manifest.site || !manifest.resources) throw new Error('Wrangler requires site and resource configuration');
+  requireString(manifest.site.slug, 'a Worker name');
+  requireString(manifest.site.appOrigin, 'an app origin');
+  requireString(manifest.site.emailFrom, 'an email sender');
+  validateProviderResources(manifest.resources, manifest.database, { requireBindingIds: true });
 
   const databaseBlock = manifest.database === 'd1'
     ? `"d1_databases": [{ "binding": "DB", "database_name": ${quote(manifest.resources.d1DatabaseName)}, "database_id": ${quote(manifest.resources.d1DatabaseId)}, "migrations_dir": "migrations" }],`
