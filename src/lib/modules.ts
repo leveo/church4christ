@@ -1,12 +1,19 @@
-// Module registry + enablement cache (spec addendum §A). Every non-core
+// Stable runtime module adapter + enablement cache (spec addendum §A). The
+// capability catalog is canonical; this module preserves the existing runtime
+// API over its metadata. Every non-core
 // capability is a MODULE a church can switch off to simplify onboarding; all
-// default ON. This file is the pure, tested source of truth: `MODULES` maps each
+// default ON. `MODULES` maps each
 // key to the locale-stripped route prefixes it owns, plus its nav dictionary keys
 // and soft `uses` (degrade-only, no hard deps). `moduleForPath` is the middleware
 // choke point's classifier; `getEnabledModules` reads the `module.<key>` settings
 // with the same per-isolate 60s cache the theme uses.
 import type { AppDb } from './appDb';
-import { CAPABILITIES, CAPABILITY_KEYS, type CapabilityKey } from './capabilityCatalog';
+import {
+  CAPABILITIES,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+  type CapabilityKey,
+} from './capabilityCatalog';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
@@ -24,12 +31,18 @@ export interface ModuleDef {
   uses: ModuleKey[];
   /** Backend requirement: when set, the module is force-disabled on any other
    *  backend (the filter in getEnabledModules wins over its settings row). */
-  requiresBackend?: 'supabase';
+  requiresBackend?: DbBackend;
+}
+
+function dbBackend(value: string | undefined): DbBackend | undefined {
+  if (value === undefined || value === 'd1' || value === 'supabase') return value;
+  throw new Error(`Unsupported database provider in capability catalog: ${value}`);
 }
 
 export const MODULES = Object.fromEntries(
   MODULE_KEYS.map((key) => {
     const def = CAPABILITIES[key];
+    const requiresBackend = dbBackend(def.requiresBackend);
     return [
       key,
       {
@@ -37,11 +50,61 @@ export const MODULES = Object.fromEntries(
         adminPrefixes: [...def.adminPrefixes],
         navKeys: [...def.navKeys],
         uses: [...def.uses],
-        ...(def.requiresBackend ? { requiresBackend: def.requiresBackend as 'supabase' } : {}),
+        ...(requiresBackend ? { requiresBackend } : {}),
       },
     ];
   }),
 ) as Record<ModuleKey, ModuleDef>;
+
+const MODULE_GROUP_CONFIG = [
+  { group: 'content', titleKey: 'admin.settings.modulesContentGroup' },
+  { group: 'community', titleKey: 'admin.settings.modulesCommunityGroup' },
+  { group: 'volunteering', titleKey: 'admin.settings.modulesVolunteeringGroup' },
+] as const;
+
+type SupportedModuleGroup = (typeof MODULE_GROUP_CONFIG)[number]['group'];
+
+export interface ModuleGroup {
+  group: SupportedModuleGroup;
+  titleKey: string;
+  keys: ModuleKey[];
+}
+
+export function buildModuleGroups(
+  keys: readonly ModuleKey[],
+  definitions: Record<ModuleKey, { group: string }>,
+  declaredGroups: readonly string[],
+): ModuleGroup[] {
+  const supported = new Set<string>(MODULE_GROUP_CONFIG.map(({ group }) => group));
+  const unsupportedDeclared = declaredGroups.filter((group) => !supported.has(group));
+  if (unsupportedDeclared.length) {
+    throw new Error(`Unsupported capability group(s): ${unsupportedDeclared.join(', ')}`);
+  }
+
+  const seen = new Set<ModuleKey>();
+  for (const key of keys) {
+    if (seen.has(key)) throw new Error(`Duplicate module key in grouping: ${key}`);
+    seen.add(key);
+    if (!Object.hasOwn(definitions, key)) {
+      throw new Error(`Missing capability definition for module grouping: ${key}`);
+    }
+    if (!supported.has(definitions[key].group)) {
+      throw new Error(`Unsupported capability group for ${key}: ${definitions[key].group}`);
+    }
+  }
+
+  return MODULE_GROUP_CONFIG.map(({ group, titleKey }) => ({
+    group,
+    titleKey,
+    keys: keys.filter((key) => definitions[key].group === group),
+  }));
+}
+
+export const MODULE_GROUPS = buildModuleGroups(
+  MODULE_KEYS,
+  CAPABILITIES,
+  CAPABILITY_CATALOG.groups,
+);
 
 // Flattened [prefix, key] pairs, built once. Every prefix a module owns (public
 // or admin) points back to its module; `moduleForPath` picks the longest match.

@@ -5,8 +5,19 @@
 // /ministries), and the always-on CORE paths that must resolve to null (/,
 // /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
-import { CAPABILITIES, CAPABILITY_KEYS } from '../src/lib/capabilityCatalog';
-import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
+import {
+  CAPABILITIES,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+} from '../src/lib/capabilityCatalog';
+import {
+  MODULE_GROUPS,
+  MODULE_KEYS,
+  MODULES,
+  buildModuleGroups,
+  filterByBackend,
+  moduleForPath,
+} from '../src/lib/modules';
 
 describe('MODULES registry', () => {
   it('has all 16 module keys in display order', () => {
@@ -66,6 +77,32 @@ describe('MODULES registry', () => {
     for (const key of MODULE_KEYS) {
       if (key !== 'giving' && key !== 'registration' && key !== 'portal') expect(MODULES[key].requiresBackend).toBeUndefined();
     }
+  });
+
+  it('groups every module exactly once and preserves catalog order within each group', () => {
+    const flattened = MODULE_GROUPS.flatMap((group) => group.keys);
+    expect([...flattened].sort()).toEqual([...MODULE_KEYS].sort());
+    expect(new Set(flattened).size).toBe(MODULE_KEYS.length);
+    for (const group of MODULE_GROUPS) {
+      expect(group.keys).toEqual(
+        MODULE_KEYS.filter((key) => CAPABILITIES[key].group === group.group),
+      );
+    }
+  });
+
+  it('rejects unsupported declared catalog groups instead of omitting them', () => {
+    expect(() =>
+      buildModuleGroups(MODULE_KEYS, CAPABILITIES, [
+        ...CAPABILITY_CATALOG.groups,
+        'missions',
+      ]),
+    ).toThrow(/unsupported capability group.*missions/i);
+  });
+
+  it('rejects duplicate module keys instead of grouping them more than once', () => {
+    expect(() =>
+      buildModuleGroups([...MODULE_KEYS, MODULE_KEYS[0]], CAPABILITIES, CAPABILITY_CATALOG.groups),
+    ).toThrow(/duplicate module key.*bulletins/i);
   });
 });
 

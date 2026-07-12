@@ -45,10 +45,22 @@ describe('resolveProvider', () => {
     expect(catalog).toEqual(raw);
   });
 
-  it('rejects unknown selected capabilities', () => {
-    expect(() => resolveProvider(['sermons', 'missing'], undefined, raw)).toThrow(
-      /unknown capability.*missing/i,
+  it('rejects every unknown selected capability in one error without mutating inputs', () => {
+    const selected = ['sermons', 'constructor', 'toString', '__proto__', 'missing', 'also-missing'];
+    const catalog = cloneCatalog();
+
+    expect(() => resolveProvider(selected, undefined, catalog)).toThrow(
+      /unknown capabilities.*constructor.*toString.*__proto__.*missing.*also-missing/i,
     );
+    expect(selected).toEqual([
+      'sermons',
+      'constructor',
+      'toString',
+      '__proto__',
+      'missing',
+      'also-missing',
+    ]);
+    expect(catalog).toEqual(raw);
   });
 
   it.each(['postgres', 'D1', '', ' supabase '])(
@@ -79,6 +91,39 @@ describe('resolveProvider', () => {
     expect(result.modules).toEqual(['gifts']);
     expect(result.addedDependencies).toEqual([]);
     expect(result.modules).not.toContain('serve');
+  });
+
+  it('rejects otherwise valid catalogs that declare an unsupported provider', () => {
+    const catalog = cloneCatalog();
+    catalog.providers.neon = {
+      label: 'Neon Postgres',
+      requiredServices: ['worker'],
+      optionalServices: [],
+    };
+    catalog.capabilities.sermons.requiresBackend = 'neon';
+
+    expect(() => resolveProvider(['sermons'], undefined, catalog)).toThrow(
+      /unsupported database provider.*neon/i,
+    );
+  });
+
+  it('lists all modules incompatible with an explicit supported backend', () => {
+    const catalog = cloneCatalog();
+    catalog.capabilities.sermons.requiresBackend = 'd1';
+    catalog.capabilities.people.requiresBackend = 'd1';
+
+    expect(() => resolveProvider(['sermons', 'people'], 'supabase', catalog)).toThrow(
+      /sermons, people.*require d1.*cannot run on supabase/i,
+    );
+  });
+
+  it('rejects selections whose required supported providers conflict', () => {
+    const catalog = cloneCatalog();
+    catalog.capabilities.sermons.requiresBackend = 'd1';
+
+    expect(() => resolveProvider(['sermons', 'portal'], undefined, catalog)).toThrow(
+      /conflicting database requirements.*sermons.*d1.*portal.*supabase/i,
+    );
   });
 
   it('has no prompt, filesystem, or mutation imports', () => {

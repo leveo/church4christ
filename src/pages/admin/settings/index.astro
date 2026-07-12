@@ -14,8 +14,7 @@ import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
-import { MODULE_KEYS, MODULES, clearModuleCache, type ModuleKey } from '../../../lib/modules';
-import { CAPABILITIES } from '../../../lib/capabilityCatalog';
+import { MODULE_GROUPS, MODULE_KEYS, MODULES, clearModuleCache } from '../../../lib/modules';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
@@ -137,11 +136,7 @@ const h2 = 'font-display text-heading-sm font-bold';
 // they require, their row renders disabled with a note (dbBackend drives that).
 const enabledModules = Astro.locals.modules;
 const dbBackend = Astro.locals.dbBackend;
-const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
-  { titleKey: 'admin.settings.modulesContentGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'content') },
-  { titleKey: 'admin.settings.modulesCommunityGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'community') },
-  { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'volunteering') },
-];
+const moduleGroups = MODULE_GROUPS;
 ---
 
 <Admin title={t(lang, 'admin.settings.title')}>
