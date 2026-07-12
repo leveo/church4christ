@@ -27,14 +27,17 @@ export function renderAnonymousBinds(sql, params, replacement = sqlLiteral) {
     const char = sql[cursor];
     const next = sql[cursor + 1];
     if (mode === 'code') {
-      if (char === "'") mode = 'single';
+      if ((char === 'E' || char === 'e') && next === "'" &&
+          (cursor === 0 || !/[\p{ID_Continue}_$]/u.test(sql[cursor - 1]))) {
+        mode = 'escape-single'; out += char + next; cursor += 1; continue;
+      } else if (char === "'") mode = 'single';
       else if (char === '"') mode = 'double';
       else if (char === '-' && next === '-') {
         mode = 'line'; out += char + next; cursor += 1; continue;
       } else if (char === '/' && next === '*') {
         mode = 'block'; blockDepth = 1; out += char + next; cursor += 1; continue;
       } else if (char === '$') {
-        const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(cursor));
+        const match = /^\$(?:[_\p{ID_Start}][_\p{ID_Continue}]*)?\$/u.exec(sql.slice(cursor));
         if (match) {
           mode = 'dollar'; dollarDelimiter = match[0]; out += dollarDelimiter; cursor += dollarDelimiter.length - 1; continue;
         }
@@ -52,6 +55,11 @@ export function renderAnonymousBinds(sql, params, replacement = sqlLiteral) {
         out += replacement(params[position - 1], position);
         continue;
       }
+    } else if (mode === 'escape-single' && char === '\\' && next !== undefined) {
+      out += char + next; cursor += 1; continue;
+    } else if (mode === 'escape-single' && char === "'") {
+      if (next === "'") { out += char + next; cursor += 1; continue; }
+      mode = 'code';
     } else if ((mode === 'single' && char === "'") || (mode === 'double' && char === '"')) {
       const quote = mode === 'single' ? "'" : '"';
       if (next === quote) { out += char + next; cursor += 1; continue; }
@@ -69,6 +77,7 @@ export function renderAnonymousBinds(sql, params, replacement = sqlLiteral) {
     out += char;
   }
   if (mode === 'single' || mode === 'double') throw new Error('Unterminated SQL quote');
+  if (mode === 'escape-single') throw new Error('Unterminated SQL escape string');
   if (mode === 'block') throw new Error('Unterminated SQL block comment');
   if (mode === 'dollar') throw new Error('Unterminated SQL dollar quote');
   if (largest !== params.length) throw new Error('SQL bind count is larger than placeholder count');

@@ -3,6 +3,10 @@ import { renderAnonymousBinds } from '../sql.mjs';
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const ID = /^[A-Za-z0-9_-]+$/;
 const SAFE_PATH = /^(?!-)[^\0\r\n]+$/;
+const CHANGES_BEFORE = '__c4c_total_changes_before_8d4f2b';
+const CHANGES_AFTER = '__c4c_total_changes_after_8d4f2b';
+const beforeSql = `SELECT total_changes() AS "${CHANGES_BEFORE}"`;
+const afterSql = `SELECT total_changes() AS "${CHANGES_AFTER}"`;
 
 function requireOptions({ runner, wranglerBin, configPath, name }) {
   if (!runner || typeof runner.run !== 'function') throw new TypeError('runner.run is required');
@@ -26,6 +30,16 @@ function normalizeD1(stdout, expectedCount) {
   });
   if (normalized.length !== expectedCount) throw new Error(`Wrangler D1 returned ${normalized.length} results; expected ${expectedCount}`);
   return normalized;
+}
+
+function totalChanges(result, alias) {
+  if (result.results.length !== 1) throw new Error('Wrangler D1 returned invalid total_changes result');
+  const row = result.results[0];
+  if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length !== 1 ||
+      !Object.hasOwn(row, alias) || !Number.isFinite(row[alias]) || row[alias] < 0) {
+    throw new Error('Wrangler D1 returned invalid total_changes result');
+  }
+  return row[alias];
 }
 
 class D1Statement {
@@ -63,18 +77,29 @@ export class D1CliDb {
       throw new TypeError('D1 batch requires statements prepared by this database');
     }
     if (statements.length === 0) return [];
-    const sql = statements.map((statement) => renderAnonymousBinds(statement.sql, statement.params)).join(';\n');
-    return this.executeBatch(sql, statements.length);
+    const sql = statements.map((statement) => renderAnonymousBinds(statement.sql, statement.params));
+    return this.executeStatements(sql);
   }
   async execute(sql) {
-    return (await this.executeBatch(sql, 1))[0];
+    return (await this.executeStatements([sql]))[0];
   }
-  async executeBatch(sql, expectedCount) {
-    if (typeof sql !== 'string' || !sql) throw new TypeError('SQL must be a non-empty string');
+  async executeStatements(statements) {
+    if (!Array.isArray(statements) || statements.length === 0 || statements.some((sql) => typeof sql !== 'string' || !sql)) {
+      throw new TypeError('SQL statements must be non-empty strings');
+    }
+    const sql = statements.flatMap((statement) => [beforeSql, statement, afterSql]).join('\n;\n');
     const args = ['d1', 'execute', 'DB', this.mode === 'deploy' ? '--remote' : '--local',
       '--command', sql, '--json', '--yes', '--config', this.configPath];
     if (this.persistTo) args.push('--persist-to', this.persistTo);
-    return normalizeD1((await this.runner.run(this.wranglerBin, args)).stdout, expectedCount);
+    const raw = normalizeD1((await this.runner.run(this.wranglerBin, args)).stdout, statements.length * 3);
+    return statements.map((_statement, index) => {
+      const before = totalChanges(raw[index * 3], CHANGES_BEFORE);
+      const middle = raw[index * 3 + 1];
+      const after = totalChanges(raw[index * 3 + 2], CHANGES_AFTER);
+      const changes = after - before;
+      if (!Number.isFinite(changes) || changes < 0) throw new Error('Wrangler D1 returned invalid total_changes delta');
+      return Object.freeze({ results: middle.results, meta: { ...middle.meta, changes }, success: true });
+    });
   }
 }
 

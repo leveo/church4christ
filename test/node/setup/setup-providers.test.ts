@@ -12,6 +12,22 @@ import {
   parseHyperdriveTable,
 } from '../../../scripts/setup/providers/postgres.mjs';
 
+function d1BracketOutput(args: string[], middles: Array<{ results?: unknown[]; delta?: number; success?: boolean }> = [{}]) {
+  const command = args[args.indexOf('--command') + 1];
+  const aliases = [...command.matchAll(/total_changes\(\) AS "([^"]+)"/g)].map((match) => match[1]);
+  expect(aliases).toHaveLength(middles.length * 2);
+  let total = 10;
+  return JSON.stringify(middles.flatMap((middle, index) => {
+    const before = total;
+    total += middle.delta ?? 0;
+    return [
+      { success: true, results: [{ [aliases[index * 2]]: before }], meta: { changes: 999 } },
+      { success: middle.success ?? true, results: middle.results ?? [], meta: { changes: 999 } },
+      { success: true, results: [{ [aliases[index * 2 + 1]]: total }], meta: { changes: 999 } },
+    ];
+  }));
+}
+
 describe('shell-free setup command runner', () => {
   it('redacts tagged args and stdin everywhere and never invokes a shell', async () => {
     const calls: any[] = [];
@@ -141,6 +157,15 @@ describe('anonymous SQL bind rendering', () => {
     expect(() => renderAnonymousBinds('SELECT $tag$ ?', [])).toThrow(/unterminated.*dollar/i);
     expect(() => renderAnonymousBinds('SELECT /* outer /* inner */', [])).toThrow(/unterminated.*comment/i);
   });
+
+  it('supports Postgres escape strings and Unicode dollar-quote tags', () => {
+    expect(renderAnonymousBinds("SELECT E'backslash\\'still ?' AS e, ?", ['ok']))
+      .toBe("SELECT E'backslash\\'still ?' AS e, 'ok'");
+    expect(renderAnonymousBinds("SELECT E'doubled '' ?' AS e, $标签$?$标签$, ?", ['ok']))
+      .toBe("SELECT E'doubled '' ?' AS e, $标签$?$标签$, 'ok'");
+    expect(() => renderAnonymousBinds("SELECT E'unterminated\\'", [])).toThrow(/unterminated.*escape/i);
+    expect(() => renderAnonymousBinds('SELECT $标签$ ?', [])).toThrow(/unterminated.*dollar/i);
+  });
 });
 
 describe('D1 setup adapter', () => {
@@ -148,8 +173,10 @@ describe('D1 setup adapter', () => {
     const calls: string[][] = [];
     const runner = { run: async (_file: string, args: string[]) => {
       calls.push(args);
-      const result = { results: [{ id: 7, name: null }], success: true, meta: { changes: 1 } };
-      return { stdout: JSON.stringify(args.includes("SELECT id FROM people WHERE email='d@example.com';\nSELECT id FROM people WHERE email='e@example.com'") ? [result, result] : [result]) };
+      const isBatch = args.some((arg) => arg.includes("email='d@example.com'"));
+      return { stdout: d1BracketOutput(args, isBatch
+        ? [{ results: [{ id: 7, name: null }] }, { results: [{ id: 7, name: null }] }]
+        : [{ results: [{ id: 7, name: null }] }]) };
     } };
     const db = new D1CliDb({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', persistTo: '.wrangler/state' });
     const base = db.prepare('SELECT id FROM people WHERE email=?');
@@ -157,10 +184,8 @@ describe('D1 setup adapter', () => {
     expect(await base.bind('b@example.com').first('name')).toBeNull();
     expect((await base.bind('c@example.com').all()).success).toBe(true);
     expect((await db.batch([base.bind('d@example.com'), base.bind('e@example.com')]))).toHaveLength(2);
-    expect(calls[0]).toEqual([
-      'd1', 'execute', 'DB', '--local', '--command', "SELECT id FROM people WHERE email='a@example.com'",
-      '--json', '--yes', '--config', 'wrangler.jsonc', '--persist-to', '.wrangler/state',
-    ]);
+    expect(calls[0].slice(0, 5)).toEqual(['d1', 'execute', 'DB', '--local', '--command']);
+    expect(calls[0]).toEqual(expect.arrayContaining(['--json', '--yes', '--config', 'wrangler.jsonc', '--persist-to', '.wrangler/state']));
   });
 
   it('uses remote scope and strictly rejects malformed or unsuccessful Wrangler JSON', async () => {
@@ -186,17 +211,38 @@ describe('D1 setup adapter', () => {
     const db = new D1CliDb({
       runner: { run: async (_file: string, args: string[]) => {
         calls.push(args);
-        return { stdout: JSON.stringify([
-          { success: true, results: [{ id: 1 }], meta: { changes: 0 } },
-          { success: true, results: [], meta: { changes: 1 } },
+        return { stdout: d1BracketOutput(args, [
+          { results: [{ id: 1 }], delta: 0 },
+          { results: [], delta: 1 },
         ]) };
       } },
       wranglerBin: 'w', configPath: 'c', mode: 'local',
     });
     const results = await db.batch([db.prepare('SELECT ?1').bind(1), db.prepare('DELETE FROM t WHERE id=?').bind(2)]);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain('SELECT 1;\nDELETE FROM t WHERE id=2');
+    expect(calls[0].find((arg) => arg.includes('SELECT 1'))).toContain('\n;\nDELETE FROM t WHERE id=2\n;\n');
     expect(results).toHaveLength(2);
+    expect(results.map((result) => result.meta.changes)).toEqual([0, 1]);
+  });
+
+  it('derives insert/update/no-op/select changes and protects separators from line comments', async () => {
+    const calls: string[][] = [];
+    const db = new D1CliDb({
+      runner: { run: async (_file: string, args: string[]) => {
+        calls.push(args);
+        return { stdout: d1BracketOutput(args, [
+          { delta: 1 }, { delta: 2 }, { delta: 0 }, { results: [{ id: 1 }], delta: 0 },
+        ]) };
+      } }, wranglerBin: 'w', configPath: 'c', mode: 'local',
+    });
+    const results = await db.batch([
+      db.prepare('INSERT INTO t VALUES (?) -- trailing').bind(1),
+      db.prepare('UPDATE t SET x=?').bind(2),
+      db.prepare('DELETE FROM t WHERE 0'),
+      db.prepare('SELECT id FROM t'),
+    ]);
+    expect(results.map((result) => result.meta.changes)).toEqual([1, 2, 0, 0]);
+    expect(calls[0].find((arg) => arg.includes('-- trailing'))).toContain('-- trailing\n;\n');
   });
 });
 
@@ -266,7 +312,7 @@ describe('Hyperdrive resource adapter', () => {
     expect(() => parseHyperdriveTable('id name\nabc site')).toThrow(/format/i);
     expect(() => parseHyperdriveTable(table(['│ a │ x │ u │ h │ 1 │ Postgres │ d │ x │ {} │ 1 │', '│ b │ x │ u │ h │ 1 │ Postgres │ d │ x │ {} │ 1 │']), 'x')).toThrow(/ambiguous/i);
     const captured4107 = `\n ⛅️ wrangler 4.107.0\n────────────────────\n${table(['│ abc-123 │ site-hd │ u │ h │ 5432 │ Postgres │ db │ disabled │ {} │ 5 │'])}`;
-    expect(parseHyperdriveTable(captured4107)).toEqual([{ id: 'abc-123', name: 'site-hd' }]);
+    expect(() => parseHyperdriveTable(captured4107)).toThrow(/format/i);
     expect(() => parseHyperdriveTable(`unknown preamble\n${table([])}`)).toThrow(/format/i);
     expect(() => parseHyperdriveTable(`\u001b[31m${table([])}`)).toThrow(/format/i);
   });
@@ -284,6 +330,7 @@ describe('Hyperdrive resource adapter', () => {
       args: ['hyperdrive', 'create', 'site-hd', '--connection-string', 'postgres://secret', '--config', 'c'],
       options: { secretArgIndexes: [4] },
     });
+    expect(calls[0].options.env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
     expect(JSON.stringify(await ensureHyperdrive({ runner: { run: async () => ({ stdout: table(['│ hd-id │ site-hd │ u │ h │ 5432 │ Postgres │ db │ x │ {} │ 1 │']) }) }, wranglerBin: 'w', configPath: 'c', name: 'site-hd', connectionString: 'postgres://secret' }))).not.toContain('postgres://secret');
   });
 

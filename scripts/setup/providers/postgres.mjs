@@ -104,11 +104,6 @@ function validBorder(line, left, separator, right) {
 export function parseHyperdriveTable(stdout, exactName) {
   if (typeof stdout !== 'string') throw new TypeError('Hyperdrive list output must be a string');
   const lines = stdout.split(/\r?\n/).filter((line) => line !== '');
-  const banner = lines[0];
-  if (/^ ⛅️ wrangler (?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(banner ?? '')) {
-    if (lines[1] !== '─'.repeat(banner.length)) throw new Error('Hyperdrive list banner format changed');
-    lines.splice(0, 2);
-  }
   if (lines[0] !== '📋 Listing Hyperdrive configs') throw new Error('Hyperdrive list format changed');
   if (lines.length === 1) return [];
   if (lines.length < 5 || !validBorder(lines[1], '┌', '┬', '┐') || !validBorder(lines[3], '├', '┼', '┤') ||
@@ -147,7 +142,7 @@ function requireHyperdriveOptions(options, requireConnection = false) {
 }
 
 async function findHyperdrive(options) {
-  const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' };
+  const env = { ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
   const result = await options.runner.run(options.wranglerBin,
     ['hyperdrive', 'list', '--config', options.configPath], { env });
   const matches = parseHyperdriveTable(result.stdout, options.name).filter((item) => item.name === options.name);
