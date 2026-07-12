@@ -59,6 +59,22 @@ describe('shell-free setup command runner', () => {
     await expect(runner.run('x', [], { allowNonzero: 'yes' as any })).rejects.toThrow(/allowNonzero/i);
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it('defaults omitted options and secret indexes for direct and resource-helper runs', async () => {
+    const calls: string[][] = [];
+    const runner = createCommandRunner({ exec: async (_file: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === 'd1') return { stdout: JSON.stringify([{ name: 'site-db', uuid: 'db-id' }]), stderr: '', exitCode: 0 };
+      if (args[0] === 'r2') return { stdout: JSON.stringify({ name: 'site-media' }), stderr: '', exitCode: 0 };
+      return { stdout: 'ok', stderr: '', exitCode: 0 };
+    } });
+    await expect(runner.run('node', ['--version'])).resolves.toEqual(expect.objectContaining({ stdout: 'ok' }));
+    await expect(ensureD1Database({ runner, wranglerBin: 'wrangler', configPath: 'c', name: 'site-db' }))
+      .resolves.toEqual({ name: 'site-db', id: 'db-id', created: false });
+    await expect(ensureR2Bucket({ runner, wranglerBin: 'wrangler', configPath: 'c', name: 'site-media' }))
+      .resolves.toEqual({ name: 'site-media', created: false });
+    expect(calls).toHaveLength(3);
+  });
 });
 
 describe('anonymous SQL bind rendering', () => {
@@ -77,6 +93,13 @@ describe('anonymous SQL bind rendering', () => {
     expect(() => sqlLiteral(undefined)).toThrow(/unsupported/i);
     expect(() => renderAnonymousBinds("SELECT 'oops", [])).toThrow(/unterminated.*quote/i);
     expect(() => renderAnonymousBinds('SELECT /* oops', [])).toThrow(/unterminated.*comment/i);
+  });
+
+  it('treats backslash before a quote as ordinary SQL text for D1 and Postgres binds', () => {
+    const query = "SELECT 'backslash\\' AS value, ? AS bound";
+    expect(renderAnonymousBinds(query, ["o'hara"])).toBe("SELECT 'backslash\\' AS value, 'o''hara' AS bound");
+    expect(renderAnonymousBinds(query, ['value'], (_value, position) => `$${position}`))
+      .toBe("SELECT 'backslash\\' AS value, $1 AS bound");
   });
 });
 

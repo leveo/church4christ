@@ -9,6 +9,11 @@ export function sqlLiteral(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+/**
+ * @param {string} sql
+ * @param {unknown[]} params
+ * @param {(value: unknown, position: number) => string} [replacement]
+ */
 export function renderAnonymousBinds(sql, params, replacement = sqlLiteral) {
   if (typeof sql !== 'string') throw new TypeError('SQL must be a string');
   if (!Array.isArray(params)) throw new TypeError('SQL params must be an array');
@@ -36,8 +41,6 @@ export function renderAnonymousBinds(sql, params, replacement = sqlLiteral) {
       const quote = mode === 'single' ? "'" : '"';
       if (next === quote) { out += char + next; cursor += 1; continue; }
       mode = 'code';
-    } else if ((mode === 'single' || mode === 'double') && char === '\\' && next !== undefined) {
-      out += char + next; cursor += 1; continue;
     } else if (mode === 'line' && char === '\n') mode = 'code';
     else if (mode === 'block' && char === '*' && next === '/') {
       out += char + next; cursor += 1; mode = 'code'; continue;

@@ -47,7 +47,8 @@ function validateRun(file, args, options) {
   if (options.allowNonzero !== undefined && typeof options.allowNonzero !== 'boolean') {
     throw new TypeError('command allowNonzero must be a boolean');
   }
-  if (!Array.isArray(options.secretArgIndexes) || options.secretArgIndexes.some((index) =>
+  const secretArgIndexes = options.secretArgIndexes ?? [];
+  if (!Array.isArray(secretArgIndexes) || secretArgIndexes.some((index) =>
     !Number.isInteger(index) || index < 0 || index >= args.length)) {
     throw new TypeError('command secret argument index is invalid');
   }
