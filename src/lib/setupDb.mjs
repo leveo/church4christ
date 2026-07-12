@@ -116,7 +116,9 @@ export async function bootstrapFirstAdmin(db, input) {
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
     const raced = await find();
-    if (!raced) throw error;
-    return handleExisting(raced);
+    if (raced?.deleted_at) return { status: 'reactivation-required', email };
+    if (raced?.active && raced.role === 'admin') return { status: 'already-admin', email };
+    if (raced?.active) return { status: 'promotion-required', email };
+    return { status: 'inactive', email };
   }
 }

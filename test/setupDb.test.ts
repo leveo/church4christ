@@ -123,4 +123,56 @@ describe('setup database operations on D1', () => {
     await expect(bootstrapFirstAdmin(failingDb, { email: 'error@setup.test', displayName: 'Error', locale: 'en' }))
       .rejects.toBe(unrelated);
   });
+
+  it('never promotes an active member discovered after a unique insert race', async () => {
+    const unique = Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    const member = { id: 100, role: 'member', active: 1, deleted_at: null };
+    let finds = 0;
+    const prepared: string[] = [];
+    const statement = (kind: 'find' | 'insert' | 'update'): AppStatement => ({
+      bind: () => statement(kind),
+      first: async <T>() => (kind === 'find' && ++finds > 1 ? member : null) as T | null,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => {
+        if (kind === 'insert') throw unique;
+        throw new Error('race classification must not update');
+      },
+    });
+    const db = {
+      prepare: (sql: string) => {
+        prepared.push(sql);
+        return statement(sql.startsWith('SELECT') ? 'find' : sql.startsWith('INSERT') ? 'insert' : 'update');
+      },
+      batch: async () => [],
+    } as AppDb;
+
+    await expect(bootstrapFirstAdmin(db, {
+      email: 'race-member@setup.test',
+      displayName: 'Race Member',
+      locale: 'en',
+      promoteExisting: true,
+    })).resolves.toEqual({ status: 'promotion-required', email: 'race-member@setup.test' });
+    expect(prepared.some((sql) => sql.startsWith('UPDATE'))).toBe(false);
+  });
+
+  it('reports inactive when a unique-race row is absent on the post-read', async () => {
+    const unique = Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    const statement = (kind: 'find' | 'insert'): AppStatement => ({
+      bind: () => statement(kind),
+      first: async () => null,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => { throw unique; },
+    });
+    const db = {
+      prepare: (sql: string) => statement(sql.startsWith('SELECT') ? 'find' : 'insert'),
+      batch: async () => [],
+    } as AppDb;
+
+    await expect(bootstrapFirstAdmin(db, {
+      email: 'race-gone@setup.test',
+      displayName: 'Race Gone',
+      locale: 'en',
+      promoteExisting: true,
+    })).resolves.toEqual({ status: 'inactive', email: 'race-gone@setup.test' });
+  });
 });
