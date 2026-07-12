@@ -75,9 +75,46 @@ describe('canonical capability catalog', () => {
       catalog.capabilities.gifts.publicPrefixes = ['/serve'];
     }, /duplicate route prefix/i);
   });
+
+  test('rejects exact duplicate route ownership across public and admin fields', () => {
+    expectInvalid((catalog) => {
+      catalog.capabilities.articles.adminPrefixes = ['/sermons'];
+    }, /\/sermons.*sermons\.publicPrefixes.*articles\.adminPrefixes/i);
+  });
 });
 
 describe('capability catalog validation', () => {
+  test.each([
+    ['services', 'blank', (c: any) => (c.services[0] = ' ')],
+    ['services', 'numeric', (c: any) => (c.services[0] = 42)],
+    ['groups', 'blank', (c: any) => {
+      c.groups[0] = ' ';
+      c.capabilities.bulletins.group = ' ';
+    }],
+    ['groups', 'numeric', (c: any) => {
+      c.groups[0] = 42;
+      c.capabilities.bulletins.group = 42;
+    }],
+  ])('rejects %s with a %s identifier', (field, _kind, mutate) => {
+    expectInvalid(mutate, new RegExp(`${field}.*nonblank string`, 'i'));
+  });
+
+  test.each(['services', 'groups'])('rejects duplicate top-level %s', (field) => {
+    expectInvalid((catalog) => {
+      catalog[field].push(catalog[field][0]);
+    }, new RegExp(`${field}.*duplicate`, 'i'));
+  });
+
+  test.each([
+    ['requiredServices', ' '],
+    ['optionalServices', 42],
+  ])('rejects non-string provider %s entries even when declared', (field, value) => {
+    expectInvalid((catalog) => {
+      catalog.services.push(value);
+      catalog.providers.d1[field] = [value];
+    }, new RegExp(`provider d1\\.${field}.*nonblank string`, 'i'));
+  });
+
   test('rejects a missing or blank provider label', () => {
     expectInvalid((catalog) => {
       delete catalog.providers.d1.label;
@@ -194,5 +231,13 @@ describe('capability catalog validation', () => {
       catalog.capabilities.bulletins.dependsOn = ['sermons'];
       catalog.capabilities.sermons.dependsOn = ['bulletins'];
     }, /dependency cycle/i);
+  });
+
+  test('reports a hard dependency cycle from the repeated key', () => {
+    expectInvalid((catalog) => {
+      catalog.capabilities.bulletins.dependsOn = ['sermons'];
+      catalog.capabilities.sermons.dependsOn = ['prayer-sheets'];
+      catalog.capabilities['prayer-sheets'].dependsOn = ['sermons'];
+    }, /hard dependency cycle: sermons -> prayer-sheets -> sermons/i);
   });
 });

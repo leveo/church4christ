@@ -35,6 +35,16 @@ export function validateCapabilityCatalog(input) {
   const groups = new Set(groupList);
   const providers = new Set(Object.keys(providersObject));
 
+  for (const [field, values] of [
+    ['services', serviceList],
+    ['groups', groupList],
+  ]) {
+    for (const value of values) {
+      if (!isNonblank(value)) fail(`${field} entries must be nonblank strings`);
+    }
+    if (new Set(values).size !== values.length) fail(`${field} contains duplicates`);
+  }
+
   if (new Set(order).size !== order.length) fail('order contains duplicates');
   if ([...order].sort().join('\0') !== [...keys].sort().join('\0')) {
     fail('order must contain every capability key exactly once');
@@ -45,6 +55,10 @@ export function validateCapabilityCatalog(input) {
     if (!isNonblank(def.label)) fail(`provider ${provider}.label is required`);
     for (const field of ['requiredServices', 'optionalServices']) {
       for (const service of arrayField(def[field], `provider ${provider}.${field}`)) {
+        if (!isNonblank(service)) {
+          fail(`provider ${provider}.${field} entries must be nonblank strings`);
+          continue;
+        }
         if (!services.has(service)) fail(`provider ${provider} has unknown service ${service}`);
       }
     }
@@ -106,13 +120,13 @@ export function validateCapabilityCatalog(input) {
           fail(`${key}.${field} contains invalid route; every route prefix must start with a slash`);
           continue;
         }
-        const ownerKey = `${field}:${prefix}`;
-        const owner = exactOwners.get(ownerKey);
+        const owner = exactOwners.get(prefix);
         if (owner) {
-          const kind = field === 'publicPrefixes' ? 'public' : 'admin';
-          fail(`duplicate route prefix: ${kind} prefix ${prefix} is owned by ${owner} and ${key}`);
+          fail(
+            `duplicate route prefix ${prefix}: ${owner.key}.${owner.field} and ${key}.${field}`,
+          );
         } else {
-          exactOwners.set(ownerKey, key);
+          exactOwners.set(prefix, { key, field });
         }
       }
     }
@@ -147,7 +161,9 @@ export function validateCapabilityCatalog(input) {
   const visited = new Set();
   const visit = (key, trail) => {
     if (visiting.has(key)) {
-      fail(`hard dependency cycle: ${[...trail, key].join(' -> ')}`);
+      const cycleStart = trail.indexOf(key);
+      const cycle = [...trail.slice(cycleStart < 0 ? 0 : cycleStart), key];
+      fail(`hard dependency cycle: ${cycle.join(' -> ')}`);
       return;
     }
     if (visited.has(key)) return;
