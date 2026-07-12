@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "d1": { "label": "Cloudflare D1", "requiredServices": ["worker", "r2"], "optionalServices": ["email", "cron"] },
+    "supabase": { "label": "Supabase Postgres", "requiredServices": ["worker", "r2", "hyperdrive"], "optionalServices": ["email", "cron", "stripe"] }
+  },
+  "services": ["worker", "r2", "email", "cron", "hyperdrive", "stripe"],
+  "groups": ["content", "community", "volunteering"],
+  "presets": {
+    "website": {
+      "labels": { "en": "Website", "zh": "教会网站" },
+      "descriptions": { "en": "A focused public website and publishing toolkit.", "zh": "专注于公开网站与内容发布的工具组合。" },
+      "modules": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "articles", "fellowships", "page-builder"]
+    },
+    "website-community": {
+      "labels": { "en": "Website + Community", "zh": "网站 + 社群管理" },
+      "descriptions": { "en": "Website publishing plus community and volunteer tools.", "zh": "网站发布加上社群与志愿服事工具。" },
+      "modules": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "people", "children", "page-builder"]
+    },
+    "full-church": {
+      "labels": { "en": "Full Church", "zh": "完整教会系统" },
+      "descriptions": { "en": "Every website, community, portal, giving, and registration capability.", "zh": "包含网站、社群、会友平台、奉献与报名的全部功能。" },
+      "modules": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "people", "children", "page-builder", "portal", "giving", "registration"]
+    }
+  },
+  "order": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "people", "children", "page-builder", "portal", "giving", "registration"],
+  "capabilities": {
+    "bulletins": { "order": 1, "labels": { "en": "Bulletins", "zh": "周报" }, "descriptions": { "en": "Build and publish weekly service bulletins.", "zh": "建立并发布每周崇拜周报。" }, "group": "content", "publicPrefixes": ["/bulletin"], "adminPrefixes": ["/admin/bulletins"], "navKeys": ["nav.bulletin"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": ["cron"], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "sermons": { "order": 2, "labels": { "en": "Sermons", "zh": "讲道" }, "descriptions": { "en": "Publish a searchable sermon archive.", "zh": "发布可搜索的讲道资料库。" }, "group": "content", "publicPrefixes": ["/sermons"], "adminPrefixes": ["/admin/sermons"], "navKeys": ["nav.sermons"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "prayer-sheets": { "order": 3, "labels": { "en": "Prayer Sheets", "zh": "祷告单" }, "descriptions": { "en": "Prepare and publish prayer sheets.", "zh": "预备并发布祷告单。" }, "group": "content", "publicPrefixes": ["/prayer"], "adminPrefixes": ["/admin/prayer-sheets"], "navKeys": ["nav.prayer"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "prayer-wall": { "order": 4, "labels": { "en": "Prayer Wall", "zh": "祷告墙" }, "descriptions": { "en": "Receive and care for prayer requests.", "zh": "接收并关怀祷告事项。" }, "group": "community", "publicPrefixes": ["/api/prayer-request"], "adminPrefixes": ["/admin/prayer-wall"], "navKeys": [], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": ["email"], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "events": { "order": 5, "labels": { "en": "Events", "zh": "活动" }, "descriptions": { "en": "Publish events and announcements.", "zh": "发布活动与公告。" }, "group": "community", "publicPrefixes": ["/events"], "adminPrefixes": ["/admin/events", "/admin/announcements"], "navKeys": ["nav.events"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "serve": { "order": 6, "labels": { "en": "Volunteer Scheduling", "zh": "服事排班" }, "descriptions": { "en": "Coordinate ministries, teams, plans, and reminders.", "zh": "协调事工、团队、排班与提醒。" }, "group": "volunteering", "publicPrefixes": ["/serve", "/my", "/cal", "/ministries"], "adminPrefixes": ["/admin/ministries", "/admin/service-types", "/admin/teams", "/admin/reports"], "navKeys": ["nav.serve", "nav.ministries", "nav.opportunities"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": ["email", "cron"], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "gifts": { "order": 7, "labels": { "en": "Spiritual Gifts", "zh": "恩赐探索" }, "descriptions": { "en": "Help people discover gifts and serving matches.", "zh": "帮助会众探索恩赐与服事配搭。" }, "group": "volunteering", "publicPrefixes": ["/serve/gifts"], "adminPrefixes": [], "navKeys": [], "uses": ["serve"], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "testimonies": { "order": 8, "labels": { "en": "Testimonies", "zh": "见证" }, "descriptions": { "en": "Collect and publish serving testimonies.", "zh": "收集并发布服事见证。" }, "group": "volunteering", "publicPrefixes": ["/serve/testimonies"], "adminPrefixes": ["/admin/testimonies"], "navKeys": [], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "articles": { "order": 9, "labels": { "en": "Articles", "zh": "文章" }, "descriptions": { "en": "Publish bilingual articles.", "zh": "发布双语文章。" }, "group": "content", "publicPrefixes": ["/articles"], "adminPrefixes": [], "navKeys": ["nav.articles"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "fellowships": { "order": 10, "labels": { "en": "Fellowships", "zh": "团契" }, "descriptions": { "en": "Publish and manage fellowship groups.", "zh": "发布并管理团契小组。" }, "group": "community", "publicPrefixes": ["/fellowships"], "adminPrefixes": ["/admin/fellowships"], "navKeys": ["nav.fellowships"], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "people": { "order": 11, "labels": { "en": "People & Households", "zh": "会友与家庭" }, "descriptions": { "en": "Manage people, households, and pastoral notes.", "zh": "管理会友、家庭与牧养记录。" }, "group": "community", "publicPrefixes": [], "adminPrefixes": [], "navKeys": [], "uses": ["serve"], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "children": { "order": 12, "labels": { "en": "Children Check-in", "zh": "儿童报到" }, "descriptions": { "en": "Run secure child check-in and attendance.", "zh": "进行安全的儿童报到与出席管理。" }, "group": "community", "publicPrefixes": ["/kiosk"], "adminPrefixes": ["/admin/children"], "navKeys": [], "uses": [], "dependsOn": [], "requiredServices": [], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": [] },
+    "page-builder": { "order": 13, "labels": { "en": "Page Builder", "zh": "页面编辑器" }, "descriptions": { "en": "Build custom bilingual pages with blocks.", "zh": "使用区块建立自订双语页面。" }, "group": "content", "publicPrefixes": [], "adminPrefixes": ["/admin/pages/builder"], "navKeys": [], "uses": [], "dependsOn": [], "requiredServices": ["r2"], "optionalServices": [], "seedProfiles": ["demo"], "readinessChecks": ["media"] },
+    "portal": { "order": 14, "labels": { "en": "Member Portal", "zh": "会友平台" }, "descriptions": { "en": "Give members household, group, calendar, and prayer tools.", "zh": "提供会友家庭、小组、日历与祷告工具。" }, "group": "community", "publicPrefixes": ["/my/household", "/my/groups", "/my/events", "/my/serving", "/my/prayer", "/email-change"], "adminPrefixes": [], "navKeys": [], "uses": ["serve", "fellowships"], "dependsOn": [], "requiresBackend": "supabase", "requiredServices": ["r2"], "optionalServices": ["email"], "seedProfiles": ["demo", "portal"], "readinessChecks": ["media"] },
+    "giving": { "order": 15, "labels": { "en": "Giving", "zh": "奉献" }, "descriptions": { "en": "Record gifts and optionally accept Stripe payments.", "zh": "记录奉献并可选择使用 Stripe 收款。" }, "group": "community", "publicPrefixes": ["/give/checkout", "/my/giving", "/api/giving"], "adminPrefixes": ["/admin/giving"], "navKeys": [], "uses": ["people"], "dependsOn": [], "requiresBackend": "supabase", "requiredServices": [], "optionalServices": ["stripe"], "seedProfiles": ["demo", "giving"], "readinessChecks": ["stripe-optional"] },
+    "registration": { "order": 16, "labels": { "en": "Registration", "zh": "活动报名" }, "descriptions": { "en": "Run free or paid event registration.", "zh": "管理免费或付费活动报名。" }, "group": "community", "publicPrefixes": ["/register", "/api/register"], "adminPrefixes": ["/admin/registration"], "navKeys": ["nav.register"], "uses": [], "dependsOn": [], "requiresBackend": "supabase", "requiredServices": [], "optionalServices": ["stripe"], "seedProfiles": ["demo", "registration"], "readinessChecks": ["stripe-optional"] }
+  }
+}
