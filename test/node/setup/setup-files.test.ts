@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +19,8 @@ import { importExistingInstallation } from '../../../scripts/setup/import-existi
 import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 
 const dirs: string[] = [];
+const STALE_TOKEN = '00000000-0000-4000-8000-000000000001';
+const OTHER_TOKEN = '00000000-0000-4000-8000-000000000002';
 const temp = async () => {
   const dir = await mkdtemp(join(tmpdir(), 'church-setup-'));
   dirs.push(dir);
@@ -329,26 +331,80 @@ describe('file ownership and atomic writes', () => {
     const lockDir = `${path}.setup-lock`;
     await writeFile(path, 'approved config');
     await mkdir(lockDir);
-    await writeFile(join(lockDir, 'owner'), JSON.stringify({
+    const ticket = join(lockDir, `ticket-${STALE_TOKEN}`);
+    await writeFile(ticket, JSON.stringify({
       version: 1,
       pid: 2_147_483_647,
       createdAt: 0,
-      token: 'dead',
+      token: STALE_TOKEN,
     }));
+    await link(ticket, join(lockDir, 'owner'));
 
     await expect(writeAtomic(path, 'new config', { allowReplace: true })).resolves.toMatchObject({ changed: true });
     expect(await readFile(path, 'utf8')).toBe('new config');
+    await expect(readdir(lockDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cleans a stale ticket-only crash before removing the lock directory', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const lockDir = `${path}.setup-lock`;
+    await writeFile(path, 'approved config');
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, `ticket-${STALE_TOKEN}`), JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      createdAt: 0,
+      token: STALE_TOKEN,
+    }));
+
+    await expect(writeAtomic(path, 'new config', { allowReplace: true })).resolves.toMatchObject({ changed: true });
+    await expect(readdir(lockDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves unrelated active, recent, malformed, and unknown-owner tickets', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    const lockDir = `${path}.setup-lock`;
+    const activeToken = '00000000-0000-4000-8000-000000000003';
+    const recentToken = '00000000-0000-4000-8000-000000000004';
+    const unknownToken = '00000000-0000-4000-8000-000000000005';
+    const malformedToken = '00000000-0000-4000-8000-000000000006';
+    await writeFile(path, 'approved config');
+    await mkdir(lockDir);
+    const tickets = {
+      [`ticket-${activeToken}`]: JSON.stringify({ version: 1, pid: process.pid, createdAt: 0, token: activeToken }),
+      [`ticket-${recentToken}`]: JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: Date.now(), token: recentToken }),
+      [`ticket-${unknownToken}`]: JSON.stringify({ version: 1, pid: 2_147_483_646, createdAt: 0, token: unknownToken }),
+      [`ticket-${malformedToken}`]: 'malformed',
+    };
+    await Promise.all(Object.entries(tickets).map(([name, value]) => writeFile(join(lockDir, name), value)));
+
+    await expect(writeAtomic(path, 'new config', {
+      allowReplace: true,
+      _processState: (pid: number) => pid === process.pid ? 'active' : pid === 2_147_483_646 ? 'unknown' : 'dead',
+    })).resolves.toMatchObject({ changed: true });
+    for (const [name, value] of Object.entries(tickets)) {
+      expect(await readFile(join(lockDir, name), 'utf8')).toBe(value);
+    }
   });
 
   it('recovers when both the owner and stale-reclamation guard are demonstrably dead', async () => {
     const dir = await temp();
     const path = join(dir, 'wrangler.jsonc');
     const lockDir = `${path}.setup-lock`;
-    const stale = JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: 0, token: 'dead' });
+    const stale = JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: 0, token: STALE_TOKEN });
+    const ticket = join(lockDir, `ticket-${STALE_TOKEN}`);
     await writeFile(path, 'approved config');
     await mkdir(lockDir);
-    await writeFile(join(lockDir, 'owner'), stale);
-    await writeFile(join(lockDir, 'reclaim'), stale);
+    await writeFile(ticket, stale);
+    await link(ticket, join(lockDir, 'owner'));
+    await writeFile(join(lockDir, 'reclaim'), JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      createdAt: 0,
+      token: OTHER_TOKEN,
+    }));
 
     await expect(writeAtomic(path, 'new config', { allowReplace: true })).resolves.toMatchObject({ changed: true });
     expect(await readFile(path, 'utf8')).toBe('new config');
@@ -356,7 +412,8 @@ describe('file ownership and atomic writes', () => {
 
   it.each([
     ['malformed', 'not json'],
-    ['recent unknown', JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: Date.now(), token: 'recent' })],
+    ['recent unknown', JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: Date.now(), token: STALE_TOKEN })],
+    ['unsafe token', JSON.stringify({ version: 1, pid: 2_147_483_647, createdAt: 0, token: '../../ticket' })],
   ])('refuses a %s lock instead of guessing ownership', async (_label, owner) => {
     const dir = await temp();
     const path = join(dir, 'wrangler.jsonc');
