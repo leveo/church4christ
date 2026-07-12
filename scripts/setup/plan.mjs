@@ -1,4 +1,4 @@
-import { missingAnswers } from './answers.mjs';
+import { missingAnswers, normalizeSetupAnswers } from './answers.mjs';
 import { resolveProvider } from './resolve-provider.mjs';
 
 const deepFreeze = (value) => {
@@ -10,18 +10,19 @@ const deepFreeze = (value) => {
 };
 
 export function buildSetupPlan(answers, catalog, currentState = {}) {
-  const selected = answers.modules ?? catalog.presets?.[answers.preset]?.modules;
+  const normalized = normalizeSetupAnswers(answers, catalog);
+  const selected = normalized.modules ?? catalog.presets?.[normalized.preset]?.modules;
   if (!selected?.length) throw new Error('Choose a preset or custom modules');
 
-  const missing = missingAnswers(answers).filter((key) => key !== 'featureChoice');
+  const missing = missingAnswers(normalized).filter((key) => key !== 'featureChoice');
   if (missing.length) {
-    if (answers.mode === 'deploy' && missing.some((key) => key === 'appOrigin' || key === 'emailFrom')) {
+    if (normalized.mode === 'deploy' && missing.some((key) => key === 'appOrigin' || key === 'emailFrom')) {
       throw new Error(`Deploy setup requires ${missing.join(' and ')}`);
     }
     throw new Error(`Missing setup answer: ${missing[0]}`);
   }
 
-  const resolved = resolveProvider(selected, answers.backendOverride, catalog);
+  const resolved = resolveProvider(selected, normalized.backendOverride, catalog);
   if (currentState.existingBackend && currentState.existingBackend !== resolved.backend) {
     const migrationDetail =
       currentState.existingBackend === 'd1' && resolved.backend === 'supabase'
@@ -50,7 +51,7 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
     'write-config',
     'configure-secrets',
     'migrate',
-    ...(answers.demoData ? ['seed', 'seed-media'] : []),
+    ...(normalized.demoData ? ['seed', 'seed-media'] : []),
     'initialize-modules',
     'bootstrap-admin',
     'doctor',
@@ -58,24 +59,24 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
 
   return deepFreeze({
     planVersion: 1,
-    mode: answers.mode,
+    mode: normalized.mode,
     site: {
-      slug: answers.siteSlug,
-      name: answers.churchName,
-      locale: answers.locale,
-      appOrigin: answers.appOrigin ?? 'http://localhost:4321',
-      emailFrom: answers.emailFrom ?? `serve@${answers.siteSlug}.invalid`,
+      slug: normalized.siteSlug,
+      name: normalized.churchName,
+      locale: normalized.locale,
+      appOrigin: normalized.appOrigin ?? 'http://localhost:4321',
+      emailFrom: normalized.emailFrom ?? `serve@${normalized.siteSlug}.invalid`,
     },
-    adminEmail: answers.adminEmail,
-    adminName: answers.adminName,
-    preset: answers.preset ?? null,
+    adminEmail: normalized.adminEmail,
+    adminName: normalized.adminName,
+    preset: normalized.preset ?? null,
     modules: resolved.modules,
     moduleSettings,
     backend: resolved.backend,
     providerReasons: resolved.reasons,
     addedDependencies: resolved.addedDependencies,
     services,
-    demoData: Boolean(answers.demoData),
+    demoData: Boolean(normalized.demoData),
     actions,
   });
 }

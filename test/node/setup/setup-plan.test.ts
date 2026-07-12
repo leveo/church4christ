@@ -74,21 +74,63 @@ describe('buildSetupPlan', () => {
     expect(JSON.stringify({ answers, catalog })).toBe(before);
   });
 
+  it('normalizes direct answers through the same boundary as CLI input', () => {
+    const plan = buildSetupPlan(
+      {
+        ...base,
+        preset: 'website',
+        churchName: '  Grace Church  ',
+        adminEmail: ' Admin@Example.com ',
+        adminName: '  Grace Admin ',
+        appOrigin: 'https://church.example/',
+        emailFrom: ' Serve@Church.Example ',
+      },
+      raw,
+    );
+    expect(plan.site.name).toBe('Grace Church');
+    expect(plan.site.appOrigin).toBe('https://church.example');
+    expect(plan.site.emailFrom).toBe('serve@church.example');
+    expect(plan.adminEmail).toBe('admin@example.com');
+    expect(plan.adminName).toBe('Grace Admin');
+    expect(Object.isFrozen(plan.site)).toBe(true);
+  });
+
+  it.each([
+    [{ mode: 'remote' }, /mode.*local.*deploy/i],
+    [{ locale: 'fr' }, /locale.*en.*zh/i],
+    [{ siteSlug: 'Grace_Church' }, /site-slug.*kebab/i],
+    [{ adminEmail: 'admin@example..com' }, /admin-email.*valid/i],
+    [{ emailFrom: 'sender@.example.com' }, /email-from.*valid/i],
+    [{ appOrigin: 'http://church.example' }, /app-origin.*HTTPS origin/i],
+    [{ appOrigin: 'https://church.example/path' }, /app-origin.*without a path/i],
+    [{ appOrigin: 'https://user:password@church.example' }, /app-origin.*HTTPS origin/i],
+    [{ appOrigin: 'postgres://user:do-not-leak-this@db.example/church' }, /app-origin.*HTTPS origin/i],
+    [{ backendOverride: 'sqlite' }, /backend.*d1.*supabase/i],
+    [{ databaseUrl: 'postgres://user:do-not-leak-this@db.example/church' }, /secret.*databaseUrl/i],
+    [{ integration: { secretKey: 'do-not-leak-this' } }, /secret.*secretKey/i],
+  ])('rejects invalid direct plan answer %#', (change, message) => {
+    expect(() => buildSetupPlan({ ...base, preset: 'website', ...change }, raw)).toThrow(message);
+  });
+
+  it('rejects conflicting or unknown direct feature selections', () => {
+    expect(() =>
+      buildSetupPlan({ ...base, preset: 'website', modules: ['sermons'] }, raw),
+    ).toThrow(/preset.*modules/i);
+    expect(() => buildSetupPlan({ ...base, preset: 'missing' }, raw)).toThrow(
+      /unknown preset.*missing/i,
+    );
+    expect(() => buildSetupPlan({ ...base, modules: ['sermons', 'missing'] }, raw)).toThrow(
+      /unknown capabilities.*missing/i,
+    );
+  });
+
   it('contains no secret fields, secret values, connection strings, or database URLs', () => {
     const plan = buildSetupPlan({ ...base, preset: 'full-church' }, raw);
-    const secretNames = new Set([
-      'password',
-      'secret',
-      'secretKey',
-      'stripeKey',
-      'connectionString',
-      'databaseUrl',
-      'DATABASE_URL',
-    ]);
+    const secretKeyPattern = /^(?:password|secret(?:[_-]?key)?|api[_-]?key|stripe[_-]?key|connection[_-]?string|database[_-]?url)$/i;
     const visit = (value: unknown): void => {
       if (!value || typeof value !== 'object') return;
       for (const [key, child] of Object.entries(value)) {
-        expect(secretNames.has(key)).toBe(false);
+        expect(key).not.toMatch(secretKeyPattern);
         visit(child);
       }
     };

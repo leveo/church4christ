@@ -86,6 +86,9 @@ describe('parseSetupArgs', () => {
     [['--strict'], /strict.*doctor/i],
     [['--doctor', '--mode', 'local'], /doctor.*setup answers/i],
     [['--doctor', '--backend', 'd1'], /doctor.*setup answers/i],
+    [['--doctor', '--force-config'], /doctor.*only.*strict.*json/i],
+    [['--doctor', '--promote-existing-admin'], /doctor.*only.*strict.*json/i],
+    [['--doctor', '--yes'], /doctor.*only.*strict.*json/i],
   ])('rejects invalid argument combination %#', (argv, message) => {
     expect(() => parseSetupArgs(argv, raw)).toThrow(message);
   });
@@ -120,6 +123,31 @@ describe('parseSetupArgs', () => {
     ]) {
       expect(SETUP_HELP).toContain(option);
     }
+  });
+
+  it('short-circuits semantic validation when help is requested', () => {
+    expect(
+      parseSetupArgs(
+        ['--help', '--strict', '--mode', 'invalid', '--admin-email', 'not-an-email'],
+        raw,
+      ),
+    ).toEqual({ help: true });
+  });
+
+  it.each([
+    'admin@example..com',
+    'admin@.example.com',
+    'admin@example.com.',
+    'admin@example-.com',
+    'admin@-example.com',
+    '.admin@example.com',
+    'admin.@example.com',
+    'ad..min@example.com',
+    'admin@example.com,other@example.com',
+    'admin@example.com;other@example.com',
+  ])('rejects malformed mailbox %s', (address) => {
+    expect(() => parseSetupArgs(['--admin-email', address], raw)).toThrow(/admin-email.*valid/i);
+    expect(() => parseSetupArgs(['--email-from', address], raw)).toThrow(/email-from.*valid/i);
   });
 });
 
