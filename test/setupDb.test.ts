@@ -94,7 +94,7 @@ describe('setup database operations on D1', () => {
   it('recovers only recognized unique races and preserves the raced account state', async () => {
     const admin = { id: 99, role: 'admin', active: 1, deleted_at: null };
     let finds = 0;
-    const unique = Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    const unique = new Error('D1_ERROR: UNIQUE constraint failed: people.email: SQLITE_CONSTRAINT');
     const statement = (kind: 'find' | 'insert'): AppStatement => ({
       bind: () => statement(kind),
       first: async <T>() => (kind === 'find' && ++finds > 1 ? admin : null) as T | null,
@@ -122,6 +122,72 @@ describe('setup database operations on D1', () => {
     } as AppDb;
     await expect(bootstrapFirstAdmin(failingDb, { email: 'error@setup.test', displayName: 'Error', locale: 'en' }))
       .rejects.toBe(unrelated);
+  });
+
+  it('binds the normalized email into promotion so changed identity ownership cannot grant admin', async () => {
+    const targetEmail = 'owner@setup.test';
+    const person = { id: 77, email: targetEmail, role: 'member', active: 1, deleted_at: null as string | null };
+    let updateSql = '';
+    let updateBinds: unknown[] = [];
+    const db = {
+      prepare: (sql: string) => {
+        let binds: unknown[] = [];
+        const statement: AppStatement = {
+          bind: (...values: unknown[]) => {
+            binds = values;
+            return statement;
+          },
+          first: async <T>() => (
+            sql.startsWith('SELECT') && person.email.toLowerCase() === targetEmail ? person : null
+          ) as T | null,
+          all: async () => ({ results: [], meta: { changes: 0 } }),
+          run: async () => {
+            if (!sql.startsWith('UPDATE')) return { results: [], meta: { changes: 0 } };
+            updateSql = sql;
+            updateBinds = binds;
+            // The originally found person loses this email immediately before
+            // the conditional UPDATE executes.
+            person.email = 'moved@setup.test';
+            const guardsEmail = sql.includes('lower(email)=?');
+            const matchesEmail = guardsEmail && binds[1] === targetEmail && person.email.toLowerCase() === binds[1];
+            if (!guardsEmail || matchesEmail) person.role = 'admin';
+            return { results: [], meta: { changes: person.role === 'admin' ? 1 : 0 } };
+          },
+        };
+        return statement;
+      },
+      batch: async () => [],
+    } as AppDb;
+
+    await expect(bootstrapFirstAdmin(db, {
+      email: ' Owner@Setup.Test ',
+      displayName: 'Owner',
+      locale: 'en',
+      promoteExisting: true,
+    })).rejects.toThrow(/concurrent update/i);
+    expect(updateSql).toContain('lower(email)=?');
+    expect(updateBinds).toEqual([77, targetEmail]);
+    expect(person.role).toBe('member');
+  });
+
+  it('rethrows SQLite unique errors unrelated to the people email constraint', async () => {
+    const unrelatedUnique = new Error('D1_ERROR: UNIQUE constraint failed: settings.key: SQLITE_CONSTRAINT');
+    const statement = (kind: 'find' | 'insert'): AppStatement => ({
+      bind: () => statement(kind),
+      first: async () => null,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => { throw unrelatedUnique; },
+    });
+    const db = {
+      prepare: (sql: string) => statement(sql.startsWith('SELECT') ? 'find' : 'insert'),
+      batch: async () => [],
+    } as AppDb;
+
+    await expect(bootstrapFirstAdmin(db, {
+      email: 'unique@setup.test',
+      displayName: 'Unique',
+      locale: 'en',
+    })).rejects.toBe(unrelatedUnique);
   });
 
   it('never promotes an active member discovered after a unique insert race', async () => {

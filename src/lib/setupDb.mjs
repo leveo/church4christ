@@ -60,7 +60,7 @@ function validatedKeys(moduleKeys, selectedModules) {
 function isUniqueViolation(error) {
   if (typeof error === 'object' && error !== null && error.code === '23505') return true;
   const message = String(error);
-  return message.includes('UNIQUE constraint failed') || message.includes('duplicate key value violates unique constraint');
+  return /UNIQUE constraint failed:\s*(?:main\.)?people\.email(?:\s|$|:)/.test(message);
 }
 
 /** Explicitly persist every supported module toggle in one atomic SQL statement. */
@@ -96,8 +96,8 @@ export async function bootstrapFirstAdmin(db, input) {
     if (!input.promoteExisting) return { status: 'promotion-required', email };
 
     const result = await db.prepare(
-      "UPDATE people SET role='admin', updated_at=datetime('now') WHERE id=? AND active=1 AND deleted_at IS NULL AND role<>'admin'",
-    ).bind(existing.id).run();
+      "UPDATE people SET role='admin', updated_at=datetime('now') WHERE id=? AND lower(email)=? AND active=1 AND deleted_at IS NULL AND role<>'admin'",
+    ).bind(existing.id, email).run();
     const current = await find();
     if (!current || current.deleted_at || !current.active || current.role !== 'admin') {
       throw new Error('administrator promotion lost a concurrent update');
