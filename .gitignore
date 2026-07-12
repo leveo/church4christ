@@ -9,3 +9,4 @@ src/lib/themeMeta.generated.ts
 .DS_Store
 .superpowers/
 .worktrees/
+.church/
