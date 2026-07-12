@@ -300,6 +300,25 @@ describe('file ownership and atomic writes', () => {
     expect((await readdir(dir)).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });
 
+  it('compares expected content while holding the setup lock', async () => {
+    const dir = await temp();
+    const path = join(dir, 'state.json');
+    await writeFile(path, 'newer');
+    await expect(writeAtomic(path, 'mine', { allowReplace: true, expectedContent: 'older' }))
+      .rejects.toThrow(/expected content|concurrent/i);
+    expect(await readFile(path, 'utf8')).toBe('newer');
+  });
+
+  it('distinguishes an expected absent file from an expected empty file', async () => {
+    const dir = await temp();
+    const path = join(dir, 'state.json');
+    await writeFile(path, '');
+    await expect(writeAtomic(path, 'mine', { allowReplace: true, expectedContent: null }))
+      .rejects.toThrow(/expected content|concurrent/i);
+    await expect(writeAtomic(path, 'mine', { allowReplace: true, expectedContent: '' }))
+      .resolves.toMatchObject({ changed: true });
+  });
+
   it('serializes approval so concurrent writers cannot both replace the same snapshot', async () => {
     const dir = await temp();
     const path = join(dir, 'wrangler.jsonc');

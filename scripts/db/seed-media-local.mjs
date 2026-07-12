@@ -35,7 +35,14 @@ function withPrefix(args) { return [...prefix, ...args, ...(persistTo ? ['--pers
 if (dryRun) {
   const db = {
     prepare(sql) {
-      return { bind(...values) { return { async run() { console.log(renderAnonymousBinds(sql, values)); return { results: [], meta: { changes: 1 } }; } }; } };
+      return { sql, values: [], bind(...values) { return { sql, values }; } };
+    },
+    async batch(statements) {
+      return statements.map((statement) => {
+        if (statement.sql.startsWith('SELECT id')) return { results: [{ id: statement.values[0] }], meta: { changes: 0 } };
+        console.log(renderAnonymousBinds(statement.sql, statement.values));
+        return { results: [], meta: { changes: 1 } };
+      });
     },
   };
   await applyMediaPlan({

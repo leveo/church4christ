@@ -281,7 +281,7 @@ export async function _syncParentDirectory(path, openDirectory = open) {
 /**
  * @param {string} path
  * @param {string} content
- * @param {{ allowReplace?: boolean, backup?: boolean, beforeReplace?: () => void | Promise<void>, _processState?: (pid: number) => 'active' | 'dead' | 'unknown' }} [options]
+ * @param {{ allowReplace?: boolean, backup?: boolean, expectedContent?: string | null, beforeReplace?: () => void | Promise<void>, _processState?: (pid: number) => 'active' | 'dead' | 'unknown' }} [options]
  * @internal `_processState` is a narrow deterministic lock-recovery test hook.
  */
 export async function writeAtomic(path, content, options = {}) {
@@ -290,6 +290,12 @@ export async function writeAtomic(path, content, options = {}) {
   const releaseLock = await acquireSetupLock(path, _processState);
   try {
     const approved = await readSnapshot(path);
+    if (Object.hasOwn(options, 'expectedContent')) {
+      const expected = options.expectedContent;
+      if (expected !== null && typeof expected !== 'string') throw new TypeError('expectedContent must be a string or null');
+      const matches = expected === null ? approved === null : approved?.content === expected;
+      if (!matches) throw new Error(`Target does not match expected content; refusing concurrent overwrite: ${path}`);
+    }
     if (approved?.content === content) return { changed: false, backupPath: null };
     if (approved !== null && !allowReplace) throw new Error(`Refusing to overwrite unrecognized file: ${path}`);
 

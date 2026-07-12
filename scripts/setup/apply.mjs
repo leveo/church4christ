@@ -2,8 +2,16 @@ import { fingerprintPlan } from './state.mjs';
 import { bootstrapFirstAdmin, initializeModuleSettings } from '../../src/lib/setupDb.mjs';
 import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
 import { ensureHyperdrive } from './providers/postgres.mjs';
+import { validateProviderResources } from './manifest.mjs';
 
 export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
+
+function validateResolvedResources(resources, plan) {
+  validateProviderResources(resources, plan.backend, { requireBindingIds: true });
+  if (typeof plan.site?.slug !== 'string' || resources.r2BucketName !== `${plan.site.slug}-media`) throw new Error('Resolved R2 resource name does not match the setup plan');
+  if (plan.backend === 'd1' && resources.d1DatabaseName !== `${plan.site.slug}-db`) throw new Error('Resolved D1 resource name does not match the setup plan');
+  return resources;
+}
 
 function providerStep(apply, verify, name) {
   if (typeof verify !== 'function') throw new TypeError(`verify.${name} is required`);
@@ -72,26 +80,36 @@ export function createResourceStep(options) {
   if (typeof options.verify !== 'function') throw new TypeError('resource verify is required');
   return providerStep(async () => {
     const { plan } = options;
-    if (plan.resources) return { changed: false, resolvedResources: Object.freeze({ ...plan.resources }) };
     const names = {
       d1DatabaseName: `${plan.site.slug}-db`,
       r2BucketName: `${plan.site.slug}-media`,
     };
+    if (plan.resources) validateProviderResources(plan.resources, plan.backend);
     if (plan.mode === 'local') {
-      return { changed: false, resolvedResources: Object.freeze({
+      const resolvedResources = Object.freeze({
         d1DatabaseName: plan.backend === 'd1' ? names.d1DatabaseName : null,
         d1DatabaseId: plan.backend === 'd1' ? 'local' : null,
         r2BucketName: names.r2BucketName,
         hyperdriveId: plan.backend === 'supabase' ? 'local' : null,
-      }) };
+      });
+      if (plan.resources && JSON.stringify(plan.resources) !== JSON.stringify(resolvedResources)) throw new Error('Local resource placeholders do not match the canonical setup resources');
+      return { changed: false, resolvedResources };
     }
     const shared = { runner: options.runner, wranglerBin: options.wranglerBin, configPath: options.configPath };
-    const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
     if (plan.backend === 'd1') {
       const database = await ensureD1Database({ ...shared, name: names.d1DatabaseName });
+      const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
       return { changed: bucket.created || database.created, resolvedResources: Object.freeze({ d1DatabaseName: database.name, d1DatabaseId: database.id, r2BucketName: bucket.name, hyperdriveId: null }) };
     }
+    let parsed;
+    try { parsed = new URL(options.dbUrl); } catch { throw new Error('Supabase database URL is invalid'); }
+    if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !parsed.hostname || parsed.pathname === '/' || !parsed.username || !parsed.password) throw new Error('Supabase database URL is invalid');
+    for (const component of [parsed.username, parsed.password, parsed.pathname]) {
+      try { if (/[\0-\x1f\x7f]/.test(decodeURIComponent(component))) throw new Error(); }
+      catch { throw new Error('Supabase database URL is invalid'); }
+    }
     const hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+    const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
     return { changed: bucket.created || hyperdrive.created, resolvedResources: Object.freeze({ d1DatabaseName: null, d1DatabaseId: null, r2BucketName: bucket.name, hyperdriveId: hyperdrive.id }) };
   }, options.verify, 'ensure-resources');
 }
@@ -118,18 +136,21 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
   const actions = validate(plan, steps);
   if (dryRun) return { status: 'dry-run', actions, results: [] };
   if (!stateStore || typeof stateStore.load !== 'function' || typeof stateStore.has !== 'function' || typeof stateStore.mark !== 'function') throw new TypeError('stateStore load/has/mark are required');
+  if (actions.includes('ensure-resources') && typeof stateStore.getEvidence !== 'function') throw new TypeError('stateStore getEvidence is required for ensure-resources recovery');
+  if (actions.includes('ensure-resources') && !['d1', 'supabase'].includes(plan.backend)) throw new TypeError('setup plan backend is required for resource recovery');
   await stateStore.load(fingerprintPlan(plan));
   const results = []; let resolvedResources = plan.resources;
   for (const name of actions) {
     const completed = await stateStore.has(name);
     if (completed && name === 'ensure-resources' && typeof stateStore.getEvidence === 'function') {
-        const evidence = await stateStore.getEvidence(name);
-        if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
-        resolvedResources = Object.freeze({ ...evidence });
+      const evidence = await stateStore.getEvidence(name);
+      if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
+      validateResolvedResources(evidence, plan);
+      resolvedResources = Object.freeze({ ...evidence });
     }
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
     const context = Object.freeze({ plan: contextPlan, resources: resolvedResources });
-    if (completed && await steps[name].verify(context)) {
+    if (completed && await steps[name].verify(context) === true) {
       results.push({ step: name, status: 'already-complete' });
       continue;
     }
@@ -137,6 +158,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
     const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     if (name === 'ensure-resources') {
       if (!result.resolvedResources || typeof result.resolvedResources !== 'object' || Array.isArray(result.resolvedResources)) throw new Error('Setup step ensure-resources did not return resolvedResources');
+      validateResolvedResources(result.resolvedResources, plan);
       resolvedResources = Object.freeze({ ...result.resolvedResources });
     }
     const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources }));

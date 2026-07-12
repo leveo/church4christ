@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const EXACT_MANIFEST_KEYS = ['version', 'generatedWith', 'contentType', 'uploadedBy', 'assets'];
@@ -49,7 +51,7 @@ function validateTarget(target, index) {
 }
 
 export function loadMediaPlan({ root, manifestPath = 'seed/media/manifest.json' }) {
-  if (typeof root !== 'string' || !isAbsolute(resolve(root))) throw new TypeError('media root is invalid');
+  if (typeof root !== 'string' || !isAbsolute(root)) throw new TypeError('media root must be absolute');
   if (typeof manifestPath !== 'string' || isAbsolute(manifestPath)) throw new Error('media manifest path must be relative');
   const canonicalRoot = realpathSync(root);
   const absoluteManifest = resolve(canonicalRoot, manifestPath);
@@ -88,7 +90,7 @@ export function loadMediaPlan({ root, manifestPath = 'seed/media/manifest.json' 
     const targetIdentity = JSON.stringify(target);
     if (seenTargets.has(targetIdentity)) throw new Error(`duplicate media target for ${asset.file}`);
     seenFiles.add(asset.file); seenKeys.add(asset.key); seenTargets.add(targetIdentity);
-    return Object.freeze({ file: asset.file, filePath: canonicalFile, key: asset.key, contentType: manifest.contentType, size: bytes.length, target });
+    return Object.freeze({ file: asset.file, contentBase64: bytes.toString('base64'), key: asset.key, contentType: manifest.contentType, size: bytes.length, target });
   });
   return Object.freeze({ version: 1, contentType: manifest.contentType, uploadedBy: manifest.uploadedBy, assets: Object.freeze(assets) });
 }
@@ -101,18 +103,68 @@ function targetStatement(db, asset) {
   return db.prepare('UPDATE people SET avatar_url = ? WHERE id = ?').bind(`/media/${key}`, target.id);
 }
 
+function preflightStatement(db, asset) {
+  if (asset.target.type === 'setting') return null;
+  const table = asset.target.type === 'event' ? 'events' : asset.target.type === 'ministry' ? 'ministries' : 'people';
+  return db.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(asset.target.id);
+}
+
+function decodeAsset(asset) {
+  if (typeof asset.contentBase64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(asset.contentBase64)) {
+    throw new Error(`Media content is invalid for ${asset.file}`);
+  }
+  const bytes = Buffer.from(asset.contentBase64, 'base64');
+  if (bytes.toString('base64') !== asset.contentBase64 || bytes.length !== asset.size || uploadKey(bytes, asset.file) !== asset.key) {
+    throw new Error(`Media content verification failed for ${asset.file}`);
+  }
+  return bytes;
+}
+
 export async function applyMediaPlan({ mediaPlan, db, uploadObject }) {
   if (!mediaPlan || !Array.isArray(mediaPlan.assets)) throw new TypeError('validated media plan is required');
-  if (!db || typeof db.prepare !== 'function') throw new TypeError('AppDb is required');
+  if (!db || typeof db.prepare !== 'function' || typeof db.batch !== 'function') throw new TypeError('AppDb with batch is required');
   if (typeof uploadObject !== 'function') throw new TypeError('uploadObject is required');
-  for (const asset of mediaPlan.assets) {
-    await uploadObject({ key: asset.key, filePath: asset.filePath, contentType: asset.contentType });
-    await db.prepare('INSERT INTO media (r2_key, filename, content_type, size, uploaded_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(r2_key) DO UPDATE SET filename = excluded.filename, content_type = excluded.content_type, size = excluded.size, uploaded_by = excluded.uploaded_by')
-      .bind(asset.key, asset.file, asset.contentType, asset.size, mediaPlan.uploadedBy).run();
-    const targetResult = await targetStatement(db, asset).run();
-    if (!targetResult?.meta || !Number.isFinite(targetResult.meta.changes) || targetResult.meta.changes < 1) {
-      throw new Error(`Media target did not exist for ${asset.file}`);
+  const relational = mediaPlan.assets.map((asset) => ({ asset, statement: preflightStatement(db, asset) })).filter((entry) => entry.statement);
+  if (relational.length) {
+    const found = await db.batch(relational.map((entry) => entry.statement));
+    if (!Array.isArray(found) || found.length !== relational.length) throw new Error('Media target preflight returned invalid results');
+    for (let index = 0; index < found.length; index += 1) {
+      const expectedId = relational[index].asset.target.id;
+      if (!Array.isArray(found[index]?.results) || found[index].results.length !== 1 || found[index].results[0]?.id !== expectedId) {
+        throw new Error(`Media target does not exist for ${relational[index].asset.file}`);
+      }
     }
   }
-  return Object.freeze({ changed: true, uploaded: mediaPlan.assets.length });
+
+  const staging = await mkdtemp(join(tmpdir(), 'church4christ-media-'));
+  try {
+    const staged = [];
+    for (let index = 0; index < mediaPlan.assets.length; index += 1) {
+      const asset = mediaPlan.assets[index];
+      const filePath = join(staging, `${index}-${sanitizeFilename(asset.file)}`);
+      await writeFile(filePath, decodeAsset(asset), { mode: 0o600, flag: 'wx' });
+      const stagedBytes = await readFile(filePath);
+      if (stagedBytes.length !== asset.size || uploadKey(stagedBytes, asset.file) !== asset.key) throw new Error(`Staged media verification failed for ${asset.file}`);
+      staged.push({ asset, filePath });
+    }
+    for (const { asset, filePath } of staged) {
+      await uploadObject({ key: asset.key, filePath, contentType: asset.contentType });
+    }
+    const statements = mediaPlan.assets.flatMap((asset) => [
+      db.prepare('INSERT INTO media (r2_key, filename, content_type, size, uploaded_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(r2_key) DO UPDATE SET filename = excluded.filename, content_type = excluded.content_type, size = excluded.size, uploaded_by = excluded.uploaded_by')
+        .bind(asset.key, asset.file, asset.contentType, asset.size, mediaPlan.uploadedBy),
+      targetStatement(db, asset),
+    ]);
+    const results = await db.batch(statements);
+    if (!Array.isArray(results) || results.length !== statements.length) throw new Error('Media database batch returned invalid results');
+    for (let index = 0; index < mediaPlan.assets.length; index += 1) {
+      const result = results[index * 2 + 1];
+      if (!result?.meta || !Number.isFinite(result.meta.changes) || result.meta.changes < 1) {
+        throw new Error(`Media target did not update for ${mediaPlan.assets[index].file}`);
+      }
+    }
+    return Object.freeze({ changed: true, uploaded: mediaPlan.assets.length });
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
 }

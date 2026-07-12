@@ -56,13 +56,16 @@ export async function configureSecrets(options) {
   if (options?.mode === 'local') {
     if (typeof options.path !== 'string' || !options.path) throw new TypeError('local .dev.vars path is required');
     let content = '';
-    try { content = await readFile(options.path, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    let sourceContent = null;
+    try { content = await readFile(options.path, 'utf8'); sourceContent = content; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const existing = parseDevVars(content);
     const additions = [];
     if (!existing.has('SESSION_SECRET')) additions.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
     if (!existing.has('EMAIL_DEV_LOG')) additions.push(['EMAIL_DEV_LOG', '1']);
     if (!existing.has('AUTH_DEV_BYPASS_EMAIL')) additions.push(['AUTH_DEV_BYPASS_EMAIL', adminEmail]);
-    const result = await writeAtomic(options.path, appendManaged(content, additions), { allowReplace: true });
+    const writer = options.writeAtomic ?? writeAtomic;
+    if (typeof writer !== 'function') throw new TypeError('writeAtomic must be a function');
+    const result = await writer(options.path, appendManaged(content, additions), { allowReplace: true, expectedContent: sourceContent });
     const handle = await open(options.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try { await handle.chmod(0o600); } finally { await handle.close(); }
     return Object.freeze({ changed: result.changed, configured: additions.map(([key]) => key) });
@@ -71,8 +74,15 @@ export async function configureSecrets(options) {
   if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
   if (typeof options.wranglerBin !== 'string' || !options.wranglerBin) throw new TypeError('wranglerBin is required');
   if (typeof options.configPath !== 'string' || !options.configPath) throw new TypeError('configPath is required');
-  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath]);
-  const names = parseSecretList(listed.stdout);
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true });
+  let names;
+  if (listed.exitCode === 0) {
+    names = parseSecretList(listed.stdout);
+  } else {
+    const freshWorker = /^Worker "[A-Za-z0-9][A-Za-z0-9_-]*"(?: \(env: [A-Za-z0-9_-]+\))? not found\.\n\nIf this is a new Worker, run `wrangler deploy` first to create it\.\nOtherwise, check that the Worker name is correct and you're logged into the right account\.$/;
+    if (listed.stdout !== '' || !freshWorker.test(listed.stderr.trim())) throw new Error('Wrangler secret list failed; refusing to assume a fresh Worker');
+    names = new Set();
+  }
   if (names.has('SESSION_SECRET')) return Object.freeze({ changed: false, configured: [] });
   const sessionSecret = randomBytes(32).toString('base64url');
   await options.runner.run(options.wranglerBin, ['secret', 'put', 'SESSION_SECRET', '--config', options.configPath], { input: `${sessionSecret}\n` });

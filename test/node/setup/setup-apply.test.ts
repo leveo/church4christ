@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { applySetup, createD1Steps, createSupabaseSteps } from '../../../scripts/setup/apply.mjs';
+import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps } from '../../../scripts/setup/apply.mjs';
 import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
 import { configureSecrets } from '../../../scripts/setup/secrets.mjs';
 
@@ -10,15 +10,17 @@ const ORDER = ['verify-provider', 'ensure-resources', 'write-manifest', 'write-c
 
 function memoryStore() {
   const completed = new Set<string>();
-  return { completed, async load() {}, async has(name: string) { return completed.has(name); }, async mark(name: string) { completed.add(name); } };
+  const evidence = new Map<string, unknown>();
+  return { completed, async load() {}, async has(name: string) { return completed.has(name); }, async getEvidence(name: string) { return evidence.get(name) ?? null; }, async mark(name: string, value: unknown) { completed.add(name); evidence.set(name, value); } };
 }
 
 describe('setup apply coordinator', () => {
   it('applies in canonical order and verifies persisted completions as no-ops', async () => {
     const calls: string[] = [];
-    const steps = Object.fromEntries(ORDER.map((name) => [name, { apply: async (context: any) => { calls.push(name); return name === 'ensure-resources' ? { changed: true, resolvedResources: { d1DatabaseId: 'id' } } : { changed: true, saw: context.plan.resources }; }, verify: async () => true }]));
+    const resources = { d1DatabaseName: 'church-db', d1DatabaseId: 'id', r2BucketName: 'church-media', hyperdriveId: null };
+    const steps = Object.fromEntries(ORDER.map((name) => [name, { apply: async (context: any) => { calls.push(name); return name === 'ensure-resources' ? { changed: true, resolvedResources: resources } : { changed: true, saw: context.plan.resources }; }, verify: async () => true }]));
     const stateStore = memoryStore();
-    const plan = Object.freeze({ actions: [...ORDER], planVersion: 1 });
+    const plan = Object.freeze({ actions: [...ORDER], planVersion: 1, backend: 'd1', site: { slug: 'church' } });
     const first = await applySetup(plan, { steps, stateStore, dryRun: false });
     expect(calls).toEqual(ORDER);
     expect(first.results[2]).toMatchObject({ step: 'write-manifest' });
@@ -51,6 +53,15 @@ describe('setup apply coordinator', () => {
     }, stateStore: { async load() {}, async has() { return false; }, mark }, dryRun: false })).rejects.toThrow(/did not verify/i);
     expect(mark).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled();
   });
+
+  it('requires exact true verification and resource evidence access', async () => {
+    const state: any = { async load() {}, async has() { return true; }, async mark() {} };
+    const step = { apply: vi.fn(async () => ({ changed: false })), verify: vi.fn().mockResolvedValueOnce(1).mockResolvedValue(true) };
+    await applySetup({ actions: ['migrate'] }, { steps: { migrate: step }, stateStore: state, dryRun: false });
+    expect(step.apply).toHaveBeenCalledTimes(1);
+    await expect(applySetup({ actions: ['ensure-resources'] }, { steps: { 'ensure-resources': { apply: vi.fn(), verify: async () => true } }, stateStore: state, dryRun: false }))
+      .rejects.toThrow(/getEvidence/i);
+  });
 });
 
 describe('concrete provider actions', () => {
@@ -77,6 +88,19 @@ describe('concrete provider actions', () => {
     expect(JSON.stringify(calls.map((call) => call[1]))).not.toContain(url);
     expect(calls[0][2].env.SUPABASE_DB_URL).toBe(url);
   });
+
+  it('reconciles deploy resources, treating stored IDs as hints and checking Hyperdrive before R2', async () => {
+    const order: string[] = [];
+    const runner = { run: async (_file: string, args: string[]) => {
+      order.push(args.slice(0, 3).join(' '));
+      if (args[0] === 'hyperdrive' && args[1] === 'list') return { stdout: '📋 Listing Hyperdrive configs', stderr: '', exitCode: 0 };
+      throw new Error('cloud mutation');
+    } };
+    const plan: any = { backend: 'supabase', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'old-media', hyperdriveId: 'stale' } };
+    const step = createResourceStep({ plan, runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', dbUrl: 'postgres://u:p@db.test/church', verify: async () => true });
+    await expect(step.apply()).rejects.toThrow(/explicitly confirm/i);
+    expect(order).toEqual(['hyperdrive list --config']);
+  });
 });
 
 describe('setup state', () => {
@@ -86,12 +110,25 @@ describe('setup state', () => {
     const firstFingerprint = fingerprintPlan({ version: 'a' });
     const secondFingerprint = fingerprintPlan({ version: 'b' });
     await store.load(firstFingerprint);
-    const evidence: any = { id: 'safe' }; await store.mark('migrate', evidence); evidence.id = 'changed';
-    expect(JSON.parse(await readFile(path, 'utf8')).completed.migrate.evidence.id).toBe('safe');
+    const evidence: any = { d1DatabaseName: 'church-db', d1DatabaseId: 'safe', r2BucketName: 'church-media', hyperdriveId: null };
+    await store.mark('ensure-resources', evidence); evidence.d1DatabaseId = 'changed';
+    expect(JSON.parse(await readFile(path, 'utf8')).completed['ensure-resources'].evidence.d1DatabaseId).toBe('safe');
+    await expect(store.mark('seed', { token: 'oops' })).rejects.toThrow(/evidence.*null/i);
+    await expect(store.mark('seed', { value: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG' })).rejects.toThrow(/evidence.*null/i);
     await store.load(secondFingerprint); expect(await store.has('migrate')).toBe(false);
     await writeFile(path, '{bad'); await expect(store.load(fingerprintPlan({ version: 'c' }))).rejects.toThrow(/state/i);
     expect(fingerprintPlan({ b: 2, a: 1 })).toMatch(/^[a-f0-9]{64}$/);
-    await expect(store.mark('seed', { token: 'oops' })).rejects.toThrow(/secret/i);
+  });
+
+  it('uses CAS and does not mark memory after a stale or failed write', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-state-cas-')); const path = join(root, 'state.json');
+    const a = createStateStore(path); const b = createStateStore(path); const fp = fingerprintPlan({ a: 1 });
+    await a.load(fp); await b.load(fp);
+    await a.mark('migrate', null);
+    await expect(b.mark('seed', null)).rejects.toThrow(/expected content|concurrent/i);
+    expect(await b.has('seed')).toBe(false);
+    const failing = createStateStore(join(root, 'fail.json'), { writeJsonAtomic: async () => { throw new Error('disk'); } });
+    await failing.load(fp); await expect(failing.mark('seed', null)).rejects.toThrow('disk'); expect(await failing.has('seed')).toBe(false);
   });
 });
 
@@ -116,5 +153,23 @@ describe('setup secrets', () => {
     expect(calls[1][1]).toEqual(['secret', 'put', 'SESSION_SECRET', '--config', 'wrangler.jsonc']);
     expect(calls[1][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
     expect(JSON.stringify(result)).not.toContain(calls[1][2].input.trim());
+  });
+
+  it('treats only Wrangler 4.107 fresh-worker output as an empty secret list', async () => {
+    const fresh = 'Worker "new-site" not found.\n\nIf this is a new Worker, run `wrangler deploy` first to create it.\nOtherwise, check that the Worker name is correct and you\'re logged into the right account.';
+    const calls: any[] = [];
+    const runner = { run: async (...args: any[]) => { calls.push(args); return calls.length === 1 ? { stdout: '', stderr: fresh, exitCode: 1 } : { stdout: '', stderr: '', exitCode: 0 }; } };
+    await configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' });
+    expect(calls[0][2]).toMatchObject({ allowNonzero: true });
+    expect(calls).toHaveLength(2);
+    const denied = { run: async () => ({ stdout: '', stderr: 'Authentication error [code: 10000]', exitCode: 1 }) };
+    await expect(configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner: denied, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' })).rejects.toThrow(/secret list failed/i);
+  });
+
+  it('passes the originally read .dev.vars bytes as expectedContent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-secret-cas-')); const path = join(root, '.dev.vars');
+    await writeFile(path, '# owned\n');
+    const writer = vi.fn(async (_path, _content, options) => { expect(options.expectedContent).toBe('# owned\n'); throw new Error('concurrent'); });
+    await expect(configureSecrets({ mode: 'local', adminEmail: 'a@b.test', path, writeAtomic: writer })).rejects.toThrow('concurrent');
   });
 });
