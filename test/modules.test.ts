@@ -5,10 +5,11 @@
 // /ministries), and the always-on CORE paths that must resolve to null (/,
 // /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
+import { CAPABILITIES, CAPABILITY_KEYS } from '../src/lib/capabilityCatalog';
 import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
 
 describe('MODULES registry', () => {
-  it('has all 15 module keys in display order', () => {
+  it('has all 16 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -27,6 +28,25 @@ describe('MODULES registry', () => {
       'giving',
       'registration',
     ]);
+  });
+
+  it('matches the canonical catalog metadata while exposing independent arrays', () => {
+    expect(MODULE_KEYS).toEqual(CAPABILITY_KEYS);
+    for (const key of MODULE_KEYS) {
+      expect(MODULES[key]).toEqual({
+        publicPrefixes: CAPABILITIES[key].publicPrefixes,
+        adminPrefixes: CAPABILITIES[key].adminPrefixes,
+        navKeys: CAPABILITIES[key].navKeys,
+        uses: CAPABILITIES[key].uses,
+        ...(CAPABILITIES[key].requiresBackend
+          ? { requiresBackend: CAPABILITIES[key].requiresBackend }
+          : {}),
+      });
+      expect(MODULES[key].publicPrefixes).not.toBe(CAPABILITIES[key].publicPrefixes);
+      expect(MODULES[key].adminPrefixes).not.toBe(CAPABILITIES[key].adminPrefixes);
+      expect(MODULES[key].navKeys).not.toBe(CAPABILITIES[key].navKeys);
+      expect(MODULES[key].uses).not.toBe(CAPABILITIES[key].uses);
+    }
   });
 
   it('gifts/people softly use serve, giving softly uses people, portal softly uses serve+fellowships; every other module has no deps', () => {

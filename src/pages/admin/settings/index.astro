@@ -15,6 +15,7 @@ import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
 import { MODULE_KEYS, MODULES, clearModuleCache, type ModuleKey } from '../../../lib/modules';
+import { CAPABILITIES } from '../../../lib/capabilityCatalog';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
@@ -50,7 +51,7 @@ if (Astro.request.method === 'POST') {
   const parsed = parseSettingsForm(fd);
   if (parsed.ok) {
     if (isModules) {
-      // The Modules panel is its OWN form: it writes ALL 15 module.<key> rows
+      // The Modules panel is its OWN form: it writes ALL 16 module.<key> rows
       // explicitly — a checked box posts '1' (in parsed.data), an unchecked box
       // is absent → we write '0'. This deliberate full write does NOT rely on the
       // parser's partial-update semantics, so unchecking truly disables a module.
@@ -137,9 +138,9 @@ const h2 = 'font-display text-heading-sm font-bold';
 const enabledModules = Astro.locals.modules;
 const dbBackend = Astro.locals.dbBackend;
 const moduleGroups: { titleKey: string; keys: ModuleKey[] }[] = [
-  { titleKey: 'admin.settings.modulesContentGroup', keys: ['bulletins', 'sermons', 'prayer-sheets', 'articles', 'fellowships', 'page-builder'] },
-  { titleKey: 'admin.settings.modulesCommunityGroup', keys: ['events', 'prayer-wall', 'testimonies', 'people', 'children', 'portal', 'giving', 'registration'] },
-  { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: ['serve', 'gifts'] },
+  { titleKey: 'admin.settings.modulesContentGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'content') },
+  { titleKey: 'admin.settings.modulesCommunityGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'community') },
+  { titleKey: 'admin.settings.modulesVolunteeringGroup', keys: MODULE_KEYS.filter((key) => CAPABILITIES[key].group === 'volunteering') },
 ];
 ---
 

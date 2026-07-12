@@ -6,32 +6,12 @@
 // choke point's classifier; `getEnabledModules` reads the `module.<key>` settings
 // with the same per-isolate 60s cache the theme uses.
 import type { AppDb } from './appDb';
+import { CAPABILITIES, CAPABILITY_KEYS, type CapabilityKey } from './capabilityCatalog';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 16 module keys, in display order (drives the admin Modules panel + nav).
-// `portal`, `giving`, and `registration` are appended last: they are backend-gated
-// (Supabase only) and stay off on the D1 backend regardless of their settings row.
-export const MODULE_KEYS = [
-  'bulletins',
-  'sermons',
-  'prayer-sheets',
-  'prayer-wall',
-  'events',
-  'serve',
-  'gifts',
-  'testimonies',
-  'articles',
-  'fellowships',
-  'people',
-  'children',
-  'page-builder',
-  'portal',
-  'giving',
-  'registration',
-] as const;
-
-export type ModuleKey = (typeof MODULE_KEYS)[number];
+export const MODULE_KEYS = CAPABILITY_KEYS;
+export type ModuleKey = CapabilityKey;
 
 export interface ModuleDef {
   /** Locale-stripped public route prefixes this module owns. */
@@ -47,123 +27,21 @@ export interface ModuleDef {
   requiresBackend?: 'supabase';
 }
 
-// Per-module route ownership. Notes: `/profile` stays CORE (auth surface), so it
-// is absent here; `gifts` owns `/serve/gifts` and `testimonies` owns
-// `/serve/testimonies`, which win over `serve`'s `/serve` by longest-prefix match;
-// `events` also owns `/admin/announcements` (the homepage ticker admin);
-// `people` deliberately owns NO route prefixes: its surfaces live inside
-// pre-existing CORE routes (`/profile`, `/admin/people`) and its opportunity
-// board is under `/serve` (the `serve` module). The People module therefore
-// gates only its added panels/sections via `locals.modules.has('people')` in
-// those pages (slice 9), never whole routes. `fellowships` owns `/admin/fellowships`
-// (member group definitions) alongside its public `/fellowships` pages, so a D1
-// church (portal off) can still manage groups once the content collection
-// retires; the members/leaders panel inside that admin page is Supabase-only and
-// gates in-page on `locals.modules.has('portal')` instead of a route prefix.
-export const MODULES: Record<ModuleKey, ModuleDef> = {
-  bulletins: {
-    publicPrefixes: ['/bulletin'],
-    adminPrefixes: ['/admin/bulletins'],
-    navKeys: ['nav.bulletin'],
-    uses: [],
-  },
-  sermons: {
-    publicPrefixes: ['/sermons'],
-    adminPrefixes: ['/admin/sermons'],
-    navKeys: ['nav.sermons'],
-    uses: [],
-  },
-  'prayer-sheets': {
-    publicPrefixes: ['/prayer'],
-    adminPrefixes: ['/admin/prayer-sheets'],
-    navKeys: ['nav.prayer'],
-    uses: [],
-  },
-  'prayer-wall': {
-    publicPrefixes: ['/api/prayer-request'],
-    adminPrefixes: ['/admin/prayer-wall'],
-    navKeys: [],
-    uses: [],
-  },
-  events: {
-    publicPrefixes: ['/events'],
-    adminPrefixes: ['/admin/events', '/admin/announcements'],
-    navKeys: ['nav.events'],
-    uses: [],
-  },
-  serve: {
-    publicPrefixes: ['/serve', '/my', '/cal', '/ministries'],
-    adminPrefixes: ['/admin/ministries', '/admin/service-types', '/admin/teams', '/admin/reports'],
-    navKeys: ['nav.serve', 'nav.ministries', 'nav.opportunities'],
-    uses: [],
-  },
-  gifts: {
-    publicPrefixes: ['/serve/gifts'],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve'],
-  },
-  testimonies: {
-    publicPrefixes: ['/serve/testimonies'],
-    adminPrefixes: ['/admin/testimonies'],
-    navKeys: [],
-    uses: [],
-  },
-  articles: {
-    publicPrefixes: ['/articles'],
-    adminPrefixes: [],
-    navKeys: ['nav.articles'],
-    uses: [],
-  },
-  fellowships: {
-    publicPrefixes: ['/fellowships'],
-    adminPrefixes: ['/admin/fellowships'],
-    navKeys: ['nav.fellowships'],
-    uses: [],
-  },
-  people: {
-    publicPrefixes: [],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve'],
-  },
-  children: {
-    publicPrefixes: ['/kiosk'],
-    adminPrefixes: ['/admin/children'],
-    navKeys: [],
-    uses: [],
-  },
-  'page-builder': {
-    // Gates AUTHORING only: published builder pages keep rendering when off
-    // (the /p/ route and block renderer are core, like the people module's
-    // panels) — a module toggle never breaks live content.
-    publicPrefixes: [],
-    adminPrefixes: ['/admin/pages/builder'],
-    navKeys: [],
-    uses: [],
-  },
-  portal: {
-    publicPrefixes: ['/my/household', '/my/groups', '/my/events', '/my/serving', '/my/prayer', '/email-change'],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve', 'fellowships'],
-    requiresBackend: 'supabase',
-  },
-  giving: {
-    publicPrefixes: ['/give/checkout', '/my/giving', '/api/giving'],
-    adminPrefixes: ['/admin/giving'],
-    navKeys: [],
-    uses: ['people'],
-    requiresBackend: 'supabase',
-  },
-  registration: {
-    publicPrefixes: ['/register', '/api/register'],
-    adminPrefixes: ['/admin/registration'],
-    navKeys: ['nav.register'],
-    uses: [],
-    requiresBackend: 'supabase',
-  },
-};
+export const MODULES = Object.fromEntries(
+  MODULE_KEYS.map((key) => {
+    const def = CAPABILITIES[key];
+    return [
+      key,
+      {
+        publicPrefixes: [...def.publicPrefixes],
+        adminPrefixes: [...def.adminPrefixes],
+        navKeys: [...def.navKeys],
+        uses: [...def.uses],
+        ...(def.requiresBackend ? { requiresBackend: def.requiresBackend as 'supabase' } : {}),
+      },
+    ];
+  }),
+) as Record<ModuleKey, ModuleDef>;
 
 // Flattened [prefix, key] pairs, built once. Every prefix a module owns (public
 // or admin) points back to its module; `moduleForPath` picks the longest match.

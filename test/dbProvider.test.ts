@@ -11,12 +11,20 @@ import { getBackend, openDb, type DbEnv } from '../src/lib/dbProvider';
 describe('getBackend', () => {
   it("defaults to 'd1' when DB_BACKEND is unset", () => {
     expect(getBackend({})).toBe('d1');
+    expect(getBackend({ DB_BACKEND: '' })).toBe('d1');
   });
 
-  it("selects 'supabase' iff DB_BACKEND === 'supabase'", () => {
+  it('accepts the exact d1 and supabase backend names', () => {
     expect(getBackend({ DB_BACKEND: 'supabase' })).toBe('supabase');
     expect(getBackend({ DB_BACKEND: 'd1' })).toBe('d1');
-    expect(getBackend({ DB_BACKEND: 'postgres' })).toBe('d1');
+  });
+
+  it('rejects every nonempty unknown DB_BACKEND value', () => {
+    for (const value of ['postgres', 'D1', ' supabase ', 'd1 ', ' d1', ' ', 'sqlite']) {
+      expect(() => getBackend({ DB_BACKEND: value })).toThrow(
+        `Invalid DB_BACKEND=${JSON.stringify(value)}; expected "d1" or "supabase"`,
+      );
+    }
   });
 });
 
