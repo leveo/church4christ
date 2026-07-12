@@ -28,6 +28,7 @@ import { claimOpenSlot, listOpenSlotsForPerson, respondToAssignment } from '../.
 import { listApplicationsByPerson, listPersonAssignments } from '../../../lib/myDb';
 import { getPortalHousehold } from '../../../lib/portalDb';
 import { listGroupsForPerson, listJoinRequests } from '../../../lib/groupDb';
+import { listPendingForApprover } from '../../../lib/prayerDb';
 import { listRegistrationsForPerson } from '../../../lib/regDb';
 import { formatDate, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
@@ -86,13 +87,16 @@ const today = todayInTz();
 // (portal always off there, see modules.ts) so it never touches those tables.
 const hasPortal = Astro.locals.modules.has('portal');
 const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
-const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations] = await Promise.all([
+// listPendingForApprover receives the whole user so only a super admin gets
+// church-wide authority. Group and event approval remains membership-driven.
+const [assignments, openSlots, applications, household, myGroups, upcomingRegistrations, pendingPrayerItems] = await Promise.all([
   listPersonAssignments(db, user.id, today, locale),
   listOpenSlotsForPerson(db, user.id, locale),
   listApplicationsByPerson(db, user.id, locale),
   hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
   hasPortal ? listGroupsForPerson(db, user.id) : Promise.resolve([]),
   hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
+  hasPortal ? listPendingForApprover(db, user.id, user, locale) : Promise.resolve([]),
 ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');
@@ -162,14 +166,19 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
             )}
           </a>
 
-          {pendingJoinRequests.length > 0 && (
+          {(pendingJoinRequests.length > 0 || pendingPrayerItems.length > 0) && (
             <a
-              href={localePath(locale, '/groups')}
+              href={localePath(locale, pendingJoinRequests.length > 0 ? '/groups' : '/my/prayer')}
               class="block rounded-lg border border-warn bg-warn-soft p-5 hover:shadow-md"
             >
               <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
               <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
-                <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingJoinRequests.length })}</p>
+                {pendingJoinRequests.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingJoinRequests.length })}</p>
+                )}
+                {pendingPrayerItems.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingPrayerItems', { count: pendingPrayerItems.length })}</p>
+                )}
               </div>
             </a>
           )}

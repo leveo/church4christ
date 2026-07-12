@@ -4,12 +4,11 @@
 // links to the existing public groups directory (/groups) and shows only when
 // the `groups` module is on; Household/Events/Serving only when `portal` is on
 // — this component is shared with /my (the serve-only schedule page), which
-// runs without the portal module. The Prayer tab is added by a later task once
-// its page exists (linking to it before then would 404 via the module prefix).
+// runs without the portal module. The Prayer tab is portal-gated too.
 import { localePath, type Locale } from '../lib/locales';
 import { t } from '../lib/i18n';
 
-export type PortalNavTab = 'dashboard' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar';
+export type PortalNavTab = 'dashboard' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer';
 
 interface Props {
   locale: Locale;
@@ -34,6 +33,7 @@ const tabs: { key: PortalNavTab; href: string; label: string }[] = [
     ? [
         { key: 'events' as const, href: localePath(locale, '/my/events'), label: t(locale, 'portal.nav.events') },
         { key: 'serving' as const, href: localePath(locale, '/my/serving'), label: t(locale, 'portal.nav.serving') },
+        { key: 'prayer' as const, href: localePath(locale, '/my/prayer'), label: t(locale, 'portal.nav.prayer') },
       ]
     : []),
   { key: 'calendar', href: localePath(locale, '/my/calendar'), label: t(locale, 'portal.nav.calendar') },

@@ -1,0 +1,328 @@
+---
+// Prayer Wall (member portal fusion): four scoped tabs (church / my groups / my
+// events / mine) plus a Pending tab for approvers, a post form (scope +
+// conditional group/event pickers, no client JS — every select always renders;
+// the page gates which id is actually forwarded to postPrayerItem by the chosen
+// scope) and inline approve/reject/delete. All mutations are PRG. Route policy
+// classes /my/* as `authed`; the `portal` module gate (middleware, see
+// modules.ts moduleForPath) 404s this whole page before it runs when the module
+// is off, so there is no in-page hasPortal check here (same as household.astro /
+// groups pages).
+//
+// Authority: postPrayerItem/list*ForPerson/listMyPrayerItems never take admin
+// authority — a member's own posting eligibility and what they may READ are
+// membership-driven (see prayerDb.ts header). listPendingForApprover /
+// decidePrayerItem / deletePrayerItem receive the complete user context. Only a
+// super admin gets the church-wide override; group and event authority remains
+// membership-driven, so limited admins cannot read or moderate unrelated prayers.
+import Base from '../../../layouts/Base.astro';
+import PortalNav from '../../../components/PortalNav.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import {
+  decidePrayerItem,
+  deletePrayerItem,
+  listChurchPrayers,
+  listEventPrayersForPerson,
+  listGroupPrayersForPerson,
+  listMyPrayerItems,
+  listPendingForApprover,
+  postPrayerItem,
+  type PrayerItem,
+  type PrayerScope,
+} from '../../../lib/prayerDb';
+import { listGroupsForPerson } from '../../../lib/groupDb';
+import { listRegistrationsForPerson } from '../../../lib/regDb';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+
+const str = (v: FormDataEntryValue | null): string => String(v ?? '').trim();
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+const TABS = ['church', 'groups', 'events', 'mine', 'pending'] as const;
+type PrayerTab = (typeof TABS)[number];
+const tabOf = (v: FormDataEntryValue | null): PrayerTab =>
+  (TABS as readonly string[]).includes(String(v ?? '')) ? (v as PrayerTab) : 'church';
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = str(fd.get('_action'));
+  const returnTab = tabOf(fd.get('tab'));
+  const done = (ok: string) => Astro.redirect(localePath(locale, `/my/prayer?tab=${returnTab}&ok=${ok}`), 303);
+  const fail = (err: string) => Astro.redirect(localePath(locale, `/my/prayer?tab=${returnTab}&err=${err}`), 303);
+
+  if (action === 'post') {
+    const scopeRaw = str(fd.get('scope'));
+    const scope: PrayerScope | null = (['church', 'group', 'event', 'private'] as const).includes(
+      scopeRaw as PrayerScope,
+    )
+      ? (scopeRaw as PrayerScope)
+      : null;
+    if (scope === null) return fail('generic');
+    const groupId = scope === 'group' ? idOf(fd.get('group_id')) : null;
+    const regEventId = scope === 'event' ? idOf(fd.get('reg_event_id')) : null;
+    try {
+      await postPrayerItem(db, {
+        authorPersonId: user.id,
+        authorEmail: user.email,
+        scope,
+        groupId,
+        regEventId,
+        body: str(fd.get('body')),
+      });
+      return done('posted');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      return fail(msg === 'not_eligible' || msg === 'too_long' ? msg : 'generic');
+    }
+  }
+  if (action === 'approve' || action === 'reject') {
+    const itemId = idOf(fd.get('item_id'));
+    if (itemId !== null) {
+      try {
+        await decidePrayerItem(db, { itemId, approve: action === 'approve', approverId: user.id, moderator: user });
+      } catch {
+        return fail('generic');
+      }
+    }
+    return done(action === 'approve' ? 'approved' : 'rejected');
+  }
+  if (action === 'delete') {
+    const itemId = idOf(fd.get('item_id'));
+    if (itemId !== null) {
+      try {
+        await deletePrayerItem(db, { itemId, actorId: user.id, moderator: user });
+      } catch {
+        return fail('generic');
+      }
+    }
+    return done('deleted');
+  }
+  return fail('generic');
+}
+
+// Data for the post form's selects, needed on every tab since the form is
+// always present. "Events I admin" has no existing helper (event_admins
+// exists to serve moderation, not this picker), so it's a small inline query
+// mirroring regDb's i18n-fallback title join.
+const [pendingForViewer, myGroups, myRegistrations, adminEventRows] = await Promise.all([
+  listPendingForApprover(db, user.id, user, locale),
+  listGroupsForPerson(db, user.id),
+  listRegistrationsForPerson(db, locale, user.id, user.email),
+  db
+    .prepare(
+      `SELECT e.id AS id, COALESCE(el.title, ed.title, '') AS title
+       FROM event_admins ea
+       JOIN reg_events e ON e.id = ea.reg_event_id
+       LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?1
+       LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'
+       WHERE ea.person_id = ?2`,
+    )
+    .bind(locale, user.id)
+    .all<{ id: number; title: string }>()
+    .then((r) => r.results),
+]);
+
+// events I'm registered for + events I admin, deduped by event id.
+const eventOptions = new Map<number, string>();
+for (const r of myRegistrations) eventOptions.set(r.event_id, r.event_title);
+for (const r of adminEventRows) eventOptions.set(r.id, r.title);
+const eventOptionsList = [...eventOptions.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+// The Pending tab (and link) is visible only when the viewer currently has
+// something within their approval authority — a cheap proxy for "has
+// authority" per the plan (admin/event-admin/church-admin with an empty
+// queue simply won't see the tab until something arrives).
+const hasAuthority = pendingForViewer.length > 0;
+const tabParam = Astro.url.searchParams.get('tab') ?? 'church';
+const visibleTabs: PrayerTab[] = hasAuthority ? [...TABS] : TABS.filter((tb) => tb !== 'pending');
+const activeTab: PrayerTab = (visibleTabs as readonly string[]).includes(tabParam) ? (tabParam as PrayerTab) : 'church';
+
+let items: PrayerItem[];
+if (activeTab === 'church') items = await listChurchPrayers(db, locale);
+else if (activeTab === 'groups') items = await listGroupPrayersForPerson(db, user.id, locale);
+else if (activeTab === 'events') items = await listEventPrayersForPerson(db, user.id, user.email, locale);
+else if (activeTab === 'mine') items = await listMyPrayerItems(db, user.id, locale);
+else items = pendingForViewer;
+
+const TAB_LABEL: Record<PrayerTab, string> = {
+  church: t(locale, 'portal.prayer.tab.church'),
+  groups: t(locale, 'portal.prayer.tab.groups'),
+  events: t(locale, 'portal.prayer.tab.events'),
+  mine: t(locale, 'portal.prayer.tab.mine'),
+  pending: t(locale, 'portal.prayer.tab.pending'),
+};
+const EMPTY_KEY: Record<PrayerTab, string> = {
+  church: 'portal.prayer.emptyChurch',
+  groups: 'portal.prayer.emptyGroups',
+  events: 'portal.prayer.emptyEvents',
+  mine: 'portal.prayer.emptyMine',
+  pending: 'portal.prayer.emptyPending',
+};
+const STATUS_BADGE: Record<PrayerItem['status'], string> = {
+  pending: badgeScheduled,
+  approved: badgeActive,
+  rejected: badgeInactive,
+};
+
+const okParam = Astro.url.searchParams.get('ok');
+const OK_MSG: Record<string, string> = {
+  posted: 'portal.prayer.okPosted',
+  approved: 'portal.prayer.okApproved',
+  rejected: 'portal.prayer.okRejected',
+  deleted: 'portal.prayer.okDeleted',
+};
+const okKey = okParam ? (OK_MSG[okParam] ?? null) : null;
+
+const errParam = Astro.url.searchParams.get('err');
+const ERR_MSG: Record<string, string> = {
+  not_eligible: 'portal.prayer.errNotEligible',
+  too_long: 'portal.prayer.errTooLong',
+  generic: 'portal.prayer.errGeneric',
+};
+const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
+---
+
+<Base title={t(locale, 'portal.prayer.title')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.prayer.title')}</h1>
+    <PortalNav locale={locale} active="prayer" />
+
+    <nav class="mt-4 flex gap-1 overflow-x-auto border-b border-border text-xs" aria-label={t(locale, 'portal.prayer.tabsLabel')}>
+      {
+        visibleTabs.map((tb) => (
+          <a
+            href={localePath(locale, `/my/prayer?tab=${tb}`)}
+            aria-current={tb === activeTab ? 'page' : undefined}
+            class={`shrink-0 whitespace-nowrap border-b-2 px-2 py-1.5 font-medium ${
+              tb === activeTab ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink'
+            }`}
+          >
+            {TAB_LABEL[tb]}
+          </a>
+        ))
+      }
+    </nav>
+
+    {okKey && <p class={`mt-6 ${noticeOk}`}>{t(locale, okKey)}</p>}
+    {errKey && <p class={`mt-6 ${noticeErr}`}>{t(locale, errKey)}</p>}
+
+    <details class="mt-6 rounded-lg border border-border bg-surface-raised p-4">
+      <summary class="cursor-pointer text-sm font-semibold text-primary">{t(locale, 'portal.prayer.postToggle')}</summary>
+      <form method="post" class="mt-4 flex flex-col gap-3">
+        <input type="hidden" name="_action" value="post" />
+        <input type="hidden" name="tab" value={activeTab} />
+        <label class="block">
+          <span class={lab}>{t(locale, 'portal.prayer.scope')}</span>
+          <select name="scope" required class={tin}>
+            <option value="church">{t(locale, 'portal.prayer.scope.church')}</option>
+            <option value="group">{t(locale, 'portal.prayer.scope.group')}</option>
+            <option value="event">{t(locale, 'portal.prayer.scope.event')}</option>
+            <option value="private">{t(locale, 'portal.prayer.scope.private')}</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'portal.prayer.group')}</span>
+          <select name="group_id" class={tin}>
+            <option value="">{t(locale, 'portal.prayer.groupNone')}</option>
+            {myGroups.map((g) => (
+              <option value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'portal.prayer.event')}</span>
+          <select name="reg_event_id" class={tin}>
+            <option value="">{t(locale, 'portal.prayer.eventNone')}</option>
+            {eventOptionsList.map(([id, title]) => (
+              <option value={id}>{title}</option>
+            ))}
+          </select>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(locale, 'portal.prayer.body')}</span>
+          <textarea name="body" required maxlength="2000" rows="4" class={tin} />
+        </label>
+        <div>
+          <button type="submit" class={btn}>
+            {t(locale, 'portal.prayer.postSubmit')}
+          </button>
+        </div>
+      </form>
+    </details>
+
+    <section class="mt-8">
+      {
+        items.length === 0 ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, EMPTY_KEY[activeTab])}</p>
+        ) : (
+          <ul class="mt-3 flex flex-col gap-3">
+            {items.map((item) => (
+              <li class="rounded-md border border-border bg-surface-raised p-4">
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <span class="font-semibold">{item.author_name}</span>
+                  {item.group_name && <span class={`${badge} bg-surface-sunken text-ink-muted`}>{item.group_name}</span>}
+                  {item.event_title && <span class={`${badge} bg-surface-sunken text-ink-muted`}>{item.event_title}</span>}
+                  {(activeTab === 'mine' || activeTab === 'pending') && (
+                    <span class={`${badge} ${STATUS_BADGE[item.status]}`}>{t(locale, `portal.prayer.status.${item.status}`)}</span>
+                  )}
+                  <span class="ml-auto text-xs text-ink-subtle tabular-nums">{item.created_at.slice(0, 10)}</span>
+                </div>
+                <p class="mt-2 whitespace-pre-wrap text-sm">{item.body}</p>
+                {
+                  activeTab === 'pending' && (
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <form method="post">
+                        <input type="hidden" name="_action" value="approve" />
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <input type="hidden" name="tab" value="pending" />
+                        <button type="submit" class={btn}>
+                          {t(locale, 'portal.prayer.approve')}
+                        </button>
+                      </form>
+                      <form method="post">
+                        <input type="hidden" name="_action" value="reject" />
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <input type="hidden" name="tab" value="pending" />
+                        <button type="submit" class={btnSecondary}>
+                          {t(locale, 'portal.prayer.reject')}
+                        </button>
+                      </form>
+                      <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'portal.prayer.deleteConfirm'))})`}>
+                        <input type="hidden" name="_action" value="delete" />
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <input type="hidden" name="tab" value="pending" />
+                        <button type="submit" class="text-danger hover:underline">
+                          {t(locale, 'portal.prayer.delete')}
+                        </button>
+                      </form>
+                    </div>
+                  )
+                }
+                {
+                  activeTab === 'mine' && (
+                    <form method="post" class="mt-3" onsubmit={`return confirm(${JSON.stringify(t(locale, 'portal.prayer.deleteConfirm'))})`}>
+                      <input type="hidden" name="_action" value="delete" />
+                      <input type="hidden" name="item_id" value={item.id} />
+                      <input type="hidden" name="tab" value="mine" />
+                      <button type="submit" class="text-danger hover:underline">
+                        {t(locale, 'portal.prayer.delete')}
+                      </button>
+                    </form>
+                  )
+                }
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</Base>

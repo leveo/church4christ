@@ -40,8 +40,14 @@ try {
   const registrationStatements = existsSync('seed/registration-seed.sql')
     ? seedStatements(readFileSync('seed/registration-seed.sql', 'utf8'))
     : [];
+  // Portal-only tables (group_files, event_admins, prayer_items) are absent
+  // from D1, so their rows live in a dedicated Postgres seed. It must follow
+  // registration-seed.sql because event fixtures reference registration events.
+  const portalStatements = existsSync('seed/portal-seed.sql')
+    ? seedStatements(readFileSync('seed/portal-seed.sql', 'utf8'))
+    : [];
   await sql.begin(async (tx) => {
-    for (const statement of [...statements, ...givingStatements, ...registrationStatements]) {
+    for (const statement of [...statements, ...givingStatements, ...registrationStatements, ...portalStatements]) {
       await tx.unsafe(statement);
     }
     // The seed inserts explicit ids, which never advances the identity
@@ -56,7 +62,7 @@ try {
       );
     }
   });
-  console.log(`seeded ${statements.length + givingStatements.length + registrationStatements.length} statements`);
+  console.log(`seeded ${statements.length + givingStatements.length + registrationStatements.length + portalStatements.length} statements`);
 } catch (err) {
   console.error(err);
   process.exitCode = 1;
