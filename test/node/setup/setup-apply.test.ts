@@ -98,8 +98,22 @@ describe('concrete provider actions', () => {
     } };
     const plan: any = { backend: 'supabase', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'old-media', hyperdriveId: 'stale' } };
     const step = createResourceStep({ plan, runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', dbUrl: 'postgres://u:p@db.test/church', verify: async () => true });
-    await expect(step.apply()).rejects.toThrow(/explicitly confirm/i);
+    await expect(step.apply()).rejects.toThrow(/imported Hyperdrive.*refusing.*replacement/i);
     expect(order).toEqual(['hyperdrive list --config']);
+  });
+
+  it('preserves imported D1 and R2 names while re-resolving stale IDs', async () => {
+    const calls: string[][] = [];
+    const runner = { run: async (_file: string, args: string[]) => {
+      calls.push(args);
+      if (args.slice(0, 2).join(' ') === 'd1 list') return { stdout: JSON.stringify([{ name: 'imported-db', uuid: 'fresh-id' }]), stderr: '', exitCode: 0 };
+      if (args.slice(0, 3).join(' ') === 'r2 bucket info') return { stdout: JSON.stringify({ name: 'imported-media' }), stderr: '', exitCode: 0 };
+      throw new Error(`unexpected ${args.join(' ')}`);
+    } };
+    const plan: any = { backend: 'd1', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: 'imported-db', d1DatabaseId: 'stale-id', r2BucketName: 'imported-media', hyperdriveId: null } };
+    const step = createResourceStep({ plan, runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', verify: async () => true });
+    await expect(step.apply()).resolves.toMatchObject({ resolvedResources: { d1DatabaseName: 'imported-db', d1DatabaseId: 'fresh-id', r2BucketName: 'imported-media' } });
+    expect(calls.some((args) => args.includes('church-db') || args.includes('church-media'))).toBe(false);
   });
 });
 
@@ -155,15 +169,26 @@ describe('setup secrets', () => {
     expect(JSON.stringify(result)).not.toContain(calls[1][2].input.trim());
   });
 
-  it('treats only Wrangler 4.107 fresh-worker output as an empty secret list', async () => {
-    const fresh = 'Worker "new-site" not found.\n\nIf this is a new Worker, run `wrangler deploy` first to create it.\nOtherwise, check that the Worker name is correct and you\'re logged into the right account.';
+  it('normalizes only the exact Wrangler 4.107 fresh-worker stderr presentation', async () => {
+    const fresh = '\u001b[31m✘ [ERROR]\u001b[0m Worker "new-site" not found.\n\n  If this is a new Worker, run `wrangler deploy` first to create it.\n  Otherwise, check that the Worker name is correct and you\'re logged into the right account.\n\n\u001b[90m🪵  Logs were written to "/tmp/wrangler.log"\u001b[0m';
     const calls: any[] = [];
     const runner = { run: async (...args: any[]) => { calls.push(args); return calls.length === 1 ? { stdout: '', stderr: fresh, exitCode: 1 } : { stdout: '', stderr: '', exitCode: 0 }; } };
     await configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' });
     expect(calls[0][2]).toMatchObject({ allowNonzero: true });
+    expect(calls[0][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
+    expect(calls[1][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
     expect(calls).toHaveLength(2);
     const denied = { run: async () => ({ stdout: '', stderr: 'Authentication error [code: 10000]', exitCode: 1 }) };
     await expect(configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner: denied, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' })).rejects.toThrow(/secret list failed/i);
+    for (const nearMiss of [
+      fresh.replace('run `wrangler deploy` first', 'deploy it first'),
+      `${fresh}\nAuthentication error [code: 10000]`,
+      fresh.replace('🪵  Logs were written to', 'unexpected trailer'),
+      fresh.replace('\u001b[31m', '\u001b]0;unsafe\u0007'),
+    ]) {
+      const bad = { run: async () => ({ stdout: '', stderr: nearMiss, exitCode: 1 }) };
+      await expect(configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner: bad, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' })).rejects.toThrow(/secret list failed/i);
+    }
   });
 
   it('passes the originally read .dev.vars bytes as expectedContent', async () => {

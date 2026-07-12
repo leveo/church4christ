@@ -8,8 +8,10 @@ export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-reso
 
 function validateResolvedResources(resources, plan) {
   validateProviderResources(resources, plan.backend, { requireBindingIds: true });
-  if (typeof plan.site?.slug !== 'string' || resources.r2BucketName !== `${plan.site.slug}-media`) throw new Error('Resolved R2 resource name does not match the setup plan');
-  if (plan.backend === 'd1' && resources.d1DatabaseName !== `${plan.site.slug}-db`) throw new Error('Resolved D1 resource name does not match the setup plan');
+  const expectedR2 = plan.resources?.r2BucketName ?? `${plan.site?.slug}-media`;
+  const expectedD1 = plan.resources?.d1DatabaseName ?? `${plan.site?.slug}-db`;
+  if (typeof plan.site?.slug !== 'string' || resources.r2BucketName !== expectedR2) throw new Error('Resolved R2 resource name does not match the setup plan');
+  if (plan.backend === 'd1' && resources.d1DatabaseName !== expectedD1) throw new Error('Resolved D1 resource name does not match the setup plan');
   return resources;
 }
 
@@ -81,8 +83,8 @@ export function createResourceStep(options) {
   return providerStep(async () => {
     const { plan } = options;
     const names = {
-      d1DatabaseName: `${plan.site.slug}-db`,
-      r2BucketName: `${plan.site.slug}-media`,
+      d1DatabaseName: plan.resources?.d1DatabaseName ?? `${plan.site.slug}-db`,
+      r2BucketName: plan.resources?.r2BucketName ?? `${plan.site.slug}-media`,
     };
     if (plan.resources) validateProviderResources(plan.resources, plan.backend);
     if (plan.mode === 'local') {
@@ -108,7 +110,17 @@ export function createResourceStep(options) {
       try { if (/[\0-\x1f\x7f]/.test(decodeURIComponent(component))) throw new Error(); }
       catch { throw new Error('Supabase database URL is invalid'); }
     }
-    const hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+    let hyperdrive;
+    if (plan.resources?.hyperdriveId) {
+      try {
+        hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db` });
+      } catch (error) {
+        if (/connection string is required/i.test(String(error))) throw new Error('Imported Hyperdrive ID cannot be reconciled by name; refusing to create a replacement');
+        throw error;
+      }
+    } else {
+      hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+    }
     const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
     return { changed: bucket.created || hyperdrive.created, resolvedResources: Object.freeze({ d1DatabaseName: null, d1DatabaseId: null, r2BucketName: bucket.name, hyperdriveId: hyperdrive.id }) };
   }, options.verify, 'ensure-resources');

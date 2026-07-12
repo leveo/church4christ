@@ -7,6 +7,8 @@ import { writeAtomic } from './files.mjs';
 const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL']);
 const KEY = /^[A-Z][A-Z0-9_]*$/;
 const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE';
+const WRANGLER_ENV = Object.freeze({ ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' });
+const FRESH_WORKER = /^Worker "[A-Za-z0-9][A-Za-z0-9_-]*"(?: \(env: [A-Za-z0-9_-]+\))? not found\.\n\nIf this is a new Worker, run `wrangler deploy` first to create it\.\nOtherwise, check that the Worker name is correct and you're logged into the right account\.$/;
 
 function parseDevVars(content) {
   const found = new Map();
@@ -51,6 +53,22 @@ function parseSecretList(stdout) {
   return names;
 }
 
+function isFreshWorkerError(stderr) {
+  if (typeof stderr !== 'string') return false;
+  const withoutSgr = stderr.replace(/\u001b\[[0-9;]*m/g, '').replaceAll('\r\n', '\n');
+  if (/\u001b|[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(withoutSgr)) return false;
+  const lines = withoutSgr.trim().split('\n');
+  const logLine = /^🪵  Logs were written to "[^"\n]+"$/;
+  if (logLine.test(lines.at(-1) ?? '')) {
+    lines.pop();
+    while ((lines.at(-1) ?? '').trim() === '') lines.pop();
+  }
+  if (!lines[0]?.startsWith('✘ [ERROR] ')) return false;
+  lines[0] = lines[0].slice('✘ [ERROR] '.length);
+  const normalized = lines.map((line, index) => index > 0 && line.startsWith('  ') ? line.slice(2) : line).join('\n');
+  return FRESH_WORKER.test(normalized);
+}
+
 export async function configureSecrets(options) {
   const adminEmail = normalizeEmail(options?.adminEmail, 'admin email');
   if (options?.mode === 'local') {
@@ -74,17 +92,16 @@ export async function configureSecrets(options) {
   if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
   if (typeof options.wranglerBin !== 'string' || !options.wranglerBin) throw new TypeError('wranglerBin is required');
   if (typeof options.configPath !== 'string' || !options.configPath) throw new TypeError('configPath is required');
-  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true });
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
   let names;
   if (listed.exitCode === 0) {
     names = parseSecretList(listed.stdout);
   } else {
-    const freshWorker = /^Worker "[A-Za-z0-9][A-Za-z0-9_-]*"(?: \(env: [A-Za-z0-9_-]+\))? not found\.\n\nIf this is a new Worker, run `wrangler deploy` first to create it\.\nOtherwise, check that the Worker name is correct and you're logged into the right account\.$/;
-    if (listed.stdout !== '' || !freshWorker.test(listed.stderr.trim())) throw new Error('Wrangler secret list failed; refusing to assume a fresh Worker');
+    if (listed.stdout !== '' || !isFreshWorkerError(listed.stderr)) throw new Error('Wrangler secret list failed; refusing to assume a fresh Worker');
     names = new Set();
   }
   if (names.has('SESSION_SECRET')) return Object.freeze({ changed: false, configured: [] });
   const sessionSecret = randomBytes(32).toString('base64url');
-  await options.runner.run(options.wranglerBin, ['secret', 'put', 'SESSION_SECRET', '--config', options.configPath], { input: `${sessionSecret}\n` });
+  await options.runner.run(options.wranglerBin, ['secret', 'put', 'SESSION_SECRET', '--config', options.configPath], { input: `${sessionSecret}\n`, env: WRANGLER_ENV });
   return Object.freeze({ changed: true, configured: ['SESSION_SECRET'] });
 }
