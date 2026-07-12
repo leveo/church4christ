@@ -61,12 +61,13 @@ describe('parseSetupArgs', () => {
   });
 
   it('collects repeated and comma-separated module flags', () => {
-    expect(
-      parseSetupArgs(
-        ['--modules', 'sermons, events', '--modules', 'sermons', '--modules', 'articles'],
-        raw,
-      ).modules,
-    ).toEqual(['sermons', 'events', 'articles']);
+    const parsed = parseSetupArgs(
+      ['--modules', 'sermons, events', '--modules', 'sermons', '--modules', 'articles'],
+      raw,
+    );
+    expect(parsed).toHaveProperty('modules');
+    if (!('modules' in parsed)) throw new Error('expected setup answers');
+    expect(parsed.modules).toEqual(['sermons', 'events', 'articles']);
   });
 
   it.each([

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import raw from '../../../config/capabilities.json';
+import { normalizeSetupAnswers } from '../../../scripts/setup/answers.mjs';
 import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 
 const base = {
@@ -106,10 +107,50 @@ describe('buildSetupPlan', () => {
     [{ appOrigin: 'https://user:password@church.example' }, /app-origin.*HTTPS origin/i],
     [{ appOrigin: 'postgres://user:do-not-leak-this@db.example/church' }, /app-origin.*HTTPS origin/i],
     [{ backendOverride: 'sqlite' }, /backend.*d1.*supabase/i],
-    [{ databaseUrl: 'postgres://user:do-not-leak-this@db.example/church' }, /secret.*databaseUrl/i],
-    [{ integration: { secretKey: 'do-not-leak-this' } }, /secret.*secretKey/i],
   ])('rejects invalid direct plan answer %#', (change, message) => {
     expect(() => buildSetupPlan({ ...base, preset: 'website', ...change }, raw)).toThrow(message);
+  });
+
+  it.each(['false', 0, 1, {}, []])('rejects non-boolean demoData value %#', (demoData) => {
+    expect(() => buildSetupPlan({ ...base, preset: 'website', demoData }, raw)).toThrow(
+      /demoData.*boolean/i,
+    );
+  });
+
+  it('returns only normalized answer fields and defaults demoData to false', () => {
+    const normalized = normalizeSetupAnswers(
+      {
+        mode: 'local',
+        preset: 'website',
+        siteSlug: 'grace-church',
+        churchName: 'Grace Church',
+        locale: 'en',
+        adminEmail: 'admin@example.com',
+        adminName: 'Grace Admin',
+        databaseUrl: 'postgres://user:do-not-leak-this@db.example/church',
+        integration: { secretKey: 'do-not-leak-this' },
+      },
+      raw,
+    );
+    expect(normalized.demoData).toBe(false);
+    expect(normalized).not.toHaveProperty('databaseUrl');
+    expect(normalized).not.toHaveProperty('integration');
+    expect(Object.keys(normalized).sort()).toEqual(
+      [
+        'adminEmail',
+        'adminName',
+        'appOrigin',
+        'backendOverride',
+        'churchName',
+        'demoData',
+        'emailFrom',
+        'locale',
+        'mode',
+        'modules',
+        'preset',
+        'siteSlug',
+      ].sort(),
+    );
   });
 
   it('rejects conflicting or unknown direct feature selections', () => {

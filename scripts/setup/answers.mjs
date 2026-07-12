@@ -1,6 +1,5 @@
 const EMAIL_LOCAL = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/;
 const EMAIL_DOMAIN_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
-const SECRET_FIELD = /^(?:password|secret(?:[_-]?key)?|api[_-]?key|stripe[_-]?key|connection[_-]?string|database[_-]?url)$/i;
 
 const isPresent = (value) => typeof value === 'string' ? value.trim().length > 0 : value != null;
 
@@ -59,24 +58,13 @@ function normalizeOrigin(value) {
   return url.origin;
 }
 
-function findSecretField(value, path = '', seen = new WeakSet()) {
-  if (!value || typeof value !== 'object' || seen.has(value)) return undefined;
-  seen.add(value);
-  for (const [key, child] of Object.entries(value)) {
-    const childPath = path ? `${path}.${key}` : key;
-    if (SECRET_FIELD.test(key)) return childPath;
-    const nested = findSecretField(child, childPath, seen);
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
 export function normalizeSetupAnswers(input, catalog) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('Setup answers must be an object');
   }
-  const secretField = findSecretField(input);
-  if (secretField) throw new Error(`Setup answers must not contain secret field: ${secretField}`);
+  if (input.demoData !== undefined && typeof input.demoData !== 'boolean') {
+    throw new Error('demoData must be a boolean');
+  }
 
   const mode = optionalIdentifier(input.mode, '--mode');
   const preset = optionalIdentifier(input.preset, '--preset');
@@ -116,7 +104,6 @@ export function normalizeSetupAnswers(input, catalog) {
   }
 
   return {
-    ...input,
     mode,
     preset,
     modules,
@@ -128,6 +115,7 @@ export function normalizeSetupAnswers(input, catalog) {
     appOrigin: normalizeOrigin(input.appOrigin),
     emailFrom: normalizeEmail(input.emailFrom, '--email-from'),
     backendOverride,
+    demoData: input.demoData ?? false,
   };
 }
 
