@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { readdir } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import raw from '../../../config/capabilities.json';
-import { buildHandoff, buildServicePresence, inspectExistingInstallation, readMaskedInput } from '../../../scripts/setup/index.mjs';
+import { buildHandoff, buildServicePresence, inspectExistingInstallation, readMaskedInput, resolveDoctorDatabaseUrl } from '../../../scripts/setup/index.mjs';
 import { probeDeployResources, probeR2Object, parseWorkerDeployments } from '../../../scripts/setup/probes.mjs';
 import { hasDeploySecret } from '../../../scripts/setup/secrets.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from '../../../scripts/setup/verification.mjs';
@@ -11,6 +11,7 @@ import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/setup/checks/database.mjs';
 import { verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
 import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
+import { redact } from '../../../scripts/setup/redact.mjs';
 
 function statementDb(rows: Record<string, any>) {
   return { prepare(sql: string) { return { bind() { return this; }, async first() { return rows[sql] ?? null; }, async all() { return { success: true, meta: {}, results: rows[sql] ?? [] }; } }; } };
@@ -174,5 +175,13 @@ describe('runtime setup hardening', () => {
   it('documents both banner-free JSON invocations', () => {
     expect(SETUP_HELP).toContain('node scripts/setup/index.mjs [options] --json');
     expect(SETUP_HELP).toContain('npm run --silent setup -- [options] --json');
+  });
+
+  it('resolves the canonical local Hyperdrive URL for doctor and keeps it redactable', () => {
+    const canonical = 'postgres://doctor:secret@db.example.test/church';
+    expect(resolveDoctorDatabaseUrl({ mode: 'local', database: 'supabase' } as any, { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toBe(canonical);
+    expect(resolveDoctorDatabaseUrl({ mode: 'local', database: 'supabase' } as any, { SUPABASE_DB_URL: 'postgres://preferred:secret@db.example.test/church', CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toContain('preferred');
+    expect(resolveDoctorDatabaseUrl({ mode: 'deploy', database: 'supabase' } as any, { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toBeUndefined();
+    expect(JSON.stringify(redact({ message: `failed ${canonical}` }, [canonical]))).not.toContain(canonical);
   });
 });

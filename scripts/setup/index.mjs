@@ -150,6 +150,14 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
   };
 }
 
+/** @param {any} manifest @param {Record<string, string | undefined>} [environment] */
+export function resolveDoctorDatabaseUrl(manifest, environment = process.env) {
+  if (manifest?.database !== 'supabase') return undefined;
+  if (environment.SUPABASE_DB_URL) return environment.SUPABASE_DB_URL;
+  if (manifest.mode === 'local') return environment.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE;
+  return undefined;
+}
+
 const step = (apply, verify) => Object.freeze({ apply, verify });
 const exists = async (path) => {
   try { return await readFile(path, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
@@ -446,11 +454,12 @@ async function createDefaultDeps() {
     const root = resolve(process.cwd());
     const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
     const configPath = resolve(root, 'wrangler.jsonc');
+    const doctorDbUrl = resolveDoctorDatabaseUrl(manifest, process.env);
     if (manifest?.database === 'd1') {
       runner = createCommandRunner();
       db = new D1CliDb({ runner, wranglerBin, configPath, mode: manifest.mode, ...(manifest.mode === 'local' && process.env.WRANGLER_PERSIST_TO ? { persistTo: process.env.WRANGLER_PERSIST_TO } : {}) });
-    } else if (manifest?.database === 'supabase' && process.env.SUPABASE_DB_URL) {
-      connection = openPostgresSetupDb(process.env.SUPABASE_DB_URL);
+    } else if (manifest?.database === 'supabase' && doctorDbUrl) {
+      connection = openPostgresSetupDb(doctorDbUrl);
       db = connection.db;
     }
     try {
@@ -459,7 +468,7 @@ async function createDefaultDeps() {
         checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
         checkDatabase: () => {
           if (!db) throw new Error('database connection is unavailable');
-          return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: process.env.SUPABASE_DB_URL ? [process.env.SUPABASE_DB_URL] : [] });
+          return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: doctorDbUrl ? [doctorDbUrl] : [] });
         },
         checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false }) }),
       }, { strict });
