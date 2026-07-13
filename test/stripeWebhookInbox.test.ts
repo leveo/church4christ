@@ -222,6 +222,57 @@ describe('sanitizeStripeDiagnostic', () => {
     expect(safe).not.toMatch(/[\u0000-\u001f\u007f]/);
   });
 
+  it('guards a throwing name accessor on an Error instance', () => {
+    const secret = 'HOSTILE NAME ACCESSOR';
+    const error = new Error('safe message');
+    Object.defineProperty(error, 'name', {
+      get() {
+        throw new Error(secret);
+      },
+    });
+
+    let safe = '';
+    expect(() => {
+      safe = sanitizeStripeDiagnostic(error, [secret]);
+    }).not.toThrow();
+    expect(safe).toBe('Error: safe message');
+    expect(safe).not.toContain(secret);
+  });
+
+  it('guards a throwing message accessor on an Error subclass', () => {
+    const secret = 'HOSTILE MESSAGE ACCESSOR';
+    class HostileMessageError extends Error {
+      get message(): string {
+        throw new Error(secret);
+      }
+    }
+    const error = new HostileMessageError();
+
+    let safe = '';
+    expect(() => {
+      safe = sanitizeStripeDiagnostic(error, [secret]);
+    }).not.toThrow();
+    expect(safe).toBe('Error');
+    expect(safe).not.toContain(secret);
+  });
+
+  it('guards hostile name and message reads through an Error proxy', () => {
+    const secret = 'HOSTILE ERROR PROXY';
+    const error = new Proxy(new Error(), {
+      get(target, property, receiver) {
+        if (property === 'name' || property === 'message') throw new Error(secret);
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    let safe = '';
+    expect(() => {
+      safe = sanitizeStripeDiagnostic(error, [secret]);
+    }).not.toThrow();
+    expect(safe).toBe('Error');
+    expect(safe).not.toContain(secret);
+  });
+
   it('redacts every supplied nonempty secret longest-first and common encoded forms', () => {
     const short = 'xy';
     const secret = 's3cr et/雪';

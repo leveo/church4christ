@@ -146,9 +146,9 @@ function readStringField(value: object, key: string): string | undefined {
 
 function diagnosticText(error: unknown): string {
   if (error instanceof Error) {
-    const name = error.name || 'Error';
+    const name = readStringField(error, 'name') ?? 'Error';
     const code = readStringField(error, 'code');
-    const message = error.message;
+    const message = readStringField(error, 'message');
     const classification = code ? `${name} [${code}]` : name;
     return message ? `${classification}: ${message}` : classification;
   }
