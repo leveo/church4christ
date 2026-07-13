@@ -168,3 +168,24 @@ export async function applyMediaPlan({ mediaPlan, db, uploadObject }) {
     await rm(staging, { recursive: true, force: true });
   }
 }
+
+export async function verifyMediaPlan({ mediaPlan, db, objectExists }) {
+  if (!mediaPlan || !Array.isArray(mediaPlan.assets) || !db || typeof db.prepare !== 'function' || typeof objectExists !== 'function') {
+    throw new TypeError('media verification dependencies are required');
+  }
+  try {
+    for (const asset of mediaPlan.assets) {
+      const media = await db.prepare('SELECT r2_key, filename, content_type, size, uploaded_by FROM media WHERE r2_key=?').bind(asset.key).first();
+      if (!media || media.r2_key !== asset.key || media.filename !== asset.file || media.content_type !== asset.contentType ||
+          Number(media.size) !== asset.size || media.uploaded_by !== mediaPlan.uploadedBy) return false;
+      let target;
+      if (asset.target.type === 'setting') target = await db.prepare('SELECT value FROM settings WHERE key=?').bind(asset.target.key).first();
+      else if (asset.target.type === 'event') target = await db.prepare('SELECT image_key AS value FROM events WHERE id=?').bind(asset.target.id).first();
+      else if (asset.target.type === 'ministry') target = await db.prepare('SELECT cover_key AS value FROM ministries WHERE id=?').bind(asset.target.id).first();
+      else target = await db.prepare('SELECT avatar_url AS value FROM people WHERE id=?').bind(asset.target.id).first();
+      const expected = asset.target.type === 'person' ? `/media/${asset.key}` : asset.key;
+      if (target?.value !== expected || !await objectExists(asset.key)) return false;
+    }
+    return true;
+  } catch { return false; }
+}

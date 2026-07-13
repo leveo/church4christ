@@ -1,6 +1,6 @@
 import { result } from '../readiness.mjs';
 
-const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'hyperdrive', 'email', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
+const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
 const SUPPORTED_REQUIRED = new Set(['worker', 'r2', 'hyperdrive', 'email', 'stripe']);
 
 export async function checkServices(options) {
@@ -8,10 +8,11 @@ export async function checkServices(options) {
     throw new TypeError('services check catalog and manifest are required');
   }
   if (!options.presence || typeof options.presence !== 'object' || Array.isArray(options.presence)) throw new TypeError('services presence is required');
-  const actualPresence = Object.keys(options.presence).sort();
+  const supplied = { emailConfigured: false, ...options.presence };
+  const actualPresence = Object.keys(supplied).sort();
   if (actualPresence.join('|') !== [...PRESENCE_KEYS].sort().join('|')) throw new TypeError('services presence fields are invalid');
   for (const key of PRESENCE_KEYS) {
-    if (typeof options.presence[key] !== 'boolean') throw new TypeError(`services presence.${key} must be a boolean`);
+    if (typeof supplied[key] !== 'boolean') throw new TypeError(`services presence.${key} must be a boolean`);
   }
   const selected = new Set(options.manifest.modules);
   if ([...selected].some((key) => !Object.hasOwn(options.catalog.capabilities, key))) throw new TypeError('services manifest contains an unknown capability');
@@ -43,10 +44,12 @@ export async function checkServices(options) {
       : result('services.hyperdrive', 'error', 'The required Hyperdrive connection is unavailable.', 'Create and bind HYPERDRIVE for the Supabase provider.'));
   }
 
-  if (options.manifest.mode === 'local' && options.presence.emailDevLog) {
+  if (options.manifest.mode === 'local' && supplied.emailDevLog) {
     checks.push(result('services.email-dev', 'info', 'Local email delivery is using the development log.', 'Use a production email binding before deployment.'));
-  } else if (options.presence.email) {
+  } else if (supplied.email) {
     checks.push(result('services.email-ok', 'info', 'Email delivery is configured.', 'No action is required.'));
+  } else if (supplied.emailConfigured) {
+    checks.push(result('services.email-unverified', required.has('email') ? 'error' : 'warning', 'An email sender is configured, but live delivery could not be verified.', 'Verify the production email binding and send a delivery test before relying on notifications or sign-in email.'));
   } else {
     checks.push(result('services.email', required.has('email') ? 'error' : 'warning', 'Production email delivery is not configured.', 'Configure the EMAIL binding before relying on notifications or sign-in email.'));
   }

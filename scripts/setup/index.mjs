@@ -21,8 +21,10 @@ import { createStateStore } from './state.mjs';
 import { writeAtomic, GENERATED_MARKER } from './files.mjs';
 import { renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { configureSecrets } from './secrets.mjs';
-import { applyMediaPlan, loadMediaPlan } from './media.mjs';
+import { configureSecrets, hasDeploySecret } from './secrets.mjs';
+import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
+import { probeDeployResources, probeR2Object } from './probes.mjs';
+import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -72,8 +74,17 @@ export function formatDoctor(doctor) {
 }
 
 export function formatResult(result) {
-  const doctor = result.doctor ? `Readiness: ${result.doctor.status}` : 'Readiness was not returned.';
-  return [`Setup finished.`, doctor].join('\n');
+  if (!result?.doctor || !result.handoff) return 'Setup did not return readiness and handoff details; rerun doctor and inspect stderr.';
+  const handoff = result.handoff;
+  return [
+    'Setup finished.',
+    formatDoctor(result.doctor),
+    `Next command: ${handoff.startCommand}`,
+    `Site URL: ${handoff.url}`,
+    `Sign-in email: ${handoff.adminEmail}`,
+    `Enabled capabilities: ${handoff.capabilities.join(', ')}`,
+    `Optional integration limitations: ${handoff.limitations.length ? handoff.limitations.join(', ') : 'none'}`,
+  ].join('\n');
 }
 
 export function createPlanPreview({ output, errorOutput }) {
@@ -95,12 +106,19 @@ export async function collectSupabaseSecret(options = {}) {
   return Object.freeze({ dbUrl });
 }
 
-function servicePresence(manifest) {
+async function servicePresence(manifest, probeOptions = {}) {
+  let live = { worker: false, r2: false, hyperdrive: false };
+  if (manifest?.mode === 'local') {
+    live = { worker: true, r2: Boolean(manifest?.resources?.r2BucketName), hyperdrive: manifest?.database !== 'supabase' || Boolean(manifest?.resources?.hyperdriveId) };
+  } else if (manifest?.mode === 'deploy' && probeOptions.runner) {
+    try { live = await probeDeployResources({ ...probeOptions, manifest }); } catch {}
+  }
   return {
-    worker: Boolean(manifest),
-    r2: Boolean(manifest?.resources?.r2BucketName),
-    hyperdrive: manifest?.database !== 'supabase' || Boolean(manifest?.resources?.hyperdriveId),
-    email: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
+    worker: live.worker,
+    r2: live.r2,
+    hyperdrive: manifest?.database !== 'supabase' || live.hyperdrive,
+    email: false,
+    emailConfigured: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
     emailDevLog: manifest?.mode === 'local',
     stripeSecretKey: Boolean(process.env.STRIPE_SECRET_KEY),
     stripeWebhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
@@ -132,12 +150,8 @@ async function applyDefaultSetup(plan, options, catalog) {
   let latestDoctor;
 
   const verify = {
-    migrate: async () => {
-      try { await db.prepare('SELECT 1 FROM settings LIMIT 1').first(); return true; } catch { return false; }
-    },
-    seed: async () => {
-      try { return Boolean(await db.prepare('SELECT id FROM people WHERE lower(email)=?').bind('admin@example.com').first()); } catch { return false; }
-    },
+    migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
+    seed: () => verifyCanonicalDemoSeed(db),
     'initialize-modules': async ({ plan: activePlan }) => {
       try {
         const rows = (await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'module.%'").all()).results;
@@ -180,13 +194,17 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: () => checkServices({ catalog, manifest, presence: servicePresence(manifest) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await servicePresence(manifest, { runner, wranglerBin, configPath }) }),
     }, { strict: false });
   };
 
   const steps = {
     'verify-provider': step(async () => ({ changed: false }), async () => true),
-    'ensure-resources': createResourceStep({ plan, runner, wranglerBin, configPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async ({ resources }) => Boolean(resources?.r2BucketName && (plan.backend === 'd1' ? resources.d1DatabaseId : resources.hyperdriveId)) }),
+    'ensure-resources': createResourceStep({ plan, runner, wranglerBin, configPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async ({ plan: activePlan, resources }) => {
+      if (!resources?.r2BucketName || !(activePlan.backend === 'd1' ? resources.d1DatabaseId : resources.hyperdriveId)) return false;
+      if (activePlan.mode === 'local') return true;
+      try { await probeDeployResources({ runner, wranglerBin, configPath, manifest: JSON.parse(renderManifest({ ...activePlan, resources }, catalog)), probeWorker: false }); return true; } catch { return false; }
+    } }),
     'write-manifest': step(async ({ plan: activePlan }) => {
       desiredManifest = renderManifest(activePlan, catalog);
       const current = await exists(manifestPath);
@@ -215,16 +233,21 @@ async function applyDefaultSetup(plan, options, catalog) {
       return await exists(configPath) === desiredConfig;
     }),
     'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath }), async ({ plan: activePlan }) => {
-      if (activePlan.mode === 'deploy') return true;
+      if (activePlan.mode === 'deploy') return hasDeploySecret({ runner, wranglerBin, configPath, name: 'SESSION_SECRET' });
       const content = await exists(resolve(root, '.dev.vars')) ?? '';
       return ['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL'].every((key) => new RegExp(`^${key}=.+$`, 'm').test(content));
     }),
     ...providerSteps,
-    'seed-media': step(async () => {
+    'seed-media': step(async ({ plan: activePlan }) => {
       const mediaPlan = loadMediaPlan({ root });
-      return applyMediaPlan({ mediaPlan, db, uploadObject: ({ key, filePath, contentType }) => runner.run(wranglerBin, ['r2', 'object', 'put', `${plan.site.slug}-media/${key}`, '--file', filePath, '--content-type', contentType, ...(plan.mode === 'local' ? ['--local'] : []), '--config', configPath]) });
-    }, async () => true),
-    doctor: step(async ({ plan: activePlan }) => { latestDoctor = await runInstallationDoctor(activePlan); return { changed: false }; }, async ({ plan: activePlan }) => { latestDoctor ??= await runInstallationDoctor(activePlan); return latestDoctor.exitCode === 0; }),
+      const bucket = activePlan.resources?.r2BucketName ?? `${activePlan.site.slug}-media`;
+      return applyMediaPlan({ mediaPlan, db, uploadObject: ({ key, filePath, contentType }) => runner.run(wranglerBin, ['r2', 'object', 'put', `${bucket}/${key}`, '--file', filePath, '--content-type', contentType, activePlan.mode === 'local' ? '--local' : '--remote', '--config', configPath]) });
+    }, async ({ plan: activePlan }) => {
+      const mediaPlan = loadMediaPlan({ root });
+      const bucket = activePlan.resources?.r2BucketName ?? `${activePlan.site.slug}-media`;
+      return verifyMediaPlan({ mediaPlan, db, objectExists: (key) => probeR2Object({ runner, wranglerBin, configPath, bucket, key, mode: activePlan.mode }) });
+    }),
+    doctor: step(async ({ plan: activePlan }) => { latestDoctor = await runInstallationDoctor(activePlan); return { changed: false }; }, async ({ plan: activePlan }) => { latestDoctor ??= await runInstallationDoctor(activePlan); return true; }),
   };
 
   try {
@@ -232,7 +255,23 @@ async function applyDefaultSetup(plan, options, catalog) {
     latestDoctor ??= await runInstallationDoctor(plan);
     const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
     const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
-    return { backend: plan.backend, enabledModules: plan.modules, moduleRows, admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' }, apply: applied, doctor: latestDoctor };
+    const limitations = latestDoctor.checks.filter((check) => check.severity === 'warning').map((check) => check.code);
+    return {
+      backend: plan.backend,
+      enabledModules: plan.modules,
+      moduleRows,
+      admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' },
+      apply: applied,
+      doctor: latestDoctor,
+      handoff: {
+        mode: plan.mode,
+        url: plan.site.appOrigin,
+        adminEmail: plan.adminEmail,
+        capabilities: plan.modules,
+        startCommand: plan.mode === 'local' ? 'npm run dev' : 'npm run deploy',
+        limitations,
+      },
+    };
   } finally {
     await postgresConnection?.close();
   }
@@ -269,7 +308,7 @@ export async function runSetup(argv, deps) {
   }
 
   requireDeps(deps, ['inspectExisting', 'formatPlan']);
-  const currentState = await deps.inspectExisting({ dryRun: parsed.dryRun });
+  const currentState = await deps.inspectExisting({ dryRun: parsed.dryRun, requestedMode: answers.mode });
   const plan = buildSetupPlan(answers, deps.catalog, currentState);
   if (parsed.dryRun) {
     deps.output(parsed.json
@@ -308,41 +347,59 @@ export async function runSetup(argv, deps) {
   return result.doctor?.exitCode ?? 0;
 }
 
-async function readMaskedInput(input, output, message) {
+export async function readMaskedInput(input, output, message) {
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== 'function') {
     throw new Error('SUPABASE_DB_URL is required in the environment for noninteractive setup');
   }
+  const wasRaw = Boolean(input.isRaw);
+  const wasPaused = typeof input.isPaused === 'function' ? input.isPaused() : true;
   output.write(`${message}: `);
-  input.setRawMode(true);
-  input.resume();
-  input.setEncoding('utf8');
   let value = '';
+  let rawChanged = false;
   try {
+    input.setRawMode(true);
+    rawChanged = true;
+    input.resume();
     return await new Promise((resolve, reject) => {
       const onData = (chunk) => {
-        for (const character of chunk) {
+        for (const character of String(chunk)) {
           if (character === '\u0003') { cleanup(); reject(new Error('Setup cancelled')); return; }
           if (character === '\r' || character === '\n') { cleanup(); output.write('\n'); resolve(value); return; }
           if (character === '\u007f' || character === '\b') value = value.slice(0, -1);
           else value += character;
         }
       };
-      const cleanup = () => input.off('data', onData);
+      const onEnd = () => { cleanup(); reject(new Error('Masked input stream ended before a value was submitted')); };
+      const onError = (error) => { cleanup(); reject(new Error(`Masked input stream failed: ${error instanceof Error ? error.message : String(error)}`)); };
+      const cleanup = () => { input.off('data', onData); input.off('end', onEnd); input.off('error', onError); };
       input.on('data', onData);
+      input.once('end', onEnd);
+      input.once('error', onError);
     });
   } finally {
-    input.setRawMode(false);
-    input.pause();
+    if (rawChanged) input.setRawMode(wasRaw);
+    if (wasPaused) input.pause();
   }
+}
+
+export function inspectExistingInstallation(manifest, requestedMode) {
+  if (!manifest || typeof manifest !== 'object' || !['local', 'deploy'].includes(requestedMode)) return {};
+  const state = { existingBackend: manifest.database, existingMode: manifest.mode };
+  if (manifest.mode === requestedMode && manifest.resources && typeof manifest.resources === 'object') {
+    state.resources = { ...manifest.resources };
+  }
+  return state;
 }
 
 async function createDefaultDeps() {
   const catalog = JSON.parse(await readFile(new URL('../../config/capabilities.json', import.meta.url), 'utf8'));
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const jsonMode = process.argv.includes('--json');
+  const uiOutput = jsonMode ? process.stderr : process.stdout;
+  const interactive = Boolean(process.stdin.isTTY && uiOutput.isTTY);
   let readline;
   const getReadline = () => {
     if (!interactive) throw new Error('Interactive questions require a TTY');
-    readline ??= createInterface({ input: process.stdin, output: process.stdout });
+    readline ??= createInterface({ input: process.stdin, output: uiOutput });
     return readline;
   };
   const ask = async (question) => {
@@ -353,10 +410,10 @@ async function createDefaultDeps() {
     if (answer === 'false' || answer === 'no' || answer === 'n') return false;
     return answer.trim();
   };
-  const inspectExisting = async () => {
+  const inspectExisting = async ({ requestedMode }) => {
     try {
-      const manifest = JSON.parse(await readFile('church.config.json', 'utf8'));
-      return { existingBackend: manifest.database, resources: manifest.resources };
+      const manifest = validateManifest(JSON.parse(await readFile('church.config.json', 'utf8')), catalog);
+      return inspectExistingInstallation(manifest, requestedMode);
     } catch (error) {
       if (error?.code === 'ENOENT') return {};
       throw new Error(`Existing church.config.json could not be read: ${error instanceof Error ? error.message : String(error)}`);
@@ -389,7 +446,7 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: process.env.SUPABASE_DB_URL ? [process.env.SUPABASE_DB_URL] : [] });
         },
-        checkServices: () => checkServices({ catalog, manifest, presence: servicePresence(manifest) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await servicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath }) }),
       }, { strict });
     } finally {
       await connection?.close();
@@ -412,7 +469,11 @@ async function createDefaultDeps() {
     collectSupabaseSecret: () => collectSupabaseSecret({
       environment: process.env,
       interactive,
-      maskedInput: (message) => readMaskedInput(process.stdin, process.stdout, message),
+      maskedInput: (message) => {
+        readline?.close();
+        readline = undefined;
+        return readMaskedInput(process.stdin, uiOutput, message);
+      },
     }),
     apply: (plan, options) => applyDefaultSetup(plan, options, catalog),
     close: () => readline?.close(),

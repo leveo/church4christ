@@ -40,7 +40,7 @@ function appendManaged(content, additions) {
   return output;
 }
 
-function parseSecretList(stdout) {
+export function parseSecretList(stdout) {
   let value;
   try { value = JSON.parse(stdout); } catch { throw new Error('Wrangler secret list returned malformed JSON'); }
   if (!Array.isArray(value) || value.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry) ||
@@ -51,6 +51,15 @@ function parseSecretList(stdout) {
   const names = new Set(value.map((entry) => entry.name));
   if (names.size !== value.length) throw new Error('Wrangler secret list returned duplicate names');
   return names;
+}
+
+export async function hasDeploySecret(options) {
+  if (!options?.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
+  if (typeof options.name !== 'string' || !KEY.test(options.name)) throw new TypeError('secret name is invalid');
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
+  if (listed.exitCode === 0) return parseSecretList(listed.stdout).has(options.name);
+  if (listed.stdout === '' && isFreshWorkerError(listed.stderr)) return false;
+  throw new Error('Wrangler secret list failed during verification');
 }
 
 function isFreshWorkerError(stderr) {

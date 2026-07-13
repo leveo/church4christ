@@ -165,8 +165,9 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
     }
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
     const context = Object.freeze({ plan: contextPlan, resources: resolvedResources });
-    if (completed && await steps[name].verify(context) === true) {
-      results.push({ step: name, status: 'already-complete' });
+    if (await steps[name].verify(context) === true) {
+      if (!completed) await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null);
+      results.push({ step: name, status: completed ? 'already-complete' : 'verified' });
       continue;
     }
     const raw = await steps[name].apply(context);

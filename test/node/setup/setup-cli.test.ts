@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import rawCatalog from '../../../config/capabilities.json';
-import { collectSupabaseSecret, createPlanPreview, formatPlan, runSetup } from '../../../scripts/setup/index.mjs';
+import { collectSupabaseSecret, createPlanPreview, formatPlan, formatResult, runSetup } from '../../../scripts/setup/index.mjs';
 import { collectInteractiveAnswers } from '../../../scripts/setup/prompts.mjs';
 import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 
@@ -234,6 +234,20 @@ describe('guided setup CLI', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('JSON Preview'));
     preview(plan, { json: false });
     expect(stdout).toHaveBeenCalledWith(expect.stringContaining('JSON Preview'));
+  });
+
+  it('formats completion with doctor detail and actionable handoff', () => {
+    const text = formatResult({
+      doctor: { status: 'ready-with-limitations', checks: [{ severity: 'warning', code: 'services.stripe-absent', message: 'Stripe is absent.', remediation: 'Configure both Stripe secrets.' }] },
+      handoff: { mode: 'local', url: 'http://localhost:4321', adminEmail: 'admin@example.test', capabilities: ['events', 'giving'], startCommand: 'npm run dev', limitations: ['services.stripe-absent'] },
+    } as any);
+    expect(text).toContain('services.stripe-absent');
+    expect(text).toContain('Stripe is absent.');
+    expect(text).toContain('Configure both Stripe secrets.');
+    expect(text).toContain('npm run dev');
+    expect(text).toContain('http://localhost:4321');
+    expect(text).toContain('admin@example.test');
+    expect(text).toContain('events, giving');
   });
 
   it('Customize asks one boolean per group and supports correction plus exact re-review', async () => {

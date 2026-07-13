@@ -17,8 +17,9 @@ function memoryStore() {
 describe('setup apply coordinator', () => {
   it('applies in canonical order and verifies persisted completions as no-ops', async () => {
     const calls: string[] = [];
+    const applied = new Set<string>();
     const resources = { d1DatabaseName: 'church-db', d1DatabaseId: 'id', r2BucketName: 'church-media', hyperdriveId: null };
-    const steps = Object.fromEntries(ORDER.map((name) => [name, { apply: async (context: any) => { calls.push(name); return name === 'ensure-resources' ? { changed: true, resolvedResources: resources } : { changed: true, saw: context.plan.resources }; }, verify: async () => true }]));
+    const steps = Object.fromEntries(ORDER.map((name) => [name, { apply: async (context: any) => { calls.push(name); applied.add(name); return name === 'ensure-resources' ? { changed: true, resolvedResources: resources } : { changed: true, saw: context.plan.resources }; }, verify: async () => applied.has(name) }]));
     const stateStore = memoryStore();
     const plan = Object.freeze({ actions: [...ORDER], planVersion: 1, backend: 'd1', site: { slug: 'church' } });
     const first = await applySetup(plan, { steps, stateStore, dryRun: false });
