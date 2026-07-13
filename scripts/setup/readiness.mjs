@@ -16,7 +16,7 @@ function validateResult(value) {
   if (!PLAIN(value)) throw new TypeError('readiness check must be a plain object');
   const keys = Object.keys(value).sort();
   if (keys.join('|') !== 'code|message|remediation|severity') throw new TypeError('readiness check fields are invalid');
-  if (typeof value.code !== 'string' || !/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/.test(value.code)) {
+  if (typeof value.code !== 'string' || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/.test(value.code)) {
     throw new TypeError('readiness check code is invalid');
   }
   if (!READINESS_SEVERITIES.includes(value.severity)) throw new TypeError(`invalid readiness severity: ${String(value.severity)}`);

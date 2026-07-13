@@ -55,6 +55,18 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
 }
 
 describe('doctor readiness model', () => {
+  it('derives the approved readiness states and strict exit codes for stable single-segment codes', () => {
+    const check = (code: string, severity: 'info' | 'warning' | 'error') => result(code, severity, code, `fix ${code}`);
+    expect(summarizeReadiness([check('ok', 'info')]).status).toBe('ready');
+    expect(summarizeReadiness([check('stripe', 'warning')]).status).toBe('ready-with-limitations');
+    expect(summarizeReadiness([check('db', 'error')]).status).toBe('not-ready');
+    expect(doctorExitCode([check('stripe', 'warning')], false)).toBe(0);
+    expect(doctorExitCode([check('stripe', 'warning')], true)).toBe(1);
+    expect(doctorExitCode([check('db', 'error')], false)).toBe(1);
+    expect(() => result('Bad.Code', 'info', 'bad', 'fix')).toThrow(/code/i);
+    expect(() => result('bad..code', 'info', 'bad', 'fix')).toThrow(/code/i);
+  });
+
   it('derives stable states, validates strict booleans, and deep-freezes copied results', () => {
     const input = [result('all.ok', 'info', 'ready', 'none')];
     const ready = summarizeReadiness(input);
@@ -127,6 +139,27 @@ describe('doctor generated configuration check', () => {
     const badWorker = workerSource.replace("const DIGEST_CRON = '0 14 * * 4'", "const DIGEST_CRON = '0 15 * * 4'");
     expect((await checkConfig({ manifest: baseManifest, template, config, workerSource: badWorker, hostEnv: {} })).map((entry) => entry.code))
       .toEqual(['config.worker-crons']);
+  });
+
+  it('finds the deprecated Hyperdrive variable in any injected additional file without exposing contents', async () => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const workerSource = await readFile('src/worker.ts', 'utf8');
+    const config = renderWrangler(template, baseManifest);
+    const secret = 'PRIVATE-CONNECTION-CONTENT';
+    const findings = await checkConfig({
+      manifest: baseManifest,
+      template,
+      config,
+      workerSource,
+      hostEnv: {},
+      files: { '.dev.vars': `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=${secret}`, '.env': 'SAFE=1' },
+    });
+    expect(findings.map((entry) => entry.code)).toEqual(['config.hyperdrive-env-deprecated']);
+    expect(JSON.stringify(findings)).not.toContain(secret);
+    await expect(checkConfig({ manifest: baseManifest, template, config, workerSource, hostEnv: {}, files: { '.dev.vars': 1 } as any }))
+      .rejects.toThrow(/files/i);
+    await expect(checkConfig({ manifest: baseManifest, template, config, workerSource, hostEnv: {}, files: [config, 1] as any }))
+      .rejects.toThrow(/files/i);
   });
 });
 

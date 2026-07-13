@@ -52,6 +52,20 @@ export async function checkConfig(options) {
   if (options.hostEnv !== undefined && (!options.hostEnv || typeof options.hostEnv !== 'object' || Array.isArray(options.hostEnv))) {
     throw new TypeError('config check hostEnv must be an object');
   }
+  let additionalFiles = [];
+  if (options.files !== undefined) {
+    if (Array.isArray(options.files)) {
+      if (options.files.some((content) => typeof content !== 'string')) throw new TypeError('config check files must contain only strings');
+      additionalFiles = [...options.files];
+    } else {
+      const plain = options.files && typeof options.files === 'object' &&
+        (Object.getPrototypeOf(options.files) === Object.prototype || Object.getPrototypeOf(options.files) === null);
+      if (!plain || Object.values(options.files).some((content) => typeof content !== 'string')) {
+        throw new TypeError('config check files must be a plain string record or string array');
+      }
+      additionalFiles = Object.values(options.files);
+    }
+  }
   let parsed;
   try { parsed = parseJsonc(options.config); } catch {
     return [result('config.invalid', 'error', 'The generated Wrangler configuration is invalid JSONC.', 'Rerun setup to regenerate wrangler.jsonc.')];
@@ -86,7 +100,8 @@ export async function checkConfig(options) {
       !same(configuredCrons, EXPECTED_CRONS) || !sourceCrons || !same(sourceCrons, EXPECTED_CRONS)) {
     checks.push(result('config.worker-crons', 'error', 'Scheduled Worker branches and configured cron triggers do not match the canonical three schedules.', 'Restore the canonical reminder, digest, and backup cron strings.'));
   }
-  if (options.config.includes(DEPRECATED) || Object.hasOwn(options.hostEnv ?? {}, DEPRECATED)) {
+  if (options.config.includes(DEPRECATED) || additionalFiles.some((content) => content.includes(DEPRECATED)) ||
+      Object.hasOwn(options.hostEnv ?? {}, DEPRECATED)) {
     checks.push(result('config.hyperdrive-env-deprecated', 'warning', `${DEPRECATED} is deprecated.`, 'Use CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE on the host instead.'));
   }
   return checks.length ? checks : [result('config.ok', 'info', 'The generated Wrangler configuration matches the manifest and Worker schedules.', 'No action is required.')];
