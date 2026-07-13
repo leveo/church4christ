@@ -9,6 +9,7 @@ import {
   checkoutRequestIdForRender,
   newCheckoutRequestId,
   parseCheckoutRequestId,
+  registrationCheckoutRenderPolicy,
 } from '../src/lib/stripeCheckoutRequests';
 
 const REQUEST_ID = '00000000-0000-4000-8000-000000000901';
@@ -77,7 +78,32 @@ function deps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('stable registration Checkout browser identity', () => {
+  it('keeps a full paid registration form available only for a valid waiting request identity', () => {
+    expect(registrationCheckoutRenderPolicy({
+      paid: true,
+      capacity: 1,
+      takenCount: 1,
+      error: 'waiting',
+      checkoutRequestId: REQUEST_ID,
+    })).toEqual({ checkoutRequestId: REQUEST_ID, isFull: false, reused: true });
+
+    for (const input of [
+      { paid: true, capacity: 1, takenCount: 1, error: null, checkoutRequestId: null },
+      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: null },
+      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: 'not-a-uuid' },
+      { paid: true, capacity: 1, takenCount: 1, error: 'invalid', checkoutRequestId: REQUEST_ID },
+      { paid: false, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID },
+    ]) {
+      const policy = registrationCheckoutRenderPolicy(input);
+      expect(policy.isFull).toBe(true);
+      expect(policy.reused).toBe(false);
+      expect(parseCheckoutRequestId(policy.checkoutRequestId)).toBe(policy.checkoutRequestId);
+      expect(policy.checkoutRequestId).not.toBe(REQUEST_ID);
+    }
+  });
+
   it('renders a server-generated UUID in the checkoutRequestId hidden field', () => {
+    expect(registerFormSource).toContain('registrationCheckoutRenderPolicy({');
     expect(registerFormSource).toContain("errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null");
     expect(registerFormSource).toMatch(/name="checkoutRequestId"\s+value=\{checkoutRequestId\}/);
     const generated = newCheckoutRequestId();

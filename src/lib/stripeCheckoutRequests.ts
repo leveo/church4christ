@@ -74,9 +74,13 @@ interface CheckoutRequestRow {
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+export function isCheckoutRequestId(value: unknown): value is string {
+  return typeof value === 'string' && UUID_V4.test(value);
+}
+
 /** Browser Checkout retries must carry the exact canonical UUID rendered by the server. */
 export function parseCheckoutRequestId(value: unknown): string {
-  if (typeof value !== 'string' || !UUID_V4.test(value)) throw new Error('checkout_request_id_invalid');
+  if (!isCheckoutRequestId(value)) throw new Error('checkout_request_id_invalid');
   return value;
 }
 
@@ -87,11 +91,27 @@ export function newCheckoutRequestId(): string {
 
 /** Reuse only a canonical server UUID; malformed/untrusted query input is replaced. */
 export function checkoutRequestIdForRender(value: unknown): string {
-  try {
-    return parseCheckoutRequestId(value);
-  } catch {
-    return newCheckoutRequestId();
-  }
+  return isCheckoutRequestId(value) ? value : newCheckoutRequestId();
+}
+
+/** Decide whether aggregate capacity blocks this render without consuming a second seat on a paid retry. */
+export function registrationCheckoutRenderPolicy(input: {
+  paid: boolean;
+  capacity: number | null;
+  takenCount: number;
+  error: unknown;
+  checkoutRequestId: unknown;
+}): { checkoutRequestId: string; isFull: boolean; reused: boolean } {
+  const reusableId = input.paid && input.error === 'waiting' && isCheckoutRequestId(input.checkoutRequestId)
+    ? input.checkoutRequestId
+    : null;
+  const reused = reusableId !== null;
+  const aggregateFull = input.capacity !== null && input.takenCount >= input.capacity;
+  return {
+    checkoutRequestId: reusableId ?? newCheckoutRequestId(),
+    isFull: aggregateFull && !reused,
+    reused,
+  };
 }
 
 export function registrationCheckoutIdempotencyKey(requestId: string): string {
