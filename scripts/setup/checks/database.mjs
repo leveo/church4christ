@@ -55,6 +55,21 @@ function plainRow(value) {
     (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 }
 
+export function qualifiedBaseTableNames(tableRows) {
+  if (!Array.isArray(tableRows)) throw new TypeError('qualified base table rows must be an array');
+  const names = new Set();
+  for (const row of tableRows) {
+    const keys = plainRow(row) ? Object.keys(row).sort().join('|') : '';
+    const relation = keys === 'table_name|table_schema|table_type' &&
+      typeof row.table_schema === 'string' && typeof row.table_name === 'string' && row.table_type === 'BASE TABLE'
+      ? `${row.table_schema}.${row.table_name}`
+      : null;
+    if (!relation || names.has(relation)) throw new TypeError('qualified base table row is invalid or duplicated');
+    names.add(relation);
+  }
+  return names;
+}
+
 function issue(code, message, remediation) {
   return result(code, 'error', message, remediation);
 }
@@ -200,20 +215,13 @@ export async function checkDatabase(options) {
   try {
     const tableRows = options.manifest.database === 'd1'
       ? await queryAll(options.db, 'SELECT name FROM sqlite_master WHERE type=? ORDER BY name', ['table'])
-      : await queryAll(options.db, 'SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema IN (?,?) ORDER BY table_schema, table_name', ['public', 'church_private']);
-    const names = new Set();
+      : await queryAll(options.db, 'SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN (?,?) AND table_type=? ORDER BY table_schema, table_name', ['public', 'church_private', 'BASE TABLE']);
+    const names = options.manifest.database === 'supabase' ? qualifiedBaseTableNames(tableRows) : new Set();
     let valid = true;
-    for (const row of tableRows) {
-      if (options.manifest.database === 'd1') {
+    if (options.manifest.database === 'd1') {
+      for (const row of tableRows) {
         if (!plainRow(row) || Object.keys(row).length !== 1 || typeof row.name !== 'string' || names.has(row.name)) valid = false;
         else names.add(row.name);
-      } else {
-        const keys = plainRow(row) ? Object.keys(row).sort().join('|') : '';
-        const relation = keys === 'table_name|table_schema' && typeof row.table_schema === 'string' && typeof row.table_name === 'string'
-          ? `${row.table_schema}.${row.table_name}`
-          : null;
-        if (!relation || names.has(relation)) valid = false;
-        else names.add(relation);
       }
     }
     if (!valid || expectedTables(options.manifest).some((name) => !names.has(name))) {

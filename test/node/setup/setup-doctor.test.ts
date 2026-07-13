@@ -4,7 +4,7 @@ import { summarizeReadiness, doctorExitCode, result } from '../../../scripts/set
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { checkManifest } from '../../../scripts/setup/checks/manifest.mjs';
 import { checkConfig } from '../../../scripts/setup/checks/config.mjs';
-import { ALWAYS_REQUIRED_TABLES, PRIVATE_TABLES_BY_CAPABILITY, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables } from '../../../scripts/setup/checks/database.mjs';
+import { ALWAYS_REQUIRED_TABLES, PRIVATE_TABLES_BY_CAPABILITY, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables, qualifiedBaseTableNames } from '../../../scripts/setup/checks/database.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
@@ -35,7 +35,7 @@ const EXPECTED_PRIVATE_TABLES_BY_CAPABILITY = {
 function relationRows(relations: string[]) {
   return relations.map((relation) => {
     const [table_schema, table_name] = relation.includes('.') ? relation.split('.', 2) : ['public', relation];
-    return { table_schema, table_name };
+    return { table_schema, table_name, table_type: 'BASE TABLE' };
   });
 }
 
@@ -52,6 +52,10 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
     ]),
   )];
   const migrations = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql', '0008_stripe_webhook_events.sql'];
+  const catalogRows = (overrides.catalogRows as ReturnType<typeof relationRows> | undefined) ?? relationRows([
+    ...tables.map((name) => `public.${name}`),
+    ...privateRelations,
+  ]);
   return {
     prepare(sql: string) {
       const statement = {
@@ -64,10 +68,15 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
         async all() {
           if (sql.includes("key LIKE 'module.%'")) return rowResult((overrides.moduleRows as any) ?? moduleRows);
           if (sql.includes('sqlite_master')) return rowResult((overrides.tables as any) ?? tables.map((name) => ({ name })));
-          if (sql.includes('information_schema.tables')) return rowResult((overrides.tables as any) ?? relationRows([
-            ...tables.map((name) => `public.${name}`),
-            ...privateRelations,
-          ]));
+          if (sql.includes('information_schema.tables')) {
+            if (overrides.tables) return rowResult(overrides.tables as any);
+            const visible = sql.includes('table_type=?')
+              ? catalogRows.filter((row) => row.table_type === 'BASE TABLE')
+              : catalogRows;
+            return rowResult(sql.includes('table_type')
+              ? visible
+              : visible.map(({ table_schema, table_name }) => ({ table_schema, table_name })));
+          }
           if (sql === 'SELECT name FROM _migrations ORDER BY name') return rowResult((overrides.migrations as any) ?? migrations.map((name) => ({ name })));
           throw new Error(`unexpected all query: ${sql}`);
         },
@@ -355,6 +364,36 @@ describe('doctor database check', () => {
     ]);
     await expect(verifyMigrationCompleteness({ db: fakeDb(full, { tables: missingPrivate }), backend: 'supabase', catalog, root: process.cwd() }))
       .resolves.toBe(false);
+  });
+
+  it('rejects a required Supabase relation implemented as a view in both readiness seams', async () => {
+    const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
+    const publicTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])];
+    const relations = [
+      ...publicTables.map((table) => `public.${table}`),
+      ...new Set(Object.values(EXPECTED_PRIVATE_TABLES_BY_CAPABILITY).flat()),
+    ];
+    const impostor = relationRows(relations).map((row) =>
+      row.table_schema === 'church_private' && row.table_name === 'stripe_webhook_events'
+        ? { ...row, table_type: 'VIEW' }
+        : row,
+    );
+    const db = fakeDb(full, { catalogRows: impostor });
+    const migrationFiles = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql', '0008_stripe_webhook_events.sql'];
+
+    const findings = await checkDatabase({ db, catalog, manifest: full, readDir: async () => migrationFiles });
+    const migrationComplete = await verifyMigrationCompleteness({ db, backend: 'supabase', catalog, root: process.cwd() });
+    expect({
+      tableFinding: findings.some((entry) => entry.code === 'database.tables'),
+      migrationComplete,
+    }).toEqual({ tableFinding: true, migrationComplete: false });
+  });
+
+  it('fails closed on malformed or duplicated qualified base-table rows', () => {
+    const row = { table_schema: 'public', table_name: 'people', table_type: 'BASE TABLE' };
+    expect(() => qualifiedBaseTableNames([row, { ...row }])).toThrow(/duplicated/i);
+    expect(() => qualifiedBaseTableNames([{ ...row, table_type: 'VIEW' }])).toThrow(/invalid/i);
+    expect(() => qualifiedBaseTableNames([{ table_schema: 'public', table_name: 'people' }])).toThrow(/invalid/i);
   });
 });
 

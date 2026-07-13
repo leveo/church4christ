@@ -4,7 +4,7 @@ import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
 function normalizeDefault(value: string | null): string | null {
   if (value === null) return null;
-  if (/^datetime\s*\(\s*'now'::text(?:\s*,[\s\S]*)?\)$/i.test(value.trim())) return 'utc-now';
+  if (/^datetime\s*\(\s*'now'::text\s*\)$/i.test(value.trim())) return 'utc-now';
   const text = value.trim().match(/^'((?:[^']|'')*)'::text$/i);
   return text ? text[1].replaceAll("''", "'") : value.trim().replace(/^\((.*)\)$/s, '$1');
 }
@@ -21,6 +21,13 @@ function pgIdentifierArray(value: unknown): string[] {
   }
   throw new Error(`unexpected Postgres identifier array: ${JSON.stringify(value)}`);
 }
+
+describe('private schema assertion helpers', () => {
+  it('does not normalize modified datetime defaults as the approved UTC-now default', () => {
+    const modified = `datetime('now'::text, '+1 day'::text)`;
+    expect(normalizeDefault(modified)).toBe(modified);
+  });
+});
 
 describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -259,6 +266,9 @@ describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
     const roles = await sql.unsafe(`
       SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated') ORDER BY rolname
     `);
+    // These roles are cluster-global and optional on portable local Postgres.
+    // Creating them here would require CREATEROLE; assert their revokes whenever
+    // the target already provides them instead of mutating cluster role state.
     for (const { rolname } of roles) {
       expect(await sql.unsafe(`SELECT has_schema_privilege($1, 'church_private', 'USAGE') AS ok`, [rolname]))
         .toEqual([expect.objectContaining({ ok: false })]);
