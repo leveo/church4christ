@@ -297,6 +297,46 @@ function requireCheckoutStripeUrl(value: unknown): string {
   return value;
 }
 
+/** Strict identity/payment contract for registration recovery and manual attachment. */
+export function requireRegistrationCheckoutSession(
+  value: unknown,
+  expected: {
+    requestId: string;
+    registrationId: number;
+    amountCents: number;
+    currency: string;
+    sessionId?: string;
+  },
+): StripeCheckoutSession {
+  const session = requireTestCheckoutSession(value);
+  const requestId = parseCheckoutRequestId(expected.requestId);
+  const expectedMetadata = {
+    kind: 'registration',
+    registration_id: String(expected.registrationId),
+    request_id: requestId,
+  };
+  const metadataKeys = Object.keys(session.metadata);
+  if (
+    !Number.isSafeInteger(expected.registrationId)
+    || expected.registrationId <= 0
+    || !Number.isSafeInteger(expected.amountCents)
+    || expected.amountCents <= 0
+    || !/^[a-z]{3}$/.test(expected.currency)
+    || session.mode !== 'payment'
+    || (expected.sessionId !== undefined && session.id !== expected.sessionId)
+    || session.amount_total !== expected.amountCents
+    || session.currency !== expected.currency
+    || (session.payment_status === 'paid'
+      && (session.payment_intent === null || !/^pi_[A-Za-z0-9_]{1,252}$/.test(session.payment_intent)))
+    || metadataKeys.length !== 3
+    || Object.entries(expectedMetadata).some(([key, expectedValue]) => session.metadata[key] !== expectedValue)
+  ) {
+    throw invalidCheckoutResponse();
+  }
+  if (session.url !== null) requireCheckoutStripeUrl(session.url);
+  return session;
+}
+
 function requireGivingCheckoutRedirect(
   value: unknown,
   expected: {
@@ -560,32 +600,19 @@ export async function createRegistrationCheckoutFromParams(
   options: StripeCheckoutRequestOptions,
 ): Promise<StripeCheckoutSession & { url: string }> {
   const requestId = parseCheckoutRequestId(options.requestId);
-  const session = requireTestCheckoutSession(await stripeRequest<unknown>(env, 'checkout/sessions', params as unknown as Record<string, unknown>, {
+  const raw = await stripeRequest<unknown>(env, 'checkout/sessions', params as unknown as Record<string, unknown>, {
     fetcher: options.fetcher,
     signal: options.signal,
     idempotencyKey: `church4christ:registration:${requestId}`,
-  }));
+  });
   const expected = params.line_items[0].price_data;
-  if (
-    typeof session.url !== 'string'
-    || session.url.length === 0
-    || session.amount_total !== expected.unit_amount
-    || session.currency !== expected.currency
-    || session.metadata.kind !== 'registration'
-    || session.metadata.request_id !== requestId
-    || session.metadata.registration_id !== params.metadata.registration_id
-  ) {
-    throw invalidCheckoutResponse();
-  }
-  try {
-    const url = new URL(session.url);
-    if (url.protocol !== 'https:' || url.hostname !== 'checkout.stripe.com' || url.username || url.password || url.port) {
-      throw invalidCheckoutResponse();
-    }
-  } catch (error) {
-    if (error instanceof StripeError) throw error;
-    throw invalidCheckoutResponse();
-  }
+  const session = requireRegistrationCheckoutSession(raw, {
+    requestId,
+    registrationId: Number(params.metadata.registration_id),
+    amountCents: expected.unit_amount,
+    currency: expected.currency,
+  });
+  if (session.url === null) throw invalidCheckoutResponse();
   return session as StripeCheckoutSession & { url: string };
 }
 

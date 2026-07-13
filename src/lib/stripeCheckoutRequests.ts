@@ -70,6 +70,12 @@ interface CheckoutRequestRow {
   amount_cents: number;
   currency: string;
   email: string;
+  reconcile_attempts: number;
+  next_reconcile_at: string | null;
+  last_error: string | null;
+  last_action_by: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -380,7 +386,11 @@ async function loadRequest(db: AppDb, requestId: string): Promise<CheckoutReques
               q.session_url AS session_url, q.state AS state,
               r.status AS status, r.stripe_checkout_session_id AS stripe_checkout_session_id,
               r.event_id AS event_id, r.amount_cents AS amount_cents,
-              r.currency AS currency, r.email AS email
+              r.currency AS currency, r.email AS email,
+              q.reconcile_attempts AS reconcile_attempts,
+              q.next_reconcile_at AS next_reconcile_at,
+              q.last_error AS last_error, q.last_action_by AS last_action_by,
+              q.created_at AS created_at, q.updated_at AS updated_at
        FROM church_private.stripe_checkout_requests q
        JOIN registrations r ON r.id = q.registration_id
        WHERE q.request_id = ?1`,
@@ -389,12 +399,223 @@ async function loadRequest(db: AppDb, requestId: string): Promise<CheckoutReques
     .first<CheckoutRequestRow>();
 }
 
+export interface RegistrationCheckoutRecoveryClaim {
+  requestId: string;
+  registrationId: number;
+  state: 'creating' | 'attached' | 'manual_review';
+  requestJson: StripeCheckoutParams | null;
+  sessionId: string | null;
+  amountCents: number;
+  currency: string;
+  createdAt: string;
+  claimVersion: string;
+  reconcileAttempts: number;
+  previousNextReconcileAt: string | null;
+  requestInvalid: boolean;
+}
+
+const RECOVERY_CLAIM_MS = 10 * 60_000;
+
+function dbTimeMs(value: string): number {
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`).getTime();
+}
+
+function hasActiveRecoveryClaim(row: CheckoutRequestRow, now: string): boolean {
+  if (row.next_reconcile_at === null) return false;
+  const updatedAt = dbTimeMs(row.updated_at);
+  const nextAt = dbTimeMs(row.next_reconcile_at);
+  const nowAt = dbTimeMs(now);
+  return Number.isFinite(updatedAt)
+    && Number.isFinite(nextAt)
+    && Number.isFinite(nowAt)
+    && nextAt > nowAt
+    && nextAt - updatedAt === RECOVERY_CLAIM_MS;
+}
+
+export async function listDueRegistrationCheckoutRequestIds(
+  db: AppDb,
+  now: string,
+  limit: number,
+): Promise<string[]> {
+  const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 25) : 10;
+  const { results } = await db
+    .prepare(
+      `SELECT q.request_id AS request_id
+       FROM church_private.stripe_checkout_requests q
+       JOIN registrations r ON r.id=q.registration_id
+       WHERE q.state IN ('creating','attached')
+         AND r.status='pending'
+         AND q.next_reconcile_at IS NOT NULL
+         AND q.next_reconcile_at <= ?1
+       ORDER BY q.next_reconcile_at,q.request_id
+       LIMIT ?2`,
+    )
+    .bind(now, safeLimit)
+    .all<{ request_id: string }>();
+  return results.map((item) => item.request_id);
+}
+
+export async function claimRegistrationCheckoutRequest(
+  db: AppDb,
+  requestIdValue: string,
+  input: {
+    now: string;
+    claimExpiresAt: string;
+    claimVersion: string;
+    force: boolean;
+    actorId: number | null;
+    allowUnattachedManualReview?: boolean;
+  },
+): Promise<RegistrationCheckoutRecoveryClaim | null> {
+  const requestId = parseCheckoutRequestId(requestIdValue);
+  const existing = await loadRequest(db, requestId);
+  if (!existing || existing.status !== 'pending') return null;
+  if (!['creating', 'attached', 'manual_review'].includes(existing.state)) return null;
+  if (
+    existing.state === 'manual_review'
+    && existing.stripe_checkout_session_id === null
+    && !input.allowUnattachedManualReview
+  ) return null;
+  // A manual request may bypass a future checkpoint, but never an active claim lease.
+  if (input.force && (existing.updated_at >= input.now || hasActiveRecoveryClaim(existing, input.now))) return null;
+  let requestJson: StripeCheckoutParams | null = null;
+  let requestInvalid = false;
+  if (existing.request_json !== null) {
+    try {
+      requestJson = requireStoredParams(existing.request_json, existing);
+    } catch {
+      requestInvalid = true;
+    }
+  }
+  const claimed = await db
+    .prepare(
+      `UPDATE church_private.stripe_checkout_requests q
+       SET reconcile_attempts=reconcile_attempts+1,
+           next_reconcile_at=?1,
+           last_action_by=COALESCE(?2,last_action_by),
+           updated_at=?3
+       WHERE q.request_id=?4
+         AND q.updated_at=?5
+         AND q.state=?6
+         AND (?7=1 OR (q.next_reconcile_at IS NOT NULL AND q.next_reconcile_at <= ?8))
+         AND EXISTS (
+           SELECT 1 FROM registrations r WHERE r.id=q.registration_id AND r.status='pending'
+         )
+       RETURNING q.request_id AS request_id`,
+    )
+    .bind(
+      input.claimExpiresAt,
+      input.actorId,
+      input.claimVersion,
+      requestId,
+      existing.updated_at,
+      existing.state,
+      input.force ? 1 : 0,
+      input.now,
+    )
+    .first<{ request_id: string }>();
+  if (!claimed) return null;
+  return {
+    requestId,
+    registrationId: existing.registration_id,
+    state: existing.state as RegistrationCheckoutRecoveryClaim['state'],
+    requestJson,
+    sessionId: existing.stripe_checkout_session_id,
+    amountCents: existing.amount_cents,
+    currency: existing.currency,
+    createdAt: existing.created_at,
+    claimVersion: input.claimVersion,
+    reconcileAttempts: existing.reconcile_attempts + 1,
+    previousNextReconcileAt: existing.next_reconcile_at,
+    requestInvalid,
+  };
+}
+
+/** Release a manual validation claim without consuming the automated schedule. */
+export async function releaseRegistrationCheckoutRecoveryClaim(
+  db: AppDb,
+  claim: RegistrationCheckoutRecoveryClaim,
+  input: { error: string; actorId: number; updatedAt: string },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE church_private.stripe_checkout_requests
+       SET next_reconcile_at=?1,last_error=?2,last_action_by=?3,updated_at=?4
+       WHERE request_id=?5 AND registration_id=?6 AND state=?7 AND updated_at=?8`,
+    )
+    .bind(
+      claim.previousNextReconcileAt,
+      input.error,
+      input.actorId,
+      input.updatedAt,
+      claim.requestId,
+      claim.registrationId,
+      claim.state,
+      claim.claimVersion,
+    )
+    .run();
+  return result.meta.changes === 1;
+}
+
+export async function registrationCheckoutClaimIsCurrent(
+  db: AppDb,
+  claim: RegistrationCheckoutRecoveryClaim,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT EXISTS (
+         SELECT 1 FROM church_private.stripe_checkout_requests q
+         JOIN registrations r ON r.id=q.registration_id
+         WHERE q.request_id=?1 AND q.registration_id=?2 AND q.state=?3
+           AND q.updated_at=?4 AND r.status='pending'
+       ) AS current`,
+    )
+    .bind(claim.requestId, claim.registrationId, claim.state, claim.claimVersion)
+    .first<{ current: boolean | number }>();
+  return row?.current === true || row?.current === 1;
+}
+
+export async function scheduleClaimedRegistrationCheckoutRequest(
+  db: AppDb,
+  claim: RegistrationCheckoutRecoveryClaim,
+  input: { nextAt: string; error: string; updatedAt: string },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE church_private.stripe_checkout_requests
+       SET next_reconcile_at=?1,last_error=?2,updated_at=?3
+       WHERE request_id=?4 AND registration_id=?5 AND state=?6 AND updated_at=?7`,
+    )
+    .bind(input.nextAt, input.error, input.updatedAt, claim.requestId, claim.registrationId, claim.state, claim.claimVersion)
+    .run();
+  return result.meta.changes === 1;
+}
+
+export async function markClaimedRegistrationCheckoutManualReview(
+  db: AppDb,
+  claim: RegistrationCheckoutRecoveryClaim,
+  input: { error: string; actorId: number | null; updatedAt: string },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='manual_review',request_json=NULL,session_url=NULL,next_reconcile_at=NULL,
+           last_error=?1,last_action_by=COALESCE(?2,last_action_by),updated_at=?3
+       WHERE request_id=?4 AND registration_id=?5 AND state=?6 AND updated_at=?7`,
+    )
+    .bind(input.error, input.actorId, input.updatedAt, claim.requestId, claim.registrationId, claim.state, claim.claimVersion)
+    .run();
+  return result.meta.changes === 1;
+}
+
 async function cleanupTerminalRequest(db: AppDb, row: CheckoutRequestRow): Promise<void> {
   await db
     .prepare(
       `UPDATE church_private.stripe_checkout_requests
        SET state = 'resolved', request_json = NULL, session_url = NULL,
-           next_reconcile_at = NULL, last_error = NULL, updated_at = datetime('now')
+           next_reconcile_at = NULL,
+           last_error = CASE WHEN last_error = 'manual_cancel' THEN last_error ELSE NULL END,
+           updated_at = datetime('now')
        WHERE request_id = ?1 AND registration_id = ?2`,
     )
     .bind(row.request_id, row.registration_id)
@@ -517,8 +738,8 @@ export async function resolveRegistrationCheckoutRequest(
     db
       .prepare(
         `INSERT INTO church_private.stripe_checkout_requests
-           (request_id, request_sha256, registration_id, request_json, state)
-         VALUES (?1, ?2, ?3, ?4, 'creating')`,
+           (request_id, request_sha256, registration_id, request_json, state, next_reconcile_at)
+         VALUES (?1, ?2, ?3, ?4, 'creating', datetime('now','+45 minutes'))`,
       )
       .bind(requestId, digest, registrationId, serializedRequest),
   );
@@ -618,7 +839,7 @@ export async function attachRegistrationCheckoutRequest(
       `).bind(input.sessionId, input.registrationId, input.amountCents, input.currency),
       db.prepare(`
         UPDATE church_private.stripe_checkout_requests
-        SET state='attached',request_json=NULL,session_url=?1,next_reconcile_at=NULL,
+        SET state='attached',request_json=NULL,session_url=?1,next_reconcile_at=datetime('now','+1 day'),
             last_error=NULL,updated_at=datetime('now')
         WHERE request_id=?2 AND registration_id=?3 AND state='creating' AND request_json IS NOT NULL
           AND EXISTS (

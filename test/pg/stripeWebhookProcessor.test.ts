@@ -550,16 +550,19 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       end: vi.fn(async () => { throw new Error('listing sk_test_processor_secret close failed'); }),
     });
     const retention = vi.fn(async () => ({ processedOrIgnored: 0, failed: 0 }));
+    const checkout = vi.fn(async () => []);
     const recovery = await runStripeRecovery({
       env: ENV,
       openDb: () => recoveryHandle,
       now: () => NOW,
       process: recoveryProcess,
+      checkout,
       retention,
     });
     expect(recovery.inbox).toEqual({ state: 'failed', error: expect.any(String) });
     expect(JSON.stringify(recovery.inbox)).not.toContain('sk_test_processor_secret');
     expect(recoveryProcess).not.toHaveBeenCalled();
+    expect(checkout).toHaveBeenCalledOnce();
     expect(retention).toHaveBeenCalledOnce();
   });
 
@@ -574,7 +577,7 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(d1List.end).toHaveBeenCalledOnce();
   });
 
-  it('runs inbox then retention as isolated bounded phases and sanitizes top-level errors', async () => {
+  it('runs inbox then Checkout then retention as isolated bounded phases and sanitizes top-level errors', async () => {
     const order: string[] = [];
     const drain = vi.fn(async () => {
       order.push('inbox');
@@ -584,10 +587,19 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       order.push('retention');
       throw new Error('retention whsec_processor_secret failed');
     });
-    const result = await runStripeRecovery({ env: ENV, drain, retention, now: () => NOW });
-    expect(order).toEqual(['inbox', 'retention']);
+    const checkout = vi.fn(async () => {
+      order.push('checkout');
+      throw new Error('checkout sk_test_processor_secret failed');
+    });
+    const result = await runStripeRecovery({
+      env: ENV, drain, checkout, retention, now: () => NOW, inboxLimit: 3, checkoutLimit: 7,
+    });
+    expect(order).toEqual(['inbox', 'checkout', 'retention']);
+    expect(drain).toHaveBeenCalledWith(expect.objectContaining({ limit: 3 }));
+    expect(checkout).toHaveBeenCalledWith(expect.objectContaining({ limit: 7 }));
     expect(result).toEqual({
       inbox: { state: 'failed', error: expect.any(String) },
+      checkout: { state: 'failed', error: expect.any(String) },
       retention: { state: 'failed', error: expect.any(String) },
     });
     expect(JSON.stringify(result)).not.toContain('sk_test_processor_secret');
@@ -605,6 +617,7 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       drain: vi.fn(async () => {
         throw new Error(`recovery ${SECRET_PARTS.join(' ')} unavailable`);
       }),
+      checkout: vi.fn(async () => []),
       retention: vi.fn(async () => ({ processedOrIgnored: 0, failed: 0 })),
       now: () => NOW,
     });

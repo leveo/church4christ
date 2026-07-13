@@ -13,6 +13,7 @@ import {
   createRegistrationCheckout,
   createRegistrationCheckoutFromParams,
   createPortalSession,
+  requireRegistrationCheckoutSession,
   requireTestCheckoutSession,
   retrieveCheckoutSession,
   retrieveSubscription,
@@ -295,6 +296,44 @@ describe('Checkout response contract', () => {
 
   it('accepts the complete nullable test-mode Checkout shape', () => {
     expect(requireTestCheckoutSession(CHECKOUT_SESSION)).toEqual(CHECKOUT_SESSION);
+  });
+
+  it('requires exact test registration identity and payment fields for recovery', () => {
+    const expected = {
+      requestId: REQUEST_ID,
+      registrationId: 88,
+      amountCents: 2500,
+      currency: 'usd',
+      sessionId: 'cs_test_registration_recovery',
+    };
+    const valid = {
+      ...CHECKOUT_SESSION,
+      id: expected.sessionId,
+      mode: 'payment' as const,
+      amount_total: 2500,
+      currency: 'usd',
+      metadata: {
+        kind: 'registration', registration_id: '88', request_id: REQUEST_ID,
+      },
+    };
+    expect(requireRegistrationCheckoutSession(valid, expected)).toEqual(valid);
+    for (const override of [
+      { livemode: true },
+      { id: 'cs_live_wrong' },
+      { id: 'cs_test_other' },
+      { mode: 'subscription' },
+      { amount_total: 2501 },
+      { currency: 'cad' },
+      { metadata: { kind: 'registration', registration_id: '99', request_id: REQUEST_ID } },
+      { metadata: { kind: 'registration', registration_id: '88', request_id: `${REQUEST_ID.slice(0, -1)}2` } },
+      { metadata: { kind: 'registration', registration_id: '88', request_id: REQUEST_ID, extra: 'no' } },
+      { url: 'https://evil.example/checkout' },
+      { payment_status: 'paid', payment_intent: null },
+      { payment_status: 'paid', payment_intent: 'not_a_payment_intent' },
+    ]) {
+      expect(() => requireRegistrationCheckoutSession({ ...valid, ...override }, expected))
+        .toThrow(expect.objectContaining({ stage: 'response' }));
+    }
   });
 
   it.each(['cs_live_x', 'cs_test_', `cs_test_${'a'.repeat(241)}`, 'cs_test_bad-value'])(

@@ -2,6 +2,11 @@ import type { DbEnv } from './dbProvider';
 import { openDb } from './dbProvider';
 import type { StripeEnv } from './stripe';
 import {
+  drainStripeCheckoutRecovery,
+  type StripeCheckoutRecoveryDeps,
+  type StripeCheckoutRecoveryResult,
+} from './stripeCheckoutRecovery';
+import {
   pruneStripeWebhookPayloads,
   sanitizeStripeDiagnostic,
   type StripePayloadPruneResult,
@@ -18,11 +23,17 @@ export type StripeRecoveryPhase<T> =
 
 export interface StripeRecoveryResult {
   inbox: StripeRecoveryPhase<ProcessAttemptResult[]>;
+  checkout: StripeRecoveryPhase<StripeCheckoutRecoveryResult[]>;
   retention: StripeRecoveryPhase<StripePayloadPruneResult>;
 }
 
 export interface StripeRecoveryDeps extends StripeWebhookDrainDeps {
+  /** Independent bound for durable webhook inbox work. */
+  inboxLimit?: number;
+  /** Independent bound for registration Checkout recovery work. */
+  checkoutLimit?: number;
   drain?: (deps: StripeWebhookDrainDeps) => Promise<ProcessAttemptResult[]>;
+  checkout?: (deps: StripeCheckoutRecoveryDeps) => Promise<StripeCheckoutRecoveryResult[]>;
   retention?: (deps: StripeWebhookDrainDeps) => Promise<StripePayloadPruneResult>;
 }
 
@@ -47,18 +58,29 @@ function recoverySecrets(env: StripeEnv & DbEnv): string[] {
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
-/** Run bounded recovery phases independently so retention still follows inbox failure. */
+/** Run bounded recovery phases independently so one failure never suppresses later work. */
 export async function runStripeRecovery(deps: StripeRecoveryDeps): Promise<StripeRecoveryResult> {
   const secrets = recoverySecrets(deps.env);
   const drain = deps.drain ?? drainStripeWebhookInbox;
+  const checkoutRecovery = deps.checkout ?? drainStripeCheckoutRecovery;
   const retention = deps.retention ?? pruneStripeWebhookRetention;
   let inbox: StripeRecoveryResult['inbox'];
+  let checkout: StripeRecoveryResult['checkout'];
   let retained: StripeRecoveryResult['retention'];
 
   try {
-    inbox = { state: 'completed', result: await drain(deps) };
+    inbox = { state: 'completed', result: await drain({ ...deps, limit: deps.inboxLimit }) };
   } catch (error) {
     inbox = { state: 'failed', error: sanitizeStripeDiagnostic(error, secrets) };
+  }
+
+  try {
+    checkout = {
+      state: 'completed',
+      result: await checkoutRecovery({ ...deps, limit: deps.checkoutLimit }),
+    };
+  } catch (error) {
+    checkout = { state: 'failed', error: sanitizeStripeDiagnostic(error, secrets) };
   }
 
   try {
@@ -67,5 +89,5 @@ export async function runStripeRecovery(deps: StripeRecoveryDeps): Promise<Strip
     retained = { state: 'failed', error: sanitizeStripeDiagnostic(error, secrets) };
   }
 
-  return { inbox, retention: retained };
+  return { inbox, checkout, retention: retained };
 }

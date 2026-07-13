@@ -395,7 +395,19 @@ export async function applyRegistrationCheckoutSession(
            stripe_payment_intent_id = CASE WHEN ?1 = 'confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
            updated_at = datetime('now')
        WHERE id = ?4
-         AND status = 'pending'
+         AND (
+           status = 'pending'
+           OR (
+             ?1 = 'confirmed' AND status = 'cancelled'
+             AND EXISTS (
+               SELECT 1 FROM church_private.stripe_checkout_requests manual_q
+               WHERE manual_q.request_id = CAST(?7 AS TEXT)
+                 AND manual_q.registration_id = ?4
+                 AND manual_q.state = 'resolved'
+                 AND manual_q.last_error = 'manual_cancel'
+             )
+           )
+         )
          AND amount_cents = ?5
          AND currency = ?6
          AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id = ?2)
@@ -477,15 +489,252 @@ export async function applyRegistrationCheckoutSession(
                request_json = CASE WHEN ?1 = 'resolved' THEN NULL ELSE request_json END,
                session_url = CASE WHEN ?1 = 'resolved' THEN NULL ELSE session_url END,
                next_reconcile_at = NULL,
-               last_error = NULL,
+               last_error = CASE
+                 WHEN last_error = 'manual_cancel' AND ?4 = 'cancel' THEN last_error
+                 ELSE NULL
+               END,
                updated_at = datetime('now')
            WHERE registration_id = ?2
              AND request_id = CAST(?3 AS TEXT)`,
         )
-        .bind(terminal ? 'resolved' : 'attached', input.registrationId, input.requestId),
+        .bind(terminal ? 'resolved' : 'attached', input.registrationId, input.requestId, input.action),
     ]);
   }
   return transition;
+}
+
+/** Apply a recovery result only while the exact Checkout claim version is current. */
+export async function applyClaimedRegistrationCheckoutSession(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimedState: 'creating' | 'attached' | 'manual_review';
+    claimVersion: string;
+    sessionId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    action: RegistrationCheckoutAction;
+    sessionUrl: string | null;
+    nextReconcileAt: string | null;
+    actorId: number | null;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  const terminal = input.action === 'confirm' || input.action === 'cancel';
+  const status = input.action === 'confirm'
+    ? 'confirmed'
+    : input.action === 'cancel'
+      ? 'cancelled'
+      : 'pending';
+  const state = terminal ? 'resolved' : 'attached';
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r
+         SET status=?1,stripe_checkout_session_id=?2,
+             stripe_payment_intent_id=CASE WHEN ?1='confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
+             updated_at=datetime('now')
+         WHERE r.id=?4 AND r.status='pending' AND r.amount_cents=?5 AND r.currency=?6
+           AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?2)
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?7 AND q.registration_id=r.id AND q.state=?8 AND q.updated_at=?9
+           )`,
+      ).bind(
+        status,
+        input.sessionId,
+        input.paymentIntentId,
+        input.registrationId,
+        input.amountCents,
+        input.currency,
+        input.requestId,
+        input.claimedState,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state=?1,request_json=NULL,session_url=?2,next_reconcile_at=?3,last_error=NULL,
+             last_action_by=COALESCE(?4,last_action_by),updated_at=?5
+         WHERE q.request_id=?6 AND q.registration_id=?7 AND q.state=?8 AND q.updated_at=?9
+           AND EXISTS (
+             SELECT 1 FROM registrations r
+             WHERE r.id=q.registration_id AND r.status=?10
+               AND r.stripe_checkout_session_id=?11 AND r.amount_cents=?12 AND r.currency=?13
+           )`,
+      ).bind(
+        state,
+        terminal ? null : input.sessionUrl,
+        terminal ? null : input.nextReconcileAt,
+        input.actorId,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimedState,
+        input.claimVersion,
+        status,
+        input.sessionId,
+        input.amountCents,
+        input.currency,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status=?2 AND r.stripe_checkout_session_id=?3
+             AND q.request_id=?4 AND q.state=?5 AND q.updated_at=?6
+             AND q.request_json IS NULL
+             AND (?7=0 OR (q.session_url IS NULL AND q.next_reconcile_at IS NULL))
+         ) THEN 1 ELSE 0 END AS recovery_guard`,
+      ).bind(
+        input.registrationId,
+        status,
+        input.sessionId,
+        input.requestId,
+        state,
+        input.updatedAt,
+        terminal ? 1 : 0,
+      ),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
+}
+
+/** Persist a strictly verified create response before any follow-up Stripe read. */
+export async function attachClaimedRegistrationCheckoutSessionId(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimVersion: string;
+    sessionId: string;
+    amountCents: number;
+    currency: string;
+    nextReconcileAt: string;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r
+         SET stripe_checkout_session_id=?1,updated_at=datetime('now')
+         WHERE r.id=?2 AND r.status='pending' AND r.amount_cents=?3 AND r.currency=?4
+           AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?1)
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?5 AND q.registration_id=r.id
+               AND q.state='creating' AND q.updated_at=?6
+           )`,
+      ).bind(
+        input.sessionId,
+        input.registrationId,
+        input.amountCents,
+        input.currency,
+        input.requestId,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state='attached',request_json=NULL,session_url=NULL,next_reconcile_at=?1,
+             last_error=NULL,updated_at=?2
+         WHERE q.request_id=?3 AND q.registration_id=?4
+           AND q.state='creating' AND q.updated_at=?5
+           AND EXISTS (
+             SELECT 1 FROM registrations r
+             WHERE r.id=q.registration_id AND r.status='pending'
+               AND r.stripe_checkout_session_id=?6 AND r.amount_cents=?7 AND r.currency=?8
+           )`,
+      ).bind(
+        input.nextReconcileAt,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimVersion,
+        input.sessionId,
+        input.amountCents,
+        input.currency,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status='pending' AND r.stripe_checkout_session_id=?2
+             AND q.request_id=?3 AND q.state='attached' AND q.updated_at=?4
+             AND q.request_json IS NULL AND q.next_reconcile_at=?5
+         ) THEN 1 ELSE 0 END AS attach_created_guard`,
+      ).bind(
+        input.registrationId,
+        input.sessionId,
+        input.requestId,
+        input.updatedAt,
+        input.nextReconcileAt,
+      ),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
+}
+
+/** Explicit operator cancellation guarded by the same request claim version. */
+export async function cancelClaimedRegistrationCheckoutRequest(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimedState: 'creating' | 'attached' | 'manual_review';
+    claimVersion: string;
+    actorId: number;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r SET status='cancelled',updated_at=datetime('now')
+         WHERE r.id=?1 AND r.status='pending'
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?2 AND q.registration_id=r.id AND q.state=?3 AND q.updated_at=?4
+           )`,
+      ).bind(input.registrationId, input.requestId, input.claimedState, input.claimVersion),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state='resolved',request_json=NULL,session_url=NULL,next_reconcile_at=NULL,
+             last_error='manual_cancel',last_action_by=?1,updated_at=?2
+         WHERE q.request_id=?3 AND q.registration_id=?4 AND q.state=?5 AND q.updated_at=?6
+           AND EXISTS (
+             SELECT 1 FROM registrations r WHERE r.id=q.registration_id AND r.status='cancelled'
+           )`,
+      ).bind(
+        input.actorId,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimedState,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status='cancelled' AND q.request_id=?2 AND q.state='resolved'
+             AND q.request_json IS NULL AND q.session_url IS NULL AND q.next_reconcile_at IS NULL
+             AND q.last_action_by=?3 AND q.last_error='manual_cancel' AND q.updated_at=?4
+         ) THEN 1 ELSE 0 END AS manual_cancel_guard`,
+      ).bind(input.registrationId, input.requestId, input.actorId, input.updatedAt),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
 }
 
 /**

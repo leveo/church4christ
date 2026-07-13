@@ -109,6 +109,7 @@ export async function processStripeWebhookEvent(
 
 export interface StripeWebhookDrainDeps extends StripeWebhookProcessorDeps {
   process?: typeof processStripeWebhookEvent;
+  limit?: number;
 }
 
 /** List a bounded pass with one client, close it, then process sequentially. */
@@ -124,7 +125,10 @@ export async function drainStripeWebhookInbox(
   try {
     opened = (deps.openDb ?? openDb)(deps.env);
     if (opened.backend !== 'supabase') return [];
-    eventIds = await listDueStripeEventIds(opened.db, startedAt, STRIPE_DRAIN_LIMIT);
+    const limit = Number.isSafeInteger(deps.limit) && (deps.limit as number) > 0
+      ? Math.min(deps.limit as number, 25)
+      : STRIPE_DRAIN_LIMIT;
+    eventIds = await listDueStripeEventIds(opened.db, startedAt, limit);
   } finally {
     if (opened) {
       // A failed close means the listing client may still own resources. Abort
