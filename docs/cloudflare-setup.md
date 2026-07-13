@@ -89,8 +89,9 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
    you copy it in. (This file is safe to share — it holds no passwords.)
 5. **Create the tables** in your new database — one command.
 6. **Set your secret sign-in key** (`SESSION_SECRET`) — one command generates and stores a
-   strong random value. This is the one thing that is a real secret; it never goes in any
-   file you share.
+   strong random value. In the minimum D1 path, this is the only credential setup asks you
+   to create. Supabase database URLs, Stripe credentials, and backup credentials are
+   secrets too; none of them belongs in a file you share.
 7. **Turn on "log emails to the screen"** for your first try (`EMAIL_DEV_LOG=1`), so you can
    grab your own sign-in link without email being fully configured yet.
 8. **Publish** with `npm run deploy`. It prints a link you can open immediately.

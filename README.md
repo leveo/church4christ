@@ -131,10 +131,11 @@ Every feature has its own plain-English guide. Start with any of these:
 
 **Pick your modules.** Every capability above is a **module** you can switch off from one
 panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling, and more.
-Everything starts on (which is why the demo shows it all), but a church that only wants
-service times and sermons can hide the rest in a click: the module's pages, links, and
-emails disappear together, and nothing is ever deleted, so you can turn any of it back on
-later. See [**`docs/features/modules.md`**](docs/features/modules.md).
+New installations write every module setting explicitly from the setup selection; the Full
+Church demo selects all 16. On older installations only, missing module rows retain the
+legacy default-on behavior. A church that wants only service times and sermons can hide the
+rest in a click: the module's pages, links, and emails disappear together, and nothing is
+deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -198,8 +199,9 @@ signs you in automatically. Remove that line to test the real sign-in flow.)
 
 Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 13
 D1-compatible modules), and **Full Church** (all 16 modules). Portal, Giving, and
-Registration select Supabase automatically; other selections default to local D1 and need
-no external account. For automation, pass all answers with `--yes`; add `--json` for one
+Registration select Supabase automatically; D1-compatible selections choose D1 unless you
+explicitly override the backend. Account requirements depend on Local versus Deploy mode,
+as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
 machine-readable result. For a human-readable noninteractive run, use the same complete
 flags with `npm run setup -- ... --yes` and omit `--json`. To keep stdout strictly JSON
 through npm, use the silent form:
@@ -226,12 +228,13 @@ It creates or imports the required resources, writes the generated configuration
 migrations, records all 16 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness report.
 
-**Choosing your database.** Local Cloudflare **D1** needs no external account. Its 13
-compatible modules exclude **Member Portal**, **Giving**, and
-**Registration**, which require Postgres and run on a **Supabase** database. A deployed D1
-site needs a Cloudflare account; deployed Supabase needs both Cloudflare and Supabase. There
-is no automated D1↔Supabase content migration yet, so choose the production database before
-entering real content. See [**`docs/supabase-setup.md`**](docs/supabase-setup.md).
+**Choosing your database.** The 13 D1-compatible modules exclude **Member Portal**,
+**Giving**, and **Registration**, which require Postgres. Account requirements follow the
+mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
+Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase
+needs both Cloudflare and Supabase. There is no automated D1↔Supabase content migration yet,
+so choose the production database before entering real content. See
+[**`docs/supabase-setup.md`**](docs/supabase-setup.md).
 
 ---
 

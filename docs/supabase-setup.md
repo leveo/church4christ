@@ -1,9 +1,9 @@
 # Supabase setup — for Portal, Giving, and Registration
 
-Many churches do not need this page. The default setup uses Cloudflare **D1**, needs no
-extra accounts locally, and supports 13 modules. **Member Portal**, **Giving**, and
-**Registration** require a Postgres database, so setup selects **Supabase** when any of
-those three modules is enabled. Stripe is optional unless you accept payments.
+Setup is capability-driven: selections among the 13 D1-compatible modules choose D1 unless
+you explicitly override the backend. **Member Portal**, **Giving**, and **Registration**
+require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
+Stripe is optional unless you accept payments.
 
 Start with the guided installer; it asks for features before choosing a database:
 
