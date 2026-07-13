@@ -16,7 +16,7 @@ import type { AppDb } from '../../src/lib/appDb';
 import { saveFund } from '../../src/lib/fundDb';
 import { getStripeCustomer, getRecurringBySubscription, fundTotals } from '../../src/lib/givingDb';
 import { handleStripeEvent, isDbConnectivityError, isRetryableWebhookError } from '../../src/lib/givingWebhook';
-import type { StripeEnv } from '../../src/lib/stripe';
+import { retrieveSubscription, StripeError, type StripeEnv } from '../../src/lib/stripe';
 
 const ENV: StripeEnv = {
   STRIPE_MODE: 'test',
@@ -355,6 +355,23 @@ describe('isDbConnectivityError', () => {
 // gift is dropped. A definitive logic/constraint error still 200s so a real bug
 // can't wedge an infinite retry loop.
 describe('isRetryableWebhookError', () => {
+  it('retries the genuine Stripe transport error emitted by a rejecting subscription fetch', async () => {
+    const fetcher = (async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+
+    let error: unknown;
+    try {
+      await retrieveSubscription(ENV, 'sub_test_transport', { fetcher });
+      expect.unreachable('retrieveSubscription should reject');
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ name: 'StripeError', stage: 'transport' });
+    expect(isRetryableWebhookError(error)).toBe(true);
+  });
+
   it('true for a StripeError (numeric .status) — a failed Stripe API call', () => {
     const stripeErr = Object.assign(new Error('No such subscription'), { status: 404 });
     expect(isRetryableWebhookError(stripeErr)).toBe(true);
@@ -378,6 +395,9 @@ describe('isRetryableWebhookError', () => {
     expect(isRetryableWebhookError({ code: '23503' })).toBe(false); // foreign_key_violation
     expect(isRetryableWebhookError(new TypeError('x is not a function'))).toBe(false);
     expect(isRetryableWebhookError(new Error('boom'))).toBe(false);
+    expect(isRetryableWebhookError({ stage: 'transport' })).toBe(false); // only nominal Stripe transport errors retry
+    expect(isRetryableWebhookError(new StripeError('bad config', { stage: 'configuration' }))).toBe(false);
+    expect(isRetryableWebhookError(new StripeError('bad response', { stage: 'response' }))).toBe(false);
     expect(isRetryableWebhookError(null)).toBe(false);
     expect(isRetryableWebhookError(undefined)).toBe(false);
     // A non-numeric status is not a StripeError signal.

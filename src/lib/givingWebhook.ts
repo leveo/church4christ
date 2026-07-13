@@ -18,7 +18,7 @@
 // kind === 'registration' is an event sign-up (confirm/cancel the pending row by
 // its attached Checkout session id). Every other kind resolves to 'ignored'.
 import type { AppDb } from './appDb';
-import { retrieveSubscription, type StripeEnv } from './stripe';
+import { retrieveSubscription, StripeError, type StripeEnv } from './stripe';
 import {
   insertCardGift,
   markGiftRefunded,
@@ -85,14 +85,16 @@ export function isDbConnectivityError(e: unknown): boolean {
  *  - it is a StripeError: readResponse (src/lib/stripe) attaches Stripe's HTTP
  *    status as a numeric `.status` on a non-2xx (429/5xx transient, or even a 4xx
  *    during the race) — redeliver rather than drop the money; or
- *  - it is a network/fetch failure reaching Stripe: fetch throws a generic error
- *    with the socket errno nested on `.cause`, so classify the cause too.
+ *  - the Stripe seam classified a fetch rejection/timeout as a genuine
+ *    StripeError transport failure; or
+ *  - another network failure has a retryable socket errno nested on `.cause`.
  * NOT retryable — a definitive logic/constraint error (a 23xxx constraint
  * violation, a plain TypeError from a real bug) returns 200 so a broken handler
  * can't wedge an infinite retry loop.
  */
 export function isRetryableWebhookError(e: unknown): boolean {
   if (isDbConnectivityError(e)) return true;
+  if (e instanceof StripeError && e.stage === 'transport') return true;
   if (typeof (e as { status?: unknown } | null)?.status === 'number') return true;
   if (isDbConnectivityError((e as { cause?: unknown } | null)?.cause)) return true;
   return false;
