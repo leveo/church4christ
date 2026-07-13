@@ -13,6 +13,7 @@ import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
 import { getOpenEvent, listQuestions } from '../../../lib/regDb';
 import { btn, lab, tin, noticeErr, badge, badgeInactive } from '../../../lib/adminUi';
+import { newCheckoutRequestId } from '../../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -24,11 +25,16 @@ const eventId = Number(Astro.params.id);
 const event =
   Number.isInteger(eventId) && eventId > 0 ? await getOpenEvent(Astro.locals.db, locale, eventId) : null;
 const questions = event ? await listQuestions(Astro.locals.db, locale, eventId) : [];
+const checkoutRequestId = newCheckoutRequestId();
 
 const user = Astro.locals.user;
 const errParam = Astro.url.searchParams.get('error');
 const errorKey =
-  errParam === 'full' ? 'register.error.full' : errParam === 'invalid' ? 'register.error.invalid' : null;
+  errParam === 'full'
+    ? 'register.error.full'
+    : errParam === 'invalid' || errParam === 'waiting'
+      ? 'register.error.invalid'
+      : null;
 
 const paid = !!event && event.price_cents !== null && event.price_cents > 0;
 const isFull = !!event && event.capacity !== null && event.taken_count >= event.capacity;
@@ -68,6 +74,7 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
           <form method="post" action="/api/register/submit" class="mt-6 space-y-4">
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="event_id" value={event.id} />
+            <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
 
             {/* Honeypot: hidden from humans, tempting for bots. */}
             <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">

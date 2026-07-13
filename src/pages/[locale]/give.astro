@@ -14,6 +14,7 @@ import { getLocalized } from '../../lib/content';
 import { getSiteIdentity } from '../../lib/settings';
 import { listFunds } from '../../lib/fundDb';
 import { btn, lab, noticeErr, tin } from '../../lib/adminUi';
+import { newCheckoutRequestId } from '../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -22,6 +23,7 @@ if (!locale) {
 }
 
 const givingOn = Astro.locals.modules.has('giving');
+const checkoutRequestId = newCheckoutRequestId();
 
 // ── Module ON: interactive giving form ──────────────────────────────────────
 // Active funds, sorted (listFunds orders by sort). An anonymous visitor can only
@@ -67,6 +69,7 @@ try {
 
         <form method="post" action="/api/giving/checkout" class="mt-6 space-y-4">
           <input type="hidden" name="locale" value={locale} />
+          <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
 
           {errorKey && <p class={noticeErr}>{t(locale, errorKey)}</p>}
 

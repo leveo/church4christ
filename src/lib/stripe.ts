@@ -7,6 +7,7 @@
 //
 // Secret hygiene: the secret key travels only in the Authorization header; it is
 // never interpolated into an error message, thrown value, or log line.
+import { parseCheckoutRequestId, type StripeCheckoutParams } from './stripeCheckoutRequests';
 
 export type StripeEnv = {
   STRIPE_MODE?: string;
@@ -56,7 +57,7 @@ export interface StripeRequestOptions {
 
 export interface StripeCheckoutRequestOptions {
   fetcher?: typeof fetch;
-  requestId?: string;
+  requestId: string;
   signal?: AbortSignal;
 }
 
@@ -339,7 +340,7 @@ export async function createOneTimeCheckout(
     donorEmail: string;
     customerId?: string | null;
   },
-  options: StripeCheckoutRequestOptions = {},
+  options: StripeCheckoutRequestOptions,
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
@@ -378,7 +379,7 @@ export async function createOneTimeCheckout(
   const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
     fetcher: options.fetcher,
     signal: options.signal,
-    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:giving:${options.requestId}`,
+    idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
   return requireCheckoutRedirect(session);
 }
@@ -401,7 +402,7 @@ export async function createRecurringCheckout(
     email: string;
     customerId?: string | null;
   },
-  options: StripeCheckoutRequestOptions = {},
+  options: StripeCheckoutRequestOptions,
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
@@ -432,7 +433,7 @@ export async function createRecurringCheckout(
   const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
     fetcher: options.fetcher,
     signal: options.signal,
-    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:giving:${options.requestId}`,
+    idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
   return requireCheckoutRedirect(session);
 }
@@ -456,7 +457,7 @@ export async function createRegistrationCheckout(
     registrationId: number;
     email: string;
   },
-  options: StripeCheckoutRequestOptions = {},
+  options: StripeCheckoutRequestOptions,
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
@@ -464,7 +465,8 @@ export async function createRegistrationCheckout(
     kind: 'registration',
     registration_id: args.registrationId,
   };
-  if (options.requestId !== undefined) metadata.request_id = options.requestId;
+  const requestId = parseCheckoutRequestId(options.requestId);
+  metadata.request_id = requestId;
   const params: Record<string, unknown> = {
     mode: 'payment',
     line_items: [
@@ -486,9 +488,45 @@ export async function createRegistrationCheckout(
   const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
     fetcher: options.fetcher,
     signal: options.signal,
-    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:registration:${options.requestId}`,
+    idempotencyKey: `church4christ:registration:${requestId}`,
   });
   return requireCheckoutRedirect(session);
+}
+
+/** Send the exact canonical parameter map retained by the private request pair. */
+export async function createRegistrationCheckoutFromParams(
+  env: StripeEnv,
+  params: StripeCheckoutParams,
+  options: StripeCheckoutRequestOptions,
+): Promise<StripeCheckoutSession & { url: string }> {
+  const requestId = parseCheckoutRequestId(options.requestId);
+  const session = requireTestCheckoutSession(await stripeRequest<unknown>(env, 'checkout/sessions', params as unknown as Record<string, unknown>, {
+    fetcher: options.fetcher,
+    signal: options.signal,
+    idempotencyKey: `church4christ:registration:${requestId}`,
+  }));
+  const expected = params.line_items[0].price_data;
+  if (
+    typeof session.url !== 'string'
+    || session.url.length === 0
+    || session.amount_total !== expected.unit_amount
+    || session.currency !== expected.currency
+    || session.metadata.kind !== 'registration'
+    || session.metadata.request_id !== requestId
+    || session.metadata.registration_id !== params.metadata.registration_id
+  ) {
+    throw invalidCheckoutResponse();
+  }
+  try {
+    const url = new URL(session.url);
+    if (url.protocol !== 'https:' || url.hostname !== 'checkout.stripe.com' || url.username || url.password || url.port) {
+      throw invalidCheckoutResponse();
+    }
+  } catch (error) {
+    if (error instanceof StripeError) throw error;
+    throw invalidCheckoutResponse();
+  }
+  return session as StripeCheckoutSession & { url: string };
 }
 
 /** A Billing Portal session so a donor can manage their recurring gift. */

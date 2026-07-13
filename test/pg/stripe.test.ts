@@ -11,6 +11,7 @@ import {
   createOneTimeCheckout,
   createRecurringCheckout,
   createRegistrationCheckout,
+  createRegistrationCheckoutFromParams,
   createPortalSession,
   requireTestCheckoutSession,
   retrieveCheckoutSession,
@@ -18,6 +19,7 @@ import {
   verifyStripeWebhook,
   type StripeEnv,
 } from '../../src/lib/stripe';
+import { buildRegistrationCheckoutParams } from '../../src/lib/stripeCheckoutRequests';
 
 // ── Test fetcher ─────────────────────────────────────────────────────────────
 type Captured = { url: string; init?: RequestInit };
@@ -357,7 +359,7 @@ describe('createOneTimeCheckout', () => {
 
   it('signed-in donor without a customer → customer_email + customer_creation:always', async () => {
     const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_2' }));
-    await createOneTimeCheckout(ENV, { ...base, customerId: null }, { fetcher: fn });
+    await createOneTimeCheckout(ENV, { ...base, customerId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.customer_email).toBe('ada@example.com');
     expect(b.customer_creation).toBe('always');
@@ -367,7 +369,7 @@ describe('createOneTimeCheckout', () => {
 
   it('anonymous donor → customer_email only, NO customer_creation, blank person_id', async () => {
     const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_3' }));
-    await createOneTimeCheckout(ENV, { ...base, personId: null }, { fetcher: fn });
+    await createOneTimeCheckout(ENV, { ...base, personId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.customer_email).toBe('ada@example.com');
     expect(b.customer_creation).toBeUndefined();
@@ -378,9 +380,9 @@ describe('createOneTimeCheckout', () => {
 
   it('rejects a non-integer or non-positive amount', async () => {
     const { fn } = mockFetch(checkoutJson());
-    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: 10.5 }, { fetcher: fn })).rejects.toThrow();
-    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn })).rejects.toThrow();
-    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: -100 }, { fetcher: fn })).rejects.toThrow();
+    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: 10.5 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
+    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
+    await expect(createOneTimeCheckout(ENV, { ...base, amountCents: -100 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
   });
 
   it('throws when APP_ORIGIN is unset', async () => {
@@ -389,7 +391,7 @@ describe('createOneTimeCheckout', () => {
       createOneTimeCheckout(
         { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_secret' },
         { ...base, customerId: 'cus_1' },
-        { fetcher: fn },
+        { fetcher: fn, requestId: REQUEST_ID },
       ),
     ).rejects.toThrow(/APP_ORIGIN/);
   });
@@ -398,7 +400,7 @@ describe('createOneTimeCheckout', () => {
     'requires a non-empty HTTPS Checkout URL before returning redirect output',
     async (url) => {
       const { fn } = mockFetch(checkoutJson({ url }));
-      await expect(createOneTimeCheckout(ENV, base, { fetcher: fn })).rejects.toMatchObject({
+      await expect(createOneTimeCheckout(ENV, base, { fetcher: fn, requestId: REQUEST_ID })).rejects.toMatchObject({
         code: 'stripe_response_invalid',
         stage: 'response',
       });
@@ -450,7 +452,7 @@ describe('createRecurringCheckout', () => {
 
   it('without a customer → customer_email and never customer_creation', async () => {
     const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_r2' }));
-    await createRecurringCheckout(ENV, { ...base, customerId: null }, { fetcher: fn });
+    await createRecurringCheckout(ENV, { ...base, customerId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.customer_email).toBe('bo@example.com');
     expect(b.customer).toBeUndefined();
@@ -459,8 +461,8 @@ describe('createRecurringCheckout', () => {
 
   it('rejects a non-integer or non-positive amount', async () => {
     const { fn } = mockFetch(checkoutJson());
-    await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0.5 }, { fetcher: fn })).rejects.toThrow();
-    await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn })).rejects.toThrow();
+    await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0.5 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
+    await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
   });
 });
 
@@ -506,7 +508,7 @@ describe('createRegistrationCheckout', () => {
 
   it('carries the locale + event id into the success/cancel URLs', async () => {
     const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_reg2' }));
-    await createRegistrationCheckout(ENV, { ...base, locale: 'zh', eventId: 7 }, { fetcher: fn });
+    await createRegistrationCheckout(ENV, { ...base, locale: 'zh', eventId: 7 }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.success_url).toBe('https://church.example/zh/register/done?ok=1&paid=1');
     expect(b.cancel_url).toBe('https://church.example/zh/register/7');
@@ -514,8 +516,8 @@ describe('createRegistrationCheckout', () => {
 
   it('rejects a non-positive amount (a free registration never builds a checkout)', async () => {
     const { fn } = mockFetch(checkoutJson());
-    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn })).rejects.toThrow();
-    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: -100 }, { fetcher: fn })).rejects.toThrow();
+    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
+    await expect(createRegistrationCheckout(ENV, { ...base, amountCents: -100 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
   });
 
   it('throws when APP_ORIGIN is unset', async () => {
@@ -524,9 +526,62 @@ describe('createRegistrationCheckout', () => {
       createRegistrationCheckout(
         { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_secret' },
         base,
-        { fetcher: fn },
+        { fetcher: fn, requestId: REQUEST_ID },
       ),
     ).rejects.toThrow(/APP_ORIGIN/);
+  });
+});
+
+describe('createRegistrationCheckoutFromParams', () => {
+  const params = buildRegistrationCheckoutParams({
+    requestId: REQUEST_ID,
+    registrationId: 88,
+    eventId: 12,
+    personId: null,
+    name: 'Ada',
+    email: 'reg@example.com',
+    amountCents: 2500,
+    currency: 'usd',
+    answers: [],
+    eventTitle: 'Summer Retreat',
+    locale: 'en',
+    appOrigin: 'https://church.example',
+  });
+
+  it('posts the exact saved canonical params with the stable registration key', async () => {
+    const { fn, calls } = mockFetch(checkoutJson({
+      id: 'cs_test_saved',
+      url: 'https://checkout.stripe.com/c/pay/cs_test_saved',
+      status: 'open',
+      payment_status: 'unpaid',
+      amount_total: 2500,
+      currency: 'usd',
+      metadata: params.metadata,
+    }));
+    const session = await createRegistrationCheckoutFromParams(ENV, params, { fetcher: fn, requestId: REQUEST_ID });
+    expect(session.id).toBe('cs_test_saved');
+    expect(calls[0].init?.body).toBe(stripeForm(params as unknown as Record<string, unknown>).toString());
+    expect(headersOf(calls[0])['Idempotency-Key']).toBe(`church4christ:registration:${REQUEST_ID}`);
+    expect(bodyEntries(calls[0]).expires_at).toBeUndefined();
+  });
+
+  it('rejects response identity or payment fields that do not match the saved pair', async () => {
+    for (const overrides of [
+      { metadata: { ...params.metadata, request_id: '00000000-0000-4000-8000-000000000999' } },
+      { amount_total: 9999, metadata: params.metadata },
+      { currency: 'cad', metadata: params.metadata },
+      { livemode: true, metadata: params.metadata },
+    ]) {
+      const { fn } = mockFetch(checkoutJson(Object.assign({
+        id: 'cs_test_saved',
+        url: 'https://checkout.stripe.com/c/pay/cs_test_saved',
+        amount_total: 2500,
+        currency: 'usd',
+        metadata: params.metadata,
+      }, overrides)));
+      await expect(createRegistrationCheckoutFromParams(ENV, params, { fetcher: fn, requestId: REQUEST_ID }))
+        .rejects.toMatchObject({ stage: 'response' });
+    }
   });
 });
 

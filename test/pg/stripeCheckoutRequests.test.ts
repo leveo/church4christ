@@ -4,7 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import {
+  attachRegistrationCheckoutRequest,
   buildRegistrationCheckoutParams,
+  cancelRegistrationCheckoutRequest,
   parseCheckoutRequestId,
   registrationCheckoutIdempotencyKey,
   registrationCheckoutRequestDigest,
@@ -322,6 +324,53 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       kind: 'review', registrationId: created.registrationId, reason: 'manual_review',
     });
     expect((await sql.unsafe(`SELECT count(*)::int AS count FROM registrations WHERE event_id=$1`, [eventId]))[0].count).toBe(1);
+  });
+
+  it('atomically attaches the verified session and clears canonical JSON before redirect', async () => {
+    const eventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+    expect(await attachRegistrationCheckoutRequest(db, {
+      requestId: REQUEST_A,
+      registrationId: created.registrationId,
+      sessionId: 'cs_test_attached',
+      sessionUrl: 'https://checkout.stripe.com/c/pay/cs_test_attached',
+      amountCents: 2500,
+      currency: 'usd',
+    })).toBe(true);
+    expect(await sql.unsafe(`
+      SELECT r.status,r.stripe_checkout_session_id,q.state,q.request_json,q.session_url
+      FROM registrations r JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+      WHERE q.request_id=$1
+    `, [REQUEST_A])).toEqual([{
+      status: 'pending',
+      stripe_checkout_session_id: 'cs_test_attached',
+      state: 'attached',
+      request_json: null,
+      session_url: 'https://checkout.stripe.com/c/pay/cs_test_attached',
+    }]);
+    expect(await attachRegistrationCheckoutRequest(db, {
+      requestId: REQUEST_A,
+      registrationId: created.registrationId,
+      sessionId: 'cs_test_other',
+      sessionUrl: 'https://checkout.stripe.com/c/pay/cs_test_other',
+      amountCents: 2500,
+      currency: 'usd',
+    })).toBe(false);
+  });
+
+  it('atomically cancels the pending pair and clears private recovery data for definitive failures', async () => {
+    const eventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+    expect(await cancelRegistrationCheckoutRequest(db, REQUEST_A, created.registrationId)).toBe(true);
+    expect(await sql.unsafe(`
+      SELECT r.status,q.state,q.request_json,q.session_url,q.next_reconcile_at
+      FROM registrations r JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+      WHERE q.request_id=$1
+    `, [REQUEST_A])).toEqual([{
+      status: 'cancelled', state: 'resolved', request_json: null, session_url: null, next_reconcile_at: null,
+    }]);
   });
 
   it('fails closed when stored create parameters are incomplete, extended, or registration-mismatched', async () => {

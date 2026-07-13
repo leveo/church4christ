@@ -80,6 +80,11 @@ export function parseCheckoutRequestId(value: unknown): string {
   return value;
 }
 
+/** Generate the one browser identity that must survive every retry of a rendered form. */
+export function newCheckoutRequestId(): string {
+  return parseCheckoutRequestId(crypto.randomUUID());
+}
+
 export function registrationCheckoutIdempotencyKey(requestId: string): string {
   return `church4christ:registration:${parseCheckoutRequestId(requestId)}`;
 }
@@ -457,4 +462,113 @@ export async function resolveRegistrationCheckoutRequest(
     throw error;
   }
   return { kind: 'create', registrationId, requestId, requestJson };
+}
+
+export interface AttachRegistrationCheckoutRequestInput {
+  requestId: string;
+  registrationId: number;
+  sessionId: string;
+  sessionUrl: string;
+  amountCents: number;
+  currency: string;
+}
+
+/**
+ * Attach the verified create response and clear reproducible request data in one
+ * transaction. The final guard deliberately raises on any partial/mismatched
+ * update so PgAdapter rolls the pair back together.
+ */
+export async function attachRegistrationCheckoutRequest(
+  db: AppDb,
+  input: AttachRegistrationCheckoutRequestInput,
+): Promise<boolean> {
+  const requestId = parseCheckoutRequestId(input.requestId);
+  if (!/^cs_test_[A-Za-z0-9_]{1,240}$/.test(input.sessionId)) return false;
+  let url: URL;
+  try {
+    url = new URL(input.sessionUrl);
+  } catch {
+    return false;
+  }
+  if (
+    input.sessionUrl.length > 2048
+    || url.protocol !== 'https:'
+    || url.hostname !== 'checkout.stripe.com'
+    || url.username
+    || url.password
+    || url.port
+  ) {
+    return false;
+  }
+  if (!Number.isSafeInteger(input.registrationId) || input.registrationId <= 0) return false;
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0 || !/^[a-z]{3}$/.test(input.currency)) return false;
+  try {
+    await db.batch([
+      db.prepare(`
+        UPDATE registrations
+        SET stripe_checkout_session_id=?1,updated_at=datetime('now')
+        WHERE id=?2 AND status='pending' AND amount_cents=?3 AND currency=?4
+          AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id=?1)
+      `).bind(input.sessionId, input.registrationId, input.amountCents, input.currency),
+      db.prepare(`
+        UPDATE church_private.stripe_checkout_requests
+        SET state='attached',request_json=NULL,session_url=?1,next_reconcile_at=NULL,
+            last_error=NULL,updated_at=datetime('now')
+        WHERE request_id=?2 AND registration_id=?3 AND state='creating' AND request_json IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM registrations r
+            WHERE r.id=?3 AND r.status='pending' AND r.stripe_checkout_session_id=?4
+          )
+      `).bind(input.sessionUrl, requestId, input.registrationId, input.sessionId),
+      db.prepare(`
+        SELECT 1 / CASE WHEN EXISTS (
+          SELECT 1 FROM registrations r
+          JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+          WHERE r.id=?1 AND r.status='pending' AND r.stripe_checkout_session_id=?2
+            AND q.request_id=?3 AND q.state='attached' AND q.request_json IS NULL AND q.session_url=?4
+        ) THEN 1 ELSE 0 END AS attachment_guard
+      `).bind(input.registrationId, input.sessionId, requestId, input.sessionUrl),
+    ]);
+    return true;
+  } catch (error) {
+    if (isPgError(error, '22012')) return false;
+    throw error;
+  }
+}
+
+/** Definitive preflight/4xx compensation; never used for ambiguous failures. */
+export async function cancelRegistrationCheckoutRequest(
+  db: AppDb,
+  requestIdValue: string,
+  registrationId: number,
+): Promise<boolean> {
+  const requestId = parseCheckoutRequestId(requestIdValue);
+  if (!Number.isSafeInteger(registrationId) || registrationId <= 0) return false;
+  try {
+    await db.batch([
+      db.prepare(`
+        UPDATE registrations SET status='cancelled',updated_at=datetime('now')
+        WHERE id=?1 AND status='pending' AND stripe_checkout_session_id IS NULL
+      `).bind(registrationId),
+      db.prepare(`
+        UPDATE church_private.stripe_checkout_requests
+        SET state='resolved',request_json=NULL,session_url=NULL,next_reconcile_at=NULL,
+            last_error=NULL,updated_at=datetime('now')
+        WHERE request_id=?1 AND registration_id=?2 AND state='creating'
+          AND EXISTS (SELECT 1 FROM registrations r WHERE r.id=?2 AND r.status='cancelled')
+      `).bind(requestId, registrationId),
+      db.prepare(`
+        SELECT 1 / CASE WHEN EXISTS (
+          SELECT 1 FROM registrations r
+          JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+          WHERE r.id=?1 AND r.status='cancelled' AND q.request_id=?2
+            AND q.state='resolved' AND q.request_json IS NULL AND q.session_url IS NULL
+        ) THEN 1 ELSE 0 END AS cancellation_guard
+      `).bind(registrationId, requestId),
+    ]);
+    return true;
+  } catch (error) {
+    if (isPgError(error, '22012')) return false;
+    throw error;
+  }
 }
