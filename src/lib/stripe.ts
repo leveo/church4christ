@@ -75,6 +75,15 @@ export function stripeTestModeConfigured(env: StripeEnv): boolean {
     && (env.STRIPE_WEBHOOK_SECRET?.trim().startsWith('whsec_') ?? false);
 }
 
+/** Local recovery actions stay available while Stripe credentials rotate. */
+export function stripeAdminActionAllowed(action: string, env: StripeEnv): boolean {
+  if (action === 'dismiss' || action === 'cancel') return true;
+  if (action === 'replay' || action === 'reconcile' || action === 'attach') {
+    return stripeTestModeConfigured(env);
+  }
+  return false;
+}
+
 /**
  * Form-encode nested params Stripe-style: objects become `a[b]`, arrays become
  * `c[0][d]`. undefined/null values are skipped; numbers and booleans are

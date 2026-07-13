@@ -193,7 +193,7 @@ export async function dismissStripeWebhookEvent(
   actorId: number,
   deps: StripeWebhookAdminServiceDeps,
 ): Promise<{ state: 'dismissed' | 'not_dismissed' }> {
-  if (!stripeTestModeConfigured(deps.env) || !validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
+  if (!validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
     return { state: 'not_dismissed' };
   }
   const opened = (deps.openDb ?? openDb)(deps.env);

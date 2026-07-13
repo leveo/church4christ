@@ -5,7 +5,7 @@ import { t } from '../../lib/i18n';
 import { paymentOperationsEnabled } from '../../lib/modules';
 import type { Locale } from '../../lib/locales';
 import type { DbEnv } from '../../lib/dbProvider';
-import { stripeTestModeConfigured, type StripeEnv } from '../../lib/stripe';
+import { stripeAdminActionAllowed, type StripeEnv } from '../../lib/stripe';
 import {
   listStripeWebhookEvents,
   stripeWebhookReplayAvailability,
@@ -51,11 +51,11 @@ if (Astro.request.method === 'POST') {
   if (!(user.isAdmin || user.finance === 1) || !paymentOperationsEnabled(Astro.locals.modules)) {
     return new Response(null, { status: 403 });
   }
-  if (!stripeTestModeConfigured(stripeEnv)) {
-    return Astro.redirect('/admin/stripe-events?result=error', 303);
-  }
   const form = await Astro.request.formData();
   const action = String(form.get('action') ?? '');
+  if (!stripeAdminActionAllowed(action, stripeEnv)) {
+    return Astro.redirect('/admin/stripe-events?result=error', 303);
+  }
   let success = false;
   try {
     if (action === 'replay') {

@@ -127,7 +127,7 @@ describe('Stripe operations module gate', () => {
     }
     expect(stripeOperationsSource).toContain("Astro.request.method === 'POST'");
     expect(stripeOperationsSource).toContain("user.isAdmin || user.finance === 1");
-    expect(stripeOperationsSource).toContain('stripeTestModeConfigured(stripeEnv)');
+    expect(stripeOperationsSource).toContain('stripeAdminActionAllowed(action, stripeEnv)');
     expect(stripeOperationsSource).toContain('cancel-registration-${row.registrationId}');
     expect(stripeOperationsSource).toContain('limit: PAGE_SIZE');
     expect(stripeOperationsSource).toContain('offset:');

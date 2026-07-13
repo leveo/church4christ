@@ -10,6 +10,7 @@ import {
 } from '../../src/lib/stripeWebhookInbox';
 import { listRegistrationCheckoutRequests } from '../../src/lib/stripeCheckoutRequests';
 import { dismissStripeWebhookEvent, replayStripeWebhookEvent } from '../../src/lib/stripeWebhookProcessor';
+import { stripeAdminActionAllowed, type StripeEnv } from '../../src/lib/stripe';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
 const NOW = new Date('2026-07-13T12:00:00.000Z');
@@ -53,15 +54,76 @@ describe('Stripe admin event services', () => {
     expect(end).toHaveBeenCalledOnce();
   });
 
-  it('refuses every admin transition unless the runtime is explicitly test mode with a test key', async () => {
+  it('refuses replay unless the runtime has the complete test configuration', async () => {
     const openDb = vi.fn();
     await expect(replayStripeWebhookEvent('evt_test_admin_service', 9, {
       env: { ...env, STRIPE_MODE: 'live' }, openDb,
     })).resolves.toEqual({ state: 'not_claimed' });
-    await expect(dismissStripeWebhookEvent('evt_test_admin_service', 9, {
-      env: { ...env, STRIPE_SECRET_KEY: 'sk_live_forbidden' }, openDb,
-    })).resolves.toEqual({ state: 'not_dismissed' });
     expect(openDb).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing credentials', { DB_BACKEND: 'supabase' }],
+    ['malformed credentials', { ...env, STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_forbidden' }],
+  ])('keeps local audited dismissal available with %s', async (_label, invalidEnv) => {
+    const dismiss = vi.fn(async () => true);
+    const end = vi.fn(async () => {});
+    await expect(dismissStripeWebhookEvent('evt_test_admin_service', 9, {
+      env: invalidEnv as any,
+      now: () => NOW,
+      openDb: () => ({ db: {} as any, backend: 'supabase', end }),
+      dismiss,
+    })).resolves.toEqual({ state: 'dismissed' });
+    expect(dismiss).toHaveBeenCalledWith(expect.anything(), 'evt_test_admin_service', 9, NOW);
+    expect(end).toHaveBeenCalledOnce();
+  });
+
+  it('keeps provider, event-id, and actor validation on local dismissal', async () => {
+    const dismiss = vi.fn(async () => true);
+    const end = vi.fn(async () => {});
+    await expect(dismissStripeWebhookEvent('bad\nevent', 9, {
+      env: { DB_BACKEND: 'supabase' } as any,
+      openDb: vi.fn(),
+      dismiss,
+    })).resolves.toEqual({ state: 'not_dismissed' });
+    await expect(dismissStripeWebhookEvent('evt_test_admin_service', 0, {
+      env: { DB_BACKEND: 'supabase' } as any,
+      openDb: vi.fn(),
+      dismiss,
+    })).resolves.toEqual({ state: 'not_dismissed' });
+    await expect(dismissStripeWebhookEvent('evt_test_admin_service', 9, {
+      env: { DB_BACKEND: 'd1' } as any,
+      openDb: () => ({ db: {} as any, backend: 'd1', end }),
+      dismiss,
+    })).resolves.toEqual({ state: 'not_dismissed' });
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(end).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Stripe admin action credential policy', () => {
+  const policy = (action: string, env: StripeEnv) => stripeAdminActionAllowed(action, env);
+  const complete = {
+    STRIPE_MODE: 'test',
+    STRIPE_SECRET_KEY: 'sk_test_admin',
+    STRIPE_WEBHOOK_SECRET: 'whsec_admin',
+  };
+
+  it.each(['replay', 'reconcile', 'attach'])('%s requires complete test-mode credentials', (action) => {
+    expect(policy(action, complete)).toBe(true);
+    expect(policy(action, {})).toBe(false);
+    expect(policy(action, { ...complete, STRIPE_MODE: 'live' })).toBe(false);
+    expect(policy(action, { ...complete, STRIPE_SECRET_KEY: 'sk_live_forbidden' })).toBe(false);
+    expect(policy(action, { ...complete, STRIPE_WEBHOOK_SECRET: undefined })).toBe(false);
+  });
+
+  it.each(['dismiss', 'cancel'])('%s stays available without Stripe credentials', (action) => {
+    expect(policy(action, {})).toBe(true);
+    expect(policy(action, { STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_forbidden' })).toBe(true);
+  });
+
+  it('fails closed for unknown actions', () => {
+    expect(policy('unknown', complete)).toBe(false);
   });
 });
 
