@@ -44,6 +44,22 @@ describe('catalog-owned docs', () => {
     expect(moduleDoc).toMatch(/`registration`[^\n]*Registration/);
   });
 
+  it('keeps guided sign-in and demo prose tied to setup answers', () => {
+    const readme = readFileSync('README.md', 'utf8');
+    const guidedSignIn = readme.slice(
+      readme.indexOf('**Signing in to the admin area.**'),
+      readme.indexOf('Setup offers **Website**'),
+    );
+    expect(guidedSignIn).toMatch(/first-admin email[^.]*setup (?:handoff|answers)/i);
+    expect(guidedSignIn).not.toContain('admin@example.com');
+    expect(readme).toMatch(/if you (?:choose|chose|selected?) (?:to load )?demo data/i);
+    expect(readme).not.toMatch(/updates? the local D1 rows that point at those objects/i);
+
+    const contributing = readFileSync('CONTRIBUTING.md', 'utf8');
+    expect(contributing).toMatch(/first-admin email[^.]*setup (?:handoff|answers)/i);
+    expect(contributing).not.toContain('sign in as `admin@example.com`');
+  });
+
   it('replacing a generated section preserves surrounding prose', () => {
     expect(
       replaceGeneratedSection(

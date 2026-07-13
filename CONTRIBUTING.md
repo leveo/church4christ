@@ -17,10 +17,11 @@ npm run setup                       # choose local features and bootstrap the ad
 npm run dev
 ```
 
-Open the printed address (usually `http://localhost:4321`). To reach the admin area, sign
-in as `admin@example.com` — the magic link prints to your terminal (local email is logged,
-not sent), and `.dev.vars` also enables an auto-sign-in bypass for convenience. Full context
-is in the [README quickstart](README.md#try-it-in-5-minutes-on-your-own-computer).
+Open the printed address (usually `http://localhost:4321`). To reach the admin area, use the
+first-admin email from your setup answers, repeated in the setup handoff. The magic link
+prints to your terminal (local email is logged, not sent), and setup also writes the same
+address as the local auto-sign-in bypass for convenience. Full context is in the
+[README quickstart](README.md#try-it-in-5-minutes-on-your-own-computer).
 
 ## The four project rules
 

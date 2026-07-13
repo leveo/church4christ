@@ -182,18 +182,19 @@ For local Supabase, the handoff instead exports
 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
 `npm run dev`; that connection URL must not go in `.dev.vars`.
 
-Open the address it prints (usually `http://localhost:4321`). You will see the full
-public site with sample sermons, bulletins, events, ministries, and local demo images.
-The media step copies the generated image pack from `seed/media/` into local R2 and
-updates the local D1 rows that point at those objects. It is safe to run again after
-reseeding the database.
+Open the address it prints (usually `http://localhost:4321`). If you chose demo data during
+setup, you will see sample sermons, bulletins, events, ministries, and local demo images.
+The media step copies the generated image pack from `seed/media/` into local R2 and updates
+the configured database records that refer to those objects. It is safe to run again after
+reseeding the database. Without demo data, setup leaves a clean installation for your own
+content.
 
-**Signing in to the admin area.** There is no password. On the sign-in page, enter
-`admin@example.com` and request a link — because local email is set to print instead of
-send, the **magic-link URL appears right in your terminal**. Paste it into the browser
-and you are in. (For even quicker poking around, `.dev.vars` also sets
-`AUTH_DEV_BYPASS_EMAIL=admin@example.com`, which signs you in automatically in local
-development — no link needed. Remove that line to test the real sign-in flow.)
+**Signing in to the admin area.** There is no password. On the sign-in page, enter the
+first-admin email from your setup answers, repeated in the setup handoff, and request a
+link. Because local email is set to print instead of send, the **magic-link URL appears
+right in your terminal**. Paste it into the browser and you are in. (For quicker local
+testing, setup writes that same address as `AUTH_DEV_BYPASS_EMAIL` in `.dev.vars`, which
+signs you in automatically. Remove that line to test the real sign-in flow.)
 
 Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 13
 D1-compatible modules), and **Full Church** (all 16 modules). Portal, Giving, and
