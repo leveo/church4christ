@@ -80,6 +80,26 @@ function expectedTables(manifest) {
   return [...names].sort();
 }
 
+export function missingRequiredTables(catalog, database, createdTables) {
+  if (!catalog || !Array.isArray(catalog.order) || !catalog.capabilities || typeof catalog.capabilities !== 'object') {
+    throw new TypeError('table readiness catalog is invalid');
+  }
+  if (!['d1', 'supabase'].includes(database)) throw new TypeError('table readiness provider is invalid');
+  if (!(createdTables instanceof Set) || [...createdTables].some((name) => typeof name !== 'string')) {
+    throw new TypeError('created tables must be a set of strings');
+  }
+  const required = new Set(ALWAYS_REQUIRED_TABLES);
+  for (const key of catalog.order) {
+    const capability = catalog.capabilities[key];
+    if (!capability || typeof capability !== 'object') throw new TypeError(`table readiness capability is invalid: ${String(key)}`);
+    if (capability.requiresBackend && capability.requiresBackend !== database) continue;
+    const owned = TABLES_BY_CAPABILITY[key];
+    if (!owned) throw new Error(`table readiness mapping is missing: ${key}`);
+    for (const table of owned) required.add(table);
+  }
+  return [...required].filter((table) => !createdTables.has(table)).sort();
+}
+
 function commandResult(value) {
   return value && typeof value === 'object' && !Array.isArray(value) &&
     typeof value.stdout === 'string' && typeof value.stderr === 'string' && Number.isInteger(value.exitCode);

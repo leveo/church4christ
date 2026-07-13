@@ -4,7 +4,7 @@ import { summarizeReadiness, doctorExitCode, result } from '../../../scripts/set
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { checkManifest } from '../../../scripts/setup/checks/manifest.mjs';
 import { checkConfig } from '../../../scripts/setup/checks/config.mjs';
-import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY, checkDatabase } from '../../../scripts/setup/checks/database.mjs';
+import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables } from '../../../scripts/setup/checks/database.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
@@ -254,16 +254,25 @@ describe('doctor database check', () => {
     }
   });
 
-  it('requires only tables that actual D1 or Supabase migrations create', async () => {
-    const migrationSql = [];
-    for (const directory of ['migrations', 'migrations-supabase']) {
+  it('checks migration-created tables independently for each compatible provider', async () => {
+    const createdByProvider: Record<'d1' | 'supabase', Set<string>> = { d1: new Set(), supabase: new Set() };
+    for (const [provider, directory] of [['d1', 'migrations'], ['supabase', 'migrations-supabase']] as const) {
       for (const file of (await readdir(directory)).filter((name) => name.endsWith('.sql'))) {
-        migrationSql.push(await readFile(`${directory}/${file}`, 'utf8'));
+        const sql = await readFile(`${directory}/${file}`, 'utf8');
+        for (const match of sql.matchAll(/\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"?([a-z][a-z0-9_]*)"?/gi)) {
+          createdByProvider[provider].add(match[1]);
+        }
       }
     }
-    const created = new Set(migrationSql.flatMap((sql) => [...sql.matchAll(/\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"?([a-z][a-z0-9_]*)"?/gi)].map((match) => match[1])));
-    const required = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])].sort();
-    expect(required.filter((table) => !created.has(table))).toEqual([]);
+    expect(missingRequiredTables(catalog, 'd1', createdByProvider.d1)).toEqual([]);
+    expect(missingRequiredTables(catalog, 'supabase', createdByProvider.supabase)).toEqual([]);
+
+    const d1MissingSermons = new Set(createdByProvider.d1); d1MissingSermons.delete('sermons');
+    const pgMissingSermons = new Set(createdByProvider.supabase); pgMissingSermons.delete('sermons');
+    expect(createdByProvider.supabase.has('sermons')).toBe(true);
+    expect(createdByProvider.d1.has('sermons')).toBe(true);
+    expect(missingRequiredTables(catalog, 'd1', d1MissingSermons)).toContain('sermons');
+    expect(missingRequiredTables(catalog, 'supabase', pgMissingSermons)).toContain('sermons');
   });
 });
 
