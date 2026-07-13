@@ -83,6 +83,45 @@ describe('handleStripeWebhookRequest', () => {
     expect(receive).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['without a content length', undefined],
+    ['with a falsely small content length', '1'],
+  ])('stops and cancels a chunked body above 1 MiB %s', async (_label, contentLength) => {
+    const pulls = vi.fn();
+    const cancel = vi.fn();
+    const chunks = [
+      new Uint8Array(STRIPE_WEBHOOK_MAX_BYTES),
+      new Uint8Array([0x78]),
+      new TextEncoder().encode('must-not-be-consumed'),
+    ];
+    let next = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls(next);
+        if (next >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[next++]!);
+      },
+      cancel,
+    }, { highWaterMark: 0 });
+    const headers = contentLength === undefined ? undefined : { 'content-length': contentLength };
+    const request = new Request('http://localhost/api/stripe/webhook', {
+      method: 'POST',
+      headers,
+      body,
+    });
+    const receive = vi.fn();
+
+    expect(await responseText(await handleStripeWebhookRequest(request, deps({ receive }))))
+      .toEqual([413, 'payload_too_large']);
+    expect(pulls).toHaveBeenCalledTimes(2);
+    expect(pulls).not.toHaveBeenCalledWith(2);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(receive).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing webhook secret', async () => {
     const request = await signed();
     const receive = vi.fn();
@@ -154,12 +193,13 @@ describe('handleStripeWebhookRequest', () => {
   ] as const)('does not acknowledge a %s receipt until its write resolves', async (kind, body) => {
     let resolveReceipt!: (value: StripeReceiptResult) => void;
     const receipt = new Promise<StripeReceiptResult>((resolve) => { resolveReceipt = resolve; });
+    const receive = vi.fn(() => receipt);
     const responsePromise = handleStripeWebhookRequest(await signed(), deps({
-      receive: vi.fn(() => receipt),
+      receive,
     }));
     let settled = false;
     void responsePromise.then(() => { settled = true; });
-    await Promise.resolve();
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(1));
     expect(settled).toBe(false);
 
     resolveReceipt({ kind, status: 'pending', outcome: null });
@@ -200,6 +240,32 @@ describe('handleStripeWebhookRequest', () => {
     expect(waitUntil).not.toHaveBeenCalled();
   });
 
+  it('logs a collision with only a fixed code and safe digest metadata', async () => {
+    const event = stripeEvent('payment_intent.succeeded', { secret: 'whsec_do_not_log' }, {
+      id: 'evt_test_control\r\nsk_test_do_not_log',
+    });
+    const request = await signed(event);
+    const body = JSON.stringify(event);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      expect(await responseText(await handleStripeWebhookRequest(request, deps({
+        receive: vi.fn(async () => ({ kind: 'collision' } as const)),
+      })))).toEqual([400, 'event_id_collision']);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith('stripe_webhook_event_id_collision', {
+        payloadSha256: await sha256Utf8(body),
+      });
+      const diagnostic = JSON.stringify(warn.mock.calls);
+      expect(diagnostic).not.toContain('evt_test_control');
+      expect(diagnostic).not.toContain('sk_test_do_not_log');
+      expect(diagnostic).not.toContain('whsec_do_not_log');
+      expect(diagnostic).not.toMatch(/[\r\n]/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it.each([
     [{ kind: 'inserted', status: 'pending', outcome: null }, true, 'received'],
     [{ kind: 'duplicate', status: 'pending', outcome: null }, true, 'pending'],
@@ -238,5 +304,24 @@ describe('handleStripeWebhookRequest', () => {
     expect(process.mock.calls[0]).toHaveLength(2);
     expect(process.mock.calls[0]?.[1]).not.toHaveProperty('db');
     expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+  });
+
+  it('acknowledges an inserted receipt when the processor seam throws synchronously', async () => {
+    const process = vi.fn(() => { throw new Error('processor sync failure'); });
+    const waitUntil = vi.fn();
+
+    expect(await responseText(await handleStripeWebhookRequest(await signed(), deps({ process, waitUntil }))))
+      .toEqual([200, 'received']);
+    await vi.waitFor(() => expect(process).toHaveBeenCalledOnce());
+    expect(waitUntil).toHaveBeenCalledOnce();
+  });
+
+  it('acknowledges an inserted receipt when waitUntil throws synchronously', async () => {
+    const process = vi.fn(async () => ({ state: 'not_claimed' } as const));
+    const waitUntil = vi.fn(() => { throw new Error('execution context closed'); });
+
+    expect(await responseText(await handleStripeWebhookRequest(await signed(), deps({ process, waitUntil }))))
+      .toEqual([200, 'received']);
+    expect(waitUntil).toHaveBeenCalledOnce();
   });
 });

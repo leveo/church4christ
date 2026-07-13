@@ -34,6 +34,42 @@ function receiptInput(body: string, envelope: StripeEnvelope, payloadSha256: str
   };
 }
 
+type BoundedBody = { tooLarge: true } | { tooLarge: false; body: string };
+
+async function readBoundedBody(request: Request): Promise<BoundedBody> {
+  if (!request.body) return { tooLarge: false, body: '' };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > STRIPE_WEBHOOK_MAX_BYTES - byteLength) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The size decision is final even when the sender rejects cancellation.
+        }
+        return { tooLarge: true };
+      }
+      chunks.push(value);
+      byteLength += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { tooLarge: false, body: new TextDecoder().decode(bytes) };
+}
+
 /** Verify, validate, and durably receive one test-mode event before acknowledging it. */
 export async function handleStripeWebhookRequest(
   request: Request,
@@ -48,10 +84,11 @@ export async function handleStripeWebhookRequest(
     return new Response('payload_too_large', { status: 413 });
   }
 
-  const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > STRIPE_WEBHOOK_MAX_BYTES) {
+  const boundedBody = await readBoundedBody(request);
+  if (boundedBody.tooLarge) {
     return new Response('payload_too_large', { status: 413 });
   }
+  const body = boundedBody.body;
 
   const secret = deps.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) return new Response('webhook_not_configured', { status: 400 });
@@ -86,12 +123,22 @@ export async function handleStripeWebhookRequest(
   }
 
   if (receipt.kind === 'collision') {
+    console.warn('stripe_webhook_event_id_collision', { payloadSha256: input.payloadSha256 });
     return new Response('event_id_collision', { status: 400 });
   }
 
   if ((receipt.kind === 'inserted' || receipt.status === 'pending') && deps.waitUntil) {
     const process = deps.process ?? processStripeWebhookEvent;
-    deps.waitUntil(process(envelope.eventId, { env: deps.env }).catch(() => undefined));
+    const eventId = envelope.eventId;
+    const processorEnv = deps.env;
+    const background = Promise.resolve()
+      .then(() => process(eventId, { env: processorEnv }))
+      .catch(() => undefined);
+    try {
+      deps.waitUntil(background);
+    } catch {
+      // The cron drain remains the durable fallback when scheduling is unavailable.
+    }
   }
 
   return new Response(receipt.kind === 'duplicate' ? receipt.status : 'received', { status: 200 });
