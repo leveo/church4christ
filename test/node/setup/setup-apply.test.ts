@@ -477,6 +477,20 @@ describe('setup secrets', () => {
     expect(JSON.stringify(result)).not.toContain('whsec_setup_local');
   });
 
+  it.each(['live', 'unexpected'])('removes reserved STRIPE_MODE=%s overrides while preserving unrelated local entries', async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-stripe-mode-')); const path = join(root, '.dev.vars');
+    await writeFile(path, `OTHER=preserved\nSTRIPE_MODE=${mode}\n`, { mode: 0o644 });
+    await configureSecrets({
+      mode: 'local', adminEmail: 'admin@example.test', path,
+      stripeSecrets: { secretKey: 'sk_test_setup_local', webhookSecret: 'whsec_setup_local' },
+    });
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain('OTHER=preserved');
+    expect(text).not.toMatch(/^STRIPE_MODE=/m);
+    expect(text).toContain('STRIPE_SECRET_KEY=sk_test_setup_local');
+    expect(text).toContain('STRIPE_WEBHOOK_SECRET=whsec_setup_local');
+  });
+
   it('rejects partial, live, or unclassified Stripe values before local or remote mutation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'c4c-invalid-stripe-')); const path = join(root, '.dev.vars');
     const writer = vi.fn(); const runner = { run: vi.fn() };
@@ -509,8 +523,8 @@ describe('setup secrets', () => {
       calls.push(args);
       return { stdout: calls.length === 1 ? '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"STRIPE_SECRET_KEY","type":"secret_text"}]' : '', stderr: '', exitCode: 0 };
     } };
-    const oldKey = process.env.STRIPE_SECRET_KEY; const oldWebhook = process.env.STRIPE_WEBHOOK_SECRET;
-    process.env.STRIPE_SECRET_KEY = 'sk_live_ambient_forbidden'; process.env.STRIPE_WEBHOOK_SECRET = 'whsec_ambient_forbidden';
+    const oldKey = process.env.STRIPE_SECRET_KEY; const oldWebhook = process.env.STRIPE_WEBHOOK_SECRET; const oldMode = process.env.STRIPE_MODE;
+    process.env.STRIPE_SECRET_KEY = 'sk_live_ambient_forbidden'; process.env.STRIPE_WEBHOOK_SECRET = 'whsec_ambient_forbidden'; process.env.STRIPE_MODE = 'live';
     try {
       const result = await configureSecrets({
         mode: 'deploy', adminEmail: 'a@b.test', runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc',
@@ -522,6 +536,7 @@ describe('setup secrets', () => {
       for (const call of calls) {
         expect(call[2].env).not.toHaveProperty('STRIPE_SECRET_KEY');
         expect(call[2].env).not.toHaveProperty('STRIPE_WEBHOOK_SECRET');
+        expect(call[2].env).not.toHaveProperty('STRIPE_MODE');
         expect(call[2].env).not.toHaveProperty('CHURCH_SETUP_STRIPE_SECRET_KEY');
         expect(call[2].env).not.toHaveProperty('CHURCH_SETUP_STRIPE_WEBHOOK_SECRET');
       }
@@ -529,6 +544,7 @@ describe('setup secrets', () => {
     } finally {
       if (oldKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = oldKey;
       if (oldWebhook === undefined) delete process.env.STRIPE_WEBHOOK_SECRET; else process.env.STRIPE_WEBHOOK_SECRET = oldWebhook;
+      if (oldMode === undefined) delete process.env.STRIPE_MODE; else process.env.STRIPE_MODE = oldMode;
     }
   });
 

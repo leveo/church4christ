@@ -4,12 +4,13 @@ import { open, readFile } from 'node:fs/promises';
 import { normalizeEmail } from './answers.mjs';
 import { writeAtomic } from './files.mjs';
 
-const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']);
+const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE']);
 const KEY = /^[A-Z][A-Z0-9_]*$/;
 const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE';
 const STRIPE_ENV_KEYS = Object.freeze([
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_MODE',
   'CHURCH_SETUP_STRIPE_SECRET_KEY',
   'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET',
 ]);
@@ -157,6 +158,21 @@ export async function readLocalStripeClassification(path) {
   return Object.freeze({ classification, ...presence });
 }
 
+export async function readLocalStripeModeOverride(path) {
+  if (typeof path !== 'string' || !path) throw new TypeError('local secret path is required');
+  let content;
+  try { content = await readFile(path, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return Object.freeze({ present: false, test: false });
+    throw new Error('Local Stripe mode override could not be classified safely');
+  }
+  let found;
+  try { found = parseDevVars(content); }
+  catch { throw new Error('Local Stripe mode override could not be classified safely'); }
+  const value = found.get('STRIPE_MODE');
+  return Object.freeze({ present: value !== undefined, test: value?.trim() === 'test' });
+}
+
 function appendManaged(content, additions) {
   let output = content;
   if (output && !output.endsWith('\n')) output += '\n';
@@ -178,6 +194,13 @@ function upsertManaged(content, entries) {
   let output = lines.join('\n');
   const additions = entries.filter(([key]) => !found.has(key));
   return appendManaged(output, additions);
+}
+
+function removeManaged(content, name) {
+  return content.split(/\r?\n/).filter((line) => {
+    const equals = line.indexOf('=');
+    return equals < 1 || line.slice(0, equals).trim() !== name;
+  }).join('\n');
 }
 
 export function parseSecretList(stdout) {
@@ -234,6 +257,7 @@ export async function configureSecrets(options) {
     let content = '';
     let sourceContent = null;
     try { content = await readFile(options.path, 'utf8'); sourceContent = content; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    content = removeManaged(content, 'STRIPE_MODE');
     const existing = parseDevVars(content);
     const additions = [];
     if (!existing.has('SESSION_SECRET')) additions.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);

@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import catalog from '../../../config/capabilities.json';
-import { buildServicePresence } from '../../../scripts/setup/index.mjs';
+import { buildServicePresence, effectiveStripeTestMode } from '../../../scripts/setup/index.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
+import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { probeDeployResourcePresence } from '../../../scripts/setup/probes.mjs';
-import { readLocalSecretNames } from '../../../scripts/setup/secrets.mjs';
+import { readLocalSecretNames, readLocalStripeModeOverride } from '../../../scripts/setup/secrets.mjs';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -60,6 +61,32 @@ describe('doctor service truth', () => {
       const checks = await checkServices({ catalog, manifest: supabaseManifest, presence });
       expect(checks).toContainEqual(expect.objectContaining({ code: state.code, severity: state.severity }));
     }
+  });
+
+  it.each(['live', 'unexpected'])('does not report ready when local STRIPE_MODE=%s overrides generated test mode', async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-stripe-mode-')); roots.push(root);
+    const path = join(root, '.dev.vars');
+    await writeFile(path, `STRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\nSTRIPE_MODE=${mode}\n`);
+    const override = await readLocalStripeModeOverride(path);
+    const presence = await buildServicePresence(supabaseManifest, {
+      hostEnv: {}, localSecretNames: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
+      localStripeClassification: { classification: 'test', secretKey: true, webhookSecret: true },
+      stripeModeTest: effectiveStripeTestMode('{ "vars": { "STRIPE_MODE": "test" } }', override),
+      localSecretsValid: true, localSupabaseUrlAvailable: true,
+    });
+    const doctor = await runDoctor({
+      checkManifest: () => [], checkConfig: () => [], checkDatabase: () => [],
+      checkServices: () => checkServices({ catalog, manifest: supabaseManifest, presence }),
+    });
+    expect(doctor.status).toBe('not-ready');
+    expect(doctor.exitCode).toBe(1);
+    expect(doctor.checks).toContainEqual(expect.objectContaining({
+      code: 'services.stripe-mode', severity: 'error',
+      message: expect.stringMatching(/effective runtime mode.*not test/i),
+      remediation: expect.stringMatching(/remove local STRIPE_MODE overrides/i),
+    }));
+    expect(doctor.checks).not.toContainEqual(expect.objectContaining({ code: 'services.stripe-ok' }));
+    expect(JSON.stringify(doctor)).not.toContain(`STRIPE_MODE=${mode}`);
   });
 
   it('keeps deploy Worker, R2, and D1 probes independent when one fails', async () => {

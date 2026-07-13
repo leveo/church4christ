@@ -78,7 +78,7 @@ export async function checkServices(options) {
     } else if (count === 1) {
       checks.push(result('services.stripe-partial', 'error', 'Stripe configuration is partial and cannot safely process payments.', 'Configure both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or remove both.'));
     } else if (!stripeModeTest) {
-      checks.push(result('services.stripe-mode', 'error', 'Stripe secrets are present but the generated test-mode marker is missing.', 'Regenerate wrangler.jsonc with STRIPE_MODE=test before processing payments.'));
+      checks.push(result('services.stripe-mode', 'error', 'Stripe secrets are present, but the effective runtime mode is not test.', 'Remove local STRIPE_MODE overrides and regenerate wrangler.jsonc with STRIPE_MODE=test before processing payments.'));
     } else if (stripeClassification === 'live') {
       checks.push(result('services.stripe-live', 'error', 'Live-mode Stripe credentials are disabled.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
     } else if (stripeClassification === 'unknown') {

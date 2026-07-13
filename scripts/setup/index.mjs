@@ -23,7 +23,7 @@ import { createStateStore } from './state.mjs';
 import { acquireApprovedContentLease, classifyConfig, writeAtomic } from './files.mjs';
 import { manifestFromPlan, renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus, readLocalStripeClassification } from './secrets.mjs';
+import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus, readLocalStripeClassification, readLocalStripeModeOverride } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
@@ -237,6 +237,16 @@ export function configuredStripeTestMode(config) {
   catch { return false; }
 }
 
+export function effectiveStripeTestMode(config, localOverride) {
+  if (localOverride === undefined) return configuredStripeTestMode(config);
+  if (!localOverride || typeof localOverride !== 'object' || Array.isArray(localOverride) ||
+      Object.keys(localOverride).sort().join('|') !== 'present|test' ||
+      typeof localOverride.present !== 'boolean' || typeof localOverride.test !== 'boolean') {
+    throw new TypeError('local Stripe mode override status is invalid');
+  }
+  return localOverride.present ? localOverride.test : configuredStripeTestMode(config);
+}
+
 export async function buildServicePresence(manifest, probeOptions = {}) {
   const hostEnv = probeOptions.hostEnv ?? process.env;
   const localNames = probeOptions.localSecretNames ?? [];
@@ -362,7 +372,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: configuredStripeTestMode(config) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: effectiveStripeTestMode(config, manifest.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
     }, { strict: false });
   };
 
@@ -412,6 +422,7 @@ async function applyDefaultSetup(plan, options, catalog) {
           (names.has('STRIPE_SECRET_KEY') && names.has('STRIPE_WEBHOOK_SECRET')));
       }
       const baseReady = await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
+      if ((await readLocalStripeModeOverride(resolve(root, '.dev.vars'))).present) return false;
       if (!baseReady || !options.secretContext?.stripeSecrets) return baseReady;
       return (await readLocalStripeClassification(resolve(root, '.dev.vars'))).classification === 'test';
     }),
@@ -766,7 +777,7 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: doctorDbUrl ? [doctorDbUrl] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: configuredStripeTestMode(config) }) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: effectiveStripeTestMode(config, manifest?.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
       }, { strict });
     } finally {
       await connection?.close();

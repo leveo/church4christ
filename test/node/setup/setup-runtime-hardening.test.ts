@@ -11,7 +11,7 @@ import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from '../../../s
 import { verifyMediaPlan } from '../../../scripts/setup/media.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/setup/checks/database.mjs';
-import { readLocalStripeClassification, verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
+import { readLocalStripeClassification, readLocalStripeModeOverride, verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
 import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { resolveLocalPersistence } from '../../../scripts/setup/persistence.mjs';
@@ -23,7 +23,7 @@ function statementDb(rows: Record<string, any>) {
 
 describe('runtime setup hardening', () => {
   it('scrubs runtime and one-shot Stripe values from every default setup child environment', async () => {
-    const keys = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'CHURCH_SETUP_STRIPE_SECRET_KEY', 'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET'] as const;
+    const keys = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE', 'CHURCH_SETUP_STRIPE_SECRET_KEY', 'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET'] as const;
     const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     for (const key of keys) process.env[key] = `secret-${key}`;
     const exec = vi.fn(async (_file, _args, options) => {
@@ -243,6 +243,23 @@ describe('runtime setup hardening', () => {
     const deploy: any = { mode: 'deploy', database: 'supabase', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', hyperdriveId: 'hd' } };
     const presence = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', stripeModeTest: true, hostEnv: {} });
     expect(presence).toMatchObject({ stripeClassification: 'unverifiable', stripeClassificationVerifiable: false, stripeModeTest: true });
+  });
+
+  it('classifies local STRIPE_MODE overrides without returning their values', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-stripe-mode-classification-'));
+    const path = join(root, '.dev.vars');
+    try {
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'OTHER=value\n'));
+      await expect(readLocalStripeModeOverride(path)).resolves.toEqual({ present: false, test: false });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_MODE=test\n'));
+      await expect(readLocalStripeModeOverride(path)).resolves.toEqual({ present: true, test: true });
+      for (const value of ['live', 'unexpected']) {
+        await import('node:fs/promises').then(({ writeFile }) => writeFile(path, `STRIPE_MODE=${value}\n`));
+        const status = await readLocalStripeModeOverride(path);
+        expect(status).toEqual({ present: true, test: false });
+        expect(JSON.stringify(status)).not.toContain(value);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it('does not convert a failed deploy secret-list probe into Stripe absence', async () => {
