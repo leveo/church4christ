@@ -464,6 +464,7 @@ export async function claimRegistrationCheckoutRequest(
     claimVersion: string;
     force: boolean;
     actorId: number | null;
+    incrementAttempts: boolean;
     allowUnattachedManualReview?: boolean;
   },
 ): Promise<RegistrationCheckoutRecoveryClaim | null> {
@@ -490,7 +491,7 @@ export async function claimRegistrationCheckoutRequest(
   const claimed = await db
     .prepare(
       `UPDATE church_private.stripe_checkout_requests q
-       SET reconcile_attempts=reconcile_attempts+1,
+       SET reconcile_attempts=reconcile_attempts+?9,
            next_reconcile_at=?1,
            last_action_by=COALESCE(?2,last_action_by),
            updated_at=?3
@@ -512,6 +513,7 @@ export async function claimRegistrationCheckoutRequest(
       existing.state,
       input.force ? 1 : 0,
       input.now,
+      input.incrementAttempts ? 1 : 0,
     )
     .first<{ request_id: string }>();
   if (!claimed) return null;
@@ -525,7 +527,7 @@ export async function claimRegistrationCheckoutRequest(
     currency: existing.currency,
     createdAt: existing.created_at,
     claimVersion: input.claimVersion,
-    reconcileAttempts: existing.reconcile_attempts + 1,
+    reconcileAttempts: existing.reconcile_attempts + (input.incrementAttempts ? 1 : 0),
     previousNextReconcileAt: existing.next_reconcile_at,
     requestInvalid,
   };

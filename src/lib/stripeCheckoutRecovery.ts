@@ -25,6 +25,7 @@ import {
   scheduleClaimedRegistrationCheckoutRequest,
   type RegistrationCheckoutRecoveryClaim,
 } from './stripeCheckoutRequests';
+import { sanitizeStripeDiagnostic } from './stripeWebhookInbox';
 
 const CHECKPOINT_MINUTES = [45, 90, 180, 480, 960, 1425] as const;
 const CREATE_CUTOFF_MS = 24 * 60 * 60_000;
@@ -59,10 +60,15 @@ function claimVersion(now: Date): string {
   return toDbTime(now);
 }
 
-function boundedError(error: unknown): string {
+function recoverySecrets(env: StripeEnv & DbEnv): string[] {
+  return [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.HYPERDRIVE?.connectionString]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function boundedError(error: unknown, env: StripeEnv & DbEnv): string {
   if (error instanceof StripeError) {
     const detail = error.code ?? (error.status === undefined ? 'unknown' : String(error.status));
-    return `stripe_${error.stage}_${detail}`.slice(0, 1000);
+    return sanitizeStripeDiagnostic(`stripe_${error.stage}_${detail}`, recoverySecrets(env));
   }
   return 'checkout_recovery_failed';
 }
@@ -89,6 +95,7 @@ async function claim(
   now: Date,
   force: boolean,
   actorId: number | null,
+  incrementAttempts: boolean,
   allowUnattachedManualReview = false,
 ): Promise<RegistrationCheckoutRecoveryClaim | null> {
   return claimRegistrationCheckoutRequest(db, requestId, {
@@ -97,6 +104,7 @@ async function claim(
     claimVersion: claimVersion(now),
     force,
     actorId,
+    incrementAttempts,
     allowUnattachedManualReview,
   });
 }
@@ -107,8 +115,9 @@ async function scheduleAmbiguous(
   now: Date,
   error: unknown,
   actorId: number | null,
+  env: StripeEnv & DbEnv,
 ): Promise<StripeCheckoutRecoveryResult> {
-  const diagnostic = boundedError(error);
+  const diagnostic = boundedError(error, env);
   if (claimRow.state === 'creating') {
     const next = nextCreateCheckpoint(parseDbTime(claimRow.createdAt), now);
     if (next === null) {
@@ -148,10 +157,11 @@ async function applySession(
   session: StripeCheckoutSession,
   now: Date,
   actorId: number | null,
+  env: StripeEnv & DbEnv,
 ): Promise<StripeCheckoutRecoveryResult> {
   const action = recoveryAction(session);
   if (!action || (action === 'attach_open' && session.url === null)) {
-    return scheduleAmbiguous(db, claimRow, now, new Error('checkout_session_unresolved'), actorId);
+    return scheduleAmbiguous(db, claimRow, now, new Error('checkout_session_unresolved'), actorId, env);
   }
   if (!(await registrationCheckoutClaimIsCurrent(db, claimRow))) {
     return { requestId: claimRow.requestId, state: 'not_claimed' };
@@ -196,13 +206,13 @@ async function processClaim(
   let activeClaim = claimRow;
   try {
     if (activeClaim.requestInvalid) {
-      return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_request_invalid'), actorId);
+      return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_request_invalid'), actorId, deps.env);
     }
     let sessionId = activeClaim.sessionId;
     if (activeClaim.state === 'creating') {
       const age = now.getTime() - parseDbTime(activeClaim.createdAt).getTime();
       if (age >= CREATE_CUTOFF_MS || activeClaim.requestJson === null) {
-        return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_create_window_closed'), actorId);
+        return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_create_window_closed'), actorId, deps.env);
       }
       if (!(await registrationCheckoutClaimIsCurrent(db, activeClaim))) {
         return { requestId: activeClaim.requestId, state: 'not_claimed' };
@@ -233,15 +243,17 @@ async function processClaim(
         requestInvalid: false,
       };
     }
-    if (sessionId === null) return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_session_missing'), actorId);
+    if (sessionId === null) {
+      return scheduleAmbiguous(db, activeClaim, now, new Error('checkout_session_missing'), actorId, deps.env);
+    }
     if (!(await registrationCheckoutClaimIsCurrent(db, activeClaim))) {
       return { requestId: activeClaim.requestId, state: 'not_claimed' };
     }
     const retrievedRaw = await retrieveCheckout(deps.env, sessionId, {});
     const retrieved = requireRegistrationCheckoutSession(retrievedRaw, expectedSession(activeClaim, sessionId));
-    return applySession(db, activeClaim, retrieved, now, actorId);
+    return applySession(db, activeClaim, retrieved, now, actorId, deps.env);
   } catch (error) {
-    return scheduleAmbiguous(db, activeClaim, now, error, actorId);
+    return scheduleAmbiguous(db, activeClaim, now, error, actorId, deps.env);
   }
 }
 
@@ -255,7 +267,7 @@ async function processRequest(
   try {
     if (opened.backend !== 'supabase') return { requestId, state: 'not_claimed' };
     const now = (deps.now ?? (() => new Date()))();
-    const claimed = await claim(opened.db, requestId, now, options.force, options.actorId);
+    const claimed = await claim(opened.db, requestId, now, options.force, options.actorId, true);
     if (!claimed) return { requestId, state: 'not_claimed' };
     return processClaim(deps, opened.db, claimed, now, options.actorId);
   } finally {
@@ -312,7 +324,7 @@ export async function attachVerifiedCheckoutSession(
   try {
     if (opened.backend !== 'supabase') return { state: 'not_claimed' };
     const now = (deps.now ?? (() => new Date()))();
-    const claimed = await claim(opened.db, requestId, now, true, actorId, true);
+    const claimed = await claim(opened.db, requestId, now, true, actorId, false, true);
     if (!claimed) return { state: 'not_claimed' };
     try {
       const raw = await (deps.retrieveCheckout ?? retrieveCheckoutSession)(deps.env, sessionId, {});
@@ -324,7 +336,7 @@ export async function attachVerifiedCheckoutSession(
         });
         return { state: restored ? 'invalid' : 'not_claimed' };
       }
-      const result = await applySession(opened.db, claimed, session, now, actorId);
+      const result = await applySession(opened.db, claimed, session, now, actorId, deps.env);
       return {
         state: ['confirmed', 'cancelled', 'attached'].includes(result.state) ? 'applied' : 'not_claimed',
       };
@@ -364,7 +376,7 @@ export async function cancelPendingCheckoutRequest(
       return { state: 'confirmation_required' };
     }
     const now = (deps.now ?? (() => new Date()))();
-    const claimed = await claim(opened.db, requestId, now, true, actorId, true);
+    const claimed = await claim(opened.db, requestId, now, true, actorId, false, true);
     if (!claimed) return { state: 'not_claimed' };
     const applied = await cancelClaimedRegistrationCheckoutRequest(opened.db, {
       requestId,

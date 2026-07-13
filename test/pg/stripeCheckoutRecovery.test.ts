@@ -154,6 +154,34 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
     expect(retrieveCheckout).not.toHaveBeenCalled();
   });
 
+  it('byte-bounds, normalizes, and redacts hostile Stripe diagnostic codes without stranding claims', async () => {
+    const variants = [
+      { code: '😀'.repeat(400), now: plusMinutes(T0, 45), state: 'creating' },
+      { code: 'bad\ncode\u0000with\tcontrols', now: plusMinutes(T0, 45), state: 'creating' },
+      { code: `leaked_${ENV.STRIPE_SECRET_KEY}_marker`, now: plusMinutes(T0, 1425), state: 'manual_review' },
+    ] as const;
+    for (let index = 0; index < variants.length; index += 1) {
+      if (index > 0) await sql.unsafe('TRUNCATE church_private.stripe_checkout_requests, registrations CASCADE');
+      await createRequest();
+      const hostile = new StripeError('hostile diagnostic', { stage: 'response', code: 'placeholder' });
+      hostile.code = variants[index].code;
+      const results = await drainStripeCheckoutRecovery({
+        env: ENV, openDb: opened, now: () => variants[index].now,
+        createCheckout: vi.fn(async () => { throw hostile; }), retrieveCheckout: vi.fn(),
+      });
+      expect(results).toHaveLength(1);
+      const [diagnostic] = await sql.unsafe(
+        `SELECT state,last_error,octet_length(last_error) AS error_bytes
+         FROM church_private.stripe_checkout_requests WHERE request_id=$1`,
+        [REQUEST],
+      );
+      expect(diagnostic.state).toBe(variants[index].state);
+      expect(Number(diagnostic.error_bytes)).toBeLessThanOrEqual(1000);
+      expect(String(diagnostic.last_error)).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+      expect(String(diagnostic.last_error)).not.toContain(ENV.STRIPE_SECRET_KEY);
+    }
+  });
+
   it('replays the exact saved create/key then retrieves, but never creates at or beyond 24h', async () => {
     const { registrationId, params } = await createRequest();
     const open = session(registrationId);
@@ -436,7 +464,7 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
     expect(await row()).toMatchObject({
       status: 'pending', state: 'creating', request_json: expect.any(String),
       stripe_checkout_session_id: null, next_reconcile_at: before.next_reconcile_at,
-      last_action_by: 7,
+      last_action_by: 7, reconcile_attempts: before.reconcile_attempts,
     });
   });
 
@@ -453,7 +481,7 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
       [REQUEST],
     );
     expect(await attachVerifiedCheckoutSession(deps, REQUEST, open.id, 1)).toMatchObject({ state: 'applied' });
-    expect(await row()).toMatchObject({ state: 'attached', last_action_by: 1 });
+    expect(await row()).toMatchObject({ state: 'attached', last_action_by: 1, reconcile_attempts: 0 });
 
     await sql.unsafe('TRUNCATE church_private.stripe_checkout_requests, registrations CASCADE');
     const second = await createRequest();
@@ -466,7 +494,9 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
     expect((await row()).status).toBe('pending');
     expect(await cancelPendingCheckoutRequest(deps, REQUEST, 1, `cancel-registration-${second.registrationId}`))
       .toMatchObject({ state: 'applied' });
-    expect(await row()).toMatchObject({ status: 'cancelled', state: 'resolved', last_action_by: 1 });
+    expect(await row()).toMatchObject({
+      status: 'cancelled', state: 'resolved', last_action_by: 1, reconcile_attempts: 0,
+    });
     expect(await resolveRegistrationCheckoutRequest(db, {
       requestId: REQUEST,
       eventId: second.eventId,
