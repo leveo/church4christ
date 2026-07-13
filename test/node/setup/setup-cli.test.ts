@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import rawCatalog from '../../../config/capabilities.json';
 import { collectSupabaseSecret, createPlanPreview, formatPlan, runSetup } from '../../../scripts/setup/index.mjs';
 import { collectInteractiveAnswers } from '../../../scripts/setup/prompts.mjs';
+import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 
 const baseFlags = [
   '--mode', 'local', '--preset', 'website-community', '--site-slug', 'grace-church',
@@ -182,6 +183,28 @@ describe('guided setup CLI', () => {
     expect(rendered).toContain('portal adds people');
     expect(rendered).toContain('portal requires Supabase');
     expect(rendered).toContain('ensure-resources -> migrate -> doctor');
+  });
+
+  it.each([
+    ['local', 'd1', 'none (local setup)'],
+    ['local', 'supabase', 'Supabase'],
+    ['deploy', 'd1', 'Cloudflare'],
+    ['deploy', 'supabase', 'Cloudflare and Supabase'],
+  ])('formats truthful required accounts for %s %s', (mode, backend, accounts) => {
+    const rendered = formatPlan({
+      mode, site: { name: 'Accounts' }, backend, modules: ['events'], services: ['worker'],
+      addedDependencies: [], providerReasons: [], providerSelectionReason: 'default', actions: ['doctor'],
+    } as any);
+    expect(rendered).toContain(`Required accounts: ${accounts}`);
+  });
+
+  it('explains an explicit Supabase override for otherwise D1-compatible capabilities', () => {
+    const plan = buildSetupPlan({
+      mode: 'local', preset: 'website', backendOverride: 'supabase', siteSlug: 'override',
+      churchName: 'Override', locale: 'en', adminName: 'Admin', adminEmail: 'admin@example.test', demoData: false,
+    }, rawCatalog);
+    expect(formatPlan(plan)).toMatch(/Supabase selected by explicit --backend override/i);
+    expect(formatPlan(plan)).not.toContain('selected capabilities are D1-compatible');
   });
 
   it('previews the resolved plan immediately before interactive confirmation', async () => {

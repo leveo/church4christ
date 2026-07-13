@@ -37,13 +37,22 @@ const requireDeps = (deps, names) => {
 
 export function formatPlan(plan) {
   const database = plan.backend === 'supabase' ? 'Supabase Postgres' : 'Cloudflare D1';
-  const accounts = plan.backend === 'supabase' ? 'Cloudflare and Supabase' : 'Cloudflare';
+  const accounts = plan.mode === 'local'
+    ? plan.backend === 'supabase' ? 'Supabase' : 'none (local setup)'
+    : plan.backend === 'supabase' ? 'Cloudflare and Supabase' : 'Cloudflare';
   const dependencies = plan.addedDependencies.length
     ? plan.addedDependencies.map(({ capability, added }) => `${capability} adds ${added}`).join('; ')
     : 'none';
-  const reasons = plan.providerReasons.length
+  const capabilityReasons = plan.providerReasons.length
     ? plan.providerReasons.map(({ capability, requiresBackend }) => `${capability} requires ${requiresBackend === 'supabase' ? 'Supabase' : 'Cloudflare D1'}`).join('; ')
-    : 'selected capabilities are D1-compatible';
+    : '';
+  const providerSelectionReason = plan.providerSelectionReason ?? (plan.providerReasons.length ? 'capability-requirement' : 'default');
+  const selectionReason = providerSelectionReason === 'explicit-override'
+    ? `${plan.backend === 'supabase' ? 'Supabase' : 'Cloudflare D1'} selected by explicit --backend override`
+    : providerSelectionReason === 'capability-requirement'
+      ? 'database selected from capability requirements'
+      : 'selected capabilities are D1-compatible, so Cloudflare D1 is the default';
+  const reasons = capabilityReasons ? `${selectionReason}; ${capabilityReasons}` : selectionReason;
   return [
     `Setup plan: ${plan.site.name}`,
     `Capabilities (${plan.modules.length}): ${plan.modules.join(', ')}`,

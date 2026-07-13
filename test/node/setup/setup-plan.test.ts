@@ -58,8 +58,15 @@ describe('buildSetupPlan', () => {
     );
     expect(plan.preset).toBeNull();
     expect(plan.backend).toBe('supabase');
+    expect(plan.providerSelectionReason).toBe('explicit-override');
     expect(plan.actions).not.toContain('seed');
     expect(plan.actions).not.toContain('seed-media');
+  });
+
+  it('records whether provider selection was default, required, or explicitly overridden', () => {
+    expect(buildSetupPlan({ ...base, preset: 'website' }, raw).providerSelectionReason).toBe('default');
+    expect(buildSetupPlan({ ...base, preset: 'full-church' }, raw).providerSelectionReason).toBe('capability-requirement');
+    expect(buildSetupPlan({ ...base, preset: 'website', backendOverride: 'd1' }, raw).providerSelectionReason).toBe('explicit-override');
   });
 
   it('is deeply frozen and does not mutate answers or catalog', () => {

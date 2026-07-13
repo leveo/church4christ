@@ -77,6 +77,9 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
     modules: resolved.modules,
     moduleSettings,
     backend: resolved.backend,
+    providerSelectionReason: normalized.backendOverride
+      ? 'explicit-override'
+      : resolved.reasons.length ? 'capability-requirement' : 'default',
     providerReasons: resolved.reasons,
     addedDependencies: resolved.addedDependencies,
     services,
