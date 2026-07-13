@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
-import { createCleanWorkspace, execWorkspace, spawnWorkspace, stopChild, waitForHttp } from './fixtures';
+import { createCleanWorkspace, execWorkspace, listRelativePaths, spawnWorkspace, stopChild, waitForHttp } from './fixtures';
 
 const databaseUrl = process.env.DATABASE_URL;
 const suite = describe.skipIf(!databaseUrl);
@@ -23,13 +23,16 @@ suite('clean-room Supabase setup', () => {
     }
     const admin = postgres(databaseUrl!, { max: 1, onnotice: () => {} });
     const identity = (await admin<{ database: string; user: string }[]>`SELECT current_database() AS database, current_user AS user`)[0];
-    const existingTables = await admin<{ table_name: string }[]>`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'`;
-    if (identity.database !== base.pathname.slice(1) || existingTables.length !== 0) {
+    if (identity.database !== base.pathname.slice(1) || identity.user !== decodeURIComponent(base.username) || identity.database !== 'postgres' || identity.user !== 'postgres') {
       await admin.end({ timeout: 5 });
-      throw new Error('clean-room Postgres setup requires the named loopback database to have an empty public schema');
+      throw new Error('clean-room Postgres setup requires the expected disposable postgres database and user');
     }
+    await admin.unsafe('CREATE TABLE IF NOT EXISTS public.clean_room_reset_sentinel (id integer)');
+    await admin.unsafe('INSERT INTO public.clean_room_reset_sentinel VALUES (1)');
     await admin.unsafe('DROP SCHEMA public CASCADE');
     await admin.unsafe('CREATE SCHEMA public');
+    const sentinel = await admin<{ name: string | null }[]>`SELECT to_regclass('public.clean_room_reset_sentinel')::text AS name`;
+    expect(sentinel[0].name).toBeNull();
     const scopedUrl = databaseUrl!;
     const db = postgres(scopedUrl, { max: 1, onnotice: () => {} });
     const workspace = await createCleanWorkspace();
@@ -43,6 +46,7 @@ suite('clean-room Supabase setup', () => {
     };
 
     try {
+      const planText = (await workspace.execNode([...flags.filter((flag) => flag !== '--yes' && flag !== '--demo-data'), '--dry-run'], env)).stdout;
       const firstText = (await workspace.execNode(flags, env, 300_000)).stdout;
       const first = JSON.parse(firstText);
       expect(first).toMatchObject({ schemaVersion: 1, kind: 'setup-result', backend: 'supabase' });
@@ -67,15 +71,21 @@ suite('clean-room Supabase setup', () => {
 
       const manifestBefore = await readFile(join(workspace.root, 'church.config.json'));
       const configBefore = await readFile(join(workspace.root, 'wrangler.jsonc'));
+      const stateBefore = await readFile(join(workspace.root, '.church/setup-state.json'));
       const secondText = (await workspace.execNode(flags, env, 300_000)).stdout;
       const second = JSON.parse(secondText);
       expect(second.apply.results.every(({ status }: { status: string }) => ['already-complete', 'verified'].includes(status))).toBe(true);
       expect(await readFile(join(workspace.root, 'church.config.json'))).toEqual(manifestBefore);
       expect(await readFile(join(workspace.root, 'wrangler.jsonc'))).toEqual(configBefore);
-      for (const generated of [firstText, secondText, manifestBefore.toString(), configBefore.toString()]) {
+      for (const generated of [planText, firstText, secondText, manifestBefore.toString(), configBefore.toString(), stateBefore.toString()]) {
         expect(generated).not.toContain(scopedUrl);
-        expect(generated).not.toContain(decodeURIComponent(base.password));
+        expect(generated).not.toContain(`${decodeURIComponent(base.username)}:${decodeURIComponent(base.password)}@`);
+        expect(generated).not.toContain(JSON.stringify(decodeURIComponent(base.username)));
+        expect(generated).not.toContain(JSON.stringify(decodeURIComponent(base.password)));
       }
+      const localStatePaths = await listRelativePaths(join(workspace.root, '.wrangler'));
+      expect(localStatePaths.some((path) => /(?:^|\/)d1(?:\/|$)/i.test(path))).toBe(false);
+      expect(localStatePaths.some((path) => /(?:^|\/)r2(?:\/|$)/i.test(path))).toBe(true);
 
       await execWorkspace(workspace.root, 'npm', ['run', 'build'], env, 300_000);
       const child = spawnWorkspace(workspace.root, 'npm', ['run', 'dev', '--', '--host', '127.0.0.1'], env);

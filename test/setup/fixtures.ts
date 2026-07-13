@@ -1,14 +1,15 @@
 import { afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { cp, lstat, mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises';
+import { cp, lstat, mkdtemp, readdir, readFile, readlink, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const SOURCE_ROOT = resolve(new URL('../..', import.meta.url).pathname);
+const SOURCE_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const cleanupRoots = new Set<string>();
 const EXCLUDED_NAMES = new Set([
   '.git', 'node_modules', '.wrangler', '.astro', 'dist', '.dev.vars', '.church',
@@ -60,12 +61,11 @@ export async function workspaceHash(root: string) {
   const entries: string[] = [];
   async function visit(directory: string) {
     for (const name of (await readdir(directory)).sort()) {
-      if (name === 'node_modules') continue;
       const path = join(directory, name);
       const rel = relative(root, path);
       const stat = await lstat(path);
       if (stat.isSymbolicLink()) {
-        entries.push(`link:${rel}`);
+        entries.push(`link:${rel}:${await readlink(path)}`);
       } else if (stat.isDirectory()) {
         entries.push(`dir:${rel}`);
         await visit(path);
@@ -77,6 +77,24 @@ export async function workspaceHash(root: string) {
   }
   await visit(root);
   return createHash('sha256').update(entries.join('\n')).digest('hex');
+}
+
+export async function listRelativePaths(root: string) {
+  const paths: string[] = [];
+  async function visit(directory: string) {
+    let names: string[];
+    try { names = await readdir(directory); }
+    catch (error: any) { if (error?.code === 'ENOENT') return; throw error; }
+    for (const name of names.sort()) {
+      const path = join(directory, name);
+      const rel = relative(root, path);
+      paths.push(rel);
+      const stat = await lstat(path);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) await visit(path);
+    }
+  }
+  await visit(root);
+  return paths.sort();
 }
 
 export async function execWorkspace(root: string, file: string, args: string[], env: Environment = {}, timeout = 180_000) {
@@ -118,15 +136,31 @@ export function spawnWorkspace(root: string, command: string, args: string[], en
 
 export async function stopChild(child: RunningChild) {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  if (process.platform === 'win32') child.kill('SIGTERM');
-  else process.kill(-child.pid!, 'SIGTERM');
-  await Promise.race([
-    new Promise<void>((resolveDone) => child.once('exit', () => resolveDone())),
-    new Promise<void>((resolveDone) => setTimeout(() => resolveDone(), 5_000)),
-  ]);
+  const signal = (name: NodeJS.Signals) => {
+    try {
+      if (process.platform === 'win32') child.kill(name);
+      else process.kill(-child.pid!, name);
+      return true;
+    } catch (error: any) {
+      if (error?.code === 'ESRCH') return false;
+      throw error;
+    }
+  };
+  const waitForExit = (timeout: number) => new Promise<boolean>((resolveDone) => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolveDone(true); return; }
+    const done = () => { clearTimeout(timer); child.off('exit', done); resolveDone(true); };
+    const timer = setTimeout(() => { child.off('exit', done); resolveDone(false); }, timeout);
+    child.once('exit', done);
+  });
+  const termSent = signal('SIGTERM');
+  if (!termSent) { await waitForExit(1_000); return; }
+  await waitForExit(5_000);
   if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === 'win32') child.kill('SIGKILL');
-    else process.kill(-child.pid!, 'SIGKILL');
+    const killSent = signal('SIGKILL');
+    const exited = await waitForExit(5_000);
+    if (killSent && !exited && child.exitCode === null && child.signalCode === null) {
+      throw new Error('dev server process group did not exit after SIGKILL');
+    }
   }
 }
 
