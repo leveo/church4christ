@@ -8,7 +8,7 @@ import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY, checkDatabase } from '../
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 const baseManifest = {
   schemaVersion: 1,
@@ -252,6 +252,18 @@ describe('doctor database check', () => {
       const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
       expect(findings.map((entry) => entry.code), `core must require ${missing}`).toContain('database.tables');
     }
+  });
+
+  it('requires only tables that actual D1 or Supabase migrations create', async () => {
+    const migrationSql = [];
+    for (const directory of ['migrations', 'migrations-supabase']) {
+      for (const file of (await readdir(directory)).filter((name) => name.endsWith('.sql'))) {
+        migrationSql.push(await readFile(`${directory}/${file}`, 'utf8'));
+      }
+    }
+    const created = new Set(migrationSql.flatMap((sql) => [...sql.matchAll(/\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"?([a-z][a-z0-9_]*)"?/gi)].map((match) => match[1])));
+    const required = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])].sort();
+    expect(required.filter((table) => !created.has(table))).toEqual([]);
   });
 });
 

@@ -1,7 +1,7 @@
 import { result } from '../readiness.mjs';
 import { redact } from '../redact.mjs';
 
-const FINAL_SHARED_TABLES = Object.freeze(['member_groups', 'checkins', 'custom_pages', 'page_blocks']);
+const FINAL_SHARED_TABLES = Object.freeze(['member_groups', 'checkins', 'custom_pages']);
 const ALWAYS_REQUIRED_TABLES = Object.freeze([
   'people', 'settings', 'tokens', 'media', ...FINAL_SHARED_TABLES,
 ]);
@@ -23,7 +23,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   fellowships: Object.freeze(['member_groups', 'member_group_i18n']),
   people: Object.freeze(['households', 'household_members', 'person_notes']),
   children: Object.freeze(['checkin_events', 'checkins', 'households', 'household_members']),
-  'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'page_blocks', 'revisions']),
+  'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
     'member_groups', 'member_group_i18n', 'group_members', 'group_applications', 'group_files',
     'event_admins', 'prayer_items', 'households', 'household_members', 'reg_events', 'reg_event_i18n',
