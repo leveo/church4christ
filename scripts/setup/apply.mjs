@@ -24,12 +24,12 @@ function commonDatabaseSteps(options) {
   if (!options.db || typeof options.db.prepare !== 'function') throw new TypeError('provider AppDb is required');
   if (!Array.isArray(options.moduleKeys)) throw new TypeError('moduleKeys are required');
   return {
-    'initialize-modules': providerStep(async ({ plan } = {}) => {
+    'initialize-modules': providerStep(async ({ plan, recovering = false } = {}) => {
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
       const key = `site.name.${plan?.site?.locale}`;
       const current = await options.db.prepare('SELECT value FROM settings WHERE key=?').bind(key).first('value');
-      const canonical = plan?.site?.locale === 'zh' ? '四方基督教会' : 'Church4Christ';
-      if (current == null || current === canonical) {
+      const validCurrent = typeof current === 'string' && current.trim() === current && current.length > 0 && current.length <= 200 && !/[\0-\x1f\x7f]/.test(current);
+      if (!(recovering || options.preserveSiteIdentity) || !validCurrent) {
         await options.db.prepare(
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
         ).bind(key, plan?.site?.name).run();
@@ -193,7 +193,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
       validateResolvedResources(result.resolvedResources, plan);
       resolvedResources = Object.freeze({ ...result.resolvedResources });
     }
-    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources }));
+    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed }));
     if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
     await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null));
     results.push({ step: name, status: result.changed ? 'changed' : 'verified' });

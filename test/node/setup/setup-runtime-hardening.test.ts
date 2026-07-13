@@ -12,12 +12,20 @@ import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/s
 import { verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
 import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
 import { redact } from '../../../scripts/setup/redact.mjs';
+import { resolveLocalPersistence } from '../../../scripts/setup/persistence.mjs';
 
 function statementDb(rows: Record<string, any>) {
   return { prepare(sql: string) { return { bind() { return this; }, async first() { return rows[sql] ?? null; }, async all() { return { success: true, meta: {}, results: rows[sql] ?? [] }; } }; } };
 }
 
 describe('runtime setup hardening', () => {
+  it('resolves a validated workspace-local Wrangler persistence override', () => {
+    expect(resolveLocalPersistence('/repo', {})).toBe('/repo/.wrangler/state');
+    expect(resolveLocalPersistence('/repo', { WRANGLER_PERSIST_TO: '.test/state' })).toBe('/repo/.test/state');
+    for (const value of ['', ' ', '../escape', '/tmp/escape', '--remote', 'bad\npath']) {
+      expect(() => resolveLocalPersistence('/repo', { WRANGLER_PERSIST_TO: value })).toThrow(/WRANGLER_PERSIST_TO/i);
+    }
+  });
   it('strictly parses a nonempty Worker deployment list', () => {
     expect(parseWorkerDeployments(JSON.stringify([{ id: 'dep', created_on: '2026-01-01T00:00:00Z', versions: [{ version_id: 'v1', percentage: 100 }] }]))).toHaveLength(1);
     for (const invalid of ['{}', '[]', '[{"id":"dep"}]', 'not-json']) expect(() => parseWorkerDeployments(invalid)).toThrow();

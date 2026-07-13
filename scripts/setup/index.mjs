@@ -25,6 +25,7 @@ import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretsS
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
+import { resolveLocalPersistence } from './persistence.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -171,7 +172,7 @@ async function applyDefaultSetup(plan, options, catalog) {
   const statePath = resolve(root, '.church/setup-state.json');
   const runner = createCommandRunner();
   const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
-  const persistTo = plan.mode === 'local' ? resolve(root, '.wrangler/state') : undefined;
+  const persistTo = plan.mode === 'local' ? resolveLocalPersistence(root, process.env) : undefined;
   const dbUrl = options.secretContext?.dbUrl;
   let postgresConnection;
   const db = plan.backend === 'd1'
@@ -185,14 +186,14 @@ async function applyDefaultSetup(plan, options, catalog) {
   const verify = {
     migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
     seed: () => verifyCanonicalDemoSeed(db),
-    'initialize-modules': async ({ plan: activePlan }) => {
+    'initialize-modules': async ({ plan: activePlan, recovering = false }) => {
       try {
         const rows = (await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'module.%'").all()).results;
         const found = new Map(rows.map((row) => [row.key, row.value]));
         const enabled = new Set(activePlan.modules);
         const identity = await db.prepare('SELECT value FROM settings WHERE key=?').bind(`site.name.${activePlan.site.locale}`).first('value');
-        const canonical = activePlan.site.locale === 'zh' ? '四方基督教会' : 'Church4Christ';
-        const identityReady = identity === activePlan.site.name || (typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity) && identity !== canonical);
+        const validIdentity = typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity);
+        const identityReady = (recovering || options.existingInstallation) ? validIdentity : identity === activePlan.site.name;
         return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },
@@ -204,8 +205,8 @@ async function applyDefaultSetup(plan, options, catalog) {
     },
   };
   const baseProviderSteps = plan.backend === 'd1'
-    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, ...(persistTo ? { persistTo } : {}), db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify })
-    : createSupabaseSteps({ runner, root, dbUrl, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify });
+    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, ...(persistTo ? { persistTo } : {}), db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, preserveSiteIdentity: options.existingInstallation, verify })
+    : createSupabaseSteps({ runner, root, dbUrl, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, preserveSiteIdentity: options.existingInstallation, verify });
   const providerSteps = { ...baseProviderSteps };
   const providerSeed = providerSteps.seed;
   providerSteps.seed = step(async (context) => await verify.seed(context) ? { changed: false } : providerSeed.apply(context), providerSeed.verify);
@@ -367,6 +368,7 @@ export async function runSetup(argv, deps) {
     forceConfig: parsed.forceConfig,
     promoteExistingAdmin: parsed.promoteExistingAdmin,
     allowHyperdriveSecretInArgv,
+    existingInstallation: Boolean(currentState.existingBackend),
   });
   deps.output(parsed.json
     ? JSON.stringify({ schemaVersion: 1, kind: 'setup-result', ...result })
@@ -456,12 +458,13 @@ async function createDefaultDeps() {
     let db;
     let runner;
     const root = resolve(process.cwd());
+    const persistTo = manifest?.mode === 'local' ? resolveLocalPersistence(root, process.env) : undefined;
     const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
     const configPath = resolve(root, 'wrangler.jsonc');
     const doctorDbUrl = resolveDoctorDatabaseUrl(manifest, process.env);
     if (manifest?.database === 'd1') {
       runner = createCommandRunner();
-      db = new D1CliDb({ runner, wranglerBin, configPath, mode: manifest.mode, ...(manifest.mode === 'local' && process.env.WRANGLER_PERSIST_TO ? { persistTo: process.env.WRANGLER_PERSIST_TO } : {}) });
+      db = new D1CliDb({ runner, wranglerBin, configPath, mode: manifest.mode, ...(persistTo ? { persistTo } : {}) });
     } else if (manifest?.database === 'supabase' && doctorDbUrl) {
       connection = openPostgresSetupDb(doctorDbUrl);
       db = connection.db;

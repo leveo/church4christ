@@ -25,7 +25,7 @@ suite('clean-room Supabase setup', () => {
     if (!/^[a-z][a-z0-9_]{1,62}$/.test(dbName)) throw new Error('generated disposable database name is unsafe');
     let db: ReturnType<typeof postgres> | undefined;
     let child: ReturnType<typeof spawnWorkspace> | undefined;
-    let databaseCreated = false;
+    let databaseCreationAttempted = false;
     let primaryError: unknown;
     const oldStripe = process.env.STRIPE_SECRET_KEY;
     const oldSupabase = process.env.SUPABASE_DB_URL;
@@ -39,8 +39,8 @@ suite('clean-room Supabase setup', () => {
       }
       await admin.unsafe('CREATE TEMP TABLE base_clean_room_sentinel (value text)');
       await admin.unsafe("INSERT INTO base_clean_room_sentinel VALUES ('untouched')");
+      databaseCreationAttempted = true;
       await admin.unsafe(`CREATE DATABASE "${dbName}"`);
-      databaseCreated = true;
       const scoped = new URL(base); scoped.pathname = `/${dbName}`;
       const scopedUrl = scoped.toString();
       db = postgres(scopedUrl, { max: 1, onnotice: () => {} });
@@ -51,12 +51,12 @@ suite('clean-room Supabase setup', () => {
 
       const workspace = await createCleanWorkspace();
       const port = await allocatePort();
-      const persistTo = join(workspace.root, '.wrangler/state');
+      const persistTo = join(workspace.root, '.noncanonical/wrangler-state');
       const env = {
         DATABASE_URL: scopedUrl,
         SUPABASE_DB_URL: scopedUrl,
         CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: scopedUrl,
-        WRANGLER_PERSIST_TO: persistTo,
+        WRANGLER_PERSIST_TO: '.noncanonical/wrangler-state',
         ASTRO_DEV_BACKGROUND: '0',
       };
       const flags = setupFlags(port);
@@ -83,13 +83,14 @@ suite('clean-room Supabase setup', () => {
       const manifestBefore = await readFile(join(workspace.root, 'church.config.json'));
       const configBefore = await readFile(join(workspace.root, 'wrangler.jsonc'));
       const stateBefore = await readFile(join(workspace.root, '.church/setup-state.json'));
+      const devVars = await readFile(join(workspace.root, '.dev.vars'), 'utf8');
       const secondRun = await workspace.execNode(flags, env, 300_000);
       const second = JSON.parse(secondRun.stdout);
       expect(second.apply.results.every(({ status }: { status: string }) => ['already-complete', 'verified'].includes(status))).toBe(true);
       expect(await readFile(join(workspace.root, 'church.config.json'))).toEqual(manifestBefore);
       expect(await readFile(join(workspace.root, 'wrangler.jsonc'))).toEqual(configBefore);
       const credentials = [scopedUrl, `${decodeURIComponent(base.username)}:${decodeURIComponent(base.password)}@`, JSON.stringify(decodeURIComponent(base.username)), JSON.stringify(decodeURIComponent(base.password)), 'ambient-stripe-must-not-leak', 'postgres://ambient:secret@invalid/ambient'];
-      for (const generated of [plan.stdout, plan.stderr, firstRun.stdout, firstRun.stderr, secondRun.stdout, secondRun.stderr, manifestBefore.toString(), configBefore.toString(), stateBefore.toString()]) {
+      for (const generated of [plan.stdout, plan.stderr, firstRun.stdout, firstRun.stderr, secondRun.stdout, secondRun.stderr, manifestBefore.toString(), configBefore.toString(), stateBefore.toString(), devVars]) {
         for (const credential of credentials) expect(generated).not.toContain(credential);
       }
       const localStatePaths = await listRelativePaths(persistTo);
@@ -108,6 +109,7 @@ suite('clean-room Supabase setup', () => {
       expect(secret).toBeTruthy();
       const jwt = await mintSession(secret!, { id: Number(owners[0].id), email: owners[0].email, sessionEpoch: Number(owners[0].session_epoch) });
       expect((await fetch(`http://127.0.0.1:${port}/en/my`, { headers: { cookie: `${SESSION_COOKIE}=${jwt}` }, redirect: 'manual' })).status, output).toBe(200);
+      for (const credential of credentials) expect(output).not.toContain(credential);
       expect((await admin<{ value: string }[]>`SELECT value FROM base_clean_room_sentinel`)[0].value).toBe('untouched');
     } catch (error) {
       primaryError = error; throw error;
@@ -117,7 +119,7 @@ suite('clean-room Supabase setup', () => {
       const failures = [
         ...await cleanupAll([async () => { if (child) await stopChild(child); }, async () => { if (db) await db.end({ timeout: 5 }); }], primaryError),
         ...await cleanupAll([async () => {
-          if (!databaseCreated) return;
+          if (!databaseCreationAttempted) return;
           await admin.unsafe('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1 AND pid<>pg_backend_pid()', [dbName]);
           await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
           expect((await admin<{ value: string }[]>`SELECT value FROM base_clean_room_sentinel`)[0].value).toBe('untouched');
