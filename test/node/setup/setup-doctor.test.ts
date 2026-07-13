@@ -4,10 +4,11 @@ import { summarizeReadiness, doctorExitCode, result } from '../../../scripts/set
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { checkManifest } from '../../../scripts/setup/checks/manifest.mjs';
 import { checkConfig } from '../../../scripts/setup/checks/config.mjs';
-import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables } from '../../../scripts/setup/checks/database.mjs';
+import { ALWAYS_REQUIRED_TABLES, PRIVATE_TABLES_BY_CAPABILITY, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables } from '../../../scripts/setup/checks/database.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
+import { verifyMigrationCompleteness } from '../../../scripts/setup/verification.mjs';
 import { readFile, readdir } from 'node:fs/promises';
 
 const baseManifest = {
@@ -23,6 +24,21 @@ const baseManifest = {
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
 
+const EXPECTED_PRIVATE_TABLES_BY_CAPABILITY = {
+  giving: ['church_private.stripe_webhook_events'],
+  registration: [
+    'church_private.stripe_webhook_events',
+    'church_private.stripe_checkout_requests',
+  ],
+} as const;
+
+function relationRows(relations: string[]) {
+  return relations.map((relation) => {
+    const [table_schema, table_name] = relation.includes('.') ? relation.split('.', 2) : ['public', relation];
+    return { table_schema, table_name };
+  });
+}
+
 function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown> = {}) {
   const enabled = new Set(manifest.modules);
   const moduleRows = catalog.order.map((key) => ({ key: `module.${key}`, value: enabled.has(key) ? '1' : '0' }));
@@ -30,7 +46,12 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
     ...ALWAYS_REQUIRED_TABLES,
     ...Object.values(TABLES_BY_CAPABILITY).flat(),
   ])];
-  const migrations = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql'];
+  const privateRelations = [...new Set<string>(
+    manifest.modules.flatMap((key: string) => [
+      ...(EXPECTED_PRIVATE_TABLES_BY_CAPABILITY[key as keyof typeof EXPECTED_PRIVATE_TABLES_BY_CAPABILITY] ?? []),
+    ]),
+  )];
+  const migrations = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql', '0008_stripe_webhook_events.sql'];
   return {
     prepare(sql: string) {
       const statement = {
@@ -43,7 +64,10 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
         async all() {
           if (sql.includes("key LIKE 'module.%'")) return rowResult((overrides.moduleRows as any) ?? moduleRows);
           if (sql.includes('sqlite_master')) return rowResult((overrides.tables as any) ?? tables.map((name) => ({ name })));
-          if (sql.includes('information_schema.tables')) return rowResult((overrides.tables as any) ?? tables.map((table_name) => ({ table_name })));
+          if (sql.includes('information_schema.tables')) return rowResult((overrides.tables as any) ?? relationRows([
+            ...tables.map((name) => `public.${name}`),
+            ...privateRelations,
+          ]));
           if (sql === 'SELECT name FROM _migrations ORDER BY name') return rowResult((overrides.migrations as any) ?? migrations.map((name) => ({ name })));
           throw new Error(`unexpected all query: ${sql}`);
         },
@@ -198,7 +222,7 @@ describe('doctor database check', () => {
       ['database.d1-migrations-unavailable', 'info'], ['database.ok', 'info'],
     ]);
     const supabase = { ...baseManifest, preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
-    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => ['0007_member_portal.sql', '0001_init.sql', 'ignore.example', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql'] });
+    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => ['0008_stripe_webhook_events.sql', '0007_member_portal.sql', '0001_init.sql', 'ignore.example', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql'] });
     expect(pg).toEqual([expect.objectContaining({ code: 'database.ok', severity: 'info' })]);
   });
 
@@ -235,6 +259,7 @@ describe('doctor database check', () => {
   });
 
   it('probes every operational table owned by every capability plus always-required core tables', async () => {
+    expect(PRIVATE_TABLES_BY_CAPABILITY).toEqual(EXPECTED_PRIVATE_TABLES_BY_CAPABILITY);
     expect(Object.keys(TABLES_BY_CAPABILITY).sort()).toEqual([...catalog.order].sort());
     expect(ALWAYS_REQUIRED_TABLES).toEqual(expect.arrayContaining(['people', 'settings', 'media', 'tokens']));
     expect(TABLES_BY_CAPABILITY.registration).toEqual(expect.arrayContaining([
@@ -249,21 +274,46 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.people).toEqual(expect.arrayContaining(['households', 'household_members', 'person_notes']));
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])];
-    const migrationFiles = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql'];
-    expect(await checkDatabase({ db: fakeDb(full, { tables: allTables.map((table_name) => ({ table_name })) }), catalog, manifest: full, readDir: async () => migrationFiles }))
+    const allRelations = [
+      ...allTables.map((table) => `public.${table}`),
+      ...new Set(Object.values(EXPECTED_PRIVATE_TABLES_BY_CAPABILITY).flat()),
+    ];
+    const migrationFiles = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql', '0008_stripe_webhook_events.sql'];
+    expect(await checkDatabase({ db: fakeDb(full, { tables: relationRows(allRelations) }), catalog, manifest: full, readDir: async () => migrationFiles }))
       .toEqual([expect.objectContaining({ code: 'database.ok' })]);
     for (const [capability, owned] of Object.entries(TABLES_BY_CAPABILITY)) {
       for (const missing of owned) {
-        const tables = allTables.filter((name) => name !== missing).map((table_name) => ({ table_name }));
+        const tables = relationRows(allRelations.filter((name) => name !== `public.${missing}`));
         const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
         expect(findings.map((entry) => entry.code), `${capability} must require ${missing}`).toContain('database.tables');
       }
     }
     for (const missing of ALWAYS_REQUIRED_TABLES) {
-      const tables = allTables.filter((name) => name !== missing).map((table_name) => ({ table_name }));
+      const tables = relationRows(allRelations.filter((name) => name !== `public.${missing}`));
       const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
       expect(findings.map((entry) => entry.code), `core must require ${missing}`).toContain('database.tables');
     }
+    for (const [capability, owned] of Object.entries(EXPECTED_PRIVATE_TABLES_BY_CAPABILITY)) {
+      for (const missing of owned) {
+        const tables = relationRows(allRelations.filter((name) => name !== missing));
+        const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
+        expect(findings.map((entry) => entry.code), `${capability} must require ${missing}`).toContain('database.tables');
+      }
+    }
+  });
+
+  it('requires private relations only for the corresponding Supabase capabilities', async () => {
+    const supabaseWebsite = { ...baseManifest, database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
+    const migrationFiles = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql', '0008_stripe_webhook_events.sql'];
+    expect(await checkDatabase({ db: fakeDb(supabaseWebsite), catalog, manifest: supabaseWebsite, readDir: async () => migrationFiles }))
+      .toEqual([expect.objectContaining({ code: 'database.ok' })]);
+
+    const giving = { ...supabaseWebsite, modules: [...supabaseWebsite.modules, 'giving'] } as const;
+    const publicOnly = relationRows([
+      ...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()]),
+    ].map((table) => `public.${table}`));
+    const findings = await checkDatabase({ db: fakeDb(giving, { tables: publicOnly }), catalog, manifest: giving, readDir: async () => migrationFiles });
+    expect(findings.map((entry) => entry.code)).toContain('database.tables');
   });
 
   it('checks migration-created tables independently for each compatible provider', async () => {
@@ -271,20 +321,40 @@ describe('doctor database check', () => {
     for (const [provider, directory] of [['d1', 'migrations'], ['supabase', 'migrations-supabase']] as const) {
       for (const file of (await readdir(directory)).filter((name) => name.endsWith('.sql'))) {
         const sql = await readFile(`${directory}/${file}`, 'utf8');
-        for (const match of sql.matchAll(/\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"?([a-z][a-z0-9_]*)"?/gi)) {
-          createdByProvider[provider].add(match[1]);
+        for (const match of sql.matchAll(/\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?([a-z][a-z0-9_]*)"?\s*\.\s*)?"?([a-z][a-z0-9_]*)"?/gi)) {
+          createdByProvider[provider].add(provider === 'supabase' ? `${match[1] ?? 'public'}.${match[2]}` : match[2]);
         }
       }
     }
     expect(missingRequiredTables(catalog, 'd1', createdByProvider.d1)).toEqual([]);
     expect(missingRequiredTables(catalog, 'supabase', createdByProvider.supabase)).toEqual([]);
+    expect(createdByProvider.d1.has('stripe_webhook_events')).toBe(false);
+    expect(createdByProvider.d1.has('stripe_checkout_requests')).toBe(false);
+    expect(createdByProvider.d1.has('church_private.stripe_webhook_events')).toBe(false);
+    expect(createdByProvider.d1.has('church_private.stripe_checkout_requests')).toBe(false);
+    expect(createdByProvider.supabase.has('church_private.stripe_webhook_events')).toBe(true);
+    expect(createdByProvider.supabase.has('church_private.stripe_checkout_requests')).toBe(true);
 
     const d1MissingSermons = new Set(createdByProvider.d1); d1MissingSermons.delete('sermons');
-    const pgMissingSermons = new Set(createdByProvider.supabase); pgMissingSermons.delete('sermons');
-    expect(createdByProvider.supabase.has('sermons')).toBe(true);
+    const pgMissingSermons = new Set(createdByProvider.supabase); pgMissingSermons.delete('public.sermons');
+    expect(createdByProvider.supabase.has('public.sermons')).toBe(true);
     expect(createdByProvider.d1.has('sermons')).toBe(true);
     expect(missingRequiredTables(catalog, 'd1', d1MissingSermons)).toContain('sermons');
-    expect(missingRequiredTables(catalog, 'supabase', pgMissingSermons)).toContain('sermons');
+    expect(missingRequiredTables(catalog, 'supabase', pgMissingSermons)).toContain('public.sermons');
+  });
+
+  it('verifies Supabase migration completeness against qualified public and private relations', async () => {
+    const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
+    await expect(verifyMigrationCompleteness({ db: fakeDb(full), backend: 'supabase', catalog, root: process.cwd() }))
+      .resolves.toBe(true);
+
+    const publicTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])];
+    const missingPrivate = relationRows([
+      ...publicTables.map((table) => `public.${table}`),
+      'church_private.stripe_webhook_events',
+    ]);
+    await expect(verifyMigrationCompleteness({ db: fakeDb(full, { tables: missingPrivate }), backend: 'supabase', catalog, root: process.cwd() }))
+      .resolves.toBe(false);
   });
 });
 

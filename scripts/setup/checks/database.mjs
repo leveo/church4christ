@@ -34,6 +34,13 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
   ]),
 });
+const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
+  giving: Object.freeze(['church_private.stripe_webhook_events']),
+  registration: Object.freeze([
+    'church_private.stripe_webhook_events',
+    'church_private.stripe_checkout_requests',
+  ]),
+});
 
 function rows(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join('|') !== 'meta|results|success' ||
@@ -75,8 +82,14 @@ async function queryFirst(db, sql, binds = []) {
 }
 
 function expectedTables(manifest) {
-  const names = new Set(ALWAYS_REQUIRED_TABLES);
-  for (const key of manifest.modules) for (const table of TABLES_BY_CAPABILITY[key] ?? []) names.add(table);
+  const qualifyPublic = (table) => manifest.database === 'supabase' ? `public.${table}` : table;
+  const names = new Set(ALWAYS_REQUIRED_TABLES.map(qualifyPublic));
+  for (const key of manifest.modules) {
+    for (const table of TABLES_BY_CAPABILITY[key] ?? []) names.add(qualifyPublic(table));
+    if (manifest.database === 'supabase') {
+      for (const table of PRIVATE_TABLES_BY_CAPABILITY[key] ?? []) names.add(table);
+    }
+  }
   return [...names].sort();
 }
 
@@ -88,14 +101,18 @@ export function missingRequiredTables(catalog, database, createdTables) {
   if (!(createdTables instanceof Set) || [...createdTables].some((name) => typeof name !== 'string')) {
     throw new TypeError('created tables must be a set of strings');
   }
-  const required = new Set(ALWAYS_REQUIRED_TABLES);
+  const qualifyPublic = (table) => database === 'supabase' ? `public.${table}` : table;
+  const required = new Set(ALWAYS_REQUIRED_TABLES.map(qualifyPublic));
   for (const key of catalog.order) {
     const capability = catalog.capabilities[key];
     if (!capability || typeof capability !== 'object') throw new TypeError(`table readiness capability is invalid: ${String(key)}`);
     if (capability.requiresBackend && capability.requiresBackend !== database) continue;
     const owned = TABLES_BY_CAPABILITY[key];
     if (!owned) throw new Error(`table readiness mapping is missing: ${key}`);
-    for (const table of owned) required.add(table);
+    for (const table of owned) required.add(qualifyPublic(table));
+    if (database === 'supabase') {
+      for (const table of PRIVATE_TABLES_BY_CAPABILITY[key] ?? []) required.add(table);
+    }
   }
   return [...required].filter((table) => !createdTables.has(table)).sort();
 }
@@ -183,13 +200,21 @@ export async function checkDatabase(options) {
   try {
     const tableRows = options.manifest.database === 'd1'
       ? await queryAll(options.db, 'SELECT name FROM sqlite_master WHERE type=? ORDER BY name', ['table'])
-      : await queryAll(options.db, 'SELECT table_name FROM information_schema.tables WHERE table_schema=? ORDER BY table_name', ['public']);
-    const field = options.manifest.database === 'd1' ? 'name' : 'table_name';
+      : await queryAll(options.db, 'SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema IN (?,?) ORDER BY table_schema, table_name', ['public', 'church_private']);
     const names = new Set();
     let valid = true;
     for (const row of tableRows) {
-      if (!plainRow(row) || Object.keys(row).length !== 1 || typeof row[field] !== 'string' || names.has(row[field])) valid = false;
-      else names.add(row[field]);
+      if (options.manifest.database === 'd1') {
+        if (!plainRow(row) || Object.keys(row).length !== 1 || typeof row.name !== 'string' || names.has(row.name)) valid = false;
+        else names.add(row.name);
+      } else {
+        const keys = plainRow(row) ? Object.keys(row).sort().join('|') : '';
+        const relation = keys === 'table_name|table_schema' && typeof row.table_schema === 'string' && typeof row.table_name === 'string'
+          ? `${row.table_schema}.${row.table_name}`
+          : null;
+        if (!relation || names.has(relation)) valid = false;
+        else names.add(relation);
+      }
     }
     if (!valid || expectedTables(options.manifest).some((name) => !names.has(name))) {
       checks.push(issue('database.tables', 'Required shared or capability tables are missing or the schema probe was malformed.', 'Apply all migrations for the selected provider.'));
@@ -225,4 +250,4 @@ export async function checkDatabase(options) {
     : checks, secrets);
 }
 
-export { ALWAYS_REQUIRED_TABLES, FINAL_SHARED_TABLES, TABLES_BY_CAPABILITY };
+export { ALWAYS_REQUIRED_TABLES, FINAL_SHARED_TABLES, PRIVATE_TABLES_BY_CAPABILITY, TABLES_BY_CAPABILITY };

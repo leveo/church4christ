@@ -23,6 +23,12 @@ export async function verifyMigrationCompleteness({ db, backend, catalog, root }
       const history = (await db.prepare('SELECT name FROM d1_migrations ORDER BY id').all()).results;
       return Array.isArray(history) && history.length === expected.length && history.every((row, index) => row?.name === expected[index]);
     }
+    const tableRows = (await db.prepare(
+      'SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema IN (?,?) ORDER BY table_schema, table_name',
+    ).bind('public', 'church_private').all()).results;
+    if (!Array.isArray(tableRows) || tableRows.some((row) => !row || typeof row.table_schema !== 'string' || typeof row.table_name !== 'string')) return false;
+    const relations = new Set(tableRows.map((row) => `${row.table_schema}.${row.table_name}`));
+    if (relations.size !== tableRows.length || missingRequiredTables(catalog, backend, relations).length !== 0) return false;
     const expected = (await readdir(resolve(root, 'migrations-supabase'))).filter((name) => name.endsWith('.sql')).sort();
     const rows = (await db.prepare('SELECT name FROM _migrations ORDER BY name').all()).results;
     return Array.isArray(rows) && rows.length === expected.length && rows.every((row, index) => row?.name === expected[index]);

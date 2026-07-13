@@ -29,6 +29,13 @@ const SUPABASE_ONLY_TABLES = new Set([
   'prayer_items',
 ]);
 
+// Private relations are qualified and deliberately separate from the public
+// Supabase-only allowlist so D1/public parity cannot absorb them accidentally.
+const SUPABASE_ONLY_PRIVATE_RELATIONS = new Set([
+  'church_private.stripe_checkout_requests',
+  'church_private.stripe_webhook_events',
+]);
+
 const INFRASTRUCTURE_TABLES = new Set(['_migrations']);
 
 function normalizePgDefault(value: string | null): string | null {
@@ -108,6 +115,18 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
     const missing = [...expected].filter((table) => !actual.has(table)).sort();
     const unexpectedSharedDrift = [...actual].filter((table) => !expected.has(table)).sort();
     expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
+  });
+
+  it('has exactly the explicitly qualified Supabase-only private relations', async () => {
+    const rows = await sql.unsafe(`
+      SELECT table_schema, table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'church_private' AND table_type = 'BASE TABLE'
+    `);
+    const actual = new Set(rows.map((row) => `${row.table_schema}.${row.table_name}`));
+    const missing = [...SUPABASE_ONLY_PRIVATE_RELATIONS].filter((relation) => !actual.has(relation)).sort();
+    const unexpectedPrivateDrift = [...actual].filter((relation) => !SUPABASE_ONLY_PRIVATE_RELATIONS.has(relation)).sort();
+    expect({ missing, unexpectedPrivateDrift }).toEqual({ missing: [], unexpectedPrivateDrift: [] });
   });
 
   it('matches shared columns, types, nullability, defaults, and identity metadata bidirectionally', async () => {
