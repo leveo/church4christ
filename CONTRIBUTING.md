@@ -13,11 +13,7 @@ You need [Node.js](https://nodejs.org/) 22+. Then:
 git clone https://github.com/leveo/church4christ.git
 cd church4christ
 npm install
-cp .dev.vars.example .dev.vars      # safe local demo values
-npm run cf-typegen
-npm run tokens
-npm run db:migrate:local
-npm run db:seed:local
+npm run setup                       # choose local features and bootstrap the admin
 npm run dev
 ```
 
@@ -71,12 +67,13 @@ Run these before opening a PR — they are the same steps CI runs:
 | `npm run test:e2e` | End-to-end tests against the actual built worker |
 | `npm run screenshots` | (Optional) regenerates the docs screenshots from the seeded dev server |
 
-### The Postgres tests (for Giving and Registration)
+### The Postgres tests (for Portal, Giving, and Registration)
 
-The **Giving** and **Registration** modules run on the optional Supabase (Postgres) backend
+The **Member Portal**, **Giving**, and **Registration** modules run on the optional Supabase
+(Postgres) backend
 (see [`docs/supabase-setup.md`](docs/supabase-setup.md)), so their tests live in a separate
 `pg` project that needs a real Postgres. `npm test` **self-skips** those suites when
-`DATABASE_URL` is unset, so you only need this when you are working on giving or registration.
+`DATABASE_URL` is unset, so you only need this when working on Portal, Giving, or Registration.
 To run them, start a throwaway local Postgres and point `DATABASE_URL` at it:
 
 ```bash

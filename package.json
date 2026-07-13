@@ -14,6 +14,8 @@
     "screenshots": "node scripts/screenshots.mjs",
     "setup": "node scripts/setup/index.mjs",
     "doctor": "node scripts/setup/index.mjs --doctor",
+    "docs:generate": "node scripts/docs/generate-capabilities.mjs",
+    "docs:check": "node scripts/docs/check-capabilities.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "test:e2e:pg": "npm run build && vitest run --config vitest.e2e.pg.config.ts",

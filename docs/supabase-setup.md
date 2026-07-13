@@ -1,12 +1,19 @@
-# Supabase setup — for Giving and Registration
+# Supabase setup — for Portal, Giving, and Registration
 
-Most churches never need this page. The default setup uses Cloudflare **D1**, needs no
-extra accounts, and runs every part of the site except two: **Giving** (online donations)
-and **Registration** (paid event sign-ups). Those two modules need a full Postgres
-database and Stripe, so they run on **Supabase** instead of D1.
+Many churches do not need this page. The default setup uses Cloudflare **D1**, needs no
+extra accounts locally, and supports 13 modules. **Member Portal**, **Giving**, and
+**Registration** require a Postgres database, so setup selects **Supabase** when any of
+those three modules is enabled. Stripe is optional unless you accept payments.
 
-Read this guide only if you want online giving or paid registration. If you do not, follow
-[`deploy.md`](./deploy.md) with D1 and skip this entirely — you can always switch later.
+Start with the guided installer; it asks for features before choosing a database:
+
+```bash
+npm run setup
+```
+
+Local Supabase requires a local Postgres/Supabase database or a hosted Supabase project.
+Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supabase content
+migration, so this guide does not promise a lossless backend switch for an existing site.
 
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
 > explains, in plain language, what Cloudflare is and how the free hosting works. This page
@@ -14,16 +21,16 @@ Read this guide only if you want online giving or paid registration. If you do n
 > with a terminal.
 
 > **Prefer to have an AI assistant do it?** Hand it this file. A good first thing to say:
-> *"Read `docs/supabase-setup.md`, then walk me through switching this church site to the
-> Supabase backend so we can turn on Giving. Ask me for anything you need — my Supabase
+> *"Read `docs/supabase-setup.md`, then run the guided setup for Full Church on Supabase.
+> Ask me for anything you need — my Supabase
 > connection string, my Stripe keys — one question at a time, and run the commands for me."*
 
 ---
 
 ## 1. Which database should I pick?
 
-Both are free. The only reason to choose Supabase is to unlock the two Stripe-powered
-modules; everything else works identically on either one.
+Both offer free tiers. Choose Supabase to enable Member Portal, Giving, or Registration;
+the other 13 modules work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -31,15 +38,20 @@ modules; everything else works identically on either one.
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
 | **Giving** (online card donations, recurring gifts) | Not available | **Available** |
 | **Registration** (event sign-ups, free or paid) | Not available | **Available** |
-| **Everything else** (bulletins, sermons, events, people, prayer wall, volunteer scheduling, articles, ministries, themes, email, two languages) | Yes | Yes |
+| **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
+| **Other 13 modules** | Yes | Yes |
 | **Backups** | Nightly D1 → R2 copy you configure (`deploy.md` step 9) | Supabase's own automatic backups (nothing to configure) |
 | **Monthly cost** | $0 (Cloudflare free tier) | $0 (Supabase free tier + Cloudflare free tier) |
 
-Giving and Registration are **force-disabled on D1** — even if you switch them on in
-**Settings → Modules**, they stay hidden until the site runs on Supabase. Switching the
-backend is a one-line change (`DB_BACKEND`) plus the connection steps below.
+Member Portal, Giving, and Registration are **force-disabled on D1**, even if legacy
+settings say they are on. New setup writes explicit selected settings for all 16 modules.
 
 ---
+
+## Manual reference and troubleshooting
+
+The guided installer performs the database and configuration work below. Keep these steps
+as a reference for diagnosing an existing installation.
 
 ## 2. Create the Supabase project
 
@@ -68,6 +80,10 @@ backend is a one-line change (`DB_BACKEND`) plus the connection steps below.
 Cloudflare **Hyperdrive** sits between your Worker and Supabase, pooling connections and
 caching queries so a serverless Worker can talk to Postgres quickly. You create it once and
 paste its id into your config.
+
+Guided setup normally creates or imports this resource. Creating or recovering it requires
+explicit `--allow-hyperdrive-secret-in-argv` consent because Wrangler receives the database
+URL in its child-process arguments; importing an existing Hyperdrive does not.
 
 ```bash
 npx wrangler hyperdrive create church4christ-db \
@@ -111,9 +127,9 @@ SUPABASE_DB_URL="postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-us
 ```
 
 It prints `applying …` for each new file and finishes with `migrations up to date`. This
-creates every table — the same content tables as D1, **plus** the giving and registration
-tables. It does **not** load any content; a real deployment starts empty and you add your
-church's content through the admin area.
+creates every table — the same content tables as D1, **plus** the Portal, Giving, and
+Registration tables. It does **not** load any content; a real deployment starts empty and
+you add your church's content through the admin area.
 
 > The script reads `SUPABASE_DB_URL` (or `DATABASE_URL` if you prefer that name). If it
 > prints `set SUPABASE_DB_URL (or DATABASE_URL)`, you forgot the variable. If it reports an
@@ -156,20 +172,11 @@ npm run deploy
 
 ---
 
-## 6. Create the first admin
+## 6. Sign in as the first admin
 
-Your new database is empty, so create your first administrator directly. Open the Supabase
-dashboard → **SQL editor** → **New query**, and run this (adjust the name, email, and
-language — the email is stored lowercase, so enter it lowercase):
-
-```sql
-INSERT INTO people (display_name, email, role, lang)
-VALUES ('Your Name', 'you@yourchurch.org', 'admin', 'en');
-```
-
-This mirrors the D1 first-admin step in [`deploy.md`](./deploy.md#8-create-the-first-admin);
-you are just running it in Supabase's SQL editor instead of through `wrangler d1 execute`.
-Now open `https://<your-site>/en/signin`, enter that email, request a link, and click it —
+`npm run setup` creates or promotes the first administrator through the validated bootstrap
+path. Do not create this privileged identity with ad-hoc SQL. Open
+`https://<your-site>/en/signin`, enter the setup email, request a link, and click it —
 you are in as an admin.
 
 To let your treasurer manage giving without making them a full admin, open their profile in
@@ -259,8 +266,9 @@ redeploy needed. Follow Supabase's own guide exactly:
 
 ## 9. Local development
 
-To run the Supabase backend on your own computer, point it at a local Postgres instead of a
-real Supabase project.
+To run the Supabase backend on your own computer, start a local Postgres (or use a hosted
+Supabase project), export its URL as `SUPABASE_DB_URL`, and run `npm run setup`. The setup
+handoff prints the canonical host variable required to start Wrangler.
 
 1. **Start a local Postgres** (Docker is easiest):
 
@@ -268,23 +276,25 @@ real Supabase project.
    docker run -d --name church-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
    ```
 
-2. **Uncomment the `hyperdrive` binding** in `wrangler.jsonc` (see step 3 above) — it must be
-   present for local dev too, even though the id in it is unused locally. Without it, the dev
-   server fails with "HYPERDRIVE binding is missing", no matter what the connection-string env
-   var below is set to.
+2. **Run guided local setup** with `SUPABASE_DB_URL` exported. It writes the local Hyperdrive
+   binding and initializes the selected modules and first admin.
+
+   ```bash
+   export SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres
+   npm run setup
+   ```
 
 3. **Tell the dev server to use your local Postgres.** Export this in the same shell you run
    `npm run dev` from (not `.dev.vars` — wrangler needs to see it before the dev server boots):
 
    ```bash
-   export DB_BACKEND=supabase
    export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
    ```
 
    That variable points the `HYPERDRIVE` binding at your local database, so you do **not** need
    a real Hyperdrive id for local dev.
 
-4. **Migrate and seed the local database:**
+4. **Manual migration/seed troubleshooting:**
 
    ```bash
    SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres npm run db:migrate:supabase
@@ -292,8 +302,8 @@ real Supabase project.
    ```
 
 5. **Run it:** `npm run dev`, then open the address it prints (usually
-   `http://localhost:4321`). Giving and Registration now appear, backed by your local
-   Postgres.
+   `http://localhost:4321`). Member Portal, Giving, and Registration now appear, backed by
+   your local Postgres.
 
 6. **Testing Stripe locally (optional).** Put your test keys in `.dev.vars`
    (`STRIPE_SECRET_KEY=sk_test_…`), and use the [Stripe CLI](https://stripe.com/docs/stripe-cli)
