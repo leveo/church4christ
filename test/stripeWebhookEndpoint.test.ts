@@ -158,20 +158,51 @@ describe('handleStripeWebhookRequest', () => {
     expect(receive).not.toHaveBeenCalled();
   });
 
-  it('rejects a separately signed valid live-mode envelope before receipt or scheduling', async () => {
+  it('rejects a signed live envelope before receipt, dispatch, domain mutation, scheduling, or log leakage', async () => {
     const receive = vi.fn();
-    const process = vi.fn();
+    const domainMutation = vi.fn();
+    const process = vi.fn(async () => {
+      domainMutation();
+      return { state: 'processed', outcome: 'must_not_run' } as const;
+    });
     const waitUntil = vi.fn();
-    const request = await signed(stripeEvent('payment_intent.succeeded', { id: 'pi_live_1' }, {
+    const rawPayloadMarker = 'raw-live-payload-marker';
+    const requestJsonMarker = '{"request_json":"private-live-request"}';
+    const secretMarker = 'sk_live_must_not_log';
+    const checkoutUrlMarker = 'https://checkout.stripe.com/c/pay/live-private-url';
+    const request = await signed(stripeEvent('payment_intent.succeeded', {
+      id: 'pi_live_1',
+      description: rawPayloadMarker,
+      metadata: { request_json: requestJsonMarker, secret: secretMarker },
+      url: checkoutUrlMarker,
+    }, {
       id: 'evt_live_1',
       livemode: true,
     }));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    expect(await responseText(await handleStripeWebhookRequest(request, deps({ receive, process, waitUntil }))))
-      .toEqual([400, 'live_mode_disabled']);
-    expect(receive).not.toHaveBeenCalled();
-    expect(process).not.toHaveBeenCalled();
-    expect(waitUntil).not.toHaveBeenCalled();
+    try {
+      expect(await responseText(await handleStripeWebhookRequest(request, deps({ receive, process, waitUntil }))))
+        .toEqual([400, 'live_mode_disabled']);
+      expect(receive).not.toHaveBeenCalled();
+      expect(process).not.toHaveBeenCalled();
+      expect(domainMutation).not.toHaveBeenCalled();
+      expect(waitUntil).not.toHaveBeenCalled();
+      const captured = JSON.stringify([
+        ...log.mock.calls, ...info.mock.calls, ...warn.mock.calls, ...error.mock.calls,
+      ]);
+      for (const privateValue of [rawPayloadMarker, requestJsonMarker, secretMarker, checkoutUrlMarker]) {
+        expect(captured).not.toContain(privateValue);
+      }
+    } finally {
+      log.mockRestore();
+      info.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it('returns 500 when durable receipt storage fails without scheduling', async () => {
@@ -288,6 +319,78 @@ describe('handleStripeWebhookRequest', () => {
     })))).toEqual([200, body]);
     expect(process).toHaveBeenCalledTimes(scheduled ? 1 : 0);
     expect(waitUntil).toHaveBeenCalledTimes(scheduled ? 1 : 0);
+  });
+
+  it('acknowledges a duplicate processing receipt durably without launching a second mutation', async () => {
+    let resolveReceipt!: (value: StripeReceiptResult) => void;
+    const storedReceipt = new Promise<StripeReceiptResult>((resolve) => { resolveReceipt = resolve; });
+    const receive = vi.fn(() => storedReceipt);
+    const domainMutation = vi.fn();
+    const process = vi.fn(async () => {
+      domainMutation();
+      return { state: 'processed', outcome: 'unsafe_second_mutation' } as const;
+    });
+    const waitUntil = vi.fn();
+
+    const responsePromise = handleStripeWebhookRequest(await signed(stripeEvent(
+      'checkout.session.completed',
+      { id: 'cs_test_processing_duplicate' },
+      { id: 'evt_test_processing_duplicate' },
+    )), deps({ receive, process, waitUntil }));
+    let acknowledged = false;
+    void responsePromise.then(() => { acknowledged = true; });
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce());
+    expect(acknowledged).toBe(false);
+
+    resolveReceipt({ kind: 'duplicate', status: 'processing', outcome: null });
+    expect(await responseText(await responsePromise)).toEqual([200, 'processing']);
+    expect(process).not.toHaveBeenCalled();
+    expect(domainMutation).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it('never logs raw payload, request JSON, secrets, or Checkout URLs on endpoint failures', async () => {
+    const markers = {
+      rawPayload: 'raw-customer-payload-marker',
+      requestJson: '{"request_json":"private-checkout-request"}',
+      secret: 'whsec_endpoint_log_marker',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/private-endpoint-url',
+    };
+    const event = stripeEvent('checkout.session.completed', {
+      id: 'cs_test_log_hygiene',
+      description: markers.rawPayload,
+      metadata: { request_json: markers.requestJson, secret: markers.secret },
+      url: markers.checkoutUrl,
+    }, { id: 'evt_test_log_hygiene' });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await responseText(await handleStripeWebhookRequest(await signed(event), deps({
+        receive: vi.fn(async () => { throw new Error(
+          `${markers.rawPayload} ${markers.requestJson} ${markers.secret} ${markers.checkoutUrl}`,
+        ); }),
+      })))).toEqual([500, 'receipt_failed']);
+
+      expect(await responseText(await handleStripeWebhookRequest(await signed(event), deps({
+        receive: vi.fn(async () => ({ kind: 'collision' } as const)),
+      })))).toEqual([400, 'event_id_collision']);
+
+      const captured = JSON.stringify([
+        ...log.mock.calls, ...info.mock.calls, ...warn.mock.calls, ...error.mock.calls,
+      ]);
+      expect(warn).toHaveBeenCalledWith('stripe_webhook_event_id_collision', {
+        payloadSha256: await sha256Utf8(JSON.stringify(event)),
+      });
+      for (const privateValue of Object.values(markers)) expect(captured).not.toContain(privateValue);
+    } finally {
+      log.mockRestore();
+      info.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it('background acceleration captures only the event id and environment', async () => {
