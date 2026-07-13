@@ -1,6 +1,7 @@
 import { result } from '../readiness.mjs';
 
 const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
+const STRIPE_CLASSIFICATIONS = new Set(['test', 'live', 'unknown', 'missing', 'unverifiable']);
 const SUPPORTED_REQUIRED = new Set(['worker', 'r2', 'hyperdrive', 'email', 'stripe']);
 
 export async function checkServices(options) {
@@ -8,12 +9,22 @@ export async function checkServices(options) {
     throw new TypeError('services check catalog and manifest are required');
   }
   if (!options.presence || typeof options.presence !== 'object' || Array.isArray(options.presence)) throw new TypeError('services presence is required');
-  const supplied = { d1: false, emailConfigured: false, ...options.presence };
+  const rawPresence = { ...options.presence };
+  const stripeCount = Number(rawPresence.stripeSecretKey === true) + Number(rawPresence.stripeWebhookSecret === true);
+  const stripeClassification = rawPresence.stripeClassification ?? (stripeCount === 0 ? 'missing' : stripeCount === 2 ? 'test' : 'unknown');
+  const stripeModeTest = rawPresence.stripeModeTest ?? options.manifest.database === 'supabase';
+  const stripeClassificationVerifiable = rawPresence.stripeClassificationVerifiable ?? options.manifest.mode !== 'deploy';
+  delete rawPresence.stripeClassification;
+  delete rawPresence.stripeModeTest;
+  delete rawPresence.stripeClassificationVerifiable;
+  const supplied = { d1: false, emailConfigured: false, ...rawPresence };
   const actualPresence = Object.keys(supplied).sort();
   if (actualPresence.join('|') !== [...PRESENCE_KEYS].sort().join('|')) throw new TypeError('services presence fields are invalid');
   for (const key of PRESENCE_KEYS) {
     if (typeof supplied[key] !== 'boolean') throw new TypeError(`services presence.${key} must be a boolean`);
   }
+  if (!STRIPE_CLASSIFICATIONS.has(stripeClassification)) throw new TypeError('services presence.stripeClassification is invalid');
+  if (typeof stripeModeTest !== 'boolean' || typeof stripeClassificationVerifiable !== 'boolean') throw new TypeError('services Stripe mode metadata must be boolean');
   const selected = new Set(options.manifest.modules);
   if ([...selected].some((key) => !Object.hasOwn(options.catalog.capabilities, key))) throw new TypeError('services manifest contains an unknown capability');
   const required = new Set(options.catalog.providers[options.manifest.database]?.requiredServices ?? []);
@@ -66,8 +77,18 @@ export async function checkServices(options) {
       checks.push(result('services.stripe-absent', required.has('stripe') ? 'error' : 'warning', 'Stripe is not configured; free registration and offline giving remain available without online payments.', 'Configure both Stripe secrets to enable payments.'));
     } else if (count === 1) {
       checks.push(result('services.stripe-partial', 'error', 'Stripe configuration is partial and cannot safely process payments.', 'Configure both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or remove both.'));
-    } else {
+    } else if (!stripeModeTest) {
+      checks.push(result('services.stripe-mode', 'error', 'Stripe secrets are present but the generated test-mode marker is missing.', 'Regenerate wrangler.jsonc with STRIPE_MODE=test before processing payments.'));
+    } else if (stripeClassification === 'live') {
+      checks.push(result('services.stripe-live', 'error', 'Live-mode Stripe credentials are disabled.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
+    } else if (stripeClassification === 'unknown') {
+      checks.push(result('services.stripe-unknown', 'error', 'Stripe credentials cannot be classified as a complete test-mode pair.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
+    } else if (!stripeClassificationVerifiable || stripeClassification === 'unverifiable') {
+      checks.push(result('services.stripe-unverifiable', 'warning', 'Stripe secret names and test mode are configured, but the remote secret value classification is unverifiable.', 'Confirm the stored Worker secret uses an sk_test_ key; runtime validation remains authoritative.'));
+    } else if (stripeClassification === 'test') {
       checks.push(result('services.stripe-ok', 'info', 'Stripe payment and webhook secrets are both configured.', 'No action is required.'));
+    } else {
+      checks.push(result('services.stripe-unknown', 'error', 'Stripe credentials cannot be classified as a complete test-mode pair.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
     }
   }
 

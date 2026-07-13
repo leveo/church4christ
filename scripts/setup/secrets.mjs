@@ -4,10 +4,15 @@ import { open, readFile } from 'node:fs/promises';
 import { normalizeEmail } from './answers.mjs';
 import { writeAtomic } from './files.mjs';
 
-const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL']);
+const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']);
 const KEY = /^[A-Z][A-Z0-9_]*$/;
 const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE';
-const WRANGLER_ENV = Object.freeze({ ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' });
+const STRIPE_ENV_KEYS = Object.freeze([
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'CHURCH_SETUP_STRIPE_SECRET_KEY',
+  'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET',
+]);
 const FRESH_WORKER = /^Worker "[A-Za-z0-9][A-Za-z0-9_-]*"(?: \(env: [A-Za-z0-9_-]+\))? not found\.\n\nIf this is a new Worker, run `wrangler deploy` first to create it\.\nOtherwise, check that the Worker name is correct and you're logged into the right account\.$/;
 
 export function parseDevVars(content) {
@@ -31,6 +36,53 @@ export function parseDevVars(content) {
     }
   }
   return found;
+}
+
+function wranglerEnv(environment = process.env) {
+  const env = { ...environment, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
+  for (const key of STRIPE_ENV_KEYS) delete env[key];
+  return env;
+}
+
+function validateStripeTestSecrets(value) {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join('|') !== 'secretKey|webhookSecret') {
+    throw new TypeError('Stripe test secrets must be a complete pair');
+  }
+  const secretKey = typeof value.secretKey === 'string' ? value.secretKey.trim() : '';
+  const webhookSecret = typeof value.webhookSecret === 'string' ? value.webhookSecret.trim() : '';
+  if (!secretKey.startsWith('sk_test_') || secretKey.length <= 'sk_test_'.length || /[\s\0]/.test(secretKey)) {
+    throw new Error('Stripe test secret key must begin with sk_test_');
+  }
+  if (!webhookSecret.startsWith('whsec_') || webhookSecret.length <= 'whsec_'.length || /[\s\0]/.test(webhookSecret)) {
+    throw new Error('Stripe test webhook secret must begin with whsec_');
+  }
+  return Object.freeze({ secretKey, webhookSecret });
+}
+
+export async function collectStripeTestSecrets(options = {}) {
+  const environment = options.environment ?? process.env;
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)) throw new TypeError('secret environment must be an object');
+  const secretKey = environment.CHURCH_SETUP_STRIPE_SECRET_KEY;
+  const webhookSecret = environment.CHURCH_SETUP_STRIPE_WEBHOOK_SECRET;
+  if (secretKey === undefined && webhookSecret === undefined) return null;
+  if (!secretKey || !webhookSecret) throw new Error('Stripe test credentials must be supplied as a complete pair');
+  return validateStripeTestSecrets({ secretKey, webhookSecret });
+}
+
+export function collectStripeSetupRedactionValues(options = {}) {
+  const environment = options.environment ?? process.env;
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)) throw new TypeError('secret environment must be an object');
+  const values = [];
+  for (const key of ['CHURCH_SETUP_STRIPE_SECRET_KEY', 'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET']) {
+    const raw = environment[key];
+    if (typeof raw !== 'string' || raw.length === 0) continue;
+    values.push(raw);
+    const trimmed = raw.trim();
+    if (trimmed && trimmed !== raw) values.push(trimmed);
+  }
+  return Object.freeze([...new Set(values)]);
 }
 
 export function verifyLocalSecretsContent(content, adminEmail) {
@@ -81,11 +133,51 @@ export async function readLocalSecretNames(path) {
   catch { throw new Error('Local secret names could not be read safely'); }
 }
 
+export async function readLocalStripeClassification(path) {
+  if (typeof path !== 'string' || !path) throw new TypeError('local secret path is required');
+  let content;
+  try { content = await readFile(path, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return Object.freeze({ classification: 'missing', secretKey: false, webhookSecret: false });
+    throw new Error('Local Stripe configuration could not be classified safely');
+  }
+  let found;
+  try { found = parseDevVars(content); }
+  catch { throw new Error('Local Stripe configuration could not be classified safely'); }
+  const secretKey = found.get('STRIPE_SECRET_KEY');
+  const webhookSecret = found.get('STRIPE_WEBHOOK_SECRET');
+  const presence = { secretKey: Boolean(secretKey), webhookSecret: Boolean(webhookSecret) };
+  let classification = 'unknown';
+  const normalizedKey = secretKey?.trim() ?? '';
+  const normalizedWebhook = webhookSecret?.trim() ?? '';
+  const validWebhook = normalizedWebhook.startsWith('whsec_') && normalizedWebhook.length > 'whsec_'.length && !/[\s\0]/.test(normalizedWebhook);
+  if (!secretKey && !webhookSecret) classification = 'missing';
+  else if (normalizedKey.startsWith('sk_test_') && normalizedKey.length > 'sk_test_'.length && !/[\s\0]/.test(normalizedKey) && validWebhook) classification = 'test';
+  else if (normalizedKey.startsWith('sk_live_') && normalizedKey.length > 'sk_live_'.length && !/[\s\0]/.test(normalizedKey) && validWebhook) classification = 'live';
+  return Object.freeze({ classification, ...presence });
+}
+
 function appendManaged(content, additions) {
   let output = content;
   if (output && !output.endsWith('\n')) output += '\n';
   for (const [key, value] of additions) output += `${key}=${value}\n`;
   return output;
+}
+
+function upsertManaged(content, entries) {
+  const replacements = new Map(entries);
+  const found = new Set();
+  const lines = content.split(/\r?\n/).map((line) => {
+    const equals = line.indexOf('=');
+    if (equals < 1) return line;
+    const key = line.slice(0, equals).trim();
+    if (!replacements.has(key)) return line;
+    found.add(key);
+    return `${key}=${replacements.get(key)}`;
+  });
+  let output = lines.join('\n');
+  const additions = entries.filter(([key]) => !found.has(key));
+  return appendManaged(output, additions);
 }
 
 export function parseSecretList(stdout) {
@@ -104,7 +196,7 @@ export function parseSecretList(stdout) {
 export async function hasDeploySecret(options) {
   if (!options?.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
   if (typeof options.name !== 'string' || !KEY.test(options.name)) throw new TypeError('secret name is invalid');
-  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: wranglerEnv() });
   if (listed.exitCode === 0) return parseSecretList(listed.stdout).has(options.name);
   if (listed.stdout === '' && isFreshWorkerError(listed.stderr)) return false;
   throw new Error('Wrangler secret list failed during verification');
@@ -112,7 +204,7 @@ export async function hasDeploySecret(options) {
 
 export async function listDeploySecrets(options) {
   if (!options?.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
-  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: wranglerEnv() });
   if (listed.exitCode === 0) return parseSecretList(listed.stdout);
   if (listed.stdout === '' && isFreshWorkerError(listed.stderr)) return new Set();
   throw new Error('Wrangler secret list failed during verification');
@@ -136,6 +228,7 @@ function isFreshWorkerError(stderr) {
 
 export async function configureSecrets(options) {
   const adminEmail = normalizeEmail(options?.adminEmail, 'admin email');
+  const stripeSecrets = validateStripeTestSecrets(options?.stripeSecrets);
   if (options?.mode === 'local') {
     if (typeof options.path !== 'string' || !options.path) throw new TypeError('local .dev.vars path is required');
     let content = '';
@@ -146,9 +239,13 @@ export async function configureSecrets(options) {
     if (!existing.has('SESSION_SECRET')) additions.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
     if (!existing.has('EMAIL_DEV_LOG')) additions.push(['EMAIL_DEV_LOG', '1']);
     if (!existing.has('AUTH_DEV_BYPASS_EMAIL')) additions.push(['AUTH_DEV_BYPASS_EMAIL', adminEmail]);
+    if (stripeSecrets) {
+      additions.push(['STRIPE_SECRET_KEY', stripeSecrets.secretKey]);
+      additions.push(['STRIPE_WEBHOOK_SECRET', stripeSecrets.webhookSecret]);
+    }
     const writer = options.writeAtomic ?? writeAtomic;
     if (typeof writer !== 'function') throw new TypeError('writeAtomic must be a function');
-    const result = await writer(options.path, appendManaged(content, additions), { allowReplace: true, expectedContent: sourceContent });
+    const result = await writer(options.path, upsertManaged(content, additions), { allowReplace: true, expectedContent: sourceContent });
     const handle = await open(options.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try { await handle.chmod(0o600); } finally { await handle.close(); }
     return Object.freeze({ changed: result.changed, configured: additions.map(([key]) => key) });
@@ -157,7 +254,8 @@ export async function configureSecrets(options) {
   if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
   if (typeof options.wranglerBin !== 'string' || !options.wranglerBin) throw new TypeError('wranglerBin is required');
   if (typeof options.configPath !== 'string' || !options.configPath) throw new TypeError('configPath is required');
-  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
+  const environment = wranglerEnv();
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: environment });
   let names;
   if (listed.exitCode === 0) {
     names = parseSecretList(listed.stdout);
@@ -165,8 +263,12 @@ export async function configureSecrets(options) {
     if (listed.stdout !== '' || !isFreshWorkerError(listed.stderr)) throw new Error('Wrangler secret list failed; refusing to assume a fresh Worker');
     names = new Set();
   }
-  if (names.has('SESSION_SECRET')) return Object.freeze({ changed: false, configured: [] });
-  const sessionSecret = randomBytes(32).toString('base64url');
-  await options.runner.run(options.wranglerBin, ['secret', 'put', 'SESSION_SECRET', '--config', options.configPath], { input: `${sessionSecret}\n`, env: WRANGLER_ENV });
-  return Object.freeze({ changed: true, configured: ['SESSION_SECRET'] });
+  const required = [];
+  if (!names.has('SESSION_SECRET')) required.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
+  if (stripeSecrets && !names.has('STRIPE_SECRET_KEY')) required.push(['STRIPE_SECRET_KEY', stripeSecrets.secretKey]);
+  if (stripeSecrets && !names.has('STRIPE_WEBHOOK_SECRET')) required.push(['STRIPE_WEBHOOK_SECRET', stripeSecrets.webhookSecret]);
+  for (const [name, value] of required) {
+    await options.runner.run(options.wranglerBin, ['secret', 'put', name, '--config', options.configPath], { input: `${value}\n`, env: environment });
+  }
+  return Object.freeze({ changed: required.length > 0, configured: required.map(([name]) => name) });
 }

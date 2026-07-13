@@ -16,7 +16,11 @@ describe('clean-room D1 setup', () => {
     const workspace = await createCleanWorkspace();
     const port = await allocatePort();
     const persistTo = join(workspace.root, '.noncanonical/wrangler-state');
-    const env = { WRANGLER_PERSIST_TO: '.noncanonical/wrangler-state', ASTRO_DEV_BACKGROUND: '0' };
+    const env = {
+      WRANGLER_PERSIST_TO: '.noncanonical/wrangler-state', ASTRO_DEV_BACKGROUND: '0',
+      CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_test_d1_must_not_be_written',
+      CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'whsec_d1_must_not_be_written',
+    };
     const ambient = { STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY, CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN };
     process.env.STRIPE_SECRET_KEY = 'ambient-d1-stripe-must-not-leak';
     process.env.CLOUDFLARE_API_TOKEN = 'ambient-d1-cloudflare-must-not-leak';
@@ -56,9 +60,16 @@ describe('clean-room D1 setup', () => {
     expect(await readFile(join(workspace.root, 'church.config.json'))).toEqual(manifestBefore);
     expect(await readFile(join(workspace.root, 'wrangler.jsonc'))).toEqual(configBefore);
     const devVars = await readFile(join(workspace.root, '.dev.vars'), 'utf8');
+    expect(devVars).not.toContain('STRIPE_SECRET_KEY');
+    expect(devVars).not.toContain('STRIPE_WEBHOOK_SECRET');
+    const configText = configBefore.toString();
+    expect(configText).not.toContain('*/5 * * * *');
+    expect(configText).not.toContain('STRIPE_MODE');
     for (const text of [firstRun.stdout, firstRun.stderr, doctorRun.stdout, doctorRun.stderr, secondRun.stdout, secondRun.stderr, devVars]) {
       expect(text).not.toContain('ambient-d1-stripe-must-not-leak');
       expect(text).not.toContain('ambient-d1-cloudflare-must-not-leak');
+      expect(text).not.toContain('sk_test_d1_must_not_be_written');
+      expect(text).not.toContain('whsec_d1_must_not_be_written');
     }
 
     await execWorkspace(workspace.root, 'npm', ['run', 'build'], env, 300_000);

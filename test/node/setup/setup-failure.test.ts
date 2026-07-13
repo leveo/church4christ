@@ -14,6 +14,8 @@ function deps(overrides: Record<string, unknown> = {}): any {
     preflightConfig: vi.fn(async () => ({ approvedContent: null })),
     confirm: vi.fn(async () => true),
     collectSupabaseSecret: vi.fn(async () => ({ dbUrl: 'postgres://user:password@db.example.test/app' })),
+    collectStripeTestSecrets: vi.fn(async () => null),
+    collectStripeSetupRedactionValues: vi.fn(async () => []),
     formatResult: vi.fn(),
     formatPlan: vi.fn(),
     apply: vi.fn(),

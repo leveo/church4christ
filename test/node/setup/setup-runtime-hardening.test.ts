@@ -11,16 +11,42 @@ import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from '../../../s
 import { verifyMediaPlan } from '../../../scripts/setup/media.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/setup/checks/database.mjs';
-import { verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
+import { readLocalStripeClassification, verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
 import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { resolveLocalPersistence } from '../../../scripts/setup/persistence.mjs';
+import { createCommandRunner } from '../../../scripts/setup/commands.mjs';
 
 function statementDb(rows: Record<string, any>) {
   return { prepare(sql: string) { return { bind() { return this; }, async first() { return rows[sql] ?? null; }, async all() { return { success: true, meta: {}, results: rows[sql] ?? [] }; } }; } };
 }
 
 describe('runtime setup hardening', () => {
+  it('scrubs runtime and one-shot Stripe values from every default setup child environment', async () => {
+    const keys = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'CHURCH_SETUP_STRIPE_SECRET_KEY', 'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET'] as const;
+    const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) process.env[key] = `secret-${key}`;
+    const exec = vi.fn(async (_file, _args, options) => {
+      for (const key of keys) expect(options.env).not.toHaveProperty(key);
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    try {
+      const runner = createCommandRunner({ exec });
+      await runner.run('safe-command', []);
+      await runner.run('safe-command', [], { env: { ...process.env } });
+    }
+    finally { for (const key of keys) { if (old[key] === undefined) delete process.env[key]; else process.env[key] = old[key]; } }
+    expect(exec).toHaveBeenCalledTimes(2);
+
+    const leaked = 'sk_test_child_diagnostic';
+    const failing = createCommandRunner({
+      secretValues: [leaked],
+      exec: vi.fn(async () => ({ stdout: '', stderr: `failed with ${leaked}`, exitCode: 1 })),
+    });
+    await expect(failing.run('safe-command', [])).rejects.toThrow(/\[REDACTED\]/);
+    await expect(failing.run('safe-command', [])).rejects.not.toThrow(/sk_test_child_diagnostic/);
+  });
+
   it('resolves a validated workspace-local Wrangler persistence override', async () => {
     const root = await mkdtemp(join(tmpdir(), 'persistence-root-'));
     let outside: string | undefined;
@@ -140,7 +166,7 @@ describe('runtime setup hardening', () => {
     const deps: any = {
       catalog: raw, interactive: false, output: vi.fn(), inspectExisting, formatPlan: vi.fn(), formatResult: vi.fn(),
       preflightConfig: vi.fn(async () => ({ approvedContent: 'baseline' })),
-      confirm: vi.fn(), collectSupabaseSecret: vi.fn(), apply: vi.fn(),
+      confirm: vi.fn(), collectSupabaseSecret: vi.fn(), collectStripeTestSecrets: vi.fn(async () => null), collectStripeSetupRedactionValues: vi.fn(async () => []), apply: vi.fn(),
     };
     const argv = ['--mode', 'deploy', '--preset', 'full-church', '--site-slug', 'x', '--church-name', 'X', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--app-origin', 'https://x.example.test', '--email-from', 'serve@x.example.test', '--yes'];
     const { runSetup } = await import('../../../scripts/setup/index.mjs');
@@ -193,6 +219,37 @@ describe('runtime setup hardening', () => {
     expect(remote.stripeSecretKey).toBe(true); expect(remote.stripeWebhookSecret).toBe(true);
     const local = await buildServicePresence({ ...deploy, mode: 'local' }, { hostEnv: { STRIPE_WEBHOOK_SECRET: 'host-only-must-be-ignored' }, localSecretNames: ['STRIPE_SECRET_KEY'], localSecretsValid: false });
     expect(local.stripeSecretKey).toBe(true); expect(local.stripeWebhookSecret).toBe(false);
+  });
+
+  it('derives only a nonsecret local Stripe classification and marks deploy values unverifiable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-stripe-classification-'));
+    const path = join(root, '.dev.vars');
+    try {
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'test', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=  sk_test_trimmed  \nSTRIPE_WEBHOOK_SECRET=  whsec_trimmed  \n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'test', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=sk_live_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'live', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=rk_test_unknown\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'unknown', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'OTHER=value\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'missing', secretKey: false, webhookSecret: false });
+    } finally { await rm(root, { recursive: true, force: true }); }
+
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => args[0] === 'secret'
+      ? { stdout: '[{"name":"STRIPE_SECRET_KEY","type":"secret_text"},{"name":"STRIPE_WEBHOOK_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 }
+      : { stdout: '', stderr: '', exitCode: 1 }) };
+    const deploy: any = { mode: 'deploy', database: 'supabase', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', hyperdriveId: 'hd' } };
+    const presence = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', stripeModeTest: true, hostEnv: {} });
+    expect(presence).toMatchObject({ stripeClassification: 'unverifiable', stripeClassificationVerifiable: false, stripeModeTest: true });
+  });
+
+  it('does not convert a failed deploy secret-list probe into Stripe absence', async () => {
+    const runner = { run: vi.fn(async () => ({ stdout: '', stderr: 'authentication failed', exitCode: 1 })) };
+    const deploy: any = { mode: 'deploy', database: 'supabase', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', hyperdriveId: 'hd' } };
+    await expect(buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', stripeModeTest: true, hostEnv: {} }))
+      .rejects.toThrow(/secret list failed/i);
   });
 
   it('documents both banner-free JSON invocations', () => {

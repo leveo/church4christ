@@ -5,6 +5,8 @@ const TOKEN_NAMES = [
   'APP_ORIGIN',
   'EMAIL_FROM',
   'DB_BACKEND',
+  'CRON_LIST',
+  'STRIPE_MODE_SUFFIX',
   'DATABASE_BLOCK',
   'R2_BUCKET',
 ];
@@ -35,6 +37,10 @@ export function renderWrangler(template, manifest) {
     APP_ORIGIN: jsonContent(manifest.site.appOrigin),
     EMAIL_FROM: jsonContent(manifest.site.emailFrom),
     DB_BACKEND: jsonContent(manifest.database),
+    CRON_LIST: JSON.stringify(manifest.database === 'd1'
+      ? ['0 13 * * *', '0 14 * * 4', '0 9 * * *']
+      : ['0 13 * * *', '0 14 * * 4', '*/5 * * * *']).replaceAll('","', '", "'),
+    STRIPE_MODE_SUFFIX: manifest.database === 'supabase' ? ', "STRIPE_MODE": "test"' : '',
     DATABASE_BLOCK: databaseBlock,
     R2_BUCKET: jsonContent(manifest.resources.r2BucketName),
   };

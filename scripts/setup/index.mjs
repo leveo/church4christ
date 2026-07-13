@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { parseSetupArgs, SETUP_HELP } from './args.mjs';
-import { missingAnswers } from './answers.mjs';
+import { missingAnswers, normalizeSetupAnswers } from './answers.mjs';
 import { buildSetupPlan } from './plan.mjs';
 import { collectInteractiveAnswers } from './prompts.mjs';
 import { runDoctor } from './doctor.mjs';
@@ -23,13 +23,16 @@ import { createStateStore } from './state.mjs';
 import { acquireApprovedContentLease, classifyConfig, writeAtomic } from './files.mjs';
 import { manifestFromPlan, renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus } from './secrets.mjs';
+import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus, readLocalStripeClassification } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 import { resolveLocalPersistence } from './persistence.mjs';
 import { inspectBaselineLocalD1Installation, inspectLegacyInstallation } from './import-existing.mjs';
 import { applyAfterProviderPreflight, assertDemoSeedTarget } from './provider-verification.mjs';
+import { parseJsoncObject } from './jsonc.mjs';
+import { redact } from './redact.mjs';
+import { resolveProvider } from './resolve-provider.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -86,19 +89,25 @@ export function formatPlan(plan) {
   ].join('\n');
 }
 
-const redactDiffLine = (line) => line
-  .replace(/([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]@')
-  .replace(/("(?:[^"\\]|\\.)*(?:secret|token|password|key|url|connection)(?:[^"\\]|\\.)*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"');
+const redactDiffLine = (line, secretValues = []) => {
+  let output = line
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]@')
+    .replace(/("(?:[^"\\]|\\.)*(?:secret|token|password|key|url|connection)(?:[^"\\]|\\.)*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"');
+  for (const secret of [...new Set(secretValues)].sort((left, right) => right.length - left.length)) {
+    if (secret) output = output.replaceAll(secret, '[REDACTED]');
+  }
+  return output;
+};
 
-function conciseLineDiff(current, desired) {
+function conciseLineDiff(current, desired, secretValues = []) {
   const left = current.split(/\r?\n/);
   const right = desired.split(/\r?\n/);
   const changed = [];
   const length = Math.max(left.length, right.length);
   for (let index = 0; index < length && changed.length < MAX_CONFIG_DIFF_LINES; index += 1) {
     if (left[index] === right[index]) continue;
-    if (left[index] !== undefined) changed.push(`- ${redactDiffLine(left[index])}`);
-    if (right[index] !== undefined && changed.length < MAX_CONFIG_DIFF_LINES) changed.push(`+ ${redactDiffLine(right[index])}`);
+    if (left[index] !== undefined) changed.push(`- ${redactDiffLine(left[index], secretValues)}`);
+    if (right[index] !== undefined && changed.length < MAX_CONFIG_DIFF_LINES) changed.push(`+ ${redactDiffLine(right[index], secretValues)}`);
   }
   if (changed.length === MAX_CONFIG_DIFF_LINES) changed.push('… additional differences omitted');
   return changed.join('\n');
@@ -128,6 +137,9 @@ export async function preflightWranglerConfig(options) {
       (options.baseline !== undefined && typeof options.baseline !== 'string') || typeof options.template !== 'string') {
     throw new TypeError('Wrangler preflight requires current and template configuration bytes');
   }
+  if (options.secretValues !== undefined && (!Array.isArray(options.secretValues) || options.secretValues.some((value) => typeof value !== 'string'))) {
+    throw new TypeError('Wrangler preflight secretValues must be a string array');
+  }
   if (options.current === null) return Object.freeze({ classification: 'absent', approvedContent: null });
   let canonical;
   if (options.existingManifest) {
@@ -152,7 +164,7 @@ export async function preflightWranglerConfig(options) {
   const pendingNote = prospective.pendingIds.length
     ? '\nPending provider IDs are clearly labeled in this diff; only those IDs will be substituted after setup approval.'
     : '';
-  options.output(`wrangler.jsonc replacement requires separate approval:${pendingNote}\n${conciseLineDiff(options.current, prospective.content)}`);
+  options.output(`wrangler.jsonc replacement requires separate approval:${pendingNote}\n${conciseLineDiff(options.current, prospective.content, options.secretValues)}`);
   if (await options.confirmConfigReplacement({ classification }) !== true) {
     throw new Error('wrangler.jsonc replacement was not approved; no setup changes were made');
   }
@@ -217,6 +229,14 @@ export async function collectSupabaseSecret(options = {}) {
   return Object.freeze({ dbUrl, source });
 }
 
+export { collectStripeTestSecrets };
+
+export function configuredStripeTestMode(config) {
+  if (typeof config !== 'string') return false;
+  try { return parseJsoncObject(config, 'generated Wrangler configuration').vars?.STRIPE_MODE === 'test'; }
+  catch { return false; }
+}
+
 export async function buildServicePresence(manifest, probeOptions = {}) {
   const hostEnv = probeOptions.hostEnv ?? process.env;
   const localNames = probeOptions.localSecretNames ?? [];
@@ -237,8 +257,15 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
   }
   let remoteSecrets = new Set();
   if (manifest?.mode === 'deploy' && probeOptions.runner) {
-    try { remoteSecrets = await listDeploySecrets(probeOptions); } catch {}
+    remoteSecrets = await listDeploySecrets(probeOptions);
   }
+  const localStripe = probeOptions.localStripeClassification ?? {
+    classification: localSecrets.size === 0 ? 'missing' : 'unknown',
+    secretKey: localSecrets.has('STRIPE_SECRET_KEY'),
+    webhookSecret: localSecrets.has('STRIPE_WEBHOOK_SECRET'),
+  };
+  const stripeSecretKey = manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : localStripe.secretKey;
+  const stripeWebhookSecret = manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : localStripe.webhookSecret;
   return {
     worker: live.worker,
     r2: live.r2,
@@ -247,8 +274,13 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
     email: false,
     emailConfigured: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
     emailDevLog: manifest?.mode === 'local' && probeOptions.localSecretsValid === true,
-    stripeSecretKey: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : localSecrets.has('STRIPE_SECRET_KEY'),
-    stripeWebhookSecret: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : localSecrets.has('STRIPE_WEBHOOK_SECRET'),
+    stripeSecretKey,
+    stripeWebhookSecret,
+    stripeClassification: manifest?.mode === 'deploy'
+      ? (stripeSecretKey || stripeWebhookSecret ? 'unverifiable' : 'missing')
+      : localStripe.classification,
+    stripeModeTest: probeOptions.stripeModeTest === true,
+    stripeClassificationVerifiable: manifest?.mode !== 'deploy',
     backup: Boolean(hostEnv.CF_ACCOUNT_ID && hostEnv.D1_DATABASE_ID && hostEnv.D1_EXPORT_TOKEN),
   };
 }
@@ -272,7 +304,7 @@ async function applyDefaultSetup(plan, options, catalog) {
   const manifestPath = resolve(root, 'church.config.json');
   const templatePath = resolve(root, 'config/wrangler.template.jsonc');
   const statePath = resolve(root, '.church/setup-state.json');
-  const runner = createCommandRunner();
+  const runner = createCommandRunner({ secretValues: options.secretValues ?? [] });
   const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
   const persistTo = plan.mode === 'local' ? resolveLocalPersistence(root, process.env) : undefined;
   const dbUrl = options.secretContext?.dbUrl;
@@ -330,7 +362,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: configuredStripeTestMode(config) }) }),
     }, { strict: false });
   };
 
@@ -373,9 +405,15 @@ async function applyDefaultSetup(plan, options, catalog) {
       }
       return verified;
     }),
-    'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath }), async ({ plan: activePlan }) => {
-      if (activePlan.mode === 'deploy') return hasDeploySecret({ runner, wranglerBin, configPath, name: 'SESSION_SECRET' });
-      return readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
+    'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath, stripeSecrets: activePlan.backend === 'supabase' ? options.secretContext?.stripeSecrets : null }), async ({ plan: activePlan }) => {
+      if (activePlan.mode === 'deploy') {
+        const names = await listDeploySecrets({ runner, wranglerBin, configPath });
+        return names.has('SESSION_SECRET') && (!options.secretContext?.stripeSecrets ||
+          (names.has('STRIPE_SECRET_KEY') && names.has('STRIPE_WEBHOOK_SECRET')));
+      }
+      const baseReady = await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
+      if (!baseReady || !options.secretContext?.stripeSecrets) return baseReady;
+      return (await readLocalStripeClassification(resolve(root, '.dev.vars'))).classification === 'test';
     }),
     ...providerSteps,
     'seed-media': step(async ({ plan: activePlan }) => {
@@ -471,8 +509,39 @@ export async function runSetup(argv, deps) {
     answers = parsed;
   }
 
+  const normalized = normalizeSetupAnswers(answers, deps.catalog);
+  const selected = normalized.modules ?? deps.catalog.presets?.[normalized.preset]?.modules;
+  if (!selected?.length) throw new Error('Choose a preset or custom modules');
+  const requestedBackend = resolveProvider(selected, normalized.backendOverride, deps.catalog).backend;
+  let rawStripeRedactionValues = [];
+  let collectedStripeSecrets = null;
+  if (requestedBackend === 'supabase') {
+    requireDeps(deps, ['collectStripeSetupRedactionValues']);
+    rawStripeRedactionValues = await deps.collectStripeSetupRedactionValues();
+    if (!Array.isArray(rawStripeRedactionValues) || rawStripeRedactionValues.some((value) => typeof value !== 'string')) {
+      throw new TypeError('Stripe setup redaction values must be a string array');
+    }
+    if (!parsed.dryRun) {
+      requireDeps(deps, ['collectStripeTestSecrets']);
+      collectedStripeSecrets = await deps.collectStripeTestSecrets();
+    }
+  }
+  const registeredStripeSecretValues = [...new Set([
+    ...rawStripeRedactionValues,
+    collectedStripeSecrets?.secretKey,
+    collectedStripeSecrets?.webhookSecret,
+  ].filter((value) => typeof value === 'string'))];
+
   requireDeps(deps, ['inspectExisting', 'formatPlan']);
-  const currentState = await deps.inspectExisting({ dryRun: parsed.dryRun, requestedMode: answers.mode });
+  let currentState;
+  try {
+    currentState = await deps.inspectExisting({ dryRun: parsed.dryRun, requestedMode: answers.mode, secretValues: registeredStripeSecretValues });
+  } catch (error) {
+    const message = redact({ message: error instanceof Error ? error.message : String(error) }, registeredStripeSecretValues).message;
+    const safe = new Error(message);
+    if (typeof error?.code === 'string') Object.defineProperty(safe, 'code', { value: error.code });
+    throw safe;
+  }
   const plan = buildSetupPlan(answers, deps.catalog, currentState);
   if (parsed.dryRun) {
     deps.output(parsed.json
@@ -481,11 +550,15 @@ export async function runSetup(argv, deps) {
     return 0;
   }
 
+  const stripeSecrets = plan.backend === 'supabase' ? collectedStripeSecrets : null;
+  const stripeSecretValues = registeredStripeSecretValues;
+
   requireDeps(deps, ['preflightConfig']);
   const configApproval = await deps.preflightConfig({
     plan,
     currentState,
     forceConfig: parsed.forceConfig,
+    secretValues: stripeSecretValues,
   });
 
   requireDeps(deps, ['confirm', 'collectSupabaseSecret', 'apply', 'formatResult']);
@@ -505,7 +578,9 @@ export async function runSetup(argv, deps) {
     }
   }
 
-  const secretContext = plan.backend === 'supabase' ? await deps.collectSupabaseSecret() : {};
+  const secretContext = plan.backend === 'supabase'
+    ? { ...await deps.collectSupabaseSecret(), stripeSecrets }
+    : {};
   const rerunNeedsForceConfig = parsed.forceConfig ||
     ['unrecognized', 'modified-generated'].includes(configApproval.classification);
   const rerunCommand = buildSetupRerunCommand(plan, {
@@ -513,7 +588,8 @@ export async function runSetup(argv, deps) {
     promoteExistingAdmin: parsed.promoteExistingAdmin,
     allowHyperdriveSecretInArgv,
   });
-  const secretValues = typeof secretContext.dbUrl === 'string' ? [secretContext.dbUrl] : [];
+  const secretValues = [secretContext.dbUrl, ...stripeSecretValues]
+    .filter((value) => typeof value === 'string');
   let result;
   try {
     result = await deps.apply(plan, {
@@ -615,7 +691,7 @@ async function createDefaultDeps() {
     if (answer === 'false' || answer === 'no' || answer === 'n') return false;
     return answer.trim();
   };
-  const inspectExisting = async ({ requestedMode }) => {
+  const inspectExisting = async ({ requestedMode, secretValues = [] }) => {
     try {
       const manifest = validateManifest(JSON.parse(await readFile('church.config.json', 'utf8')), catalog);
       return inspectExistingInstallation(manifest, requestedMode);
@@ -624,7 +700,7 @@ async function createDefaultDeps() {
         const root = resolve(process.cwd());
         const configPath = resolve(root, 'wrangler.jsonc');
         const configContent = await readFile(configPath, 'utf8');
-        const runner = createCommandRunner();
+        const runner = createCommandRunner({ secretValues });
         const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
         const openD1 = ({ mode, persistTo }) => new D1CliDb({
           runner,
@@ -670,9 +746,12 @@ async function createDefaultDeps() {
     const persistTo = manifest?.mode === 'local' ? resolveLocalPersistence(root, process.env) : undefined;
     const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
     const configPath = resolve(root, 'wrangler.jsonc');
+    const stripeRedactionValues = manifest?.database === 'supabase'
+      ? collectStripeSetupRedactionValues({ environment: process.env })
+      : [];
     const doctorDbUrl = resolveDoctorDatabaseUrl(manifest, process.env);
     if (manifest?.database === 'd1') {
-      runner = createCommandRunner();
+      runner = createCommandRunner({ secretValues: stripeRedactionValues });
       db = new D1CliDb({ runner, wranglerBin, configPath, mode: manifest.mode, ...(persistTo ? { persistTo } : {}) });
     } else if (manifest?.database === 'supabase' && doctorDbUrl) {
       connection = openPostgresSetupDb(doctorDbUrl);
@@ -680,13 +759,14 @@ async function createDefaultDeps() {
     }
     try {
       return await runDoctor({
+        secrets: stripeRedactionValues,
         checkManifest: () => checkManifest({ catalog, manifest }),
         checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
         checkDatabase: () => {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: doctorDbUrl ? [doctorDbUrl] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [] }) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: configuredStripeTestMode(config) }) }),
       }, { strict });
     } finally {
       await connection?.close();
@@ -699,7 +779,7 @@ async function createDefaultDeps() {
     output,
     errorOutput,
     inspectExisting,
-    preflightConfig: async ({ plan, currentState, forceConfig }) => {
+    preflightConfig: async ({ plan, currentState, forceConfig, secretValues }) => {
       const current = await readFile('wrangler.jsonc', 'utf8').catch((error) => {
         if (error?.code === 'ENOENT') return null;
         throw error;
@@ -714,6 +794,7 @@ async function createDefaultDeps() {
         baselineSha256: BASELINE_WRANGLER_SHA256,
         interactive,
         forceConfig,
+        secretValues,
         output: (value) => uiOutput.write(`${value}\n`),
         confirmConfigReplacement: async () => (await ask({ key: 'configReplacement', message: 'Replace wrangler.jsonc after reviewing this diff?', choices: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] })) === true,
       });
@@ -734,6 +815,8 @@ async function createDefaultDeps() {
         return readMaskedInput(process.stdin, uiOutput, message);
       },
     }),
+    collectStripeTestSecrets: () => collectStripeTestSecrets({ environment: process.env }),
+    collectStripeSetupRedactionValues: () => collectStripeSetupRedactionValues({ environment: process.env }),
     apply: (plan, options) => applyDefaultSetup(plan, options, catalog),
     close: () => readline?.close(),
   };

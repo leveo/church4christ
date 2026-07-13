@@ -26,6 +26,7 @@ import {
   type RegistrationCheckoutRecoveryClaim,
 } from './stripeCheckoutRequests';
 import { sanitizeStripeDiagnostic } from './stripeWebhookInbox';
+import { getEnabledModules } from './modules';
 
 const CHECKPOINT_MINUTES = [45, 90, 180, 480, 960, 1425] as const;
 const CREATE_CUTOFF_MS = 24 * 60 * 60_000;
@@ -279,10 +280,13 @@ async function processRequest(
 export async function drainStripeCheckoutRecovery(
   deps: StripeCheckoutRecoveryDeps,
 ): Promise<StripeCheckoutRecoveryResult[]> {
+  if (deps.env.STRIPE_MODE !== 'test' || !deps.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ||
+      !deps.env.STRIPE_WEBHOOK_SECRET?.startsWith('whsec_')) return [];
   const opened = (deps.openDb ?? openDb)(deps.env);
   let ids: string[];
   try {
     if (opened.backend !== 'supabase') return [];
+    if (!(await getEnabledModules(opened.db, 'supabase')).has('registration')) return [];
     ids = await listDueRegistrationCheckoutRequestIds(
       opened.db,
       toDbTime((deps.now ?? (() => new Date()))()),

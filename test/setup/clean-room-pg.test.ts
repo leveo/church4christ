@@ -58,6 +58,8 @@ suite('clean-room Supabase setup', () => {
         CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: scopedUrl,
         WRANGLER_PERSIST_TO: '.noncanonical/wrangler-state',
         ASTRO_DEV_BACKGROUND: '0',
+        CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_test_clean_room_setup',
+        CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'whsec_clean_room_setup',
       };
       const flags = setupFlags(port);
       const plan = await workspace.execNode([...flags.filter((flag) => flag !== '--yes' && flag !== '--demo-data'), '--dry-run'], env);
@@ -67,8 +69,8 @@ suite('clean-room Supabase setup', () => {
       expect(first.enabledModules).toHaveLength(16);
       expect(first.moduleRows).toBe(16);
       expect(first.admin.status).toMatch(/created|already-admin/);
-      expect(first.doctor.status).toBe('ready-with-limitations');
-      expect(first.doctor.checks.filter(({ severity }: { severity: string }) => severity === 'warning').map(({ code }: { code: string }) => code)).toEqual(['services.stripe-absent']);
+      expect(first.doctor.status).toBe('ready');
+      expect(first.doctor.checks).toContainEqual(expect.objectContaining({ code: 'services.stripe-ok', severity: 'info' }));
 
       const expectedMigrations = (await readdir(join(workspace.root, 'migrations-supabase'))).filter((name) => name.endsWith('.sql')).sort();
       const migrations = await db<{ name: string }[]>`SELECT name FROM _migrations ORDER BY name`;
@@ -84,14 +86,20 @@ suite('clean-room Supabase setup', () => {
       const configBefore = await readFile(join(workspace.root, 'wrangler.jsonc'));
       const stateBefore = await readFile(join(workspace.root, '.church/setup-state.json'));
       const devVars = await readFile(join(workspace.root, '.dev.vars'), 'utf8');
+      expect(devVars).toContain('STRIPE_SECRET_KEY=sk_test_clean_room_setup');
+      expect(devVars).toContain('STRIPE_WEBHOOK_SECRET=whsec_clean_room_setup');
+      expect(configBefore.toString()).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "*/5 * * * *"]');
+      expect(configBefore.toString()).toContain('"STRIPE_MODE": "test"');
       const secondRun = await workspace.execNode(flags, env, 300_000);
       const second = JSON.parse(secondRun.stdout);
       expect(second.apply.results.every(({ status }: { status: string }) => ['already-complete', 'verified'].includes(status))).toBe(true);
       expect(await readFile(join(workspace.root, 'church.config.json'))).toEqual(manifestBefore);
       expect(await readFile(join(workspace.root, 'wrangler.jsonc'))).toEqual(configBefore);
       const credentials = [scopedUrl, `${decodeURIComponent(base.username)}:${decodeURIComponent(base.password)}@`, JSON.stringify(decodeURIComponent(base.username)), JSON.stringify(decodeURIComponent(base.password)), 'ambient-stripe-must-not-leak', 'postgres://ambient:secret@invalid/ambient'];
-      for (const generated of [plan.stdout, plan.stderr, firstRun.stdout, firstRun.stderr, secondRun.stdout, secondRun.stderr, manifestBefore.toString(), configBefore.toString(), stateBefore.toString(), devVars]) {
+      for (const generated of [plan.stdout, plan.stderr, firstRun.stdout, firstRun.stderr, secondRun.stdout, secondRun.stderr, manifestBefore.toString(), configBefore.toString(), stateBefore.toString()]) {
         for (const credential of credentials) expect(generated).not.toContain(credential);
+        expect(generated).not.toContain('sk_test_clean_room_setup');
+        expect(generated).not.toContain('whsec_clean_room_setup');
       }
       const localStatePaths = await listRelativePaths(persistTo);
       expect(localStatePaths.some((path) => /(?:^|\/)d1(?:\/|$)/i.test(path))).toBe(false);

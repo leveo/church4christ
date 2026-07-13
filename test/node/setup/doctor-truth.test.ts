@@ -43,14 +43,17 @@ describe('doctor service truth', () => {
 
   it('derives exact absent, partial, and complete local Stripe states from .dev.vars names, never host env', async () => {
     const states = [
-      { names: [], code: 'services.stripe-absent', severity: 'warning' },
-      { names: ['STRIPE_SECRET_KEY'], code: 'services.stripe-partial', severity: 'error' },
-      { names: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], code: 'services.stripe-ok', severity: 'info' },
+      { names: [], classification: 'missing', code: 'services.stripe-absent', severity: 'warning' },
+      { names: ['STRIPE_SECRET_KEY'], classification: 'unknown', code: 'services.stripe-partial', severity: 'error' },
+      { names: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], classification: 'test', code: 'services.stripe-ok', severity: 'info' },
     ] as const;
     for (const state of states) {
+      const names = new Set<string>(state.names);
       const presence = await buildServicePresence(supabaseManifest, {
         hostEnv: { STRIPE_SECRET_KEY: 'host-only', STRIPE_WEBHOOK_SECRET: 'host-only' },
         localSecretNames: state.names,
+        localStripeClassification: { classification: state.classification, secretKey: names.has('STRIPE_SECRET_KEY'), webhookSecret: names.has('STRIPE_WEBHOOK_SECRET') },
+        stripeModeTest: true,
         localSecretsValid: true,
         localSupabaseUrlAvailable: true,
       });

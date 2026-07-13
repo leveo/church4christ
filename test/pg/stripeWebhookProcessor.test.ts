@@ -607,6 +607,36 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(result.inbox.state === 'failed' && result.inbox.error).not.toContain('\n');
   });
 
+  it('still drains an already-received event to module_disabled when both payment modules are off', async () => {
+    const eventId = 'evt_test_disabled_modules_recovery';
+    await receipt(eventId, {
+      id: eventId,
+      type: 'checkout.session.completed',
+      created: 1_700_000_000,
+      livemode: false,
+      data: { object: { metadata: { kind: 'registration' } } },
+    });
+    await sql.unsafe(`
+      INSERT INTO settings (key, value) VALUES ('module.giving', '0'), ('module.registration', '0')
+      ON CONFLICT (key) DO UPDATE SET value='0'
+    `);
+    clearModuleCache();
+    try {
+      const result = await runStripeRecovery({
+        env: ENV,
+        openDb: () => opened(),
+        now: () => NOW,
+        checkout: vi.fn(async () => []),
+        retention: vi.fn(async () => ({ processedOrIgnored: 0, failed: 0 })),
+      });
+      expect(result.inbox).toEqual({ state: 'completed', result: [{ state: 'ignored', outcome: 'module_disabled' }] });
+      expect((await listStripeWebhookEvents(db))[0]).toMatchObject({ status: 'ignored', outcome: 'module_disabled' });
+    } finally {
+      await sql.unsafe(`UPDATE settings SET value='1' WHERE key IN ('module.giving', 'module.registration')`);
+      clearModuleCache();
+    }
+  });
+
   it('redacts the Hyperdrive URL and credential components from recovery phase errors', async () => {
     const hyperdriveEnv: StripeEnv & DbEnv = {
       ...ENV,

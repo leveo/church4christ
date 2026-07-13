@@ -6,12 +6,12 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": "./dist", "binding": "ASSETS" },
-  "triggers": { "crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *"] },
+  "triggers": { "crons": @@CRON_LIST@@ },
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["@@EMAIL_FROM@@"] }],
   "vars": {
     "APP_ORIGIN": "@@APP_ORIGIN@@",
     "EMAIL_FROM": "@@EMAIL_FROM@@",
-    "DB_BACKEND": "@@DB_BACKEND@@"
+    "DB_BACKEND": "@@DB_BACKEND@@"@@STRIPE_MODE_SUFFIX@@
   },
   @@DATABASE_BLOCK@@
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "@@R2_BUCKET@@" }],

@@ -69,4 +69,20 @@ describe('setup clean-room dry run', () => {
       await expect(access(join(workspace.root, generated))).rejects.toMatchObject({ code: 'ENOENT' });
     }
   }, 180_000);
+
+  it('does not collect or serialize one-shot Stripe values during a Supabase dry run', async () => {
+    const workspace = await createCleanWorkspace();
+    const before = await workspaceHash(workspace.root);
+    const secretKey = 'sk_test_dry_run_must_not_serialize';
+    const webhookSecret = 'whsec_dry_run_must_not_serialize';
+    const { stdout, stderr } = await workspace.execNode([
+      '--mode', 'local', '--preset', 'full-church', '--site-slug', 'dry-pg',
+      '--church-name', 'Dry PG', '--locale', 'en', '--admin-email', 'admin@dry.invalid',
+      '--admin-name', 'Dry Admin', '--dry-run', '--json',
+    ], { CHURCH_SETUP_STRIPE_SECRET_KEY: secretKey, CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: webhookSecret });
+    expect(JSON.parse(stdout)).toMatchObject({ kind: 'setup-plan', plan: { backend: 'supabase' } });
+    expect(`${stdout}\n${stderr}`).not.toContain(secretKey);
+    expect(`${stdout}\n${stderr}`).not.toContain(webhookSecret);
+    expect(await workspaceHash(workspace.root)).toBe(before);
+  }, 180_000);
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import rawCatalog from '../../../config/capabilities.json';
-import { collectSupabaseSecret, createPlanPreview, formatPlan, formatResult, preflightWranglerConfig, runSetup } from '../../../scripts/setup/index.mjs';
+import { collectStripeTestSecrets, collectSupabaseSecret, configuredStripeTestMode, createPlanPreview, formatPlan, formatResult, preflightWranglerConfig, runSetup } from '../../../scripts/setup/index.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
 import { manifestFromPlan } from '../../../scripts/setup/manifest.mjs';
 import { readFile } from 'node:fs/promises';
@@ -27,6 +27,8 @@ function deps(overrides: Record<string, unknown> = {}): any {
     confirm: vi.fn(async () => true),
     previewPlan: vi.fn(),
     collectSupabaseSecret: vi.fn(async () => ({ dbUrl: 'postgres://user:password@db.example.test/app' })),
+    collectStripeTestSecrets: vi.fn(async () => null),
+    collectStripeSetupRedactionValues: vi.fn(async () => []),
     formatPlan: (plan: unknown) => JSON.stringify(plan, null, 2),
     formatResult: (result: unknown) => JSON.stringify(result, null, 2),
     formatDoctor: (result: unknown) => JSON.stringify(result, null, 2),
@@ -44,6 +46,22 @@ describe('guided setup CLI', () => {
     expect(d.apply).not.toHaveBeenCalled();
     expect(d.runner.run).not.toHaveBeenCalled();
     expect(d.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('registers raw one-shot values for dry-run inspection without validating or serializing them', async () => {
+    const rawValues = ['sk_live_raw_dry_run', 'whsec_raw_dry_run'];
+    const d = deps({
+      collectStripeSetupRedactionValues: vi.fn(async () => rawValues),
+      inspectExisting: vi.fn(async (options) => {
+        expect(options.secretValues).toEqual(rawValues);
+        return {};
+      }),
+      collectStripeTestSecrets: vi.fn(async () => { throw new Error('must not validate dry-run values'); }),
+    });
+    await expect(runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'dry-raw', '--church-name', 'Dry Raw', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--dry-run', '--json'], d)).resolves.toBe(0);
+    expect(d.collectStripeSetupRedactionValues).toHaveBeenCalledOnce();
+    expect(d.collectStripeTestSecrets).not.toHaveBeenCalled();
+    expect(JSON.stringify(d.output.mock.calls)).not.toContain('sk_live_raw_dry_run');
   });
 
   it('interactive answers and equivalent flags build deeply equal plans', async () => {
@@ -132,6 +150,23 @@ describe('guided setup CLI', () => {
     expect(events).toEqual(['config', 'preview', 'confirm', 'apply:approved bytes']);
   });
 
+  it('registers one-shot Stripe values before existing-installation inspection or diagnostics', async () => {
+    const events: string[] = [];
+    const stripeSecrets = { secretKey: 'sk_test_early_registration', webhookSecret: 'whsec_early_registration' };
+    const d = deps({
+      collectStripeSetupRedactionValues: vi.fn(async () => { events.push('raw-registration'); return ['sk_test_early_registration', 'whsec_early_registration']; }),
+      collectStripeTestSecrets: vi.fn(async () => { events.push('stripe-registration'); return stripeSecrets; }),
+      inspectExisting: vi.fn(async (options) => {
+        events.push('inspect');
+        expect(options.secretValues).toEqual(['sk_test_early_registration', 'whsec_early_registration']);
+        return {};
+      }),
+      preflightConfig: vi.fn(async () => { events.push('config'); return { approvedContent: null }; }),
+    });
+    await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'early-pg', '--church-name', 'Early PG', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d);
+    expect(events.slice(0, 4)).toEqual(['raw-registration', 'stripe-registration', 'inspect', 'config']);
+  });
+
   it('does not treat --yes as approval to replace an unrecognized config', async () => {
     const d = deps({ preflightConfig: vi.fn(async () => { throw new Error('rerun with --force-config'); }) });
     await expect(runSetup([...baseFlags, '--yes'], d)).rejects.toThrow(/--force-config/);
@@ -182,6 +217,49 @@ describe('guided setup CLI', () => {
     expect(d.collectSupabaseSecret).toHaveBeenCalledOnce();
     expect(d.apply.mock.calls[0][1]).toMatchObject({ secretContext: { dbUrl: 'postgres://user:password@db.example.test/app' } });
     expect(JSON.stringify(d.apply.mock.calls[0][0])).not.toContain('postgres://');
+  });
+
+  it('registers Stripe setup credentials for redaction but consumes them only for Supabase secretContext', async () => {
+    const stripeSecrets = { secretKey: 'sk_test_setup_only', webhookSecret: 'whsec_setup_only' };
+    const pg = deps({ collectStripeTestSecrets: vi.fn(async () => stripeSecrets) });
+    await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], pg);
+    expect(pg.collectStripeTestSecrets).toHaveBeenCalledOnce();
+    expect(pg.preflightConfig).toHaveBeenCalledWith(expect.objectContaining({ secretValues: ['sk_test_setup_only', 'whsec_setup_only'] }));
+    expect(pg.apply.mock.calls[0][1].secretContext.stripeSecrets).toEqual(stripeSecrets);
+    expect(pg.apply.mock.calls[0][1].secretValues).toEqual(expect.arrayContaining(['sk_test_setup_only', 'whsec_setup_only']));
+    expect(JSON.stringify(pg.apply.mock.calls[0][0])).not.toContain('sk_test_setup_only');
+
+    const d1 = deps();
+    await runSetup([...baseFlags, '--yes'], d1);
+    expect(d1.collectStripeTestSecrets).not.toHaveBeenCalled();
+    expect(d1.collectStripeSetupRedactionValues).not.toHaveBeenCalled();
+    expect(d1.apply.mock.calls[0][1].secretContext).not.toHaveProperty('stripeSecrets');
+  });
+
+  it('accepts only a complete dedicated test-mode Stripe pair and ignores ambient runtime names', async () => {
+    await expect(collectStripeTestSecrets({ environment: {} })).resolves.toBeNull();
+    await expect(collectStripeTestSecrets({ environment: {
+      STRIPE_SECRET_KEY: 'sk_test_ambient', STRIPE_WEBHOOK_SECRET: 'whsec_ambient',
+    } })).resolves.toBeNull();
+    await expect(collectStripeTestSecrets({ environment: {
+      CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_test_setup', CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'whsec_setup',
+    } })).resolves.toEqual({ secretKey: 'sk_test_setup', webhookSecret: 'whsec_setup' });
+    await expect(collectStripeTestSecrets({ environment: {
+      CHURCH_SETUP_STRIPE_SECRET_KEY: '  sk_test_trimmed  ', CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: '  whsec_trimmed  ',
+    } })).resolves.toEqual({ secretKey: 'sk_test_trimmed', webhookSecret: 'whsec_trimmed' });
+    for (const environment of [
+      { CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_test_partial' },
+      { CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_live_forbidden', CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'whsec_setup' },
+      { CHURCH_SETUP_STRIPE_SECRET_KEY: 'unknown', CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'whsec_setup' },
+      { CHURCH_SETUP_STRIPE_SECRET_KEY: 'sk_test_setup', CHURCH_SETUP_STRIPE_WEBHOOK_SECRET: 'unknown' },
+    ]) await expect(collectStripeTestSecrets({ environment })).rejects.toThrow(/Stripe test|complete pair/i);
+  });
+
+  it('parses STRIPE_MODE structurally and never accepts a comment or unrelated text match', () => {
+    expect(configuredStripeTestMode('{ "vars": { "STRIPE_MODE": "test" } }')).toBe(true);
+    expect(configuredStripeTestMode('// "STRIPE_MODE": "test"\n{ "vars": { "DB_BACKEND": "supabase" } }')).toBe(false);
+    expect(configuredStripeTestMode('{ "note": "\\\"STRIPE_MODE\\\": \\\"test\\\"", "vars": {} }')).toBe(false);
+    expect(configuredStripeTestMode('invalid')).toBe(false);
   });
 
   it('collects the Supabase URL from env first and otherwise requires masked interactive input', async () => {
@@ -348,6 +426,28 @@ describe('wrangler replacement preflight', () => {
       .rejects.toThrow(/--force-config/);
   });
 
+  it('requires the normal explicit replacement path for a pre-recovery generated Supabase config', async () => {
+    const baseline = await readFile('wrangler.jsonc', 'utf8');
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const plan = buildSetupPlan({
+      mode: 'local', preset: 'full-church', siteSlug: 'upgrade-pg', churchName: 'Upgrade PG', locale: 'en',
+      adminName: 'Admin', adminEmail: 'admin@example.test', demoData: false,
+    }, rawCatalog);
+    const manifest = manifestFromPlan(plan, rawCatalog);
+    const canonical = renderWrangler(template, manifest);
+    const oldGenerated = canonical
+      .replace(', "*/5 * * * *"', '')
+      .replace(', "STRIPE_MODE": "test"', '');
+    const output = vi.fn();
+    const confirmConfigReplacement = vi.fn(async () => false);
+    await expect(preflightWranglerConfig({ current: oldGenerated, baseline, template, plan, existingManifest: manifest, catalog: rawCatalog, interactive: true, forceConfig: false, output, confirmConfigReplacement }))
+      .rejects.toThrow(/replacement was not approved/i);
+    expect(confirmConfigReplacement).toHaveBeenCalledOnce();
+    expect(output.mock.calls[0][0]).toContain('*/5 * * * *');
+    await expect(preflightWranglerConfig({ current: oldGenerated, baseline, template, plan, existingManifest: manifest, catalog: rawCatalog, interactive: false, forceConfig: false }))
+      .rejects.toThrow(/--force-config/);
+  });
+
   it('requires a separate interactive replacement confirmation and emits a concise redacted diff', async () => {
     const baseline = await readFile('wrangler.jsonc', 'utf8');
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
@@ -357,16 +457,18 @@ describe('wrangler replacement preflight', () => {
     }, rawCatalog);
     const output = vi.fn();
     const confirmConfigReplacement = vi.fn(async () => false);
-    const current = '{ "name": "private", "vars": { "TOKEN": "postgres://owner:very-secret-password@example/db" } }\n';
-    await expect(preflightWranglerConfig({ current, baseline, template, plan, existingManifest: null, catalog: rawCatalog, interactive: true, forceConfig: false, output, confirmConfigReplacement }))
+    const registered = 'sk_test_registered_input';
+    const current = `{ "name": "private", "vars": { "TOKEN": "postgres://owner:very-secret-password@example/db" } }\n// ${registered}\n`;
+    await expect(preflightWranglerConfig({ current, baseline, template, plan, existingManifest: null, catalog: rawCatalog, interactive: true, forceConfig: false, secretValues: [registered], output, confirmConfigReplacement }))
       .rejects.toThrow(/replacement was not approved/i);
     expect(confirmConfigReplacement).toHaveBeenCalledOnce();
     const preview = output.mock.calls[0][0];
     expect(preview).toContain('wrangler.jsonc replacement');
     expect(preview).not.toContain('very-secret-password');
+    expect(preview).not.toContain(registered);
 
     confirmConfigReplacement.mockResolvedValueOnce(true);
-    await expect(preflightWranglerConfig({ current, baseline, template, plan, existingManifest: null, catalog: rawCatalog, interactive: true, forceConfig: false, output, confirmConfigReplacement }))
+    await expect(preflightWranglerConfig({ current, baseline, template, plan, existingManifest: null, catalog: rawCatalog, interactive: true, forceConfig: false, secretValues: [registered], output, confirmConfigReplacement }))
       .resolves.toMatchObject({ classification: 'unrecognized', approvedContent: current });
   });
 

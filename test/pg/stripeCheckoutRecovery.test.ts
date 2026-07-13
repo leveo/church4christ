@@ -16,10 +16,12 @@ import {
   resolveRegistrationCheckoutRequest,
 } from '../../src/lib/stripeCheckoutRequests';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
+import { clearModuleCache } from '../../src/lib/modules';
 
 const ENV: StripeEnv & DbEnv = {
   STRIPE_MODE: 'test',
   STRIPE_SECRET_KEY: 'sk_test_checkout_recovery',
+  STRIPE_WEBHOOK_SECRET: 'whsec_checkout_recovery',
   DB_BACKEND: 'supabase',
   HYPERDRIVE: { connectionString: DATABASE_URL },
 };
@@ -57,6 +59,25 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
   afterAll(async () => { await sql?.end(); });
 
   const opened = () => ({ db, backend: 'supabase' as const, end: vi.fn(async () => {}) });
+
+  it('skips new Checkout recovery without a complete test pair or Registration enablement', async () => {
+    const missingOpen = vi.fn(opened);
+    await expect(drainStripeCheckoutRecovery({ env: { ...ENV, STRIPE_WEBHOOK_SECRET: undefined }, openDb: missingOpen, now: () => T0 })).resolves.toEqual([]);
+    expect(missingOpen).not.toHaveBeenCalled();
+
+    await sql.unsafe(`INSERT INTO settings (key, value) VALUES ('module.registration', '0') ON CONFLICT (key) DO UPDATE SET value='0'`);
+    clearModuleCache();
+    const disabled = opened(); const disabledOpen = vi.fn(() => disabled);
+    try {
+      await expect(drainStripeCheckoutRecovery({ env: ENV, openDb: disabledOpen, now: () => T0 })).resolves.toEqual([]);
+      expect(disabledOpen).toHaveBeenCalledOnce();
+      expect(disabled.end).toHaveBeenCalledOnce();
+    } finally {
+      await sql.unsafe(`UPDATE settings SET value='1' WHERE key='module.registration'`);
+      clearModuleCache();
+    }
+  });
+
   const createRequest = async (requestId = REQUEST, createdAt = T0) => {
     sequence += 1;
     const [event] = await sql.unsafe(

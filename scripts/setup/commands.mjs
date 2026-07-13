@@ -5,6 +5,18 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const SECRET_ENV_NAME = /(?:SECRET|TOKEN|PASSWORD|API_KEY|DATABASE_URL|CONNECTION_STRING)/i;
+const SCRUBBED_STRIPE_ENV_KEYS = Object.freeze([
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'CHURCH_SETUP_STRIPE_SECRET_KEY',
+  'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET',
+]);
+
+function scrubbedChildEnvironment(environment) {
+  const env = { ...environment };
+  for (const key of SCRUBBED_STRIPE_ENV_KEYS) delete env[key];
+  return env;
+}
 
 const defaultExec = (file, args, options) => new Promise((resolve, reject) => {
   let settled = false;
@@ -106,22 +118,26 @@ function validateRun(file, args, options) {
   }
 }
 
-export function createCommandRunner({ exec = defaultExec } = {}) {
+export function createCommandRunner({ exec = defaultExec, secretValues: registeredSecretValues = /** @type {string[]} */ ([]) } = {}) {
   if (typeof exec !== 'function') throw new TypeError('command exec must be a function');
+  if (!Array.isArray(registeredSecretValues) || registeredSecretValues.some((value) => typeof value !== 'string')) {
+    throw new TypeError('registered command secretValues must be a string array');
+  }
   return Object.freeze({
     async run(file, args, options = {}) {
       validateRun(file, args, options);
       const {
         cwd = process.cwd(),
-        env = process.env,
+        env: requestedEnv = process.env,
         input,
         secretArgIndexes = [],
         allowNonzero = false,
         maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
         timeoutMs = DEFAULT_TIMEOUT_MS,
-        secretValues = [],
+        secretValues: commandSecretValues = [],
         secretEnvKeys = [],
       } = options;
+      const env = scrubbedChildEnvironment(requestedEnv);
       const indexSet = new Set(secretArgIndexes);
       const inputParts = input === undefined ? [] : [input, ...input.split(/\r?\n/).flatMap((line) => {
         const trimmed = line.trim();
@@ -132,7 +148,7 @@ export function createCommandRunner({ exec = defaultExec } = {}) {
         typeof value === 'string' && (SECRET_ENV_NAME.test(key) || secretEnvKeys.includes(key))).map(([, value]) => value);
       const secrets = secretVariants([
         ...secretArgIndexes.map((index) => args[index]),
-        ...inputParts, ...secretValues, ...envSecrets,
+        ...inputParts, ...registeredSecretValues, ...commandSecretValues, ...envSecrets,
       ]);
       const redactedArgs = args.map((arg, index) => indexSet.has(index) ? '[REDACTED]' : arg);
       const displayCommand = [file, ...redactedArgs].map((part) => JSON.stringify(part)).join(' ');

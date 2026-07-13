@@ -189,6 +189,22 @@ describe('doctor generated configuration check', () => {
       .toEqual(['config.worker-crons']);
   });
 
+  it('validates provider schedules separately from all four Worker schedule branches', async () => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const workerSource = await readFile('src/worker.ts', 'utf8');
+    const supabase: any = {
+      ...baseManifest, database: 'supabase', preset: 'full-church', modules: [...catalog.presets['full-church'].modules],
+      resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' },
+    };
+    const config = renderWrangler(template, supabase);
+    expect(await checkConfig({ manifest: supabase, template, config, workerSource, hostEnv: {} })).toEqual([
+      expect.objectContaining({ code: 'config.ok' }),
+    ]);
+    const withoutTestMode = config.replace(', "STRIPE_MODE": "test"', '');
+    expect((await checkConfig({ manifest: supabase, template, config: withoutTestMode, workerSource, hostEnv: {} })).map((entry) => entry.code))
+      .toEqual(['config.stripe-mode', 'config.drift']);
+  });
+
   it('accepts only the recorded baseline local D1 identifier as preserved legacy storage identity', async () => {
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
     const workerSource = await readFile('src/worker.ts', 'utf8');
@@ -408,10 +424,22 @@ describe('doctor capability services check', () => {
       ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.backup-ok', 'info'],
     ]);
     const complete = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
-    expect(complete.find((entry) => entry.code === 'services.stripe-ok')?.severity).toBe('info');
+    expect(complete.find((entry) => entry.code === 'services.stripe-unverifiable')?.severity).toBe('warning');
     expect(complete.find((entry) => entry.code === 'services.backup-absent')?.severity).toBe('info');
     const local = await checkServices({ catalog, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
     expect(local.map((entry) => entry.code)).toEqual(['services.worker-ok', 'services.r2-ok', 'services.email-dev', 'services.backup-absent']);
+  });
+
+  it('fails local live or unknown Stripe values and reports deploy value classification as unverifiable', async () => {
+    const full: any = { ...baseManifest, database: 'supabase', modules: [...catalog.presets['full-church'].modules], resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } };
+    const basePresence = { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false };
+    for (const classification of ['live', 'unknown']) {
+      const findings = await checkServices({ catalog, manifest: full, presence: { ...basePresence, stripeClassification: classification, stripeModeTest: true, stripeClassificationVerifiable: true } });
+      expect(findings).toContainEqual(expect.objectContaining({ code: `services.stripe-${classification}`, severity: 'error' }));
+      expect(findings).not.toContainEqual(expect.objectContaining({ code: 'services.stripe-ok' }));
+    }
+    const deploy = await checkServices({ catalog, manifest: { ...full, mode: 'deploy' }, presence: { ...basePresence, stripeClassification: 'unverifiable', stripeModeTest: true, stripeClassificationVerifiable: false } });
+    expect(deploy).toContainEqual(expect.objectContaining({ code: 'services.stripe-unverifiable', severity: 'warning', message: expect.stringMatching(/test mode.*value.*unverifiable/i) }));
   });
 
   it('fails missing mandatory email/Stripe and unknown required services instead of silently ignoring them', async () => {
