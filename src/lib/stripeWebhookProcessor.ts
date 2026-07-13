@@ -29,7 +29,7 @@ export interface StripeWebhookProcessorDeps {
 type OpenedDb = ReturnType<typeof openDb>;
 
 function processorSecrets(env: StripeEnv & DbEnv): string[] {
-  return [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET]
+  return [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.HYPERDRIVE?.connectionString]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
@@ -46,11 +46,12 @@ export async function processStripeWebhookEvent(
     opened = (deps.openDb ?? openDb)(deps.env);
     if (opened.backend !== 'supabase') return { state: 'not_claimed' };
 
+    const leaseToken = deps.newLeaseToken ? deps.newLeaseToken() : crypto.randomUUID();
     claim = await claimStripeEvent(
       opened.db,
       eventId,
       now(),
-      (deps.newLeaseToken ?? crypto.randomUUID)(),
+      leaseToken,
     );
     if (!claim) return { state: 'not_claimed' };
 

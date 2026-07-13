@@ -34,6 +34,14 @@ const ENV: StripeEnv & DbEnv = {
   STRIPE_WEBHOOK_SECRET: 'whsec_processor_secret',
   APP_ORIGIN: 'https://church.example',
 };
+const HYPERDRIVE_CONNECTION =
+  'postgres://processor_user:processor_password@db.example/postgres?api_key=processor_query_credential';
+const SECRET_PARTS = [
+  HYPERDRIVE_CONNECTION,
+  'processor_user',
+  'processor_password',
+  'processor_query_credential',
+] as const;
 
 describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -156,6 +164,24 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect((await listStripeWebhookEvents(db))[0]).toMatchObject({ status, outcome: result.outcome });
   });
 
+  it('uses real global crypto for the default lease token and completes the claim', async () => {
+    await receipt('evt_test_default_crypto');
+    const end = vi.fn(async () => {});
+    const dispatch = vi.fn(async () => ({ state: 'processed', outcome: 'default_token_ok' } as const));
+
+    expect(await processStripeWebhookEvent('evt_test_default_crypto', {
+      env: ENV,
+      openDb: () => opened({ end }),
+      now: () => NOW,
+      dispatch,
+    })).toEqual({ state: 'processed', outcome: 'default_token_ok' });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(end).toHaveBeenCalledOnce();
+    expect(await sql.unsafe(
+      `SELECT status,lease_token FROM church_private.stripe_webhook_events WHERE event_id='evt_test_default_crypto'`,
+    )).toEqual([{ status: 'processed', lease_token: null }]);
+  });
+
   it('returns not_claimed without dispatch for a missing row or an actually processing active lease', async () => {
     await receipt('evt_test_active');
     expect(await claimStripeEvent(db, 'evt_test_active', NOW, 'lease-held'))
@@ -229,6 +255,25 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       outcome: 'attempt_failed',
       lastError: expect.not.stringContaining('sk_test_processor_secret'),
     });
+  });
+
+  it('redacts the Hyperdrive URL and its credential components from stored processor diagnostics', async () => {
+    await receipt('evt_test_hyperdrive_diagnostic');
+    const hyperdriveEnv: StripeEnv & DbEnv = {
+      ...ENV,
+      HYPERDRIVE: { connectionString: HYPERDRIVE_CONNECTION },
+    };
+    const test = deps(vi.fn(async () => {
+      throw new Error(`database ${SECRET_PARTS.join(' ')} unavailable`);
+    }), { env: hyperdriveEnv });
+
+    expect(await processStripeWebhookEvent('evt_test_hyperdrive_diagnostic', test.value))
+      .toEqual({ state: 'failed' });
+    const [row] = await sql.unsafe(
+      `SELECT last_error FROM church_private.stripe_webhook_events WHERE event_id='evt_test_hyperdrive_diagnostic'`,
+    );
+    expect(row.last_error).toEqual(expect.any(String));
+    for (const secret of SECRET_PARTS) expect(row.last_error).not.toContain(secret);
   });
 
   it('returns failed for invalid stored JSON, module-load failure, finalization failure, and open failure', async () => {
@@ -396,20 +441,18 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect((await listStripeWebhookEvents(db))[0]).toMatchObject({ status: 'processed', outcome: 'converged', attemptCount: 2 });
   });
 
-  it('cannot finalize after ownership changes strictly between the final checkpoint and finish', async () => {
+  it('cannot finalize when ownership changes after checkpoint three and immediately before the finish UPDATE', async () => {
     await receipt('evt_test_stale_finish');
-    let leaseChecks = 0;
+    const dispatch = vi.fn(async () => ({ state: 'processed', outcome: 'must_not_finalize' } as const));
     const racingDb = hookedDb(
-      (query) => query.includes('SELECT event_id,lease_token,lease_expires_at,status'),
+      (query) => query.trimStart().startsWith('UPDATE church_private.stripe_webhook_events')
+        && query.includes('last_error=NULL,completed_at=?3'),
       {
-        afterFirst: async () => {
-          leaseChecks += 1;
-          if (leaseChecks === 2) {
-            await sql.unsafe(
-              'UPDATE church_private.stripe_webhook_events SET lease_token=$1,lease_expires_at=$2 WHERE event_id=$3',
-              ['lease-successor', utc(addMs(NOW, STRIPE_LEASE_MS)), 'evt_test_stale_finish'],
-            );
-          }
+        beforeFirst: async () => {
+          await sql.unsafe(
+            'UPDATE church_private.stripe_webhook_events SET lease_token=$1,lease_expires_at=$2 WHERE event_id=$3',
+            ['lease-successor', utc(addMs(NOW, STRIPE_LEASE_MS)), 'evt_test_stale_finish'],
+          );
         },
       },
     );
@@ -419,8 +462,9 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       openDb: () => opened({ db: racingDb, end }),
       now: () => NOW,
       newLeaseToken: () => 'lease-stale-finisher',
-      dispatch: vi.fn(async () => ({ state: 'processed', outcome: 'must_not_finalize' } as const)),
+      dispatch,
     })).toEqual({ state: 'failed' });
+    expect(dispatch).toHaveBeenCalledOnce();
     expect(end).toHaveBeenCalledOnce();
     expect(await sql.unsafe(
       `SELECT status,outcome,lease_token FROM church_private.stripe_webhook_events WHERE event_id='evt_test_stale_finish'`,
@@ -549,5 +593,23 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(JSON.stringify(result)).not.toContain('sk_test_processor_secret');
     expect(JSON.stringify(result)).not.toContain('whsec_processor_secret');
     expect(result.inbox.state === 'failed' && result.inbox.error).not.toContain('\n');
+  });
+
+  it('redacts the Hyperdrive URL and credential components from recovery phase errors', async () => {
+    const hyperdriveEnv: StripeEnv & DbEnv = {
+      ...ENV,
+      HYPERDRIVE: { connectionString: HYPERDRIVE_CONNECTION },
+    };
+    const result = await runStripeRecovery({
+      env: hyperdriveEnv,
+      drain: vi.fn(async () => {
+        throw new Error(`recovery ${SECRET_PARTS.join(' ')} unavailable`);
+      }),
+      retention: vi.fn(async () => ({ processedOrIgnored: 0, failed: 0 })),
+      now: () => NOW,
+    });
+    expect(result.inbox).toEqual({ state: 'failed', error: expect.any(String) });
+    const serialized = JSON.stringify(result);
+    for (const secret of SECRET_PARTS) expect(serialized).not.toContain(secret);
   });
 });

@@ -43,7 +43,7 @@ export async function pruneStripeWebhookRetention(
 }
 
 function recoverySecrets(env: StripeEnv & DbEnv): string[] {
-  return [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET]
+  return [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.HYPERDRIVE?.connectionString]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
