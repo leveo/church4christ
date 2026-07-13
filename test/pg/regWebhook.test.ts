@@ -254,24 +254,56 @@ describe.skipIf(!hasPg)('handleStripeEvent — registration branch (Postgres)', 
     expect((await regRow(reg))[0]).toMatchObject({ status: 'pending', stripe_checkout_session_id: null });
   });
 
-  it('defers a known registration request while its row is not visible', async () => {
-    expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.completed', {
-      id: 'cs_registration_not_visible', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_not_visible',
-      amount_total: 2000, currency: 'usd',
-      metadata: {
-        kind: 'registration', registration_id: '2147483000',
-        request_id: '00000000-0000-4000-8000-000000000598',
-      },
-    }))).toEqual({ state: 'deferred', outcome: 'registration_not_visible' });
+  it('defers only when an exact private request proves the registration is not visible yet', async () => {
+    const registrationId = 2147483000;
+    const requestId = '00000000-0000-4000-8000-000000000598';
+    // Model the narrow cross-transaction visibility race directly. Production's
+    // FK prevents a durable orphan; disabling triggers only for this insert lets
+    // the real-PG dispatcher prove it checks exact private request evidence.
+    await sql.begin(async (tx) => {
+      await tx.unsafe('SET LOCAL session_replication_role = replica');
+      await tx.unsafe(
+        `INSERT INTO church_private.stripe_checkout_requests
+           (request_id, request_sha256, registration_id, request_json, state)
+         VALUES ($1, $2, $3, '{}', 'creating')`,
+        [requestId, 'd'.repeat(64), registrationId],
+      );
+    });
+    try {
+      expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.completed', {
+        id: 'cs_registration_not_visible', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_not_visible',
+        amount_total: 2000, currency: 'usd',
+        metadata: { kind: 'registration', registration_id: String(registrationId), request_id: requestId },
+      }))).toEqual({ state: 'deferred', outcome: 'registration_not_visible' });
+    } finally {
+      await sql.unsafe('DELETE FROM church_private.stripe_checkout_requests WHERE request_id = $1', [requestId]);
+    }
   });
 
-  it('converges an attached legacy registration without a private request row', async () => {
+  it('terminally ignores an unknown request ID when no registration row exists', async () => {
+    expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.completed', {
+      id: 'cs_unknown_request', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_unknown_request',
+      amount_total: 2000, currency: 'usd',
+      metadata: {
+        kind: 'registration', registration_id: '2147482999',
+        request_id: '00000000-0000-4000-8000-000000000599',
+      },
+    }))).toEqual(ignored('registration_mismatch'));
+  });
+
+  it('converges an attached legacy registration without cleaning an unrelated private request', async () => {
     const { reg } = await pendingReg('cs_legacy_attached');
+    const unrelatedRequestId = '00000000-0000-4000-8000-000000000596';
+    await checkoutRequest(unrelatedRequestId, reg);
     expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.completed', {
       id: 'cs_legacy_attached', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_legacy_attached',
       amount_total: 2000, currency: 'usd', metadata: { kind: 'registration', registration_id: String(reg) },
     }))).toEqual(processed('registration_confirmed'));
     expect((await regRow(reg))[0].status).toBe('confirmed');
+    expect((await sql.unsafe(
+      'SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [unrelatedRequestId],
+    ))[0]).toMatchObject({ state: 'creating', request_json: '{}' });
   });
 
   // ── Regression: gift routing is untouched by the new registration branch ──────

@@ -425,34 +425,48 @@ export async function applyRegistrationCheckoutSession(
   if (result.meta.changes > 0) {
     transition = 'applied';
   } else {
-    const row = await db
+    const evidence = await db
       .prepare(
-        `SELECT status, amount_cents, currency, stripe_checkout_session_id
-         FROM registrations WHERE id = ?1 LIMIT 1`,
+        `SELECT r.status AS status,
+                r.amount_cents AS amount_cents,
+                r.currency AS currency,
+                r.stripe_checkout_session_id AS stripe_checkout_session_id,
+                EXISTS (
+                  SELECT 1 FROM church_private.stripe_checkout_requests q
+                  WHERE CAST(?2 AS TEXT) IS NOT NULL
+                    AND q.request_id = CAST(?2 AS TEXT)
+                    AND q.registration_id = ?1
+                ) AS request_matches
+         FROM (SELECT 1) seed
+         LEFT JOIN registrations r ON r.id = ?1
+         LIMIT 1`,
       )
-      .bind(input.registrationId)
+      .bind(input.registrationId, input.requestId)
       .first<{
-        status: 'pending' | 'confirmed' | 'cancelled';
-        amount_cents: number;
-        currency: string;
+        status: 'pending' | 'confirmed' | 'cancelled' | null;
+        amount_cents: number | null;
+        currency: string | null;
         stripe_checkout_session_id: string | null;
+        request_matches: boolean | number;
       }>();
-    if (!row) {
-      transition = input.requestId ? 'deferred' : 'mismatch';
+    if (!evidence?.status) {
+      transition = evidence?.request_matches === true || evidence?.request_matches === 1
+        ? 'deferred'
+        : 'mismatch';
     } else {
-      const exact = row.amount_cents === input.amountCents
-        && row.currency === input.currency
-        && row.stripe_checkout_session_id === input.sessionId;
+      const exact = evidence.amount_cents === input.amountCents
+        && evidence.currency === input.currency
+        && evidence.stripe_checkout_session_id === input.sessionId;
       const expectedTerminal = input.action === 'confirm'
-        ? row.status === 'confirmed'
+        ? evidence.status === 'confirmed'
         : input.action === 'cancel'
-          ? row.status === 'cancelled'
-          : row.status === 'pending';
+          ? evidence.status === 'cancelled'
+          : evidence.status === 'pending';
       transition = exact && expectedTerminal ? 'converged' : 'mismatch';
     }
   }
 
-  if (transition === 'applied' || transition === 'converged') {
+  if ((transition === 'applied' || transition === 'converged') && input.requestId !== null) {
     const terminal = input.action === 'confirm' || input.action === 'cancel';
     await checkpoint?.();
     await db.batch([
@@ -466,7 +480,7 @@ export async function applyRegistrationCheckoutSession(
                last_error = NULL,
                updated_at = datetime('now')
            WHERE registration_id = ?2
-             AND (CAST(?3 AS TEXT) IS NULL OR request_id = CAST(?3 AS TEXT))`,
+             AND request_id = CAST(?3 AS TEXT)`,
         )
         .bind(terminal ? 'resolved' : 'attached', input.registrationId, input.requestId),
     ]);

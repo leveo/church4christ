@@ -196,6 +196,86 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
     expect(rows[0]).toMatchObject({ person_id: 10, fund_id: fund, amount_cents: 3000, method: 'card', status: 'succeeded' });
   });
 
+  it('records and deduplicates a current Basil subscription invoice without legacy top-level fields', async () => {
+    const fetcher = subFetcher({ sub_basil: subFixture('sub_basil', fund, 3, 4500) });
+    const event = ev('invoice.paid', {
+      id: 'in_basil',
+      amount_paid: 4500,
+      currency: 'usd',
+      customer_email: 'basil@example.com',
+      parent: {
+        type: 'subscription_details',
+        subscription_details: { subscription: 'sub_basil' },
+      },
+      payments: {
+        object: 'list',
+        data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_basil' } }],
+      },
+    });
+
+    expect(await handleStripeEvent({ db, env: ENV, fetcher }, event)).toEqual(processed('gift_recorded'));
+    expect(await handleStripeEvent({ db, env: ENV, fetcher }, event)).toEqual(processed('gift_recorded'));
+    const rows = await giftRow('stripe_invoice_id', 'in_basil');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      person_id: 3,
+      fund_id: fund,
+      amount_cents: 4500,
+      stripe_subscription_id: 'sub_basil',
+      stripe_payment_intent_id: 'pi_basil',
+    });
+  });
+
+  it.each([
+    ['multiple payment intents', {
+      data: [
+        { payment: { type: 'payment_intent', payment_intent: 'pi_multi_a' } },
+        { payment: { type: 'payment_intent', payment_intent: 'pi_multi_b' } },
+      ],
+    }],
+    ['no payment intent', { data: [{ payment: { type: 'charge', charge: 'ch_invoice' } }] }],
+  ])('uses the invoice ID safely when a current invoice has %s', async (label, payments) => {
+    const invoiceId = label === 'multiple payment intents' ? 'in_multi_pi' : 'in_no_pi';
+    const event = ev('invoice.paid', {
+      id: invoiceId,
+      amount_paid: 3000,
+      currency: 'usd',
+      parent: {
+        type: 'subscription_details',
+        subscription_details: { subscription: 'sub_100' },
+      },
+      payments,
+    });
+
+    expect(await handleStripeEvent({ db, env: ENV }, event)).toEqual(processed('gift_recorded'));
+    expect(await handleStripeEvent({ db, env: ENV }, event)).toEqual(processed('gift_recorded'));
+    const rows = await giftRow('stripe_invoice_id', invoiceId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].stripe_payment_intent_id).toBeNull();
+  });
+
+  it.each([
+    ['legacy', { id: 'in_zero_legacy', subscription: 'sub_zero_legacy', payment_intent: 'pi_zero_legacy' }],
+    ['current', {
+      id: 'in_zero_current',
+      parent: { type: 'subscription_details', subscription_details: { subscription: 'sub_zero_current' } },
+      payments: { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_zero_current' } }] },
+    }],
+  ])('terminally ignores a %s paid invoice with zero amount and writes no gift', async (_shape, invoice) => {
+    let fetches = 0;
+    const fetcher = (async () => {
+      fetches += 1;
+      throw new Error('zero amount must not fetch or back-fill a subscription');
+    }) as typeof fetch;
+    expect(await handleStripeEvent({ db, env: ENV, fetcher }, ev('invoice.paid', {
+      ...invoice,
+      amount_paid: 0,
+      currency: 'usd',
+    }))).toEqual(ignored());
+    expect(fetches).toBe(0);
+    expect(await giftRow('stripe_invoice_id', String(invoice.id))).toHaveLength(0);
+  });
+
   it('invoice.paid BEFORE checkout.completed (webhook race) retrieves + upserts the sub, then records the gift', async () => {
     const fetcher = subFetcher({ sub_200: subFixture('sub_200', fund, 3, 4000) });
     // No recurring row for sub_200 yet — the invoice arrived first.

@@ -130,6 +130,53 @@ function strOrNull(v: unknown): string | null {
 function strOr(v: unknown, fallback: string): string {
   return typeof v === 'string' && v.length > 0 ? v : fallback;
 }
+/** A Stripe expandable reference may be an id string or an expanded object. */
+function expandableId(v: unknown): string | null {
+  if (typeof v === 'string') return strOrNull(v);
+  if (!v || typeof v !== 'object') return null;
+  return strOrNull((v as Record<string, unknown>).id);
+}
+/** Subscription reference across pre-Basil and current Invoice shapes. */
+function invoiceSubscriptionId(invoice: Record<string, unknown>): string | null {
+  const parent = invoice.parent;
+  if (parent && typeof parent === 'object') {
+    const parentRecord = parent as Record<string, unknown>;
+    if (parentRecord.type === 'subscription_details') {
+      const details = parentRecord.subscription_details;
+      if (details && typeof details === 'object') {
+        const current = expandableId((details as Record<string, unknown>).subscription);
+        if (current) return current;
+      }
+    }
+  }
+  return expandableId(invoice.subscription);
+}
+/**
+ * A single PaymentIntent across pre-Basil and current Invoice shapes. Current
+ * invoices may have zero or several payments, so only return an id when exactly
+ * one distinct payment_intent member is present; the invoice id remains the
+ * authoritative dedup key in every case.
+ */
+function invoicePaymentIntentId(invoice: Record<string, unknown>): string | null {
+  const payments = invoice.payments;
+  if (payments && typeof payments === 'object') {
+    const data = (payments as Record<string, unknown>).data;
+    if (Array.isArray(data)) {
+      const ids = new Set<string>();
+      for (const item of data) {
+        if (!item || typeof item !== 'object') continue;
+        const payment = (item as Record<string, unknown>).payment;
+        if (!payment || typeof payment !== 'object') continue;
+        const member = payment as Record<string, unknown>;
+        if (member.type !== 'payment_intent') continue;
+        const id = expandableId(member.payment_intent);
+        if (id) ids.add(id);
+      }
+      return ids.size === 1 ? [...ids][0] : null;
+    }
+  }
+  return expandableId(invoice.payment_intent);
+}
 /** A positive integer id from a metadata string ('' / missing → null). */
 function intOrNull(v: unknown): number | null {
   if (v === '' || v === null || v === undefined) return null;
@@ -291,8 +338,13 @@ async function onCheckoutCompleted(
 }
 
 async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>): Promise<StripeDispatchResult> {
-  const subId = strOrNull(invoice.subscription);
+  const subId = invoiceSubscriptionId(invoice);
   if (!subId) return ignored(); // one-time payments emit no invoice — be defensive
+  const amountPaid = invoice.amount_paid;
+  if (!Number.isInteger(amountPaid) || (amountPaid as number) <= 0) return ignored();
+  const invoiceId = expandableId(invoice.id);
+  const paymentIntentId = invoicePaymentIntentId(invoice);
+  if (!invoiceId && !paymentIntentId) return ignored();
   let rec = await getRecurringBySubscription(deps.db, subId);
   if (!rec) {
     // Webhook-order race: invoice.paid can arrive before checkout.session.completed.
@@ -305,19 +357,17 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
     await upsertRecurringGift(deps.db, { ...built, subscriptionId: subId });
     rec = { person_id: built.personId, fund_id: built.fundId };
   }
-  const amountPaid = invoice.amount_paid;
-  if (typeof amountPaid !== 'number') return ignored();
   await checked(deps);
   await insertCardGift(deps.db, {
     personId: rec.person_id,
     donorName: null,
     donorEmail: strOrNull(invoice.customer_email),
     fundId: rec.fund_id,
-    amountCents: amountPaid,
+    amountCents: amountPaid as number,
     currency: strOr(invoice.currency, 'usd'),
     sessionId: null,
-    paymentIntentId: strOrNull(invoice.payment_intent),
-    invoiceId: strOrNull(invoice.id),
+    paymentIntentId,
+    invoiceId,
     subscriptionId: subId,
   });
   return processed('gift_recorded');
