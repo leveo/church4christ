@@ -7,6 +7,7 @@ const GROUPS = Object.freeze([
   ['database', 'checkDatabase'],
   ['services', 'checkServices'],
 ]);
+const RESERVED_EXCEPTION_CODES = new Set(GROUPS.map(([scope]) => `${scope}.exception`));
 
 export async function runDoctor(context, { strict = false } = {}) {
   if (!context || typeof context !== 'object' || Array.isArray(context)) throw new TypeError('doctor context is required');
@@ -22,7 +23,9 @@ export async function runDoctor(context, { strict = false } = {}) {
     try {
       const group = await context[name]();
       const validated = summarizeReadiness(group).checks;
-      if (validated.some((entry) => codes.has(entry.code))) throw new Error('duplicate cross-group readiness code');
+      if (validated.some((entry) => RESERVED_EXCEPTION_CODES.has(entry.code) || codes.has(entry.code))) {
+        throw new Error('reserved or duplicate readiness code');
+      }
       for (const entry of validated) codes.add(entry.code);
       checks.push(...validated);
     } catch {
@@ -31,7 +34,12 @@ export async function runDoctor(context, { strict = false } = {}) {
       checks.push(exception);
     }
   }
-  const safe = redact(checks, context.secrets ?? []);
+  const safe = checks.map((entry) => result(
+    entry.code,
+    entry.severity,
+    redact(entry.message, context.secrets ?? []),
+    redact(entry.remediation, context.secrets ?? []),
+  ));
   const summary = summarizeReadiness(safe);
   return deepFreeze({ ...summary, exitCode: doctorExitCode(summary.checks, strict) });
 }

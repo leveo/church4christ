@@ -4,7 +4,7 @@ import { summarizeReadiness, doctorExitCode, result } from '../../../scripts/set
 import { redact } from '../../../scripts/setup/redact.mjs';
 import { checkManifest } from '../../../scripts/setup/checks/manifest.mjs';
 import { checkConfig } from '../../../scripts/setup/checks/config.mjs';
-import { checkDatabase } from '../../../scripts/setup/checks/database.mjs';
+import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY, checkDatabase } from '../../../scripts/setup/checks/database.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
@@ -26,11 +26,10 @@ const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: {
 function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown> = {}) {
   const enabled = new Set(manifest.modules);
   const moduleRows = catalog.order.map((key) => ({ key: `module.${key}`, value: enabled.has(key) ? '1' : '0' }));
-  const tables = [
-    'people', 'settings', 'bulletins', 'sermons', 'prayer_sheets', 'prayer_requests', 'events',
-    'plans', 'roster_assignments', 'gift_results', 'testimonies', 'custom_pages', 'member_groups', 'households',
-    'checkins', 'page_blocks', 'group_members', 'funds', 'gifts', 'reg_events',
-  ];
+  const tables = [...new Set([
+    ...ALWAYS_REQUIRED_TABLES,
+    ...Object.values(TABLES_BY_CAPABILITY).flat(),
+  ])];
   const migrations = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql'];
   return {
     prepare(sql: string) {
@@ -85,16 +84,16 @@ describe('doctor readiness model', () => {
   });
 
   it('redacts recursive values and keys using URL, encoded, and multiline variants', () => {
-    const url = 'postgres://bob:p%40ss@db.example/church?token=xYz12345';
+    const url = 'postgres://bob-user:p%40ssword@db.example/church?token=xYz12345';
     const value = {
-      [url]: `failure for bob / p@ss / ${encodeURIComponent('p@ss')}`,
+      [url]: `failure for bob-user / p@ssword / ${encodeURIComponent('p@ssword')}`,
       nested: ['xYz12345', 'common', 'SESSION_SECRET=abcdefgh\nshort=xy'],
     };
     const safe = redact(value, [url, 'ordinary', 'SESSION_SECRET=abcdefgh\nshort=xy', 'tiny']);
     const json = JSON.stringify(safe);
-    expect(json).not.toContain('bob');
-    expect(json).not.toContain('p@ss');
-    expect(json).not.toContain('p%40ss');
+    expect(json).not.toContain('bob-user');
+    expect(json).not.toContain('p@ssword');
+    expect(json).not.toContain('p%40ssword');
     expect(json).not.toContain('xYz12345');
     expect(json).not.toContain('abcdefgh');
     expect(json).not.toContain(url);
@@ -104,6 +103,15 @@ describe('doctor readiness model', () => {
     const cyclic: any = {}; cyclic.self = cyclic;
     expect(() => redact(cyclic, [])).toThrow(/cyclic/i);
     expect(() => redact({ bad: new Date() }, [])).toThrow(/plain JSON/i);
+  });
+
+  it('does not derive unsafe short replacements from explicit, multiline, or URL secrets', () => {
+    const shortUrl = 'postgres://a:b@db.example/x?q=c';
+    const encodedShortUrl = 'postgres://%61%62%63:%64%65%66@db.example/x';
+    const safe = redact({ message: `a abc def database schema remediation ${shortUrl} ${encodedShortUrl} A=a`, database: 'stable' }, [
+      'A=a', 'X=xy\nY=short', shortUrl, encodedShortUrl,
+    ]);
+    expect(safe).toEqual({ message: 'a abc def database schema remediation [REDACTED] [REDACTED] A=a', database: 'stable' });
   });
 });
 
@@ -138,6 +146,13 @@ describe('doctor generated configuration check', () => {
     ]);
     const badWorker = workerSource.replace("const DIGEST_CRON = '0 14 * * 4'", "const DIGEST_CRON = '0 15 * * 4'");
     expect((await checkConfig({ manifest: baseManifest, template, config, workerSource: badWorker, hostEnv: {} })).map((entry) => entry.code))
+      .toEqual(['config.worker-crons']);
+    const unrelated = `function unrelated(controller: { cron: string }) { switch (controller.cron) { case '1 2 3 4 5': break; } }\n${workerSource}`;
+    expect(await checkConfig({ manifest: baseManifest, template, config, workerSource: unrelated, hostEnv: {} })).toEqual([
+      expect.objectContaining({ code: 'config.ok' }),
+    ]);
+    const ambiguous = workerSource.replace('clearModuleCache();', "clearModuleCache(); switch (controller.cron) { case '0 13 * * *': break; }");
+    expect((await checkConfig({ manifest: baseManifest, template, config, workerSource: ambiguous, hostEnv: {} })).map((entry) => entry.code))
       .toEqual(['config.worker-crons']);
   });
 
@@ -206,23 +221,69 @@ describe('doctor database check', () => {
     expect(safe).toEqual([expect.objectContaining({ code: 'database.exception', severity: 'error' })]);
     expect(JSON.stringify(safe)).not.toContain('secret-value');
   });
+
+  it('probes every operational table owned by every capability plus always-required core tables', async () => {
+    expect(Object.keys(TABLES_BY_CAPABILITY).sort()).toEqual([...catalog.order].sort());
+    expect(ALWAYS_REQUIRED_TABLES).toEqual(expect.arrayContaining(['people', 'settings', 'media', 'tokens']));
+    expect(TABLES_BY_CAPABILITY.registration).toEqual(expect.arrayContaining([
+      'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
+    ]));
+    expect(TABLES_BY_CAPABILITY.portal).toEqual(expect.arrayContaining([
+      'group_members', 'group_applications', 'group_files', 'event_admins', 'prayer_items',
+      'households', 'household_members', 'reg_events', 'reg_event_i18n', 'registrations',
+    ]));
+    expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
+    expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
+    expect(TABLES_BY_CAPABILITY.people).toEqual(expect.arrayContaining(['households', 'household_members', 'person_notes']));
+    const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
+    const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])];
+    const migrationFiles = ['0001_init.sql', '0002_giving.sql', '0003_registration.sql', '0004_custom_pages.sql', '0005_children_checkin.sql', '0006_page_builder.sql', '0007_member_portal.sql'];
+    expect(await checkDatabase({ db: fakeDb(full, { tables: allTables.map((table_name) => ({ table_name })) }), catalog, manifest: full, readDir: async () => migrationFiles }))
+      .toEqual([expect.objectContaining({ code: 'database.ok' })]);
+    for (const [capability, owned] of Object.entries(TABLES_BY_CAPABILITY)) {
+      for (const missing of owned) {
+        const tables = allTables.filter((name) => name !== missing).map((table_name) => ({ table_name }));
+        const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
+        expect(findings.map((entry) => entry.code), `${capability} must require ${missing}`).toContain('database.tables');
+      }
+    }
+    for (const missing of ALWAYS_REQUIRED_TABLES) {
+      const tables = allTables.filter((name) => name !== missing).map((table_name) => ({ table_name }));
+      const findings = await checkDatabase({ db: fakeDb(full, { tables }), catalog, manifest: full, readDir: async () => migrationFiles });
+      expect(findings.map((entry) => entry.code), `core must require ${missing}`).toContain('database.tables');
+    }
+  });
 });
 
 describe('doctor capability services check', () => {
   it('reports required R2, email by mode, exact Stripe states, and optional backup', async () => {
     const full = { ...baseManifest, mode: 'deploy', preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } } as const;
-    const absent = await checkServices({ catalog, manifest: full, presence: { r2: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
-    expect(absent.map((entry) => entry.code)).toEqual(['services.r2', 'services.email', 'services.stripe-absent', 'services.backup-absent']);
+    const absent = await checkServices({ catalog, manifest: full, presence: { worker: false, r2: false, hyperdrive: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    expect(absent.map((entry) => entry.code)).toEqual(['services.worker', 'services.r2', 'services.hyperdrive', 'services.email', 'services.stripe-absent', 'services.backup-absent']);
     expect(absent.find((entry) => entry.code === 'services.stripe-absent')?.message).toMatch(/free registration.*offline giving/i);
-    const partial = await checkServices({ catalog, manifest: full, presence: { r2: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: false, backup: true } });
+    const partial = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: false, backup: true } });
     expect(partial.map((entry) => [entry.code, entry.severity])).toEqual([
-      ['services.r2-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.backup-ok', 'info'],
+      ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.backup-ok', 'info'],
     ]);
-    const complete = await checkServices({ catalog, manifest: full, presence: { r2: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
+    const complete = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
     expect(complete.find((entry) => entry.code === 'services.stripe-ok')?.severity).toBe('info');
     expect(complete.find((entry) => entry.code === 'services.backup-absent')?.severity).toBe('info');
-    const local = await checkServices({ catalog, manifest: baseManifest, presence: { r2: true, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
-    expect(local.map((entry) => entry.code)).toEqual(['services.r2-ok', 'services.email-dev', 'services.backup-absent']);
+    const local = await checkServices({ catalog, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    expect(local.map((entry) => entry.code)).toEqual(['services.worker-ok', 'services.r2-ok', 'services.email-dev', 'services.backup-absent']);
+  });
+
+  it('fails missing mandatory email/Stripe and unknown required services instead of silently ignoring them', async () => {
+    const future: any = structuredClone(catalog);
+    future.providers.d1.requiredServices = ['worker', 'r2', 'email', 'stripe', 'mystery'];
+    const findings = await checkServices({ catalog: future, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    expect(findings.map((entry) => [entry.code, entry.severity])).toEqual([
+      ['services.required-unsupported', 'error'], ['services.worker-ok', 'info'], ['services.r2-ok', 'info'],
+      ['services.email', 'error'], ['services.stripe-absent', 'error'], ['services.backup-absent', 'info'],
+    ]);
+    const optional: any = structuredClone(catalog);
+    optional.capabilities.bulletins.optionalServices = ['stripe'];
+    const optionalFindings = await checkServices({ catalog: optional, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    expect(optionalFindings.map((entry) => [entry.code, entry.severity])).toContainEqual(['services.stripe-absent', 'warning']);
   });
 });
 
@@ -249,5 +310,22 @@ describe('doctor composition', () => {
       checkServices: () => [],
     });
     expect(duplicate.checks.map((entry) => entry.code)).toEqual(['shared.code', 'config.exception']);
+  });
+
+  it('reserves scoped exception codes and preserves structural output under adversarial secret names', async () => {
+    const context = {
+      secrets: ['A=a', 'database', 'remediation'],
+      checkManifest: () => [result('config.exception', 'info', 'database remediation A=a', 'database remediation')],
+      checkConfig: () => [result('config.exception', 'info', 'database remediation A=a', 'database remediation')],
+      checkDatabase: () => { throw new Error('database remediation A=a'); },
+      checkServices: () => [],
+    };
+    const doctor = await runDoctor(context);
+    expect(doctor.schemaVersion).toBe(1);
+    expect(doctor.status).toBe('not-ready');
+    expect(doctor.checks.map((entry) => entry.code)).toEqual(['manifest.exception', 'config.exception', 'database.exception']);
+    expect(Object.keys(doctor)).toEqual(['schemaVersion', 'status', 'checks', 'exitCode']);
+    expect(doctor.checks.every((entry) => Object.keys(entry).sort().join('|') === 'code|message|remediation|severity')).toBe(true);
+    expect(doctor.checks.some((entry) => entry.message.includes('database') || entry.remediation.includes('database'))).toBe(false);
   });
 });

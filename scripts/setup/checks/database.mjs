@@ -2,23 +2,37 @@ import { result } from '../readiness.mjs';
 import { redact } from '../redact.mjs';
 
 const FINAL_SHARED_TABLES = Object.freeze(['member_groups', 'checkins', 'custom_pages', 'page_blocks']);
+const ALWAYS_REQUIRED_TABLES = Object.freeze([
+  'people', 'settings', 'tokens', 'media', ...FINAL_SHARED_TABLES,
+]);
 const TABLES_BY_CAPABILITY = Object.freeze({
-  bulletins: ['bulletins'],
-  sermons: ['sermons'],
-  'prayer-sheets': ['prayer_sheets'],
-  'prayer-wall': ['prayer_requests'],
-  events: ['events'],
-  serve: ['plans', 'roster_assignments'],
-  gifts: ['gift_results'],
-  testimonies: ['testimonies'],
-  articles: ['custom_pages'],
-  fellowships: ['member_groups'],
-  people: ['households'],
-  children: ['checkins'],
-  'page-builder': ['custom_pages', 'page_blocks'],
-  portal: ['group_members'],
-  giving: ['funds', 'gifts'],
-  registration: ['reg_events'],
+  bulletins: Object.freeze(['bulletins', 'bulletin_announcements', 'revisions']),
+  sermons: Object.freeze(['sermons', 'revisions']),
+  'prayer-sheets': Object.freeze(['prayer_sheets', 'revisions']),
+  'prayer-wall': Object.freeze(['prayer_requests', 'prayer_activity']),
+  events: Object.freeze(['announcements', 'announcement_i18n', 'events', 'event_i18n', 'revisions']),
+  serve: Object.freeze([
+    'ministries', 'ministry_i18n', 'teams', 'team_i18n', 'positions', 'position_i18n',
+    'team_members', 'service_types', 'service_type_i18n', 'plans', 'plan_positions',
+    'roster_assignments', 'blockout_dates', 'team_applications', 'person_interests',
+    'email_rules', 'email_templates', 'email_log',
+  ]),
+  gifts: Object.freeze(['gift_results']),
+  testimonies: Object.freeze(['testimonies']),
+  articles: Object.freeze([]),
+  fellowships: Object.freeze(['member_groups', 'member_group_i18n']),
+  people: Object.freeze(['households', 'household_members', 'person_notes']),
+  children: Object.freeze(['checkin_events', 'checkins', 'households', 'household_members']),
+  'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'page_blocks', 'revisions']),
+  portal: Object.freeze([
+    'member_groups', 'member_group_i18n', 'group_members', 'group_applications', 'group_files',
+    'event_admins', 'prayer_items', 'households', 'household_members', 'reg_events', 'reg_event_i18n',
+    'registrations',
+  ]),
+  giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']),
+  registration: Object.freeze([
+    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
+  ]),
 });
 
 function rows(value, label) {
@@ -61,7 +75,7 @@ async function queryFirst(db, sql, binds = []) {
 }
 
 function expectedTables(manifest) {
-  const names = new Set(['people', 'settings', ...FINAL_SHARED_TABLES]);
+  const names = new Set(ALWAYS_REQUIRED_TABLES);
   for (const key of manifest.modules) for (const table of TABLES_BY_CAPABILITY[key] ?? []) names.add(table);
   return [...names].sort();
 }
@@ -191,4 +205,4 @@ export async function checkDatabase(options) {
     : checks, secrets);
 }
 
-export { FINAL_SHARED_TABLES, TABLES_BY_CAPABILITY };
+export { ALWAYS_REQUIRED_TABLES, FINAL_SHARED_TABLES, TABLES_BY_CAPABILITY };

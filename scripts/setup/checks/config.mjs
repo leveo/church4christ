@@ -26,19 +26,40 @@ function workerCrons(source) {
       }
     }
   }
-  const found = [];
+  const unwrap = (node) => {
+    while (ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
+        ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) node = node.expression;
+    return node;
+  };
+  const exports = file.statements.filter((statement) => ts.isExportAssignment(statement) && !statement.isExportEquals);
+  if (exports.length !== 1) throw new Error('worker must have exactly one default export');
+  const handler = unwrap(exports[0].expression);
+  if (!ts.isObjectLiteralExpression(handler)) throw new Error('default Worker handler must be an object literal');
+  const scheduled = handler.properties.filter((property) => ts.isMethodDeclaration(property) &&
+    ((ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) && property.name.text === 'scheduled'));
+  if (scheduled.length !== 1 || scheduled[0].parameters.length < 1 || !ts.isIdentifier(scheduled[0].parameters[0].name) || !scheduled[0].body) {
+    throw new Error('Worker handler must have one scheduled method with a controller parameter');
+  }
+  const controller = scheduled[0].parameters[0].name.text;
+  const switches = [];
   const visit = (node) => {
-    if (ts.isSwitchStatement(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'cron') {
-      for (const clause of node.caseBlock.clauses) {
-        if (!ts.isCaseClause(clause)) continue;
-        if (ts.isStringLiteral(clause.expression)) found.push(clause.expression.text);
-        else if (ts.isIdentifier(clause.expression) && constants.has(clause.expression.text)) found.push(constants.get(clause.expression.text));
-        else throw new Error('scheduled cron case is not a static string constant');
-      }
+    if (ts.isSwitchStatement(node)) {
+      const expression = unwrap(node.expression);
+      if (ts.isPropertyAccessExpression(expression) && expression.name.text === 'cron' &&
+          ts.isIdentifier(unwrap(expression.expression)) && unwrap(expression.expression).text === controller) switches.push(node);
     }
     ts.forEachChild(node, visit);
   };
-  visit(file);
+  visit(scheduled[0].body);
+  if (switches.length !== 1) throw new Error('scheduled method must have exactly one controller.cron switch');
+  const found = [];
+  for (const clause of switches[0].caseBlock.clauses) {
+    if (!ts.isCaseClause(clause)) continue;
+    const expression = unwrap(clause.expression);
+    if (ts.isStringLiteral(expression)) found.push(expression.text);
+    else if (ts.isIdentifier(expression) && constants.has(expression.text)) found.push(constants.get(expression.text));
+    else throw new Error('scheduled cron case is not a static string constant');
+  }
   return found;
 }
 

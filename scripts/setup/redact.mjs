@@ -6,23 +6,23 @@ function variants(values) {
     throw new TypeError('redaction secrets must be an array of strings');
   }
   const found = new Set();
-  const add = (value, derived = false) => {
-    if (typeof value !== 'string' || value === '' || (!derived && value.length < 8)) return;
+  const add = (value) => {
+    if (typeof value !== 'string' || value.length < 8) return;
     found.add(value);
     try {
       const decoded = decodeURIComponent(value);
-      if (decoded) found.add(decoded);
+      if (decoded.length >= 8) found.add(decoded);
     } catch {}
     const encoded = encodeURIComponent(value);
-    if (encoded) found.add(encoded);
+    if (encoded.length >= 8) found.add(encoded);
   };
   const addUrl = (value) => {
     if (!/^\w+:\/\//.test(value)) return;
     try {
       const url = new URL(value);
-      add(url.username, true);
-      add(url.password, true);
-      for (const queryValue of url.searchParams.values()) add(queryValue, true);
+      add(url.username);
+      add(url.password);
+      for (const queryValue of url.searchParams.values()) add(queryValue);
     } catch {}
   };
   for (const value of values) {
@@ -31,9 +31,9 @@ function variants(values) {
     for (const line of value.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      add(trimmed, true);
+      add(trimmed);
       const equals = trimmed.indexOf('=');
-      if (equals >= 0) add(trimmed.slice(equals + 1), true);
+      if (equals >= 0) add(trimmed.slice(equals + 1));
     }
   }
   return [...found].filter(Boolean).sort((left, right) => right.length - left.length || left.localeCompare(right));
