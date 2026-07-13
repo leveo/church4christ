@@ -379,12 +379,14 @@ export async function applyRegistrationCheckoutSession(
     currency: string;
     action: RegistrationCheckoutAction;
   },
+  checkpoint?: () => Promise<void>,
 ): Promise<RegistrationCheckoutTransition> {
   const terminalStatus = input.action === 'confirm'
     ? 'confirmed'
     : input.action === 'cancel'
       ? 'cancelled'
       : 'pending';
+  await checkpoint?.();
   const result = await db
     .prepare(
       `UPDATE registrations
@@ -452,6 +454,7 @@ export async function applyRegistrationCheckoutSession(
 
   if (transition === 'applied' || transition === 'converged') {
     const terminal = input.action === 'confirm' || input.action === 'cancel';
+    await checkpoint?.();
     await db.batch([
       db
         .prepare(

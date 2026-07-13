@@ -246,6 +246,45 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect((await sql.unsafe('SELECT status FROM registrations WHERE id = $1', [reg]))[0].status).toBe('confirmed');
   });
 
+  it('checkpoints the registration write and private cleanup independently, then replay converges cleanup', async () => {
+    const ev = await openEvent();
+    const reg = await createRegistration(db, {
+      eventId: ev, personId: null, name: 'lease-guard', email: 'lease-guard@x.com',
+      status: 'pending', amountCents: 4200, currency: 'usd', answers: [],
+    });
+    const requestId = '00000000-0000-4000-8000-000000000699';
+    await sql.unsafe(
+      `INSERT INTO church_private.stripe_checkout_requests
+         (request_id, request_sha256, registration_id, request_json, state)
+       VALUES ($1, $2, $3, '{}', 'creating')`,
+      [requestId, 'c'.repeat(64), reg],
+    );
+    const input = {
+      registrationId: reg, requestId, sessionId: 'cs_lease_guard', paymentIntentId: 'pi_lease_guard',
+      amountCents: 4200, currency: 'usd', action: 'confirm' as const,
+    };
+    let checkpoints = 0;
+    const checkpoint = async () => {
+      checkpoints += 1;
+      if (checkpoints === 2) throw new Error('stripe_attempt_lease_lost');
+    };
+
+    await expect(applyRegistrationCheckoutSession(db, input, checkpoint))
+      .rejects.toThrow('stripe_attempt_lease_lost');
+    expect(checkpoints).toBe(2);
+    expect((await sql.unsafe('SELECT status FROM registrations WHERE id = $1', [reg]))[0].status).toBe('confirmed');
+    expect((await sql.unsafe(
+      'SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0]).toMatchObject({ state: 'creating', request_json: '{}' });
+
+    expect(await applyRegistrationCheckoutSession(db, input, async () => undefined)).toBe('converged');
+    expect((await sql.unsafe(
+      'SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0]).toMatchObject({ state: 'resolved', request_json: null });
+  });
+
   // ── saveQuestions replace-all preserves surviving answers ────────────────────
   it('saveQuestions replaces the set, keeps surviving question ids + their answers', async () => {
     const ev = await openEvent();

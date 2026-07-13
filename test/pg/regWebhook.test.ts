@@ -197,6 +197,38 @@ describe.skipIf(!hasPg)('handleStripeEvent — registration branch (Postgres)', 
     expect(request).toMatchObject({ state: 'resolved', request_json: null, session_url: null });
   });
 
+  it('passes lease checkpoints into both guarded Registration writes and replay finishes cleanup', async () => {
+    const requestId = '00000000-0000-4000-8000-000000000597';
+    const { reg } = await pendingReg(null);
+    await checkoutRequest(requestId, reg);
+    const event = ev('checkout.session.completed', {
+      id: 'cs_dispatch_checkpoint', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_dispatch_checkpoint',
+      amount_total: 2000, currency: 'usd',
+      metadata: { kind: 'registration', registration_id: String(reg), request_id: requestId },
+    });
+    let checkpoints = 0;
+    await expect(handleStripeEvent({
+      db,
+      env: ENV,
+      checkpoint: async () => {
+        checkpoints += 1;
+        if (checkpoints === 2) throw new Error('stripe_attempt_lease_lost');
+      },
+    }, event)).rejects.toThrow('stripe_attempt_lease_lost');
+    expect(checkpoints).toBe(2);
+    expect((await regRow(reg))[0].status).toBe('confirmed');
+    expect((await sql.unsafe(
+      'SELECT state FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0].state).toBe('creating');
+
+    expect(await handleStripeEvent({ db, env: ENV }, event)).toEqual(processed('registration_confirmed'));
+    expect((await sql.unsafe(
+      'SELECT state FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0].state).toBe('resolved');
+  });
+
   it.each<[string, string, { requestId?: string; registrationId?: 'other'; amountTotal?: number; currency?: string }]>([
     ['request ID', '701', { requestId: '00000000-0000-4000-8000-000000000799' }],
     ['registration ID', '702', { registrationId: 'other' }],

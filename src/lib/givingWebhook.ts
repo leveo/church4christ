@@ -24,6 +24,7 @@ import type { StripeDispatchResult } from './stripeWebhookInbox';
 import {
   insertCardGift,
   markGiftRefunded,
+  giftStatusByPaymentIntent,
   upsertRecurringGift,
   setRecurringStatus,
   getRecurringBySubscription,
@@ -213,7 +214,6 @@ async function applyRegistrationSession(
     || (amountCents as number) < 0
     || !currency
   ) return ignored();
-  await checked(deps);
   const transition = await applyRegistrationCheckoutSession(deps.db, {
     registrationId,
     requestId,
@@ -222,7 +222,7 @@ async function applyRegistrationSession(
     amountCents: amountCents as number,
     currency,
     action,
-  });
+  }, deps.checkpoint);
   return registrationResult(transition, action);
 }
 
@@ -357,7 +357,11 @@ async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknow
   // that cannot yet see its gift is deferred for replay.
   await checked(deps);
   const moved = await markGiftRefunded(deps.db, pi);
-  return moved ? processed('refunded') : deferred('gift_not_visible');
+  if (moved) return processed('refunded');
+  const status = await giftStatusByPaymentIntent(deps.db, pi);
+  return status === 'refunded'
+    ? processed('refunded')
+    : deferred('gift_not_visible');
 }
 
 async function onSubscriptionChange(deps: WebhookDeps, sub: Record<string, unknown>): Promise<StripeDispatchResult> {

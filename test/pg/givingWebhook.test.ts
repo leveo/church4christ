@@ -220,17 +220,18 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
 
   // ── refund ─────────────────────────────────────────────────────────────────
   it('a FULL charge.refunded flips the matching gift to refunded', async () => {
-    const outcome = await handleStripeEvent(
-      { db, env: ENV },
-      // Stripe sets refunded:true only on a full refund; amounts included too.
-      ev('charge.refunded', {
-        id: 'ch_1', payment_intent: 'pi_guest', refunded: true, amount: 5000, amount_refunded: 5000,
-        metadata: { kind: 'gift' },
-      }),
-    );
+    const event = ev('charge.refunded', {
+      id: 'ch_1', payment_intent: 'pi_guest', refunded: true, amount: 5000, amount_refunded: 5000,
+      metadata: { kind: 'gift' },
+    });
+    const outcome = await handleStripeEvent({ db, env: ENV }, event);
     expect(outcome).toEqual(processed('refunded'));
     const [row] = await giftRow('stripe_payment_intent_id', 'pi_guest');
     expect(row.status).toBe('refunded');
+
+    // The domain UPDATE may commit before inbox finalization. Replaying the same
+    // claim must converge terminally instead of treating the applied refund as missing.
+    expect(await handleStripeEvent({ db, env: ENV }, event)).toEqual(processed('refunded'));
   });
 
   it('a PARTIAL refund leaves the gift succeeded + counted; a FULL refund excludes it from totals', async () => {
