@@ -87,14 +87,18 @@ export function formatResult(result) {
   ].join('\n');
 }
 
-export function buildHandoff(plan, doctor) {
+export function buildHandoff(plan, doctor, { supabaseSecretSource } = {}) {
   return Object.freeze({
     mode: plan.mode,
     url: plan.site.appOrigin,
     adminEmail: plan.adminEmail,
     capabilities: Object.freeze([...plan.modules]),
     startCommand: plan.mode === 'local'
-      ? plan.backend === 'supabase' ? 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev' : 'npm run dev'
+      ? plan.backend === 'supabase'
+        ? supabaseSecretSource === 'environment'
+          ? 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev'
+          : 'read -s SUPABASE_DB_URL && export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" && npm run dev'
+        : 'npm run dev'
       : 'npm run deploy',
     limitations: Object.freeze(doctor.checks.filter((check) => check.severity === 'warning').map((check) => check.code)),
   });
@@ -110,13 +114,15 @@ export async function collectSupabaseSecret(options = {}) {
   const { environment = process.env, interactive = false, maskedInput } = options;
   if (!environment || typeof environment !== 'object' || Array.isArray(environment)) throw new TypeError('secret environment must be an object');
   let dbUrl = environment.SUPABASE_DB_URL;
+  let source = 'environment';
   if (!dbUrl) {
     if (!interactive) throw new Error('SUPABASE_DB_URL is required in the environment for noninteractive setup');
     if (typeof maskedInput !== 'function') throw new Error('A masked input reader is required for interactive Supabase setup');
     dbUrl = await maskedInput('Supabase database URL (input hidden)');
+    source = 'masked';
   }
   if (typeof dbUrl !== 'string' || !/^postgres(?:ql)?:\/\//.test(dbUrl)) throw new Error('SUPABASE_DB_URL must be a Postgres URL');
-  return Object.freeze({ dbUrl });
+  return Object.freeze({ dbUrl, source });
 }
 
 export async function buildServicePresence(manifest, probeOptions = {}) {
@@ -212,7 +218,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: Boolean(dbUrl), localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail) }) }),
     }, { strict: false });
   };
 
@@ -279,7 +285,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' },
       apply: applied,
       doctor: latestDoctor,
-      handoff: buildHandoff(plan, latestDoctor),
+      handoff: buildHandoff(plan, latestDoctor, { supabaseSecretSource: options.secretContext?.source }),
     };
   } finally {
     await postgresConnection?.close();
@@ -334,7 +340,7 @@ export async function runSetup(argv, deps) {
   }
 
   let allowHyperdriveSecretInArgv = parsed.allowHyperdriveSecretInArgv;
-  if (plan.backend === 'supabase' && plan.mode === 'deploy' && !allowHyperdriveSecretInArgv) {
+  if (plan.backend === 'supabase' && plan.mode === 'deploy' && !plan.resources?.hyperdriveId && !allowHyperdriveSecretInArgv) {
     if (deps.interactive && typeof deps.confirmHyperdriveSecretInArgv === 'function') {
       allowHyperdriveSecretInArgv = await deps.confirmHyperdriveSecretInArgv(plan) === true;
     }
@@ -455,7 +461,7 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: process.env.SUPABASE_DB_URL ? [process.env.SUPABASE_DB_URL] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars'), process.env.AUTH_DEV_BYPASS_EMAIL ?? '') : false }) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false }) }),
       }, { strict });
     } finally {
       await connection?.close();

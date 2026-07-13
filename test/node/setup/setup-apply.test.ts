@@ -126,6 +126,19 @@ describe('concrete provider actions', () => {
     expect(calls.findIndex((args) => args[0] === 'hyperdrive' && args[1] === 'create')).toBeLessThan(calls.findIndex((args) => args[0] === 'r2'));
   });
 
+  it('fails deleted owned Hyperdrive recovery before mutation without explicit argv consent', async () => {
+    const calls: string[][] = [];
+    const runner = { run: async (_file: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === 'hyperdrive' && args[1] === 'list') return { stdout: '📋 Listing Hyperdrive configs', stderr: '', exitCode: 0 };
+      throw new Error('mutation should not run');
+    } };
+    const plan: any = { backend: 'supabase', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'old-media', hyperdriveId: 'stale' } };
+    const resource = createResourceStep({ plan, runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', dbUrl: 'postgres://u:p@db.test/church', allowHyperdriveSecretInArgv: false, verify: async () => true });
+    await expect(resource.apply({ recovering: true } as any)).rejects.toThrow(/--allow-hyperdrive-secret-in-argv.*no resource mutation/i);
+    expect(calls).toHaveLength(1);
+  });
+
   it('rejects an imported Hyperdrive name match with a different ID before touching R2', async () => {
     const table = (id: string) => [
       '📋 Listing Hyperdrive configs',

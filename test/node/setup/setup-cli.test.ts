@@ -136,6 +136,13 @@ describe('guided setup CLI', () => {
     expect(allowed.apply).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ allowHyperdriveSecretInArgv: true }));
   });
 
+  it('does not require argv consent for a healthy recorded deploy Hyperdrive', async () => {
+    const flags = ['--mode', 'deploy', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--app-origin', 'https://full.example.test', '--email-from', 'serve@full.example.test', '--yes'];
+    const d = deps({ inspectExisting: vi.fn(async () => ({ existingBackend: 'supabase', existingMode: 'deploy', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'full-media', hyperdriveId: 'healthy-id' } })) });
+    await expect(runSetup(flags, d)).resolves.toBe(0);
+    expect(d.apply).toHaveBeenCalledWith(expect.objectContaining({ resources: expect.objectContaining({ hyperdriveId: 'healthy-id' }) }), expect.objectContaining({ allowHyperdriveSecretInArgv: false }));
+  });
+
   it('passes the Supabase URL only inside secretContext', async () => {
     const d = deps();
     await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any);
@@ -147,11 +154,11 @@ describe('guided setup CLI', () => {
   it('collects the Supabase URL from env first and otherwise requires masked interactive input', async () => {
     const maskedInput = vi.fn(async () => 'postgres://masked:password@db.example.test/app');
     await expect(collectSupabaseSecret({ environment: { SUPABASE_DB_URL: 'postgres://env:password@db.example.test/app' }, interactive: true, maskedInput }))
-      .resolves.toEqual({ dbUrl: 'postgres://env:password@db.example.test/app' });
+      .resolves.toEqual({ dbUrl: 'postgres://env:password@db.example.test/app', source: 'environment' });
     expect(maskedInput).not.toHaveBeenCalled();
     await expect(collectSupabaseSecret({ environment: {}, interactive: false, maskedInput })).rejects.toThrow(/SUPABASE_DB_URL/);
     expect(maskedInput).not.toHaveBeenCalled();
-    await expect(collectSupabaseSecret({ environment: {}, interactive: true, maskedInput })).resolves.toEqual({ dbUrl: 'postgres://masked:password@db.example.test/app' });
+    await expect(collectSupabaseSecret({ environment: {}, interactive: true, maskedInput })).resolves.toEqual({ dbUrl: 'postgres://masked:password@db.example.test/app', source: 'masked' });
     expect(maskedInput).toHaveBeenCalledOnce();
   });
 

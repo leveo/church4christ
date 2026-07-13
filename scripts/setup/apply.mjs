@@ -119,7 +119,14 @@ export function createResourceStep(options) {
         throw error;
       }
     } else {
-      hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+      try {
+        hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
+      } catch (error) {
+        if (context.recovering && /explicitly confirm|process-list argv/i.test(String(error))) {
+          throw new Error('Deleted setup-owned Hyperdrive recovery requires --allow-hyperdrive-secret-in-argv; no resource mutation was performed');
+        }
+        throw error;
+      }
     }
     if (plan.resources?.hyperdriveId && !context.recovering && hyperdrive.id !== plan.resources.hyperdriveId) {
       throw new Error('Imported Hyperdrive name is ambiguous: resolved ID mismatches the recorded Hyperdrive ID');

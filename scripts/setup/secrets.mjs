@@ -36,8 +36,10 @@ export function parseDevVars(content) {
 export function verifyLocalSecretsContent(content, adminEmail) {
   try {
     const found = parseDevVars(content);
-    const normalized = normalizeEmail(adminEmail, 'admin email');
-    return found.get('EMAIL_DEV_LOG') === '1' && found.get('AUTH_DEV_BYPASS_EMAIL') === normalized &&
+    const fileAdmin = found.get('AUTH_DEV_BYPASS_EMAIL');
+    const normalizedFileAdmin = normalizeEmail(fileAdmin, 'AUTH_DEV_BYPASS_EMAIL');
+    const expected = adminEmail === undefined ? undefined : normalizeEmail(adminEmail, 'admin email');
+    return found.get('EMAIL_DEV_LOG') === '1' && fileAdmin === normalizedFileAdmin && (!expected || fileAdmin === expected) &&
       typeof found.get('SESSION_SECRET') === 'string' && found.get('SESSION_SECRET').length >= 32;
   } catch { return false; }
 }

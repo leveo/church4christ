@@ -143,15 +143,20 @@ describe('runtime setup hardening', () => {
     expect(verifyLocalSecretsContent(`SESSION_SECRET=weak\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
     expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=0\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
     expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`)).toBe(true);
   });
 
   it('requires a real local Supabase connection source and returns a nonsecret handoff reference', async () => {
     const manifest: any = { mode: 'local', database: 'supabase', resources: { r2BucketName: 'x-media', hyperdriveId: 'local' } };
     expect((await buildServicePresence(manifest, { hostEnv: {}, localSecretsValid: true })).hyperdrive).toBe(false);
     expect((await buildServicePresence(manifest, { hostEnv: { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: 'postgres://secret' }, localSecretsValid: true })).hyperdrive).toBe(true);
-    const handoff = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any);
+    const handoff = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any, { supabaseSecretSource: 'environment' });
     expect(handoff.startCommand).toBe('CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev');
     expect(JSON.stringify(handoff)).not.toContain('postgres://secret');
+    const masked = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any, { supabaseSecretSource: 'masked' });
+    expect(masked.startCommand).toContain('read -s SUPABASE_DB_URL');
+    expect(masked.startCommand).toContain('CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL"');
+    expect(JSON.stringify(masked)).not.toContain('postgres://');
   });
 
   it('uses remote Stripe secret metadata for deploy and host env only for local', async () => {
