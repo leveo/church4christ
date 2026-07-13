@@ -49,34 +49,52 @@ export interface GivingCheckoutDigestInput {
   customerId: string | null;
 }
 
-const normalizeProofText = (value: string): string => value.normalize('NFC').trim();
+declare const normalizedGivingCheckoutInput: unique symbol;
+export type NormalizedGivingCheckoutInput = GivingCheckoutDigestInput & {
+  readonly [normalizedGivingCheckoutInput]: true;
+};
 
-/** Stable SHA-256 identity for retry binding; the proof contains only this digest, never raw donor fields. */
-export async function givingCheckoutRequestDigest(input: GivingCheckoutDigestInput): Promise<string> {
-  if (!Number.isSafeInteger(input.fundId) || input.fundId <= 0) throw new Error('giving_digest_invalid');
-  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw new Error('giving_digest_invalid');
+const normalizeProofText = (value: string): string => value.normalize('NFC').trim();
+const NORMALIZED_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Validate and canonicalize the exact values shared by retry identity and Stripe payloads. */
+export function normalizeGivingCheckoutInput(input: GivingCheckoutDigestInput): NormalizedGivingCheckoutInput {
+  if (!Number.isSafeInteger(input.fundId) || input.fundId <= 0) throw new Error('giving_fund_invalid');
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw new Error('giving_amount_invalid');
   if (!(input.personId === null || (Number.isSafeInteger(input.personId) && input.personId > 0))) {
-    throw new Error('giving_digest_invalid');
+    throw new Error('giving_person_invalid');
   }
   const currency = normalizeProofText(input.currency).toLowerCase();
-  if (!/^[a-z]{3}$/.test(currency) || !parseFrequency(input.frequency)) throw new Error('giving_digest_invalid');
-  if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('giving_digest_invalid');
-  const normalized = {
+  if (!/^[a-z]{3}$/.test(currency)) throw new Error('giving_currency_invalid');
+  if (!parseFrequency(input.frequency)) throw new Error('giving_frequency_invalid');
+  if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('giving_locale_invalid');
+
+  const fundName = normalizeProofText(input.fundName);
+  const donorName = normalizeProofText(input.donorName);
+  const donorEmail = normalizeProofText(input.donorEmail).toLowerCase();
+  const customerId = input.customerId === null ? null : normalizeProofText(input.customerId);
+  if (!fundName) throw new Error('giving_fund_invalid');
+  if (!NORMALIZED_EMAIL_RE.test(donorEmail)) throw new Error('giving_email_invalid');
+  if (input.frequency === 'once' && !donorName) throw new Error('giving_name_invalid');
+  if (input.customerId !== null && !customerId) throw new Error('giving_customer_invalid');
+
+  return {
     fundId: input.fundId,
-    fundName: normalizeProofText(input.fundName),
+    fundName,
     amountCents: input.amountCents,
     currency,
     frequency: input.frequency,
     locale: input.locale,
     personId: input.personId,
-    donorName: normalizeProofText(input.donorName),
-    donorEmail: normalizeProofText(input.donorEmail).toLowerCase(),
-    customerId: input.customerId === null ? null : normalizeProofText(input.customerId),
-  };
-  if (!normalized.fundName || !normalized.donorEmail || (input.frequency === 'once' && !normalized.donorName)) {
-    throw new Error('giving_digest_invalid');
-  }
-  return sha256Utf8(JSON.stringify(normalized));
+    donorName,
+    donorEmail,
+    customerId,
+  } as NormalizedGivingCheckoutInput;
+}
+
+/** Stable SHA-256 identity for retry binding; the proof contains only this digest, never raw donor fields. */
+export async function givingCheckoutRequestDigest(input: NormalizedGivingCheckoutInput): Promise<string> {
+  return sha256Utf8(JSON.stringify(input));
 }
 
 export type GivingCheckoutProof = { kind: 'initial' } | { kind: 'retry'; digest: string };
@@ -161,7 +179,7 @@ export async function selectGivingCheckoutIdentityForRender(
 ): Promise<{ requestId: string; proof: string; reused: boolean }> {
   if (isCheckoutRequestId(requestIdValue) && typeof proofValue === 'string') {
     const verified = await verifyGivingCheckoutProof(secret, requestIdValue, proofValue);
-    if (verified) return { requestId: requestIdValue, proof: proofValue, reused: true };
+    if (verified?.kind === 'retry') return { requestId: requestIdValue, proof: proofValue, reused: true };
   }
   const requestId = newCheckoutRequestId();
   return {

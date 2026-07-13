@@ -21,6 +21,7 @@ const SESSION_SECRET = 'test-session-secret-at-least-32-characters';
 describe('signed giving Checkout browser proof', () => {
   it('signs initial UUID provenance and input-bound retry digests without embedding PII', async () => {
     const api = givingCheckout as unknown as {
+      normalizeGivingCheckoutInput?: (input: Record<string, unknown>) => Record<string, unknown>;
       givingCheckoutRequestDigest?: (input: Record<string, unknown>) => Promise<string>;
       signInitialGivingCheckoutProof?: (secret: string, requestId: string) => Promise<string>;
       signRetryGivingCheckoutProof?: (secret: string, requestId: string, digest: string) => Promise<string>;
@@ -35,16 +36,17 @@ describe('signed giving Checkout browser proof', () => {
         proof: unknown,
       ) => Promise<{ requestId: string; proof: string; reused: boolean }>;
     };
+    expect(api.normalizeGivingCheckoutInput).toBeTypeOf('function');
     expect(api.givingCheckoutRequestDigest).toBeTypeOf('function');
     expect(api.signInitialGivingCheckoutProof).toBeTypeOf('function');
     expect(api.signRetryGivingCheckoutProof).toBeTypeOf('function');
     expect(api.verifyGivingCheckoutProof).toBeTypeOf('function');
     expect(api.selectGivingCheckoutIdentityForRender).toBeTypeOf('function');
-    if (!api.givingCheckoutRequestDigest || !api.signInitialGivingCheckoutProof
+    if (!api.normalizeGivingCheckoutInput || !api.givingCheckoutRequestDigest || !api.signInitialGivingCheckoutProof
       || !api.signRetryGivingCheckoutProof || !api.verifyGivingCheckoutProof
       || !api.selectGivingCheckoutIdentityForRender) return;
 
-    const digest = await api.givingCheckoutRequestDigest({
+    const normalized = api.normalizeGivingCheckoutInput({
       fundId: 7,
       fundName: 'General',
       amountCents: 2500,
@@ -56,6 +58,10 @@ describe('signed giving Checkout browser proof', () => {
       donorEmail: 'ADA@example.com',
       customerId: null,
     });
+    expect(normalized).toMatchObject({
+      fundName: 'General', currency: 'usd', donorName: 'Ada Lovelace', donorEmail: 'ada@example.com',
+    });
+    const digest = await api.givingCheckoutRequestDigest(normalized);
     const initial = await api.signInitialGivingCheckoutProof(SESSION_SECRET, REQUEST_ID);
     const retry = await api.signRetryGivingCheckoutProof(SESSION_SECRET, REQUEST_ID, digest);
     expect(await api.verifyGivingCheckoutProof(SESSION_SECRET, REQUEST_ID, initial)).toEqual({ kind: 'initial' });
@@ -69,7 +75,12 @@ describe('signed giving Checkout browser proof', () => {
       proof: retry,
       reused: true,
     });
-    for (const [requestId, proof] of [[REQUEST_ID, 'attacker-proof'], [REQUEST_ID, null], ['not-a-uuid', retry]]) {
+    for (const [requestId, proof] of [
+      [REQUEST_ID, initial],
+      [REQUEST_ID, 'attacker-proof'],
+      [REQUEST_ID, null],
+      ['not-a-uuid', retry],
+    ]) {
       const selected = await api.selectGivingCheckoutIdentityForRender(SESSION_SECRET, requestId, proof);
       expect(selected.requestId).not.toBe(REQUEST_ID);
       expect(selected.reused).toBe(false);
@@ -133,9 +144,9 @@ describe('stable giving Checkout browser identity', () => {
     requestId,
     await signInitialGivingCheckoutProof(SESSION_SECRET, requestId),
   );
-  const context = (data: FormData) => ({
+  const context = (data: FormData, user: null | { id: number; displayName: string; email: string } = null) => ({
     request: new Request('https://church.example/api/giving/checkout', { method: 'POST', body: data }),
-    locals: { modules: new Set(['giving']), locale: 'en', user: null, db: {} },
+    locals: { modules: new Set(['giving']), locale: 'en', user, db: {} },
   } as never);
   const deps = (overrides: Record<string, unknown> = {}) => ({
     sessionSecret: SESSION_SECRET,
@@ -204,17 +215,29 @@ describe('stable giving Checkout browser identity', () => {
         throw new StripeError('timeout', { stage: 'transport' });
       }),
     });
-    const first = await createGivingCheckoutHandler(ambiguous as never)(context(await signedForm()));
+    const firstData = await signedForm();
+    firstData.set('name', ' Ame\u0301lie ');
+    firstData.set('email', ' ADA@Example.COM ');
+    const first = await createGivingCheckoutHandler(ambiguous as never)(context(firstData));
     const query = new URL(first.headers.get('location')!, 'https://church.example').searchParams;
     const retryProof = query.get('checkoutRequestProof')!;
 
+    const equivalentData = form(REQUEST_ID, retryProof);
+    equivalentData.set('name', 'Amélie');
+    equivalentData.set('email', 'ada@example.com');
     const same = deps();
-    await createGivingCheckoutHandler(same as never)(context(form(REQUEST_ID, retryProof)));
+    await createGivingCheckoutHandler(same as never)(context(equivalentData));
     expect(same.createOneTimeCheckout).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       { requestId: REQUEST_ID },
     );
+    const firstCalls = ambiguous.createOneTimeCheckout.mock.calls as unknown as unknown[][];
+    const sameCalls = same.createOneTimeCheckout.mock.calls as unknown as unknown[][];
+    expect(firstCalls[0][1]).toEqual(sameCalls[0][1]);
+    expect(firstCalls[0][1]).toMatchObject({
+      fundName: 'General', currency: 'usd', donorName: 'Amélie', donorEmail: 'ada@example.com',
+    });
 
     const changedData = form(REQUEST_ID, retryProof);
     changedData.set('amount', '30.00');
@@ -222,6 +245,43 @@ describe('stable giving Checkout browser identity', () => {
     await createGivingCheckoutHandler(changed as never)(context(changedData));
     const changedCalls = changed.createOneTimeCheckout.mock.calls as unknown as unknown[][];
     expect((changedCalls[0][2] as { requestId: string }).requestId).not.toBe(REQUEST_ID);
+  });
+
+  it('uses one canonical payload for signed-in recurring ambiguous retries', async () => {
+    const firstUser = { id: 9, displayName: ' Me\u0301i ', email: ' MEI@Example.COM ' };
+    const initialData = await signedForm();
+    initialData.set('frequency', 'month');
+    const ambiguous = deps({
+      getFund: vi.fn(async () => ({ id: 7, name: ' Missions\u0301 ', active: 1 })),
+      getSetting: vi.fn(async () => ' USD '),
+      getStripeCustomer: vi.fn(async () => ' cus_9 '),
+      createRecurringCheckout: vi.fn(async () => {
+        throw new StripeError('timeout', { stage: 'transport' });
+      }),
+    });
+    const first = await createGivingCheckoutHandler(ambiguous as never)(context(initialData, firstUser));
+    const query = new URL(first.headers.get('location')!, 'https://church.example').searchParams;
+    const retryProof = query.get('checkoutRequestProof')!;
+
+    const retryData = form(REQUEST_ID, retryProof);
+    retryData.set('frequency', 'month');
+    const same = deps({
+      getFund: vi.fn(async () => ({ id: 7, name: 'Missionś', active: 1 })),
+      getStripeCustomer: vi.fn(async () => 'cus_9'),
+    });
+    await createGivingCheckoutHandler(same as never)(context(
+      retryData,
+      { id: 9, displayName: 'Méi', email: 'mei@example.com' },
+    ));
+
+    const firstCalls = ambiguous.createRecurringCheckout.mock.calls as unknown as unknown[][];
+    const sameCalls = same.createRecurringCheckout.mock.calls as unknown as unknown[][];
+    expect(firstCalls[0][1]).toEqual(sameCalls[0][1]);
+    expect(firstCalls[0][1]).toMatchObject({
+      fundName: 'Missionś', currency: 'usd', email: 'mei@example.com', customerId: 'cus_9',
+    });
+    expect(firstCalls[0][2]).toEqual({ requestId: REQUEST_ID });
+    expect(sameCalls[0][2]).toEqual({ requestId: REQUEST_ID });
   });
 
   it('rotates an attacker-provided UUID when its browser proof is invalid', async () => {

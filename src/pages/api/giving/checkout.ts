@@ -14,6 +14,7 @@ import { getStripeCustomer } from '../../../lib/givingDb';
 import { getSetting } from '../../../lib/settings';
 import {
   givingCheckoutRequestDigest,
+  normalizeGivingCheckoutInput,
   parseAmountToCents,
   parseFrequency,
   signRetryGivingCheckoutProof,
@@ -22,7 +23,6 @@ import {
 import { parseLocale, type Locale } from '../../../lib/locales';
 
 export const prerender = false;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface GivingCheckoutDeps {
   sessionSecret: string;
@@ -95,24 +95,30 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
       customerId = await deps.getStripeCustomer(locals.db, user.id);
     } else {
       personId = null;
-      donorName = String(form.get('name') ?? '').trim();
-      donorEmail = String(form.get('email') ?? '').trim();
-      if (!donorName) return back(locale, 'name');
-      if (!EMAIL_RE.test(donorEmail)) return back(locale, 'email');
+      donorName = String(form.get('name') ?? '');
+      donorEmail = String(form.get('email') ?? '');
     }
 
-    const digest = await givingCheckoutRequestDigest({
-      fundId,
-      fundName: fund.name,
-      amountCents,
-      currency,
-      frequency,
-      locale,
-      personId,
-      donorName,
-      donorEmail,
-      customerId,
-    });
+    let normalized: ReturnType<typeof normalizeGivingCheckoutInput>;
+    try {
+      normalized = normalizeGivingCheckoutInput({
+        fundId,
+        fundName: fund.name,
+        amountCents,
+        currency,
+        frequency,
+        locale,
+        personId,
+        donorName,
+        donorEmail,
+        customerId,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'giving_name_invalid') return back(locale, 'name');
+      if (error instanceof Error && error.message === 'giving_email_invalid') return back(locale, 'email');
+      return back(locale, 'form');
+    }
+    const digest = await givingCheckoutRequestDigest(normalized);
     const requestId = verifiedProof?.kind === 'initial'
       || (verifiedProof?.kind === 'retry' && verifiedProof.digest === digest)
       ? candidateRequestId
@@ -121,29 +127,29 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     try {
       if (frequency === 'once') {
         const session = await deps.createOneTimeCheckout(deps.stripeEnv, {
-          amountCents,
-          currency,
-          fundId,
-          fundName: fund.name,
-          locale,
-          personId,
-          donorName,
-          donorEmail,
-          customerId,
+          amountCents: normalized.amountCents,
+          currency: normalized.currency,
+          fundId: normalized.fundId,
+          fundName: normalized.fundName,
+          locale: normalized.locale,
+          personId: normalized.personId,
+          donorName: normalized.donorName,
+          donorEmail: normalized.donorEmail,
+          customerId: normalized.customerId,
         }, { requestId });
         return redirect(session.url);
       }
 
       const session = await deps.createRecurringCheckout(deps.stripeEnv, {
-        amountCents,
-        currency,
+        amountCents: normalized.amountCents,
+        currency: normalized.currency,
         interval: frequency,
-        fundId,
-        fundName: fund.name,
-        locale,
-        personId: user!.id,
-        email: user!.email,
-        customerId,
+        fundId: normalized.fundId,
+        fundName: normalized.fundName,
+        locale: normalized.locale,
+        personId: normalized.personId!,
+        email: normalized.donorEmail,
+        customerId: normalized.customerId,
       }, { requestId });
       return redirect(session.url);
     } catch (error) {
