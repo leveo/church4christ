@@ -11,7 +11,10 @@ import {
   reconcileCheckoutRequestNow,
 } from '../../src/lib/stripeCheckoutRecovery';
 import { StripeError, type StripeCheckoutSession, type StripeEnv } from '../../src/lib/stripe';
-import { resolveRegistrationCheckoutRequest } from '../../src/lib/stripeCheckoutRequests';
+import {
+  attachRegistrationCheckoutRequest,
+  resolveRegistrationCheckoutRequest,
+} from '../../src/lib/stripeCheckoutRequests';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
 const ENV: StripeEnv & DbEnv = {
@@ -222,14 +225,16 @@ describe.skipIf(!hasPg)('registration Checkout recovery (Postgres)', () => {
   it('attached requests retrieve only and unresolved sessions use a once-daily cadence', async () => {
     const { registrationId } = await createRequest();
     const open = session(registrationId);
-    await sql.unsafe(
-      `UPDATE registrations SET stripe_checkout_session_id=$2 WHERE id=$1`, [registrationId, open.id],
-    );
-    await sql.unsafe(
-      `UPDATE church_private.stripe_checkout_requests
-       SET state='attached',request_json=NULL,session_url=NULL,next_reconcile_at=$2 WHERE request_id=$1`,
-      [REQUEST, sqlTime(plusMinutes(T0, 45))],
-    );
+    const initialDeadline = (await row()).next_reconcile_at;
+    expect(await attachRegistrationCheckoutRequest(db, {
+      requestId: REQUEST,
+      registrationId,
+      sessionId: open.id,
+      sessionUrl: open.url as string,
+      amountCents: 2500,
+      currency: 'usd',
+    })).toBe(true);
+    expect((await row()).next_reconcile_at).toBe(initialDeadline);
     const createCheckout = vi.fn();
     const retrieveCheckout = vi.fn(async () => open);
     await drainStripeCheckoutRecovery({

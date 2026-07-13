@@ -839,8 +839,7 @@ export async function attachRegistrationCheckoutRequest(
       `).bind(input.sessionId, input.registrationId, input.amountCents, input.currency),
       db.prepare(`
         UPDATE church_private.stripe_checkout_requests
-        SET state='attached',request_json=NULL,session_url=?1,next_reconcile_at=datetime('now','+1 day'),
-            last_error=NULL,updated_at=datetime('now')
+        SET state='attached',request_json=NULL,session_url=?1,last_error=NULL,updated_at=datetime('now')
         WHERE request_id=?2 AND registration_id=?3 AND state='creating' AND request_json IS NOT NULL
           AND EXISTS (
             SELECT 1 FROM registrations r

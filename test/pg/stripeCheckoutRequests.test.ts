@@ -438,6 +438,10 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     const eventId = await event();
     const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
     if (created.kind !== 'create') throw new Error('expected create');
+    const [beforeAttach] = await sql.unsafe(
+      `SELECT next_reconcile_at FROM church_private.stripe_checkout_requests WHERE request_id=$1`,
+      [REQUEST_A],
+    );
     expect(await attachRegistrationCheckoutRequest(db, {
       requestId: REQUEST_A,
       registrationId: created.registrationId,
@@ -447,7 +451,7 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       currency: 'usd',
     })).toBe(true);
     expect(await sql.unsafe(`
-      SELECT r.status,r.stripe_checkout_session_id,q.state,q.request_json,q.session_url
+      SELECT r.status,r.stripe_checkout_session_id,q.state,q.request_json,q.session_url,q.next_reconcile_at
       FROM registrations r JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
       WHERE q.request_id=$1
     `, [REQUEST_A])).toEqual([{
@@ -456,6 +460,7 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       state: 'attached',
       request_json: null,
       session_url: 'https://checkout.stripe.com/c/pay/cs_test_attached',
+      next_reconcile_at: beforeAttach.next_reconcile_at,
     }]);
     expect(await attachRegistrationCheckoutRequest(db, {
       requestId: REQUEST_A,
