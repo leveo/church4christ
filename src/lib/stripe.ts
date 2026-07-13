@@ -7,7 +7,12 @@
 //
 // Secret hygiene: the secret key travels only in the Authorization header; it is
 // never interpolated into an error message, thrown value, or log line.
-import { parseCheckoutRequestId, type StripeCheckoutParams } from './stripeCheckoutRequests';
+import {
+  canonicalAppOrigin,
+  parseCheckoutRequestId,
+  registrationCheckoutCancelUrl,
+  type StripeCheckoutParams,
+} from './stripeCheckoutRequests';
 
 export type StripeEnv = {
   STRIPE_MODE?: string;
@@ -105,7 +110,7 @@ function requireSecret(env: StripeEnv): string {
 
 function requireOrigin(env: StripeEnv): string {
   if (!env.APP_ORIGIN) throw new Error('APP_ORIGIN is not set');
-  return env.APP_ORIGIN;
+  return canonicalAppOrigin(env.APP_ORIGIN);
 }
 
 function requireIdempotencyKey(value: string): string {
@@ -201,6 +206,7 @@ export async function stripeRequest<T = Record<string, unknown>>(
 export interface StripeCheckoutSession {
   id: string;
   url: string | null;
+  mode: 'payment' | 'subscription' | null;
   livemode: false;
   status: 'open' | 'complete' | 'expired' | null;
   payment_status: 'paid' | 'unpaid' | 'no_payment_required' | null;
@@ -237,6 +243,9 @@ export function requireTestCheckoutSession(value: unknown): StripeCheckoutSessio
   if (!((typeof value.url === 'string' && value.url.length <= 2048) || value.url === null)) {
     throw invalidCheckoutResponse();
   }
+  if (![null, 'payment', 'subscription'].includes(value.mode as string | null)) {
+    throw invalidCheckoutResponse();
+  }
   if (![null, 'open', 'complete', 'expired'].includes(value.status as string | null)) {
     throw invalidCheckoutResponse();
   }
@@ -271,14 +280,45 @@ export function requireTestCheckoutSession(value: unknown): StripeCheckoutSessio
 
 function requireCheckoutRedirect(value: unknown): { id: string; url: string } {
   const session = requireTestCheckoutSession(value);
-  if (typeof session.url !== 'string' || session.url.length === 0) throw invalidCheckoutResponse();
+  return { id: session.id, url: requireCheckoutStripeUrl(session.url) };
+}
+
+function requireCheckoutStripeUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw invalidCheckoutResponse();
   try {
-    if (new URL(session.url).protocol !== 'https:') throw invalidCheckoutResponse();
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.hostname !== 'checkout.stripe.com' || url.username || url.password || url.port) {
+      throw invalidCheckoutResponse();
+    }
   } catch (error) {
     if (error instanceof StripeError) throw error;
     throw invalidCheckoutResponse();
   }
-  return { id: session.id, url: session.url };
+  return value;
+}
+
+function requireGivingCheckoutRedirect(
+  value: unknown,
+  expected: {
+    mode: 'payment' | 'subscription';
+    amountCents: number;
+    currency: string;
+    metadata: Record<string, string>;
+  },
+): { id: string; url: string } {
+  const session = requireTestCheckoutSession(value);
+  const metadataKeys = Object.keys(session.metadata);
+  const expectedMetadataKeys = Object.keys(expected.metadata);
+  if (
+    session.mode !== expected.mode
+    || session.amount_total !== expected.amountCents
+    || session.currency !== expected.currency
+    || metadataKeys.length !== expectedMetadataKeys.length
+    || expectedMetadataKeys.some((key) => session.metadata[key] !== expected.metadata[key])
+  ) {
+    throw invalidCheckoutResponse();
+  }
+  return { id: session.id, url: requireCheckoutStripeUrl(session.url) };
 }
 
 export async function retrieveCheckoutSession(
@@ -381,7 +421,18 @@ export async function createOneTimeCheckout(
     signal: options.signal,
     idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
-  return requireCheckoutRedirect(session);
+  return requireGivingCheckoutRedirect(session, {
+    mode: 'payment',
+    amountCents: args.amountCents,
+    currency: args.currency,
+    metadata: {
+      kind: 'gift',
+      fund_id: String(args.fundId),
+      person_id: args.personId === null ? '' : String(args.personId),
+      donor_name: args.donorName,
+      donor_email: args.donorEmail,
+    },
+  });
 }
 
 /**
@@ -435,7 +486,16 @@ export async function createRecurringCheckout(
     signal: options.signal,
     idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
-  return requireCheckoutRedirect(session);
+  return requireGivingCheckoutRedirect(session, {
+    mode: 'subscription',
+    amountCents: args.amountCents,
+    currency: args.currency,
+    metadata: {
+      kind: 'gift',
+      fund_id: String(args.fundId),
+      person_id: String(args.personId),
+    },
+  });
 }
 
 /**
@@ -480,7 +540,7 @@ export async function createRegistrationCheckout(
       },
     ],
     success_url: `${origin}/${args.locale}/register/done?ok=1&paid=1`,
-    cancel_url: `${origin}/${args.locale}/register/${args.eventId}`,
+    cancel_url: registrationCheckoutCancelUrl(origin, args.locale as 'en' | 'zh', args.eventId, requestId),
     customer_email: args.email,
     metadata,
     payment_intent_data: { metadata },

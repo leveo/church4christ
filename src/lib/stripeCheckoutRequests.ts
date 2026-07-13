@@ -103,8 +103,7 @@ export function registrationCheckoutRenderPolicy(input: {
   checkoutRequestId: unknown;
   ownsWaitingSeat: boolean;
 }): { checkoutRequestId: string; isFull: boolean; reused: boolean } {
-  const reusableId = input.paid
-    && input.error === 'waiting'
+  const reusableId = input.error === 'waiting'
     && input.ownsWaitingSeat
     && isCheckoutRequestId(input.checkoutRequestId)
     ? input.checkoutRequestId
@@ -185,17 +184,45 @@ export async function registrationCheckoutRequestDigest(input: RegistrationCheck
   return sha256Utf8(JSON.stringify(normalizeInput(input)));
 }
 
-function canonicalOrigin(value: string): string {
+function isAllowedApplicationUrl(url: URL): boolean {
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+  return !url.username && !url.password && (url.protocol === 'https:' || (url.protocol === 'http:' && loopback));
+}
+
+function hasExactHttpLoopbackAuthority(value: string): boolean {
+  return /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#]|$)/.test(value);
+}
+
+export function canonicalAppOrigin(value: string): string {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new Error('checkout_origin_invalid');
   }
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+  if (
+    !isAllowedApplicationUrl(url)
+    || (url.protocol === 'http:' && !hasExactHttpLoopbackAuthority(value))
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
     throw new Error('checkout_origin_invalid');
   }
   return url.origin;
+}
+
+export function registrationCheckoutCancelUrl(
+  originValue: string,
+  locale: 'en' | 'zh',
+  eventId: number,
+  requestIdValue: string,
+): string {
+  const origin = canonicalAppOrigin(originValue);
+  const requestId = parseCheckoutRequestId(requestIdValue);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) throw new Error('checkout_event_invalid');
+  const query = new URLSearchParams({ error: 'waiting', checkoutRequestId: requestId });
+  return `${origin}/${locale}/register/${eventId}?${query.toString()}`;
 }
 
 /** Build the exact non-secret Stripe parameter map persisted for same-key recovery. */
@@ -208,7 +235,7 @@ export function buildRegistrationCheckoutParams(
     throw new Error('checkout_registration_invalid');
   }
   if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('checkout_locale_invalid');
-  const origin = canonicalOrigin(input.appOrigin);
+  const origin = canonicalAppOrigin(input.appOrigin);
   const metadata: RegistrationCheckoutMetadata = {
     kind: 'registration',
     registration_id: String(input.registrationId),
@@ -225,7 +252,7 @@ export function buildRegistrationCheckoutParams(
       },
     }],
     success_url: `${origin}/${input.locale}/register/done?ok=1&paid=1`,
-    cancel_url: `${origin}/${input.locale}/register/${normalized.eventId}`,
+    cancel_url: registrationCheckoutCancelUrl(origin, input.locale, normalized.eventId, requestId),
     customer_email: normalized.email,
     metadata,
     payment_intent_data: { metadata: { ...metadata } },
@@ -255,7 +282,9 @@ function safeApplicationUrl(value: unknown): URL {
   } catch {
     corruptRequest();
   }
-  if (url.protocol !== 'https:' || url.username || url.password) corruptRequest();
+  if (!isAllowedApplicationUrl(url) || (url.protocol === 'http:' && !hasExactHttpLoopbackAuthority(value))) {
+    corruptRequest();
+  }
   return url;
 }
 
@@ -332,7 +361,10 @@ function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeChecko
     || success.hash
     || cancel.origin !== success.origin
     || cancel.pathname !== `/${successMatch[1]}/register/${row.event_id}`
-    || cancel.search
+    || cancel.search !== `?${new URLSearchParams({
+      error: 'waiting',
+      checkoutRequestId: row.request_id,
+    }).toString()}`
     || cancel.hash
   ) {
     corruptRequest();
@@ -377,6 +409,10 @@ async function resolveRow(
   // Digest mismatch always wins, including over terminal cleanup, so a reused
   // browser identity can never mutate the original pair.
   if (row.request_sha256 !== digest) return { kind: 'conflict' };
+  return resolveStoredRow(db, row);
+}
+
+async function resolveStoredRow(db: AppDb, row: CheckoutRequestRow): Promise<CheckoutRequestResolution> {
   if (row.status === 'confirmed') {
     await cleanupTerminalRequest(db, row);
     return { kind: 'done', registrationId: row.registration_id };
@@ -519,6 +555,19 @@ export async function resolveRegistrationCheckoutRequest(
     throw error;
   }
   return { kind: 'create', registrationId, requestId, requestJson };
+}
+
+/** Continue an exact durable request without asking the browser to replay identity or answers. */
+export async function continueRegistrationCheckoutRequest(
+  db: AppDb,
+  requestIdValue: unknown,
+  eventId: number,
+): Promise<CheckoutRequestResolution> {
+  const requestId = parseCheckoutRequestId(requestIdValue);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) return { kind: 'conflict' };
+  const row = await loadRequest(db, requestId);
+  if (!row || row.event_id !== eventId) return { kind: 'conflict' };
+  return resolveStoredRow(db, row);
 }
 
 export interface AttachRegistrationCheckoutRequestInput {

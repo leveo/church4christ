@@ -17,8 +17,8 @@ const WAITING_LOCATION = `/en/register/7?error=waiting&checkoutRequestId=${REQUE
 const savedJson = {
   mode: 'payment' as const,
   line_items: [{ quantity: 1 as const, price_data: { currency: 'usd', unit_amount: 2500, product_data: { name: 'Retreat' } } }],
-  success_url: 'https://church.example/en/register/done?ok=1&paid=1',
-  cancel_url: 'https://church.example/en/register/7',
+  success_url: 'http://localhost:4321/en/register/done?ok=1&paid=1',
+  cancel_url: `http://localhost:4321/en/register/7?error=waiting&checkoutRequestId=${REQUEST_ID}`,
   customer_email: 'ada@example.com',
   metadata: { kind: 'registration' as const, registration_id: '41', request_id: REQUEST_ID },
   payment_intent_data: { metadata: { kind: 'registration' as const, registration_id: '41', request_id: REQUEST_ID } },
@@ -54,12 +54,13 @@ function context(data: FormData) {
 
 function deps(overrides: Record<string, unknown> = {}) {
   return {
-    stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', APP_ORIGIN: 'https://church.example' },
+    stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', APP_ORIGIN: 'http://localhost:4321' },
     getOpenEvent: vi.fn(async () => event(2500)),
     listQuestions: vi.fn(async () => []),
     validateAnswers: vi.fn(() => []),
     createRegistration: vi.fn(async () => 41),
     resolveRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
+    continueRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
     createCheckout: vi.fn(async () => ({
       id: 'cs_test_route',
       url: 'https://checkout.stripe.com/c/pay/cs_test_route',
@@ -93,7 +94,6 @@ describe('stable registration Checkout browser identity', () => {
       { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: null, ownsWaitingSeat: false },
       { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: 'not-a-uuid', ownsWaitingSeat: false },
       { paid: true, capacity: 1, takenCount: 1, error: 'invalid', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: true },
-      { paid: false, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: true },
       { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: false },
     ]) {
       const policy = registrationCheckoutRenderPolicy(input);
@@ -102,6 +102,15 @@ describe('stable registration Checkout browser identity', () => {
       expect(parseCheckoutRequestId(policy.checkoutRequestId)).toBe(policy.checkoutRequestId);
       expect(policy.checkoutRequestId).not.toBe(REQUEST_ID);
     }
+
+    expect(registrationCheckoutRenderPolicy({
+      paid: false,
+      capacity: 1,
+      takenCount: 1,
+      error: 'waiting',
+      checkoutRequestId: REQUEST_ID,
+      ownsWaitingSeat: true,
+    })).toEqual({ checkoutRequestId: REQUEST_ID, isFull: false, reused: true });
   });
 
   it('renders a server-generated UUID in the checkoutRequestId hidden field', () => {
@@ -114,6 +123,8 @@ describe('stable registration Checkout browser identity', () => {
       /isCheckoutRequestId\(requestedCheckoutId\)[\s\S]*await ownsRecoverableRegistrationCheckoutRequest/,
     );
     expect(registerFormSource).toMatch(/name="checkoutRequestId"\s+value=\{checkoutRequestId\}/);
+    expect(registerFormSource).toMatch(/name="action"\s+value="continue"/);
+    expect(registerFormSource).toContain('!event && ownsWaitingSeat');
     const generated = newCheckoutRequestId();
     expect(parseCheckoutRequestId(generated)).toBe(generated);
   });
@@ -155,7 +166,44 @@ describe('stable registration Checkout browser identity', () => {
       expect(JSON.stringify(call[1])).toBe(JSON.stringify(savedJson));
       expect(call[2]).toMatchObject({ requestId: REQUEST_ID });
     }
+    expect(dependencies.resolveRequest).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ appOrigin: 'http://localhost:4321' }),
+    );
     expect(savedJson).not.toHaveProperty('expires_at');
+  });
+
+  it('continues an anonymous required-answer checkout from exact durable server state without browser PII', async () => {
+    const dependencies = deps({
+      listQuestions: vi.fn(async () => { throw new Error('must not reconstruct answers'); }),
+      validateAnswers: vi.fn(() => { throw new Error('must not validate browser answers'); }),
+    });
+    const data = new FormData();
+    for (const [key, value] of Object.entries({
+      locale: 'en', event_id: '7', website: '', action: 'continue', checkoutRequestId: REQUEST_ID,
+    })) data.set(key, value);
+
+    const response = await createRegistrationSubmitHandler(dependencies as never)(context(data));
+    expect(response.headers.get('location')).toBe('https://checkout.stripe.com/c/pay/cs_test_route');
+    expect(dependencies.continueRequest).toHaveBeenCalledWith({}, REQUEST_ID, 7);
+    expect(dependencies.resolveRequest).not.toHaveBeenCalled();
+    expect(dependencies.listQuestions).not.toHaveBeenCalled();
+    expect(dependencies.validateAnswers).not.toHaveBeenCalled();
+  });
+
+  it('continues durable checkout state even when the event is no longer open or currently paid', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => null),
+    });
+    const data = new FormData();
+    for (const [key, value] of Object.entries({
+      locale: 'en', event_id: '7', action: 'continue', checkoutRequestId: REQUEST_ID,
+    })) data.set(key, value);
+
+    const response = await createRegistrationSubmitHandler(dependencies as never)(context(data));
+    expect(response.headers.get('location')).toBe('https://checkout.stripe.com/c/pay/cs_test_route');
+    expect(dependencies.continueRequest).toHaveBeenCalledWith({}, REQUEST_ID, 7);
+    expect(dependencies.getOpenEvent).not.toHaveBeenCalled();
   });
 
   it('returns persisted done/redirect/wait/review outcomes without a new Stripe call', async () => {
@@ -212,6 +260,19 @@ describe('stable registration Checkout browser identity', () => {
     const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
     expect(response.headers.get('location')).toBe(WAITING_LOCATION);
     expect(dependencies.cancelRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ kind: 'done', registrationId: 41 }, '/en/register/done?ok=1&paid=1'],
+    [{ kind: 'redirect', registrationId: 41, checkoutUrl: 'https://checkout.stripe.com/c/pay/race-winner' }, 'https://checkout.stripe.com/c/pay/race-winner'],
+  ] as const)('converges an attach-false race before deciding to wait', async (continued, expected) => {
+    const dependencies = deps({
+      attachRequest: vi.fn(async () => false),
+      continueRequest: vi.fn(async () => continued),
+    });
+    const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
+    expect(response.headers.get('location')).toBe(expected);
+    expect(dependencies.continueRequest).toHaveBeenCalledWith({}, REQUEST_ID, 7);
   });
 
   it('returns waiting when a definitive Stripe failure cannot be durably compensated', async () => {

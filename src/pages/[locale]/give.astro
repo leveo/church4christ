@@ -6,6 +6,7 @@
 // prominent CTA driven by the site's giving URL setting, failing soft (a note,
 // no button) when the setting is unset or the read fails.
 import { render } from 'astro:content';
+import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
 import ContentPage from '../../components/ContentPage.astro';
 import { localePath, parseLocale } from '../../lib/locales';
@@ -14,7 +15,7 @@ import { getLocalized } from '../../lib/content';
 import { getSiteIdentity } from '../../lib/settings';
 import { listFunds } from '../../lib/fundDb';
 import { btn, lab, noticeErr, tin } from '../../lib/adminUi';
-import { checkoutRequestIdForRender } from '../../lib/stripeCheckoutRequests';
+import { selectGivingCheckoutIdentityForRender } from '../../lib/givingCheckout';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -33,9 +34,14 @@ const givingOn = Astro.locals.modules.has('giving');
 const user = Astro.locals.user;
 const funds = givingOn ? await listFunds(Astro.locals.db, locale, { activeOnly: true }) : [];
 const errParam = givingOn ? Astro.url.searchParams.get('error') : null;
-const checkoutRequestId = checkoutRequestIdForRender(
-  errParam === 'stripe' ? Astro.url.searchParams.get('checkoutRequestId') : null,
-);
+const sessionSecret = String((env as unknown as { SESSION_SECRET?: string }).SESSION_SECRET ?? '');
+const checkoutIdentity = givingOn
+  ? await selectGivingCheckoutIdentityForRender(
+      sessionSecret,
+      errParam === 'stripe' ? Astro.url.searchParams.get('checkoutRequestId') : null,
+      errParam === 'stripe' ? Astro.url.searchParams.get('checkoutRequestProof') : null,
+    )
+  : { requestId: '', proof: '', reused: false };
 const errorKey = errParam ? (errParam === 'noportal' ? 'give.error.noportal' : 'give.error.invalid') : null;
 const frequencies = [
   { value: 'once', label: 'give.once', guestOk: true },
@@ -71,7 +77,8 @@ try {
 
         <form method="post" action="/api/giving/checkout" class="mt-6 space-y-4">
           <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
+          <input type="hidden" name="checkoutRequestId" value={checkoutIdentity.requestId} />
+          <input type="hidden" name="checkoutRequestProof" value={checkoutIdentity.proof} />
 
           {errorKey && <p class={noticeErr}>{t(locale, errorKey)}</p>}
 

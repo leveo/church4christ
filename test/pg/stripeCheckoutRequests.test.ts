@@ -7,9 +7,11 @@ import {
   attachRegistrationCheckoutRequest,
   buildRegistrationCheckoutParams,
   cancelRegistrationCheckoutRequest,
+  continueRegistrationCheckoutRequest,
   ownsRecoverableRegistrationCheckoutRequest,
   parseCheckoutRequestId,
   registrationCheckoutIdempotencyKey,
+  registrationCheckoutRenderPolicy,
   registrationCheckoutRequestDigest,
   resolveRegistrationCheckoutRequest,
   type RegistrationCheckoutRequestInput,
@@ -82,7 +84,7 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     answers: [],
     eventTitle: 'Summer Retreat',
     locale: 'en',
-    appOrigin: 'https://church.example',
+    appOrigin: 'http://localhost:4321',
     ...overrides,
   });
 
@@ -202,6 +204,9 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       },
     });
     expect(result.requestJson).not.toHaveProperty('expires_at');
+    expect(result.requestJson.cancel_url).toBe(
+      `http://localhost:4321/en/register/${eventId}?error=waiting&checkoutRequestId=${REQUEST_A}`,
+    );
 
     const [registration] = await sql.unsafe(
       `SELECT event_id, name, email, status, amount_cents, currency FROM registrations WHERE id=$1`,
@@ -232,6 +237,24 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     });
     expect(request.request_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(request.request_json).not.toMatch(/secret|signature|authorization|card|headers/i);
+  });
+
+  it('returns a capacity-one Stripe cancellation to an owned actionable retry with the same UUID', async () => {
+    const eventId = await event(1);
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+    const cancel = new URL(created.requestJson.cancel_url);
+    expect(cancel.search).toBe(`?error=waiting&checkoutRequestId=${REQUEST_A}`);
+    const requestId = cancel.searchParams.get('checkoutRequestId');
+    const ownsWaitingSeat = await ownsRecoverableRegistrationCheckoutRequest(db, requestId, eventId);
+    expect(registrationCheckoutRenderPolicy({
+      paid: true,
+      capacity: 1,
+      takenCount: 1,
+      error: cancel.searchParams.get('error'),
+      checkoutRequestId: requestId,
+      ownsWaitingSeat,
+    })).toEqual({ checkoutRequestId: REQUEST_A, isFull: false, reused: true });
   });
 
   it('returns conflict for the same UUID with a different digest and changes neither row', async () => {
@@ -378,6 +401,37 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       kind: 'review', registrationId: created.registrationId, reason: 'manual_review',
     });
     expect((await sql.unsafe(`SELECT count(*)::int AS count FROM registrations WHERE event_id=$1`, [eventId]))[0].count).toBe(1);
+  });
+
+  it('continues only the exact event request from durable state without browser identity fields', async () => {
+    const eventId = await event();
+    const otherEventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+
+    expect(await continueRegistrationCheckoutRequest(db, REQUEST_A, eventId)).toEqual(created);
+    expect(await continueRegistrationCheckoutRequest(db, REQUEST_A, otherEventId)).toEqual({ kind: 'conflict' });
+    expect(await continueRegistrationCheckoutRequest(db, REQUEST_B, eventId)).toEqual({ kind: 'conflict' });
+
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='attached', request_json=NULL, session_url=$2 WHERE request_id=$1`,
+      [REQUEST_A, 'https://checkout.stripe.com/c/pay/cs_test_continue'],
+    );
+    expect(await continueRegistrationCheckoutRequest(db, REQUEST_A, eventId)).toEqual({
+      kind: 'redirect',
+      registrationId: created.registrationId,
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_continue',
+    });
+
+    await sql.unsafe(`UPDATE registrations SET status='confirmed' WHERE id=$1`, [created.registrationId]);
+    expect(await continueRegistrationCheckoutRequest(db, REQUEST_A, eventId)).toEqual({
+      kind: 'done', registrationId: created.registrationId,
+    });
+    expect(await sql.unsafe(
+      `SELECT state, request_json, session_url FROM church_private.stripe_checkout_requests WHERE request_id=$1`,
+      [REQUEST_A],
+    )).toEqual([{ state: 'resolved', request_json: null, session_url: null }]);
   });
 
   it('atomically attaches the verified session and clears canonical JSON before redirect', async () => {

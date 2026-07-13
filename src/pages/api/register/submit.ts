@@ -11,8 +11,10 @@ import {
 import {
   attachRegistrationCheckoutRequest,
   cancelRegistrationCheckoutRequest,
+  continueRegistrationCheckoutRequest,
   parseCheckoutRequestId,
   resolveRegistrationCheckoutRequest,
+  type CheckoutRequestResolution,
 } from '../../../lib/stripeCheckoutRequests';
 import {
   getOpenEvent,
@@ -50,6 +52,7 @@ interface RegistrationSubmitDeps {
   validateAnswers: typeof validateAnswers;
   createRegistration: typeof createRegistration;
   resolveRequest: typeof resolveRegistrationCheckoutRequest;
+  continueRequest: typeof continueRegistrationCheckoutRequest;
   createCheckout: typeof createRegistrationCheckoutFromParams;
   attachRequest: typeof attachRegistrationCheckoutRequest;
   cancelRequest: typeof cancelRegistrationCheckoutRequest;
@@ -62,6 +65,7 @@ const defaultDeps: RegistrationSubmitDeps = {
   validateAnswers,
   createRegistration,
   resolveRequest: resolveRegistrationCheckoutRequest,
+  continueRequest: continueRegistrationCheckoutRequest,
   createCheckout: createRegistrationCheckoutFromParams,
   attachRequest: attachRegistrationCheckoutRequest,
   cancelRequest: cancelRegistrationCheckoutRequest,
@@ -83,8 +87,71 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
 
     const eventId = Number(form.get('event_id'));
     if (!Number.isInteger(eventId) || eventId <= 0) return backToList(locale);
+
+    const processResolution = async (
+      requestId: string,
+      resolution: CheckoutRequestResolution,
+    ): Promise<Response> => {
+      const immediate = responseForResolution(locale, eventId, requestId, resolution, false);
+      if (immediate) return immediate;
+      if (resolution.kind !== 'create') return backWaiting(locale, eventId, requestId);
+
+      try {
+        const session = await deps.createCheckout(deps.stripeEnv, resolution.requestJson, {
+          requestId: resolution.requestId,
+        });
+        const price = resolution.requestJson.line_items[0].price_data;
+        const attached = await deps.attachRequest(locals.db, {
+          requestId: resolution.requestId,
+          registrationId: resolution.registrationId,
+          sessionId: session.id,
+          sessionUrl: session.url,
+          amountCents: price.unit_amount,
+          currency: price.currency,
+        });
+        if (attached) return redirect(session.url);
+        try {
+          const converged = await deps.continueRequest(locals.db, resolution.requestId, eventId);
+          return responseForResolution(locale, eventId, requestId, converged, true)
+            ?? backWaiting(locale, eventId, requestId);
+        } catch {
+          return backWaiting(locale, eventId, requestId);
+        }
+      } catch (error) {
+        if (classifyRegistrationCheckoutFailure(error) === 'cancel') {
+          try {
+            const cancelled = await deps.cancelRequest(locals.db, resolution.requestId, resolution.registrationId);
+            if (!cancelled) return backWaiting(locale, eventId, requestId);
+          } catch {
+            // A failed compensating write remains pending for the recovery service.
+            return backWaiting(locale, eventId, requestId);
+          }
+          return back(locale, eventId, 'invalid');
+        }
+        return backWaiting(locale, eventId, requestId);
+      }
+    };
+
+    if (String(form.get('action') ?? '') === 'continue') {
+      let requestId: string;
+      try {
+        requestId = parseCheckoutRequestId(form.get('checkoutRequestId'));
+      } catch {
+        return back(locale, eventId, 'invalid');
+      }
+      try {
+        return await processResolution(
+          requestId,
+          await deps.continueRequest(locals.db, requestId, eventId),
+        );
+      } catch {
+        return backWaiting(locale, eventId, requestId);
+      }
+    }
+
     const event = await deps.getOpenEvent(locals.db, locale, eventId);
     if (!event) return back(locale, eventId, 'closed');
+    const paid = event.price_cents !== null && event.price_cents > 0;
 
     const user = locals.user;
     let personId: number | null;
@@ -111,7 +178,6 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       return back(locale, eventId, 'invalid');
     }
 
-    const paid = event.price_cents !== null && event.price_cents > 0;
     if (!paid) {
       try {
         await deps.createRegistration(locals.db, {
@@ -159,39 +225,22 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       return backWaiting(locale, eventId, requestId);
     }
 
-    if (resolution.kind === 'done') return redirect(`/${locale}/register/done?ok=1&paid=1`);
-    if (resolution.kind === 'redirect') return redirect(resolution.checkoutUrl);
-    if (resolution.kind === 'waiting' || resolution.kind === 'review') return backWaiting(locale, eventId, requestId);
-    if (resolution.kind === 'expired' || resolution.kind === 'conflict') return back(locale, eventId, 'invalid');
-
-    try {
-      const session = await deps.createCheckout(deps.stripeEnv, resolution.requestJson, {
-        requestId: resolution.requestId,
-      });
-      const price = resolution.requestJson.line_items[0].price_data;
-      const attached = await deps.attachRequest(locals.db, {
-        requestId: resolution.requestId,
-        registrationId: resolution.registrationId,
-        sessionId: session.id,
-        sessionUrl: session.url,
-        amountCents: price.unit_amount,
-        currency: price.currency,
-      });
-      return attached ? redirect(session.url) : backWaiting(locale, eventId, requestId);
-    } catch (error) {
-      if (classifyRegistrationCheckoutFailure(error) === 'cancel') {
-        try {
-          const cancelled = await deps.cancelRequest(locals.db, resolution.requestId, resolution.registrationId);
-          if (!cancelled) return backWaiting(locale, eventId, requestId);
-        } catch {
-          // A failed compensating write remains pending for the recovery service.
-          return backWaiting(locale, eventId, requestId);
-        }
-        return back(locale, eventId, 'invalid');
-      }
-      return backWaiting(locale, eventId, requestId);
-    }
+    return processResolution(requestId, resolution);
   };
+}
+
+function responseForResolution(
+  locale: Locale,
+  eventId: number,
+  requestId: string,
+  resolution: CheckoutRequestResolution,
+  createAsWaiting: boolean,
+): Response | null {
+  if (resolution.kind === 'done') return redirect(`/${locale}/register/done?ok=1&paid=1`);
+  if (resolution.kind === 'redirect') return redirect(resolution.checkoutUrl);
+  if (resolution.kind === 'waiting' || resolution.kind === 'review') return backWaiting(locale, eventId, requestId);
+  if (resolution.kind === 'expired' || resolution.kind === 'conflict') return back(locale, eventId, 'invalid');
+  return createAsWaiting ? backWaiting(locale, eventId, requestId) : null;
 }
 
 export const POST: APIRoute = createRegistrationSubmitHandler();

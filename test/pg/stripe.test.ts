@@ -50,13 +50,17 @@ const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
 const CHECKOUT_SESSION = {
   id: 'cs_test_fixture',
   url: 'https://checkout.stripe.com/c/pay/cs_test_fixture',
+  mode: 'payment' as const,
   livemode: false as const,
   status: null,
   payment_status: null,
   payment_intent: null,
-  amount_total: null,
-  currency: null,
-  metadata: { kind: 'gift' },
+  amount_total: 5000,
+  currency: 'usd',
+  metadata: {
+    kind: 'gift', fund_id: '7', person_id: '42',
+    donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
+  },
 };
 const checkoutJson = (overrides: Record<string, unknown> = {}) => json({ ...CHECKOUT_SESSION, ...overrides });
 
@@ -368,7 +372,13 @@ describe('createOneTimeCheckout', () => {
   });
 
   it('anonymous donor → customer_email only, NO customer_creation, blank person_id', async () => {
-    const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_3' }));
+    const { fn, calls } = mockFetch(checkoutJson({
+      id: 'cs_test_3',
+      metadata: {
+        kind: 'gift', fund_id: '7', person_id: '',
+        donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
+      },
+    }));
     await createOneTimeCheckout(ENV, { ...base, personId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.customer_email).toBe('ada@example.com');
@@ -406,6 +416,73 @@ describe('createOneTimeCheckout', () => {
       });
     },
   );
+
+  it.each([
+    ['http://localhost:4321', 'http://localhost:4321/en/give'],
+    ['http://127.0.0.1:8787', 'http://127.0.0.1:8787/en/give'],
+    ['http://[::1]:3000', 'http://[::1]:3000/en/give'],
+  ])('allows exact loopback APP_ORIGIN %s for local setup', async (origin, cancelUrl) => {
+    const { fn, calls } = mockFetch(checkoutJson({
+      amount_total: 5000,
+      currency: 'usd',
+      metadata: {
+        kind: 'gift', fund_id: '7', person_id: '42',
+        donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
+      },
+    }));
+    await createOneTimeCheckout({ ...ENV, APP_ORIGIN: origin }, base, { fetcher: fn, requestId: REQUEST_ID });
+    expect(bodyEntries(calls[0]).cancel_url).toBe(cancelUrl);
+  });
+
+  it.each([
+    'http://church.example',
+    'http://localhost.evil.example:4321',
+    'http://user:pass@localhost:4321',
+    'http://0.0.0.0:4321',
+    'http://127.1:4321',
+    'http://2130706433:4321',
+    'http://0x7f000001:4321',
+    'http://[0:0:0:0:0:0:0:1]:4321',
+  ])('rejects non-loopback or credentialed HTTP APP_ORIGIN %s before fetch', async (origin) => {
+    const { fn, calls } = mockFetch(checkoutJson());
+    await expect(createOneTimeCheckout({ ...ENV, APP_ORIGIN: origin }, base, {
+      fetcher: fn,
+      requestId: REQUEST_ID,
+    })).rejects.toThrow('checkout_origin_invalid');
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    { url: 'https://evil.example/c/pay/cs_test_bad' },
+    { url: 'https://user:pass@checkout.stripe.com/c/pay/cs_test_bad' },
+    { url: 'https://checkout.stripe.com:444/c/pay/cs_test_bad' },
+    { mode: 'subscription' },
+    { amount_total: 9999 },
+    { currency: 'cad' },
+    { metadata: { kind: 'gift', fund_id: '8', person_id: '42', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '99', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Wrong', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Ada Lovelace' } },
+    {
+      metadata: {
+        kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Ada Lovelace',
+        donor_email: 'ada@example.com', unexpected: 'value',
+      },
+    },
+  ])('fails closed on mismatched one-time Checkout response %#', async (override) => {
+    const valid = {
+      mode: 'payment',
+      amount_total: 5000,
+      currency: 'usd',
+      metadata: {
+        kind: 'gift', fund_id: '7', person_id: '42',
+        donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
+      },
+    };
+    const { fn } = mockFetch(checkoutJson({ ...valid, ...override }));
+    await expect(createOneTimeCheckout(ENV, base, { fetcher: fn, requestId: REQUEST_ID }))
+      .rejects.toMatchObject({ code: 'stripe_response_invalid', stage: 'response' });
+  });
 });
 
 // ── createRecurringCheckout ──────────────────────────────────────────────────
@@ -423,7 +500,13 @@ describe('createRecurringCheckout', () => {
 
   it('subscription-mode donor with a customer → recurring price + subscription metadata', async () => {
     const { fn, calls } = mockFetch(
-      checkoutJson({ id: 'cs_test_r', url: 'https://checkout.stripe.com/c/pay/cs_test_r' }),
+      checkoutJson({
+        id: 'cs_test_r',
+        url: 'https://checkout.stripe.com/c/pay/cs_test_r',
+        mode: 'subscription',
+        amount_total: 2000,
+        metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+      }),
     );
     const out = await createRecurringCheckout(ENV, { ...base, customerId: 'cus_9' }, {
       fetcher: fn,
@@ -451,7 +534,12 @@ describe('createRecurringCheckout', () => {
   });
 
   it('without a customer → customer_email and never customer_creation', async () => {
-    const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_r2' }));
+    const { fn, calls } = mockFetch(checkoutJson({
+      id: 'cs_test_r2',
+      mode: 'subscription',
+      amount_total: 2000,
+      metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+    }));
     await createRecurringCheckout(ENV, { ...base, customerId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.customer_email).toBe('bo@example.com');
@@ -463,6 +551,27 @@ describe('createRecurringCheckout', () => {
     const { fn } = mockFetch(checkoutJson());
     await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0.5 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
     await expect(createRecurringCheckout(ENV, { ...base, amountCents: 0 }, { fetcher: fn, requestId: REQUEST_ID })).rejects.toThrow();
+  });
+
+  it.each([
+    { url: 'https://evil.example/c/pay/cs_test_bad' },
+    { url: 'https://user:pass@checkout.stripe.com/c/pay/cs_test_bad' },
+    { url: 'https://checkout.stripe.com:444/c/pay/cs_test_bad' },
+    { mode: 'payment' },
+    { amount_total: 9999 },
+    { currency: 'cad' },
+    { metadata: { kind: 'gift', fund_id: '4', person_id: '9' } },
+    { metadata: { kind: 'gift', fund_id: '3', person_id: '10' } },
+  ])('fails closed on mismatched recurring Checkout response %#', async (override) => {
+    const valid = {
+      mode: 'subscription',
+      amount_total: 2000,
+      currency: 'usd',
+      metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+    };
+    const { fn } = mockFetch(checkoutJson({ ...valid, ...override }));
+    await expect(createRecurringCheckout(ENV, base, { fetcher: fn, requestId: REQUEST_ID }))
+      .rejects.toMatchObject({ code: 'stripe_response_invalid', stage: 'response' });
   });
 });
 
@@ -495,7 +604,7 @@ describe('createRegistrationCheckout', () => {
       'line_items[0][price_data][unit_amount]': '2500',
       'line_items[0][price_data][product_data][name]': 'Summer Retreat',
       success_url: 'https://church.example/en/register/done?ok=1&paid=1',
-      cancel_url: 'https://church.example/en/register/12',
+      cancel_url: `https://church.example/en/register/12?error=waiting&checkoutRequestId=${REQUEST_ID}`,
       customer_email: 'reg@example.com',
       'metadata[kind]': 'registration',
       'metadata[registration_id]': '88',
@@ -511,7 +620,7 @@ describe('createRegistrationCheckout', () => {
     await createRegistrationCheckout(ENV, { ...base, locale: 'zh', eventId: 7 }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
     expect(b.success_url).toBe('https://church.example/zh/register/done?ok=1&paid=1');
-    expect(b.cancel_url).toBe('https://church.example/zh/register/7');
+    expect(b.cancel_url).toBe(`https://church.example/zh/register/7?error=waiting&checkoutRequestId=${REQUEST_ID}`);
   });
 
   it('rejects a non-positive amount (a free registration never builds a checkout)', async () => {
