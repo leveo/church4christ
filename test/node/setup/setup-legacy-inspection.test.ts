@@ -55,7 +55,7 @@ describe('real legacy installation inspection', () => {
     const stateFile = join(stateDir, BASELINE_D1_FILE);
     await mkdir(stateDir, { recursive: true });
     await writeFile(stateFile, 'existing sqlite bytes');
-    const openD1 = vi.fn(() => legacyDb());
+    const openD1 = vi.fn((_options: { mode: string; persistTo: string }) => legacyDb());
     try {
       const proposal: any = await inspectBaselineLocalD1Installation({
         catalog: rawCatalog,
@@ -81,7 +81,7 @@ describe('real legacy installation inspection', () => {
           hyperdriveId: null,
         },
       });
-      const inspectedPersistTo = openD1.mock.calls[0][0].persistTo;
+      const inspectedPersistTo = openD1.mock.calls[0]![0].persistTo;
       expect(inspectedPersistTo).not.toBe(join(root, '.wrangler/state'));
       expect(inspectedPersistTo).toMatch(/church-baseline-inspection-/);
       await expect(stat(inspectedPersistTo)).rejects.toMatchObject({ code: 'ENOENT' });
