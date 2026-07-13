@@ -36,7 +36,7 @@ managed service.
 ## Goals
 
 1. While either Stripe-consuming module is enabled, durably store every well-formed,
-   signature-verified Stripe event before acknowledging it.
+   signature-verified Stripe test-mode (`livemode: false`) event before acknowledging it.
 2. Process events at least once, prevent overlapping claims during the normal execution
    budget, and make lease-expiry overlap safe through idempotent domain effects.
 3. Make every processing failure visible and recoverable through bounded automatic retry
@@ -50,6 +50,8 @@ managed service.
 7. Keep webhook payloads and outbound Checkout recovery data private, bounded in retention,
    and absent from logs and admin HTML.
 8. Keep D1 installations free of unused Stripe schema and retry triggers.
+9. Launch Stripe support in test mode only, with no configuration or runtime path that
+   accepts live API keys, live webhook events, or live Checkout objects.
 
 ## Non-goals
 
@@ -61,6 +63,8 @@ managed service.
 - Adding partial-refund accounting.
 - Displaying or editing raw Stripe JSON in the browser.
 - Adding Cloudflare Queues, Workflows, or another paid/managed resource.
+- Enabling Stripe live mode. That requires a separate reviewed design, explicit operator
+  opt-in, and production-readiness work; it is not a hidden flag in this release.
 - Creating or modifying `church4christ-demo`.
 
 ## Chosen architecture
@@ -81,6 +85,34 @@ The alternatives were:
 
 The inbox is Supabase-only because the two Stripe-consuming modules already require
 Supabase. A D1 installation neither migrates the inbox nor schedules Stripe recovery.
+
+## Test-mode-only launch boundary
+
+The initial Stripe integration is deliberately test-mode-only:
+
+- Generated Supabase configuration declares the non-secret invariant
+  `STRIPE_MODE = "test"`. Setup accepts only a secret key whose trimmed value begins with
+  `sk_test_`; it rejects `sk_live_` and every non-test prefix before writing a local or
+  remote secret. The application has no Stripe publishable-key setting because it uses
+  server-created hosted Checkout URLs; if one is added later, this release must accept
+  only `pk_test_`.
+- Local doctor validates the readable local key prefix. Cloudflare does not reveal an
+  already-stored remote secret, so deploy doctor validates the `STRIPE_MODE = "test"`
+  marker and secret presence, while runtime still validates the secret-key prefix before
+  every Stripe API request. A remote live or malformed key therefore cannot create,
+  retrieve, or mutate anything through this application.
+- `STRIPE_WEBHOOK_SECRET` uses Stripe's mode-neutral `whsec_` format, so the verified event
+  envelope is the authoritative webhook mode signal. A signature-valid event with
+  `livemode: true` receives `400 live_mode_disabled` before receipt insertion or business
+  dispatch. Test-mode receipts persist `livemode = 0`; the column remains explicit for
+  immutable audit/schema clarity.
+- Every Checkout Session returned by create or retrieve must contain strict
+  `livemode: false`. A missing/non-boolean mode is a malformed Stripe response; a live
+  object is a `live_mode_disabled` configuration/integrity failure. Neither case can
+  confirm/cancel a registration, create/update a gift, attach a session, or clear a seat.
+- `/admin/stripe-events`, payment setup/readiness output, and payment-facing admin guidance
+  show a persistent **Stripe test mode** label. There is no UI, manifest feature, or
+  environment switch that enables live mode.
 
 ## Components
 
@@ -279,7 +311,8 @@ This is deliberate at-least-once behavior.
 3. Require a JSON object with a non-empty bounded string `id` and `type`, a non-negative
    integer `created`, a strict boolean `livemode`, and `api_version` that is null/absent or
    a bounded string. A malformed verified envelope receives `400` and is not acknowledged;
-   no coercion is performed.
+   no coercion is performed. A well-formed verified envelope with `livemode: true` receives
+   `400 live_mode_disabled` and is not stored or dispatched.
 4. Compute SHA-256 from the exact body and insert it as `pending`.
 5. When `event_id` already exists:
 
@@ -414,6 +447,19 @@ created: local preflight/configuration failure or a Stripe HTTP `4xx` response o
 and any post-Stripe database failure are ambiguous and do not cancel a possibly valid
 session. The eventual signed webhook can self-attach and confirm/cancel the row.
 
+The canonical Registration Checkout parameters omit `expires_at`. Stripe therefore assigns
+the hosted Session expiry when a same-key create actually reaches Stripe. This is necessary
+because an absolute timestamp captured during the browser request would become invalid
+during the 23-hour-45-minute recovery window and make a safe same-key retry impossible.
+The old application-generated 30-minute expiry is removed; the pending registration keeps
+holding its seat until Stripe reports the Session expired/failed/paid or an authorized
+operator completes the guarded cancel action.
+
+For the same reason, capacity counting no longer drops a pending registration after the
+current one-hour freshness heuristic. Every `pending` row holds a seat regardless of age;
+only a guarded paid/expired/failed transition or the authorized manual cancel changes the
+registration to a terminal state and releases or confirms that seat.
+
 The five-minute Supabase Stripe recovery pass also owns outbound registration
 reconciliation. It examines every paid registration still pending 45 minutes after the
 Checkout request, whether its session is attached or unattached:
@@ -493,7 +539,10 @@ preflight/diff/replacement path rather than being silently edited.
 
 Stripe remains optional for Supabase features. With no stored events, the recovery pass is
 a bounded no-op; doctor continues to report absent Stripe secrets as a limitation for
-optional online payments and an error for partial configuration.
+optional online payments and an error for partial configuration. When Stripe is configured,
+setup and doctor require the explicit test-mode marker; local validation also requires an
+`sk_test_` secret. Deploy doctor reports remote secret presence without pretending it can
+read the stored value, and runtime remains the authoritative key-prefix enforcement.
 
 ## Security, privacy, and retention
 
@@ -570,9 +619,13 @@ Implementation follows strict test-first red/green cycles.
 
 ### Endpoint and processor
 
-- Oversized body, bad signature, absent secret, malformed envelope, missing ID/type,
-  non-boolean livemode, invalid created timestamp, and overlong audit fields never create
-  a receipt.
+- Integrated webhook fixtures default to complete, genuinely signed `livemode: false`
+  envelopes. Oversized body, bad signature, absent secret, malformed envelope, missing
+  ID/type, non-boolean livemode, invalid created timestamp, and overlong audit fields never
+  create a receipt.
+- A separately signed, otherwise-valid `livemode: true` envelope receives exactly
+  `400 live_mode_disabled`, creates no receipt, invokes no dispatcher or domain writer,
+  and schedules no `waitUntil` acceleration.
 - Receipt failure returns non-2xx; durable receipt returns `200` before domain completion.
 - Active leases prevent ordinary duplicate dispatch; a deliberately paused attempt that
   resumes after lease expiry overlaps a successor without duplicating domain effects.
@@ -612,6 +665,9 @@ Implementation follows strict test-first red/green cycles.
   covered.
 - Manual verified-session attach rejects each request-ID, registration-ID, amount, and
   currency mismatch independently, and proves unpaid/processing sessions never confirm.
+- Stripe API calls reject `sk_live_` and non-test keys before fetch. Create/retrieve paths
+  reject live or mode-less Checkout objects without domain mutation; only strict
+  `livemode: false` objects enter the existing session-state matrix.
 - Private request JSON/URL pruning and permanent request digest metadata obey the exact
   attachment, terminal, manual-review, and 24-hour boundaries.
 
@@ -627,14 +683,18 @@ Implementation follows strict test-first red/green cycles.
   Stripe recovery; source extraction verifies all four Worker branches.
 - D1 clean-room setup remains unchanged and receives no Stripe table/trigger.
 - Supabase clean-room setup applies the new migration and passes doctor.
+- Setup rejects live/non-test secret keys before local or remote secret writes; generated
+  configuration and deploy doctor require `STRIPE_MODE = "test"`; local doctor checks the
+  readable `sk_test_` prefix; the admin operations page visibly identifies test mode.
 - Full unit, Worker/D1, real-Postgres, E2E, Astro check, build, token, docs, and schema-parity
   gates pass with no unexpected skip or ignored-error weakening.
 
 ## Acceptance criteria
 
-1. While either Stripe-consuming module is enabled, a valid Stripe event is never
+1. While either Stripe-consuming module is enabled, a valid test-mode Stripe event is never
    acknowledged before its immutable receipt is durable; with both disabled, the endpoint
-   is an explicit no-storage 404.
+   is an explicit no-storage 404. A validly signed live-mode event is outside the accepted
+   integration contract and receives the explicit no-storage `400 live_mode_disabled`.
 2. A receipt can always be classified as pending, processing, processed, ignored, failed,
    or dismissed, with a visible lifetime attempt count, current-cycle count, latest
    diagnostic, and no silent drop path.
@@ -665,6 +725,10 @@ Implementation follows strict test-first red/green cycles.
     request JSON/URLs obey their exact bounded retention rules while permanent digest/audit
     metadata still blocks duplicate effects.
 14. All quality gates pass, and `church4christ-demo` remains empty throughout this project.
+15. Stripe is test-mode-only: setup rejects live/non-test keys, runtime refuses them before
+    network I/O, live webhook envelopes are not persisted, live or mode-less Checkout
+    objects cannot mutate domain state, and the admin/setup surfaces visibly identify test
+    mode. Enabling live mode is impossible without a future reviewed code change.
 
 ## Primary references
 
