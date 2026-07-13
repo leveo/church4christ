@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
@@ -236,6 +237,63 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     ))[0].count).toBe(1);
   });
 
+  it('serializes a capacity-one race without exposing a deadlock or overselling', async () => {
+    const eventId = await event(1);
+    const otherSql = pgClient();
+    const otherDb = new PgAdapter(otherSql);
+    const gateSql = postgres(DATABASE_URL, { max: 1, fetch_types: false, onnotice: () => {} });
+    try {
+      await sql.unsafe(`
+        CREATE FUNCTION test_checkout_capacity_barrier() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          PERFORM pg_advisory_xact_lock_shared(8808);
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER test_checkout_capacity_barrier
+        AFTER INSERT ON registrations
+        FOR EACH ROW EXECUTE FUNCTION test_checkout_capacity_barrier()
+      `);
+      await gateSql.unsafe(`SELECT pg_advisory_lock(8808)`);
+      const pending = Promise.all([
+        resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId))
+          .then((result) => result.kind)
+          .catch((error: Error) => error.message),
+        resolveRegistrationCheckoutRequest(otherDb, input(REQUEST_B, eventId, { email: 'other@example.com' }))
+          .then((result) => result.kind)
+          .catch((error: Error) => error.message),
+      ]);
+      let waiting = 0;
+      for (let attempt = 0; attempt < 100 && waiting < 2; attempt += 1) {
+        // Before the fix both contenders wait on this advisory trigger. After
+        // the fix one waits there while the other waits on the earlier event
+        // row lock. Either way, two ungranted locks proves both database
+        // transactions are active before the coordinator releases the gate.
+        const [row] = await sql.unsafe(`SELECT count(*)::int AS count FROM pg_locks WHERE granted=false`);
+        waiting = row.count as number;
+        if (waiting < 2) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(2);
+      await gateSql.unsafe(`SELECT pg_advisory_unlock(8808)`);
+      const outcomes = await pending;
+      expect(outcomes.sort()).toEqual(['create', 'event_full']);
+      expect(outcomes).not.toContain('deadlock detected');
+      expect((await sql.unsafe(`SELECT count(*)::int AS count FROM registrations WHERE event_id=$1`, [eventId]))[0].count).toBe(1);
+      expect((await sql.unsafe(
+        `SELECT count(*)::int AS count
+         FROM church_private.stripe_checkout_requests q
+         JOIN registrations r ON r.id=q.registration_id WHERE r.event_id=$1`,
+        [eventId],
+      ))[0].count).toBe(1);
+    } finally {
+      await gateSql.unsafe(`SELECT pg_advisory_unlock_all()`);
+      await sql.unsafe(`DROP TRIGGER IF EXISTS test_checkout_capacity_barrier ON registrations`);
+      await sql.unsafe(`DROP FUNCTION IF EXISTS test_checkout_capacity_barrier()`);
+      await gateSql.end();
+      await otherSql.end();
+    }
+  });
+
   it('applies the exact pending reuse matrix without a second registration', async () => {
     const eventId = await event();
     const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
@@ -244,10 +302,11 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
 
     await sql.unsafe(
       `UPDATE church_private.stripe_checkout_requests SET state='attached', request_json=NULL, session_url=$2 WHERE request_id=$1`,
-      [REQUEST_A, 'https://checkout.stripe.test/c/pay/cs_test_one'],
+      [REQUEST_A, 'https://checkout.stripe.com/c/pay/cs_test_one?prefilled=true#checkout'],
     );
     expect(await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId))).toEqual({
-      kind: 'redirect', registrationId: created.registrationId, checkoutUrl: 'https://checkout.stripe.test/c/pay/cs_test_one',
+      kind: 'redirect', registrationId: created.registrationId,
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_one?prefilled=true#checkout',
     });
 
     await sql.unsafe(`UPDATE church_private.stripe_checkout_requests SET session_url=NULL WHERE request_id=$1`, [REQUEST_A]);
@@ -263,6 +322,61 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       kind: 'review', registrationId: created.registrationId, reason: 'manual_review',
     });
     expect((await sql.unsafe(`SELECT count(*)::int AS count FROM registrations WHERE event_id=$1`, [eventId]))[0].count).toBe(1);
+  });
+
+  it('fails closed when stored create parameters are incomplete, extended, or registration-mismatched', async () => {
+    const eventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+    const valid = created.requestJson;
+    const corrupt: unknown[] = [
+      { metadata: valid.metadata, payment_intent_data: valid.payment_intent_data },
+      { ...valid, customer: 'cus_unexpected' },
+      {
+        ...valid,
+        line_items: [{ ...valid.line_items[0], price_data: { ...valid.line_items[0].price_data, secret: 'not-allowed' } }],
+      },
+      {
+        ...valid,
+        line_items: [{ ...valid.line_items[0], price_data: { ...valid.line_items[0].price_data, unit_amount: 9999 } }],
+      },
+      {
+        ...valid,
+        line_items: [{ ...valid.line_items[0], price_data: { ...valid.line_items[0].price_data, currency: 'cad' } }],
+      },
+      { ...valid, customer_email: 'attacker@example.com' },
+      { ...valid, success_url: 'https://evil.example/en/register/done?ok=1&paid=1' },
+      { ...valid, cancel_url: `https://church.example/en/register/${eventId + 1}` },
+      { ...valid, line_items: [] },
+    ];
+
+    for (const requestJson of corrupt) {
+      await sql.unsafe(
+        `UPDATE church_private.stripe_checkout_requests SET request_json=$2 WHERE request_id=$1`,
+        [REQUEST_A, JSON.stringify(requestJson)],
+      );
+      await expect(resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId)))
+        .rejects.toThrow('checkout_request_corrupt');
+    }
+  });
+
+  it('rejects a stored redirect unless it is a credential-free default-port checkout.stripe.com HTTPS URL', async () => {
+    const eventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    if (created.kind !== 'create') throw new Error('expected create');
+    for (const checkoutUrl of [
+      'https://user:pass@checkout.stripe.com/c/pay/cs_test_one',
+      'https://evil.example/c/pay/cs_test_one',
+      'https://checkout.stripe.com:444/c/pay/cs_test_one',
+    ]) {
+      await sql.unsafe(
+        `UPDATE church_private.stripe_checkout_requests
+         SET state='attached', request_json=NULL, session_url=$2 WHERE request_id=$1`,
+        [REQUEST_A, checkoutUrl],
+      );
+      await expect(resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId)))
+        .rejects.toThrow('checkout_request_corrupt');
+    }
   });
 
   it('converges confirmed/cancelled terminal cleanup and never exposes retained request JSON or URL', async () => {

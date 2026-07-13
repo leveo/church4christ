@@ -66,6 +66,10 @@ interface CheckoutRequestRow {
   state: 'creating' | 'attached' | 'manual_review' | 'resolved';
   status: 'pending' | 'confirmed' | 'cancelled';
   stripe_checkout_session_id: string | null;
+  event_id: number;
+  amount_cents: number;
+  currency: string;
+  email: string;
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -172,29 +176,105 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function corruptRequest(): never {
+  throw new Error('checkout_request_corrupt');
+}
+
+function safeApplicationUrl(value: unknown): URL {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 2048) corruptRequest();
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    corruptRequest();
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) corruptRequest();
+  return url;
+}
+
 function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeCheckoutParams {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error('checkout_request_corrupt');
+    corruptRequest();
   }
-  if (!isPlainObject(parsed) || !isPlainObject(parsed.metadata) || !isPlainObject(parsed.payment_intent_data)) {
-    throw new Error('checkout_request_corrupt');
+  if (
+    !isPlainObject(parsed)
+    || !hasExactKeys(parsed, [
+      'mode',
+      'line_items',
+      'success_url',
+      'cancel_url',
+      'customer_email',
+      'metadata',
+      'payment_intent_data',
+    ])
+    || parsed.mode !== 'payment'
+    || !Array.isArray(parsed.line_items)
+    || parsed.line_items.length !== 1
+    || typeof parsed.customer_email !== 'string'
+    || parsed.customer_email !== row.email
+    || !isPlainObject(parsed.metadata)
+    || !isPlainObject(parsed.payment_intent_data)
+    || !hasExactKeys(parsed.payment_intent_data, ['metadata'])
+  ) {
+    corruptRequest();
   }
   const paymentMetadata = parsed.payment_intent_data.metadata;
-  if (!isPlainObject(paymentMetadata)) throw new Error('checkout_request_corrupt');
+  if (!isPlainObject(paymentMetadata)) corruptRequest();
   const registrationId = String(row.registration_id);
   for (const metadata of [parsed.metadata, paymentMetadata]) {
     if (
-      metadata.kind !== 'registration'
+      !hasExactKeys(metadata, ['kind', 'registration_id', 'request_id'])
+      || metadata.kind !== 'registration'
       || metadata.request_id !== row.request_id
       || metadata.registration_id !== registrationId
     ) {
       throw new Error('checkout_request_metadata_mismatch');
     }
   }
-  if ('expires_at' in parsed) throw new Error('checkout_request_corrupt');
+
+  const lineItem = parsed.line_items[0];
+  if (
+    !isPlainObject(lineItem)
+    || !hasExactKeys(lineItem, ['quantity', 'price_data'])
+    || lineItem.quantity !== 1
+    || !isPlainObject(lineItem.price_data)
+    || !hasExactKeys(lineItem.price_data, ['currency', 'unit_amount', 'product_data'])
+    || lineItem.price_data.unit_amount !== row.amount_cents
+    || !Number.isSafeInteger(lineItem.price_data.unit_amount)
+    || (lineItem.price_data.unit_amount as number) <= 0
+    || lineItem.price_data.currency !== row.currency
+    || typeof lineItem.price_data.currency !== 'string'
+    || !/^[a-z]{3}$/.test(lineItem.price_data.currency)
+    || !isPlainObject(lineItem.price_data.product_data)
+    || !hasExactKeys(lineItem.price_data.product_data, ['name'])
+    || typeof lineItem.price_data.product_data.name !== 'string'
+    || lineItem.price_data.product_data.name.trim().length < 1
+  ) {
+    corruptRequest();
+  }
+
+  const success = safeApplicationUrl(parsed.success_url);
+  const cancel = safeApplicationUrl(parsed.cancel_url);
+  const successMatch = success.pathname.match(/^\/(en|zh)\/register\/done$/);
+  if (
+    !successMatch
+    || success.search !== '?ok=1&paid=1'
+    || success.hash
+    || cancel.origin !== success.origin
+    || cancel.pathname !== `/${successMatch[1]}/register/${row.event_id}`
+    || cancel.search
+    || cancel.hash
+  ) {
+    corruptRequest();
+  }
   return parsed as unknown as StripeCheckoutParams;
 }
 
@@ -204,7 +284,9 @@ async function loadRequest(db: AppDb, requestId: string): Promise<CheckoutReques
       `SELECT q.request_id AS request_id, q.request_sha256 AS request_sha256,
               q.registration_id AS registration_id, q.request_json AS request_json,
               q.session_url AS session_url, q.state AS state,
-              r.status AS status, r.stripe_checkout_session_id AS stripe_checkout_session_id
+              r.status AS status, r.stripe_checkout_session_id AS stripe_checkout_session_id,
+              r.event_id AS event_id, r.amount_cents AS amount_cents,
+              r.currency AS currency, r.email AS email
        FROM church_private.stripe_checkout_requests q
        JOIN registrations r ON r.id = q.registration_id
        WHERE q.request_id = ?1`,
@@ -259,7 +341,15 @@ async function resolveRow(
       } catch {
         throw new Error('checkout_request_corrupt');
       }
-      if (url.protocol !== 'https:') throw new Error('checkout_request_corrupt');
+      if (
+        url.protocol !== 'https:'
+        || url.hostname !== 'checkout.stripe.com'
+        || url.username
+        || url.password
+        || url.port
+      ) {
+        throw new Error('checkout_request_corrupt');
+      }
       return { kind: 'redirect', registrationId: row.registration_id, checkoutUrl: row.session_url };
     }
     return { kind: 'waiting', registrationId: row.registration_id };
@@ -296,6 +386,12 @@ export async function resolveRegistrationCheckoutRequest(
   const requestJson = buildRegistrationCheckoutParams({ ...input, registrationId });
   const serializedRequest = JSON.stringify(requestJson);
   const statements: AppStatement[] = [
+    // Acquire the parent-row lock before the registration insert takes its FK
+    // key-share lock. Capacity-one contenders therefore serialize instead of
+    // deadlocking when they reach the final recount guard.
+    db
+      .prepare(`SELECT id FROM reg_events WHERE id = ?1 FOR UPDATE`)
+      .bind(normalized.eventId),
     db
       .prepare(
         `INSERT INTO registrations
