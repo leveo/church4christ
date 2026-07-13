@@ -1,0 +1,158 @@
+import { describe, expect, it, vi } from 'vitest';
+import rawCatalog from '../../../config/capabilities.json';
+import { collectSupabaseSecret, runSetup } from '../../../scripts/setup/index.mjs';
+import { collectInteractiveAnswers } from '../../../scripts/setup/prompts.mjs';
+
+const baseFlags = [
+  '--mode', 'local', '--preset', 'website-community', '--site-slug', 'grace-church',
+  '--church-name', 'Grace Church', '--locale', 'en', '--admin-name', 'Grace Admin',
+  '--admin-email', 'admin@example.test',
+];
+
+function deps(overrides: Record<string, unknown> = {}): any {
+  const output = vi.fn();
+  return {
+    catalog: rawCatalog,
+    interactive: false,
+    output,
+    errorOutput: vi.fn(),
+    inspectExisting: vi.fn(async () => ({})),
+    apply: vi.fn(async (_plan: unknown, _options: unknown) => ({ doctor: { schemaVersion: 1, status: 'ready', checks: [], exitCode: 0 } })),
+    doctor: vi.fn(async () => ({ schemaVersion: 1, status: 'ready', checks: [], exitCode: 0 })),
+    confirm: vi.fn(async () => true),
+    collectSupabaseSecret: vi.fn(async () => ({ dbUrl: 'postgres://user:password@db.example.test/app' })),
+    formatPlan: (plan: unknown) => JSON.stringify(plan, null, 2),
+    formatResult: (result: unknown) => JSON.stringify(result, null, 2),
+    formatDoctor: (result: unknown) => JSON.stringify(result, null, 2),
+    ...overrides,
+  };
+}
+
+describe('guided setup CLI', () => {
+  it('--help exits zero without prompting, files, commands, inspection, or apply', async () => {
+    const d = deps({ ask: vi.fn(), runner: { run: vi.fn() }, writeFile: vi.fn() });
+    await expect(runSetup(['--help'], d as any)).resolves.toBe(0);
+    expect(d.output).toHaveBeenCalledOnce();
+    expect(d.ask).not.toHaveBeenCalled();
+    expect(d.inspectExisting).not.toHaveBeenCalled();
+    expect(d.apply).not.toHaveBeenCalled();
+    expect(d.runner.run).not.toHaveBeenCalled();
+    expect(d.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('interactive answers and equivalent flags build deeply equal plans', async () => {
+    const flagDeps = deps();
+    await runSetup([...baseFlags, '--dry-run', '--json'], flagDeps as any);
+    const flagged = JSON.parse(flagDeps.output.mock.calls[0][0]).plan;
+    const values: Record<string, unknown> = {
+      mode: 'local', featureChoice: 'website-community', siteSlug: 'grace-church',
+      churchName: 'Grace Church', locale: 'en', adminName: 'Grace Admin',
+      adminEmail: 'admin@example.test', demoData: false,
+    };
+    const interactiveDeps = deps({ interactive: true, ask: vi.fn(async (question: any) => values[question.key]) });
+    await runSetup(['--dry-run', '--json'], interactiveDeps as any);
+    const prompted = JSON.parse(interactiveDeps.output.mock.calls[0][0]).plan;
+    expect(prompted).toEqual(flagged);
+    expect(prompted.backend).toBe('d1');
+    expect(prompted.modules).toHaveLength(13);
+  });
+
+  it('Full Church automatically selects Supabase and all 16 modules', async () => {
+    const d = deps();
+    await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--dry-run', '--json'], d as any);
+    const plan = JSON.parse(d.output.mock.calls[0][0]).plan;
+    expect(plan.backend).toBe('supabase');
+    expect(plan.modules).toHaveLength(16);
+    expect(d.collectSupabaseSecret).not.toHaveBeenCalled();
+  });
+
+  it('--dry-run --json emits one versioned plan and performs zero mutations', async () => {
+    const d = deps({ runner: { run: vi.fn() }, writeFile: vi.fn(), stateStore: { mark: vi.fn() } });
+    await expect(runSetup([...baseFlags, '--dry-run', '--json'], d as any)).resolves.toBe(0);
+    expect(d.output).toHaveBeenCalledOnce();
+    expect(JSON.parse(d.output.mock.calls[0][0])).toMatchObject({ schemaVersion: 1, kind: 'setup-plan' });
+    expect(d.apply).not.toHaveBeenCalled();
+    expect(d.runner.run).not.toHaveBeenCalled();
+    expect(d.writeFile).not.toHaveBeenCalled();
+    expect(d.stateStore.mark).not.toHaveBeenCalled();
+  });
+
+  it('noninteractive missing answers fail with all exact missing flags listed', async () => {
+    const d = deps();
+    await expect(runSetup(['--mode', 'deploy', '--preset', 'website'], d as any)).rejects.toThrow(
+      '--site-slug, --church-name, --locale, --admin-email, --admin-name, --app-origin, --email-from',
+    );
+    expect(d.inspectExisting).not.toHaveBeenCalled();
+    expect(d.apply).not.toHaveBeenCalled();
+  });
+
+  it('D1 override plus portal/giving/registration lists all offenders before mutation', async () => {
+    const d = deps();
+    await expect(runSetup(['--mode', 'local', '--modules', 'portal,giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test'], d as any))
+      .rejects.toThrow(/portal, giving, registration/);
+    expect(d.apply).not.toHaveBeenCalled();
+  });
+
+  it('confirmation rejection leaves files, commands, state, database, and secrets untouched', async () => {
+    const d = deps({ confirm: vi.fn(async () => false), runner: { run: vi.fn() }, writeFile: vi.fn(), stateStore: { mark: vi.fn() }, db: { prepare: vi.fn() } });
+    await expect(runSetup(baseFlags, d as any)).resolves.toBe(0);
+    expect(d.apply).not.toHaveBeenCalled();
+    expect(d.collectSupabaseSecret).not.toHaveBeenCalled();
+    expect(d.runner.run).not.toHaveBeenCalled();
+    expect(d.writeFile).not.toHaveBeenCalled();
+    expect(d.stateStore.mark).not.toHaveBeenCalled();
+    expect(d.db.prepare).not.toHaveBeenCalled();
+  });
+
+  it('doctor is exclusive and emits a single JSON document', async () => {
+    const d = deps();
+    await expect(runSetup(['--doctor', '--strict', '--json'], d as any)).resolves.toBe(0);
+    expect(d.doctor).toHaveBeenCalledWith({ strict: true });
+    expect(JSON.parse(d.output.mock.calls[0][0])).toMatchObject({ schemaVersion: 1, status: 'ready' });
+    await expect(runSetup(['--doctor', '--dry-run'], d as any)).rejects.toThrow(/cannot be combined/i);
+  });
+
+  it('requires explicit Hyperdrive credential argv consent before deploy mutation', async () => {
+    const flags = ['--mode', 'deploy', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--app-origin', 'https://full.example.test', '--email-from', 'serve@full.example.test', '--yes'];
+    const refused = deps();
+    await expect(runSetup(flags, refused as any)).rejects.toThrow(/allow-hyperdrive-secret-in-argv/);
+    expect(refused.collectSupabaseSecret).not.toHaveBeenCalled();
+    expect(refused.apply).not.toHaveBeenCalled();
+
+    const allowed = deps();
+    await runSetup([...flags, '--allow-hyperdrive-secret-in-argv'], allowed as any);
+    expect(allowed.apply).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ allowHyperdriveSecretInArgv: true }));
+  });
+
+  it('passes the Supabase URL only inside secretContext', async () => {
+    const d = deps();
+    await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any);
+    expect(d.collectSupabaseSecret).toHaveBeenCalledOnce();
+    expect(d.apply.mock.calls[0][1]).toMatchObject({ secretContext: { dbUrl: 'postgres://user:password@db.example.test/app' } });
+    expect(JSON.stringify(d.apply.mock.calls[0][0])).not.toContain('postgres://');
+  });
+
+  it('collects the Supabase URL from env first and otherwise requires masked interactive input', async () => {
+    const maskedInput = vi.fn(async () => 'postgres://masked:password@db.example.test/app');
+    await expect(collectSupabaseSecret({ environment: { SUPABASE_DB_URL: 'postgres://env:password@db.example.test/app' }, interactive: true, maskedInput }))
+      .resolves.toEqual({ dbUrl: 'postgres://env:password@db.example.test/app' });
+    expect(maskedInput).not.toHaveBeenCalled();
+    await expect(collectSupabaseSecret({ environment: {}, interactive: false, maskedInput })).rejects.toThrow(/SUPABASE_DB_URL/);
+    expect(maskedInput).not.toHaveBeenCalled();
+    await expect(collectSupabaseSecret({ environment: {}, interactive: true, maskedInput })).resolves.toEqual({ dbUrl: 'postgres://masked:password@db.example.test/app' });
+    expect(maskedInput).toHaveBeenCalledOnce();
+  });
+
+  it('asks interactive questions sequentially in the documented order', async () => {
+    const ordered: string[] = [];
+    const values: Record<string, unknown> = {
+      mode: 'deploy', featureChoice: 'website', siteSlug: 'ordered', churchName: 'Ordered Church',
+      locale: 'zh', adminName: 'Admin', adminEmail: 'admin@example.test',
+      appOrigin: 'https://ordered.example.test', emailFrom: 'serve@ordered.example.test', demoData: false,
+    };
+    const ask = vi.fn(async (question: any) => { ordered.push(question.key); return values[question.key]; });
+    await collectInteractiveAnswers({ demoData: false, demoDataSpecified: false } as any, rawCatalog, ask);
+    expect(ordered).toEqual(['mode', 'featureChoice', 'siteSlug', 'churchName', 'locale', 'adminName', 'adminEmail', 'appOrigin', 'emailFrom', 'demoData']);
+    expect(ask).toHaveBeenCalledTimes(10);
+  });
+});

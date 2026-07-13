@@ -15,6 +15,8 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
   --backend d1|supabase
   --demo-data
   --yes --dry-run --json --force-config --promote-existing-admin
+  --allow-hyperdrive-secret-in-argv
+      Explicitly permit Wrangler to receive a Supabase URL in its argv when creating deploy Hyperdrive
   --doctor --strict
   --help`;
 
@@ -42,6 +44,7 @@ export function parseSetupArgs(argv, catalog) {
       json: { type: 'boolean' },
       'force-config': { type: 'boolean' },
       'promote-existing-admin': { type: 'boolean' },
+      'allow-hyperdrive-secret-in-argv': { type: 'boolean' },
       doctor: { type: 'boolean' },
       strict: { type: 'boolean' },
     },
@@ -92,6 +95,8 @@ export function parseSetupArgs(argv, catalog) {
     json: values.json ?? false,
     forceConfig: values['force-config'] ?? false,
     promoteExistingAdmin: values['promote-existing-admin'] ?? false,
+    allowHyperdriveSecretInArgv: values['allow-hyperdrive-secret-in-argv'] ?? false,
+    demoDataSpecified: values['demo-data'] !== undefined,
     doctor: false,
     strict: false,
   };
