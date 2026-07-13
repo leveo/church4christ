@@ -24,12 +24,13 @@ function commonDatabaseSteps(options) {
   if (!options.db || typeof options.db.prepare !== 'function') throw new TypeError('provider AppDb is required');
   if (!Array.isArray(options.moduleKeys)) throw new TypeError('moduleKeys are required');
   return {
-    'initialize-modules': providerStep(async ({ plan, recovering = false } = {}) => {
+    'initialize-modules': providerStep(async ({ plan, recovering = false, managedInstallation = false } = {}) => {
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
       const key = `site.name.${plan?.site?.locale}`;
       const current = await options.db.prepare('SELECT value FROM settings WHERE key=?').bind(key).first('value');
       const validCurrent = typeof current === 'string' && current.trim() === current && current.length > 0 && current.length <= 200 && !/[\0-\x1f\x7f]/.test(current);
-      if (!(recovering || options.preserveSiteIdentity) || !validCurrent) {
+      const preserveImported = options.preserveSiteIdentity && !managedInstallation;
+      if (!(recovering || preserveImported) || !validCurrent) {
         await options.db.prepare(
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
         ).bind(key, plan?.site?.name).run();
@@ -170,9 +171,12 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
   if (actions.includes('ensure-resources') && typeof stateStore.getEvidence !== 'function') throw new TypeError('stateStore getEvidence is required for ensure-resources recovery');
   if (actions.includes('ensure-resources') && !['d1', 'supabase'].includes(plan.backend)) throw new TypeError('setup plan backend is required for resource recovery');
   await stateStore.load(fingerprintPlan(plan));
+  const initialCompletion = new Map();
+  for (const action of actions) initialCompletion.set(action, await stateStore.has(action));
+  const managedInstallation = [...initialCompletion.entries()].some(([name, completed]) => completed && !['verify-provider', 'ensure-resources'].includes(name));
   const results = []; let resolvedResources = plan.resources;
   for (const name of actions) {
-    const completed = await stateStore.has(name);
+    const completed = initialCompletion.get(name) === true;
     if (completed && name === 'ensure-resources' && typeof stateStore.getEvidence === 'function') {
       const evidence = await stateStore.getEvidence(name);
       if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
@@ -180,7 +184,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
       resolvedResources = Object.freeze({ ...evidence });
     }
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
-    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed });
+    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed, managedInstallation });
     if (await steps[name].verify(context) === true) {
       if (!completed) await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null);
       results.push({ step: name, status: completed ? 'already-complete' : 'verified' });
@@ -193,7 +197,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
       validateResolvedResources(result.resolvedResources, plan);
       resolvedResources = Object.freeze({ ...result.resolvedResources });
     }
-    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed }));
+    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
     if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
     await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null));
     results.push({ step: name, status: result.changed ? 'changed' : 'verified' });

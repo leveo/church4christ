@@ -189,6 +189,41 @@ describe('concrete provider actions', () => {
 });
 
 describe('setup state', () => {
+  it('keeps desired-plan fingerprints stable across resolved provider IDs', () => {
+    const base: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Church' }, modules: ['events'], actions: ['ensure-resources'] };
+    const resolved = { ...base, resources: { d1DatabaseName: 'church-db', d1DatabaseId: 'local', r2BucketName: 'church-media', hyperdriveId: null }, existingInstallation: true };
+    expect(fingerprintPlan(base)).toBe(fingerprintPlan(resolved));
+    expect(fingerprintPlan({ ...resolved, resources: { ...resolved.resources, d1DatabaseId: 'remote-id' } })).toBe(fingerprintPlan(base));
+    expect(fingerprintPlan({ ...resolved, resources: { ...resolved.resources, d1DatabaseName: 'other-db' } })).not.toBe(fingerprintPlan(base));
+    expect(fingerprintPlan({ ...base, backend: 'supabase' })).not.toBe(fingerprintPlan(base));
+    expect(fingerprintPlan({ ...base, site: { ...base.site, name: 'Other Church' } })).not.toBe(fingerprintPlan(base));
+  });
+
+  it('recovers a managed crash after seed, then preserves a completed canonical customization', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-partial-recovery-'));
+    const store = createStateStore(join(root, 'state.json'));
+    const resources = { d1DatabaseName: 'church-db', d1DatabaseId: 'local', r2BucketName: 'church-media', hyperdriveId: null };
+    const plan: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Requested Church', locale: 'en' }, modules: ['events'], actions: ['ensure-resources', 'write-manifest', 'write-config', 'seed', 'initialize-modules'] };
+    const completed = new Set<string>();
+    const simple = (name: string) => ({ apply: async () => { completed.add(name); return { changed: true }; }, verify: async () => completed.has(name) });
+    const firstSteps: any = {
+      'ensure-resources': { apply: async () => { completed.add('ensure-resources'); return { changed: true, resolvedResources: resources }; }, verify: async () => completed.has('ensure-resources') },
+      'write-manifest': simple('write-manifest'), 'write-config': simple('write-config'), seed: simple('seed'),
+      'initialize-modules': { apply: async () => { throw new Error('crash before initialize'); }, verify: async () => false },
+    };
+    await expect(applySetup(plan, { steps: firstSteps, stateStore: store })).rejects.toThrow('crash before initialize');
+
+    let siteName = 'Church4Christ'; const settings = new Map<string, string>();
+    const db: any = { prepare(sql: string) { let binds: any[] = []; return { bind(...values: any[]) { binds = values; return this; }, async first(column?: string) { const value = settings.get(binds[0]) ?? (binds[0] === 'site.name.en' ? siteName : null); return column ? value : value === null ? null : { value }; }, async run() { if (sql.startsWith('INSERT INTO settings') && binds[0] === 'site.name.en') siteName = binds[1]; else for (let i = 0; i < binds.length; i += 2) settings.set(binds[i], binds[i + 1]); return { success: true, meta: { changes: 1 } }; } }; } };
+    const provider = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db, moduleKeys: ['events'], preserveSiteIdentity: true, verify: { migrate: async () => true, seed: async () => true, 'initialize-modules': async (context: any) => context.recovering ? Boolean(siteName) : siteName === 'Requested Church', 'bootstrap-admin': async () => true } });
+    const secondSteps: any = { 'ensure-resources': { apply: vi.fn(), verify: async () => true }, 'write-manifest': simple('write-manifest'), 'write-config': simple('write-config'), seed: simple('seed'), 'initialize-modules': provider['initialize-modules'] };
+    await applySetup({ ...plan, resources }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
+    expect(siteName).toBe('Requested Church');
+    siteName = 'Church4Christ';
+    await applySetup({ ...plan, resources }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
+    expect(siteName).toBe('Church4Christ');
+  });
+
   it('is versioned, resets completion on fingerprint change, clones evidence, and fails corrupt state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'c4c-state-')); const path = join(root, 'state.json');
     const store = createStateStore(path);

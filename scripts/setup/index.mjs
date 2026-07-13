@@ -186,14 +186,15 @@ async function applyDefaultSetup(plan, options, catalog) {
   const verify = {
     migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
     seed: () => verifyCanonicalDemoSeed(db),
-    'initialize-modules': async ({ plan: activePlan, recovering = false }) => {
+    'initialize-modules': async ({ plan: activePlan, recovering = false, managedInstallation = false }) => {
       try {
         const rows = (await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'module.%'").all()).results;
         const found = new Map(rows.map((row) => [row.key, row.value]));
         const enabled = new Set(activePlan.modules);
         const identity = await db.prepare('SELECT value FROM settings WHERE key=?').bind(`site.name.${activePlan.site.locale}`).first('value');
         const validIdentity = typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity);
-        const identityReady = (recovering || options.existingInstallation) ? validIdentity : identity === activePlan.site.name;
+        const preserveImported = options.existingInstallation && !managedInstallation;
+        const identityReady = (recovering || preserveImported) ? validIdentity : identity === activePlan.site.name;
         return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },

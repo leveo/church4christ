@@ -18,7 +18,15 @@ function stable(value) {
 }
 
 export function fingerprintPlan(plan) {
-  const json = stable(plan);
+  let desired = plan;
+  if (isRecord(plan) && isRecord(plan.site) && typeof plan.site.slug === 'string' && ['d1', 'supabase'].includes(plan.backend)) {
+    const { existingInstallation: _provenance, resources, ...rest } = plan;
+    const r2BucketName = isRecord(resources) && typeof resources.r2BucketName === 'string' ? resources.r2BucketName : `${plan.site.slug}-media`;
+    const databaseName = plan.backend === 'd1' && isRecord(resources) && typeof resources.d1DatabaseName === 'string'
+      ? resources.d1DatabaseName : `${plan.site.slug}-db`;
+    desired = { ...rest, resources: { databaseName, r2BucketName } };
+  }
+  const json = stable(desired);
   if (json === undefined) throw new TypeError('plan cannot be fingerprinted');
   return createHash('sha256').update(json).digest('hex');
 }

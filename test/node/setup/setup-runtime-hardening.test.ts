@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import raw from '../../../config/capabilities.json';
 import { buildHandoff, buildServicePresence, inspectExistingInstallation, readMaskedInput, resolveDoctorDatabaseUrl } from '../../../scripts/setup/index.mjs';
@@ -19,12 +21,18 @@ function statementDb(rows: Record<string, any>) {
 }
 
 describe('runtime setup hardening', () => {
-  it('resolves a validated workspace-local Wrangler persistence override', () => {
-    expect(resolveLocalPersistence('/repo', {})).toBe('/repo/.wrangler/state');
-    expect(resolveLocalPersistence('/repo', { WRANGLER_PERSIST_TO: '.test/state' })).toBe('/repo/.test/state');
-    for (const value of ['', ' ', '../escape', '/tmp/escape', '--remote', 'bad\npath']) {
-      expect(() => resolveLocalPersistence('/repo', { WRANGLER_PERSIST_TO: value })).toThrow(/WRANGLER_PERSIST_TO/i);
+  it('resolves a validated workspace-local Wrangler persistence override', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'persistence-root-'));
+    const realRoot = await realpath(root);
+    expect(resolveLocalPersistence(root, {})).toBe(join(realRoot, '.wrangler/state'));
+    expect(resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: '.test/state' })).toBe(join(realRoot, '.test/state'));
+    for (const value of ['', ' ', '../escape', '..\\escape', '/tmp/escape', '--remote', 'bad\npath']) {
+      expect(() => resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: value })).toThrow(/WRANGLER_PERSIST_TO/i);
     }
+    const outside = await mkdtemp(join(tmpdir(), 'persistence-outside-'));
+    await mkdir(join(root, 'links'));
+    await symlink(outside, join(root, 'links/escape'), 'dir');
+    expect(() => resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: 'links/escape/state' })).toThrow(/symlink|escape/i);
   });
   it('strictly parses a nonempty Worker deployment list', () => {
     expect(parseWorkerDeployments(JSON.stringify([{ id: 'dep', created_on: '2026-01-01T00:00:00Z', versions: [{ version_id: 'v1', percentage: 100 }] }]))).toHaveLength(1);
