@@ -15,7 +15,7 @@ const NODE_ONLY = [
   'test/tokens.test.ts',
   'test/themeMeta.test.ts',
   'test/node/setup/**/*.test.ts',
-  'test/setup/clean-room-*.test.ts',
+  'test/setup/*.test.ts',
 ];
 
 // Three projects in one config, classified by convention (see NODE_ONLY above):

@@ -26,6 +26,9 @@ function commonDatabaseSteps(options) {
   return {
     'initialize-modules': providerStep(async ({ plan } = {}) => {
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
+      await options.db.prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      ).bind(`site.name.${plan?.site?.locale}`, plan?.site?.name).run();
       return { changed: true };
     }, options.verify?.['initialize-modules'], 'initialize-modules'),
     'bootstrap-admin': providerStep(async ({ plan } = {}) => {
@@ -46,7 +49,8 @@ export function createD1Steps(options) {
   if (typeof options.configPath !== 'string' || !options.configPath) throw new TypeError('configPath is required');
   if (!['local', 'deploy'].includes(options.mode)) throw new TypeError('D1 mode must be local or deploy');
   const location = options.mode === 'deploy' ? '--remote' : '--local';
-  const command = (args) => options.runner.run(options.wranglerBin, args, { cwd: options.root ?? process.cwd() });
+  const localPersistence = options.mode === 'local' && options.persistTo ? ['--persist-to', options.persistTo] : [];
+  const command = (args) => options.runner.run(options.wranglerBin, [...args, ...localPersistence], { cwd: options.root ?? process.cwd() });
   return Object.freeze({
     migrate: providerStep(async () => {
       await command(['d1', 'migrations', 'apply', 'DB', location, '--config', options.configPath]);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { parseSetupArgs, SETUP_HELP } from './args.mjs';
 import { missingAnswers } from './answers.mjs';
@@ -189,7 +189,8 @@ async function applyDefaultSetup(plan, options, catalog) {
         const rows = (await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'module.%'").all()).results;
         const found = new Map(rows.map((row) => [row.key, row.value]));
         const enabled = new Set(activePlan.modules);
-        return catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
+        const identity = await db.prepare('SELECT value FROM settings WHERE key=?').bind(`site.name.${activePlan.site.locale}`).first('value');
+        return identity === activePlan.site.name && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },
     'bootstrap-admin': async ({ plan: activePlan }) => {
@@ -200,7 +201,7 @@ async function applyDefaultSetup(plan, options, catalog) {
     },
   };
   const baseProviderSteps = plan.backend === 'd1'
-    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify })
+    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, ...(plan.mode === 'local' && process.env.WRANGLER_PERSIST_TO ? { persistTo: process.env.WRANGLER_PERSIST_TO } : {}), db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify })
     : createSupabaseSteps({ runner, root, dbUrl, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify });
   const providerSteps = { ...baseProviderSteps };
   const providerSeed = providerSteps.seed;
@@ -516,4 +517,4 @@ async function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) await main();
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => '') === await realpath(fileURLToPath(import.meta.url)).catch(() => '')) await main();
