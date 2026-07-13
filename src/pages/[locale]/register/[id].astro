@@ -13,7 +13,7 @@ import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
 import { getOpenEvent, listQuestions } from '../../../lib/regDb';
 import { btn, lab, tin, noticeErr, badge, badgeInactive } from '../../../lib/adminUi';
-import { newCheckoutRequestId } from '../../../lib/stripeCheckoutRequests';
+import { checkoutRequestIdForRender } from '../../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -25,10 +25,12 @@ const eventId = Number(Astro.params.id);
 const event =
   Number.isInteger(eventId) && eventId > 0 ? await getOpenEvent(Astro.locals.db, locale, eventId) : null;
 const questions = event ? await listQuestions(Astro.locals.db, locale, eventId) : [];
-const checkoutRequestId = newCheckoutRequestId();
 
 const user = Astro.locals.user;
 const errParam = Astro.url.searchParams.get('error');
+const checkoutRequestId = checkoutRequestIdForRender(
+  errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null,
+);
 const errorKey =
   errParam === 'full'
     ? 'register.error.full'

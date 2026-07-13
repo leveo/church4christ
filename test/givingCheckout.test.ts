@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import giveFormSource from '../src/pages/[locale]/give.astro?raw';
 import { parseAmountToCents, parseFrequency } from '../src/lib/givingCheckout';
 import { createGivingCheckoutHandler } from '../src/pages/api/giving/checkout';
+import { checkoutRequestIdForRender } from '../src/lib/stripeCheckoutRequests';
 
 const REQUEST_ID = '00000000-0000-4000-8000-000000000902';
 
@@ -74,7 +75,7 @@ describe('stable giving Checkout browser identity', () => {
   });
 
   it('renders a server-generated checkoutRequestId hidden field', () => {
-    expect(giveFormSource).toContain('const checkoutRequestId = newCheckoutRequestId()');
+    expect(giveFormSource).toContain("errParam === 'stripe' ? Astro.url.searchParams.get('checkoutRequestId') : null");
     expect(giveFormSource).toMatch(/name="checkoutRequestId"\s+value=\{checkoutRequestId\}/);
   });
 
@@ -106,8 +107,17 @@ describe('stable giving Checkout browser identity', () => {
     });
     const logger = vi.spyOn(console, 'error').mockImplementation(() => {});
     const response = await createGivingCheckoutHandler(dependencies as never)(context(form()));
-    expect(response.headers.get('location')).toBe('/en/give?error=stripe');
+    const location = response.headers.get('location')!;
+    expect(location).toBe(`/en/give?error=stripe&checkoutRequestId=${REQUEST_ID}`);
+    const queryId = new URL(location, 'https://church.example').searchParams.get('checkoutRequestId');
+    expect(checkoutRequestIdForRender(queryId)).toBe(REQUEST_ID);
     expect(logger).not.toHaveBeenCalled();
     logger.mockRestore();
+  });
+
+  it('never reflects an invalid query ID into the next rendered form identity', () => {
+    const selected = checkoutRequestIdForRender('not-a-uuid<script>');
+    expect(selected).not.toBe('not-a-uuid<script>');
+    expect(selected).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

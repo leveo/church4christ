@@ -5,9 +5,14 @@ import {
   createRegistrationSubmitHandler,
 } from '../src/pages/api/register/submit';
 import { StripeError } from '../src/lib/stripe';
-import { newCheckoutRequestId, parseCheckoutRequestId } from '../src/lib/stripeCheckoutRequests';
+import {
+  checkoutRequestIdForRender,
+  newCheckoutRequestId,
+  parseCheckoutRequestId,
+} from '../src/lib/stripeCheckoutRequests';
 
 const REQUEST_ID = '00000000-0000-4000-8000-000000000901';
+const WAITING_LOCATION = `/en/register/7?error=waiting&checkoutRequestId=${REQUEST_ID}`;
 const savedJson = {
   mode: 'payment' as const,
   line_items: [{ quantity: 1 as const, price_data: { currency: 'usd', unit_amount: 2500, product_data: { name: 'Retreat' } } }],
@@ -73,7 +78,7 @@ function deps(overrides: Record<string, unknown> = {}) {
 
 describe('stable registration Checkout browser identity', () => {
   it('renders a server-generated UUID in the checkoutRequestId hidden field', () => {
-    expect(registerFormSource).toContain('const checkoutRequestId = newCheckoutRequestId()');
+    expect(registerFormSource).toContain("errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null");
     expect(registerFormSource).toMatch(/name="checkoutRequestId"\s+value=\{checkoutRequestId\}/);
     const generated = newCheckoutRequestId();
     expect(parseCheckoutRequestId(generated)).toBe(generated);
@@ -123,8 +128,8 @@ describe('stable registration Checkout browser identity', () => {
     const cases = [
       [{ kind: 'done', registrationId: 41 }, '/en/register/done?ok=1&paid=1'],
       [{ kind: 'redirect', registrationId: 41, checkoutUrl: 'https://checkout.stripe.com/c/pay/saved' }, 'https://checkout.stripe.com/c/pay/saved'],
-      [{ kind: 'waiting', registrationId: 41 }, '/en/register/7?error=waiting'],
-      [{ kind: 'review', registrationId: 41, reason: 'manual_review' }, '/en/register/7?error=waiting'],
+      [{ kind: 'waiting', registrationId: 41 }, WAITING_LOCATION],
+      [{ kind: 'review', registrationId: 41, reason: 'manual_review' }, WAITING_LOCATION],
     ] as const;
     for (const [resolution, location] of cases) {
       const dependencies = deps({ resolveRequest: vi.fn(async () => resolution) });
@@ -149,7 +154,10 @@ describe('stable registration Checkout browser identity', () => {
     const dependencies = deps({ createCheckout: vi.fn(async () => { throw error; }) });
     const logger = vi.spyOn(console, 'error').mockImplementation(() => {});
     const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
-    expect(response.headers.get('location')).toBe('/en/register/7?error=waiting');
+    const location = response.headers.get('location')!;
+    expect(location).toBe(WAITING_LOCATION);
+    expect(checkoutRequestIdForRender(new URL(location, 'https://church.example').searchParams.get('checkoutRequestId')))
+      .toBe(REQUEST_ID);
     expect(dependencies.cancelRequest).not.toHaveBeenCalled();
     expect(logger).not.toHaveBeenCalled();
     logger.mockRestore();
@@ -168,7 +176,7 @@ describe('stable registration Checkout browser identity', () => {
   it('leaves the pair recoverable when guarded attachment fails after Stripe responds', async () => {
     const dependencies = deps({ attachRequest: vi.fn(async () => { throw new Error('database unavailable'); }) });
     const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
-    expect(response.headers.get('location')).toBe('/en/register/7?error=waiting');
+    expect(response.headers.get('location')).toBe(WAITING_LOCATION);
     expect(dependencies.cancelRequest).not.toHaveBeenCalled();
   });
 
@@ -180,6 +188,32 @@ describe('stable registration Checkout browser identity', () => {
       cancelRequest: vi.fn(async () => false),
     });
     const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
-    expect(response.headers.get('location')).toBe('/en/register/7?error=waiting');
+    expect(response.headers.get('location')).toBe(WAITING_LOCATION);
+  });
+
+  it('preserves the submitted UUID through resolver errors and attach-false redirects', async () => {
+    for (const dependencies of [
+      deps({ resolveRequest: vi.fn(async () => { throw new Error('database unavailable'); }) }),
+      deps({ attachRequest: vi.fn(async () => false) }),
+    ]) {
+      const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
+      const location = response.headers.get('location')!;
+      expect(location).toBe(WAITING_LOCATION);
+      const queryId = new URL(location, 'https://church.example').searchParams.get('checkoutRequestId');
+      expect(checkoutRequestIdForRender(queryId)).toBe(REQUEST_ID);
+    }
+  });
+
+  it('never preserves a stale UUID after conflict, expiry, or successful definitive cancellation', async () => {
+    for (const dependencies of [
+      deps({ resolveRequest: vi.fn(async () => ({ kind: 'conflict' })) }),
+      deps({ resolveRequest: vi.fn(async () => ({ kind: 'expired' })) }),
+      deps({ createCheckout: vi.fn(async () => { throw new StripeError('bad', { stage: 'response', status: 400 }); }) }),
+    ]) {
+      const response = await createRegistrationSubmitHandler(dependencies as never)(context(form()));
+      const location = response.headers.get('location')!;
+      expect(location).toBe('/en/register/7?error=invalid');
+      expect(new URL(location, 'https://church.example').searchParams.has('checkoutRequestId')).toBe(false);
+    }
   });
 });

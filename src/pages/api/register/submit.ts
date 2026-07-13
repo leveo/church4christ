@@ -156,12 +156,12 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
     } catch (error) {
       if ((error as Error).message === 'event_full') return back(locale, eventId, 'full');
       // Corrupt/ambiguous durable state stays untouched for operator recovery.
-      return back(locale, eventId, 'waiting');
+      return backWaiting(locale, eventId, requestId);
     }
 
     if (resolution.kind === 'done') return redirect(`/${locale}/register/done?ok=1&paid=1`);
     if (resolution.kind === 'redirect') return redirect(resolution.checkoutUrl);
-    if (resolution.kind === 'waiting' || resolution.kind === 'review') return back(locale, eventId, 'waiting');
+    if (resolution.kind === 'waiting' || resolution.kind === 'review') return backWaiting(locale, eventId, requestId);
     if (resolution.kind === 'expired' || resolution.kind === 'conflict') return back(locale, eventId, 'invalid');
 
     try {
@@ -177,19 +177,19 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
         amountCents: price.unit_amount,
         currency: price.currency,
       });
-      return attached ? redirect(session.url) : back(locale, eventId, 'waiting');
+      return attached ? redirect(session.url) : backWaiting(locale, eventId, requestId);
     } catch (error) {
       if (classifyRegistrationCheckoutFailure(error) === 'cancel') {
         try {
           const cancelled = await deps.cancelRequest(locals.db, resolution.requestId, resolution.registrationId);
-          if (!cancelled) return back(locale, eventId, 'waiting');
+          if (!cancelled) return backWaiting(locale, eventId, requestId);
         } catch {
           // A failed compensating write remains pending for the recovery service.
-          return back(locale, eventId, 'waiting');
+          return backWaiting(locale, eventId, requestId);
         }
         return back(locale, eventId, 'invalid');
       }
-      return back(locale, eventId, 'waiting');
+      return backWaiting(locale, eventId, requestId);
     }
   };
 }
@@ -201,6 +201,13 @@ function redirect(location: string): Response {
 }
 function back(locale: string, eventId: number, error: string): Response {
   return redirect(`/${locale}/register/${eventId}?error=${error}`);
+}
+function backWaiting(locale: string, eventId: number, requestId: string): Response {
+  const query = new URLSearchParams({
+    error: 'waiting',
+    checkoutRequestId: parseCheckoutRequestId(requestId),
+  });
+  return redirect(`/${locale}/register/${eventId}?${query.toString()}`);
 }
 function backToList(locale: string): Response {
   return redirect(`/${locale}/register`);

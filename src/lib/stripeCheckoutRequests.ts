@@ -85,6 +85,15 @@ export function newCheckoutRequestId(): string {
   return parseCheckoutRequestId(crypto.randomUUID());
 }
 
+/** Reuse only a canonical server UUID; malformed/untrusted query input is replaced. */
+export function checkoutRequestIdForRender(value: unknown): string {
+  try {
+    return parseCheckoutRequestId(value);
+  } catch {
+    return newCheckoutRequestId();
+  }
+}
+
 export function registrationCheckoutIdempotencyKey(requestId: string): string {
   return `church4christ:registration:${parseCheckoutRequestId(requestId)}`;
 }

@@ -109,7 +109,7 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
       }, { requestId });
       return redirect(session.url);
     } catch {
-      return back(locale, 'stripe');
+      return backWithRequest(locale, 'stripe', requestId);
     }
   };
 }
@@ -121,4 +121,8 @@ function redirect(location: string): Response {
 }
 function back(locale: string, error: string): Response {
   return redirect(`/${locale}/give?error=${error}`);
+}
+function backWithRequest(locale: string, error: string, requestId: string): Response {
+  const query = new URLSearchParams({ error, checkoutRequestId: parseCheckoutRequestId(requestId) });
+  return redirect(`/${locale}/give?${query.toString()}`);
 }

@@ -14,7 +14,7 @@ import { getLocalized } from '../../lib/content';
 import { getSiteIdentity } from '../../lib/settings';
 import { listFunds } from '../../lib/fundDb';
 import { btn, lab, noticeErr, tin } from '../../lib/adminUi';
-import { newCheckoutRequestId } from '../../lib/stripeCheckoutRequests';
+import { checkoutRequestIdForRender } from '../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -23,7 +23,6 @@ if (!locale) {
 }
 
 const givingOn = Astro.locals.modules.has('giving');
-const checkoutRequestId = newCheckoutRequestId();
 
 // ── Module ON: interactive giving form ──────────────────────────────────────
 // Active funds, sorted (listFunds orders by sort). An anonymous visitor can only
@@ -34,6 +33,9 @@ const checkoutRequestId = newCheckoutRequestId();
 const user = Astro.locals.user;
 const funds = givingOn ? await listFunds(Astro.locals.db, locale, { activeOnly: true }) : [];
 const errParam = givingOn ? Astro.url.searchParams.get('error') : null;
+const checkoutRequestId = checkoutRequestIdForRender(
+  errParam === 'stripe' ? Astro.url.searchParams.get('checkoutRequestId') : null,
+);
 const errorKey = errParam ? (errParam === 'noportal' ? 'give.error.noportal' : 'give.error.invalid') : null;
 const frequencies = [
   { value: 'once', label: 'give.once', guestOk: true },
