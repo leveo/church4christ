@@ -68,6 +68,7 @@ export async function processStripeWebhookEvent(
     await checkpoint();
     const modules = await getEnabledModules(opened.db, 'supabase');
     const event = JSON.parse(claim.payloadJson) as Record<string, unknown>;
+    await checkpoint();
     const result = await (deps.dispatch ?? handleStripeEvent)({
       db: opened.db,
       env: deps.env,
@@ -125,11 +126,9 @@ export async function drainStripeWebhookInbox(
     eventIds = await listDueStripeEventIds(opened.db, startedAt, STRIPE_DRAIN_LIMIT);
   } finally {
     if (opened) {
-      try {
-        await opened.end();
-      } catch {
-        // The listing query is read-only; closing failure must not start overlap.
-      }
+      // A failed close means the listing client may still own resources. Abort
+      // the pass rather than opening per-event clients alongside it.
+      await opened.end();
     }
   }
 

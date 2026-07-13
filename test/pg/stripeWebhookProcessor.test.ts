@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppDb } from '../../src/lib/appDb';
+import type { AppDb, AppStatement } from '../../src/lib/appDb';
 import type { DbEnv } from '../../src/lib/dbProvider';
 import { clearModuleCache } from '../../src/lib/modules';
 import { PgAdapter } from '../../src/lib/pgAdapter';
@@ -8,6 +8,7 @@ import type { StripeEnv } from '../../src/lib/stripe';
 import {
   STRIPE_ATTEMPT_MS,
   STRIPE_LEASE_MS,
+  claimStripeEvent,
   listStripeWebhookEvents,
   receiveStripeEvent,
   sha256Utf8,
@@ -62,6 +63,43 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     const end = overrides.end ?? vi.fn(async () => {});
     return { db: overrides.db ?? db, backend: overrides.backend ?? 'supabase', end };
   };
+
+  const hookedDb = (
+    matches: (query: string) => boolean,
+    hooks: {
+      beforeFirst?: () => void | Promise<void>;
+      afterFirst?: () => void | Promise<void>;
+      afterAll?: () => void | Promise<void>;
+    },
+  ): AppDb => ({
+    ...db,
+    prepare(query: string) {
+      const source = db.prepare(query);
+      if (!matches(query)) return source;
+      let current = source;
+      const wrapped: AppStatement = {
+        bind(...values: unknown[]) {
+          current = current.bind(...values);
+          return wrapped;
+        },
+        async first<T = unknown>(column?: string) {
+          await hooks.beforeFirst?.();
+          const result = await current.first<T>(column);
+          await hooks.afterFirst?.();
+          return result;
+        },
+        async all<T = unknown>() {
+          const result = await current.all<T>();
+          await hooks.afterAll?.();
+          return result;
+        },
+        run<T = unknown>() {
+          return current.run<T>();
+        },
+      };
+      return wrapped;
+    },
+  });
 
   const deps = (
     dispatch: (deps: Parameters<NonNullable<StripeWebhookProcessorDeps['dispatch']>>[0], event: Record<string, unknown>) => Promise<StripeDispatchResult>,
@@ -118,25 +156,10 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect((await listStripeWebhookEvents(db))[0]).toMatchObject({ status, outcome: result.outcome });
   });
 
-  it('returns not_claimed without dispatch for a missing row or an active lease and ends each client once', async () => {
+  it('returns not_claimed without dispatch for a missing row or an actually processing active lease', async () => {
     await receipt('evt_test_active');
-    const heldHandle = opened();
-    const held = await processStripeWebhookEvent('evt_test_active', {
-      env: ENV,
-      openDb: () => heldHandle,
-      now: () => NOW,
-      newLeaseToken: () => 'lease-first',
-      dispatch: vi.fn(async ({ checkpoint }) => {
-        await sql.unsafe('UPDATE church_private.stripe_webhook_events SET lease_expires_at=$1 WHERE event_id=$2', [
-          utc(addMs(NOW, STRIPE_LEASE_MS)),
-          'evt_test_active',
-        ]);
-        await checkpoint?.();
-        return { state: 'processed', outcome: 'never' } as const;
-      }),
-    });
-    expect(held.state).toBe('processed');
-    expect(heldHandle.end).toHaveBeenCalledOnce();
+    expect(await claimStripeEvent(db, 'evt_test_active', NOW, 'lease-held'))
+      .toMatchObject({ leaseToken: 'lease-held' });
 
     const dispatch = vi.fn(async () => ({ state: 'processed', outcome: 'forbidden' } as const));
     const activeHandle = opened();
@@ -159,6 +182,42 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(activeHandle.end).toHaveBeenCalledOnce();
     expect(missingHandle.end).toHaveBeenCalledOnce();
   });
+
+  it.each(['deadline', 'lease_changed'] as const)(
+    'checkpoints after module load so %s prevents dispatch',
+    async (mode) => {
+      const eventId = `evt_test_modules_${mode}`;
+      await receipt(eventId);
+      clearModuleCache();
+      let current = NOW;
+      const moduleDb = hookedDb(
+        (query) => query.includes('FROM settings'),
+        {
+          afterAll: async () => {
+            if (mode === 'deadline') current = addMs(NOW, STRIPE_ATTEMPT_MS);
+            else {
+              await sql.unsafe(
+                'UPDATE church_private.stripe_webhook_events SET lease_token=$1 WHERE event_id=$2',
+                ['lease-successor', eventId],
+              );
+            }
+          },
+        },
+      );
+      const end = vi.fn(async () => {});
+      const dispatch = vi.fn(async () => ({ state: 'processed', outcome: 'forbidden' } as const));
+
+      expect(await processStripeWebhookEvent(eventId, {
+        env: ENV,
+        openDb: () => opened({ db: moduleDb, end }),
+        now: () => current,
+        newLeaseToken: () => 'lease-module-load',
+        dispatch,
+      })).toEqual({ state: 'failed' });
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(end).toHaveBeenCalledOnce();
+    },
+  );
 
   it('returns failed for thrown dispatch and records a sanitized retry without masking the result', async () => {
     await receipt('evt_test_throw');
@@ -229,16 +288,13 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(openDb).toHaveBeenCalledOnce();
   });
 
-  it('does not let error-recording failure, lease loss, or end failure mask a failed result', async () => {
+  it('does not let an error-record UPDATE failure or end failure mask the result and recovers by lease', async () => {
     await receipt('evt_test_record_failure');
-    let dispatched = false;
-    const brokenDb: AppDb = {
-      ...db,
-      prepare(query: string) {
-        if (dispatched && query.includes('church_private.stripe_webhook_events')) throw new Error('recording unavailable');
-        return db.prepare(query);
-      },
-    };
+    const brokenDb = hookedDb(
+      (query) => query.trimStart().startsWith('UPDATE church_private.stripe_webhook_events')
+        && query.includes('last_error=?4'),
+      { beforeFirst: () => { throw new Error('recording unavailable'); } },
+    );
     const handle = opened({ db: brokenDb, end: vi.fn(async () => { throw new Error('end failed'); }) });
     const result = await processStripeWebhookEvent('evt_test_record_failure', {
       env: ENV,
@@ -246,12 +302,21 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
       now: () => NOW,
       newLeaseToken: () => 'lease-record',
       dispatch: vi.fn(async () => {
-        dispatched = true;
         throw new Error('handler failed');
       }),
     });
     expect(result).toEqual({ state: 'failed' });
     expect(handle.end).toHaveBeenCalledOnce();
+    expect(await sql.unsafe(
+      `SELECT status,lease_token FROM church_private.stripe_webhook_events WHERE event_id='evt_test_record_failure'`,
+    )).toEqual([{ status: 'processing', lease_token: 'lease-record' }]);
+
+    const recovered = deps(vi.fn(async () => ({ state: 'processed', outcome: 'recovered' } as const)), {
+      now: () => addMs(NOW, STRIPE_LEASE_MS),
+      newLeaseToken: () => 'lease-recovery',
+    });
+    expect(await processStripeWebhookEvent('evt_test_record_failure', recovered.value))
+      .toEqual({ state: 'processed', outcome: 'recovered' });
   });
 
   it('rejects the checkpoint at the 25-second deadline before a later write', async () => {
@@ -331,6 +396,37 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect((await listStripeWebhookEvents(db))[0]).toMatchObject({ status: 'processed', outcome: 'converged', attemptCount: 2 });
   });
 
+  it('cannot finalize after ownership changes strictly between the final checkpoint and finish', async () => {
+    await receipt('evt_test_stale_finish');
+    let leaseChecks = 0;
+    const racingDb = hookedDb(
+      (query) => query.includes('SELECT event_id,lease_token,lease_expires_at,status'),
+      {
+        afterFirst: async () => {
+          leaseChecks += 1;
+          if (leaseChecks === 2) {
+            await sql.unsafe(
+              'UPDATE church_private.stripe_webhook_events SET lease_token=$1,lease_expires_at=$2 WHERE event_id=$3',
+              ['lease-successor', utc(addMs(NOW, STRIPE_LEASE_MS)), 'evt_test_stale_finish'],
+            );
+          }
+        },
+      },
+    );
+    const end = vi.fn(async () => {});
+    expect(await processStripeWebhookEvent('evt_test_stale_finish', {
+      env: ENV,
+      openDb: () => opened({ db: racingDb, end }),
+      now: () => NOW,
+      newLeaseToken: () => 'lease-stale-finisher',
+      dispatch: vi.fn(async () => ({ state: 'processed', outcome: 'must_not_finalize' } as const)),
+    })).toEqual({ state: 'failed' });
+    expect(end).toHaveBeenCalledOnce();
+    expect(await sql.unsafe(
+      `SELECT status,outcome,lease_token FROM church_private.stripe_webhook_events WHERE event_id='evt_test_stale_finish'`,
+    )).toEqual([{ status: 'processing', outcome: null, lease_token: 'lease-successor' }]);
+  });
+
   it('makes the sixth thrown claim terminal failed', async () => {
     await receipt('evt_test_six_failures');
     const delays = [0, 5 * 60_000, 35 * 60_000, 155 * 60_000, 875 * 60_000, 2315 * 60_000];
@@ -390,6 +486,37 @@ describe.skipIf(!hasPg)('Stripe webhook processor and recovery (Postgres)', () =
     expect(await drainStripeWebhookInbox({ env: ENV, openDb: () => opened(), now: () => NOW, process: emptyProcess }))
       .toEqual([]);
     expect(emptyProcess).not.toHaveBeenCalled();
+  });
+
+  it('aborts the drain when the listing client fails to close and starts no processor clients', async () => {
+    await receipt('evt_test_listing_close_failure');
+    const process = vi.fn();
+    const handle = opened({ end: vi.fn(async () => { throw new Error('listing close failed'); }) });
+    await expect(drainStripeWebhookInbox({
+      env: ENV,
+      openDb: () => handle,
+      now: () => NOW,
+      process,
+    })).rejects.toThrow('listing close failed');
+    expect(handle.end).toHaveBeenCalledOnce();
+    expect(process).not.toHaveBeenCalled();
+
+    const recoveryProcess = vi.fn();
+    const recoveryHandle = opened({
+      end: vi.fn(async () => { throw new Error('listing sk_test_processor_secret close failed'); }),
+    });
+    const retention = vi.fn(async () => ({ processedOrIgnored: 0, failed: 0 }));
+    const recovery = await runStripeRecovery({
+      env: ENV,
+      openDb: () => recoveryHandle,
+      now: () => NOW,
+      process: recoveryProcess,
+      retention,
+    });
+    expect(recovery.inbox).toEqual({ state: 'failed', error: expect.any(String) });
+    expect(JSON.stringify(recovery.inbox)).not.toContain('sk_test_processor_secret');
+    expect(recoveryProcess).not.toHaveBeenCalled();
+    expect(retention).toHaveBeenCalledOnce();
   });
 
   it('does not claim Stripe work on D1 and still closes listing and attempt clients', async () => {
