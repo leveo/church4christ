@@ -9,8 +9,8 @@ function normalizeDefault(value: string | null): string | null {
   return text ? text[1].replaceAll("''", "'") : value.trim().replace(/^\((.*)\)$/s, '$1');
 }
 
-function quotedValues(value: string): string[] {
-  return [...value.matchAll(/'([^']+)'::text/g)].map((match) => match[1]);
+function normalizeConstraintDefinition(value: string): string {
+  return value.toLowerCase().replaceAll('::text', '').replaceAll(/\s+/g, '');
 }
 
 function pgIdentifierArray(value: unknown): string[] {
@@ -101,8 +101,8 @@ describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
     ]);
   });
 
-  it('enforces the exact status/state sets and coherent processing/sensitive states', async () => {
-    const rows = await sql.unsafe(`
+  it('has the complete approved CHECK constraint set on each private table', async () => {
+    const rows = await sql.unsafe<{ table_name: string; definition: string }[]>(`
       SELECT rel.relname AS table_name, pg_get_constraintdef(con.oid) AS definition
       FROM pg_constraint con
       JOIN pg_class rel ON rel.oid = con.conrelid
@@ -110,33 +110,56 @@ describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
       WHERE namespace.nspname = 'church_private' AND con.contype = 'c'
       ORDER BY rel.relname, con.oid
     `);
-    const webhookChecks = rows.filter((row) => row.table_name === 'stripe_webhook_events');
-    const checkoutChecks = rows.filter((row) => row.table_name === 'stripe_checkout_requests');
-    expect(webhookChecks).toHaveLength(12);
-    expect(checkoutChecks).toHaveLength(7);
+    const definitionsFor = (table: string) => rows
+      .filter((row) => row.table_name === table)
+      .map((row) => normalizeConstraintDefinition(row.definition))
+      .sort();
+    const expected = (definitions: string[]) => definitions
+      .map(normalizeConstraintDefinition)
+      .sort();
 
-    const status = webhookChecks.find((row) => /status\s*=\s*ANY/i.test(row.definition));
-    const state = checkoutChecks.find((row) => /state\s*=\s*ANY/i.test(row.definition));
-    expect(status).toBeDefined();
-    expect(state).toBeDefined();
-    expect(quotedValues(status!.definition)).toEqual([
-      'pending', 'processing', 'processed', 'ignored', 'failed', 'dismissed',
+    expect(definitionsFor('stripe_checkout_requests')).toEqual(expected([
+      `CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 255)))`,
+      `CHECK ((request_sha256 ~ '^[0-9a-f]{64}$'::text))`,
+      `CHECK ((state = ANY (ARRAY['creating'::text, 'attached'::text, 'manual_review'::text, 'resolved'::text])))`,
+      `CHECK ((reconcile_attempts >= 0))`,
+      `CHECK (((last_error IS NULL) OR (octet_length(last_error) <= 1000)))`,
+      `CHECK (((state <> 'creating'::text) OR (request_json IS NOT NULL)))`,
+      `CHECK (((state <> ALL (ARRAY['manual_review'::text, 'resolved'::text])) OR ((request_json IS NULL) AND (session_url IS NULL))))`,
+    ]));
+    expect(definitionsFor('stripe_webhook_events')).toEqual(expected([
+      `CHECK (((octet_length(event_id) >= 1) AND (octet_length(event_id) <= 255)))`,
+      `CHECK ((payload_sha256 ~ '^[0-9a-f]{64}$'::text))`,
+      `CHECK (((octet_length(event_type) >= 1) AND (octet_length(event_type) <= 255)))`,
+      `CHECK (((api_version IS NULL) OR ((octet_length(api_version) >= 1) AND (octet_length(api_version) <= 64))))`,
+      `CHECK ((event_created >= 0))`,
+      `CHECK ((livemode = ANY (ARRAY[0, 1])))`,
+      `CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'processed'::text, 'ignored'::text, 'failed'::text, 'dismissed'::text])))`,
+      `CHECK (((outcome IS NULL) OR (octet_length(outcome) <= 128)))`,
+      `CHECK ((attempt_count >= 0))`,
+      `CHECK ((retry_cycle_attempts >= 0))`,
+      `CHECK (((last_error IS NULL) OR (octet_length(last_error) <= 1000)))`,
+      `CHECK (((status = 'processing'::text) = ((lease_token IS NOT NULL) AND (lease_expires_at IS NOT NULL))))`,
+    ]));
+  });
+
+  it('has exactly the approved private primary-key and unique constraints', async () => {
+    const rows = await sql.unsafe(`
+      SELECT rel.relname AS table_name, con.contype,
+        (SELECT string_agg(att.attname, ',' ORDER BY key.ord)
+         FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ord)
+         JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = key.attnum) AS columns
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace namespace ON namespace.oid = rel.relnamespace
+      WHERE namespace.nspname = 'church_private' AND con.contype IN ('p', 'u')
+      ORDER BY rel.relname, con.contype, columns
+    `);
+    expect(rows).toEqual([
+      { table_name: 'stripe_checkout_requests', contype: 'p', columns: 'request_id' },
+      { table_name: 'stripe_checkout_requests', contype: 'u', columns: 'registration_id' },
+      { table_name: 'stripe_webhook_events', contype: 'p', columns: 'event_id' },
     ]);
-    expect(quotedValues(state!.definition)).toEqual([
-      'creating', 'attached', 'manual_review', 'resolved',
-    ]);
-    expect(webhookChecks.some((row) =>
-      /status\s*=\s*'processing'::text/i.test(row.definition) &&
-      /lease_token IS NOT NULL/i.test(row.definition) &&
-      /lease_expires_at IS NOT NULL/i.test(row.definition),
-    )).toBe(true);
-    expect(checkoutChecks.some((row) =>
-      /state\s*<>\s*'creating'::text/i.test(row.definition) && /request_json IS NOT NULL/i.test(row.definition),
-    )).toBe(true);
-    expect(checkoutChecks.some((row) =>
-      /manual_review/i.test(row.definition) && /resolved/i.test(row.definition) &&
-      /request_json IS NULL/i.test(row.definition) && /session_url IS NULL/i.test(row.definition),
-    )).toBe(true);
   });
 
   it('has exactly the approved named non-constraint indexes', async () => {
