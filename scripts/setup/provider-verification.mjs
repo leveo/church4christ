@@ -65,6 +65,12 @@ export async function verifyProviderPreflight(options) {
   }
 }
 
+export async function applyAfterProviderPreflight({ providerOptions, apply } = {}) {
+  if (typeof apply !== 'function') throw new TypeError('provider preflight apply callback is required');
+  await verifyProviderPreflight(providerOptions);
+  return apply();
+}
+
 export async function assertDemoSeedTarget(options) {
   if (!options || !['d1', 'supabase'].includes(options.backend)) throw new TypeError('demo target backend is required');
   requireDb(options.db);

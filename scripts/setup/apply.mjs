@@ -120,9 +120,9 @@ export function createResourceStep(options) {
     if (plan.mode === 'local') {
       const resolvedResources = Object.freeze({
         d1DatabaseName: plan.backend === 'd1' ? names.d1DatabaseName : null,
-        d1DatabaseId: plan.backend === 'd1' ? 'local' : null,
+        d1DatabaseId: plan.backend === 'd1' ? (plan.resources?.d1DatabaseId ?? 'local') : null,
         r2BucketName: names.r2BucketName,
-        hyperdriveId: plan.backend === 'supabase' ? 'local' : null,
+        hyperdriveId: plan.backend === 'supabase' ? (plan.resources?.hyperdriveId ?? 'local') : null,
       });
       if (plan.resources && JSON.stringify(plan.resources) !== JSON.stringify(resolvedResources)) throw new Error('Local resource placeholders do not match the canonical setup resources');
       return { changed: false, resolvedResources };
@@ -183,15 +183,17 @@ function validate(plan, steps) {
   return [...plan.actions];
 }
 
-/** @param {any} plan @param {{ steps: any, stateStore: any, dryRun?: boolean, rerunCommand?: string, secretValues?: string[] }} options */
-export async function applySetup(plan, { steps, stateStore, dryRun = false, rerunCommand = 'npm run setup -- --yes', secretValues = [] }) {
+/** @param {any} plan @param {{ steps: any, stateStore: any, dryRun?: boolean, rerunCommand?: string, secretValues?: string[], beforeMutation?: (boundary: string) => Promise<void> | void }} options */
+export async function applySetup(plan, { steps, stateStore, dryRun = false, rerunCommand = 'npm run setup -- --yes', secretValues = [], beforeMutation = async () => {} }) {
   if (typeof dryRun !== 'boolean') throw new TypeError('dryRun must be a boolean');
   if (!Array.isArray(secretValues) || secretValues.some((value) => typeof value !== 'string')) throw new TypeError('secretValues must be a string array');
+  if (typeof beforeMutation !== 'function') throw new TypeError('beforeMutation must be a function');
   const actions = validate(plan, steps);
   if (dryRun) return { status: 'dry-run', actions, results: [] };
   if (!stateStore || typeof stateStore.load !== 'function' || typeof stateStore.has !== 'function' || typeof stateStore.mark !== 'function') throw new TypeError('stateStore load/has/mark are required');
   if (actions.includes('ensure-resources') && typeof stateStore.getEvidence !== 'function') throw new TypeError('stateStore getEvidence is required for ensure-resources recovery');
   if (actions.includes('ensure-resources') && !['d1', 'supabase'].includes(plan.backend)) throw new TypeError('setup plan backend is required for resource recovery');
+  await beforeMutation('state-load');
   const installationOrigin = await stateStore.load(fingerprintPlan(plan), plan.existingInstallation === true ? 'imported' : 'managed');
   if (!['managed', 'imported'].includes(installationOrigin)) throw new Error('stateStore load must return the installation origin');
   const initialCompletion = new Map();
@@ -217,14 +219,20 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
     catch (error) { throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
     if (preverified === true) {
       if (!completed) {
-        try { await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null); }
+        try {
+          await beforeMutation(`state-mark:${name}`);
+          await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null);
+        }
         catch (error) { throw new SetupApplyError({ step: name, phase: 'mark', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
       }
       results.push({ step: name, status: completed ? 'already-complete' : 'verified' });
       continue;
     }
     let raw;
-    try { raw = await steps[name].apply(context); }
+    try {
+      await beforeMutation(`step-apply:${name}`);
+      raw = await steps[name].apply(context);
+    }
     catch (error) { throw new SetupApplyError({ step: name, phase: 'apply', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand: recoveryRerunCommand(error, rerunCommand) }); }
     let result;
     try {
@@ -242,7 +250,10 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
       verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
       if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
     } catch (error) { throw new SetupApplyError({ step: name, phase: 'postverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
-    try { await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null)); }
+    try {
+      await beforeMutation(`state-mark:${name}`);
+      await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null));
+    }
     catch (error) { throw new SetupApplyError({ step: name, phase: 'mark', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
     results.push({ step: name, status: result.changed ? 'changed' : 'verified' });
   }

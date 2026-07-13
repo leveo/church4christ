@@ -288,66 +288,107 @@ export async function _syncParentDirectory(path, openDirectory = open) {
  * @param {{ allowReplace?: boolean, backup?: boolean, expectedContent?: string | null, beforeReplace?: () => void | Promise<void>, _processState?: (pid: number) => 'active' | 'dead' | 'unknown' }} [options]
  * @internal `_processState` is a narrow deterministic lock-recovery test hook.
  */
-export async function writeAtomic(path, content, options = {}) {
-  const { allowReplace = false, backup = false, beforeReplace, _processState = processState } = options;
-  await mkdir(dirname(path), { recursive: true });
-  const releaseLock = await acquireSetupLock(path, _processState);
+async function writeApproved(path, content, options, approved) {
+  const { allowReplace = false, backup = false, beforeReplace } = options;
+  if (Object.hasOwn(options, 'expectedContent')) {
+    const expected = options.expectedContent;
+    if (expected !== null && typeof expected !== 'string') throw new TypeError('expectedContent must be a string or null');
+    const matches = expected === null ? approved === null : approved?.content === expected;
+    if (!matches) throw new Error(`Target does not match expected content; refusing concurrent overwrite: ${path}`);
+  }
+  if (approved?.content === content) return { changed: false, backupPath: null };
+  if (approved !== null && !allowReplace) throw new Error(`Refusing to overwrite unrecognized file: ${path}`);
+
+  let backupPath = null;
+  if (approved !== null && backup) {
+    await assertUnchanged(path, approved);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    backupPath = await createExclusiveBackup(path, timestamp);
+  }
+
+  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let handle;
+  let ownsTemporaryPath = false;
   try {
-    const approved = await readSnapshot(path);
-    if (Object.hasOwn(options, 'expectedContent')) {
-      const expected = options.expectedContent;
-      if (expected !== null && typeof expected !== 'string') throw new TypeError('expectedContent must be a string or null');
-      const matches = expected === null ? approved === null : approved?.content === expected;
-      if (!matches) throw new Error(`Target does not match expected content; refusing concurrent overwrite: ${path}`);
-    }
-    if (approved?.content === content) return { changed: false, backupPath: null };
-    if (approved !== null && !allowReplace) throw new Error(`Refusing to overwrite unrecognized file: ${path}`);
+    handle = await open(temporaryPath, 'wx', 0o600);
+    ownsTemporaryPath = true;
+    await handle.writeFile(content, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    if (beforeReplace) await beforeReplace();
+    await assertUnchanged(path, approved);
+    await rename(temporaryPath, path);
+    ownsTemporaryPath = false;
+    await _syncParentDirectory(path);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    if (ownsTemporaryPath) await unlink(temporaryPath).catch(() => {});
+    throw error;
+  }
+  return { changed: true, backupPath };
+}
 
-    let backupPath = null;
-    if (approved !== null && backup) {
-      await assertUnchanged(path, approved);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      backupPath = await createExclusiveBackup(path, timestamp);
-    }
-
-    const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let handle;
-    let ownsTemporaryPath = false;
-    try {
-      handle = await open(temporaryPath, 'wx', 0o600);
-      ownsTemporaryPath = true;
-      await handle.writeFile(content, 'utf8');
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      if (beforeReplace) await beforeReplace();
-      await assertUnchanged(path, approved);
-      await rename(temporaryPath, path);
-      ownsTemporaryPath = false;
-      await _syncParentDirectory(path);
-    } catch (error) {
-      await handle?.close().catch(() => {});
-      if (ownsTemporaryPath) await unlink(temporaryPath).catch(() => {});
-      throw error;
-    }
-    return { changed: true, backupPath };
-  } finally {
+export async function acquireApprovedContentLease(path, expectedContent, options = {}) {
+  if (expectedContent !== null && typeof expectedContent !== 'string') {
+    throw new TypeError('expectedContent must be a string or null');
+  }
+  await mkdir(dirname(path), { recursive: true });
+  const releaseLock = await acquireSetupLock(path, options._processState ?? processState);
+  let approved;
+  let released = false;
+  try {
+    approved = await readSnapshot(path);
+    const matches = expectedContent === null ? approved === null : approved?.content === expectedContent;
+    if (!matches) throw new Error(`Target changed after approval; refusing concurrent setup mutation: ${path}`);
+  } catch (error) {
     await releaseLock();
+    throw error;
+  }
+  const requireOpen = () => { if (released) throw new Error('Approved-content lease has already been released'); };
+  const assertLeaseUnchanged = async () => {
+    requireOpen();
+    const current = await readSnapshot(path);
+    if (approved === null ? current !== null : !sameSnapshot(current, approved)) {
+      throw new Error(`Target changed after approval; refusing concurrent setup mutation: ${path}`);
+    }
+  };
+  return Object.freeze({
+    assertUnchanged: assertLeaseUnchanged,
+    async writeAtomic(content, writeOptions = {}) {
+      requireOpen();
+      await assertLeaseUnchanged();
+      const result = await writeApproved(path, content, writeOptions, approved);
+      approved = await readSnapshot(path);
+      return result;
+    },
+    async release() {
+      if (released) return;
+      await releaseLock();
+      released = true;
+    },
+  });
+}
+
+export async function writeAtomic(path, content, options = {}) {
+  const lease = await acquireApprovedContentLease(
+    path,
+    Object.hasOwn(options, 'expectedContent') ? options.expectedContent : (await readSnapshot(path))?.content ?? null,
+    options,
+  );
+  try {
+    return await lease.writeAtomic(content, options);
+  } finally {
+    await lease.release();
   }
 }
 
 /** Assert an approved text snapshot while holding the same lock used by writeAtomic. */
 export async function assertExpectedContent(path, expectedContent, options = {}) {
-  if (expectedContent !== null && typeof expectedContent !== 'string') {
-    throw new TypeError('expectedContent must be a string or null');
-  }
-  const stateForProcess = options._processState ?? processState;
-  const releaseLock = await acquireSetupLock(path, stateForProcess);
+  const lease = await acquireApprovedContentLease(path, expectedContent, options);
   try {
-    const current = await readSnapshot(path);
-    const matches = expectedContent === null ? current === null : current?.content === expectedContent;
-    if (!matches) throw new Error(`Target changed after approval; refusing concurrent setup mutation: ${path}`);
+    await lease.assertUnchanged();
   } finally {
-    await releaseLock();
+    await lease.release();
   }
 }

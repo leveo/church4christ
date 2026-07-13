@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { parseSetupArgs, SETUP_HELP } from './args.mjs';
@@ -19,16 +20,16 @@ import { buildSetupRerunCommand } from './failure.mjs';
 import { D1CliDb } from './providers/d1.mjs';
 import { openPostgresSetupDb } from './providers/postgres.mjs';
 import { createStateStore } from './state.mjs';
-import { assertExpectedContent, classifyConfig, writeAtomic } from './files.mjs';
-import { renderManifest, validateManifest } from './manifest.mjs';
+import { acquireApprovedContentLease, classifyConfig, writeAtomic } from './files.mjs';
+import { manifestFromPlan, renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
 import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 import { resolveLocalPersistence } from './persistence.mjs';
-import { inspectLegacyInstallation } from './import-existing.mjs';
-import { assertDemoSeedTarget, verifyProviderPreflight } from './provider-verification.mjs';
+import { inspectBaselineLocalD1Installation, inspectLegacyInstallation } from './import-existing.mjs';
+import { applyAfterProviderPreflight, assertDemoSeedTarget } from './provider-verification.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -36,6 +37,11 @@ const MISSING_FLAGS = Object.freeze({
   adminName: '--admin-name', appOrigin: '--app-origin', emailFrom: '--email-from',
 });
 const BASELINE_WRANGLER_SHA256 = '8fdf874f7956b5fb7c2e102d0041d9ac06ee694dca4c15201e3dc6d2b21424a8';
+const PROSPECTIVE_RESOURCE_IDS = Object.freeze({
+  d1: 'PENDING_D1_DATABASE_ID_AFTER_APPROVAL',
+  supabase: 'PENDING_HYPERDRIVE_ID_AFTER_APPROVAL',
+});
+const MAX_CONFIG_DIFF_LINES = 40;
 
 const requireDeps = (deps, names) => {
   for (const name of names) if (typeof deps[name] !== 'function') throw new TypeError(`setup dependency ${name} is required`);
@@ -89,13 +95,32 @@ function conciseLineDiff(current, desired) {
   const right = desired.split(/\r?\n/);
   const changed = [];
   const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length && changed.length < 12; index += 1) {
+  for (let index = 0; index < length && changed.length < MAX_CONFIG_DIFF_LINES; index += 1) {
     if (left[index] === right[index]) continue;
     if (left[index] !== undefined) changed.push(`- ${redactDiffLine(left[index])}`);
-    if (right[index] !== undefined && changed.length < 12) changed.push(`+ ${redactDiffLine(right[index])}`);
+    if (right[index] !== undefined && changed.length < MAX_CONFIG_DIFF_LINES) changed.push(`+ ${redactDiffLine(right[index])}`);
   }
-  if (changed.length === 12 && length > 6) changed.push('… additional differences omitted');
+  if (changed.length === MAX_CONFIG_DIFF_LINES) changed.push('… additional differences omitted');
   return changed.join('\n');
+}
+
+function renderProspectiveWrangler(template, plan, catalog) {
+  if (!plan || typeof plan !== 'object') throw new TypeError('Wrangler replacement preview requires the resolved setup plan');
+  const manifest = manifestFromPlan(plan, catalog);
+  const resources = { ...manifest.resources };
+  const pendingIds = [];
+  if (manifest.mode === 'deploy' && manifest.database === 'd1' && !resources.d1DatabaseId) {
+    resources.d1DatabaseId = PROSPECTIVE_RESOURCE_IDS.d1;
+    pendingIds.push(PROSPECTIVE_RESOURCE_IDS.d1);
+  }
+  if (manifest.mode === 'deploy' && manifest.database === 'supabase' && !resources.hyperdriveId) {
+    resources.hyperdriveId = PROSPECTIVE_RESOURCE_IDS.supabase;
+    pendingIds.push(PROSPECTIVE_RESOURCE_IDS.supabase);
+  }
+  return Object.freeze({
+    content: renderWrangler(template, { ...manifest, resources }),
+    pendingIds: Object.freeze(pendingIds),
+  });
 }
 
 export async function preflightWranglerConfig(options) {
@@ -123,8 +148,11 @@ export async function preflightWranglerConfig(options) {
   if (typeof options.confirmConfigReplacement !== 'function' || typeof options.output !== 'function') {
     throw new TypeError('interactive Wrangler replacement requires output and confirmConfigReplacement');
   }
-  const desired = canonical ?? options.template;
-  options.output(`wrangler.jsonc replacement requires separate approval:\n${conciseLineDiff(options.current, desired)}`);
+  const prospective = renderProspectiveWrangler(options.template, options.plan, options.catalog);
+  const pendingNote = prospective.pendingIds.length
+    ? '\nPending provider IDs are clearly labeled in this diff; only those IDs will be substituted after setup approval.'
+    : '';
+  options.output(`wrangler.jsonc replacement requires separate approval:${pendingNote}\n${conciseLineDiff(options.current, prospective.content)}`);
   if (await options.confirmConfigReplacement({ classification }) !== true) {
     throw new Error('wrangler.jsonc replacement was not approved; no setup changes were made');
   }
@@ -241,7 +269,6 @@ const exists = async (path) => {
 async function applyDefaultSetup(plan, options, catalog) {
   const root = resolve(process.cwd());
   const configPath = resolve(root, 'wrangler.jsonc');
-  await assertExpectedContent(configPath, options.approvedConfigContent);
   const manifestPath = resolve(root, 'church.config.json');
   const templatePath = resolve(root, 'config/wrangler.template.jsonc');
   const statePath = resolve(root, '.church/setup-state.json');
@@ -257,6 +284,9 @@ async function applyDefaultSetup(plan, options, catalog) {
   let desiredManifest;
   let desiredConfig;
   let latestDoctor;
+  let configLease = null;
+  let providerProofComplete = false;
+  let d1ProofRoot = null;
 
   const verify = {
     migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
@@ -304,16 +334,7 @@ async function applyDefaultSetup(plan, options, catalog) {
   };
 
   const steps = {
-    'verify-provider': step(async () => ({ changed: false }), () => verifyProviderPreflight({
-      backend: plan.backend,
-      mode: plan.mode,
-      db,
-      runner,
-      wranglerBin,
-      configPath,
-      resources: plan.resources,
-      ...(dbUrl ? { secrets: [dbUrl] } : {}),
-    })),
+    'verify-provider': step(async () => ({ changed: false }), () => providerProofComplete),
     'ensure-resources': createResourceStep({ plan, runner, wranglerBin, configPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async ({ plan: activePlan, resources }) => {
       if (!resources?.r2BucketName || !(activePlan.backend === 'd1' ? resources.d1DatabaseId : resources.hyperdriveId)) return false;
       if (activePlan.mode === 'local') return true;
@@ -335,7 +356,8 @@ async function applyDefaultSetup(plan, options, catalog) {
     'write-config': step(async ({ plan: activePlan }) => {
       desiredConfig = renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
       const approved = options.approvedConfigContent;
-      const result = await writeAtomic(configPath, desiredConfig, {
+      if (!configLease) throw new Error('Wrangler configuration ownership lease is unavailable');
+      const result = await configLease.writeAtomic(desiredConfig, {
         allowReplace: approved !== null,
         backup: approved !== null,
         expectedContent: approved,
@@ -343,7 +365,12 @@ async function applyDefaultSetup(plan, options, catalog) {
       return { changed: result.changed };
     }, async ({ plan: activePlan }) => {
       desiredConfig ??= renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
-      return await exists(configPath) === desiredConfig;
+      const verified = await exists(configPath) === desiredConfig;
+      if (verified && configLease) {
+        await configLease.release();
+        configLease = null;
+      }
+      return verified;
     }),
     'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath }), async ({ plan: activePlan }) => {
       if (activePlan.mode === 'deploy') return hasDeploySecret({ runner, wranglerBin, configPath, name: 'SESSION_SECRET' });
@@ -363,27 +390,56 @@ async function applyDefaultSetup(plan, options, catalog) {
   };
 
   try {
-    const applied = await applySetup({ ...plan, existingInstallation: options.existingInstallation === true }, {
-      steps,
-      stateStore: createStateStore(statePath),
-      dryRun: false,
-      rerunCommand: options.rerunCommand,
-      secretValues: options.secretValues,
+    let proofConfigPath = configPath;
+    let proofDb = db;
+    if (plan.backend === 'd1') {
+      d1ProofRoot = await mkdtemp(join(tmpdir(), 'church-setup-provider-proof-'));
+      proofConfigPath = join(d1ProofRoot, 'wrangler.jsonc');
+      await writeFile(proofConfigPath, renderProspectiveWrangler(template, plan, catalog).content, { encoding: 'utf8', mode: 0o600 });
+      if (plan.mode === 'local') {
+        proofDb = new D1CliDb({ runner, wranglerBin, configPath: proofConfigPath, mode: 'local', persistTo: join(d1ProofRoot, 'state') });
+      }
+    }
+    return await applyAfterProviderPreflight({
+      providerOptions: {
+        backend: plan.backend,
+        mode: plan.mode,
+        db: proofDb,
+        runner,
+        wranglerBin,
+        configPath: proofConfigPath,
+        resources: plan.resources,
+        ...(dbUrl ? { secrets: [dbUrl] } : {}),
+      },
+      apply: async () => {
+        providerProofComplete = true;
+        configLease = await acquireApprovedContentLease(configPath, options.approvedConfigContent);
+        const applied = await applySetup({ ...plan, existingInstallation: options.existingInstallation === true }, {
+          steps,
+          stateStore: createStateStore(statePath),
+          dryRun: false,
+          rerunCommand: options.rerunCommand,
+          secretValues: options.secretValues,
+          beforeMutation: async () => { if (configLease) await configLease.assertUnchanged(); },
+        });
+        latestDoctor ??= await runInstallationDoctor(plan);
+        const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
+        const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
+        return {
+          backend: plan.backend,
+          enabledModules: plan.modules,
+          moduleRows,
+          admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' },
+          apply: applied,
+          doctor: latestDoctor,
+          handoff: buildHandoff(plan, latestDoctor, { supabaseSecretSource: options.secretContext?.source }),
+        };
+      },
     });
-    latestDoctor ??= await runInstallationDoctor(plan);
-    const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
-    const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
-    return {
-      backend: plan.backend,
-      enabledModules: plan.modules,
-      moduleRows,
-      admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' },
-      apply: applied,
-      doctor: latestDoctor,
-      handoff: buildHandoff(plan, latestDoctor, { supabaseSecretSource: options.secretContext?.source }),
-    };
   } finally {
+    await configLease?.release();
     await postgresConnection?.close();
+    if (d1ProofRoot) await rm(d1ProofRoot, { recursive: true, force: true });
   }
 }
 
@@ -570,22 +626,33 @@ async function createDefaultDeps() {
         const root = resolve(process.cwd());
         const configPath = resolve(root, 'wrangler.jsonc');
         const configContent = await readFile(configPath, 'utf8');
-        if (createHash('sha256').update(configContent).digest('hex') === BASELINE_WRANGLER_SHA256) return {};
         const runner = createCommandRunner();
         const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
+        const openD1 = ({ mode, persistTo }) => new D1CliDb({
+          runner,
+          wranglerBin,
+          configPath,
+          mode,
+          ...(mode === 'local' ? { persistTo: persistTo ?? resolveLocalPersistence(root, process.env) } : {}),
+        });
+        if (createHash('sha256').update(configContent).digest('hex') === BASELINE_WRANGLER_SHA256) {
+          return inspectBaselineLocalD1Installation({
+            catalog,
+            root,
+            configContent,
+            baselineContent: configContent,
+            requestedMode,
+            environment: process.env,
+            openD1,
+          });
+        }
         return inspectLegacyInstallation({
           catalog,
           configContent,
           baselineContent: '',
           requestedMode,
           environment: process.env,
-          openD1: ({ mode }) => new D1CliDb({
-            runner,
-            wranglerBin,
-            configPath,
-            mode,
-            ...(mode === 'local' ? { persistTo: resolveLocalPersistence(root, process.env) } : {}),
-          }),
+          openD1,
           openPostgres: (url) => openPostgresSetupDb(url),
         });
       }
@@ -634,7 +701,7 @@ async function createDefaultDeps() {
     output,
     errorOutput,
     inspectExisting,
-    preflightConfig: async ({ currentState, forceConfig }) => {
+    preflightConfig: async ({ plan, currentState, forceConfig }) => {
       const current = await readFile('wrangler.jsonc', 'utf8').catch((error) => {
         if (error?.code === 'ENOENT') return null;
         throw error;
@@ -643,6 +710,7 @@ async function createDefaultDeps() {
       return preflightWranglerConfig({
         current,
         template,
+        plan,
         existingManifest: currentState.existingManifest ?? null,
         catalog,
         baselineSha256: BASELINE_WRANGLER_SHA256,

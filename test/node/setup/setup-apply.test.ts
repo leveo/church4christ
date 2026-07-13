@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps, SetupApplyError } from '../../../scripts/setup/apply.mjs';
+import { acquireApprovedContentLease } from '../../../scripts/setup/files.mjs';
 import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
 import { configureSecrets } from '../../../scripts/setup/secrets.mjs';
 import { probeR2Object } from '../../../scripts/setup/probes.mjs';
@@ -38,6 +39,40 @@ describe('setup apply coordinator', () => {
     const result = await applySetup({ actions: ['migrate'] }, { steps: { migrate: { apply, verify } }, stateStore: { load, has: vi.fn(), mark }, dryRun: true });
     expect(result).toEqual({ status: 'dry-run', actions: ['migrate'], results: [] });
     expect(apply).not.toHaveBeenCalled(); expect(verify).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled(); expect(mark).not.toHaveBeenCalled();
+  });
+
+  it('rechecks config ownership before state and every later mutation boundary', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-lease-'));
+    const configPath = join(root, 'wrangler.jsonc');
+    const statePath = join(root, '.church/setup-state.json');
+    await writeFile(configPath, 'approved');
+    const lease = await acquireApprovedContentLease(configPath, 'approved');
+    const mutate = vi.fn(async () => ({ changed: true }));
+    await writeFile(configPath, 'changed before state');
+    await expect(applySetup({ actions: ['migrate'] }, {
+      steps: { migrate: { apply: mutate, verify: async () => false } },
+      stateStore: createStateStore(statePath),
+      beforeMutation: () => lease.assertUnchanged(),
+    })).rejects.toThrow(/changed.*approval/i);
+    expect(mutate).not.toHaveBeenCalled();
+    await expect(stat(statePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await lease.release();
+
+    await writeFile(configPath, 'approved');
+    const secondLease = await acquireApprovedContentLease(configPath, 'approved');
+    let boundaries = 0;
+    await expect(applySetup({ actions: ['migrate'] }, {
+      steps: { migrate: { apply: mutate, verify: async () => false } },
+      stateStore: createStateStore(statePath),
+      beforeMutation: async () => {
+        boundaries += 1;
+        if (boundaries === 2) await writeFile(configPath, 'changed before external call');
+        await secondLease.assertUnchanged();
+      },
+    })).rejects.toThrow(/changed.*approval/i);
+    expect(mutate).not.toHaveBeenCalled();
+    await secondLease.release();
+    await rm(root, { recursive: true, force: true });
   });
 
   it('rejects unknown, duplicate, out-of-order, and malformed requested actions', async () => {

@@ -14,6 +14,7 @@ import {
   _syncParentDirectory,
   classifyConfig,
   assertExpectedContent,
+  acquireApprovedContentLease,
   writeAtomic,
 } from '../../../scripts/setup/files.mjs';
 import { importExistingInstallation } from '../../../scripts/setup/import-existing.mjs';
@@ -233,6 +234,31 @@ describe('Wrangler rendering', () => {
 });
 
 describe('file ownership and atomic writes', () => {
+  it('holds approved ownership across mutations and permits replacement through the same lease', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'approved');
+    const lease = await acquireApprovedContentLease(path, 'approved');
+    await expect(writeAtomic(path, 'competing writer', { allowReplace: true })).rejects.toThrow(/already in progress/i);
+    await expect(lease.assertUnchanged()).resolves.toBeUndefined();
+    await expect(lease.writeAtomic('replacement', { allowReplace: true, expectedContent: 'approved' }))
+      .resolves.toMatchObject({ changed: true });
+    await lease.release();
+    expect(await readFile(path, 'utf8')).toBe('replacement');
+  });
+
+  it('detects an editor that bypasses the ownership lock without overwriting their bytes', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'approved');
+    const lease = await acquireApprovedContentLease(path, 'approved');
+    await writeFile(path, 'external edit');
+    await expect(lease.assertUnchanged()).rejects.toThrow(/changed.*approval/i);
+    await expect(lease.writeAtomic('replacement', { allowReplace: true, expectedContent: 'approved' })).rejects.toThrow(/changed|expected/i);
+    await lease.release();
+    expect(await readFile(path, 'utf8')).toBe('external edit');
+  });
+
   it('atomically checks approved config bytes without mutating the target', async () => {
     const dir = await temp();
     const path = join(dir, 'wrangler.jsonc');

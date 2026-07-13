@@ -1,6 +1,7 @@
 import { normalizeEmail, normalizeOrigin } from './answers.mjs';
 import { validateProviderResources } from './manifest.mjs';
 import { parseJsoncObject } from './jsonc.mjs';
+import { inspectLocalD1Persistence } from './persistence.mjs';
 
 const normalizeText = (value) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
@@ -55,9 +56,19 @@ const oneBinding = (entries, binding, label) => {
   return matches[0];
 };
 
-export function parseLegacyWrangler(content) {
-  if (/@@[A-Z_]+@@|\bYOUR_[A-Z0-9_]*\b/.test(content)) throw new Error('legacy Wrangler configuration contains unresolved placeholders');
+export function parseLegacyWrangler(content, options = {}) {
+  if (options.allowCommentPlaceholders !== true && /@@[A-Z_]+@@|\bYOUR_[A-Z0-9_]*\b/.test(content)) {
+    throw new Error('legacy Wrangler configuration contains unresolved placeholders');
+  }
   const parsed = parseJsoncObject(content, 'legacy wrangler.jsonc');
+  const parsedText = JSON.stringify(parsed);
+  const baselineD1Placeholder = options.allowBaselineD1Placeholder === true &&
+    parsed.d1_databases?.filter((entry) => entry?.binding === 'DB').length === 1 &&
+    parsed.d1_databases.find((entry) => entry?.binding === 'DB')?.database_id === 'YOUR_D1_DATABASE_ID';
+  const withoutAllowedPlaceholder = baselineD1Placeholder ? parsedText.replace('YOUR_D1_DATABASE_ID', '') : parsedText;
+  if (/@@[A-Z_]+@@|\bYOUR_[A-Z0-9_]*\b/.test(withoutAllowedPlaceholder)) {
+    throw new Error('legacy Wrangler configuration contains unresolved placeholders');
+  }
   const backend = parsed.vars?.DB_BACKEND ?? 'd1';
   if (!['d1', 'supabase'].includes(backend)) throw new Error('legacy DB_BACKEND must be d1 or supabase');
   if (typeof parsed.name !== 'string' || !parsed.name) throw new Error('legacy Worker name is missing');
@@ -105,9 +116,19 @@ export async function inspectLegacyInstallation(options) {
   if (!catalog || typeof configContent !== 'string' || typeof baselineContent !== 'string') {
     throw new TypeError('legacy inspection requires catalog and configuration bytes');
   }
-  if (configContent === baselineContent) return {};
-  const config = parseLegacyWrangler(configContent);
-  const initial = importExistingInstallation({ catalog, config, settings: {}, admins: [] });
+  const baselineLocalD1 = configContent === baselineContent && options.baselineLocalD1 === true;
+  if (configContent === baselineContent && !baselineLocalD1) return {};
+  let inspectionContent = configContent;
+  if (baselineLocalD1) {
+    const placeholder = /("database_id"\s*:\s*)"YOUR_D1_DATABASE_ID"/g;
+    if ([...configContent.matchAll(placeholder)].length !== 1) {
+      throw new Error('baseline Wrangler configuration must contain exactly one D1 database id placeholder');
+    }
+  }
+  const config = parseLegacyWrangler(inspectionContent, { allowCommentPlaceholders: baselineLocalD1, allowBaselineD1Placeholder: baselineLocalD1 });
+  if (baselineLocalD1 && config.backend !== 'd1') throw new Error('baseline local persistence must use D1');
+  const forceLocal = (proposal) => baselineLocalD1 ? { ...proposal, mode: 'local' } : proposal;
+  const initial = forceLocal(importExistingInstallation({ catalog, config, settings: {}, admins: [] }));
   let opened;
   if (config.backend === 'd1') {
     if (typeof options.openD1 !== 'function') throw new TypeError('legacy D1 inspection requires openD1');
@@ -135,7 +156,7 @@ export async function inspectLegacyInstallation(options) {
       if (!row || typeof row.email !== 'string') throw new Error('legacy admin result is invalid');
       return row;
     });
-    const proposal = importExistingInstallation({ catalog, config, settings, admins });
+    const proposal = forceLocal(importExistingInstallation({ catalog, config, settings, admins }));
     if (options.requestedMode && options.requestedMode !== proposal.mode) {
       return {
         ...proposal,
@@ -148,4 +169,26 @@ export async function inspectLegacyInstallation(options) {
   } finally {
     await opened?.close?.();
   }
+}
+
+/** Import the exact baseline as legacy local D1 only when read-only state discovery proves it exists. */
+export async function inspectBaselineLocalD1Installation(options) {
+  const { catalog, root, configContent, baselineContent, environment = process.env } = options ?? {};
+  if (!catalog || typeof root !== 'string' || typeof configContent !== 'string' || typeof baselineContent !== 'string' || configContent !== baselineContent) {
+    throw new TypeError('baseline local D1 inspection requires the exact baseline configuration and workspace root');
+  }
+  const persistence = await inspectLocalD1Persistence(root, environment);
+  if (!persistence.hasState) return {};
+  return inspectLegacyInstallation({
+    catalog,
+    configContent,
+    baselineContent,
+    requestedMode: options.requestedMode,
+    environment,
+    baselineLocalD1: true,
+    openD1: ({ config }) => {
+      if (typeof options.openD1 !== 'function') throw new TypeError('baseline local D1 inspection requires openD1');
+      return options.openD1({ mode: 'local', config, persistTo: persistence.persistTo });
+    },
+  });
 }

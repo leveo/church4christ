@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertDemoSeedTarget, verifyProviderPreflight } from '../../../scripts/setup/provider-verification.mjs';
-import { applySetup } from '../../../scripts/setup/apply.mjs';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { applyAfterProviderPreflight, assertDemoSeedTarget, verifyProviderPreflight } from '../../../scripts/setup/provider-verification.mjs';
+import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
 
 function dbWithRows(rows: unknown[]) {
   const prepare = vi.fn((_sql: string) => ({
@@ -114,27 +117,25 @@ describe('provider verification preflight', () => {
     })).resolves.toBe(true);
   });
 
-  it('stops the action pipeline after only the initial installation-origin load when provider verification fails', async () => {
+  it('rejects the provider before creating setup state or entering the mutation pipeline', async () => {
     const db = dbWithRows([new Error('private provider failure')]);
-    const ensureApply = vi.fn();
-    const state = {
-      load: vi.fn(async () => 'managed'),
-      has: vi.fn(async () => false),
-      mark: vi.fn(),
-      getEvidence: vi.fn(),
-    };
-    await expect(applySetup({
-      backend: 'supabase', existingInstallation: false,
-      actions: ['verify-provider', 'ensure-resources'],
-    } as any, {
-      steps: {
-        'verify-provider': { apply: vi.fn(), verify: () => verifyProviderPreflight({ backend: 'supabase', mode: 'local', db }) },
-        'ensure-resources': { apply: ensureApply, verify: vi.fn() },
-      },
-      stateStore: state,
-    })).rejects.toThrow(/Failed step: verify-provider[\s\S]*Selected database provider verification failed before setup mutations/);
-    expect(state.load).toHaveBeenCalledOnce();
-    expect(state.mark).not.toHaveBeenCalled();
-    expect(ensureApply).not.toHaveBeenCalled();
+    const root = await mkdtemp(join(tmpdir(), 'provider-before-state-'));
+    const statePath = join(root, '.church/setup-state.json');
+    const configPath = join(root, 'wrangler.jsonc');
+    const manifestPath = join(root, 'church.config.json');
+    const store = createStateStore(statePath);
+    const externalResource = vi.fn();
+    const enterApply = vi.fn(async () => {
+      await store.load(fingerprintPlan({ version: 1 }));
+      await externalResource();
+    });
+    await expect(applyAfterProviderPreflight({
+      providerOptions: { backend: 'supabase', mode: 'local', db },
+      apply: enterApply,
+    })).rejects.toThrow(/^Selected database provider verification failed before setup mutations$/);
+    expect(enterApply).not.toHaveBeenCalled();
+    expect(externalResource).not.toHaveBeenCalled();
+    for (const path of [statePath, configPath, manifestPath]) await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    await rm(root, { recursive: true, force: true });
   });
 });
