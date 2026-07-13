@@ -60,6 +60,20 @@ describe('catalog-owned docs', () => {
     const malformed = structuredClone(raw) as any;
     malformed.capabilities.events.labels = null;
     expect(() => renderCapabilityTable(malformed)).toThrow(/labels\.en/i);
+
+    const hostileKey = structuredClone(raw) as any;
+    const definition = hostileKey.capabilities.events;
+    delete hostileKey.capabilities.events;
+    hostileKey.capabilities['events`|\nrow'] = definition;
+    hostileKey.order[4] = 'events`|\nrow';
+    for (const preset of Object.values(hostileKey.presets) as any[]) {
+      preset.modules = preset.modules.map((key: string) =>
+        key === 'events' ? 'events`|\nrow' : key,
+      );
+    }
+    expect(() => renderCapabilityTable(hostileKey)).toThrow(
+      /capability key.*lowercase kebab-case/i,
+    );
   });
 
   it('escapes catalog labels without corrupting table rows or cells', () => {

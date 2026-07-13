@@ -84,6 +84,34 @@ describe('canonical capability catalog', () => {
 });
 
 describe('capability catalog validation', () => {
+  test.each(['unsafe`key', 'unsafe|key', 'unsafe\nkey', 'Unsafe_Key', '-unsafe'])(
+    'rejects unsafe capability key %j even when references remain bijective',
+    (unsafeKey) => {
+      expectInvalid((catalog) => {
+        const definition = catalog.capabilities.events;
+        delete catalog.capabilities.events;
+        catalog.capabilities[unsafeKey] = definition;
+        catalog.order = catalog.order.map((key: string) =>
+          key === 'events' ? unsafeKey : key,
+        );
+        for (const preset of Object.values(catalog.presets) as any[]) {
+          preset.modules = preset.modules.map((key: string) =>
+            key === 'events' ? unsafeKey : key,
+          );
+        }
+      }, /capability key.*lowercase kebab-case/i);
+    },
+  );
+
+  test.each(['unsafe`key', 'unsafe|key', 'unsafe\nkey'])(
+    'rejects unsafe order key %j at the identifier and bijection boundary',
+    (unsafeKey) => {
+      expectInvalid((catalog) => {
+        catalog.order[4] = unsafeKey;
+      }, /order key.*lowercase kebab-case.*order must contain every capability key/is);
+    },
+  );
+
   test.each([
     ['services', 'blank', (c: any) => (c.services[0] = ' ')],
     ['services', 'numeric', (c: any) => (c.services[0] = 42)],

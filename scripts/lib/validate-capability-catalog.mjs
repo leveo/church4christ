@@ -1,5 +1,6 @@
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isNonblank = (value) => typeof value === 'string' && value.trim().length > 0;
+const SAFE_CAPABILITY_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function validateCapabilityCatalog(input) {
   if (!isObject(input)) throw new Error('capability catalog must be an object');
@@ -34,6 +35,17 @@ export function validateCapabilityCatalog(input) {
   const services = new Set(serviceList);
   const groups = new Set(groupList);
   const providers = new Set(Object.keys(providersObject));
+
+  for (const key of keys) {
+    if (!SAFE_CAPABILITY_KEY.test(key)) {
+      fail(`capability key ${JSON.stringify(key)} must use lowercase kebab-case`);
+    }
+  }
+  for (const key of order) {
+    if (typeof key !== 'string' || !SAFE_CAPABILITY_KEY.test(key)) {
+      fail(`order key ${JSON.stringify(key)} must use lowercase kebab-case`);
+    }
+  }
 
   for (const [field, values] of [
     ['services', serviceList],
