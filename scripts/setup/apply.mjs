@@ -29,7 +29,7 @@ function commonDatabaseSteps(options) {
       const key = `site.name.${plan?.site?.locale}`;
       const current = await options.db.prepare('SELECT value FROM settings WHERE key=?').bind(key).first('value');
       const validCurrent = typeof current === 'string' && current.trim() === current && current.length > 0 && current.length <= 200 && !/[\0-\x1f\x7f]/.test(current);
-      const preserveImported = options.preserveSiteIdentity && !managedInstallation;
+      const preserveImported = !managedInstallation;
       if (!(recovering || preserveImported) || !validCurrent) {
         await options.db.prepare(
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -170,10 +170,11 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
   if (!stateStore || typeof stateStore.load !== 'function' || typeof stateStore.has !== 'function' || typeof stateStore.mark !== 'function') throw new TypeError('stateStore load/has/mark are required');
   if (actions.includes('ensure-resources') && typeof stateStore.getEvidence !== 'function') throw new TypeError('stateStore getEvidence is required for ensure-resources recovery');
   if (actions.includes('ensure-resources') && !['d1', 'supabase'].includes(plan.backend)) throw new TypeError('setup plan backend is required for resource recovery');
-  await stateStore.load(fingerprintPlan(plan));
+  const installationOrigin = await stateStore.load(fingerprintPlan(plan), plan.existingInstallation === true ? 'imported' : 'managed');
+  if (!['managed', 'imported'].includes(installationOrigin)) throw new Error('stateStore load must return the installation origin');
   const initialCompletion = new Map();
   for (const action of actions) initialCompletion.set(action, await stateStore.has(action));
-  const managedInstallation = [...initialCompletion.entries()].some(([name, completed]) => completed && !['verify-provider', 'ensure-resources'].includes(name));
+  const managedInstallation = installationOrigin === 'managed';
   const results = []; let resolvedResources = plan.resources;
   for (const name of actions) {
     const completed = initialCompletion.get(name) === true;

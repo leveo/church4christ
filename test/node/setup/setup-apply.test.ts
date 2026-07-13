@@ -9,10 +9,11 @@ import { probeR2Object } from '../../../scripts/setup/probes.mjs';
 
 const ORDER = ['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor'];
 
-function memoryStore() {
+function memoryStore(initialOrigin?: 'managed' | 'imported') {
   const completed = new Set<string>();
   const evidence = new Map<string, unknown>();
-  return { completed, async load() {}, async has(name: string) { return completed.has(name); }, async getEvidence(name: string) { return evidence.get(name) ?? null; }, async mark(name: string, value: unknown) { completed.add(name); evidence.set(name, value); } };
+  let origin = initialOrigin;
+  return { completed, async load(_fingerprint?: string, hint: 'managed' | 'imported' = 'managed') { origin ??= hint; return origin; }, async has(name: string) { return completed.has(name); }, async getEvidence(name: string) { return evidence.get(name) ?? null; }, async mark(name: string, value: unknown) { completed.add(name); evidence.set(name, value); } };
 }
 
 describe('setup apply coordinator', () => {
@@ -52,12 +53,12 @@ describe('setup apply coordinator', () => {
     await expect(applySetup({ actions: ['migrate', 'seed'] }, { steps: {
       migrate: { apply: async () => ({ changed: true }), verify: async () => false },
       seed: { apply: second, verify: async () => true },
-    }, stateStore: { async load() {}, async has() { return false; }, mark }, dryRun: false })).rejects.toThrow(/did not verify/i);
+    }, stateStore: { async load() { return 'managed'; }, async has() { return false; }, mark }, dryRun: false })).rejects.toThrow(/did not verify/i);
     expect(mark).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled();
   });
 
   it('requires exact true verification and resource evidence access', async () => {
-    const state: any = { async load() {}, async has() { return true; }, async mark() {} };
+    const state: any = { async load() { return 'managed'; }, async has() { return true; }, async mark() {} };
     const step = { apply: vi.fn(async () => ({ changed: false })), verify: vi.fn().mockResolvedValueOnce(1).mockResolvedValue(true) };
     await applySetup({ actions: ['migrate'] }, { steps: { migrate: step }, stateStore: state, dryRun: false });
     expect(step.apply).toHaveBeenCalledTimes(1);
@@ -203,7 +204,7 @@ describe('setup state', () => {
     const root = await mkdtemp(join(tmpdir(), 'c4c-partial-recovery-'));
     const store = createStateStore(join(root, 'state.json'));
     const resources = { d1DatabaseName: 'church-db', d1DatabaseId: 'local', r2BucketName: 'church-media', hyperdriveId: null };
-    const plan: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Requested Church', locale: 'en' }, modules: ['events'], actions: ['ensure-resources', 'write-manifest', 'write-config', 'seed', 'initialize-modules'] };
+    const plan: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Requested Church', locale: 'en' }, modules: ['events'], actions: ['ensure-resources', 'write-manifest', 'write-config', 'seed', 'initialize-modules'], existingInstallation: false };
     const completed = new Set<string>();
     const simple = (name: string) => ({ apply: async () => { completed.add(name); return { changed: true }; }, verify: async () => completed.has(name) });
     const firstSteps: any = {
@@ -217,11 +218,60 @@ describe('setup state', () => {
     const db: any = { prepare(sql: string) { let binds: any[] = []; return { bind(...values: any[]) { binds = values; return this; }, async first(column?: string) { const value = settings.get(binds[0]) ?? (binds[0] === 'site.name.en' ? siteName : null); return column ? value : value === null ? null : { value }; }, async run() { if (sql.startsWith('INSERT INTO settings') && binds[0] === 'site.name.en') siteName = binds[1]; else for (let i = 0; i < binds.length; i += 2) settings.set(binds[i], binds[i + 1]); return { success: true, meta: { changes: 1 } }; } }; } };
     const provider = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db, moduleKeys: ['events'], preserveSiteIdentity: true, verify: { migrate: async () => true, seed: async () => true, 'initialize-modules': async (context: any) => context.recovering ? Boolean(siteName) : siteName === 'Requested Church', 'bootstrap-admin': async () => true } });
     const secondSteps: any = { 'ensure-resources': { apply: vi.fn(), verify: async () => true }, 'write-manifest': simple('write-manifest'), 'write-config': simple('write-config'), seed: simple('seed'), 'initialize-modules': provider['initialize-modules'] };
-    await applySetup({ ...plan, resources }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
+    await applySetup({ ...plan, resources, existingInstallation: true }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
     expect(siteName).toBe('Requested Church');
     siteName = 'Church4Christ';
-    await applySetup({ ...plan, resources }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
+    await applySetup({ ...plan, resources, existingInstallation: true }, { steps: secondSteps, stateStore: createStateStore(join(root, 'state.json')) });
     expect(siteName).toBe('Church4Christ');
+  });
+
+  it('preserves an imported custom identity through a partial run and resource-resolved rerun', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-imported-recovery-'));
+    const path = join(root, 'state.json');
+    const resources = { d1DatabaseName: 'church-db', d1DatabaseId: 'local', r2BucketName: 'church-media', hyperdriveId: null };
+    const plan: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Requested Church', locale: 'en' }, modules: ['events'], actions: ['verify-provider', 'write-manifest', 'write-config', 'seed', 'initialize-modules'], existingInstallation: true };
+    const completed = new Set<string>();
+    const simple = (name: string) => ({ apply: async () => { completed.add(name); return { changed: true }; }, verify: async () => completed.has(name) });
+    await expect(applySetup(plan, { steps: {
+      'verify-provider': { apply: vi.fn(), verify: async () => true },
+      'write-manifest': simple('write-manifest'), 'write-config': simple('write-config'), seed: simple('seed'),
+      'initialize-modules': { apply: async () => { throw new Error('crash before initialize'); }, verify: async () => false },
+    } as any, stateStore: createStateStore(path) })).rejects.toThrow('crash before initialize');
+
+    let siteName = 'Imported Custom Church'; const settings = new Map<string, string>();
+    const db: any = { prepare(sql: string) { let binds: any[] = []; return { bind(...values: any[]) { binds = values; return this; }, async first(column?: string) { const value = settings.get(binds[0]) ?? (binds[0] === 'site.name.en' ? siteName : null); return column ? value : value === null ? null : { value }; }, async run() { if (sql.startsWith('INSERT INTO settings') && binds[0] === 'site.name.en') siteName = binds[1]; else for (let i = 0; i < binds.length; i += 2) settings.set(binds[i], binds[i + 1]); return { success: true, meta: { changes: 1 } }; } }; } };
+    const provider = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db, moduleKeys: ['events'], preserveSiteIdentity: true, verify: { migrate: async () => true, seed: async () => true, 'initialize-modules': async (context: any) => !context.managedInstallation && Boolean(siteName), 'bootstrap-admin': async () => true } });
+    await applySetup({ ...plan, resources }, { steps: { 'verify-provider': { apply: vi.fn(), verify: async () => true }, 'write-manifest': simple('write-manifest'), 'write-config': simple('write-config'), seed: simple('seed'), 'initialize-modules': provider['initialize-modules'] } as any, stateStore: createStateStore(path) });
+    expect(siteName).toBe('Imported Custom Church');
+  });
+
+  it('persists immutable origin without secrets and keeps it across hint and fingerprint changes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-state-origin-')); const path = join(root, 'state.json');
+    const first = fingerprintPlan({ version: 'a', secret: 'do-not-serialize' });
+    const second = fingerprintPlan({ version: 'b' });
+    const managed = createStateStore(path);
+    await expect(managed.load(first, 'managed')).resolves.toBe('managed');
+    expect(await readFile(path, 'utf8')).not.toContain('do-not-serialize');
+    await expect(createStateStore(path).load(first, 'imported')).resolves.toBe('managed');
+    await expect(createStateStore(path).load(second, 'imported')).resolves.toBe('managed');
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ schemaVersion: 2, installationOrigin: 'managed', planFingerprint: second });
+
+    const importedPath = join(root, 'imported.json');
+    await expect(createStateStore(importedPath).load(first, 'imported')).resolves.toBe('imported');
+    await expect(createStateStore(importedPath).load(second, 'managed')).resolves.toBe('imported');
+  });
+
+  it('reads strict v1 state and deterministically migrates it on the next mark', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-state-v1-')); const path = join(root, 'state.json');
+    const fingerprint = fingerprintPlan({ version: 'legacy' });
+    await writeFile(path, `${JSON.stringify({ schemaVersion: 1, planFingerprint: fingerprint, completed: {} }, null, 2)}\n`);
+    const store = createStateStore(path);
+    await expect(store.load(fingerprint, 'imported')).resolves.toBe('imported');
+    expect(JSON.parse(await readFile(path, 'utf8')).schemaVersion).toBe(1);
+    await store.mark('migrate');
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ schemaVersion: 2, installationOrigin: 'imported' });
+    await writeFile(path, `${JSON.stringify({ schemaVersion: 1, planFingerprint: fingerprint, completed: {}, extra: true })}\n`);
+    await expect(createStateStore(path).load(fingerprint, 'managed')).rejects.toThrow(/corrupt|unsupported/i);
   });
 
   it('is versioned, resets completion on fingerprint change, clones evidence, and fails corrupt state', async () => {
@@ -247,8 +297,25 @@ describe('setup state', () => {
     await a.mark('migrate', null);
     await expect(b.mark('seed', null)).rejects.toThrow(/expected content|concurrent/i);
     expect(await b.has('seed')).toBe(false);
-    const failing = createStateStore(join(root, 'fail.json'), { writeJsonAtomic: async () => { throw new Error('disk'); } });
+    let writes = 0;
+    const failing = createStateStore(join(root, 'fail.json'), { writeJsonAtomic: async () => { if (writes++ > 0) throw new Error('disk'); } });
     await failing.load(fp); await expect(failing.mark('seed', null)).rejects.toThrow('disk'); expect(await failing.has('seed')).toBe(false);
+  });
+
+  it('makes state unreadable after an atomic fingerprint rewrite fails', async () => {
+    const fingerprint = fingerprintPlan({ version: 'first' });
+    let content: string | null = null;
+    let writes = 0;
+    const store = createStateStore('/virtual/state.json', {
+      readJson: async () => {
+        if (content === null) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return { value: JSON.parse(content), sourceContent: content };
+      },
+      writeJsonAtomic: async (_path, next) => { if (writes++ > 0) throw new Error('disk'); content = next; },
+    });
+    await store.load(fingerprint, 'managed');
+    await expect(store.load(fingerprintPlan({ version: 'second' }), 'imported')).rejects.toThrow('disk');
+    await expect(store.has('migrate')).rejects.toThrow(/must be loaded/i);
   });
 });
 

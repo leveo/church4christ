@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { writeAtomic } from './files.mjs';
 
-const STATE_KEYS = ['schemaVersion', 'planFingerprint', 'completed'];
+const STATE_V1_KEYS = ['schemaVersion', 'planFingerprint', 'completed'];
+const STATE_V2_KEYS = ['schemaVersion', 'installationOrigin', 'planFingerprint', 'completed'];
 const RECORD_KEYS = ['at', 'evidence'];
 const STEP = /^[a-z][a-z0-9-]*$/;
 const KNOWN_STEPS = new Set(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
@@ -62,8 +63,10 @@ function stepEvidence(name, value) {
 }
 
 function validateState(value) {
-  if (!isRecord(value) || Object.keys(value).sort().join('|') !== [...STATE_KEYS].sort().join('|')) throw new Error('setup state schema is invalid');
-  if (value.schemaVersion !== 1) throw new Error('setup state version is unsupported');
+  if (!isRecord(value) || ![1, 2].includes(value.schemaVersion)) throw new Error('setup state version is unsupported');
+  const expectedKeys = value.schemaVersion === 1 ? STATE_V1_KEYS : STATE_V2_KEYS;
+  if (Object.keys(value).sort().join('|') !== [...expectedKeys].sort().join('|')) throw new Error('setup state schema is invalid');
+  if (value.schemaVersion === 2 && !['managed', 'imported'].includes(value.installationOrigin)) throw new Error('setup state installation origin is invalid');
   if (value.planFingerprint !== null && (typeof value.planFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.planFingerprint))) throw new Error('setup state fingerprint is invalid');
   if (!isRecord(value.completed)) throw new Error('setup state completed map is invalid');
   const completed = {};
@@ -72,7 +75,12 @@ function validateState(value) {
       typeof record.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.at) || Number.isNaN(Date.parse(record.at))) throw new Error('setup state completion record is invalid');
     completed[name] = { at: record.at, evidence: stepEvidence(name, record.evidence) };
   }
-  return { schemaVersion: 1, planFingerprint: value.planFingerprint, completed };
+  return {
+    schemaVersion: value.schemaVersion,
+    ...(value.schemaVersion === 2 ? { installationOrigin: value.installationOrigin } : {}),
+    planFingerprint: value.planFingerprint,
+    completed,
+  };
 }
 
 /**
@@ -86,12 +94,15 @@ export function createStateStore(path, options = {}) {
     return { value: JSON.parse(sourceContent), sourceContent };
   });
   const writeJsonAtomic = options.writeJsonAtomic ?? ((target, content, writeOptions) => writeAtomic(target, content, { allowReplace: true, expectedContent: writeOptions.expectedContent }));
-  let state = { schemaVersion: 1, planFingerprint: null, completed: {} };
+  let state = { schemaVersion: 2, installationOrigin: 'managed', planFingerprint: null, completed: {} };
   let sourceContent = null;
   let loaded = false;
   return Object.freeze({
-    async load(fingerprint) {
+    async load(fingerprint, originHint = 'managed') {
       if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('setup plan fingerprint is invalid');
+      if (!['managed', 'imported'].includes(originHint)) throw new Error('setup installation origin hint is invalid');
+      loaded = false;
+      let missing = false;
       try {
         const loadedValue = await readJson(path);
         if (isRecord(loadedValue) && Object.hasOwn(loadedValue, 'value') && Object.hasOwn(loadedValue, 'sourceContent')) {
@@ -105,11 +116,24 @@ export function createStateStore(path, options = {}) {
       }
       catch (error) {
         if (error?.code !== 'ENOENT') throw new Error('Failed to read setup state: state file is corrupt or unsupported');
-        state = { schemaVersion: 1, planFingerprint: null, completed: {} };
+        state = { schemaVersion: 2, installationOrigin: originHint, planFingerprint: null, completed: {} };
         sourceContent = null;
+        missing = true;
       }
+      // Version 1 predates durable provenance. Its caller-provided discovery hint is
+      // the only safe deterministic inference; the next mark atomically upgrades it.
+      const legacy = state.schemaVersion === 1;
+      if (legacy) state = { ...state, schemaVersion: 2, installationOrigin: originHint };
+      const fingerprintChanged = state.planFingerprint !== fingerprint;
       if (state.planFingerprint !== fingerprint) state.completed = {};
-      state.planFingerprint = fingerprint; loaded = true;
+      state.planFingerprint = fingerprint;
+      if (missing || (!legacy && fingerprintChanged)) {
+        const nextContent = `${JSON.stringify(state, null, 2)}\n`;
+        await writeJsonAtomic(path, nextContent, { expectedContent: sourceContent });
+        sourceContent = nextContent;
+      }
+      loaded = true;
+      return state.installationOrigin;
     },
     async has(name) { if (!loaded) throw new Error('setup state must be loaded'); return Boolean(state.completed[name]); },
     async getEvidence(name) {

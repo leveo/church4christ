@@ -193,7 +193,7 @@ async function applyDefaultSetup(plan, options, catalog) {
         const enabled = new Set(activePlan.modules);
         const identity = await db.prepare('SELECT value FROM settings WHERE key=?').bind(`site.name.${activePlan.site.locale}`).first('value');
         const validIdentity = typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity);
-        const preserveImported = options.existingInstallation && !managedInstallation;
+        const preserveImported = !managedInstallation;
         const identityReady = (recovering || preserveImported) ? validIdentity : identity === activePlan.site.name;
         return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
@@ -288,7 +288,7 @@ async function applyDefaultSetup(plan, options, catalog) {
   };
 
   try {
-    const applied = await applySetup(plan, { steps, stateStore: createStateStore(statePath), dryRun: false });
+    const applied = await applySetup({ ...plan, existingInstallation: options.existingInstallation === true }, { steps, stateStore: createStateStore(statePath), dryRun: false });
     latestDoctor ??= await runInstallationDoctor(plan);
     const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
     const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
