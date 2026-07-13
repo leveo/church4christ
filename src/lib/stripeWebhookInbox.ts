@@ -433,11 +433,19 @@ export async function claimStripeEvent(
 ): Promise<StripeWebhookClaim | null> {
   const stamp = utcText(now);
   const leaseExpiresAt = utcText(new Date(now.getTime() + STRIPE_LEASE_MS));
-  return db.prepare(`
+  const updated = await db.prepare(`
     UPDATE church_private.stripe_webhook_events
-    SET status='processing',lease_token=?3,lease_expires_at=?4,
-        attempt_count=attempt_count+1,retry_cycle_attempts=retry_cycle_attempts+1,
-        last_attempt_at=?2,updated_at=?2
+    SET status=CASE WHEN retry_cycle_attempts>=?5 THEN 'failed' ELSE 'processing' END,
+        outcome=CASE WHEN retry_cycle_attempts>=?5 THEN 'lease_expired' ELSE outcome END,
+        next_attempt_at=CASE WHEN retry_cycle_attempts>=?5 THEN NULL ELSE next_attempt_at END,
+        lease_token=CASE WHEN retry_cycle_attempts>=?5 THEN NULL ELSE ?3 END,
+        lease_expires_at=CASE WHEN retry_cycle_attempts>=?5 THEN NULL ELSE ?4 END,
+        attempt_count=attempt_count+CASE WHEN retry_cycle_attempts>=?5 THEN 0 ELSE 1 END,
+        retry_cycle_attempts=retry_cycle_attempts+CASE WHEN retry_cycle_attempts>=?5 THEN 0 ELSE 1 END,
+        last_error=CASE WHEN retry_cycle_attempts>=?5 THEN ?6 ELSE last_error END,
+        last_attempt_at=CASE WHEN retry_cycle_attempts>=?5 THEN last_attempt_at ELSE ?2 END,
+        completed_at=CASE WHEN retry_cycle_attempts>=?5 THEN ?2 ELSE completed_at END,
+        updated_at=?2
     WHERE event_id=?1 AND payload_json IS NOT NULL AND (
       (status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?2))
       OR (status='processing' AND lease_expires_at<=?2)
@@ -446,8 +454,19 @@ export async function claimStripeEvent(
       event_id AS "eventId",payload_json AS "payloadJson",payload_sha256 AS "payloadSha256",
       event_type AS "eventType",api_version AS "apiVersion",event_created AS "eventCreated",
       livemode,lease_token AS "leaseToken",lease_expires_at AS "leaseExpiresAt",
-      attempt_count AS "attemptCount",retry_cycle_attempts AS "retryCycleAttempts"
-  `).bind(eventId, stamp, leaseToken, leaseExpiresAt).first<StripeWebhookClaim>();
+      attempt_count AS "attemptCount",retry_cycle_attempts AS "retryCycleAttempts",
+      status AS "claimStatus"
+  `).bind(
+    eventId,
+    stamp,
+    leaseToken,
+    leaseExpiresAt,
+    STRIPE_MAX_CYCLE_ATTEMPTS,
+    'Processing lease expired after maximum attempts',
+  ).first<StripeWebhookClaim & { claimStatus: StripeWebhookStatus }>();
+  if (!updated || updated.claimStatus !== 'processing') return null;
+  const { claimStatus: _claimStatus, ...claim } = updated;
+  return claim;
 }
 
 /** Read only lease metadata and require an unexpired matching processing token. */

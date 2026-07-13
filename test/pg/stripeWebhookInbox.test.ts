@@ -160,6 +160,40 @@ describe.skipIf(!hasPg)('Stripe webhook inbox state machine (Postgres)', () => {
     expect(row).toEqual({ attempt_count: 1, retry_cycle_attempts: 1 });
   });
 
+  it('atomically fails an expired sixth claim without allowing a seventh dispatch or counter increment', async () => {
+    const { input } = await receipt('evt_test_crash_exhaustion');
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      const claimedAt = addMs(NOW, (attempt - 1) * STRIPE_LEASE_MS);
+      expect(await claimStripeEvent(db, input.eventId, claimedAt, `lease-crash-${attempt}`))
+        .toMatchObject({ attemptCount: attempt, retryCycleAttempts: attempt, leaseToken: `lease-crash-${attempt}` });
+    }
+
+    const exhaustedAt = addMs(NOW, 6 * STRIPE_LEASE_MS);
+    const exhaustedClaims = await Promise.all([
+      claimStripeEvent(db, input.eventId, exhaustedAt, 'lease-forbidden-7a'),
+      claimStripeEvent(db, input.eventId, exhaustedAt, 'lease-forbidden-7b'),
+    ]);
+    expect(exhaustedClaims).toEqual([null, null]);
+
+    const [row] = await sql.unsafe(`
+      SELECT status,outcome,attempt_count,retry_cycle_attempts,next_attempt_at,
+             lease_token,lease_expires_at,last_error,completed_at,updated_at
+      FROM church_private.stripe_webhook_events WHERE event_id=$1
+    `, [input.eventId]);
+    expect(row).toEqual({
+      status: 'failed',
+      outcome: 'lease_expired',
+      attempt_count: 6,
+      retry_cycle_attempts: 6,
+      next_attempt_at: null,
+      lease_token: null,
+      lease_expires_at: null,
+      last_error: 'Processing lease expired after maximum attempts',
+      completed_at: utc(exhaustedAt),
+      updated_at: utc(exhaustedAt),
+    });
+  });
+
   it('finalizes ignored outcomes as terminal through the owned lease', async () => {
     const { input } = await receipt('evt_test_ignored_finalize');
     expect(await claimStripeEvent(db, input.eventId, NOW, 'lease-ignore')).not.toBeNull();
