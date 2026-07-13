@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps } from '../../../scripts/setup/apply.mjs';
+import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps, SetupApplyError } from '../../../scripts/setup/apply.mjs';
 import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
 import { configureSecrets } from '../../../scripts/setup/secrets.mjs';
 import { probeR2Object } from '../../../scripts/setup/probes.mjs';
@@ -55,6 +55,101 @@ describe('setup apply coordinator', () => {
       seed: { apply: second, verify: async () => true },
     }, stateStore: { async load() { return 'managed'; }, async has() { return false; }, mark }, dryRun: false })).rejects.toThrow(/did not verify/i);
     expect(mark).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled();
+  });
+
+  it('reports a migration failure with safe recovery context and leaves later actions untouched', async () => {
+    const secret = 'postgres://setup-user:super-secret-password@db.example.test/church';
+    const seed = vi.fn();
+    let failure: unknown;
+    try {
+      await applySetup({ actions: ['verify-provider', 'migrate', 'seed'] }, {
+        steps: {
+          'verify-provider': { apply: vi.fn(), verify: async () => true },
+          migrate: { apply: async () => { throw new Error(`migration rejected ${secret}`); }, verify: async () => false },
+          seed: { apply: seed, verify: async () => false },
+        },
+        stateStore: memoryStore(),
+        dryRun: false,
+        rerunCommand: "npm run --silent setup -- --mode 'local' --yes",
+        secretValues: [secret] as string[],
+      });
+    } catch (error) { failure = error; }
+
+    expect(failure).toBeInstanceOf(SetupApplyError);
+    expect(failure).toMatchObject({
+      code: 'SETUP_APPLY_FAILED', step: 'migrate', phase: 'apply',
+      completed: [{ step: 'verify-provider', status: 'verified' }],
+      unchanged: ['seed'], causeMessage: 'migration rejected [REDACTED]',
+      rerunCommand: "npm run --silent setup -- --mode 'local' --yes",
+    });
+    expect(String(failure)).toContain('Failed step: migrate (apply)');
+    expect(String(failure)).toContain('Completed: verify-provider (verified)');
+    expect(String(failure)).toContain('Unchanged: seed');
+    expect(String(failure)).toContain('Remediation:');
+    expect(String(failure)).toContain("Rerun: npm run --silent setup -- --mode 'local' --yes");
+    expect(String(failure)).not.toContain(secret);
+    expect(String(failure)).not.toContain('super-secret-password');
+    expect(seed).not.toHaveBeenCalled();
+  });
+
+  it('classifies preverification, postverification, and state-mark failures', async () => {
+    const cases = [
+      { expected: 'preverify', step: { apply: vi.fn(), verify: async () => { throw new Error('probe failed'); } }, mark: vi.fn() },
+      { expected: 'postverify', step: { apply: async () => ({ changed: true }), verify: vi.fn().mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('postcheck failed')) }, mark: vi.fn() },
+      { expected: 'mark', step: { apply: async () => ({ changed: true }), verify: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true) }, mark: vi.fn(async () => { throw new Error('state write failed'); }) },
+    ];
+    for (const item of cases) {
+      const state = { async load() { return 'managed'; }, async has() { return false; }, mark: item.mark };
+      await expect(applySetup({ actions: ['migrate'] }, { steps: { migrate: item.step }, stateStore: state, rerunCommand: 'npm run setup -- --yes' }))
+        .rejects.toMatchObject({ step: 'migrate', phase: item.expected, completed: [], unchanged: [] });
+    }
+  });
+
+  it('classifies invalid resource evidence at the boundary where it is observed', async () => {
+    const plan: any = { actions: ['ensure-resources'], backend: 'd1', site: { slug: 'church' } };
+    await expect(applySetup(plan, {
+      steps: { 'ensure-resources': { apply: async () => ({ changed: true }), verify: async () => false } },
+      stateStore: memoryStore(),
+    })).rejects.toMatchObject({ step: 'ensure-resources', phase: 'apply' });
+
+    const completed = memoryStore();
+    completed.completed.add('ensure-resources');
+    await expect(applySetup(plan, {
+      steps: { 'ensure-resources': { apply: vi.fn(), verify: async () => true } },
+      stateStore: completed,
+    })).rejects.toMatchObject({ step: 'ensure-resources', phase: 'preverify' });
+  });
+
+  it('turns administrator bootstrap classifications into explicit recovery actions', async () => {
+    const outcome = (status: string) => ({
+      prepare() {
+        return { bind() { return this; }, async first() { return { id: 1, role: status === 'already-admin' ? 'admin' : 'member', active: status === 'inactive' ? 0 : 1, deleted_at: status === 'reactivation-required' ? '2026-01-01' : null }; }, async run() { return { meta: { changes: 1 } }; } };
+      },
+    });
+    const verify = { migrate: async () => true, seed: async () => true, 'initialize-modules': async () => true, 'bootstrap-admin': async () => true };
+    const plan: any = { adminEmail: 'member@example.test', adminName: 'Member', site: { locale: 'en' } };
+
+    const promotion = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db: outcome('promotion-required'), moduleKeys: [], verify });
+    await expect(promotion['bootstrap-admin'].apply({ plan })).rejects.toThrow(/--promote-existing-admin/);
+    await expect(applySetup({ ...plan, actions: ['bootstrap-admin'] }, {
+      steps: { 'bootstrap-admin': { ...promotion['bootstrap-admin'], verify: async () => false } },
+      stateStore: memoryStore(),
+      rerunCommand: "npm run --silent setup -- --admin-email 'member@example.test' --yes",
+    })).rejects.toMatchObject({
+      step: 'bootstrap-admin', phase: 'apply',
+      rerunCommand: "npm run --silent setup -- --admin-email 'member@example.test' --promote-existing-admin --yes",
+    });
+    await expect(applySetup({ ...plan, actions: ['bootstrap-admin'] }, {
+      steps: { 'bootstrap-admin': { ...promotion['bootstrap-admin'], verify: async () => false } },
+      stateStore: memoryStore(),
+      rerunCommand: "npm run --silent setup -- --church-name '--promote-existing-admin' --yes",
+    })).rejects.toMatchObject({
+      rerunCommand: "npm run --silent setup -- --church-name '--promote-existing-admin' --promote-existing-admin --yes",
+    });
+    const inactive = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db: outcome('inactive'), moduleKeys: [], verify });
+    await expect(inactive['bootstrap-admin'].apply({ plan })).rejects.toThrow(/reactivate.*member@example\.test.*rerun/i);
+    const deleted = createD1Steps({ runner: { run: vi.fn() }, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', db: outcome('reactivation-required'), moduleKeys: [], verify });
+    await expect(deleted['bootstrap-admin'].apply({ plan })).rejects.toThrow(/restore.*reactivate.*member@example\.test.*rerun/i);
   });
 
   it('requires exact true verification and resource evidence access', async () => {
@@ -194,6 +289,7 @@ describe('setup state', () => {
     const base: any = { planVersion: 1, backend: 'd1', mode: 'local', site: { slug: 'church', name: 'Church' }, modules: ['events'], actions: ['ensure-resources'] };
     const resolved = { ...base, resources: { d1DatabaseName: 'church-db', d1DatabaseId: 'local', r2BucketName: 'church-media', hyperdriveId: null }, existingInstallation: true };
     expect(fingerprintPlan(base)).toBe(fingerprintPlan(resolved));
+    expect(fingerprintPlan({ ...resolved, proposedChanges: ['display-only preview metadata'] })).toBe(fingerprintPlan(base));
     expect(fingerprintPlan({ ...resolved, resources: { ...resolved.resources, d1DatabaseId: 'remote-id' } })).toBe(fingerprintPlan(base));
     expect(fingerprintPlan({ ...resolved, resources: { ...resolved.resources, d1DatabaseName: 'other-db' } })).not.toBe(fingerprintPlan(base));
     expect(fingerprintPlan({ ...base, backend: 'supabase' })).not.toBe(fingerprintPlan(base));

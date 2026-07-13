@@ -27,6 +27,15 @@ function parseD1List(stdout) {
   return value;
 }
 
+function parseR2Bucket(stdout, expectedName) {
+  let value;
+  try { value = JSON.parse(stdout); } catch { throw new Error('R2 bucket probe returned malformed JSON'); }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.name !== expectedName) {
+    throw new Error('R2 bucket probe name mismatch');
+  }
+  return value;
+}
+
 async function run(options, args, extra = {}) {
   if (!options?.runner || typeof options.runner.run !== 'function') throw new TypeError('probe runner.run is required');
   const result = await options.runner.run(options.wranglerBin, args, extra);
@@ -44,28 +53,62 @@ export async function probeR2Object(options) {
   throw new Error('R2 object probe failed');
 }
 
+export async function probeWorkerDeployment(options) {
+  const worker = await run(options, ['deployments', 'status', '--name', options.manifest.site.slug, '--json', '--config', options.configPath]);
+  parseWorkerDeployments(JSON.stringify([JSON.parse(worker.stdout)]));
+  return true;
+}
+
+export async function probeR2Bucket(options) {
+  const name = options.manifest.resources.r2BucketName;
+  const bucket = await run(options, ['r2', 'bucket', 'info', name, '--json', '--config', options.configPath]);
+  parseR2Bucket(bucket.stdout, name);
+  return true;
+}
+
+export async function probeD1Database(options) {
+  const { d1DatabaseName: name, d1DatabaseId: id } = options.manifest.resources;
+  const databases = parseD1List((await run(options, ['d1', 'list', '--json', '--config', options.configPath])).stdout);
+  if (databases.filter((entry) => entry.name === name && entry.uuid === id).length !== 1) {
+    throw new Error('D1 resource ID/name mismatch');
+  }
+  return true;
+}
+
+export async function probeHyperdrive(options) {
+  const name = `${options.manifest.site.slug}-db`;
+  const listed = await run(options, ['hyperdrive', 'list', '--config', options.configPath], { env: { ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' } });
+  const matches = parseHyperdriveTable(listed.stdout, name)
+    .filter((entry) => entry.name === name && entry.id === options.manifest.resources.hyperdriveId);
+  if (matches.length !== 1) throw new Error('Hyperdrive resource ID/name mismatch');
+  return true;
+}
+
+export async function probeDeployResourcePresence(options) {
+  if (options?.manifest?.mode !== 'deploy') throw new TypeError('deploy resource presence requires deploy mode');
+  const presence = { worker: false, r2: false, d1: false, hyperdrive: false };
+  for (const [key, probe] of [
+    ['worker', probeWorkerDeployment],
+    ['r2', probeR2Bucket],
+    ...(options.manifest.database === 'd1' ? [['d1', probeD1Database]] : [['hyperdrive', probeHyperdrive]]),
+  ]) {
+    try { presence[key] = await probe(options) === true; } catch { presence[key] = false; }
+  }
+  return Object.freeze(presence);
+}
+
 export async function probeDeployResources(options) {
   const { manifest } = options;
   if (manifest?.mode !== undefined && manifest.mode !== 'deploy') throw new TypeError('deploy resource probe requires deploy mode');
   let workerReady = false;
   if (options.probeWorker !== false) {
-    const worker = await run(options, ['deployments', 'status', '--name', manifest.site.slug, '--json', '--config', options.configPath]);
-    parseWorkerDeployments(JSON.stringify([JSON.parse(worker.stdout)]));
-    workerReady = true;
+    workerReady = await probeWorkerDeployment(options);
   }
-  const bucket = await run(options, ['r2', 'bucket', 'info', manifest.resources.r2BucketName, '--json', '--config', options.configPath]);
-  let bucketJson;
-  try { bucketJson = JSON.parse(bucket.stdout); } catch { throw new Error('R2 bucket probe returned malformed JSON'); }
-  if (!bucketJson || typeof bucketJson !== 'object' || Array.isArray(bucketJson) || bucketJson.name !== manifest.resources.r2BucketName) throw new Error('R2 bucket probe name mismatch');
+  await probeR2Bucket(options);
   if (manifest.database === 'd1') {
-    const databases = parseD1List((await run(options, ['d1', 'list', '--json', '--config', options.configPath])).stdout);
-    const matches = databases.filter((entry) => entry.name === manifest.resources.d1DatabaseName && entry.uuid === manifest.resources.d1DatabaseId);
-    if (matches.length !== 1) throw new Error('D1 resource ID/name mismatch');
+    await probeD1Database(options);
     return Object.freeze({ worker: workerReady, r2: true, d1: true, hyperdrive: false });
   }
-  const listed = await run(options, ['hyperdrive', 'list', '--config', options.configPath], { env: { ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' } });
-  const matches = parseHyperdriveTable(listed.stdout, `${manifest.site.slug}-db`)
-    .filter((entry) => entry.name === `${manifest.site.slug}-db` && entry.id === manifest.resources.hyperdriveId);
-  if (matches.length !== 1) throw new Error('Hyperdrive resource ID/name mismatch');
+  await probeHyperdrive(options);
   return Object.freeze({ worker: workerReady, r2: true, d1: false, hyperdrive: true });
 }

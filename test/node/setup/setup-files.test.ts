@@ -13,6 +13,7 @@ import {
   GENERATED_MARKER,
   _syncParentDirectory,
   classifyConfig,
+  assertExpectedContent,
   writeAtomic,
 } from '../../../scripts/setup/files.mjs';
 import { importExistingInstallation } from '../../../scripts/setup/import-existing.mjs';
@@ -232,11 +233,23 @@ describe('Wrangler rendering', () => {
 });
 
 describe('file ownership and atomic writes', () => {
+  it('atomically checks approved config bytes without mutating the target', async () => {
+    const dir = await temp();
+    const path = join(dir, 'wrangler.jsonc');
+    await writeFile(path, 'changed after approval');
+    await expect(assertExpectedContent(path, 'approved bytes')).rejects.toThrow(/changed|expected|concurrent/i);
+    expect(await readFile(path, 'utf8')).toBe('changed after approval');
+    const absent = join(dir, 'absent.jsonc');
+    await expect(assertExpectedContent(absent, null)).resolves.toBeUndefined();
+    await expect(readFile(absent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('classifies generated, known baseline, and unrecognized config separately', async () => {
     const baseline = await readFile('wrangler.jsonc', 'utf8');
 
     expect(classifyConfig(baseline, baseline)).toBe('baseline');
-    expect(classifyConfig(`${GENERATED_MARKER}\n{}` , baseline)).toBe('generated');
+    expect(classifyConfig(`${GENERATED_MARKER}\n{}` , baseline)).toBe('modified-generated');
+    expect(classifyConfig(`${GENERATED_MARKER}\n{}` , baseline, `${GENERATED_MARKER}\n{}`)).toBe('canonical-generated');
     expect(classifyConfig('{ "name": "hand-edited" }', baseline)).toBe('unrecognized');
   });
 

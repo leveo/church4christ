@@ -3,6 +3,8 @@ import { bootstrapFirstAdmin, initializeModuleSettings } from '../../src/lib/set
 import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
 import { ensureHyperdrive } from './providers/postgres.mjs';
 import { validateProviderResources } from './manifest.mjs';
+import { SetupApplyError } from './failure.mjs';
+export { SetupApplyError } from './failure.mjs';
 
 export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
 
@@ -18,6 +20,13 @@ function validateResolvedResources(resources, plan) {
 function providerStep(apply, verify, name) {
   if (typeof verify !== 'function') throw new TypeError(`verify.${name} is required`);
   return Object.freeze({ apply, verify });
+}
+
+function recoveryRerunCommand(error, rerunCommand) {
+  if (error?.setupRecoveryFlag !== '--promote-existing-admin' || / --promote-existing-admin(?: |$)/.test(rerunCommand)) return rerunCommand;
+  return rerunCommand.endsWith(' --yes')
+    ? `${rerunCommand.slice(0, -6)} --promote-existing-admin --yes`
+    : `${rerunCommand} --promote-existing-admin`;
 }
 
 function commonDatabaseSteps(options) {
@@ -44,6 +53,17 @@ function commonDatabaseSteps(options) {
         locale: plan?.site?.locale,
         promoteExisting: Boolean(options.promoteExistingAdmin),
       });
+      if (outcome.status === 'promotion-required') {
+        const error = new Error(`An active person already uses ${outcome.email}; rerun setup with --promote-existing-admin to promote that account explicitly`);
+        Object.defineProperty(error, 'setupRecoveryFlag', { value: '--promote-existing-admin' });
+        throw error;
+      }
+      if (outcome.status === 'inactive') {
+        throw new Error(`Reactivate ${outcome.email}, then rerun setup; setup will not reactivate an inactive person automatically`);
+      }
+      if (outcome.status === 'reactivation-required') {
+        throw new Error(`Restore and reactivate ${outcome.email}, then rerun setup; setup will not restore a deleted person automatically`);
+      }
       return { changed: ['created', 'promoted'].includes(outcome.status) };
     }, options.verify?.['bootstrap-admin'], 'bootstrap-admin'),
   };
@@ -163,8 +183,10 @@ function validate(plan, steps) {
   return [...plan.actions];
 }
 
-export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
+/** @param {any} plan @param {{ steps: any, stateStore: any, dryRun?: boolean, rerunCommand?: string, secretValues?: string[] }} options */
+export async function applySetup(plan, { steps, stateStore, dryRun = false, rerunCommand = 'npm run setup -- --yes', secretValues = [] }) {
   if (typeof dryRun !== 'boolean') throw new TypeError('dryRun must be a boolean');
+  if (!Array.isArray(secretValues) || secretValues.some((value) => typeof value !== 'string')) throw new TypeError('secretValues must be a string array');
   const actions = validate(plan, steps);
   if (dryRun) return { status: 'dry-run', actions, results: [] };
   if (!stateStore || typeof stateStore.load !== 'function' || typeof stateStore.has !== 'function' || typeof stateStore.mark !== 'function') throw new TypeError('stateStore load/has/mark are required');
@@ -176,31 +198,52 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
   for (const action of actions) initialCompletion.set(action, await stateStore.has(action));
   const managedInstallation = installationOrigin === 'managed';
   const results = []; let resolvedResources = plan.resources;
-  for (const name of actions) {
+  for (const [actionIndex, name] of actions.entries()) {
     const completed = initialCompletion.get(name) === true;
     if (completed && name === 'ensure-resources' && typeof stateStore.getEvidence === 'function') {
-      const evidence = await stateStore.getEvidence(name);
-      if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
-      validateResolvedResources(evidence, plan);
-      resolvedResources = Object.freeze({ ...evidence });
+      try {
+        const evidence = await stateStore.getEvidence(name);
+        if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('Completed ensure-resources state has invalid evidence');
+        validateResolvedResources(evidence, plan);
+        resolvedResources = Object.freeze({ ...evidence });
+      } catch (error) {
+        throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand });
+      }
     }
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
     const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed, managedInstallation });
-    if (await steps[name].verify(context) === true) {
-      if (!completed) await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null);
+    let preverified;
+    try { preverified = await steps[name].verify(context); }
+    catch (error) { throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
+    if (preverified === true) {
+      if (!completed) {
+        try { await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null); }
+        catch (error) { throw new SetupApplyError({ step: name, phase: 'mark', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
+      }
       results.push({ step: name, status: completed ? 'already-complete' : 'verified' });
       continue;
     }
-    const raw = await steps[name].apply(context);
-    const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    if (name === 'ensure-resources') {
-      if (!result.resolvedResources || typeof result.resolvedResources !== 'object' || Array.isArray(result.resolvedResources)) throw new Error('Setup step ensure-resources did not return resolvedResources');
-      validateResolvedResources(result.resolvedResources, plan);
-      resolvedResources = Object.freeze({ ...result.resolvedResources });
+    let raw;
+    try { raw = await steps[name].apply(context); }
+    catch (error) { throw new SetupApplyError({ step: name, phase: 'apply', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand: recoveryRerunCommand(error, rerunCommand) }); }
+    let result;
+    try {
+      result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      if (name === 'ensure-resources') {
+        if (!result.resolvedResources || typeof result.resolvedResources !== 'object' || Array.isArray(result.resolvedResources)) throw new Error('Setup step ensure-resources did not return resolvedResources');
+        validateResolvedResources(result.resolvedResources, plan);
+        resolvedResources = Object.freeze({ ...result.resolvedResources });
+      }
+    } catch (error) {
+      throw new SetupApplyError({ step: name, phase: 'apply', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand });
     }
-    const verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
-    if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
-    await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null));
+    let verified;
+    try {
+      verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
+      if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
+    } catch (error) { throw new SetupApplyError({ step: name, phase: 'postverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
+    try { await stateStore.mark(name, result.evidence ?? (name === 'ensure-resources' ? resolvedResources : null)); }
+    catch (error) { throw new SetupApplyError({ step: name, phase: 'mark', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
     results.push({ step: name, status: result.changed ? 'changed' : 'verified' });
   }
   return { status: 'applied', actions, results };

@@ -139,6 +139,7 @@ describe('runtime setup hardening', () => {
     const inspectExisting = vi.fn(async ({ requestedMode }: any) => inspectExistingInstallation(localManifest as any, requestedMode));
     const deps: any = {
       catalog: raw, interactive: false, output: vi.fn(), inspectExisting, formatPlan: vi.fn(), formatResult: vi.fn(),
+      preflightConfig: vi.fn(async () => ({ approvedContent: 'baseline' })),
       confirm: vi.fn(), collectSupabaseSecret: vi.fn(), apply: vi.fn(),
     };
     const argv = ['--mode', 'deploy', '--preset', 'full-church', '--site-slug', 'x', '--church-name', 'X', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--app-origin', 'https://x.example.test', '--email-from', 'serve@x.example.test', '--yes'];
@@ -182,7 +183,7 @@ describe('runtime setup hardening', () => {
     expect(JSON.stringify(masked)).not.toContain('postgres://');
   });
 
-  it('uses remote Stripe secret metadata for deploy and host env only for local', async () => {
+  it('uses remote Stripe secret metadata for deploy and .dev.vars key metadata only for local', async () => {
     const runner = { run: vi.fn(async (_file: string, args: string[]) => {
       if (args[0] === 'secret') return { stdout: '[{"name":"STRIPE_SECRET_KEY","type":"secret_text"},{"name":"STRIPE_WEBHOOK_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 };
       return { stdout: '', stderr: 'probe unavailable', exitCode: 1 };
@@ -190,7 +191,7 @@ describe('runtime setup hardening', () => {
     const deploy: any = { mode: 'deploy', database: 'd1', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', d1DatabaseName: 'x-db', d1DatabaseId: 'id' } };
     const remote = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {} });
     expect(remote.stripeSecretKey).toBe(true); expect(remote.stripeWebhookSecret).toBe(true);
-    const local = await buildServicePresence({ ...deploy, mode: 'local' }, { hostEnv: { STRIPE_SECRET_KEY: 'local' }, localSecretsValid: false });
+    const local = await buildServicePresence({ ...deploy, mode: 'local' }, { hostEnv: { STRIPE_WEBHOOK_SECRET: 'host-only-must-be-ignored' }, localSecretNames: ['STRIPE_SECRET_KEY'], localSecretsValid: false });
     expect(local.stripeSecretKey).toBe(true); expect(local.stripeWebhookSecret).toBe(false);
   });
 

@@ -61,6 +61,39 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
     'doctor',
   ];
 
+  let existingInstallation;
+  let proposedChanges;
+  if (currentState.existingBackend) {
+    existingInstallation = {
+      backend: currentState.existingBackend,
+      mode: currentState.mode ?? currentState.existingMode ?? normalized.mode,
+      modules: Array.isArray(currentState.modules) ? [...currentState.modules] : [],
+      siteSlug: currentState.siteSlug,
+      churchName: currentState.churchName,
+      locale: currentState.locale,
+      adminEmail: currentState.adminEmail,
+      adminName: currentState.adminName,
+      appOrigin: currentState.appOrigin,
+      emailFrom: currentState.emailFrom,
+      resources: { ...(currentState.currentResources ?? currentState.resources ?? {}) },
+    };
+    proposedChanges = [];
+    const changed = (label, before, after) => {
+      if (before !== after) proposedChanges.push(`${label}: ${before ?? 'unknown'} -> ${after ?? 'unknown'}`);
+    };
+    changed('mode', currentState.mode ?? currentState.existingMode, normalized.mode);
+    changed('site', currentState.churchName, normalized.churchName);
+    changed('site slug', currentState.siteSlug, normalized.siteSlug);
+    changed('locale', currentState.locale, normalized.locale);
+    changed('admin', currentState.adminEmail, normalized.adminEmail);
+    changed('app origin', currentState.appOrigin, normalized.appOrigin ?? 'http://localhost:4321');
+    changed('email sender', currentState.emailFrom, normalized.emailFrom ?? `serve@${normalized.siteSlug}.invalid`);
+    if (Array.isArray(currentState.modules) &&
+        (currentState.modules.length !== resolved.modules.length || currentState.modules.some((key) => !resolved.modules.includes(key)))) {
+      proposedChanges.push(`capabilities: ${currentState.modules.join(', ')} -> ${resolved.modules.join(', ')}`);
+    }
+  }
+
   return deepFreeze({
     planVersion: 1,
     mode: normalized.mode,
@@ -86,5 +119,6 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
     ...(existingResources ? { resources: existingResources } : {}),
     demoData: Boolean(normalized.demoData),
     actions,
+    ...(existingInstallation ? { existingInstallation, proposedChanges } : {}),
   });
 }

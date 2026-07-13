@@ -14,18 +14,21 @@ import { checkConfig } from './checks/config.mjs';
 import { checkDatabase } from './checks/database.mjs';
 import { checkServices } from './checks/services.mjs';
 import { createCommandRunner } from './commands.mjs';
-import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps } from './apply.mjs';
+import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps, SetupApplyError } from './apply.mjs';
+import { buildSetupRerunCommand } from './failure.mjs';
 import { D1CliDb } from './providers/d1.mjs';
 import { openPostgresSetupDb } from './providers/postgres.mjs';
 import { createStateStore } from './state.mjs';
-import { writeAtomic, GENERATED_MARKER } from './files.mjs';
+import { assertExpectedContent, classifyConfig, writeAtomic } from './files.mjs';
 import { renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretsStatus } from './secrets.mjs';
+import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
-import { probeDeployResources, probeR2Object } from './probes.mjs';
+import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 import { resolveLocalPersistence } from './persistence.mjs';
+import { inspectLegacyInstallation } from './import-existing.mjs';
+import { assertDemoSeedTarget, verifyProviderPreflight } from './provider-verification.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -56,6 +59,14 @@ export function formatPlan(plan) {
       ? 'database selected from capability requirements'
       : 'selected capabilities are D1-compatible, so Cloudflare D1 is the default';
   const reasons = capabilityReasons ? `${selectionReason}; ${capabilityReasons}` : selectionReason;
+  const existing = plan.existingInstallation
+    ? [
+        `Current installation: ${plan.existingInstallation.backend} / ${plan.existingInstallation.mode}; ${plan.existingInstallation.modules.join(', ')}`,
+        `Current site/admin: ${plan.existingInstallation.churchName ?? 'unknown'} / ${plan.existingInstallation.adminEmail ?? 'not uniquely identifiable'}`,
+        `Current resources: ${Object.entries(plan.existingInstallation.resources).filter(([, value]) => value).map(([key, value]) => `${key}=${value}`).join(', ')}`,
+        `Proposed changes: ${plan.proposedChanges.length ? plan.proposedChanges.join('; ') : 'none'}`,
+      ]
+    : [];
   return [
     `Setup plan: ${plan.site.name}`,
     `Capabilities (${plan.modules.length}): ${plan.modules.join(', ')}`,
@@ -65,7 +76,59 @@ export function formatPlan(plan) {
     `Dependency additions: ${dependencies}`,
     `Provider reasons: ${reasons}`,
     `Actions: ${plan.actions.join(' -> ')}`,
+    ...existing,
   ].join('\n');
+}
+
+const redactDiffLine = (line) => line
+  .replace(/([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]@')
+  .replace(/("(?:[^"\\]|\\.)*(?:secret|token|password|key|url|connection)(?:[^"\\]|\\.)*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"');
+
+function conciseLineDiff(current, desired) {
+  const left = current.split(/\r?\n/);
+  const right = desired.split(/\r?\n/);
+  const changed = [];
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length && changed.length < 12; index += 1) {
+    if (left[index] === right[index]) continue;
+    if (left[index] !== undefined) changed.push(`- ${redactDiffLine(left[index])}`);
+    if (right[index] !== undefined && changed.length < 12) changed.push(`+ ${redactDiffLine(right[index])}`);
+  }
+  if (changed.length === 12 && length > 6) changed.push('… additional differences omitted');
+  return changed.join('\n');
+}
+
+export async function preflightWranglerConfig(options) {
+  if (!options || (options.current !== null && typeof options.current !== 'string') ||
+      (options.baseline !== undefined && typeof options.baseline !== 'string') || typeof options.template !== 'string') {
+    throw new TypeError('Wrangler preflight requires current and template configuration bytes');
+  }
+  if (options.current === null) return Object.freeze({ classification: 'absent', approvedContent: null });
+  let canonical;
+  if (options.existingManifest) {
+    const manifest = validateManifest(structuredClone(options.existingManifest), options.catalog);
+    canonical = renderWrangler(options.template, manifest);
+  }
+  let classification = classifyConfig(options.current, options.baseline ?? '', canonical);
+  if (options.baselineSha256 && createHash('sha256').update(options.current).digest('hex') === options.baselineSha256) {
+    classification = 'baseline';
+  }
+  if (classification === 'baseline' || classification === 'canonical-generated' ||
+      (options.forceConfig === true && options.interactive !== true)) {
+    return Object.freeze({ classification, approvedContent: options.current });
+  }
+  if (!options.interactive) {
+    throw new Error(`Refusing to overwrite ${classification === 'modified-generated' ? 'a locally modified generated' : 'an unrecognized'} wrangler.jsonc; rerun with --force-config after reviewing it`);
+  }
+  if (typeof options.confirmConfigReplacement !== 'function' || typeof options.output !== 'function') {
+    throw new TypeError('interactive Wrangler replacement requires output and confirmConfigReplacement');
+  }
+  const desired = canonical ?? options.template;
+  options.output(`wrangler.jsonc replacement requires separate approval:\n${conciseLineDiff(options.current, desired)}`);
+  if (await options.confirmConfigReplacement({ classification }) !== true) {
+    throw new Error('wrangler.jsonc replacement was not approved; no setup changes were made');
+  }
+  return Object.freeze({ classification, approvedContent: options.current });
 }
 
 export function formatDoctor(doctor) {
@@ -128,11 +191,21 @@ export async function collectSupabaseSecret(options = {}) {
 
 export async function buildServicePresence(manifest, probeOptions = {}) {
   const hostEnv = probeOptions.hostEnv ?? process.env;
-  let live = { worker: false, r2: false, hyperdrive: false };
+  const localNames = probeOptions.localSecretNames ?? [];
+  if (!Array.isArray(localNames) || localNames.some((name) => typeof name !== 'string') || new Set(localNames).size !== localNames.length) {
+    throw new TypeError('local secret names must be a unique string array');
+  }
+  const localSecrets = new Set(localNames);
+  let live = { worker: false, r2: false, d1: false, hyperdrive: false };
   if (manifest?.mode === 'local') {
-    live = { worker: true, r2: Boolean(manifest?.resources?.r2BucketName), hyperdrive: manifest?.database !== 'supabase' || Boolean(hostEnv.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE || probeOptions.localSupabaseUrlAvailable) };
+    live = {
+      worker: true,
+      r2: Boolean(manifest?.resources?.r2BucketName),
+      d1: manifest?.database === 'd1',
+      hyperdrive: manifest?.database !== 'supabase' || Boolean(hostEnv.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE || probeOptions.localSupabaseUrlAvailable),
+    };
   } else if (manifest?.mode === 'deploy' && probeOptions.runner) {
-    try { live = await probeDeployResources({ ...probeOptions, manifest }); } catch {}
+    live = await probeDeployResourcePresence({ ...probeOptions, manifest });
   }
   let remoteSecrets = new Set();
   if (manifest?.mode === 'deploy' && probeOptions.runner) {
@@ -141,12 +214,13 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
   return {
     worker: live.worker,
     r2: live.r2,
+    d1: live.d1,
     hyperdrive: manifest?.database !== 'supabase' || live.hyperdrive,
     email: false,
     emailConfigured: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
     emailDevLog: manifest?.mode === 'local' && probeOptions.localSecretsValid === true,
-    stripeSecretKey: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : Boolean(hostEnv.STRIPE_SECRET_KEY),
-    stripeWebhookSecret: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : Boolean(hostEnv.STRIPE_WEBHOOK_SECRET),
+    stripeSecretKey: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : localSecrets.has('STRIPE_SECRET_KEY'),
+    stripeWebhookSecret: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : localSecrets.has('STRIPE_WEBHOOK_SECRET'),
     backup: Boolean(hostEnv.CF_ACCOUNT_ID && hostEnv.D1_DATABASE_ID && hostEnv.D1_EXPORT_TOKEN),
   };
 }
@@ -167,6 +241,7 @@ const exists = async (path) => {
 async function applyDefaultSetup(plan, options, catalog) {
   const root = resolve(process.cwd());
   const configPath = resolve(root, 'wrangler.jsonc');
+  await assertExpectedContent(configPath, options.approvedConfigContent);
   const manifestPath = resolve(root, 'church.config.json');
   const templatePath = resolve(root, 'config/wrangler.template.jsonc');
   const statePath = resolve(root, '.church/setup-state.json');
@@ -210,19 +285,11 @@ async function applyDefaultSetup(plan, options, catalog) {
     : createSupabaseSteps({ runner, root, dbUrl, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, preserveSiteIdentity: options.existingInstallation, verify });
   const providerSteps = { ...baseProviderSteps };
   const providerSeed = providerSteps.seed;
-  providerSteps.seed = step(async (context) => await verify.seed(context) ? { changed: false } : providerSeed.apply(context), providerSeed.verify);
-
-  if (plan.demoData) {
-    try {
-      const count = Number((await db.prepare('SELECT COUNT(*) AS count FROM people').first())?.count ?? 0);
-      if (count > 0 && !await verify.seed()) {
-        throw new Error('Fictional demo data can only be added to a fresh database; refusing to collide with existing people');
-      }
-    } catch (error) {
-      if (/Fictional demo data/.test(String(error))) throw error;
-      // A fresh database has no schema until the migration step.
-    }
-  }
+  providerSteps.seed = step(async (context) => {
+    if (await verify.seed(context)) return { changed: false };
+    if (plan.demoData) await assertDemoSeedTarget({ backend: plan.backend, db, canonicalDemoReady: () => verify.seed(context) });
+    return providerSeed.apply(context);
+  }, providerSeed.verify);
 
   const runInstallationDoctor = async (activePlan) => {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -232,12 +299,21 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')) }) }),
     }, { strict: false });
   };
 
   const steps = {
-    'verify-provider': step(async () => ({ changed: false }), async () => true),
+    'verify-provider': step(async () => ({ changed: false }), () => verifyProviderPreflight({
+      backend: plan.backend,
+      mode: plan.mode,
+      db,
+      runner,
+      wranglerBin,
+      configPath,
+      resources: plan.resources,
+      ...(dbUrl ? { secrets: [dbUrl] } : {}),
+    })),
     'ensure-resources': createResourceStep({ plan, runner, wranglerBin, configPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async ({ plan: activePlan, resources }) => {
       if (!resources?.r2BucketName || !(activePlan.backend === 'd1' ? resources.d1DatabaseId : resources.hyperdriveId)) return false;
       if (activePlan.mode === 'local') return true;
@@ -258,13 +334,12 @@ async function applyDefaultSetup(plan, options, catalog) {
     }),
     'write-config': step(async ({ plan: activePlan }) => {
       desiredConfig = renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
-      const current = await exists(configPath);
-      if (current !== null) {
-        const digest = createHash('sha256').update(current).digest('hex');
-        const recognized = current.startsWith(GENERATED_MARKER) || digest === BASELINE_WRANGLER_SHA256;
-        if (!recognized && !options.forceConfig) throw new Error('Refusing to overwrite an unrecognized wrangler.jsonc; review it and rerun with --force-config');
-      }
-      const result = await writeAtomic(configPath, desiredConfig, { allowReplace: current !== null, backup: current !== null, expectedContent: current });
+      const approved = options.approvedConfigContent;
+      const result = await writeAtomic(configPath, desiredConfig, {
+        allowReplace: approved !== null,
+        backup: approved !== null,
+        expectedContent: approved,
+      });
       return { changed: result.changed };
     }, async ({ plan: activePlan }) => {
       desiredConfig ??= renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
@@ -288,7 +363,13 @@ async function applyDefaultSetup(plan, options, catalog) {
   };
 
   try {
-    const applied = await applySetup({ ...plan, existingInstallation: options.existingInstallation === true }, { steps, stateStore: createStateStore(statePath), dryRun: false });
+    const applied = await applySetup({ ...plan, existingInstallation: options.existingInstallation === true }, {
+      steps,
+      stateStore: createStateStore(statePath),
+      dryRun: false,
+      rerunCommand: options.rerunCommand,
+      secretValues: options.secretValues,
+    });
     latestDoctor ??= await runInstallationDoctor(plan);
     const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
     const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
@@ -346,6 +427,13 @@ export async function runSetup(argv, deps) {
     return 0;
   }
 
+  requireDeps(deps, ['preflightConfig']);
+  const configApproval = await deps.preflightConfig({
+    plan,
+    currentState,
+    forceConfig: parsed.forceConfig,
+  });
+
   requireDeps(deps, ['confirm', 'collectSupabaseSecret', 'apply', 'formatResult']);
   if (!parsed.yes) {
     requireDeps(deps, ['previewPlan']);
@@ -364,13 +452,34 @@ export async function runSetup(argv, deps) {
   }
 
   const secretContext = plan.backend === 'supabase' ? await deps.collectSupabaseSecret() : {};
-  const result = await deps.apply(plan, {
-    secretContext,
-    forceConfig: parsed.forceConfig,
+  const rerunNeedsForceConfig = parsed.forceConfig ||
+    ['unrecognized', 'modified-generated'].includes(configApproval.classification);
+  const rerunCommand = buildSetupRerunCommand(plan, {
+    forceConfig: rerunNeedsForceConfig,
     promoteExistingAdmin: parsed.promoteExistingAdmin,
     allowHyperdriveSecretInArgv,
-    existingInstallation: Boolean(currentState.existingBackend),
   });
+  const secretValues = typeof secretContext.dbUrl === 'string' ? [secretContext.dbUrl] : [];
+  let result;
+  try {
+    result = await deps.apply(plan, {
+      secretContext,
+      forceConfig: parsed.forceConfig,
+      promoteExistingAdmin: parsed.promoteExistingAdmin,
+      allowHyperdriveSecretInArgv,
+      existingInstallation: Boolean(currentState.existingBackend),
+      approvedConfigContent: configApproval.approvedContent,
+      rerunCommand,
+      secretValues,
+    });
+  } catch (error) {
+    if (error instanceof SetupApplyError) {
+      requireDeps(deps, ['errorOutput']);
+      deps.errorOutput(error.message);
+      Object.defineProperty(error, 'reported', { value: true });
+    }
+    throw error;
+  }
   deps.output(parsed.json
     ? JSON.stringify({ schemaVersion: 1, kind: 'setup-result', ...result })
     : deps.formatResult(result));
@@ -414,7 +523,19 @@ export async function readMaskedInput(input, output, message) {
 
 export function inspectExistingInstallation(manifest, requestedMode) {
   if (!manifest || typeof manifest !== 'object' || !['local', 'deploy'].includes(requestedMode)) return {};
-  const state = { existingBackend: manifest.database, existingMode: manifest.mode };
+  const state = {
+    existingBackend: manifest.database,
+    existingMode: manifest.mode,
+    existingManifest: manifest,
+    mode: manifest.mode,
+    modules: Array.isArray(manifest.modules) ? [...manifest.modules] : [],
+    siteSlug: manifest.site?.slug,
+    churchName: manifest.site?.name,
+    locale: manifest.site?.locale,
+    appOrigin: manifest.site?.appOrigin,
+    emailFrom: manifest.site?.emailFrom,
+    currentResources: manifest.resources && typeof manifest.resources === 'object' ? { ...manifest.resources } : {},
+  };
   if (manifest.mode === requestedMode && manifest.resources && typeof manifest.resources === 'object') {
     state.resources = { ...manifest.resources };
   }
@@ -445,7 +566,29 @@ async function createDefaultDeps() {
       const manifest = validateManifest(JSON.parse(await readFile('church.config.json', 'utf8')), catalog);
       return inspectExistingInstallation(manifest, requestedMode);
     } catch (error) {
-      if (error?.code === 'ENOENT') return {};
+      if (error?.code === 'ENOENT') {
+        const root = resolve(process.cwd());
+        const configPath = resolve(root, 'wrangler.jsonc');
+        const configContent = await readFile(configPath, 'utf8');
+        if (createHash('sha256').update(configContent).digest('hex') === BASELINE_WRANGLER_SHA256) return {};
+        const runner = createCommandRunner();
+        const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
+        return inspectLegacyInstallation({
+          catalog,
+          configContent,
+          baselineContent: '',
+          requestedMode,
+          environment: process.env,
+          openD1: ({ mode }) => new D1CliDb({
+            runner,
+            wranglerBin,
+            configPath,
+            mode,
+            ...(mode === 'local' ? { persistTo: resolveLocalPersistence(root, process.env) } : {}),
+          }),
+          openPostgres: (url) => openPostgresSetupDb(url),
+        });
+      }
       throw new Error(`Existing church.config.json could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
@@ -478,7 +621,7 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: doctorDbUrl ? [doctorDbUrl] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false }) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [] }) }),
       }, { strict });
     } finally {
       await connection?.close();
@@ -491,6 +634,24 @@ async function createDefaultDeps() {
     output,
     errorOutput,
     inspectExisting,
+    preflightConfig: async ({ currentState, forceConfig }) => {
+      const current = await readFile('wrangler.jsonc', 'utf8').catch((error) => {
+        if (error?.code === 'ENOENT') return null;
+        throw error;
+      });
+      const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+      return preflightWranglerConfig({
+        current,
+        template,
+        existingManifest: currentState.existingManifest ?? null,
+        catalog,
+        baselineSha256: BASELINE_WRANGLER_SHA256,
+        interactive,
+        forceConfig,
+        output: (value) => uiOutput.write(`${value}\n`),
+        confirmConfigReplacement: async () => (await ask({ key: 'configReplacement', message: 'Replace wrangler.jsonc after reviewing this diff?', choices: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] })) === true,
+      });
+    },
     doctor: standaloneDoctor,
     formatPlan,
     formatDoctor,
@@ -517,7 +678,7 @@ async function main() {
   try {
     process.exitCode = await runSetup(process.argv.slice(2), deps);
   } catch (error) {
-    deps.errorOutput(error instanceof Error ? error.message : String(error));
+    if (!error?.reported) deps.errorOutput(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   } finally {
     deps.close();

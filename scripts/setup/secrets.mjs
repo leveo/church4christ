@@ -49,6 +49,38 @@ export async function readLocalSecretsStatus(path, adminEmail) {
   catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
 }
 
+function localSecretNames(content) {
+  if (typeof content !== 'string') throw new TypeError('local secret content must be a string');
+  const names = new Set();
+  const seen = new Set();
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const equals = line.indexOf('=');
+    if (equals < 1) throw new Error('local secret file is malformed');
+    const key = line.slice(0, equals).trim();
+    const value = line.slice(equals + 1);
+    if (!KEY.test(key) || /[\r\n\0]/.test(value) || seen.has(key) || key === LOCAL_HYPERDRIVE) {
+      throw new Error('local secret file is malformed');
+    }
+    seen.add(key);
+    if (value.trim().length > 0) names.add(key);
+  }
+  return Object.freeze([...names].sort());
+}
+
+export async function readLocalSecretNames(path) {
+  if (typeof path !== 'string' || !path) throw new TypeError('local secret path is required');
+  let content;
+  try { content = await readFile(path, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return Object.freeze([]);
+    throw new Error('Local secret names could not be read safely');
+  }
+  try { return localSecretNames(content); }
+  catch { throw new Error('Local secret names could not be read safely'); }
+}
+
 function appendManaged(content, additions) {
   let output = content;
   if (output && !output.endsWith('\n')) output += '\n';

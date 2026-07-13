@@ -97,8 +97,9 @@ run on either of two databases:
 <!-- capabilities:end -->
 
 **Which backend runs** is the `DB_BACKEND` var: `getBackend` (`src/lib/dbProvider.ts`) reads
-it and returns `'supabase'` only for the exact string `supabase`, and `'d1'` for everything
-else (including unset). `openDb` then returns a **per-request** `{ db, backend, end }` — on
+it and defaults only an unset/empty value to D1. The exact values `d1` and `supabase`
+select their respective providers; any unknown non-empty value throws instead of silently
+selecting a provider. `openDb` then returns a **per-request** `{ db, backend, end }` — on
 D1 a zero-copy passthrough whose `end()` is a no-op; on Postgres a fresh postgres.js client
 over Hyperdrive (Workers sockets are request-scoped, so the client is never cached across
 requests) whose `end()` drains it after the response. The middleware opens this once per

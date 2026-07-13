@@ -1,6 +1,6 @@
 import { result } from '../readiness.mjs';
 
-const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
+const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
 const SUPPORTED_REQUIRED = new Set(['worker', 'r2', 'hyperdrive', 'email', 'stripe']);
 
 export async function checkServices(options) {
@@ -8,7 +8,7 @@ export async function checkServices(options) {
     throw new TypeError('services check catalog and manifest are required');
   }
   if (!options.presence || typeof options.presence !== 'object' || Array.isArray(options.presence)) throw new TypeError('services presence is required');
-  const supplied = { emailConfigured: false, ...options.presence };
+  const supplied = { d1: false, emailConfigured: false, ...options.presence };
   const actualPresence = Object.keys(supplied).sort();
   if (actualPresence.join('|') !== [...PRESENCE_KEYS].sort().join('|')) throw new TypeError('services presence fields are invalid');
   for (const key of PRESENCE_KEYS) {
@@ -36,6 +36,12 @@ export async function checkServices(options) {
     checks.push(options.presence.r2
       ? result('services.r2-ok', 'info', 'Required R2 media storage is accessible.', 'No action is required.')
       : result('services.r2', 'error', 'Required R2 media storage is unavailable.', 'Create or bind the configured MEDIA bucket and verify access.'));
+  }
+
+  if (options.manifest.mode === 'deploy' && options.manifest.database === 'd1') {
+    checks.push(supplied.d1
+      ? result('services.d1-ok', 'info', 'The configured D1 database is discoverable by exact name and ID.', 'No action is required.')
+      : result('services.d1', 'error', 'The configured D1 database could not be verified by exact name and ID.', 'Verify Cloudflare access and the D1 resource recorded in church.config.json.'));
   }
 
   if (required.has('hyperdrive')) {

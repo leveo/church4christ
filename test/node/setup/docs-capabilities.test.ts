@@ -30,6 +30,13 @@ const docs = [
 ];
 
 describe('catalog-owned docs', () => {
+  it('documents DB_BACKEND as fail-closed for unknown values', () => {
+    const architecture = readFileSync('docs/architecture.md', 'utf8');
+    expect(architecture).toMatch(/unset\/empty.*D1/i);
+    expect(architecture).toMatch(/unknown.*throws|throws.*unknown/i);
+    expect(architecture).not.toMatch(/'d1' for everything else/i);
+  });
+
   it('renders all 16 modules and exactly three Supabase requirements', () => {
     expect(raw.order).toHaveLength(16);
     expect(Object.keys(raw.capabilities)).toHaveLength(16);
