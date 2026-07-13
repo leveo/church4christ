@@ -286,7 +286,8 @@ async function applyDefaultSetup(plan, options, catalog) {
   let latestDoctor;
   let configLease = null;
   let providerProofComplete = false;
-  let d1ProofRoot = null;
+  let providerConfigRoot = null;
+  let providerConfigPath = configPath;
 
   const verify = {
     migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
@@ -335,11 +336,11 @@ async function applyDefaultSetup(plan, options, catalog) {
 
   const steps = {
     'verify-provider': step(async () => ({ changed: false }), () => providerProofComplete),
-    'ensure-resources': createResourceStep({ plan, runner, wranglerBin, configPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async ({ plan: activePlan, resources }) => {
+    'ensure-resources': step(async (context) => createResourceStep({ plan, runner, wranglerBin, configPath: providerConfigPath, dbUrl, allowHyperdriveSecretInArgv: options.allowHyperdriveSecretInArgv, verify: async () => false }).apply(context), async ({ plan: activePlan, resources }) => {
       if (!resources?.r2BucketName || !(activePlan.backend === 'd1' ? resources.d1DatabaseId : resources.hyperdriveId)) return false;
       if (activePlan.mode === 'local') return true;
-      try { await probeDeployResources({ runner, wranglerBin, configPath, manifest: JSON.parse(renderManifest({ ...activePlan, resources }, catalog)), probeWorker: false }); return true; } catch { return false; }
-    } }),
+      try { await probeDeployResources({ runner, wranglerBin, configPath: providerConfigPath, manifest: JSON.parse(renderManifest({ ...activePlan, resources }, catalog)), probeWorker: false }); return true; } catch { return false; }
+    }),
     'write-manifest': step(async ({ plan: activePlan }) => {
       desiredManifest = renderManifest(activePlan, catalog);
       const current = await exists(manifestPath);
@@ -390,15 +391,12 @@ async function applyDefaultSetup(plan, options, catalog) {
   };
 
   try {
-    let proofConfigPath = configPath;
     let proofDb = db;
-    if (plan.backend === 'd1') {
-      d1ProofRoot = await mkdtemp(join(tmpdir(), 'church-setup-provider-proof-'));
-      proofConfigPath = join(d1ProofRoot, 'wrangler.jsonc');
-      await writeFile(proofConfigPath, renderProspectiveWrangler(template, plan, catalog).content, { encoding: 'utf8', mode: 0o600 });
-      if (plan.mode === 'local') {
-        proofDb = new D1CliDb({ runner, wranglerBin, configPath: proofConfigPath, mode: 'local', persistTo: join(d1ProofRoot, 'state') });
-      }
+    providerConfigRoot = await mkdtemp(join(tmpdir(), 'church-setup-provider-config-'));
+    providerConfigPath = join(providerConfigRoot, 'wrangler.jsonc');
+    await writeFile(providerConfigPath, renderProspectiveWrangler(template, plan, catalog).content, { encoding: 'utf8', mode: 0o600 });
+    if (plan.backend === 'd1' && plan.mode === 'local') {
+      proofDb = new D1CliDb({ runner, wranglerBin, configPath: providerConfigPath, mode: 'local', persistTo: join(providerConfigRoot, 'state') });
     }
     return await applyAfterProviderPreflight({
       providerOptions: {
@@ -407,7 +405,7 @@ async function applyDefaultSetup(plan, options, catalog) {
         db: proofDb,
         runner,
         wranglerBin,
-        configPath: proofConfigPath,
+        configPath: providerConfigPath,
         resources: plan.resources,
         ...(dbUrl ? { secrets: [dbUrl] } : {}),
       },
@@ -439,7 +437,7 @@ async function applyDefaultSetup(plan, options, catalog) {
   } finally {
     await configLease?.release();
     await postgresConnection?.close();
-    if (d1ProofRoot) await rm(d1ProofRoot, { recursive: true, force: true });
+    if (providerConfigRoot) await rm(providerConfigRoot, { recursive: true, force: true });
   }
 }
 

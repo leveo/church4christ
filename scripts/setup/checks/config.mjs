@@ -88,7 +88,13 @@ export async function checkConfig(options) {
   if (!options.config.startsWith(GENERATED_MARKER)) {
     checks.push(result('config.generated-marker', 'error', 'wrangler.jsonc is not recognized as setup-generated.', 'Preserve custom changes, then rerun setup with explicit replacement approval.'));
   }
-  if (/@@[A-Z_]+@@|\bYOUR_[A-Z0-9_]*\b/.test(options.config)) {
+  const preservedBaselineLocalD1 = options.manifest.mode === 'local' && options.manifest.database === 'd1' &&
+    options.manifest.resources?.d1DatabaseId === 'YOUR_D1_DATABASE_ID' &&
+    parsed.d1_databases?.length === 1 && parsed.d1_databases[0]?.database_id === 'YOUR_D1_DATABASE_ID';
+  const placeholderScan = preservedBaselineLocalD1
+    ? options.config.replaceAll('YOUR_D1_DATABASE_ID', '')
+    : options.config;
+  if (/@@[A-Z_]+@@|\bYOUR_[A-Z0-9_]*\b/.test(placeholderScan)) {
     checks.push(result('config.placeholder', 'error', 'wrangler.jsonc contains unresolved setup placeholders.', 'Rerun setup after providing all resource identifiers.'));
   }
   if (parsed.vars?.DB_BACKEND !== options.manifest.database || !['d1', 'supabase'].includes(parsed.vars?.DB_BACKEND)) {

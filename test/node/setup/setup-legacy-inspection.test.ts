@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import rawCatalog from '../../../config/capabilities.json';
@@ -81,7 +81,10 @@ describe('real legacy installation inspection', () => {
           hyperdriveId: null,
         },
       });
-      expect(openD1).toHaveBeenCalledWith(expect.objectContaining({ mode: 'local', persistTo: join(await realpath(root), '.wrangler/state') }));
+      const inspectedPersistTo = openD1.mock.calls[0][0].persistTo;
+      expect(inspectedPersistTo).not.toBe(join(root, '.wrangler/state'));
+      expect(inspectedPersistTo).toMatch(/church-baseline-inspection-/);
+      await expect(stat(inspectedPersistTo)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

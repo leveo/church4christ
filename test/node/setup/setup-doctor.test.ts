@@ -156,6 +156,18 @@ describe('doctor generated configuration check', () => {
       .toEqual(['config.worker-crons']);
   });
 
+  it('accepts only the recorded baseline local D1 identifier as preserved legacy storage identity', async () => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const workerSource = await readFile('src/worker.ts', 'utf8');
+    const manifest = { ...baseManifest, resources: { ...baseManifest.resources, d1DatabaseId: 'YOUR_D1_DATABASE_ID' } };
+    const config = renderWrangler(template, manifest);
+    expect(await checkConfig({ manifest, template, config, workerSource, hostEnv: {} })).toEqual([
+      expect.objectContaining({ code: 'config.ok', severity: 'info' }),
+    ]);
+    expect((await checkConfig({ manifest, template, config: `${config}\n// YOUR_OTHER_ID`, workerSource, hostEnv: {} })).map((entry) => entry.code))
+      .toContain('config.placeholder');
+  });
+
   it('finds the deprecated Hyperdrive variable in any injected additional file without exposing contents', async () => {
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
     const workerSource = await readFile('src/worker.ts', 'utf8');

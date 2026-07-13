@@ -1,4 +1,7 @@
 import { normalizeEmail, normalizeOrigin } from './answers.mjs';
+import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { validateProviderResources } from './manifest.mjs';
 import { parseJsoncObject } from './jsonc.mjs';
 import { inspectLocalD1Persistence } from './persistence.mjs';
@@ -179,16 +182,23 @@ export async function inspectBaselineLocalD1Installation(options) {
   }
   const persistence = await inspectLocalD1Persistence(root, environment);
   if (!persistence.hasState) return {};
-  return inspectLegacyInstallation({
-    catalog,
-    configContent,
-    baselineContent,
-    requestedMode: options.requestedMode,
-    environment,
-    baselineLocalD1: true,
-    openD1: ({ config }) => {
-      if (typeof options.openD1 !== 'function') throw new TypeError('baseline local D1 inspection requires openD1');
-      return options.openD1({ mode: 'local', config, persistTo: persistence.persistTo });
-    },
-  });
+  const cloneRoot = await mkdtemp(join(tmpdir(), 'church-baseline-inspection-'));
+  const clonePersistTo = join(cloneRoot, 'state');
+  try {
+    await cp(persistence.persistTo, clonePersistTo, { recursive: true, errorOnExist: true, force: false });
+    return await inspectLegacyInstallation({
+      catalog,
+      configContent,
+      baselineContent,
+      requestedMode: options.requestedMode,
+      environment,
+      baselineLocalD1: true,
+      openD1: ({ config }) => {
+        if (typeof options.openD1 !== 'function') throw new TypeError('baseline local D1 inspection requires openD1');
+        return options.openD1({ mode: 'local', config, persistTo: clonePersistTo });
+      },
+    });
+  } finally {
+    await rm(cloneRoot, { recursive: true, force: true });
+  }
 }
