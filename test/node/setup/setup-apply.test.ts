@@ -103,6 +103,29 @@ describe('concrete provider actions', () => {
     expect(order).toEqual(['hyperdrive list --config']);
   });
 
+  it('recreates an owned deleted Hyperdrive only in explicit recovery context', async () => {
+    const table = [
+      '📋 Listing Hyperdrive configs',
+      '┌────┬──────┬──────┬──────┬──────┬────────┬──────────┬─────────┬──────┬─────────────────────────┐',
+      '│ id │ name │ user │ host │ port │ scheme │ database │ caching │ mtls │ origin_connection_limit │',
+      '├────┼──────┼──────┼──────┼──────┼────────┼──────────┼─────────┼──────┼─────────────────────────┤',
+      '│ new-id │ church-db │ u │ h │ 5432 │ Postgres │ db │ x │ {} │ 1 │',
+      '└────┴──────┴──────┴──────┴──────┴────────┴──────────┴─────────┴──────┴─────────────────────────┘',
+    ].join('\n');
+    let lists = 0; const calls: string[][] = [];
+    const runner = { run: async (_file: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === 'hyperdrive' && args[1] === 'list') return { stdout: lists++ === 0 ? '📋 Listing Hyperdrive configs' : table, stderr: '', exitCode: 0 };
+      if (args[0] === 'hyperdrive' && args[1] === 'create') return { stdout: '', stderr: '', exitCode: 0 };
+      if (args.slice(0, 3).join(' ') === 'r2 bucket info') return { stdout: JSON.stringify({ name: 'old-media' }), stderr: '', exitCode: 0 };
+      throw new Error(`unexpected ${args.join(' ')}`);
+    } };
+    const plan: any = { backend: 'supabase', mode: 'deploy', site: { slug: 'church' }, resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'old-media', hyperdriveId: 'stale' } };
+    const resource = createResourceStep({ plan, runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', dbUrl: 'postgres://u:p@db.test/church', allowHyperdriveSecretInArgv: true, verify: async () => true });
+    await expect(resource.apply({ recovering: true } as any)).resolves.toMatchObject({ resolvedResources: { hyperdriveId: 'new-id' } });
+    expect(calls.findIndex((args) => args[0] === 'hyperdrive' && args[1] === 'create')).toBeLessThan(calls.findIndex((args) => args[0] === 'r2'));
+  });
+
   it('rejects an imported Hyperdrive name match with a different ID before touching R2', async () => {
     const table = (id: string) => [
       '📋 Listing Hyperdrive configs',

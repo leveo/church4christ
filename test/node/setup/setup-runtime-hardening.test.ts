@@ -2,13 +2,15 @@ import { EventEmitter } from 'node:events';
 import { readdir } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import raw from '../../../config/capabilities.json';
-import { inspectExistingInstallation, readMaskedInput } from '../../../scripts/setup/index.mjs';
+import { buildHandoff, buildServicePresence, inspectExistingInstallation, readMaskedInput } from '../../../scripts/setup/index.mjs';
 import { probeDeployResources, probeR2Object, parseWorkerDeployments } from '../../../scripts/setup/probes.mjs';
 import { hasDeploySecret } from '../../../scripts/setup/secrets.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from '../../../scripts/setup/verification.mjs';
 import { verifyMediaPlan } from '../../../scripts/setup/media.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/setup/checks/database.mjs';
+import { verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
+import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
 
 function statementDb(rows: Record<string, any>) {
   return { prepare(sql: string) { return { bind() { return this; }, async first() { return rows[sql] ?? null; }, async all() { return { success: true, meta: {}, results: rows[sql] ?? [] }; } }; } };
@@ -133,5 +135,39 @@ describe('runtime setup hardening', () => {
     expect(input.setRawMode).toHaveBeenLastCalledWith(false);
     expect(input.listenerCount('data')).toBe(0);
     expect(output.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('strictly verifies local managed secrets and exact admin identity', () => {
+    const strong = 'x'.repeat(32);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(true);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=weak\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=0\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`, 'admin@example.test')).toBe(false);
+  });
+
+  it('requires a real local Supabase connection source and returns a nonsecret handoff reference', async () => {
+    const manifest: any = { mode: 'local', database: 'supabase', resources: { r2BucketName: 'x-media', hyperdriveId: 'local' } };
+    expect((await buildServicePresence(manifest, { hostEnv: {}, localSecretsValid: true })).hyperdrive).toBe(false);
+    expect((await buildServicePresence(manifest, { hostEnv: { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: 'postgres://secret' }, localSecretsValid: true })).hyperdrive).toBe(true);
+    const handoff = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any);
+    expect(handoff.startCommand).toBe('CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev');
+    expect(JSON.stringify(handoff)).not.toContain('postgres://secret');
+  });
+
+  it('uses remote Stripe secret metadata for deploy and host env only for local', async () => {
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => {
+      if (args[0] === 'secret') return { stdout: '[{"name":"STRIPE_SECRET_KEY","type":"secret_text"},{"name":"STRIPE_WEBHOOK_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 };
+      return { stdout: '', stderr: 'probe unavailable', exitCode: 1 };
+    }) };
+    const deploy: any = { mode: 'deploy', database: 'd1', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', d1DatabaseName: 'x-db', d1DatabaseId: 'id' } };
+    const remote = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {} });
+    expect(remote.stripeSecretKey).toBe(true); expect(remote.stripeWebhookSecret).toBe(true);
+    const local = await buildServicePresence({ ...deploy, mode: 'local' }, { hostEnv: { STRIPE_SECRET_KEY: 'local' }, localSecretsValid: false });
+    expect(local.stripeSecretKey).toBe(true); expect(local.stripeWebhookSecret).toBe(false);
+  });
+
+  it('documents both banner-free JSON invocations', () => {
+    expect(SETUP_HELP).toContain('node scripts/setup/index.mjs [options] --json');
+    expect(SETUP_HELP).toContain('npm run --silent setup -- [options] --json');
   });
 });

@@ -10,7 +10,7 @@ const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRI
 const WRANGLER_ENV = Object.freeze({ ...process.env, WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' });
 const FRESH_WORKER = /^Worker "[A-Za-z0-9][A-Za-z0-9_-]*"(?: \(env: [A-Za-z0-9_-]+\))? not found\.\n\nIf this is a new Worker, run `wrangler deploy` first to create it\.\nOtherwise, check that the Worker name is correct and you're logged into the right account\.$/;
 
-function parseDevVars(content) {
+export function parseDevVars(content) {
   const found = new Map();
   for (const [index, line] of content.split(/\r?\n/).entries()) {
     const trimmed = line.trim();
@@ -31,6 +31,20 @@ function parseDevVars(content) {
     }
   }
   return found;
+}
+
+export function verifyLocalSecretsContent(content, adminEmail) {
+  try {
+    const found = parseDevVars(content);
+    const normalized = normalizeEmail(adminEmail, 'admin email');
+    return found.get('EMAIL_DEV_LOG') === '1' && found.get('AUTH_DEV_BYPASS_EMAIL') === normalized &&
+      typeof found.get('SESSION_SECRET') === 'string' && found.get('SESSION_SECRET').length >= 32;
+  } catch { return false; }
+}
+
+export async function readLocalSecretsStatus(path, adminEmail) {
+  try { return verifyLocalSecretsContent(await readFile(path, 'utf8'), adminEmail); }
+  catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
 }
 
 function appendManaged(content, additions) {
@@ -59,6 +73,14 @@ export async function hasDeploySecret(options) {
   const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
   if (listed.exitCode === 0) return parseSecretList(listed.stdout).has(options.name);
   if (listed.stdout === '' && isFreshWorkerError(listed.stderr)) return false;
+  throw new Error('Wrangler secret list failed during verification');
+}
+
+export async function listDeploySecrets(options) {
+  if (!options?.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
+  const listed = await options.runner.run(options.wranglerBin, ['secret', 'list', '--format', 'json', '--config', options.configPath], { allowNonzero: true, env: WRANGLER_ENV });
+  if (listed.exitCode === 0) return parseSecretList(listed.stdout);
+  if (listed.stdout === '' && isFreshWorkerError(listed.stderr)) return new Set();
   throw new Error('Wrangler secret list failed during verification');
 }
 

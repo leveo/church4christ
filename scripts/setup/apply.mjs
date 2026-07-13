@@ -80,7 +80,7 @@ export function createResourceStep(options) {
   if (!options?.plan || !['d1', 'supabase'].includes(options.plan.backend)) throw new TypeError('resource plan backend is required');
   if (!options.runner || typeof options.runner.run !== 'function') throw new TypeError('runner.run is required');
   if (typeof options.verify !== 'function') throw new TypeError('resource verify is required');
-  return providerStep(async () => {
+  return providerStep(async (context = {}) => {
     const { plan } = options;
     const names = {
       d1DatabaseName: plan.resources?.d1DatabaseName ?? `${plan.site.slug}-db`,
@@ -111,7 +111,7 @@ export function createResourceStep(options) {
       catch { throw new Error('Supabase database URL is invalid'); }
     }
     let hyperdrive;
-    if (plan.resources?.hyperdriveId) {
+    if (plan.resources?.hyperdriveId && !context.recovering) {
       try {
         hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db` });
       } catch (error) {
@@ -121,7 +121,7 @@ export function createResourceStep(options) {
     } else {
       hyperdrive = await ensureHyperdrive({ ...shared, name: `${plan.site.slug}-db`, connectionString: options.dbUrl, allowSecretInArgv: options.allowHyperdriveSecretInArgv });
     }
-    if (plan.resources?.hyperdriveId && hyperdrive.id !== plan.resources.hyperdriveId) {
+    if (plan.resources?.hyperdriveId && !context.recovering && hyperdrive.id !== plan.resources.hyperdriveId) {
       throw new Error('Imported Hyperdrive name is ambiguous: resolved ID mismatches the recorded Hyperdrive ID');
     }
     const bucket = await ensureR2Bucket({ ...shared, name: names.r2BucketName });
@@ -164,7 +164,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false }) {
       resolvedResources = Object.freeze({ ...evidence });
     }
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
-    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources });
+    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed });
     if (await steps[name].verify(context) === true) {
       if (!completed) await stateStore.mark(name, name === 'ensure-resources' ? resolvedResources : null);
       results.push({ step: name, status: completed ? 'already-complete' : 'verified' });

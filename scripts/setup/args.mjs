@@ -19,6 +19,7 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
       Explicitly permit Wrangler to receive a Supabase URL in its argv when creating deploy Hyperdrive
   --doctor --strict
   Machine-readable: node scripts/setup/index.mjs [options] --json
+                    npm run --silent setup -- [options] --json
   --help`;
 
 export function parseSetupArgs(argv, catalog) {

@@ -21,7 +21,7 @@ import { createStateStore } from './state.mjs';
 import { writeAtomic, GENERATED_MARKER } from './files.mjs';
 import { renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { configureSecrets, hasDeploySecret } from './secrets.mjs';
+import { configureSecrets, hasDeploySecret, listDeploySecrets, readLocalSecretsStatus } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResources, probeR2Object } from './probes.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
@@ -87,6 +87,19 @@ export function formatResult(result) {
   ].join('\n');
 }
 
+export function buildHandoff(plan, doctor) {
+  return Object.freeze({
+    mode: plan.mode,
+    url: plan.site.appOrigin,
+    adminEmail: plan.adminEmail,
+    capabilities: Object.freeze([...plan.modules]),
+    startCommand: plan.mode === 'local'
+      ? plan.backend === 'supabase' ? 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev' : 'npm run dev'
+      : 'npm run deploy',
+    limitations: Object.freeze(doctor.checks.filter((check) => check.severity === 'warning').map((check) => check.code)),
+  });
+}
+
 export function createPlanPreview({ output, errorOutput }) {
   if (typeof output !== 'function' || typeof errorOutput !== 'function') throw new TypeError('plan preview output functions are required');
   return (plan, { json = false } = {}) => (json ? errorOutput : output)(formatPlan(plan));
@@ -106,12 +119,17 @@ export async function collectSupabaseSecret(options = {}) {
   return Object.freeze({ dbUrl });
 }
 
-async function servicePresence(manifest, probeOptions = {}) {
+export async function buildServicePresence(manifest, probeOptions = {}) {
+  const hostEnv = probeOptions.hostEnv ?? process.env;
   let live = { worker: false, r2: false, hyperdrive: false };
   if (manifest?.mode === 'local') {
-    live = { worker: true, r2: Boolean(manifest?.resources?.r2BucketName), hyperdrive: manifest?.database !== 'supabase' || Boolean(manifest?.resources?.hyperdriveId) };
+    live = { worker: true, r2: Boolean(manifest?.resources?.r2BucketName), hyperdrive: manifest?.database !== 'supabase' || Boolean(hostEnv.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE || probeOptions.localSupabaseUrlAvailable) };
   } else if (manifest?.mode === 'deploy' && probeOptions.runner) {
     try { live = await probeDeployResources({ ...probeOptions, manifest }); } catch {}
+  }
+  let remoteSecrets = new Set();
+  if (manifest?.mode === 'deploy' && probeOptions.runner) {
+    try { remoteSecrets = await listDeploySecrets(probeOptions); } catch {}
   }
   return {
     worker: live.worker,
@@ -119,10 +137,10 @@ async function servicePresence(manifest, probeOptions = {}) {
     hyperdrive: manifest?.database !== 'supabase' || live.hyperdrive,
     email: false,
     emailConfigured: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
-    emailDevLog: manifest?.mode === 'local',
-    stripeSecretKey: Boolean(process.env.STRIPE_SECRET_KEY),
-    stripeWebhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
-    backup: Boolean(process.env.CF_ACCOUNT_ID && process.env.D1_DATABASE_ID && process.env.D1_EXPORT_TOKEN),
+    emailDevLog: manifest?.mode === 'local' && probeOptions.localSecretsValid === true,
+    stripeSecretKey: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : Boolean(hostEnv.STRIPE_SECRET_KEY),
+    stripeWebhookSecret: manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : Boolean(hostEnv.STRIPE_WEBHOOK_SECRET),
+    backup: Boolean(hostEnv.CF_ACCOUNT_ID && hostEnv.D1_DATABASE_ID && hostEnv.D1_EXPORT_TOKEN),
   };
 }
 
@@ -194,7 +212,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await servicePresence(manifest, { runner, wranglerBin, configPath }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: Boolean(dbUrl), localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail) }) }),
     }, { strict: false });
   };
 
@@ -234,8 +252,7 @@ async function applyDefaultSetup(plan, options, catalog) {
     }),
     'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath }), async ({ plan: activePlan }) => {
       if (activePlan.mode === 'deploy') return hasDeploySecret({ runner, wranglerBin, configPath, name: 'SESSION_SECRET' });
-      const content = await exists(resolve(root, '.dev.vars')) ?? '';
-      return ['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL'].every((key) => new RegExp(`^${key}=.+$`, 'm').test(content));
+      return readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
     }),
     ...providerSteps,
     'seed-media': step(async ({ plan: activePlan }) => {
@@ -255,7 +272,6 @@ async function applyDefaultSetup(plan, options, catalog) {
     latestDoctor ??= await runInstallationDoctor(plan);
     const moduleRows = Number((await db.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").first())?.count ?? 0);
     const admin = await db.prepare('SELECT role, active FROM people WHERE lower(email)=lower(?)').bind(plan.adminEmail).first();
-    const limitations = latestDoctor.checks.filter((check) => check.severity === 'warning').map((check) => check.code);
     return {
       backend: plan.backend,
       enabledModules: plan.modules,
@@ -263,14 +279,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       admin: { status: admin?.role === 'admin' && Number(admin.active) === 1 ? 'already-admin' : 'missing' },
       apply: applied,
       doctor: latestDoctor,
-      handoff: {
-        mode: plan.mode,
-        url: plan.site.appOrigin,
-        adminEmail: plan.adminEmail,
-        capabilities: plan.modules,
-        startCommand: plan.mode === 'local' ? 'npm run dev' : 'npm run deploy',
-        limitations,
-      },
+      handoff: buildHandoff(plan, latestDoctor),
     };
   } finally {
     await postgresConnection?.close();
@@ -325,7 +334,7 @@ export async function runSetup(argv, deps) {
   }
 
   let allowHyperdriveSecretInArgv = parsed.allowHyperdriveSecretInArgv;
-  if (plan.backend === 'supabase' && plan.mode === 'deploy' && !plan.resources?.hyperdriveId && !allowHyperdriveSecretInArgv) {
+  if (plan.backend === 'supabase' && plan.mode === 'deploy' && !allowHyperdriveSecretInArgv) {
     if (deps.interactive && typeof deps.confirmHyperdriveSecretInArgv === 'function') {
       allowHyperdriveSecretInArgv = await deps.confirmHyperdriveSecretInArgv(plan) === true;
     }
@@ -446,7 +455,7 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: process.env.SUPABASE_DB_URL ? [process.env.SUPABASE_DB_URL] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await servicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath }) }),
+        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner(), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars'), process.env.AUTH_DEV_BYPASS_EMAIL ?? '') : false }) }),
       }, { strict });
     } finally {
       await connection?.close();
