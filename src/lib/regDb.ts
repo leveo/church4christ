@@ -11,12 +11,10 @@
 // 'en' fallback (the givingDb style), not i18nJoin — reg_event_i18n/reg_question_i18n
 // key on title/description/label, not `name`.
 //
-// A pending registration HOLDS a seat until its Checkout session confirms or
-// expires, so taken_count (the capacity gate) counts confirmed rows plus pending
-// rows still within a 1h freshness window (see HOLDS_SEAT — a dead pending row
-// whose worker never attached a session id is freed after 1h); confirmed_count is
-// the settled subset. See createRegistration for the capacity-race backstop and
-// its documented non-serializable window.
+// A pending registration HOLDS a seat until a guarded Stripe or operator action
+// confirms/cancels it. Local age never frees a possibly valid Checkout session.
+// See createRegistration for the capacity-race backstop and its documented
+// non-serializable window.
 import type { AppDb, AppStatement } from './appDb';
 import type { Locale } from './db';
 import { csvCell } from './csv';
@@ -47,18 +45,13 @@ export interface RegEvent {
   taken_count: number;
 }
 
-// A registration HOLDS a seat when it is confirmed, OR pending and still fresh.
-// A pending row whose worker died before attachCheckoutSession keeps a NULL
-// stripe_checkout_session_id — unreachable by confirmBySession/cancelBySession
-// (both key on the session id) — so without a freshness bound it would hold a
-// seat forever and could falsely trigger event_full. Stripe checkout sessions
-// expire at 30min, so a pending row older than 1h is definitively dead; excluding
-// it frees the seat without a background job. Assumes the row is aliased `r`.
-const HOLDS_SEAT = `(r.status = 'confirmed'
-  OR (r.status = 'pending' AND r.created_at > datetime('now','-1 hours')))`;
+// Pending seats are durable: an ambiguous Checkout create can remain recoverable
+// for almost 24 hours, so only a guarded terminal transition may release one.
+// Assumes the row is aliased `r`.
+const HOLDS_SEAT = `r.status IN ('pending','confirmed')`;
 
 // The localized event projection shared by every event reader. Locale binds as
-// ?1; a confirmed OR fresh-pending registration counts toward taken_count (it
+// ?1; a confirmed OR pending registration counts toward taken_count (it
 // holds a seat — see HOLDS_SEAT), confirmed_count is the settled subset. Callers
 // append their own WHERE / ORDER BY (numbered from ?2) and bind the locale first.
 const EVENT_SELECT = `
@@ -306,8 +299,7 @@ export async function createRegistration(
     );
   }
   // Last statement: recount held seats + read capacity in the same transaction.
-  // Counts only LIVE seats (HOLDS_SEAT) so a stale/dead pending row can't wedge
-  // the event at capacity and reject a legitimate registration.
+  // Every pending/confirmed row is a durable held seat (HOLDS_SEAT).
   stmts.push(
     db
       .prepare(
@@ -366,6 +358,117 @@ export async function cancelBySession(db: AppDb, sessionId: string): Promise<boo
     .bind(sessionId)
     .run();
   return r.meta.changes > 0;
+}
+
+export type RegistrationCheckoutAction = 'confirm' | 'cancel' | 'attach_waiting' | 'attach_open';
+export type RegistrationCheckoutTransition = 'applied' | 'converged' | 'deferred' | 'mismatch';
+
+/**
+ * Resolve a Stripe Checkout session against one registration without trusting
+ * metadata alone. An unattached row may self-heal only through its exact private
+ * request; an already-attached legacy row converges by exact session ID.
+ */
+export async function applyRegistrationCheckoutSession(
+  db: AppDb,
+  input: {
+    registrationId: number;
+    requestId: string | null;
+    sessionId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    action: RegistrationCheckoutAction;
+  },
+): Promise<RegistrationCheckoutTransition> {
+  const terminalStatus = input.action === 'confirm'
+    ? 'confirmed'
+    : input.action === 'cancel'
+      ? 'cancelled'
+      : 'pending';
+  const result = await db
+    .prepare(
+      `UPDATE registrations
+       SET status = ?1,
+           stripe_checkout_session_id = ?2,
+           stripe_payment_intent_id = CASE WHEN ?1 = 'confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
+           updated_at = datetime('now')
+       WHERE id = ?4
+         AND status = 'pending'
+         AND amount_cents = ?5
+         AND currency = ?6
+         AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id = ?2)
+         AND (
+           stripe_checkout_session_id = ?2
+           OR (
+             CAST(?7 AS TEXT) IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM church_private.stripe_checkout_requests q
+               WHERE q.request_id = CAST(?7 AS TEXT) AND q.registration_id = ?4
+             )
+           )
+         )`,
+    )
+    .bind(
+      terminalStatus,
+      input.sessionId,
+      input.paymentIntentId,
+      input.registrationId,
+      input.amountCents,
+      input.currency,
+      input.requestId,
+    )
+    .run();
+
+  let transition: RegistrationCheckoutTransition;
+  if (result.meta.changes > 0) {
+    transition = 'applied';
+  } else {
+    const row = await db
+      .prepare(
+        `SELECT status, amount_cents, currency, stripe_checkout_session_id
+         FROM registrations WHERE id = ?1 LIMIT 1`,
+      )
+      .bind(input.registrationId)
+      .first<{
+        status: 'pending' | 'confirmed' | 'cancelled';
+        amount_cents: number;
+        currency: string;
+        stripe_checkout_session_id: string | null;
+      }>();
+    if (!row) {
+      transition = input.requestId ? 'deferred' : 'mismatch';
+    } else {
+      const exact = row.amount_cents === input.amountCents
+        && row.currency === input.currency
+        && row.stripe_checkout_session_id === input.sessionId;
+      const expectedTerminal = input.action === 'confirm'
+        ? row.status === 'confirmed'
+        : input.action === 'cancel'
+          ? row.status === 'cancelled'
+          : row.status === 'pending';
+      transition = exact && expectedTerminal ? 'converged' : 'mismatch';
+    }
+  }
+
+  if (transition === 'applied' || transition === 'converged') {
+    const terminal = input.action === 'confirm' || input.action === 'cancel';
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE church_private.stripe_checkout_requests
+           SET state = ?1,
+               request_json = CASE WHEN ?1 = 'resolved' THEN NULL ELSE request_json END,
+               session_url = CASE WHEN ?1 = 'resolved' THEN NULL ELSE session_url END,
+               next_reconcile_at = NULL,
+               last_error = NULL,
+               updated_at = datetime('now')
+           WHERE registration_id = ?2
+             AND (CAST(?3 AS TEXT) IS NULL OR request_id = CAST(?3 AS TEXT))`,
+        )
+        .bind(terminal ? 'resolved' : 'attached', input.registrationId, input.requestId),
+    ]);
+  }
+  return transition;
 }
 
 /**

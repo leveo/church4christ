@@ -19,6 +19,7 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { verifyStripeWebhook, type StripeEnv } from '../../../lib/stripe';
 import { handleStripeEvent, isRetryableWebhookError } from '../../../lib/givingWebhook';
+import type { ModuleKey } from '../../../lib/modules';
 
 export const prerender = false;
 
@@ -39,8 +40,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!event) return new Response('invalid signature', { status: 400 });
 
   try {
-    const outcome = await handleStripeEvent({ db: locals.db, env: stripeEnv }, event);
-    return new Response(outcome, { status: 200 });
+    const result = await handleStripeEvent({
+      db: locals.db,
+      env: stripeEnv,
+      modules: locals.modules as ReadonlySet<ModuleKey>,
+    }, event);
+    return new Response(result.outcome, { status: 200 });
   } catch (e) {
     if (isRetryableWebhookError(e)) {
       console.error('stripe webhook: transient error (will retry)', e);

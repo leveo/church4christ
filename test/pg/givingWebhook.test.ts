@@ -15,8 +15,14 @@ import { PgAdapter } from '../../src/lib/pgAdapter';
 import type { AppDb } from '../../src/lib/appDb';
 import { saveFund } from '../../src/lib/fundDb';
 import { getStripeCustomer, getRecurringBySubscription, fundTotals } from '../../src/lib/givingDb';
-import { handleStripeEvent, isDbConnectivityError, isRetryableWebhookError } from '../../src/lib/givingWebhook';
+import {
+  handleStripeEvent as dispatchStripeEvent,
+  isDbConnectivityError,
+  isRetryableWebhookError,
+  type WebhookDeps,
+} from '../../src/lib/givingWebhook';
 import { retrieveSubscription, StripeError, type StripeEnv } from '../../src/lib/stripe';
+import { stripeEvent } from '../stripeFixtures';
 
 const ENV: StripeEnv = {
   STRIPE_MODE: 'test',
@@ -50,7 +56,14 @@ function subFixture(id: string, fundId: number, personId: number, amountCents: n
   };
 }
 
-const ev = (type: string, object: Record<string, unknown>): Record<string, unknown> => ({ type, data: { object } });
+const ALL_MODULES = new Set(['giving', 'registration'] as const);
+const handleStripeEvent = (
+  deps: Omit<WebhookDeps, 'modules'>,
+  event: Record<string, unknown>,
+) => dispatchStripeEvent({ ...deps, modules: ALL_MODULES }, event);
+const ev = stripeEvent;
+const processed = (outcome: string) => ({ state: 'processed', outcome });
+const ignored = (outcome = 'ignored') => ({ state: 'ignored', outcome });
 
 describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -93,7 +106,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         metadata: { kind: 'gift', fund_id: String(fund), person_id: '', donor_name: 'Guest Giver' },
       }),
     );
-    expect(outcome).toBe('gift_recorded');
+    expect(outcome).toEqual(processed('gift_recorded'));
     const rows = await giftRow('stripe_payment_intent_id', 'pi_guest');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -122,7 +135,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         metadata: { kind: 'gift', fund_id: String(fund), person_id: '6', donor_name: 'Ben' },
       }),
     );
-    expect(outcome).toBe('gift_recorded');
+    expect(outcome).toEqual(processed('gift_recorded'));
     const rows = await giftRow('stripe_payment_intent_id', 'pi_member');
     expect(rows[0]).toMatchObject({ person_id: 6, amount_cents: 2500 });
     expect(await getStripeCustomer(db, 6)).toBe('cus_member1');
@@ -156,7 +169,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         metadata: { kind: 'gift', fund_id: String(fund), person_id: '10' },
       }),
     );
-    expect(outcome).toBe('recurring_started');
+    expect(outcome).toEqual(processed('recurring_started'));
     expect(await getRecurringBySubscription(db, 'sub_100')).toEqual({ person_id: 10, fund_id: fund });
     const [rec] = await sql.unsafe('SELECT amount_cents, "interval", status FROM recurring_gifts WHERE stripe_subscription_id = $1', ['sub_100']);
     expect(rec).toMatchObject({ amount_cents: 3000, interval: 'month', status: 'active' });
@@ -177,7 +190,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         customer_email: 'zhao@example.com',
       }),
     );
-    expect(outcome).toBe('gift_recorded');
+    expect(outcome).toEqual(processed('gift_recorded'));
     const rows = await giftRow('stripe_invoice_id', 'in_100');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ person_id: 10, fund_id: fund, amount_cents: 3000, method: 'card', status: 'succeeded' });
@@ -197,7 +210,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         currency: 'usd',
       }),
     );
-    expect(outcome).toBe('gift_recorded');
+    expect(outcome).toEqual(processed('gift_recorded'));
     // The race handler back-filled the subscription…
     expect(await getRecurringBySubscription(db, 'sub_200')).toEqual({ person_id: 3, fund_id: fund });
     // …and the money row landed.
@@ -210,9 +223,12 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
     const outcome = await handleStripeEvent(
       { db, env: ENV },
       // Stripe sets refunded:true only on a full refund; amounts included too.
-      ev('charge.refunded', { id: 'ch_1', payment_intent: 'pi_guest', refunded: true, amount: 5000, amount_refunded: 5000 }),
+      ev('charge.refunded', {
+        id: 'ch_1', payment_intent: 'pi_guest', refunded: true, amount: 5000, amount_refunded: 5000,
+        metadata: { kind: 'gift' },
+      }),
     );
-    expect(outcome).toBe('refunded');
+    expect(outcome).toEqual(processed('refunded'));
     const [row] = await giftRow('stripe_payment_intent_id', 'pi_guest');
     expect(row.status).toBe('refunded');
   });
@@ -228,25 +244,31 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
           metadata: { kind: 'gift', fund_id: String(rfund), person_id: '', donor_name: 'R' },
         }),
       );
-    expect(await mkGift('pi_full', 1000)).toBe('gift_recorded');
-    expect(await mkGift('pi_partial', 1000)).toBe('gift_recorded');
+    expect(await mkGift('pi_full', 1000)).toEqual(processed('gift_recorded'));
+    expect(await mkGift('pi_partial', 1000)).toEqual(processed('gift_recorded'));
 
     // Full refund (Stripe's refunded:true) → the gift flips to 'refunded'.
     expect(
       await handleStripeEvent(
         { db, env: ENV },
-        ev('charge.refunded', { id: 'ch_full', payment_intent: 'pi_full', refunded: true, amount: 1000, amount_refunded: 1000 }),
+        ev('charge.refunded', {
+          id: 'ch_full', payment_intent: 'pi_full', refunded: true, amount: 1000, amount_refunded: 1000,
+          metadata: { kind: 'gift' },
+        }),
       ),
-    ).toBe('refunded');
+    ).toEqual(processed('refunded'));
 
     // Partial refund ($5 of $10) → NO flip: the gift stays 'succeeded' and keeps
     // its FULL amount in totals (a partial-refund ledger is out of scope).
     expect(
       await handleStripeEvent(
         { db, env: ENV },
-        ev('charge.refunded', { id: 'ch_part', payment_intent: 'pi_partial', refunded: false, amount: 1000, amount_refunded: 500 }),
+        ev('charge.refunded', {
+          id: 'ch_part', payment_intent: 'pi_partial', refunded: false, amount: 1000, amount_refunded: 500,
+          metadata: { kind: 'gift' },
+        }),
       ),
-    ).toBe('ignored');
+    ).toEqual(ignored());
 
     const [full] = await giftRow('stripe_payment_intent_id', 'pi_full');
     const [partial] = await giftRow('stripe_payment_intent_id', 'pi_partial');
@@ -267,11 +289,75 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         id: `cs_${pi}`, mode: 'payment', payment_status: status, payment_intent: pi, amount_total: 1234, currency: 'usd',
         metadata: { kind: 'gift', fund_id: String(fund), person_id: '', donor_name: 'PS' },
       });
-    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_unpaid', 'unpaid'))).toBe('ignored');
+    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_unpaid', 'unpaid'))).toEqual(ignored('awaiting_async_payment'));
     expect(await giftRow('stripe_payment_intent_id', 'pi_unpaid')).toHaveLength(0);
 
-    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_paid', 'paid'))).toBe('gift_recorded');
+    expect(await handleStripeEvent({ db, env: ENV }, mk('pi_paid', 'paid'))).toEqual(processed('gift_recorded'));
     expect(await giftRow('stripe_payment_intent_id', 'pi_paid')).toHaveLength(1);
+  });
+
+  it('does not mutate Giving when only Registration is enabled', async () => {
+    const event = ev('checkout.session.completed', {
+      id: 'cs_giving_disabled', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_giving_disabled',
+      amount_total: 1700, currency: 'usd',
+      metadata: { kind: 'gift', fund_id: String(fund), person_id: '', donor_name: 'Disabled' },
+    });
+    expect(await dispatchStripeEvent({ db, env: ENV, modules: new Set(['registration']) }, event))
+      .toEqual(ignored('module_disabled'));
+    expect(await giftRow('stripe_payment_intent_id', 'pi_giving_disabled')).toHaveLength(0);
+  });
+
+  it.each(['payment_intent.succeeded', 'checkout.session.unsupported'])(
+    'keeps unsupported %s terminally ignored even when metadata names a disabled module', async (type) => {
+    expect(await dispatchStripeEvent(
+      { db, env: ENV, modules: new Set(['registration']) },
+      ev(type, { id: 'pi_unsupported_gift', metadata: { kind: 'gift' } }),
+    )).toEqual(ignored());
+  });
+
+  it('checkpoints before a Stripe fetch and before each following domain write', async () => {
+    let checkpoints = 0;
+    const fetcher = subFetcher({ sub_checkpoint: subFixture('sub_checkpoint', fund, 10, 3300) });
+    expect(await dispatchStripeEvent(
+      { db, env: ENV, modules: ALL_MODULES, fetcher, checkpoint: async () => { checkpoints += 1; } },
+      ev('checkout.session.completed', {
+        id: 'cs_checkpoint', mode: 'subscription', subscription: 'sub_checkpoint', customer: 'cus_checkpoint',
+        metadata: { kind: 'gift', fund_id: String(fund), person_id: '10' },
+      }),
+    )).toEqual(processed('recurring_started'));
+    expect(checkpoints).toBe(3); // retrieveSubscription, upsertRecurringGift, setStripeCustomer
+  });
+
+  it('routes async payment success through paid gift fulfillment and ignores async failure', async () => {
+    const base = {
+      id: 'cs_async_gift', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_async_gift',
+      amount_total: 2100, currency: 'usd',
+      metadata: { kind: 'gift', fund_id: String(fund), person_id: '', donor_name: 'Async' },
+    };
+    expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.async_payment_succeeded', base)))
+      .toEqual(processed('gift_recorded'));
+    expect(await giftRow('stripe_payment_intent_id', 'pi_async_gift')).toHaveLength(1);
+    expect(await handleStripeEvent({ db, env: ENV }, ev('checkout.session.async_payment_failed', {
+      ...base, id: 'cs_async_gift_failed', payment_intent: 'pi_async_gift_failed', payment_status: 'unpaid',
+    }))).toEqual(ignored('awaiting_async_payment'));
+    expect(await giftRow('stripe_payment_intent_id', 'pi_async_gift_failed')).toHaveLength(0);
+  });
+
+  it('defers an internal full refund whose gift row is not visible yet', async () => {
+    expect(await handleStripeEvent({ db, env: ENV }, ev('charge.refunded', {
+      id: 'ch_early_internal', payment_intent: 'pi_early_internal', refunded: true,
+      amount: 3200, amount_refunded: 3200, metadata: { kind: 'gift' },
+    }))).toEqual({ state: 'deferred', outcome: 'gift_not_visible' });
+  });
+
+  it('keeps foreign full refunds and internal partial refunds terminally ignored', async () => {
+    expect(await handleStripeEvent({ db, env: ENV }, ev('charge.refunded', {
+      id: 'ch_foreign', payment_intent: 'pi_foreign', refunded: true, amount: 1000, amount_refunded: 1000,
+    }))).toEqual(ignored());
+    expect(await handleStripeEvent({ db, env: ENV }, ev('charge.refunded', {
+      id: 'ch_partial_internal', payment_intent: 'pi_partial_internal', refunded: false,
+      amount: 1000, amount_refunded: 500, metadata: { kind: 'gift' },
+    }))).toEqual(ignored());
   });
 
   // ── subscription lifecycle ───────────────────────────────────────────────────
@@ -281,7 +367,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         { db, env: ENV },
         ev('customer.subscription.updated', { id: 'sub_100', status: 'past_due', metadata: { kind: 'gift' } }),
       ),
-    ).toBe('status_synced');
+    ).toEqual(processed('status_synced'));
     let [rec] = await sql.unsafe('SELECT status FROM recurring_gifts WHERE stripe_subscription_id = $1', ['sub_100']);
     expect(rec.status).toBe('past_due');
 
@@ -290,7 +376,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
         { db, env: ENV },
         ev('customer.subscription.deleted', { id: 'sub_100', status: 'canceled', metadata: { kind: 'gift' } }),
       ),
-    ).toBe('status_synced');
+    ).toEqual(processed('status_synced'));
     [rec] = await sql.unsafe('SELECT status FROM recurring_gifts WHERE stripe_subscription_id = $1', ['sub_100']);
     expect(rec.status).toBe('canceled');
   });
@@ -308,7 +394,7 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
       {}, // no type at all
     ];
     for (const c of cases) {
-      expect(await handleStripeEvent({ db, env: ENV }, c)).toBe('ignored');
+      expect(await handleStripeEvent({ db, env: ENV }, c)).toEqual(ignored());
     }
   });
 });

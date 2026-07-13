@@ -18,7 +18,9 @@
 // kind === 'registration' is an event sign-up (confirm/cancel the pending row by
 // its attached Checkout session id). Every other kind resolves to 'ignored'.
 import type { AppDb } from './appDb';
+import type { ModuleKey } from './modules';
 import { retrieveSubscription, StripeError, type StripeEnv } from './stripe';
+import type { StripeDispatchResult } from './stripeWebhookInbox';
 import {
   insertCardGift,
   markGiftRefunded,
@@ -27,12 +29,18 @@ import {
   getRecurringBySubscription,
   setStripeCustomer,
 } from './givingDb';
-import { confirmBySession, cancelBySession } from './regDb';
+import {
+  applyRegistrationCheckoutSession,
+  type RegistrationCheckoutAction,
+  type RegistrationCheckoutTransition,
+} from './regDb';
 
 export interface WebhookDeps {
   db: AppDb;
   env: StripeEnv;
+  modules: ReadonlySet<ModuleKey>;
   fetcher?: typeof fetch;
+  checkpoint?: () => Promise<void>;
 }
 
 // postgres.js client-side connection-failure codes (src/lib/dbProvider opens the
@@ -100,15 +108,10 @@ export function isRetryableWebhookError(e: unknown): boolean {
   return false;
 }
 
-/** A short outcome for the log line: what the handler did with this event. */
-type Outcome =
-  | 'gift_recorded'
-  | 'recurring_started'
-  | 'refunded'
-  | 'status_synced'
-  | 'registration_confirmed'
-  | 'registration_cancelled'
-  | 'ignored';
+const processed = (outcome: string): StripeDispatchResult => ({ state: 'processed', outcome });
+const ignored = (outcome = 'ignored'): StripeDispatchResult => ({ state: 'ignored', outcome });
+const deferred = (outcome: string): StripeDispatchResult => ({ state: 'deferred', outcome });
+const checked = async (deps: WebhookDeps): Promise<void> => deps.checkpoint?.();
 
 // ── tolerant field readers (a foreign/malformed payload must never throw) ──────
 function getMeta(obj: Record<string, unknown>): Record<string, unknown> {
@@ -183,18 +186,55 @@ function recurringFromSub(sub: Record<string, unknown>): RecurringParams | null 
 }
 
 // ── per-event handlers ─────────────────────────────────────────────────────────
-async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, unknown>): Promise<Outcome> {
-  // Registration checkouts ride the same choke point as gifts, distinguished by
-  // metadata.kind; a paid registration confirms the pending row its Checkout
-  // session id is attached to. Matches by session id (confirmBySession), so the
-  // registration_id in metadata is informational only.
+function registrationResult(
+  transition: RegistrationCheckoutTransition,
+  action: RegistrationCheckoutAction,
+): StripeDispatchResult {
+  if (transition === 'deferred') return deferred('registration_not_visible');
+  if (transition === 'mismatch') return ignored('registration_mismatch');
+  return processed(action === 'confirm' ? 'registration_confirmed' : 'registration_cancelled');
+}
+
+async function applyRegistrationSession(
+  deps: WebhookDeps,
+  session: Record<string, unknown>,
+  action: 'confirm' | 'cancel',
+): Promise<StripeDispatchResult> {
+  const meta = getMeta(session);
+  const registrationId = intOrNull(meta.registration_id);
+  const requestId = strOrNull(meta.request_id);
+  const sessionId = strOrNull(session.id);
+  const amountCents = session.amount_total;
+  const currency = strOrNull(session.currency);
+  if (
+    registrationId === null
+    || !sessionId
+    || !Number.isInteger(amountCents)
+    || (amountCents as number) < 0
+    || !currency
+  ) return ignored();
+  await checked(deps);
+  const transition = await applyRegistrationCheckoutSession(deps.db, {
+    registrationId,
+    requestId,
+    sessionId,
+    paymentIntentId: action === 'confirm' ? strOrNull(session.payment_intent) : null,
+    amountCents: amountCents as number,
+    currency,
+    action,
+  });
+  return registrationResult(transition, action);
+}
+
+async function onCheckoutCompleted(
+  deps: WebhookDeps,
+  session: Record<string, unknown>,
+): Promise<StripeDispatchResult> {
   if (metaKind(session) === 'registration') {
-    const sessionId = strOrNull(session.id);
-    if (!sessionId) return 'ignored';
-    const confirmed = await confirmBySession(deps.db, sessionId, strOrNull(session.payment_intent));
-    return confirmed ? 'registration_confirmed' : 'ignored';
+    if (session.payment_status !== 'paid') return ignored('awaiting_async_payment');
+    return applyRegistrationSession(deps, session, 'confirm');
   }
-  if (metaKind(session) !== 'gift') return 'ignored';
+  if (metaKind(session) !== 'gift') return ignored();
   const mode = session.mode;
 
   if (mode === 'payment') {
@@ -203,13 +243,14 @@ async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, un
     // record money — Stripe re-fires completion when it settles. A paid card
     // session always carries a payment_intent, so this gate also closes the
     // null-PI double-insert gap (an unpaid session has no PI to dedup on).
-    if (session.payment_status !== 'paid') return 'ignored';
+    if (session.payment_status !== 'paid') return ignored('awaiting_async_payment');
     const meta = getMeta(session);
     const fundId = intOrNull(meta.fund_id);
     const amountTotal = session.amount_total;
-    if (fundId === null || typeof amountTotal !== 'number') return 'ignored';
+    if (fundId === null || typeof amountTotal !== 'number') return ignored();
     const personId = intOrNull(meta.person_id);
     const details = session.customer_details as { email?: unknown } | undefined;
+    await checked(deps);
     await insertCardGift(deps.db, {
       personId,
       donorName: strOrNull(meta.donor_name),
@@ -221,41 +262,52 @@ async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, un
       paymentIntentId: strOrNull(session.payment_intent),
     });
     const customerId = strOrNull(session.customer);
-    if (personId !== null && customerId) await setStripeCustomer(deps.db, personId, customerId);
-    return 'gift_recorded';
+    if (personId !== null && customerId) {
+      await checked(deps);
+      await setStripeCustomer(deps.db, personId, customerId);
+    }
+    return processed('gift_recorded');
   }
 
   if (mode === 'subscription') {
     const subId = strOrNull(session.subscription);
-    if (!subId) return 'ignored';
+    if (!subId) return ignored();
+    await checked(deps);
     const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const rec = recurringFromSub(sub);
-    if (!rec) return 'ignored';
+    if (!rec) return ignored();
+    await checked(deps);
     await upsertRecurringGift(deps.db, { ...rec, subscriptionId: subId });
     // The money rows come from invoice.paid; here we only persist the customer.
     const customerId = strOrNull(session.customer) ?? strOrNull(sub.customer);
-    if (customerId) await setStripeCustomer(deps.db, rec.personId, customerId);
-    return 'recurring_started';
+    if (customerId) {
+      await checked(deps);
+      await setStripeCustomer(deps.db, rec.personId, customerId);
+    }
+    return processed('recurring_started');
   }
 
-  return 'ignored';
+  return ignored();
 }
 
-async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>): Promise<Outcome> {
+async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>): Promise<StripeDispatchResult> {
   const subId = strOrNull(invoice.subscription);
-  if (!subId) return 'ignored'; // one-time payments emit no invoice — be defensive
+  if (!subId) return ignored(); // one-time payments emit no invoice — be defensive
   let rec = await getRecurringBySubscription(deps.db, subId);
   if (!rec) {
     // Webhook-order race: invoice.paid can arrive before checkout.session.completed.
     // Pull the subscription from Stripe and back-fill the recurring row first.
+    await checked(deps);
     const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const built = recurringFromSub(sub);
-    if (!built) return 'ignored';
+    if (!built) return ignored();
+    await checked(deps);
     await upsertRecurringGift(deps.db, { ...built, subscriptionId: subId });
     rec = { person_id: built.personId, fund_id: built.fundId };
   }
   const amountPaid = invoice.amount_paid;
-  if (typeof amountPaid !== 'number') return 'ignored';
+  if (typeof amountPaid !== 'number') return ignored();
+  await checked(deps);
   await insertCardGift(deps.db, {
     personId: rec.person_id,
     donorName: null,
@@ -268,18 +320,17 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
     invoiceId: strOrNull(invoice.id),
     subscriptionId: subId,
   });
-  return 'gift_recorded';
+  return processed('gift_recorded');
 }
 
 /** A Checkout session expired. Only registration sessions hold a seat, so only
- *  those need freeing (a gift checkout expiring records nothing). Idempotent:
- *  cancelBySession moves only a still-pending row → 'ignored' on redelivery. */
-async function onCheckoutExpired(deps: WebhookDeps, session: Record<string, unknown>): Promise<Outcome> {
-  if (metaKind(session) !== 'registration') return 'ignored';
-  const sessionId = strOrNull(session.id);
-  if (!sessionId) return 'ignored';
-  const cancelled = await cancelBySession(deps.db, sessionId);
-  return cancelled ? 'registration_cancelled' : 'ignored';
+ *  those need a guarded cancellation; terminal replays converge. */
+async function onCheckoutExpired(
+  deps: WebhookDeps,
+  session: Record<string, unknown>,
+): Promise<StripeDispatchResult> {
+  if (metaKind(session) !== 'registration') return ignored();
+  return applyRegistrationSession(deps, session, 'cancel');
 }
 
 /** True when a charge.refunded event represents a FULL refund. Stripe sets
@@ -293,28 +344,30 @@ function isFullRefund(charge: Record<string, unknown>): boolean {
   return typeof amount === 'number' && typeof refunded === 'number' && amount > 0 && refunded >= amount;
 }
 
-async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>): Promise<Outcome> {
+async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>): Promise<StripeDispatchResult> {
   const pi = strOrNull(charge.payment_intent);
-  if (!pi) return 'ignored';
+  if (!pi) return ignored();
   // Only a FULL refund zeroes a gift's contribution. A partial refund ($50 on a
   // $1000 gift) must NOT flip status to 'refunded' — that would drop the whole
   // $1000 out of fundTotals/householdYearTotals (both filter status='succeeded'),
   // understating fund totals and the donor's tax statement. On a partial refund
   // we leave the gift 'succeeded' (a partial-refund ledger field is out of scope).
-  if (!isFullRefund(charge)) return 'ignored';
-  // markGiftRefunded is scoped to our gifts by PI, so a foreign charge (or a
-  // redelivered refund) simply moves no row → 'ignored'.
+  if (!isFullRefund(charge)) return ignored();
+  // markGiftRefunded is scoped to our gifts by PI. A signed internal full refund
+  // that cannot yet see its gift is deferred for replay.
+  await checked(deps);
   const moved = await markGiftRefunded(deps.db, pi);
-  return moved ? 'refunded' : 'ignored';
+  return moved ? processed('refunded') : deferred('gift_not_visible');
 }
 
-async function onSubscriptionChange(deps: WebhookDeps, sub: Record<string, unknown>): Promise<Outcome> {
-  if (metaKind(sub) !== 'gift') return 'ignored';
+async function onSubscriptionChange(deps: WebhookDeps, sub: Record<string, unknown>): Promise<StripeDispatchResult> {
+  if (metaKind(sub) !== 'gift') return ignored();
   const subId = strOrNull(sub.id);
   const status = mapStatus(sub.status);
-  if (!subId || !status) return 'ignored';
+  if (!subId || !status) return ignored();
+  await checked(deps);
   await setRecurringStatus(deps.db, subId, status);
-  return 'status_synced';
+  return processed('status_synced');
 }
 
 /**
@@ -323,23 +376,45 @@ async function onSubscriptionChange(deps: WebhookDeps, sub: Record<string, unkno
  * 'ignored'). Every unrecognized type — and every gift event that fails the
  * metadata/shape checks above — resolves to 'ignored' without throwing.
  */
-export async function handleStripeEvent(deps: WebhookDeps, event: Record<string, unknown>): Promise<string> {
+export async function handleStripeEvent(deps: WebhookDeps, event: Record<string, unknown>): Promise<StripeDispatchResult> {
   const type = typeof event.type === 'string' ? event.type : '';
   const data = event.data as { object?: Record<string, unknown> } | undefined;
   const object = data?.object ?? {};
+  const kind = metaKind(object);
+  const moduleAwareType = type === 'checkout.session.completed'
+    || type === 'checkout.session.async_payment_succeeded'
+    || type === 'checkout.session.async_payment_failed'
+    || type === 'checkout.session.expired'
+    || type === 'charge.refunded'
+    || type === 'customer.subscription.updated'
+    || type === 'customer.subscription.deleted';
+  const requiredModule: ModuleKey | null = type === 'invoice.paid'
+    ? 'giving'
+    : moduleAwareType && kind === 'gift'
+      ? 'giving'
+      : moduleAwareType && kind === 'registration'
+        ? 'registration'
+        : null;
+  if (requiredModule && !deps.modules.has(requiredModule)) return ignored('module_disabled');
+
   switch (type) {
     case 'checkout.session.completed':
+    case 'checkout.session.async_payment_succeeded':
       return onCheckoutCompleted(deps, object);
+    case 'checkout.session.async_payment_failed':
+      if (kind === 'registration') return applyRegistrationSession(deps, object, 'cancel');
+      return ignored(kind === 'gift' ? 'awaiting_async_payment' : 'ignored');
     case 'checkout.session.expired':
       return onCheckoutExpired(deps, object);
     case 'invoice.paid':
       return onInvoicePaid(deps, object);
     case 'charge.refunded':
+      if (kind !== 'gift') return ignored();
       return onChargeRefunded(deps, object);
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
       return onSubscriptionChange(deps, object);
     default:
-      return 'ignored';
+      return ignored();
   }
 }
