@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 // Same package-entry export deviation as vitest.config.ts (0.17.0 has no
 // `/config` subpath): cloudflareTest comes off the main entrypoint.
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandled';
 
 // Postgres-backed e2e smoke: drives the BUILT worker (SELF.fetch) with the Supabase
 // backend selected (DB_BACKEND=supabase) and a HYPERDRIVE binding pointed at local
@@ -34,13 +35,11 @@ export default defineConfig({
   ],
   test: {
     include: ['test/e2e-pg/**/*.test.ts'],
-    setupFiles: ['./test/e2e-pg/setup.ts'],
+    setupFiles: ['./test/e2e/knownUnhandled.ts', './test/e2e-pg/setup.ts'],
+    onUnhandledError: ignoreKnownUnhandledError,
     globalSetup: ['./test/e2e-pg/global-setup.ts'],
     // One shared Postgres database, reseeded per file — files must not run
     // concurrently or they clobber each other's TRUNCATE + reseed.
     fileParallelism: false,
-    // See vitest.e2e.config.ts: the built worker's benign es-module-lexer WASM
-    // compile rejection must not fail the run.
-    dangerouslyIgnoreUnhandledErrors: true,
   },
 });

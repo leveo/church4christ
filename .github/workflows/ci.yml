@@ -52,6 +52,23 @@ jobs:
       - name: Generate Cloudflare Worker types
         run: npx wrangler types
 
+      - name: Prepare test reports
+        run: node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"
+
+      - name: Check generated capability documentation
+        run: npm run docs:check
+
+      - name: Prove setup dry-run and clean D1 install
+        run: npx vitest run --project node test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts
+
+      - name: Prove clean Supabase setup
+        run: npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: Assert Supabase setup test did not skip
+        run: node scripts/ci/assert-vitest-json.mjs .tmp/setup-pg.json 1
+
       - name: Build design tokens
         run: npm run tokens
 
@@ -75,6 +92,9 @@ jobs:
       - name: Seed demo data (local)
         run: npm run db:seed:local
 
+      - name: Seed local media objects
+        run: npm run db:seed-media:local
+
       - name: Smoke test
         run: bash scripts/smoke.sh
 
@@ -97,9 +117,12 @@ jobs:
           SUPABASE_DB_URL: postgres://postgres:postgres@localhost:5432/postgres
 
       - name: Postgres backend tests (pg project)
-        run: npx vitest run --project pg
+        run: npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: Assert Postgres project did not skip
+        run: node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1
 
       - name: End-to-end tests (Postgres worker)
         run: npm run test:e2e:pg
