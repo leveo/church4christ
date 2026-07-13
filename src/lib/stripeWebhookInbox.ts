@@ -47,8 +47,9 @@ export class StripeEnvelopeError extends Error {
 const encoder = new TextEncoder();
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value === null || typeof value !== 'object') return false;
   try {
+    if (Array.isArray(value)) return false;
     const prototype = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
   } catch {
@@ -171,22 +172,36 @@ function diagnosticText(error: unknown): string {
   return 'Unknown error';
 }
 
+function normalizeDiagnosticLine(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function secretVariants(secrets: readonly string[]): string[] {
   const variants = new Set<string>();
   const add = (secret: string) => {
     if (!secret) return;
-    variants.add(secret);
+    const bases = [secret];
     try {
       const decoded = decodeURIComponent(secret);
-      if (decoded) variants.add(decoded);
+      if (decoded) bases.push(decoded);
     } catch {
       // A malformed percent sequence has no decoded variant.
     }
-    try {
-      const encoded = encodeURIComponent(secret);
-      if (encoded) variants.add(encoded);
-    } catch {
-      // Lone surrogates have no URI-encoded variant; the exact secret remains.
+
+    for (const base of bases) {
+      const normalized = normalizeDiagnosticLine(base);
+      for (const variant of [base, normalized]) {
+        if (!variant) continue;
+        variants.add(variant);
+        try {
+          variants.add(encodeURIComponent(variant));
+        } catch {
+          // Lone surrogates have no URI-encoded variant; the exact secret remains.
+        }
+      }
     }
   };
 
@@ -232,11 +247,24 @@ function safeRedactionMarker(variants: readonly string[]): string {
   return '';
 }
 
+function removeSecretVariants(value: string, variants: readonly string[]): string {
+  let output = value;
+  let passesRemaining = value.length + 1;
+  let changed: boolean;
+  do {
+    changed = false;
+    for (const secret of variants) {
+      if (!output.includes(secret)) continue;
+      output = output.replaceAll(secret, '');
+      changed = true;
+    }
+    passesRemaining -= 1;
+  } while (changed && passesRemaining > 0);
+  return output;
+}
+
 export function sanitizeStripeDiagnostic(error: unknown, secrets: readonly string[] = []): string {
-  let output = diagnosticText(error)
-    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let output = normalizeDiagnosticLine(diagnosticText(error));
 
   const variants = secretVariants(secrets);
   const marker = safeRedactionMarker(variants);
@@ -265,7 +293,8 @@ export function sanitizeStripeDiagnostic(error: unknown, secrets: readonly strin
     } while (changed);
   }
 
-  return truncateUtf8(output, DIAGNOSTIC_MAX_BYTES);
+  output = truncateUtf8(output, DIAGNOSTIC_MAX_BYTES);
+  return removeSecretVariants(output, variants);
 }
 
 export const STRIPE_PROCESSED_RETENTION_MS = 90 * 24 * 60 * 60_000;

@@ -76,6 +76,13 @@ describe('parseStripeEnvelope', () => {
     expectEnvelopeError(event, 'stripe_event_invalid_object');
   });
 
+  it('classifies a revoked proxy as invalid_object', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+
+    expectEnvelopeError(proxy, 'stripe_event_invalid_object');
+  });
+
   it.each([
     ['id', 'stripe_event_invalid_id'],
     ['type', 'stripe_event_invalid_type'],
@@ -306,6 +313,22 @@ describe('sanitizeStripeDiagnostic', () => {
   it('does not reintroduce a short secret through its redaction marker', () => {
     const secrets = ['[REDACTED]', 'R', '*', '…'];
     const safe = sanitizeStripeDiagnostic(new Error(secrets.join(' ')), secrets);
+
+    for (const secret of secrets) expect(safe).not.toContain(secret);
+  });
+
+  it('redacts the one-line normalized form of a supplied secret', () => {
+    const secret = 'abc\ndef';
+    const normalized = 'abc def';
+    const safe = sanitizeStripeDiagnostic(new Error(secret), [secret]);
+
+    expect(safe).not.toContain(secret);
+    expect(safe).not.toContain(normalized);
+  });
+
+  it('removes secret matches created across redaction-marker boundaries', () => {
+    const secrets = ['D]a', 'foo'];
+    const safe = sanitizeStripeDiagnostic(new Error('fooa'), secrets);
 
     for (const secret of secrets) expect(safe).not.toContain(secret);
   });
