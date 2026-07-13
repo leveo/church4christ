@@ -2,18 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
-import { parseFinalD1Schema, type D1Constraint } from './schemaParity';
+import { discoverD1MigrationFiles, parseFinalD1Schema, type D1Constraint } from './schemaParity';
 
-const D1_FILES = [
-  '0001_init.sql',
-  '0002_email.sql',
-  '0003_people.sql',
-  '0004_giving_people.sql',
-  '0005_custom_pages.sql',
-  '0006_children_checkin.sql',
-  '0007_page_builder.sql',
-  '0008_member_portal.sql',
-];
+const D1_FILES = discoverD1MigrationFiles();
 
 // These feature tables intentionally have no D1 equivalent. Keeping this list
 // explicit makes a new Postgres-only table a reviewed schema decision.

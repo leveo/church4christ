@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 // Same package-entry export deviation as vitest.config.ts (0.17.0 has no
 // `/config` subpath): both come off the main entrypoint.
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
-import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandled';
+import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandledConfig';
 
 // End-to-end suite: exercises the BUILT Astro worker via SELF.fetch (real
 // middleware + routes), separate from the unit config so `npm test` stays fast.

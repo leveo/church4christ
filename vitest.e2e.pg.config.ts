@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 // Same package-entry export deviation as vitest.config.ts (0.17.0 has no
 // `/config` subpath): cloudflareTest comes off the main entrypoint.
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
-import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandled';
+import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandledConfig';
 
 // Postgres-backed e2e smoke: drives the BUILT worker (SELF.fetch) with the Supabase
 // backend selected (DB_BACKEND=supabase) and a HYPERDRIVE binding pointed at local

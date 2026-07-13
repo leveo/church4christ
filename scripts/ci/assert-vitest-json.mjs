@@ -9,10 +9,38 @@ if (!Number.isSafeInteger(minimum) || minimum < 1) {
 }
 
 const report = JSON.parse(readFileSync(reportPath, 'utf8'));
-const passed = Number(report.numPassedTests ?? 0);
-const failed = Number(report.numFailedTests ?? 0);
-const pending = Number(report.numPendingTests ?? 0);
-const todo = Number(report.numTodoTests ?? 0);
+if (
+  report === null ||
+  typeof report !== 'object' ||
+  Array.isArray(report) ||
+  Object.getPrototypeOf(report) !== Object.prototype
+) {
+  throw new Error('Vitest report must be a plain JSON object');
+}
+
+function nonNegativeInteger(field, { optional = false } = {}) {
+  if (!Object.hasOwn(report, field)) {
+    if (optional) return 0;
+    throw new Error(`Vitest report is missing required counter ${field}`);
+  }
+  const value = report[field];
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Vitest report counter ${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
+const passed = nonNegativeInteger('numPassedTests');
+const failed = nonNegativeInteger('numFailedTests');
+const pending = nonNegativeInteger('numPendingTests');
+const todo = nonNegativeInteger('numTodoTests', { optional: true });
+const total = nonNegativeInteger('numTotalTests');
+
+if (total !== passed + failed + pending + todo) {
+  throw new Error(
+    `Vitest report total ${total} does not equal passed + failed + pending + todo (${passed + failed + pending + todo})`,
+  );
+}
 
 if (report.success !== true || failed !== 0) {
   throw new Error(`Vitest report is unsuccessful or contains ${failed} failed tests`);

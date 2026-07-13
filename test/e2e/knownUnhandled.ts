@@ -3,10 +3,16 @@ type RejectionTarget = Pick<EventTarget, 'addEventListener'>;
 const ES_MODULE_LEXER_WASM_REJECTION =
   /^WebAssembly\.compile\(\): Wasm code generation disallowed by embedder$/i;
 const POSTGRES_CF_CANCEL = /^Stream was cancelled\.$/;
-const POSTGRES_CF_READER_STACK =
-  /\bat read \(?(?:(?:[^\n]*\/)?node_modules\/postgres\/cf\/polyfills\.js|[^\n]*\/dist\/server\/chunks\/modules_[^/\n]+\.mjs):\d+:\d+\)?/;
+const POSTGRES_CF_SOURCE_STACK =
+  /\bat read \(?(?:[^\n]*\/)?node_modules\/postgres\/cf\/polyfills\.js:\d+:\d+\)?/;
+const BUNDLED_READ_FRAME =
+  /\bat read \(?(?:[^\n]*\/)?(dist\/server\/chunks\/[^/\n]+\.mjs:\d+:\d+)\)?/;
+const NO_BUNDLED_FRAMES: ReadonlySet<string> = new Set();
 
-export function isKnownUnhandledError(reason: unknown): boolean {
+export function isKnownUnhandledError(
+  reason: unknown,
+  postgresBundledFrames: ReadonlySet<string> = NO_BUNDLED_FRAMES,
+): boolean {
   if (!reason || typeof reason !== 'object') return false;
   const candidate = reason as { name?: unknown; message?: unknown; stack?: unknown };
   const wasm =
@@ -18,12 +24,20 @@ export function isKnownUnhandledError(reason: unknown): boolean {
     typeof candidate.message === 'string' &&
     POSTGRES_CF_CANCEL.test(candidate.message) &&
     typeof candidate.stack === 'string' &&
-    POSTGRES_CF_READER_STACK.test(candidate.stack);
+    (POSTGRES_CF_SOURCE_STACK.test(candidate.stack) ||
+      postgresBundledFrames.has(candidate.stack.match(BUNDLED_READ_FRAME)?.[1] ?? ''));
   return wasm || postgresCancellation;
 }
 
 export function ignoreKnownUnhandledError(reason: unknown): false | undefined {
   return isKnownUnhandledError(reason) ? false : undefined;
+}
+
+export function createKnownUnhandledErrorFilter(
+  postgresBundledFrames: ReadonlySet<string>,
+): (reason: unknown) => false | undefined {
+  return (reason) =>
+    isKnownUnhandledError(reason, postgresBundledFrames) ? false : undefined;
 }
 
 export function installKnownUnhandledFilter(target: RejectionTarget): void {

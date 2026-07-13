@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs';
+
 export type D1Column = {
   name: string;
   type: 'integer' | 'text' | 'real' | 'blob';
@@ -25,6 +27,13 @@ export type D1Schema = {
   tables: Map<string, { columns: Map<string, D1Column>; constraints: D1Constraint[] }>;
   indexes: Map<string, D1Index>;
 };
+
+export function discoverD1MigrationFiles(directory = 'migrations'): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
+    .map((entry) => entry.name)
+    .sort();
+}
 
 function identifier(value: string): string {
   const trimmed = value.trim();
@@ -276,7 +285,20 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       continue;
     }
 
-    if (/^(?:CREATE\s+(?:UNIQUE\s+)?INDEX|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i.test(statement)) {
+    const dropIndex = statement.match(/^DROP\s+INDEX(\s+IF\s+EXISTS)?\s+(\S+)$/i);
+    if (dropIndex) {
+      const name = identifier(dropIndex[2]);
+      if (!dropIndex[1] && !schema.indexes.has(name)) {
+        throw new Error(`cannot drop missing index ${name}`);
+      }
+      schema.indexes.delete(name);
+      continue;
+    }
+
+    // Data-copy statements used by SQLite table rebuilds are intentionally
+    // ignored. Any unrecognized schema-affecting statement must stop parity
+    // analysis so a future migration cannot silently disappear from the model.
+    if (/^(?:CREATE|ALTER|DROP)\b/i.test(statement)) {
       throw new Error(`unsupported schema DDL: ${statement}`);
     }
   }

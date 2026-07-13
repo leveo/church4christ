@@ -1,9 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { installKnownUnhandledFilter } from '../../e2e/knownUnhandled';
+import {
+  discoverPostgresCfReaderFrames,
+  ignoreKnownUnhandledError as ignoreConfiguredUnhandledError,
+} from '../../e2e/knownUnhandledConfig';
 
 function rejectionEvent(reason: unknown): Event & { reason: unknown } {
   const event = new Event('unhandledrejection', { cancelable: true }) as Event & {
@@ -54,13 +58,47 @@ describe('test runner hardening', () => {
     const unrelatedCancellation = new Error('Stream was cancelled.');
     unrelatedCancellation.stack =
       'Error: Stream was cancelled.\n    at read (src/lib/unrelated-reader.ts:10:2)';
+    const unrelatedBundledCancellation = new Error('Stream was cancelled.');
+    unrelatedBundledCancellation.stack =
+      'Error: Stream was cancelled.\n    at read (/workspace/dist/server/chunks/modules_unrelated.mjs:42:7)';
     const known = rejectionEvent(postgresCancellation);
     const unrelated = rejectionEvent(unrelatedCancellation);
+    const unrelatedBundled = rejectionEvent(unrelatedBundledCancellation);
 
     expect(target.dispatchEvent(known)).toBe(false);
     expect(known.defaultPrevented).toBe(true);
     expect(target.dispatchEvent(unrelated)).toBe(true);
     expect(unrelated.defaultPrevented).toBe(false);
+    expect(target.dispatchEvent(unrelatedBundled)).toBe(true);
+    expect(unrelatedBundled.defaultPrevented).toBe(false);
+  });
+
+  it('derives an exact bundled postgres.js reader frame from dependency-specific code', () => {
+    const root = mkdtempSync(join(tmpdir(), 'postgres-bundle-'));
+    const chunks = join(root, 'dist/server/chunks');
+    mkdirSync(chunks, { recursive: true });
+    const bundle = [
+      'const unrelated = true;',
+      'async function read() {',
+      '  try {',
+      '    let done, value;',
+      '    while ({done, value} = await tcp.reader.read(), !done) tcp.emit("data", Buffer.from(value));',
+      '  } catch (err) {',
+      '    error(err);',
+      '  }',
+      '}',
+    ].join('\n');
+    writeFileSync(join(chunks, 'modules_probe.mjs'), bundle);
+
+    expect([...discoverPostgresCfReaderFrames(root)]).toEqual([
+      'dist/server/chunks/modules_probe.mjs:5:28',
+    ]);
+    // The configured filter is generated from the real current build and must
+    // not infer arbitrary bundled read frames from the error text alone.
+    const unrelated = new Error('Stream was cancelled.');
+    unrelated.stack =
+      'Error: Stream was cancelled.\n    at read (/workspace/dist/server/chunks/modules_other.mjs:5:27)';
+    expect(ignoreConfiguredUnhandledError(unrelated)).toBeUndefined();
   });
 
   it('accepts a successful Vitest JSON report with the required tests and no skips', () => {
@@ -74,6 +112,7 @@ describe('test runner hardening', () => {
         numFailedTests: 0,
         numPendingTests: 0,
         numTodoTests: 0,
+        numTotalTests: 3,
       }),
     );
 
@@ -86,10 +125,37 @@ describe('test runner hardening', () => {
   });
 
   it.each([
-    ['failed', { success: false, numPassedTests: 2, numFailedTests: 1, numPendingTests: 0 }],
-    ['skipped', { success: true, numPassedTests: 2, numFailedTests: 0, numPendingTests: 1 }],
-    ['too few', { success: true, numPassedTests: 1, numFailedTests: 0, numPendingTests: 0 }],
+    ['failed', { success: false, numPassedTests: 2, numFailedTests: 1, numPendingTests: 0, numTotalTests: 3 }],
+    ['skipped', { success: true, numPassedTests: 2, numFailedTests: 0, numPendingTests: 1, numTotalTests: 3 }],
+    ['too few', { success: true, numPassedTests: 1, numFailedTests: 0, numPendingTests: 0, numTotalTests: 1 }],
   ])('rejects a %s Vitest JSON report', (_label, body) => {
+    const dir = mkdtempSync(join(tmpdir(), 'vitest-report-'));
+    const report = join(dir, 'report.json');
+    writeFileSync(report, JSON.stringify(body));
+
+    expect(() =>
+      execFileSync(process.execPath, ['scripts/ci/assert-vitest-json.mjs', report, '2'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    ['array report', []],
+    ['null report', null],
+    ['string report', 'not an object'],
+    ['string counter', { success: true, numPassedTests: '2', numFailedTests: 0, numPendingTests: 0, numTotalTests: 2 }],
+    ['boolean counter', { success: true, numPassedTests: true, numFailedTests: 0, numPendingTests: 0, numTotalTests: 1 }],
+    ['null counter', { success: true, numPassedTests: null, numFailedTests: 0, numPendingTests: 0, numTotalTests: 0 }],
+    ['missing counter', { success: true, numPassedTests: 2, numPendingTests: 0, numTotalTests: 2 }],
+    ['negative counter', { success: true, numPassedTests: 2, numFailedTests: -1, numPendingTests: 0, numTotalTests: 1 }],
+    ['fractional counter', { success: true, numPassedTests: 2.5, numFailedTests: 0, numPendingTests: 0, numTotalTests: 2.5 }],
+    ['NaN-like counter', { success: true, numPassedTests: 'NaN', numFailedTests: 0, numPendingTests: 0, numTotalTests: 0 }],
+    ['inconsistent total', { success: true, numPassedTests: 2, numFailedTests: 0, numPendingTests: 0, numTotalTests: 3 }],
+    ['string success', { success: 'true', numPassedTests: 2, numFailedTests: 0, numPendingTests: 0, numTotalTests: 2 }],
+    ['invalid todo', { success: true, numPassedTests: 2, numFailedTests: 0, numPendingTests: 0, numTodoTests: '0', numTotalTests: 2 }],
+  ])('rejects malformed Vitest JSON: %s', (_label, body) => {
     const dir = mkdtempSync(join(tmpdir(), 'vitest-report-'));
     const report = join(dir, 'report.json');
     writeFileSync(report, JSON.stringify(body));

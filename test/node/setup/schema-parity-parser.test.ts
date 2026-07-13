@@ -1,23 +1,32 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseFinalD1Schema } from '../../pg/schemaParity';
-
-const files = [
-  '0001_init.sql',
-  '0002_email.sql',
-  '0003_people.sql',
-  '0004_giving_people.sql',
-  '0005_custom_pages.sql',
-  '0006_children_checkin.sql',
-  '0007_page_builder.sql',
-  '0008_member_portal.sql',
-];
+import { discoverD1MigrationFiles, parseFinalD1Schema } from '../../pg/schemaParity';
 
 function finalSchema() {
+  const files = discoverD1MigrationFiles();
   return parseFinalD1Schema(files.map((file) => readFileSync(`migrations/${file}`, 'utf8')));
 }
 
 describe('final D1 schema parser', () => {
+  it('discovers every lowercase SQL migration in lexical order, including newly added files', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd1-migrations-'));
+    writeFileSync(join(directory, '0002_second.sql'), 'ALTER TABLE example ADD COLUMN added TEXT;');
+    writeFileSync(join(directory, '0001_first.sql'), 'CREATE TABLE example (id INTEGER PRIMARY KEY);');
+    writeFileSync(join(directory, '9999_new.sql'), 'CREATE INDEX idx_example_added ON example (added);');
+    writeFileSync(join(directory, 'notes.txt'), 'not a migration');
+
+    const files = discoverD1MigrationFiles(directory);
+    expect(files).toEqual(['0001_first.sql', '0002_second.sql', '9999_new.sql']);
+
+    const schema = parseFinalD1Schema(
+      files.map((file) => readFileSync(join(directory, file), 'utf8')),
+    );
+    expect(schema.tables.get('example')?.columns.has('added')).toBe(true);
+    expect(schema.indexes.has('idx_example_added')).toBe(true);
+  });
+
   it('applies ALTER ADD and table rebuilds in migration order', () => {
     const schema = finalSchema();
 
@@ -77,5 +86,27 @@ describe('final D1 schema parser', () => {
         'CREATE TABLE example (id INTEGER PRIMARY KEY); ALTER TABLE example DROP COLUMN id;',
       ]),
     ).toThrow(/unsupported schema DDL.*DROP COLUMN/i);
+  });
+
+  it('applies DROP INDEX and DROP INDEX IF EXISTS in migration order', () => {
+    const schema = parseFinalD1Schema([
+      [
+        'CREATE TABLE example (id INTEGER PRIMARY KEY, name TEXT);',
+        'CREATE INDEX idx_keep ON example (name);',
+        'CREATE INDEX idx_remove ON example (name);',
+        'DROP INDEX idx_remove;',
+        'DROP INDEX IF EXISTS idx_already_absent;',
+      ].join('\n'),
+    ]);
+
+    expect([...schema.indexes.keys()]).toEqual(['idx_keep']);
+  });
+
+  it.each([
+    'CREATE VIEW example_view AS SELECT 1',
+    'ALTER INDEX idx_example RENAME TO idx_other',
+    'DROP TRIGGER example_trigger',
+  ])('fails closed on unknown schema-affecting DDL: %s', (statement) => {
+    expect(() => parseFinalD1Schema([`${statement};`])).toThrow(/unsupported schema DDL/i);
   });
 });
