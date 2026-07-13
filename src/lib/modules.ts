@@ -147,6 +147,11 @@ export function moduleForPath(path: string): ModuleKey | null {
   return best;
 }
 
+/** Shared gate for the global finance operations surface and role assignment. */
+export function paymentOperationsEnabled(modules: ReadonlySet<string>): boolean {
+  return modules.has('giving') || modules.has('registration');
+}
+
 // Per-isolate cache: reading the module settings on every request would hammer
 // D1, and the enabled set changes at most a few times a church's lifetime. The
 // admin save clears this (task 2 calls clearModuleCache) so a toggle takes effect

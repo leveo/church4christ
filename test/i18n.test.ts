@@ -31,6 +31,36 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['site.name']).toBe('四方基督教会');
     expect(zh['site.tagline']).toBe('城市中的教会');
   });
+
+  it('provides complete bilingual Stripe test-mode operations copy', () => {
+    const keys = [
+      'admin.stripe.title', 'admin.stripe.testMode', 'admin.stripe.events', 'admin.stripe.requests',
+      'admin.stripe.filter', 'admin.stripe.status', 'admin.stripe.actions', 'admin.stripe.replay',
+      'admin.stripe.dismiss', 'admin.stripe.reconcile', 'admin.stripe.attach', 'admin.stripe.cancel',
+      'admin.stripe.confirmDismiss', 'admin.stripe.confirmCancel', 'admin.stripe.replayWarning',
+      'admin.stripe.replayExpired', 'admin.stripe.rawHidden', 'admin.stripe.emptyEvents',
+      'admin.stripe.emptyRequests', 'admin.stripe.resultSuccess', 'admin.stripe.resultError',
+      'admin.stripe.status.pending', 'admin.stripe.status.processing', 'admin.stripe.status.processed',
+      'admin.stripe.status.ignored', 'admin.stripe.status.failed', 'admin.stripe.status.dismissed',
+      'admin.stripe.request.creating', 'admin.stripe.request.attached', 'admin.stripe.request.manual_review',
+      'admin.stripe.allStatuses', 'admin.stripe.allRequestStates', 'admin.stripe.previous', 'admin.stripe.next',
+      'admin.stripe.eventId', 'admin.stripe.eventType', 'admin.stripe.attempts', 'admin.stripe.updatedAt',
+      'admin.stripe.outcome', 'admin.stripe.lastError', 'admin.stripe.requestId',
+      'admin.stripe.registrationId', 'admin.stripe.sessionId', 'admin.stripe.confirmation',
+      'admin.stripe.replayHelp',
+      'admin.stripe.completedAt',
+      'admin.stripe.ageDays',
+    ] as const;
+    for (const key of keys) {
+      expect(en[key], `en:${key}`).toBeTruthy();
+      expect(zh[key], `zh:${key}`).toBeTruthy();
+    }
+    expect(en['admin.stripe.testMode']).toContain('Stripe test mode');
+    expect(zh['admin.stripe.testMode']).toContain('Stripe 测试模式');
+    expect(`${en['admin.stripe.testMode']} ${zh['admin.stripe.testMode']}`).not.toMatch(/enable live|启用正式/i);
+    expect(en['admin.people.finance']).toContain('Giving and paid Registration');
+    expect(zh['admin.people.finance']).toContain('奉献和付费报名');
+  });
 });
 
 describe('t()', () => {

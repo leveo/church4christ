@@ -301,6 +301,7 @@ export function sanitizeStripeDiagnostic(error: unknown, secrets: readonly strin
 
 export const STRIPE_PROCESSED_RETENTION_MS = 90 * 24 * 60 * 60_000;
 export const STRIPE_FAILED_RETENTION_MS = 180 * 24 * 60 * 60_000;
+export const STRIPE_FAILED_REPLAY_WARNING_MS = 150 * 24 * 60 * 60_000;
 
 export type StripePayloadRetentionDecision = 'prune' | 'retain' | 'already_null';
 
@@ -375,6 +376,28 @@ export interface StripeWebhookAdminRow {
   lastAttemptAt: string | null;
   completedAt: string | null;
   updatedAt: string;
+  payloadAvailable: boolean;
+}
+
+export type StripeWebhookReplayAvailability = 'available' | 'warning' | 'expired' | 'unavailable';
+
+export function stripeWebhookReplayAvailability(
+  row: Pick<StripeWebhookAdminRow, 'status' | 'payloadAvailable' | 'completedAt'>,
+  now: Date,
+): StripeWebhookReplayAvailability {
+  if (!Number.isFinite(now.getTime())) throw new TypeError('Invalid date');
+  if (!['failed', 'ignored'].includes(row.status)) return 'unavailable';
+  if (!row.payloadAvailable) return row.status === 'failed' ? 'expired' : 'unavailable';
+  if (row.status === 'ignored') return 'available';
+  if (row.completedAt === null) return 'unavailable';
+  const completedAt = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(row.completedAt)
+    ? row.completedAt
+    : `${row.completedAt.replace(' ', 'T')}Z`).getTime();
+  if (!Number.isFinite(completedAt)) return 'expired';
+  const age = now.getTime() - completedAt;
+  if (age >= STRIPE_FAILED_RETENTION_MS) return 'expired';
+  if (age >= STRIPE_FAILED_REPLAY_WARNING_MS) return 'warning';
+  return 'available';
 }
 
 function utcText(date: Date): string {
@@ -608,14 +631,16 @@ export async function replayStripeEvent(
 ): Promise<boolean> {
   if (!validActorId(actorId)) return false;
   const stamp = utcText(now);
+  const failedCutoffModifier = `-${STRIPE_FAILED_RETENTION_MS / (24 * 60 * 60_000)} days`;
   const updated = await db.prepare(`
     UPDATE church_private.stripe_webhook_events
     SET status='pending',outcome='manual_replay',retry_cycle_attempts=0,next_attempt_at=?1,
         lease_token=NULL,lease_expires_at=NULL,last_error=NULL,last_action_by=?2,last_action_at=?1,
         completed_at=NULL,updated_at=?1
     WHERE event_id=?3 AND status IN ('failed','ignored') AND payload_json IS NOT NULL
+      AND (status='ignored' OR datetime(completed_at)>datetime(?1,?4))
     RETURNING event_id
-  `).bind(stamp, actorId, eventId).first<{ event_id: string }>();
+  `).bind(stamp, actorId, eventId, failedCutoffModifier).first<{ event_id: string }>();
   return updated !== null;
 }
 
@@ -642,6 +667,7 @@ export async function dismissStripeEvent(
 export interface ListStripeWebhookEventsOptions {
   status?: StripeWebhookStatus;
   limit?: number;
+  offset?: number;
 }
 
 /** Bounded admin projection; raw event and Checkout request JSON are never selected. */
@@ -650,18 +676,20 @@ export async function listStripeWebhookEvents(
   options: ListStripeWebhookEventsOptions = {},
 ): Promise<StripeWebhookAdminRow[]> {
   const limit = Math.max(1, Math.min(100, Number.isSafeInteger(options.limit) ? options.limit! : 50));
+  const offset = Math.max(0, Math.min(10_000, Number.isSafeInteger(options.offset) ? options.offset! : 0));
   const { results } = await db.prepare(`
     SELECT event_id AS "eventId",event_type AS "eventType",api_version AS "apiVersion",
       event_created AS "eventCreated",livemode,status,outcome,attempt_count AS "attemptCount",
       retry_cycle_attempts AS "retryCycleAttempts",next_attempt_at AS "nextAttemptAt",
       lease_expires_at AS "leaseExpiresAt",last_error AS "lastError",last_action_by AS "lastActionBy",
       last_action_at AS "lastActionAt",received_at AS "receivedAt",last_attempt_at AS "lastAttemptAt",
-      completed_at AS "completedAt",updated_at AS "updatedAt"
+      completed_at AS "completedAt",updated_at AS "updatedAt",
+      (payload_json IS NOT NULL) AS "payloadAvailable"
     FROM church_private.stripe_webhook_events
     WHERE (CAST(?1 AS TEXT) IS NULL OR status=?1)
     ORDER BY received_at DESC,event_id DESC
-    LIMIT ?2
-  `).bind(options.status ?? null, limit).all<StripeWebhookAdminRow>();
+    LIMIT ?2 OFFSET ?3
+  `).bind(options.status ?? null, limit, offset).all<StripeWebhookAdminRow>();
   return results;
 }
 

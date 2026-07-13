@@ -68,6 +68,13 @@ export interface StripeCheckoutRequestOptions {
 
 export const STRIPE_REQUEST_TIMEOUT_MS = 10_000;
 
+/** True only for the deliberately supported test-mode runtime configuration. */
+export function stripeTestModeConfigured(env: StripeEnv): boolean {
+  return env.STRIPE_MODE === 'test'
+    && (env.STRIPE_SECRET_KEY?.trim().startsWith('sk_test_') ?? false)
+    && (env.STRIPE_WEBHOOK_SECRET?.trim().startsWith('whsec_') ?? false);
+}
+
 /**
  * Form-encode nested params Stripe-style: objects become `a[b]`, arrays become
  * `c[0][d]`. undefined/null values are skipped; numbers and booleans are

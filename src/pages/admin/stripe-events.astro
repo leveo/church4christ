@@ -1,0 +1,221 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import { env } from 'cloudflare:workers';
+import { t } from '../../lib/i18n';
+import { paymentOperationsEnabled } from '../../lib/modules';
+import type { Locale } from '../../lib/locales';
+import type { DbEnv } from '../../lib/dbProvider';
+import { stripeTestModeConfigured, type StripeEnv } from '../../lib/stripe';
+import {
+  listStripeWebhookEvents,
+  stripeWebhookReplayAvailability,
+  type StripeWebhookStatus,
+} from '../../lib/stripeWebhookInbox';
+import {
+  dismissStripeWebhookEvent,
+  replayStripeWebhookEvent,
+} from '../../lib/stripeWebhookProcessor';
+import {
+  listRegistrationCheckoutRequests,
+  type RegistrationCheckoutAdminRow,
+} from '../../lib/stripeCheckoutRequests';
+import {
+  attachVerifiedCheckoutSession,
+  cancelPendingCheckoutRequest,
+  reconcileCheckoutRequestNow,
+} from '../../lib/stripeCheckoutRecovery';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btnDanger, btnSecondary, card, lab, noticeErr, noticeOk, td, th, tin } from '../../lib/adminUi';
+
+const user = Astro.locals.user;
+if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
+if (!paymentOperationsEnabled(Astro.locals.modules)) return new Response(null, { status: 404 });
+const lang: Locale = user.lang ?? 'en';
+const heading = t(lang, 'admin.stripe.title');
+const db = Astro.locals.db;
+const stripeEnv = env as unknown as StripeEnv & DbEnv;
+const PAGE_SIZE = 25;
+const EVENT_STATUSES = ['pending', 'processing', 'processed', 'ignored', 'failed', 'dismissed'] as const;
+const REQUEST_STATES = ['creating', 'attached', 'manual_review'] as const;
+const numberParam = (value: string | null) => value && /^\d+$/.test(value) ? Math.min(400, Math.max(1, Number(value))) : 1;
+const eventStatusRaw = Astro.url.searchParams.get('eventStatus') ?? '';
+const eventStatus = EVENT_STATUSES.find((status) => status === eventStatusRaw);
+const requestStateRaw = Astro.url.searchParams.get('requestState') ?? '';
+const requestState = REQUEST_STATES.find((state) => state === requestStateRaw);
+const eventPage = numberParam(Astro.url.searchParams.get('eventPage'));
+const requestPage = numberParam(Astro.url.searchParams.get('requestPage'));
+const testMode = t(lang, 'admin.stripe.testMode');
+
+if (Astro.request.method === 'POST') {
+  // Middleware enforces same-origin/CSRF first; repeat finance + module
+  // authorization here before invoking any audited service-layer mutation.
+  if (!(user.isAdmin || user.finance === 1) || !paymentOperationsEnabled(Astro.locals.modules)) {
+    return new Response(null, { status: 403 });
+  }
+  if (!stripeTestModeConfigured(stripeEnv)) {
+    return Astro.redirect('/admin/stripe-events?result=error', 303);
+  }
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  let success = false;
+  try {
+    if (action === 'replay') {
+      const result = await replayStripeWebhookEvent(String(form.get('eventId') ?? ''), user.id, { env: stripeEnv });
+      success = !['failed', 'not_claimed'].includes(result.state);
+    } else if (action === 'dismiss') {
+      const eventId = String(form.get('eventId') ?? '');
+      if (String(form.get('confirmation') ?? '') === `dismiss-${eventId}`) {
+        success = (await dismissStripeWebhookEvent(eventId, user.id, { env: stripeEnv })).state === 'dismissed';
+      }
+    } else if (action === 'reconcile' && Astro.locals.modules.has('registration')) {
+      success = (await reconcileCheckoutRequestNow({ env: stripeEnv }, String(form.get('requestId') ?? ''), user.id)).state !== 'not_claimed';
+    } else if (action === 'attach' && Astro.locals.modules.has('registration')) {
+      success = (await attachVerifiedCheckoutSession(
+        { env: stripeEnv },
+        String(form.get('requestId') ?? ''),
+        String(form.get('sessionId') ?? ''),
+        user.id,
+      )).state === 'applied';
+    } else if (action === 'cancel' && Astro.locals.modules.has('registration')) {
+      success = (await cancelPendingCheckoutRequest(
+        { env: stripeEnv },
+        String(form.get('requestId') ?? ''),
+        user.id,
+        String(form.get('confirmation') ?? ''),
+      )).state === 'applied';
+    }
+  } catch {
+    success = false;
+  }
+  return Astro.redirect(`/admin/stripe-events?result=${success ? 'ok' : 'error'}`, 303);
+}
+
+const [events, requests] = await Promise.all([
+  listStripeWebhookEvents(db, {
+    status: eventStatus,
+    limit: PAGE_SIZE,
+    offset: (eventPage - 1) * PAGE_SIZE,
+  }),
+  Astro.locals.modules.has('registration')
+    ? listRegistrationCheckoutRequests(db, {
+        state: requestState,
+        limit: PAGE_SIZE,
+        offset: (requestPage - 1) * PAGE_SIZE,
+      })
+    : Promise.resolve([] as RegistrationCheckoutAdminRow[]),
+]);
+const result = Astro.url.searchParams.get('result');
+const renderedAt = Date.now();
+const ageDays = (value: string) => {
+  const parsed = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`).getTime();
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor((renderedAt - parsed) / (24 * 60 * 60_000))) : 0;
+};
+const statusClass = (status: StripeWebhookStatus) => status === 'processed'
+  ? badgeActive
+  : status === 'pending' || status === 'processing'
+    ? badgeScheduled
+    : badgeInactive;
+const queryHref = (overrides: Record<string, string | number | undefined>) => {
+  const query = new URLSearchParams();
+  if (eventStatus) query.set('eventStatus', eventStatus);
+  if (requestState) query.set('requestState', requestState);
+  if (eventPage > 1) query.set('eventPage', String(eventPage));
+  if (requestPage > 1) query.set('requestPage', String(requestPage));
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined || value === '') query.delete(key); else query.set(key, String(value));
+  }
+  const rendered = query.toString();
+  return `/admin/stripe-events${rendered ? `?${rendered}` : ''}`;
+};
+---
+
+<Admin title={heading}>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+    <strong class="rounded-full bg-accent-soft px-3 py-1 text-sm text-on-accent-soft">
+      {testMode}
+    </strong>
+  </div>
+  <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.stripe.rawHidden')}</p>
+  {result === 'ok' && <p class={`mt-4 ${noticeOk}`}>{testMode}: {t(lang, 'admin.stripe.resultSuccess')}</p>}
+  {result === 'error' && <p class={`mt-4 ${noticeErr}`}>{testMode}: {t(lang, 'admin.stripe.resultError')}</p>}
+  <section class={`mt-6 ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.stripe.events')}</h2>
+    <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.stripe.replayHelp')}</p>
+    <form method="get" class="mt-4 flex flex-wrap items-end gap-3">
+      <label>
+        <span class={lab}>{t(lang, 'admin.stripe.status')}</span>
+        <select name="eventStatus" class={tin}>
+          <option value="">{t(lang, 'admin.stripe.allStatuses')}</option>
+          {EVENT_STATUSES.map((status) => <option value={status} selected={eventStatus === status}>{t(lang, `admin.stripe.status.${status}`)}</option>)}
+        </select>
+      </label>
+      {requestState && <input type="hidden" name="requestState" value={requestState} />}
+      <button type="submit" class={btnSecondary}>{t(lang, 'admin.stripe.filter')}</button>
+    </form>
+    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+      <table class="w-full border-collapse">
+        <thead class="bg-surface-sunken"><tr>
+          <th class={th}>{t(lang, 'admin.stripe.eventId')}</th><th class={th}>{t(lang, 'admin.stripe.eventType')}</th>
+          <th class={th}>{t(lang, 'admin.stripe.status')}</th><th class={th}>{t(lang, 'admin.stripe.outcome')}</th>
+          <th class={th}>{t(lang, 'admin.stripe.attempts')}</th><th class={th}>{t(lang, 'admin.stripe.updatedAt')}</th>
+          <th class={th}>{t(lang, 'admin.stripe.completedAt')}</th>
+          <th class={th}>{t(lang, 'admin.stripe.lastError')}</th><th class={th}>{t(lang, 'admin.stripe.actions')}</th>
+        </tr></thead>
+        <tbody>
+          {events.length === 0 ? <tr><td class={`${td} text-ink-muted`} colspan="9">{t(lang, 'admin.stripe.emptyEvents')}</td></tr> : events.map((row) => {
+            const replay = stripeWebhookReplayAvailability(row, new Date());
+            return <tr class="border-t border-border align-top">
+              <td class={`${td} font-mono text-xs`}>{row.eventId}</td><td class={td}>{row.eventType}</td>
+              <td class={td}><span class={`${badge} ${statusClass(row.status)}`}>{t(lang, `admin.stripe.status.${row.status}`)}</span><div class="mt-1 text-xs">{testMode}</div></td>
+              <td class={td}>{row.outcome ?? '—'}</td><td class={`${td} tabular-nums`}>{row.attemptCount}</td>
+              <td class={`${td} whitespace-nowrap`}>{row.updatedAt}</td>
+              <td class={`${td} whitespace-nowrap`}>{row.completedAt ?? '—'}<div class="mt-1 text-xs text-ink-muted">{t(lang, 'admin.stripe.ageDays', { count: ageDays(row.completedAt ?? row.receivedAt) })}</div></td>
+              <td class={td}>{row.lastError ?? '—'}</td>
+              <td class={`${td} min-w-72 space-y-2`}>
+                {replay === 'warning' && <p class="text-xs text-danger">{t(lang, 'admin.stripe.replayWarning')}</p>}
+                {replay === 'expired' && <p class="text-xs text-ink-muted">{t(lang, 'admin.stripe.replayExpired')}</p>}
+                {(replay === 'available' || replay === 'warning') && <form method="post">
+                  <input type="hidden" name="action" value="replay" /><input type="hidden" name="eventId" value={row.eventId} />
+                  <button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.replay')}</button>
+                </form>}
+                {row.status === 'failed' && <form method="post" class="space-y-2">
+                  <input type="hidden" name="action" value="dismiss" /><input type="hidden" name="eventId" value={row.eventId} />
+                  <label><span class={lab}>{t(lang, 'admin.stripe.confirmDismiss')}</span><input name="confirmation" required placeholder={`dismiss-${row.eventId}`} class={tin} /></label>
+                  <button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.dismiss')}</button>
+                </form>}
+              </td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+    </div>
+    <nav class="mt-4 flex gap-4">
+      {eventPage > 1 && <a class="text-sm text-primary hover:underline" href={queryHref({ eventPage: eventPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}
+      {events.length === PAGE_SIZE && <a class="text-sm text-primary hover:underline" href={queryHref({ eventPage: eventPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}
+    </nav>
+  </section>
+  {Astro.locals.modules.has('registration') && <section class={`mt-6 ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.stripe.requests')}</h2>
+    <form method="get" class="mt-4 flex flex-wrap items-end gap-3">
+      <label><span class={lab}>{t(lang, 'admin.stripe.status')}</span><select name="requestState" class={tin}>
+        <option value="">{t(lang, 'admin.stripe.allRequestStates')}</option>
+        {REQUEST_STATES.map((state) => <option value={state} selected={requestState === state}>{t(lang, `admin.stripe.request.${state}`)}</option>)}
+      </select></label>
+      {eventStatus && <input type="hidden" name="eventStatus" value={eventStatus} />}
+      <button type="submit" class={btnSecondary}>{t(lang, 'admin.stripe.filter')}</button>
+    </form>
+    <div class="mt-4 overflow-x-auto rounded-xl border border-border"><table class="w-full border-collapse">
+      <thead class="bg-surface-sunken"><tr><th class={th}>{t(lang, 'admin.stripe.requestId')}</th><th class={th}>{t(lang, 'admin.stripe.registrationId')}</th><th class={th}>{t(lang, 'admin.stripe.status')}</th><th class={th}>{t(lang, 'admin.stripe.attempts')}</th><th class={th}>{t(lang, 'admin.stripe.updatedAt')}</th><th class={th}>{t(lang, 'admin.stripe.lastError')}</th><th class={th}>{t(lang, 'admin.stripe.actions')}</th></tr></thead>
+      <tbody>{requests.length === 0 ? <tr><td class={`${td} text-ink-muted`} colspan="7">{t(lang, 'admin.stripe.emptyRequests')}</td></tr> : requests.map((row) => <tr class="border-t border-border align-top">
+        <td class={`${td} font-mono text-xs`}>{row.requestId}</td><td class={`${td} tabular-nums`}>{row.registrationId}</td><td class={td}><span class={`${badge} ${badgeScheduled}`}>{t(lang, `admin.stripe.request.${row.state}`)}</span><div class="mt-1 text-xs">{testMode}</div></td><td class={`${td} tabular-nums`}>{row.reconcileAttempts}</td><td class={`${td} whitespace-nowrap`}>{row.updatedAt}</td><td class={td}>{row.lastError ?? '—'}</td>
+        <td class={`${td} min-w-80 space-y-3`}>
+          {(row.state === 'creating' || row.state === 'attached') && <form method="post"><input type="hidden" name="action" value="reconcile" /><input type="hidden" name="requestId" value={row.requestId} /><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.reconcile')}</button></form>}
+          {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="attach" /><input type="hidden" name="requestId" value={row.requestId} /><label><span class={lab}>{t(lang, 'admin.stripe.sessionId')}</span><input name="sessionId" required pattern="cs_test_[A-Za-z0-9_]+" class={tin} /></label><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.attach')}</button></form>}
+          {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="cancel" /><input type="hidden" name="requestId" value={row.requestId} /><label><span class={lab}>{t(lang, 'admin.stripe.confirmCancel', { id: row.registrationId })}</span><input name="confirmation" required placeholder={`cancel-registration-${row.registrationId}`} class={tin} /></label><button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.cancel')}</button></form>}
+        </td>
+      </tr>)}</tbody>
+    </table></div>
+    <nav class="mt-4 flex gap-4">{requestPage > 1 && <a class="text-sm text-primary hover:underline" href={queryHref({ requestPage: requestPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}{requests.length === PAGE_SIZE && <a class="text-sm text-primary hover:underline" href={queryHref({ requestPage: requestPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}</nav>
+  </section>}
+  {Astro.locals.modules.has('giving') && <p class="mt-6"><a href="/admin/giving/reconcile" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a></p>}
+</Admin>

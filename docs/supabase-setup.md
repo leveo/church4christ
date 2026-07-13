@@ -148,23 +148,21 @@ SUPABASE_DB_URL="postgresql://…pooler.supabase.com:5432/postgres" npm run db:s
 
 ## 5. Set your secrets
 
-Secrets never go in `wrangler.jsonc`. Set them with `wrangler secret put` — each command
-prompts you to paste the value.
+Secrets never go in `wrangler.jsonc`. The manual session-secret command below prompts you
+to paste the value; guided setup imports Stripe test credentials separately in step 7.
 
 ```bash
 # Session signing key (same as the D1 setup). Generate a strong random value:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 npx wrangler secret put SESSION_SECRET
 
-# Stripe keys — do these after step 7, once you have the values from Stripe:
-npx wrangler secret put STRIPE_SECRET_KEY
-npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# Stripe test credentials are imported by guided setup; see step 7.
 ```
 
-If you already deployed on D1, `SESSION_SECRET` is set and you can leave it. The two Stripe
-secrets are the only new ones, and you can add them after you set up Stripe in step 7. Until
-`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are set, the online giving form is inert and
-paid registration cannot take money — everything else works. Redeploy after setting them:
+If you already deployed on D1, `SESSION_SECRET` is set and you can leave it. Stripe is
+available only on Supabase and only in test mode. Import its two test credentials through
+guided setup after step 7. Until they are stored, the online giving form is inert and paid
+registration cannot take money — everything else works. Redeploy after setting them:
 
 ```bash
 npm run deploy
@@ -179,9 +177,11 @@ path. Do not create this privileged identity with ad-hoc SQL. Open
 `https://<your-site>/en/signin`, enter the setup email, request a link, and click it —
 you are in as an admin.
 
-To let your treasurer manage giving without making them a full admin, open their profile in
-`/admin/people` and turn on the **finance** flag. That grants the giving-admin pages
-(record gifts, funds, reconcile) without the rest of the admin area.
+To delegate payment work without making someone a full admin, open their profile in
+`/admin/people` and turn on **Payment operations (Giving and paid Registration)**. This
+grants giving administration plus Stripe replay/dismiss, verified-session attachment,
+reconciliation, and explicit pending-registration cancellation. Grant it only to someone
+trusted with both kinds of payment operation.
 
 ---
 
@@ -194,11 +194,9 @@ number. Set this up once.
    mode** (the toggle in the dashboard) while you try things out — test-mode keys and
    webhooks are completely separate from live ones, so you can experiment safely.
 
-2. **Get your secret key.** In the Stripe dashboard → **Developers → API keys**, copy the
-   **Secret key** (`sk_test_…` in test mode, `sk_live_…` in live mode). This is
-   `STRIPE_SECRET_KEY`. For a hardened production setup you can instead create a
-   **restricted key** with write access to Checkout Sessions and Billing Portal Sessions,
-   and read access to Subscriptions.
+2. **Get your test secret key.** In the Stripe dashboard → **Developers → API keys**, copy
+   the test **Secret key** beginning `sk_test_…`. Church4Christ intentionally rejects every
+   other prefix.
 
 3. **Add the webhook endpoint.** In **Developers → Webhooks → Add endpoint**, set the
    endpoint URL to:
@@ -207,30 +205,51 @@ number. Set this up once.
    https://<your-site>/api/stripe/webhook
    ```
 
-   Subscribe it to exactly these six events (this one endpoint serves both Giving and
+   Subscribe it to exactly these eight events (this one endpoint serves both Giving and
    Registration — each event tells the app what happened):
 
    - `checkout.session.completed` — a card gift or a paid registration succeeded
    - `checkout.session.expired` — someone abandoned a registration checkout; frees the seat
+   - `checkout.session.async_payment_succeeded` — delayed payment succeeded; fulfills the gift or registration
+   - `checkout.session.async_payment_failed` — delayed registration payment failed; frees the seat
    - `invoice.paid` — a recurring gift renewed
    - `charge.refunded` — a gift was refunded
    - `customer.subscription.updated` — a recurring gift's status changed
    - `customer.subscription.deleted` — a recurring gift was canceled
 
-   After creating the endpoint, Stripe shows a **Signing secret** (`whsec_…`). That is
-   `STRIPE_WEBHOOK_SECRET` — set it with `wrangler secret put` (step 5).
+   After creating the test endpoint, Stripe shows a **Signing secret** (`whsec_…`).
 
-4. **Turn on the Customer Portal.** In **Settings → Billing → Customer portal**, activate
+4. **Import both values in one setup run.** Use the dedicated one-shot environment names:
+
+   ```bash
+   CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+   CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+   npm run setup
+   ```
+
+   Setup validates the pair before making changes, registers both values for redaction,
+   and stores them under the runtime secret names automatically. Do not expose them as
+   ambient `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` inputs to setup. A partial pair
+   or a live key is rejected before local or deployed configuration is changed.
+
+5. **Turn on the Customer Portal.** In **Settings → Billing → Customer portal**, activate
    it and save. This is what powers the **Manage** button on a member's *My giving* page,
    where they can update their card or cancel a recurring gift themselves.
 
-5. **Choose your currency (optional).** Gifts default to US dollars. To use another
+6. **Choose your currency (optional).** Gifts default to US dollars. To use another
    currency, sign in as an admin and set the `giving.currency` site setting to its
    three-letter code (for example `cad` or `eur`).
 
-6. **Go live when ready.** When you have tested with `sk_test_…` keys, switch Stripe to
-   **live mode**, create a *live* secret key and a *live* webhook endpoint (same URL, same
-   six events), and update both secrets to the live values, then `npm run deploy`.
+7. **Keep test mode visible.** The operations page at `/admin/stripe-events` labels every
+   screen and action **Stripe test mode** and provides no live-mode switch. Even when a
+   live event is separately signed with the configured webhook secret, the endpoint returns
+   exactly `400 live_mode_disabled` before durable storage.
+
+The generated Supabase Worker runs webhook-inbox and pending-Checkout recovery on
+`*/5 * * * *` (every five minutes). The page above gives admins and finance users bounded,
+audited recovery controls without rendering raw webhook payloads, Checkout request JSON,
+customer email, secrets, or Checkout URLs. D1 does not support Giving, Registration, Stripe
+operations, or this recovery schedule.
 
 See [`docs/features/giving.md`](./features/giving.md) and
 [`docs/features/registration.md`](./features/registration.md) for how each module works
@@ -240,7 +259,7 @@ day to day.
 
 ## 8. Optional: reconciliation (Stripe FDW)
 
-Once giving is live, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
+Once giving is enabled, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
 which cross-checks your local ledger against Stripe and flags any drift — a gift Stripe has
 but your ledger is missing, or the reverse. Online giving works fully without this; it is an
 audit convenience, not a requirement.

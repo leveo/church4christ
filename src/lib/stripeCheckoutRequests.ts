@@ -455,6 +455,47 @@ export async function listDueRegistrationCheckoutRequestIds(
   return results.map((item) => item.request_id);
 }
 
+export interface RegistrationCheckoutAdminRow {
+  requestId: string;
+  registrationId: number;
+  state: 'creating' | 'attached' | 'manual_review';
+  registrationStatus: 'pending' | 'confirmed' | 'cancelled';
+  reconcileAttempts: number;
+  nextReconcileAt: string | null;
+  lastError: string | null;
+  lastActionBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListRegistrationCheckoutRequestsOptions {
+  state?: RegistrationCheckoutAdminRow['state'];
+  limit?: number;
+  offset?: number;
+}
+
+/** Bounded operations projection; request JSON, customer email, secrets, and session URLs are never selected. */
+export async function listRegistrationCheckoutRequests(
+  db: AppDb,
+  options: ListRegistrationCheckoutRequestsOptions = {},
+): Promise<RegistrationCheckoutAdminRow[]> {
+  const limit = Math.max(1, Math.min(100, Number.isSafeInteger(options.limit) ? options.limit! : 50));
+  const offset = Math.max(0, Math.min(10_000, Number.isSafeInteger(options.offset) ? options.offset! : 0));
+  const { results } = await db.prepare(`
+    SELECT q.request_id AS "requestId",q.registration_id AS "registrationId",q.state,
+      r.status AS "registrationStatus",q.reconcile_attempts AS "reconcileAttempts",
+      q.next_reconcile_at AS "nextReconcileAt",q.last_error AS "lastError",
+      q.last_action_by AS "lastActionBy",q.created_at AS "createdAt",q.updated_at AS "updatedAt"
+    FROM church_private.stripe_checkout_requests q
+    JOIN registrations r ON r.id=q.registration_id
+    WHERE q.state IN ('creating','attached','manual_review')
+      AND (CAST(?1 AS TEXT) IS NULL OR q.state=?1)
+    ORDER BY q.updated_at DESC,q.request_id DESC
+    LIMIT ?2 OFFSET ?3
+  `).bind(options.state ?? null, limit, offset).all<RegistrationCheckoutAdminRow>();
+  return results;
+}
+
 export async function claimRegistrationCheckoutRequest(
   db: AppDb,
   requestIdValue: string,

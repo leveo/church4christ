@@ -236,6 +236,14 @@ needs both Cloudflare and Supabase. There is no automated D1↔Supabase content 
 so choose the production database before entering real content. See
 [**`docs/supabase-setup.md`**](docs/supabase-setup.md).
 
+**Stripe starts and stays in test mode.** Giving and Registration are Supabase-only; D1
+does not support Stripe modules. When setup asks for either payment feature, import only an
+`sk_test_…` key and `whsec_…` signing secret with the one-shot
+`CHURCH_SETUP_STRIPE_SECRET_KEY` and `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment
+variables. Setup stores the runtime secrets automatically and rejects live keys. Signed live
+events are rejected with `400 live_mode_disabled` before storage, while Supabase runs durable
+recovery every five minutes. See the Supabase guide for the exact command.
+
 ---
 
 ## What's under the hood

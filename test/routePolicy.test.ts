@@ -63,6 +63,7 @@ describe('classifyRoute', () => {
     // ── finance (giving admin) ──
     ['/admin/giving', 'finance'],
     ['/admin/giving/funds', 'finance'],
+    ['/admin/stripe-events', 'finance'],
     // ── authed ──
     ['/my', 'authed'],
     ['/my/blockouts', 'authed'],

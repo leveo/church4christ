@@ -29,7 +29,15 @@ export default defineConfig({
       wrangler: { configPath: './test/e2e/wrangler.e2e.jsonc' },
       miniflare: {
         hyperdrives: { HYPERDRIVE: DATABASE_URL },
-        bindings: { DB_BACKEND: 'supabase' },
+        // Test-only credentials. The built worker must exercise signature
+        // verification and the hard live-event rejection without contacting
+        // Stripe or exposing any production key material.
+        bindings: {
+          DB_BACKEND: 'supabase',
+          STRIPE_MODE: 'test',
+          STRIPE_SECRET_KEY: 'sk_test_e2e_local_only',
+          STRIPE_WEBHOOK_SECRET: 'whsec_e2e_local_only',
+        },
       },
     }),
   ],

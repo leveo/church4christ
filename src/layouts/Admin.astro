@@ -15,7 +15,7 @@ import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '.
 import { t } from '../lib/i18n';
 import { getLogoImageKey } from '../lib/settings';
 import { mediaPath } from '../lib/mediaRef';
-import type { ModuleKey } from '../lib/modules';
+import { paymentOperationsEnabled, type ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
 
 interface Props {
@@ -70,6 +70,7 @@ const isConsole = isStaff || (user?.leaderTeamIds.length ?? 0) > 0;
 // none — it is core). Groups drop out once every child is hidden.
 const modules = Astro.locals.modules;
 const modOn = (m?: ModuleKey) => !m || modules.has(m);
+const hasPaymentOperations = paymentOperationsEnabled(modules);
 
 type NavItem = { label: string; href: string; module?: ModuleKey };
 type NavSection = { label: string; href?: string; show: boolean; module?: ModuleKey; children?: NavItem[] };
@@ -101,6 +102,7 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.children'), href: '/admin/children', show: isAdmin, module: 'children' },
   { label: t(lang, 'admin.nav.groups'), href: '/admin/fellowships', show: isStaff, module: 'fellowships' },
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving' },
+  { label: t(lang, 'admin.stripe.title'), href: '/admin/stripe-events', show: isFinance && hasPaymentOperations },
   { label: t(lang, 'admin.reg.title'), href: '/admin/registration', show: isStaff, module: 'registration' },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isAdmin },
   { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isAdmin },

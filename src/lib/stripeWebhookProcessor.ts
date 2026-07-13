@@ -2,15 +2,17 @@ import type { DbEnv } from './dbProvider';
 import { openDb } from './dbProvider';
 import { handleStripeEvent } from './givingWebhook';
 import { getEnabledModules } from './modules';
-import type { StripeEnv } from './stripe';
+import { stripeTestModeConfigured, type StripeEnv } from './stripe';
 import {
   STRIPE_ATTEMPT_MS,
   STRIPE_DRAIN_LIMIT,
   assertStripeLease,
   claimStripeEvent,
+  dismissStripeEvent as dismissStoredStripeEvent,
   finishStripeDispatch,
   listDueStripeEventIds,
   recordClaimErrorWhenOwned,
+  replayStripeEvent as queueStripeEventReplay,
   type StripeDispatchResult,
   type StripeWebhookClaim,
 } from './stripeWebhookInbox';
@@ -145,4 +147,66 @@ export async function drainStripeWebhookInbox(
     results.push(await process(eventId, processorDeps));
   }
   return results;
+}
+
+export interface StripeWebhookAdminServiceDeps extends StripeWebhookProcessorDeps {
+  replay?: typeof queueStripeEventReplay;
+  dismiss?: typeof dismissStoredStripeEvent;
+  process?: typeof processStripeWebhookEvent;
+}
+
+function validAdminEventId(eventId: string): boolean {
+  return typeof eventId === 'string'
+    && eventId.length > 0
+    && new TextEncoder().encode(eventId).byteLength <= 255
+    && !/[\0-\x1f\x7f]/.test(eventId);
+}
+
+/** Queue an audited replay, close that client, then process through a fresh client and lease. */
+export async function replayStripeWebhookEvent(
+  eventId: string,
+  actorId: number,
+  deps: StripeWebhookAdminServiceDeps,
+): Promise<ProcessAttemptResult> {
+  if (!stripeTestModeConfigured(deps.env) || !validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
+    return { state: 'not_claimed' };
+  }
+  const opened = (deps.openDb ?? openDb)(deps.env);
+  let queued = false;
+  try {
+    if (opened.backend !== 'supabase') return { state: 'not_claimed' };
+    queued = await (deps.replay ?? queueStripeEventReplay)(
+      opened.db,
+      eventId,
+      actorId,
+      (deps.now ?? (() => new Date()))(),
+    );
+  } finally {
+    await opened.end();
+  }
+  if (!queued) return { state: 'not_claimed' };
+  return (deps.process ?? processStripeWebhookEvent)(eventId, deps);
+}
+
+export async function dismissStripeWebhookEvent(
+  eventId: string,
+  actorId: number,
+  deps: StripeWebhookAdminServiceDeps,
+): Promise<{ state: 'dismissed' | 'not_dismissed' }> {
+  if (!stripeTestModeConfigured(deps.env) || !validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
+    return { state: 'not_dismissed' };
+  }
+  const opened = (deps.openDb ?? openDb)(deps.env);
+  try {
+    if (opened.backend !== 'supabase') return { state: 'not_dismissed' };
+    const dismissed = await (deps.dismiss ?? dismissStoredStripeEvent)(
+      opened.db,
+      eventId,
+      actorId,
+      (deps.now ?? (() => new Date()))(),
+    );
+    return { state: dismissed ? 'dismissed' : 'not_dismissed' };
+  } finally {
+    await opened.end();
+  }
 }

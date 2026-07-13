@@ -101,6 +101,21 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
 Every one of these is spelled out, with the exact text to type, in
 [`deploy.md`](./deploy.md).
 
+**Stripe is test-only and Supabase-only.** D1 does not support Giving, Registration, or
+Stripe operations. If your selected Supabase features accept payments, keep Stripe in test
+mode and provide its credentials as one-shot inputs when you run setup:
+
+```bash
+CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+npm run setup
+```
+
+Setup stores the runtime secrets without printing them. It rejects live keys, and the site
+rejects signed live webhook events with `400 live_mode_disabled` without storing them. The
+Supabase configuration also installs the five-minute recovery schedule; D1 installs no
+Stripe schedule.
+
 ## After you are live
 
 - **Changing your site** is one command: `npm run deploy`. Edit content in the admin area;
