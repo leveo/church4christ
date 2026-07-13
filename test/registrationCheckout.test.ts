@@ -85,14 +85,16 @@ describe('stable registration Checkout browser identity', () => {
       takenCount: 1,
       error: 'waiting',
       checkoutRequestId: REQUEST_ID,
+      ownsWaitingSeat: true,
     })).toEqual({ checkoutRequestId: REQUEST_ID, isFull: false, reused: true });
 
     for (const input of [
-      { paid: true, capacity: 1, takenCount: 1, error: null, checkoutRequestId: null },
-      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: null },
-      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: 'not-a-uuid' },
-      { paid: true, capacity: 1, takenCount: 1, error: 'invalid', checkoutRequestId: REQUEST_ID },
-      { paid: false, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID },
+      { paid: true, capacity: 1, takenCount: 1, error: null, checkoutRequestId: null, ownsWaitingSeat: false },
+      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: null, ownsWaitingSeat: false },
+      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: 'not-a-uuid', ownsWaitingSeat: false },
+      { paid: true, capacity: 1, takenCount: 1, error: 'invalid', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: true },
+      { paid: false, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: true },
+      { paid: true, capacity: 1, takenCount: 1, error: 'waiting', checkoutRequestId: REQUEST_ID, ownsWaitingSeat: false },
     ]) {
       const policy = registrationCheckoutRenderPolicy(input);
       expect(policy.isFull).toBe(true);
@@ -104,7 +106,13 @@ describe('stable registration Checkout browser identity', () => {
 
   it('renders a server-generated UUID in the checkoutRequestId hidden field', () => {
     expect(registerFormSource).toContain('registrationCheckoutRenderPolicy({');
-    expect(registerFormSource).toContain("errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null");
+    expect(registerFormSource).toContain('ownsRecoverableRegistrationCheckoutRequest(');
+    expect(registerFormSource).toContain(
+      "const requestedCheckoutId = errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null",
+    );
+    expect(registerFormSource).toMatch(
+      /isCheckoutRequestId\(requestedCheckoutId\)[\s\S]*await ownsRecoverableRegistrationCheckoutRequest/,
+    );
     expect(registerFormSource).toMatch(/name="checkoutRequestId"\s+value=\{checkoutRequestId\}/);
     const generated = newCheckoutRequestId();
     expect(parseCheckoutRequestId(generated)).toBe(generated);

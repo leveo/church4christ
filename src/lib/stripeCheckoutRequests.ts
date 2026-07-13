@@ -101,8 +101,12 @@ export function registrationCheckoutRenderPolicy(input: {
   takenCount: number;
   error: unknown;
   checkoutRequestId: unknown;
+  ownsWaitingSeat: boolean;
 }): { checkoutRequestId: string; isFull: boolean; reused: boolean } {
-  const reusableId = input.paid && input.error === 'waiting' && isCheckoutRequestId(input.checkoutRequestId)
+  const reusableId = input.paid
+    && input.error === 'waiting'
+    && input.ownsWaitingSeat
+    && isCheckoutRequestId(input.checkoutRequestId)
     ? input.checkoutRequestId
     : null;
   const reused = reusableId !== null;
@@ -112,6 +116,30 @@ export function registrationCheckoutRenderPolicy(input: {
     isFull: aggregateFull && !reused,
     reused,
   };
+}
+
+/** Verify that this browser request owns a recoverable pending seat for this event. */
+export async function ownsRecoverableRegistrationCheckoutRequest(
+  db: AppDb,
+  requestIdValue: unknown,
+  eventId: number,
+): Promise<boolean> {
+  if (!isCheckoutRequestId(requestIdValue) || !Number.isSafeInteger(eventId) || eventId <= 0) return false;
+  const row = await db
+    .prepare(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM church_private.stripe_checkout_requests q
+         JOIN registrations r ON r.id = q.registration_id
+         WHERE q.request_id = ?1
+           AND r.event_id = ?2
+           AND r.status = 'pending'
+           AND q.state IN ('creating','attached','manual_review')
+       ) AS owns_waiting_seat`,
+    )
+    .bind(requestIdValue, eventId)
+    .first<{ owns_waiting_seat: boolean | number }>();
+  return row?.owns_waiting_seat === true || row?.owns_waiting_seat === 1;
 }
 
 export function registrationCheckoutIdempotencyKey(requestId: string): string {

@@ -13,7 +13,11 @@ import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
 import { getOpenEvent, listQuestions } from '../../../lib/regDb';
 import { btn, lab, tin, noticeErr, badge, badgeInactive } from '../../../lib/adminUi';
-import { registrationCheckoutRenderPolicy } from '../../../lib/stripeCheckoutRequests';
+import {
+  isCheckoutRequestId,
+  ownsRecoverableRegistrationCheckoutRequest,
+  registrationCheckoutRenderPolicy,
+} from '../../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -29,12 +33,18 @@ const questions = event ? await listQuestions(Astro.locals.db, locale, eventId) 
 const user = Astro.locals.user;
 const errParam = Astro.url.searchParams.get('error');
 const paid = !!event && event.price_cents !== null && event.price_cents > 0;
+const requestedCheckoutId = errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null;
+const ownsWaitingSeat = !!event
+  && paid
+  && isCheckoutRequestId(requestedCheckoutId)
+  && await ownsRecoverableRegistrationCheckoutRequest(Astro.locals.db, requestedCheckoutId, event.id);
 const { checkoutRequestId, isFull } = registrationCheckoutRenderPolicy({
   paid,
   capacity: event?.capacity ?? null,
   takenCount: event?.taken_count ?? 0,
   error: errParam,
-  checkoutRequestId: errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null,
+  checkoutRequestId: requestedCheckoutId,
+  ownsWaitingSeat,
 });
 const errorKey =
   errParam === 'full'

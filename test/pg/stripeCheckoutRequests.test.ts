@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import postgres from 'postgres';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import {
   attachRegistrationCheckoutRequest,
   buildRegistrationCheckoutParams,
   cancelRegistrationCheckoutRequest,
+  ownsRecoverableRegistrationCheckoutRequest,
   parseCheckoutRequestId,
   registrationCheckoutIdempotencyKey,
   registrationCheckoutRequestDigest,
@@ -100,6 +101,59 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     ]) {
       expect(() => parseCheckoutRequestId(value)).toThrow('checkout_request_id_invalid');
     }
+  });
+
+  it('proves a recoverable request owns only its pending registration seat for the same event', async () => {
+    const ownedEvent = await event(1);
+    const otherEvent = await event(1);
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, ownedEvent));
+    if (created.kind !== 'create') throw new Error('expected create');
+
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(true);
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_C, ownedEvent)).toBe(false);
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, otherEvent)).toBe(false);
+
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='attached',request_json=NULL,session_url='https://checkout.stripe.com/c/pay/cs_test_owned'
+       WHERE request_id=$1`,
+      [REQUEST_A],
+    );
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(true);
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='manual_review',session_url=NULL WHERE request_id=$1`,
+      [REQUEST_A],
+    );
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(true);
+
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='resolved' WHERE request_id=$1`,
+      [REQUEST_A],
+    );
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(false);
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests
+       SET state='manual_review' WHERE request_id=$1`,
+      [REQUEST_A],
+    );
+
+    await sql.unsafe(`UPDATE registrations SET status='cancelled' WHERE id=$1`, [created.registrationId]);
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(false);
+    await sql.unsafe(`UPDATE registrations SET status='confirmed' WHERE id=$1`, [created.registrationId]);
+    expect(await ownsRecoverableRegistrationCheckoutRequest(db, REQUEST_A, ownedEvent)).toBe(false);
+  });
+
+  it('rejects malformed ownership probes before preparing a private query', async () => {
+    const prepare = vi.fn();
+    expect(await ownsRecoverableRegistrationCheckoutRequest(
+      { prepare } as unknown as AppDb,
+      'not-a-uuid',
+      7,
+    )).toBe(false);
+    expect(await ownsRecoverableRegistrationCheckoutRequest({ prepare } as unknown as AppDb, null, 7)).toBe(false);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it('hashes one stable normalized event/identity/amount/currency/sorted-answer representation', async () => {
