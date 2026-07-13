@@ -9,13 +9,58 @@
 // never interpolated into an error message, thrown value, or log line.
 
 export type StripeEnv = {
+  STRIPE_MODE?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
 };
 
-/** An error carrying Stripe's own message plus the HTTP status of the failure. */
-export type StripeError = Error & { status?: number };
+export type StripeErrorStage = 'configuration' | 'transport' | 'response';
+
+/** A bounded, structured error safe for recovery classification and logs. */
+export class StripeError extends Error {
+  status?: number;
+  type?: string;
+  code?: string;
+  requestId?: string;
+  stage: StripeErrorStage;
+
+  constructor(
+    message: string,
+    fields: {
+      stage: StripeErrorStage;
+      status?: number;
+      type?: string;
+      code?: string;
+      requestId?: string;
+    },
+  ) {
+    super(message.slice(0, 500));
+    this.name = 'StripeError';
+    this.stage = fields.stage;
+    if (Number.isInteger(fields.status) && fields.status! >= 100 && fields.status! <= 599) {
+      this.status = fields.status;
+    }
+    for (const key of ['type', 'code', 'requestId'] as const) {
+      const value = fields[key];
+      if (typeof value === 'string' && value.length > 0) this[key] = value.slice(0, 128);
+    }
+  }
+}
+
+export interface StripeRequestOptions {
+  fetcher?: typeof fetch;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+}
+
+export interface StripeCheckoutRequestOptions {
+  fetcher?: typeof fetch;
+  requestId?: string;
+  signal?: AbortSignal;
+}
+
+export const STRIPE_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * Form-encode nested params Stripe-style: objects become `a[b]`, arrays become
@@ -41,8 +86,20 @@ export function stripeForm(params: Record<string, unknown>): URLSearchParams {
 }
 
 function requireSecret(env: StripeEnv): string {
-  if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set');
-  return env.STRIPE_SECRET_KEY;
+  if (env.STRIPE_MODE !== 'test') {
+    throw new StripeError('Stripe test mode is required', {
+      stage: 'configuration',
+      code: 'stripe_test_mode_required',
+    });
+  }
+  const secret = env.STRIPE_SECRET_KEY?.trim() ?? '';
+  if (!secret.startsWith('sk_test_')) {
+    throw new StripeError('A Stripe test secret key is required', {
+      stage: 'configuration',
+      code: 'stripe_test_key_required',
+    });
+  }
+  return secret;
 }
 
 function requireOrigin(env: StripeEnv): string {
@@ -50,24 +107,68 @@ function requireOrigin(env: StripeEnv): string {
   return env.APP_ORIGIN;
 }
 
-/** Parse a Stripe response; on a non-2xx, throw with Stripe's error.message
- *  (falling back to the status text) and the HTTP status attached. */
-async function readResponse<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  let body: unknown = {};
+function requireIdempotencyKey(value: string): string {
+  if (typeof value !== 'string' || !/^[\x20-\x7e]{1,255}$/.test(value)) {
+    throw new StripeError('Invalid Stripe idempotency key', {
+      stage: 'configuration',
+      code: 'stripe_idempotency_key_invalid',
+    });
+  }
+  return value;
+}
+
+async function stripeFetch(fetcher: typeof fetch, input: string, init: RequestInit): Promise<Response> {
   try {
-    if (text) body = JSON.parse(text);
+    return await fetcher(input, init);
   } catch {
-    body = {};
+    throw new StripeError('Stripe request failed during transport', { stage: 'transport' });
+  }
+}
+
+/** Parse a Stripe response without retaining its raw body. */
+async function readResponse<T>(res: Response): Promise<T> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    throw new StripeError('Stripe response body could not be read', {
+      stage: 'response',
+      status: res.status,
+      requestId: res.headers.get('request-id') ?? undefined,
+      code: 'stripe_response_invalid',
+    });
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new StripeError('Malformed Stripe response', {
+      stage: 'response',
+      status: res.status,
+      requestId: res.headers.get('request-id') ?? undefined,
+      code: 'stripe_response_invalid',
+    });
   }
   if (!res.ok) {
+    const stripeError =
+      body && typeof body === 'object' && !Array.isArray(body)
+        ? (body as { error?: unknown }).error
+        : undefined;
+    const fields =
+      stripeError && typeof stripeError === 'object' && !Array.isArray(stripeError)
+        ? (stripeError as { message?: unknown; type?: unknown; code?: unknown })
+        : {};
     const message =
-      (body as { error?: { message?: string } }).error?.message ||
+      (typeof fields.message === 'string' && fields.message) ||
       res.statusText ||
       `Stripe request failed with status ${res.status}`;
-    const err = new Error(message) as StripeError;
-    err.status = res.status;
-    throw err;
+    throw new StripeError(message, {
+      stage: 'response',
+      status: res.status,
+      type: typeof fields.type === 'string' ? fields.type : undefined,
+      code: typeof fields.code === 'string' ? fields.code : undefined,
+      requestId: res.headers.get('request-id') ?? undefined,
+    });
   }
   return body as T;
 }
@@ -77,18 +178,130 @@ export async function stripeRequest<T = Record<string, unknown>>(
   env: StripeEnv,
   path: string,
   params: Record<string, unknown>,
-  fetcher: typeof fetch = fetch,
+  options: StripeRequestOptions = {},
 ): Promise<T> {
   const secret = requireSecret(env);
-  const res = await fetcher(`https://api.stripe.com/v1/${path}`, {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secret}`,
+    'content-type': 'application/x-www-form-urlencoded',
+  };
+  if (options.idempotencyKey !== undefined) {
+    headers['Idempotency-Key'] = requireIdempotencyKey(options.idempotencyKey);
+  }
+  const res = await stripeFetch(options.fetcher ?? fetch, `https://api.stripe.com/v1/${path}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      'content-type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: stripeForm(params).toString(),
+    signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
   });
   return readResponse<T>(res);
+}
+
+export interface StripeCheckoutSession {
+  id: string;
+  url: string | null;
+  livemode: false;
+  status: 'open' | 'complete' | 'expired' | null;
+  payment_status: 'paid' | 'unpaid' | 'no_payment_required' | null;
+  payment_intent: string | null;
+  amount_total: number | null;
+  currency: string | null;
+  metadata: Record<string, string>;
+}
+
+const invalidCheckoutResponse = (): StripeError =>
+  new StripeError('Malformed Stripe Checkout response', {
+    stage: 'response',
+    code: 'stripe_response_invalid',
+  });
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** Strictly validate the bounded Checkout fields consumed by recovery code. */
+export function requireTestCheckoutSession(value: unknown): StripeCheckoutSession {
+  if (!isPlainObject(value)) throw invalidCheckoutResponse();
+  if (value.livemode === true) {
+    throw new StripeError('Stripe live mode is disabled', {
+      stage: 'response',
+      code: 'live_mode_disabled',
+    });
+  }
+  if (value.livemode !== false || typeof value.id !== 'string' || !/^cs_test_[A-Za-z0-9_]{1,240}$/.test(value.id)) {
+    throw invalidCheckoutResponse();
+  }
+  if (!((typeof value.url === 'string' && value.url.length <= 2048) || value.url === null)) {
+    throw invalidCheckoutResponse();
+  }
+  if (![null, 'open', 'complete', 'expired'].includes(value.status as string | null)) {
+    throw invalidCheckoutResponse();
+  }
+  if (![null, 'paid', 'unpaid', 'no_payment_required'].includes(value.payment_status as string | null)) {
+    throw invalidCheckoutResponse();
+  }
+  if (!((typeof value.payment_intent === 'string' && value.payment_intent.length <= 255) || value.payment_intent === null)) {
+    throw invalidCheckoutResponse();
+  }
+  if (!(value.amount_total === null || (Number.isSafeInteger(value.amount_total) && (value.amount_total as number) >= 0))) {
+    throw invalidCheckoutResponse();
+  }
+  if (!(value.currency === null || (typeof value.currency === 'string' && /^[a-z]{1,128}$/.test(value.currency)))) {
+    throw invalidCheckoutResponse();
+  }
+  if (!isPlainObject(value.metadata)) throw invalidCheckoutResponse();
+  const metadataEntries = Object.entries(value.metadata);
+  if (
+    metadataEntries.length > 50 ||
+    metadataEntries.some(
+      ([key, metadataValue]) =>
+        key.length < 1 ||
+        key.length > 128 ||
+        typeof metadataValue !== 'string' ||
+        metadataValue.length > 500,
+    )
+  ) {
+    throw invalidCheckoutResponse();
+  }
+  return value as unknown as StripeCheckoutSession;
+}
+
+function requireCheckoutRedirect(value: unknown): { id: string; url: string } {
+  const session = requireTestCheckoutSession(value);
+  if (typeof session.url !== 'string' || session.url.length === 0) throw invalidCheckoutResponse();
+  try {
+    if (new URL(session.url).protocol !== 'https:') throw invalidCheckoutResponse();
+  } catch (error) {
+    if (error instanceof StripeError) throw error;
+    throw invalidCheckoutResponse();
+  }
+  return { id: session.id, url: session.url };
+}
+
+export async function retrieveCheckoutSession(
+  env: StripeEnv,
+  id: string,
+  options: StripeRequestOptions = {},
+): Promise<StripeCheckoutSession> {
+  if (typeof id !== 'string' || !/^cs_test_[A-Za-z0-9_]{1,240}$/.test(id)) {
+    throw new StripeError('Invalid test Checkout Session ID', {
+      stage: 'configuration',
+      code: 'stripe_session_id_invalid',
+    });
+  }
+  const secret = requireSecret(env);
+  const response = await stripeFetch(
+    options.fetcher ?? fetch,
+    `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}`,
+    {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
+    },
+  );
+  return requireTestCheckoutSession(await readResponse<unknown>(response));
 }
 
 /** Guard amounts: Stripe unit_amount must be a positive integer number of cents. */
@@ -126,7 +339,7 @@ export async function createOneTimeCheckout(
     donorEmail: string;
     customerId?: string | null;
   },
-  fetcher: typeof fetch = fetch,
+  options: StripeCheckoutRequestOptions = {},
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
@@ -162,8 +375,12 @@ export async function createOneTimeCheckout(
     // gifts stay customer-less.
     if (args.personId != null) params.customer_creation = 'always';
   }
-  const session = await stripeRequest<{ id: string; url: string }>(env, 'checkout/sessions', params, fetcher);
-  return { id: session.id, url: session.url };
+  const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
+    fetcher: options.fetcher,
+    signal: options.signal,
+    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:giving:${options.requestId}`,
+  });
+  return requireCheckoutRedirect(session);
 }
 
 /**
@@ -184,7 +401,7 @@ export async function createRecurringCheckout(
     email: string;
     customerId?: string | null;
   },
-  fetcher: typeof fetch = fetch,
+  options: StripeCheckoutRequestOptions = {},
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
@@ -212,19 +429,19 @@ export async function createRecurringCheckout(
   } else {
     params.customer_email = args.email;
   }
-  const session = await stripeRequest<{ id: string; url: string }>(env, 'checkout/sessions', params, fetcher);
-  return { id: session.id, url: session.url };
+  const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
+    fetcher: options.fetcher,
+    signal: options.signal,
+    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:giving:${options.requestId}`,
+  });
+  return requireCheckoutRedirect(session);
 }
 
 /**
  * One-time (payment-mode) Checkout Session for an event REGISTRATION. Distinct
  * from a gift: `metadata.kind = 'registration'` routes it to the registration
- * branch of the shared webhook, and `expires_at` (now + 30.5 min — Stripe's
- * 30-min minimum plus a skew margin) bounds how long the pending row holds its
- * seat — an abandoned checkout expires, fires checkout.session.expired, and the
- * webhook frees the seat. `Date.now()` is read at call time so each session gets
- * a fresh window. Registrations
- * are always email-prefilled (no saved customer reuse — giving owns that).
+ * branch of the shared webhook. Registrations are always email-prefilled (no
+ * saved customer reuse — giving owns that).
  * success → /register/done?ok=1&paid=1 (the paid marker drives the receipt copy);
  * cancel → back to the event page so the visitor can retry.
  */
@@ -239,11 +456,15 @@ export async function createRegistrationCheckout(
     registrationId: number;
     email: string;
   },
-  fetcher: typeof fetch = fetch,
+  options: StripeCheckoutRequestOptions = {},
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
-  const metadata = { kind: 'registration', registration_id: args.registrationId };
+  const metadata: Record<string, string | number> = {
+    kind: 'registration',
+    registration_id: args.registrationId,
+  };
+  if (options.requestId !== undefined) metadata.request_id = options.requestId;
   const params: Record<string, unknown> = {
     mode: 'payment',
     line_items: [
@@ -259,14 +480,15 @@ export async function createRegistrationCheckout(
     success_url: `${origin}/${args.locale}/register/done?ok=1&paid=1`,
     cancel_url: `${origin}/${args.locale}/register/${args.eventId}`,
     customer_email: args.email,
-    // Plan said now+1800 (Stripe's exact minimum); the +30s margin is deliberate
-    // so latency/clock skew can't land the value under the minimum and reject.
-    expires_at: Math.floor(Date.now() / 1000) + 1830,
     metadata,
     payment_intent_data: { metadata },
   };
-  const session = await stripeRequest<{ id: string; url: string }>(env, 'checkout/sessions', params, fetcher);
-  return { id: session.id, url: session.url };
+  const session = await stripeRequest<unknown>(env, 'checkout/sessions', params, {
+    fetcher: options.fetcher,
+    signal: options.signal,
+    idempotencyKey: options.requestId === undefined ? undefined : `church4christ:registration:${options.requestId}`,
+  });
+  return requireCheckoutRedirect(session);
 }
 
 /** A Billing Portal session so a donor can manage their recurring gift. */
@@ -274,13 +496,13 @@ export async function createPortalSession(
   env: StripeEnv,
   customerId: string,
   returnUrl: string,
-  fetcher: typeof fetch = fetch,
+  options: StripeRequestOptions = {},
 ): Promise<{ url: string }> {
   const session = await stripeRequest<{ url: string }>(
     env,
     'billing_portal/sessions',
     { customer: customerId, return_url: returnUrl },
-    fetcher,
+    options,
   );
   return { url: session.url };
 }
@@ -289,12 +511,13 @@ export async function createPortalSession(
 export async function retrieveSubscription(
   env: StripeEnv,
   id: string,
-  fetcher: typeof fetch = fetch,
+  options: StripeRequestOptions = {},
 ): Promise<Record<string, unknown>> {
   const secret = requireSecret(env);
-  const res = await fetcher(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(id)}`, {
+  const res = await stripeFetch(options.fetcher ?? fetch, `https://api.stripe.com/v1/subscriptions/${encodeURIComponent(id)}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${secret}` },
+    signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
   });
   return readResponse<Record<string, unknown>>(res);
 }

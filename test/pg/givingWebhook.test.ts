@@ -18,7 +18,11 @@ import { getStripeCustomer, getRecurringBySubscription, fundTotals } from '../..
 import { handleStripeEvent, isDbConnectivityError, isRetryableWebhookError } from '../../src/lib/givingWebhook';
 import type { StripeEnv } from '../../src/lib/stripe';
 
-const ENV: StripeEnv = { STRIPE_SECRET_KEY: 'sk_test_x', APP_ORIGIN: 'https://church.example' };
+const ENV: StripeEnv = {
+  STRIPE_MODE: 'test',
+  STRIPE_SECRET_KEY: 'sk_test_x',
+  APP_ORIGIN: 'https://church.example',
+};
 
 /** A fetch stub that answers GET /v1/subscriptions/<id> from a fixture map, so
  *  retrieveSubscription resolves without touching the network. */

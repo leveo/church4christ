@@ -226,7 +226,7 @@ async function onCheckoutCompleted(deps: WebhookDeps, session: Record<string, un
   if (mode === 'subscription') {
     const subId = strOrNull(session.subscription);
     if (!subId) return 'ignored';
-    const sub = await retrieveSubscription(deps.env, subId, deps.fetcher);
+    const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const rec = recurringFromSub(sub);
     if (!rec) return 'ignored';
     await upsertRecurringGift(deps.db, { ...rec, subscriptionId: subId });
@@ -246,7 +246,7 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
   if (!rec) {
     // Webhook-order race: invoice.paid can arrive before checkout.session.completed.
     // Pull the subscription from Stripe and back-fill the recurring row first.
-    const sub = await retrieveSubscription(deps.env, subId, deps.fetcher);
+    const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const built = recurringFromSub(sub);
     if (!built) return 'ignored';
     await upsertRecurringGift(deps.db, { ...built, subscriptionId: subId });
