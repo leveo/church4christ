@@ -13,9 +13,9 @@ export type StripeWebhookStatus =
   | 'dismissed';
 
 export type StripeDispatchResult =
-  | { status: 'processed'; outcome: string }
-  | { status: 'ignored'; outcome: string }
-  | { status: 'deferred'; outcome: string };
+  | { state: 'processed'; outcome: string }
+  | { state: 'ignored'; outcome: string }
+  | { state: 'deferred'; outcome: string };
 
 export interface StripeEnvelope {
   eventId: string;
@@ -48,8 +48,12 @@ const encoder = new TextEncoder();
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }
 
 function boundedNonemptyString(value: unknown, maxBytes: number): value is string {
@@ -58,29 +62,46 @@ function boundedNonemptyString(value: unknown, maxBytes: number): value is strin
 
 export function parseStripeEnvelope(value: unknown): StripeEnvelope {
   if (!isPlainObject(value)) throw new StripeEnvelopeError('stripe_event_invalid_object');
-  if (!boundedNonemptyString(value.id, 255)) {
+
+  const readField = (key: string, code: StripeEnvelopeErrorCode): unknown => {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw new StripeEnvelopeError(code);
+    }
+    if (!descriptor) return undefined;
+    if (!Object.hasOwn(descriptor, 'value')) throw new StripeEnvelopeError(code);
+    return descriptor.value;
+  };
+
+  const id = readField('id', 'stripe_event_invalid_id');
+  if (!boundedNonemptyString(id, 255)) {
     throw new StripeEnvelopeError('stripe_event_invalid_id');
   }
-  if (!boundedNonemptyString(value.type, 255)) {
+  const type = readField('type', 'stripe_event_invalid_type');
+  if (!boundedNonemptyString(type, 255)) {
     throw new StripeEnvelopeError('stripe_event_invalid_type');
   }
-  if (!Number.isSafeInteger(value.created) || (value.created as number) < 0) {
+  const created = readField('created', 'stripe_event_invalid_created');
+  if (!Number.isSafeInteger(created) || (created as number) < 0) {
     throw new StripeEnvelopeError('stripe_event_invalid_created');
   }
-  if (typeof value.livemode !== 'boolean') {
+  const livemode = readField('livemode', 'stripe_event_invalid_livemode');
+  if (typeof livemode !== 'boolean') {
     throw new StripeEnvelopeError('stripe_event_invalid_livemode');
   }
-  const apiVersion = value.api_version;
+  const apiVersion = readField('api_version', 'stripe_event_invalid_api_version');
   if (apiVersion !== undefined && apiVersion !== null && !boundedNonemptyString(apiVersion, 64)) {
     throw new StripeEnvelopeError('stripe_event_invalid_api_version');
   }
 
   return {
-    eventId: value.id,
-    eventType: value.type,
+    eventId: id,
+    eventType: type,
     apiVersion: apiVersion ?? null,
-    eventCreated: value.created as number,
-    livemode: value.livemode,
+    eventCreated: created as number,
+    livemode,
     event: value,
   };
 }
@@ -153,8 +174,12 @@ function secretVariants(secrets: readonly string[]): string[] {
     } catch {
       // A malformed percent sequence has no decoded variant.
     }
-    const encoded = encodeURIComponent(secret);
-    if (encoded) variants.add(encoded);
+    try {
+      const encoded = encodeURIComponent(secret);
+      if (encoded) variants.add(encoded);
+    } catch {
+      // Lone surrogates have no URI-encoded variant; the exact secret remains.
+    }
   };
 
   for (const secret of secrets) {
@@ -232,7 +257,7 @@ export function sanitizeStripeDiagnostic(error: unknown, secrets: readonly strin
     } while (changed);
   }
 
-  return truncateUtf8(output || 'Unknown error', DIAGNOSTIC_MAX_BYTES);
+  return truncateUtf8(output, DIAGNOSTIC_MAX_BYTES);
 }
 
 export const STRIPE_PROCESSED_RETENTION_MS = 90 * 24 * 60 * 60_000;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { verifyStripeWebhook } from '../src/lib/stripe';
 import {
   STRIPE_ATTEMPT_MS,
@@ -13,6 +13,7 @@ import {
   retryDelayMs,
   sanitizeStripeDiagnostic,
   sha256Utf8,
+  type StripeDispatchResult,
 } from '../src/lib/stripeWebhookInbox';
 import { signedStripeRequest, stripeEvent } from './stripeFixtures';
 
@@ -23,7 +24,7 @@ const expectEnvelopeError = (value: unknown, code: string) => {
   } catch (error) {
     expect(error).toBeInstanceOf(Error);
     expect(error).toMatchObject({ code });
-    expect((error as Error).message.length).toBeLessThanOrEqual(64);
+    expect((error as Error).message).toBe(code);
   }
 };
 
@@ -34,6 +35,14 @@ describe('stripe webhook constants', () => {
     expect(STRIPE_ATTEMPT_MS).toBe(25_000);
     expect(STRIPE_MAX_CYCLE_ATTEMPTS).toBe(6);
     expect(STRIPE_DRAIN_LIMIT).toBe(10);
+  });
+
+  it('exposes the approved state-discriminated dispatch result', () => {
+    expectTypeOf<StripeDispatchResult>().toEqualTypeOf<
+      | { state: 'processed'; outcome: string }
+      | { state: 'ignored'; outcome: string }
+      | { state: 'deferred'; outcome: string }
+    >();
   });
 });
 
@@ -56,6 +65,52 @@ describe('parseStripeEnvelope', () => {
     'rejects non-plain event %j',
     (event) => expectEnvelopeError(event, 'stripe_event_invalid_object'),
   );
+
+  it('classifies a throwing getPrototypeOf trap as invalid_object', () => {
+    const event = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error('ARBITRARY PROTOTYPE TRAP');
+      },
+    });
+
+    expectEnvelopeError(event, 'stripe_event_invalid_object');
+  });
+
+  it.each([
+    ['id', 'stripe_event_invalid_id'],
+    ['type', 'stripe_event_invalid_type'],
+    ['created', 'stripe_event_invalid_created'],
+    ['livemode', 'stripe_event_invalid_livemode'],
+    ['api_version', 'stripe_event_invalid_api_version'],
+  ] as const)('rejects an accessor for %s with stable classification', (field, code) => {
+    const event = stripeEvent('event.test', {});
+    Object.defineProperty(event, field, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        throw new Error(`ARBITRARY ${field} GETTER`);
+      },
+    });
+
+    expectEnvelopeError(event, code);
+  });
+
+  it.each([
+    ['id', 'stripe_event_invalid_id'],
+    ['type', 'stripe_event_invalid_type'],
+    ['created', 'stripe_event_invalid_created'],
+    ['livemode', 'stripe_event_invalid_livemode'],
+    ['api_version', 'stripe_event_invalid_api_version'],
+  ] as const)('rejects a descriptor trap for %s with stable classification', (field, code) => {
+    const event = new Proxy(stripeEvent('event.test', {}), {
+      getOwnPropertyDescriptor(target, property) {
+        if (property === field) throw new Error(`ARBITRARY ${field} DESCRIPTOR TRAP`);
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+    });
+
+    expectEnvelopeError(event, code);
+  });
 
   it.each([
     [{ type: 'event.test', created: 0, livemode: false }, 'stripe_event_invalid_id'],
@@ -185,6 +240,36 @@ describe('sanitizeStripeDiagnostic', () => {
     const secrets = ['[REDACTED]', 'R', '*', '…'];
     const safe = sanitizeStripeDiagnostic(new Error(secrets.join(' ')), secrets);
 
+    for (const secret of secrets) expect(safe).not.toContain(secret);
+  });
+
+  it('never throws or retains a lone-surrogate secret', () => {
+    const secret = '\ud800';
+    let safe = '';
+
+    expect(() => {
+      safe = sanitizeStripeDiagnostic(new Error(`unsafe ${secret}`), [secret]);
+    }).not.toThrow();
+    expect(safe).not.toContain(secret);
+  });
+
+  it('never reintroduces fallback text when all safe markers are exhausted', () => {
+    const allPrivateUseMarkers = Array.from(
+      { length: 0xf8ff - 0xe000 + 1 },
+      (_, index) => String.fromCodePoint(0xe000 + index),
+    ).join('');
+    const secrets = [
+      '[REDACTED]',
+      '***',
+      '…',
+      '‹redacted›',
+      allPrivateUseMarkers,
+      'Unknown error',
+    ];
+
+    const safe = sanitizeStripeDiagnostic({ raw: 'ignored' }, secrets);
+
+    expect(safe).toBe('');
     for (const secret of secrets) expect(safe).not.toContain(secret);
   });
 
