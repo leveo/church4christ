@@ -273,6 +273,22 @@ describe('sanitizeStripeDiagnostic', () => {
     expect(safe).not.toContain(secret);
   });
 
+  it('guards Error classification through a throwing getPrototypeOf proxy', () => {
+    const secret = 'HOSTILE ERROR PROTOTYPE';
+    const error = new Proxy(new Error('safe proxy message'), {
+      getPrototypeOf() {
+        throw new Error(secret);
+      },
+    });
+
+    let safe = '';
+    expect(() => {
+      safe = sanitizeStripeDiagnostic(error, [secret]);
+    }).not.toThrow();
+    expect(safe).toBe('safe proxy message');
+    expect(safe).not.toContain(secret);
+  });
+
   it('redacts every supplied nonempty secret longest-first and common encoded forms', () => {
     const short = 'xy';
     const secret = 's3cr et/雪';

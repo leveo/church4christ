@@ -144,8 +144,16 @@ function readStringField(value: object, key: string): string | undefined {
   }
 }
 
+function isError(value: unknown): value is Error {
+  try {
+    return value instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
 function diagnosticText(error: unknown): string {
-  if (error instanceof Error) {
+  if (isError(error)) {
     const name = readStringField(error, 'name') ?? 'Error';
     const code = readStringField(error, 'code');
     const message = readStringField(error, 'message');
