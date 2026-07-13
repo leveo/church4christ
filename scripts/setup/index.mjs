@@ -36,7 +36,24 @@ const requireDeps = (deps, names) => {
 };
 
 export function formatPlan(plan) {
-  return [`Setup plan: ${plan.site.name}`, `Database: ${plan.backend}`, `Modules (${plan.modules.length}): ${plan.modules.join(', ')}`, `Actions: ${plan.actions.join(' -> ')}`].join('\n');
+  const database = plan.backend === 'supabase' ? 'Supabase Postgres' : 'Cloudflare D1';
+  const accounts = plan.backend === 'supabase' ? 'Cloudflare and Supabase' : 'Cloudflare';
+  const dependencies = plan.addedDependencies.length
+    ? plan.addedDependencies.map(({ capability, added }) => `${capability} adds ${added}`).join('; ')
+    : 'none';
+  const reasons = plan.providerReasons.length
+    ? plan.providerReasons.map(({ capability, requiresBackend }) => `${capability} requires ${requiresBackend === 'supabase' ? 'Supabase' : 'Cloudflare D1'}`).join('; ')
+    : 'selected capabilities are D1-compatible';
+  return [
+    `Setup plan: ${plan.site.name}`,
+    `Capabilities (${plan.modules.length}): ${plan.modules.join(', ')}`,
+    `Database: ${database}`,
+    `Required accounts: ${accounts}`,
+    `Required services: ${plan.services.join(', ')}`,
+    `Dependency additions: ${dependencies}`,
+    `Provider reasons: ${reasons}`,
+    `Actions: ${plan.actions.join(' -> ')}`,
+  ].join('\n');
 }
 
 export function formatDoctor(doctor) {
@@ -48,6 +65,11 @@ export function formatDoctor(doctor) {
 export function formatResult(result) {
   const doctor = result.doctor ? `Readiness: ${result.doctor.status}` : 'Readiness was not returned.';
   return [`Setup finished.`, doctor].join('\n');
+}
+
+export function createPlanPreview({ output, errorOutput }) {
+  if (typeof output !== 'function' || typeof errorOutput !== 'function') throw new TypeError('plan preview output functions are required');
+  return (plan, { json = false } = {}) => (json ? errorOutput : output)(formatPlan(plan));
 }
 
 /** @param {{ environment?: Record<string, string | undefined>, interactive?: boolean, maskedInput?: (message: string) => Promise<string> }} [options] */
@@ -231,6 +253,9 @@ export async function runSetup(argv, deps) {
     if (missing.length) {
       throw new Error(`Noninteractive setup is missing required flags: ${missing.map((key) => MISSING_FLAGS[key]).join(', ')}`);
     }
+    if (!parsed.dryRun && !parsed.yes) {
+      throw new Error('Noninteractive setup requires --yes to apply changes; use --dry-run to preview without mutation');
+    }
     answers = parsed;
   }
 
@@ -245,7 +270,11 @@ export async function runSetup(argv, deps) {
   }
 
   requireDeps(deps, ['confirm', 'collectSupabaseSecret', 'apply', 'formatResult']);
-  if (!parsed.yes && !await deps.confirm(plan)) return 0;
+  if (!parsed.yes) {
+    requireDeps(deps, ['previewPlan']);
+    deps.previewPlan(plan, { json: parsed.json });
+    if (!await deps.confirm(plan)) return 0;
+  }
 
   let allowHyperdriveSecretInArgv = parsed.allowHyperdriveSecretInArgv;
   if (plan.backend === 'supabase' && plan.mode === 'deploy' && !plan.resources?.hyperdriveId && !allowHyperdriveSecretInArgv) {
@@ -357,15 +386,18 @@ async function createDefaultDeps() {
       await connection?.close();
     }
   };
+  const output = (value) => process.stdout.write(`${value}\n`);
+  const errorOutput = (value) => process.stderr.write(`${value}\n`);
   return {
     catalog, interactive, ask,
-    output: (value) => process.stdout.write(`${value}\n`),
-    errorOutput: (value) => process.stderr.write(`${value}\n`),
+    output,
+    errorOutput,
     inspectExisting,
     doctor: standaloneDoctor,
     formatPlan,
     formatDoctor,
     formatResult,
+    previewPlan: createPlanPreview({ output, errorOutput }),
     confirm: async (plan) => (await ask({ key: 'confirmation', message: `Apply this ${plan.backend} plan?`, choices: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] })) === true,
     confirmHyperdriveSecretInArgv: async () => (await ask({ key: 'hyperdriveArgv', message: 'Allow Wrangler to receive the Supabase URL in child-process argv?', choices: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] })) === true,
     collectSupabaseSecret: () => collectSupabaseSecret({

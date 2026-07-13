@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import rawCatalog from '../../../config/capabilities.json';
-import { collectSupabaseSecret, runSetup } from '../../../scripts/setup/index.mjs';
+import { collectSupabaseSecret, createPlanPreview, formatPlan, runSetup } from '../../../scripts/setup/index.mjs';
 import { collectInteractiveAnswers } from '../../../scripts/setup/prompts.mjs';
 
 const baseFlags = [
@@ -20,6 +20,7 @@ function deps(overrides: Record<string, unknown> = {}): any {
     apply: vi.fn(async (_plan: unknown, _options: unknown) => ({ doctor: { schemaVersion: 1, status: 'ready', checks: [], exitCode: 0 } })),
     doctor: vi.fn(async () => ({ schemaVersion: 1, status: 'ready', checks: [], exitCode: 0 })),
     confirm: vi.fn(async () => true),
+    previewPlan: vi.fn(),
     collectSupabaseSecret: vi.fn(async () => ({ dbUrl: 'postgres://user:password@db.example.test/app' })),
     formatPlan: (plan: unknown) => JSON.stringify(plan, null, 2),
     formatResult: (result: unknown) => JSON.stringify(result, null, 2),
@@ -88,20 +89,30 @@ describe('guided setup CLI', () => {
 
   it('D1 override plus portal/giving/registration lists all offenders before mutation', async () => {
     const d = deps();
-    await expect(runSetup(['--mode', 'local', '--modules', 'portal,giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test'], d as any))
+    await expect(runSetup(['--mode', 'local', '--modules', 'portal,giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any))
       .rejects.toThrow(/portal, giving, registration/);
     expect(d.apply).not.toHaveBeenCalled();
   });
 
   it('confirmation rejection leaves files, commands, state, database, and secrets untouched', async () => {
-    const d = deps({ confirm: vi.fn(async () => false), runner: { run: vi.fn() }, writeFile: vi.fn(), stateStore: { mark: vi.fn() }, db: { prepare: vi.fn() } });
-    await expect(runSetup(baseFlags, d as any)).resolves.toBe(0);
+    const d = deps({ interactive: true, ask: vi.fn(), confirm: vi.fn(async () => false), runner: { run: vi.fn() }, writeFile: vi.fn(), stateStore: { mark: vi.fn() }, db: { prepare: vi.fn() } });
+    await expect(runSetup([...baseFlags, '--demo-data'], d as any)).resolves.toBe(0);
     expect(d.apply).not.toHaveBeenCalled();
     expect(d.collectSupabaseSecret).not.toHaveBeenCalled();
     expect(d.runner.run).not.toHaveBeenCalled();
     expect(d.writeFile).not.toHaveBeenCalled();
     expect(d.stateStore.mark).not.toHaveBeenCalled();
     expect(d.db.prepare).not.toHaveBeenCalled();
+    expect(d.previewPlan).toHaveBeenCalledOnce();
+  });
+
+  it('noninteractive apply without --yes fails before inspection and names the exact flag', async () => {
+    const d = deps();
+    await expect(runSetup(baseFlags, d as any)).rejects.toThrow(/--yes/);
+    expect(d.inspectExisting).not.toHaveBeenCalled();
+    expect(d.previewPlan).not.toHaveBeenCalled();
+    expect(d.confirm).not.toHaveBeenCalled();
+    expect(d.apply).not.toHaveBeenCalled();
   });
 
   it('doctor is exclusive and emits a single JSON document', async () => {
@@ -154,5 +165,73 @@ describe('guided setup CLI', () => {
     await collectInteractiveAnswers({ demoData: false, demoDataSpecified: false } as any, rawCatalog, ask);
     expect(ordered).toEqual(['mode', 'featureChoice', 'siteSlug', 'churchName', 'locale', 'adminName', 'adminEmail', 'appOrigin', 'emailFrom', 'demoData']);
     expect(ask).toHaveBeenCalledTimes(10);
+  });
+
+  it('formats a confirmation preview with capabilities, provider requirements, reasons, dependencies, and actions', () => {
+    const rendered = formatPlan({
+      site: { name: 'Full Church' }, backend: 'supabase',
+      modules: ['portal', 'giving'], services: ['hyperdrive', 'r2', 'worker'],
+      addedDependencies: [{ capability: 'portal', added: 'people' }],
+      providerReasons: [{ capability: 'portal', requiresBackend: 'supabase' }],
+      actions: ['ensure-resources', 'migrate', 'doctor'],
+    } as any);
+    expect(rendered).toContain('portal, giving');
+    expect(rendered).toContain('Supabase');
+    expect(rendered).toContain('hyperdrive, r2, worker');
+    expect(rendered).toMatch(/Cloudflare.*Supabase/s);
+    expect(rendered).toContain('portal adds people');
+    expect(rendered).toContain('portal requires Supabase');
+    expect(rendered).toContain('ensure-resources -> migrate -> doctor');
+  });
+
+  it('previews the resolved plan immediately before interactive confirmation', async () => {
+    const events: string[] = [];
+    const values: Record<string, unknown> = {
+      mode: 'local', featureChoice: 'website', siteSlug: 'preview', churchName: 'Preview',
+      locale: 'en', adminName: 'Admin', adminEmail: 'admin@example.test', demoData: false,
+    };
+    const d = deps({
+      interactive: true,
+      ask: vi.fn(async (question: any) => values[question.key]),
+      previewPlan: vi.fn(() => events.push('preview')),
+      confirm: vi.fn(async () => { events.push('confirm'); return false; }),
+    });
+    await runSetup([], d);
+    expect(events).toEqual(['preview', 'confirm']);
+    expect(d.previewPlan).toHaveBeenCalledWith(expect.objectContaining({ backend: 'd1', modules: expect.any(Array) }), { json: false });
+  });
+
+  it('routes the default plan preview to stderr in JSON mode to preserve single-document stdout', () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    const preview = createPlanPreview({ output: stdout, errorOutput: stderr });
+    const plan = { site: { name: 'JSON Preview' }, backend: 'd1', modules: ['events'], services: ['worker'], addedDependencies: [], providerReasons: [], actions: ['doctor'] } as any;
+    preview(plan, { json: true });
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('JSON Preview'));
+    preview(plan, { json: false });
+    expect(stdout).toHaveBeenCalledWith(expect.stringContaining('JSON Preview'));
+  });
+
+  it('Customize asks one boolean per group and supports correction plus exact re-review', async () => {
+    const ordered: string[] = [];
+    const responses: Record<string, unknown[]> = {
+      mode: ['local'], featureChoice: ['customize'],
+      'group.content': [true], 'group.community': [false], 'group.volunteering': [false],
+      moduleReview: [false, true], moduleSelection: [['giving', 'bulletins']],
+      siteSlug: ['custom'], churchName: ['Custom'], locale: ['en'], adminName: ['Admin'],
+      adminEmail: ['admin@example.test'], demoData: [false],
+    };
+    const ask = vi.fn(async (question: any) => {
+      ordered.push(question.key);
+      if (question.key.startsWith('group.')) {
+        expect(question.multiple).not.toBe(true);
+        expect(question.choices.map((choice: any) => choice.value)).toEqual([true, false]);
+      }
+      return responses[question.key].shift();
+    });
+    const answers = await collectInteractiveAnswers({ demoData: false, demoDataSpecified: false } as any, rawCatalog, ask);
+    expect(ordered.slice(0, 8)).toEqual(['mode', 'featureChoice', 'group.content', 'group.community', 'group.volunteering', 'moduleReview', 'moduleSelection', 'moduleReview']);
+    expect(answers.modules).toEqual(['bulletins', 'giving']);
   });
 });

@@ -7,6 +7,7 @@ const prompt = async (ask, key, message, choices, extra = {}) => {
 };
 
 const yes = (value) => value === true || value === 'yes' || value === 'y';
+const no = (value) => value === false || value === 'no' || value === 'n';
 
 export async function collectInteractiveAnswers(partial, catalog, ask) {
   if (!partial || typeof partial !== 'object' || Array.isArray(partial)) throw new TypeError('partial setup answers are required');
@@ -28,30 +29,43 @@ export async function collectInteractiveAnswers(partial, catalog, ask) {
     if (featureChoice !== 'customize') {
       answers.preset = featureChoice;
     } else {
-      const selected = [];
+      let selected = [];
       for (const group of catalog.groups) {
         const modules = catalog.order.filter((key) => catalog.capabilities[key].group === group);
         const response = await prompt(
           ask,
           `group.${group}`,
           `Enable the ${group} capabilities?`,
-          modules.map((key) => ({ value: key, label: catalog.capabilities[key].labels.en })),
-          { multiple: true, modules: Object.freeze([...modules]) },
+          [{ value: true, label: 'Yes' }, { value: false, label: 'No' }],
+          { modules: Object.freeze([...modules]) },
         );
-        if (Array.isArray(response)) selected.push(...response);
-        else if (yes(response)) selected.push(...modules);
+        if (yes(response)) selected.push(...modules);
+        else if (!no(response)) throw new Error(`The ${group} group answer must be yes or no`);
       }
-      const canonical = catalog.order.filter((key) => selected.includes(key));
-      const review = await prompt(
-        ask,
-        'moduleReview',
-        `Review exact modules: ${canonical.join(', ') || '(none)'}`,
-        [{ value: true, label: 'Use these modules' }, { value: false, label: 'Change selection' }],
-        { modules: Object.freeze([...canonical]) },
-      );
-      if (Array.isArray(review)) answers.modules = catalog.order.filter((key) => review.includes(key));
-      else if (yes(review)) answers.modules = canonical;
-      else throw new Error('Custom module selection was not confirmed');
+      selected = catalog.order.filter((key) => selected.includes(key));
+      while (true) {
+        const review = await prompt(
+          ask,
+          'moduleReview',
+          `Review exact modules: ${selected.join(', ') || '(none)'}`,
+          [{ value: true, label: 'Use these modules' }, { value: false, label: 'Change selection' }, { value: 'cancel', label: 'Cancel setup' }],
+          { modules: Object.freeze([...selected]) },
+        );
+        if (yes(review)) { answers.modules = selected; break; }
+        if (review === 'cancel') throw new Error('Setup cancelled during custom module review');
+        if (!no(review)) throw new Error('Custom module review must be accepted, changed, or cancelled');
+        const correction = await prompt(
+          ask,
+          'moduleSelection',
+          'Select the exact capabilities to enable',
+          catalog.order.map((key) => ({ value: key, label: catalog.capabilities[key].labels.en })),
+          { multiple: true, modules: Object.freeze([...catalog.order]) },
+        );
+        if (!Array.isArray(correction)) throw new Error('Exact module selection must be a list');
+        const unknown = correction.filter((key) => !catalog.order.includes(key));
+        if (unknown.length) throw new Error(`Unknown capabilities: ${unknown.join(', ')}`);
+        selected = catalog.order.filter((key) => correction.includes(key));
+      }
     }
   }
 
