@@ -36,6 +36,7 @@ async function run(options, args, extra = {}) {
 
 export async function probeR2Object(options) {
   const args = ['r2', 'object', 'get', `${options.bucket}/${options.key}`, '--pipe', options.mode === 'deploy' ? '--remote' : '--local', '--config', options.configPath];
+  if (options.mode === 'local' && options.persistTo) args.push('--persist-to', options.persistTo);
   const result = await options.runner.run(options.wranglerBin, args, { allowNonzero: true, maxOutputBytes: 8 * 1024 * 1024 });
   if (!commandResult(result)) throw new Error('R2 object probe returned an invalid command result');
   if (result.exitCode === 0) return true;

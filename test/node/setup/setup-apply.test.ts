@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps } from '../../../scripts/setup/apply.mjs';
 import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
 import { configureSecrets } from '../../../scripts/setup/secrets.mjs';
+import { probeR2Object } from '../../../scripts/setup/probes.mjs';
 
 const ORDER = ['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor'];
 
@@ -76,6 +77,17 @@ describe('concrete provider actions', () => {
       ['d1', 'migrations', 'apply', 'DB', '--remote', '--config', 'wrangler.jsonc'],
       ['d1', 'execute', 'DB', '--remote', '--file', 'seed/dev-seed.sql', '--config', 'wrangler.jsonc', '--yes'],
     ]);
+  });
+
+  it('threads one local persistence root through D1 and R2 commands', async () => {
+    const calls: string[][] = [];
+    const runner = { run: async (_file: string, args: string[]) => { calls.push(args); return { stdout: '', stderr: '', exitCode: 0 }; } };
+    const verify = { migrate: async () => true, seed: async () => true, 'initialize-modules': async () => true, 'bootstrap-admin': async () => true };
+    const steps = createD1Steps({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', persistTo: '/tmp/state', db: unusedDb, moduleKeys: [], verify });
+    await steps.migrate.apply(); await steps.seed.apply();
+    await probeR2Object({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', bucket: 'media', key: 'x', mode: 'local', persistTo: '/tmp/state' });
+    expect(calls).toHaveLength(3);
+    expect(calls.every((args) => args.slice(-2).join(' ') === '--persist-to /tmp/state')).toBe(true);
   });
 
   it('passes Supabase URL only in child environment and never argv', async () => {

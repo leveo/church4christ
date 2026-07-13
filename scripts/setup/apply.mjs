@@ -26,9 +26,14 @@ function commonDatabaseSteps(options) {
   return {
     'initialize-modules': providerStep(async ({ plan } = {}) => {
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
-      await options.db.prepare(
-        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      ).bind(`site.name.${plan?.site?.locale}`, plan?.site?.name).run();
+      const key = `site.name.${plan?.site?.locale}`;
+      const current = await options.db.prepare('SELECT value FROM settings WHERE key=?').bind(key).first('value');
+      const canonical = plan?.site?.locale === 'zh' ? '四方基督教会' : 'Church4Christ';
+      if (current == null || current === canonical) {
+        await options.db.prepare(
+          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        ).bind(key, plan?.site?.name).run();
+      }
       return { changed: true };
     }, options.verify?.['initialize-modules'], 'initialize-modules'),
     'bootstrap-admin': providerStep(async ({ plan } = {}) => {

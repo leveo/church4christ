@@ -171,10 +171,11 @@ async function applyDefaultSetup(plan, options, catalog) {
   const statePath = resolve(root, '.church/setup-state.json');
   const runner = createCommandRunner();
   const wranglerBin = resolve(root, 'node_modules/.bin/wrangler');
+  const persistTo = plan.mode === 'local' ? resolve(root, '.wrangler/state') : undefined;
   const dbUrl = options.secretContext?.dbUrl;
   let postgresConnection;
   const db = plan.backend === 'd1'
-    ? new D1CliDb({ runner, wranglerBin, configPath, mode: plan.mode, ...(plan.mode === 'local' && process.env.WRANGLER_PERSIST_TO ? { persistTo: process.env.WRANGLER_PERSIST_TO } : {}) })
+    ? new D1CliDb({ runner, wranglerBin, configPath, mode: plan.mode, ...(persistTo ? { persistTo } : {}) })
     : (postgresConnection = openPostgresSetupDb(dbUrl)).db;
   const template = await readFile(templatePath, 'utf8');
   let desiredManifest;
@@ -190,7 +191,9 @@ async function applyDefaultSetup(plan, options, catalog) {
         const found = new Map(rows.map((row) => [row.key, row.value]));
         const enabled = new Set(activePlan.modules);
         const identity = await db.prepare('SELECT value FROM settings WHERE key=?').bind(`site.name.${activePlan.site.locale}`).first('value');
-        return identity === activePlan.site.name && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
+        const canonical = activePlan.site.locale === 'zh' ? '四方基督教会' : 'Church4Christ';
+        const identityReady = identity === activePlan.site.name || (typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity) && identity !== canonical);
+        return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },
     'bootstrap-admin': async ({ plan: activePlan }) => {
@@ -201,7 +204,7 @@ async function applyDefaultSetup(plan, options, catalog) {
     },
   };
   const baseProviderSteps = plan.backend === 'd1'
-    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, ...(plan.mode === 'local' && process.env.WRANGLER_PERSIST_TO ? { persistTo: process.env.WRANGLER_PERSIST_TO } : {}), db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify })
+    ? createD1Steps({ runner, wranglerBin, configPath, mode: plan.mode, ...(persistTo ? { persistTo } : {}), db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify })
     : createSupabaseSteps({ runner, root, dbUrl, db, moduleKeys: catalog.order, promoteExistingAdmin: options.promoteExistingAdmin, verify });
   const providerSteps = { ...baseProviderSteps };
   const providerSeed = providerSteps.seed;
@@ -273,11 +276,11 @@ async function applyDefaultSetup(plan, options, catalog) {
     'seed-media': step(async ({ plan: activePlan }) => {
       const mediaPlan = loadMediaPlan({ root });
       const bucket = activePlan.resources?.r2BucketName ?? `${activePlan.site.slug}-media`;
-      return applyMediaPlan({ mediaPlan, db, uploadObject: ({ key, filePath, contentType }) => runner.run(wranglerBin, ['r2', 'object', 'put', `${bucket}/${key}`, '--file', filePath, '--content-type', contentType, activePlan.mode === 'local' ? '--local' : '--remote', '--config', configPath]) });
+      return applyMediaPlan({ mediaPlan, db, uploadObject: ({ key, filePath, contentType }) => runner.run(wranglerBin, ['r2', 'object', 'put', `${bucket}/${key}`, '--file', filePath, '--content-type', contentType, activePlan.mode === 'local' ? '--local' : '--remote', '--config', configPath, ...(activePlan.mode === 'local' && persistTo ? ['--persist-to', persistTo] : [])]) });
     }, async ({ plan: activePlan }) => {
       const mediaPlan = loadMediaPlan({ root });
       const bucket = activePlan.resources?.r2BucketName ?? `${activePlan.site.slug}-media`;
-      return verifyMediaPlan({ mediaPlan, db, objectExists: (key) => probeR2Object({ runner, wranglerBin, configPath, bucket, key, mode: activePlan.mode }) });
+      return verifyMediaPlan({ mediaPlan, db, objectExists: (key) => probeR2Object({ runner, wranglerBin, configPath, bucket, key, mode: activePlan.mode, ...(persistTo ? { persistTo } : {}) }) });
     }),
     doctor: step(async ({ plan: activePlan }) => { latestDoctor = await runInstallationDoctor(activePlan); return { changed: false }; }, async ({ plan: activePlan }) => { latestDoctor ??= await runInstallationDoctor(activePlan); return true; }),
   };
