@@ -53,7 +53,8 @@ jobs:
         run: npx wrangler types
 
       - name: Prepare test reports
-        run: node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"
+        run: >-
+          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"
 
       - name: Check generated capability documentation
         run: npm run docs:check
