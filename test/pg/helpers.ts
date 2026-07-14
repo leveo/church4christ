@@ -18,7 +18,7 @@ export function pgClient() {
   });
 }
 
-/** Drop + recreate the public schema — every suite starts from nothing. */
+/** Drop private state, then recreate public — every suite starts from nothing. */
 export async function resetSchema(sql: ReturnType<typeof pgClient>) {
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await sql.unsafe('DROP SCHEMA IF EXISTS church_private CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
 }

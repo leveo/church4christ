@@ -1,0 +1,284 @@
+import { EventEmitter } from 'node:events';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import raw from '../../../config/capabilities.json';
+import { buildHandoff, buildServicePresence, inspectExistingInstallation, readMaskedInput, resolveDoctorDatabaseUrl } from '../../../scripts/setup/index.mjs';
+import { probeDeployResources, probeR2Object, parseWorkerDeployments } from '../../../scripts/setup/probes.mjs';
+import { hasDeploySecret } from '../../../scripts/setup/secrets.mjs';
+import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from '../../../scripts/setup/verification.mjs';
+import { verifyMediaPlan } from '../../../scripts/setup/media.mjs';
+import { checkServices } from '../../../scripts/setup/checks/services.mjs';
+import { ALWAYS_REQUIRED_TABLES, TABLES_BY_CAPABILITY } from '../../../scripts/setup/checks/database.mjs';
+import { readLocalStripeClassification, readLocalStripeModeOverride, verifyLocalSecretsContent } from '../../../scripts/setup/secrets.mjs';
+import { SETUP_HELP } from '../../../scripts/setup/args.mjs';
+import { redact } from '../../../scripts/setup/redact.mjs';
+import { resolveLocalPersistence } from '../../../scripts/setup/persistence.mjs';
+import { createCommandRunner } from '../../../scripts/setup/commands.mjs';
+
+function statementDb(rows: Record<string, any>) {
+  return { prepare(sql: string) { return { bind() { return this; }, async first() { return rows[sql] ?? null; }, async all() { return { success: true, meta: {}, results: rows[sql] ?? [] }; } }; } };
+}
+
+describe('runtime setup hardening', () => {
+  it('scrubs runtime and one-shot Stripe values from every default setup child environment', async () => {
+    const keys = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE', 'CHURCH_SETUP_STRIPE_SECRET_KEY', 'CHURCH_SETUP_STRIPE_WEBHOOK_SECRET'] as const;
+    const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) process.env[key] = `secret-${key}`;
+    const exec = vi.fn(async (_file, _args, options) => {
+      for (const key of keys) expect(options.env).not.toHaveProperty(key);
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    try {
+      const runner = createCommandRunner({ exec });
+      await runner.run('safe-command', []);
+      await runner.run('safe-command', [], { env: { ...process.env } });
+    }
+    finally { for (const key of keys) { if (old[key] === undefined) delete process.env[key]; else process.env[key] = old[key]; } }
+    expect(exec).toHaveBeenCalledTimes(2);
+
+    const leaked = 'sk_test_child_diagnostic';
+    const failing = createCommandRunner({
+      secretValues: [leaked],
+      exec: vi.fn(async () => ({ stdout: '', stderr: `failed with ${leaked}`, exitCode: 1 })),
+    });
+    await expect(failing.run('safe-command', [])).rejects.toThrow(/\[REDACTED\]/);
+    await expect(failing.run('safe-command', [])).rejects.not.toThrow(/sk_test_child_diagnostic/);
+  });
+
+  it('resolves a validated workspace-local Wrangler persistence override', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'persistence-root-'));
+    let outside: string | undefined;
+    try {
+      const realRoot = await realpath(root);
+      expect(resolveLocalPersistence(root, {})).toBe(join(realRoot, '.wrangler/state'));
+      expect(resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: '.test/state' })).toBe(join(realRoot, '.test/state'));
+      for (const value of ['', ' ', '../escape', '..\\escape', '/tmp/escape', '--remote', 'bad\npath']) {
+        expect(() => resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: value })).toThrow(/WRANGLER_PERSIST_TO/i);
+      }
+      outside = await mkdtemp(join(tmpdir(), 'persistence-outside-'));
+      await mkdir(join(root, 'links'));
+      await symlink(outside, join(root, 'links/escape'), 'dir');
+      expect(() => resolveLocalPersistence(root, { WRANGLER_PERSIST_TO: 'links/escape/state' })).toThrow(/symlink|escape/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      if (outside) await rm(outside, { recursive: true, force: true });
+    }
+  });
+  it('strictly parses a nonempty Worker deployment list', () => {
+    expect(parseWorkerDeployments(JSON.stringify([{ id: 'dep', created_on: '2026-01-01T00:00:00Z', versions: [{ version_id: 'v1', percentage: 100 }] }]))).toHaveLength(1);
+    for (const invalid of ['{}', '[]', '[{"id":"dep"}]', 'not-json']) expect(() => parseWorkerDeployments(invalid)).toThrow();
+  });
+
+  it('probes deploy Worker, R2, D1 or Hyperdrive and fails closed on mismatches', async () => {
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => {
+      if (args[0] === 'deployments') return { stdout: JSON.stringify({ id: 'dep', created_on: '2026-01-01T00:00:00Z', versions: [{ version_id: 'v', percentage: 100 }] }), stderr: '', exitCode: 0 };
+      if (args[0] === 'r2') return { stdout: JSON.stringify({ name: 'church-media' }), stderr: '', exitCode: 0 };
+      if (args[0] === 'd1') return { stdout: JSON.stringify([{ name: 'church-db', uuid: 'd1-id' }]), stderr: '', exitCode: 0 };
+      throw new Error('unexpected');
+    }) };
+    await expect(probeDeployResources({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', manifest: { site: { slug: 'church' }, database: 'd1', resources: { d1DatabaseName: 'church-db', d1DatabaseId: 'd1-id', r2BucketName: 'church-media', hyperdriveId: null } } as any }))
+      .resolves.toEqual({ worker: true, r2: true, d1: true, hyperdrive: false });
+    runner.run.mockImplementationOnce(async () => ({ stdout: '[]', stderr: '', exitCode: 0 }));
+    await expect(probeDeployResources({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', manifest: { site: { slug: 'church' }, database: 'd1', resources: { d1DatabaseName: 'church-db', d1DatabaseId: 'd1-id', r2BucketName: 'church-media', hyperdriveId: null } } as any })).rejects.toThrow(/deployment/i);
+  });
+
+  it('checks SESSION_SECRET remotely and R2 objects without logging object bytes', async () => {
+    const secretRunner = { run: vi.fn(async () => ({ stdout: '[{"name":"SESSION_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 })) };
+    await expect(hasDeploySecret({ runner: secretRunner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', name: 'SESSION_SECRET' })).resolves.toBe(true);
+    const objectRunner = { run: vi.fn(async (_file: string, _args: string[]) => ({ stdout: 'binary bytes', stderr: '', exitCode: 0 })) };
+    await expect(probeR2Object({ runner: objectRunner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', bucket: 'media', key: 'uploads/a.webp', mode: 'local' })).resolves.toBe(true);
+    expect(objectRunner.run.mock.calls[0][1]).toContain('--pipe');
+  });
+
+  it('reports configured deploy email as unverified instead of live available', async () => {
+    const findings = await checkServices({
+      catalog: raw,
+      manifest: { mode: 'deploy', database: 'd1', modules: ['events'] },
+      presence: { worker: true, r2: true, hyperdrive: false, email: false, emailConfigured: true, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false },
+    } as any);
+    expect(findings).toContainEqual(expect.objectContaining({ code: 'services.email-unverified', severity: 'warning' }));
+    expect(findings).not.toContainEqual(expect.objectContaining({ code: 'services.email-ok' }));
+  });
+
+  it('requires multiple canonical demo sentinels, not an unrelated admin email', async () => {
+    const complete = statementDb({
+      'SELECT COUNT(*) AS count FROM people': { count: 10 },
+      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Alex Admin', role: 'admin' },
+      'SELECT slug FROM ministries WHERE id=?': { slug: 'av-tech' },
+      'SELECT COUNT(*) AS count FROM sermons': { count: 5 },
+    });
+    await expect(verifyCanonicalDemoSeed(complete as any)).resolves.toBe(true);
+    const unrelated = statementDb({
+      'SELECT COUNT(*) AS count FROM people': { count: 1 },
+      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Someone', role: 'admin' },
+      'SELECT slug FROM ministries WHERE id=?': null,
+      'SELECT COUNT(*) AS count FROM sermons': { count: 0 },
+    });
+    await expect(verifyCanonicalDemoSeed(unrelated as any)).resolves.toBe(false);
+  });
+
+  it('detects a missing later migration table', async () => {
+    const tables = ['people', 'settings', 'tokens', 'media'];
+    const db = statementDb({ "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name": tables.map((name) => ({ name })) });
+    await expect(verifyMigrationCompleteness({ db: db as any, backend: 'd1', catalog: raw, root: process.cwd() })).resolves.toBe(false);
+  });
+
+  it('requires exact D1 migration history even when all final tables exist', async () => {
+    const tables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat()])].map((name) => ({ name }));
+    const migrations = (await readdir('migrations')).filter((name) => name.endsWith('.sql')).sort();
+    const sqlTables = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+    const sqlHistory = 'SELECT name FROM d1_migrations ORDER BY id';
+    const complete = statementDb({ [sqlTables]: tables, [sqlHistory]: migrations.map((name) => ({ name })) });
+    await expect(verifyMigrationCompleteness({ db: complete as any, backend: 'd1', catalog: raw, root: process.cwd() })).resolves.toBe(true);
+    const partial = statementDb({ [sqlTables]: tables, [sqlHistory]: migrations.slice(0, -1).map((name) => ({ name })) });
+    await expect(verifyMigrationCompleteness({ db: partial as any, backend: 'd1', catalog: raw, root: process.cwd() })).resolves.toBe(false);
+  });
+
+  it('verifies every media DB reference and object, detecting deletion', async () => {
+    const plan: any = { assets: [{ key: 'uploads/a.webp', file: 'a.webp', contentType: 'image/webp', size: 1, target: { type: 'setting', key: 'site.hero' } }], objects: [], uploadedBy: 'a@b.test' };
+    const db = statementDb({
+      'SELECT r2_key, filename, content_type, size, uploaded_by FROM media WHERE r2_key=?': { r2_key: 'uploads/a.webp', filename: 'a.webp', content_type: 'image/webp', size: 1, uploaded_by: 'a@b.test' },
+      'SELECT value FROM settings WHERE key=?': { value: 'uploads/a.webp' },
+    });
+    await expect(verifyMediaPlan({ mediaPlan: plan, db: db as any, objectExists: async () => true })).resolves.toBe(true);
+    await expect(verifyMediaPlan({ mediaPlan: plan, db: db as any, objectExists: async () => false })).resolves.toBe(false);
+    await expect(verifyMediaPlan({ mediaPlan: plan, db: statementDb({}) as any, objectExists: async () => true })).resolves.toBe(false);
+  });
+
+  it('drops mode-specific resource placeholders across local/deploy transitions', () => {
+    const cases = [
+      { mode: 'local', database: 'd1', resources: { d1DatabaseName: 'x-db', d1DatabaseId: 'local', r2BucketName: 'x-media', hyperdriveId: null } },
+      { mode: 'deploy', database: 'd1', resources: { d1DatabaseName: 'x-db', d1DatabaseId: 'remote-d1', r2BucketName: 'x-media', hyperdriveId: null } },
+      { mode: 'local', database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'x-media', hyperdriveId: 'local' } },
+      { mode: 'deploy', database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'x-media', hyperdriveId: 'remote-hd' } },
+    ];
+    for (const manifest of cases) {
+      expect(inspectExistingInstallation(manifest as any, manifest.mode)).toHaveProperty('resources');
+      expect(inspectExistingInstallation(manifest as any, manifest.mode === 'local' ? 'deploy' : 'local')).not.toHaveProperty('resources');
+    }
+  });
+
+  it('fails closed before mutation when an existing installation changes execution mode', async () => {
+    const localManifest = { mode: 'local', database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'x-media', hyperdriveId: 'local' } };
+    const inspectExisting = vi.fn(async ({ requestedMode }: any) => inspectExistingInstallation(localManifest as any, requestedMode));
+    const deps: any = {
+      catalog: raw, interactive: false, output: vi.fn(), inspectExisting, formatPlan: vi.fn(), formatResult: vi.fn(),
+      preflightConfig: vi.fn(async () => ({ approvedContent: 'baseline' })),
+      confirm: vi.fn(), collectSupabaseSecret: vi.fn(), collectStripeTestSecrets: vi.fn(async () => null), collectStripeSetupRedactionValues: vi.fn(async () => []), apply: vi.fn(),
+    };
+    const argv = ['--mode', 'deploy', '--preset', 'full-church', '--site-slug', 'x', '--church-name', 'X', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--app-origin', 'https://x.example.test', '--email-from', 'serve@x.example.test', '--yes'];
+    const { runSetup } = await import('../../../scripts/setup/index.mjs');
+    await expect(runSetup(argv, deps)).rejects.toThrow(/local.*deploy.*migration|mode.*migration/i);
+    expect(deps.collectSupabaseSecret).not.toHaveBeenCalled();
+    expect(deps.apply).not.toHaveBeenCalled();
+  });
+
+  it('masked input rejects on end and restores terminal state without echo', async () => {
+    class Input extends EventEmitter { isTTY = true; isRaw = false; paused = true; setRawMode = vi.fn((raw: boolean) => { this.isRaw = raw; }); resume = vi.fn(() => { this.paused = false; }); pause = vi.fn(() => { this.paused = true; }); isPaused() { return this.paused; } }
+    const input = new Input();
+    const output = { isTTY: true, write: vi.fn() };
+    const pending = readMaskedInput(input as any, output as any, 'Secret');
+    input.emit('end');
+    await expect(pending).rejects.toThrow(/ended/i);
+    expect(input.setRawMode).toHaveBeenLastCalledWith(false);
+    expect(input.listenerCount('data')).toBe(0);
+    expect(output.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('strictly verifies local managed secrets and exact admin identity', () => {
+    const strong = 'x'.repeat(32);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(true);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=weak\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=0\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`)).toBe(true);
+  });
+
+  it('requires a real local Supabase connection source and returns a nonsecret handoff reference', async () => {
+    const manifest: any = { mode: 'local', database: 'supabase', resources: { r2BucketName: 'x-media', hyperdriveId: 'local' } };
+    expect((await buildServicePresence(manifest, { hostEnv: {}, localSecretsValid: true })).hyperdrive).toBe(false);
+    expect((await buildServicePresence(manifest, { hostEnv: { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: 'postgres://secret' }, localSecretsValid: true })).hyperdrive).toBe(true);
+    const handoff = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any, { supabaseSecretSource: 'environment' });
+    expect(handoff.startCommand).toBe('CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL" npm run dev');
+    expect(JSON.stringify(handoff)).not.toContain('postgres://secret');
+    const masked = buildHandoff({ mode: 'local', backend: 'supabase', site: { appOrigin: 'http://localhost:4321' }, adminEmail: 'admin@example.test', modules: ['portal'] } as any, { checks: [] } as any, { supabaseSecretSource: 'masked' });
+    expect(masked.startCommand).toContain('read -s SUPABASE_DB_URL');
+    expect(masked.startCommand).toContain('CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$SUPABASE_DB_URL"');
+    expect(JSON.stringify(masked)).not.toContain('postgres://');
+  });
+
+  it('uses remote Stripe secret metadata for deploy and .dev.vars key metadata only for local', async () => {
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => {
+      if (args[0] === 'secret') return { stdout: '[{"name":"STRIPE_SECRET_KEY","type":"secret_text"},{"name":"STRIPE_WEBHOOK_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 };
+      return { stdout: '', stderr: 'probe unavailable', exitCode: 1 };
+    }) };
+    const deploy: any = { mode: 'deploy', database: 'd1', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', d1DatabaseName: 'x-db', d1DatabaseId: 'id' } };
+    const remote = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {} });
+    expect(remote.stripeSecretKey).toBe(true); expect(remote.stripeWebhookSecret).toBe(true);
+    const local = await buildServicePresence({ ...deploy, mode: 'local' }, { hostEnv: { STRIPE_WEBHOOK_SECRET: 'host-only-must-be-ignored' }, localSecretNames: ['STRIPE_SECRET_KEY'], localSecretsValid: false });
+    expect(local.stripeSecretKey).toBe(true); expect(local.stripeWebhookSecret).toBe(false);
+  });
+
+  it('derives only a nonsecret local Stripe classification and marks deploy values unverifiable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-stripe-classification-'));
+    const path = join(root, '.dev.vars');
+    try {
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'test', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=  sk_test_trimmed  \nSTRIPE_WEBHOOK_SECRET=  whsec_trimmed  \n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'test', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=sk_live_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'live', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_SECRET_KEY=rk_test_unknown\nSTRIPE_WEBHOOK_SECRET=whsec_local\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'unknown', secretKey: true, webhookSecret: true });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'OTHER=value\n'));
+      await expect(readLocalStripeClassification(path)).resolves.toEqual({ classification: 'missing', secretKey: false, webhookSecret: false });
+    } finally { await rm(root, { recursive: true, force: true }); }
+
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => args[0] === 'secret'
+      ? { stdout: '[{"name":"STRIPE_SECRET_KEY","type":"secret_text"},{"name":"STRIPE_WEBHOOK_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 }
+      : { stdout: '', stderr: '', exitCode: 1 }) };
+    const deploy: any = { mode: 'deploy', database: 'supabase', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', hyperdriveId: 'hd' } };
+    const presence = await buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', stripeModeTest: true, hostEnv: {} });
+    expect(presence).toMatchObject({ stripeClassification: 'unverifiable', stripeClassificationVerifiable: false, stripeModeTest: true });
+  });
+
+  it('classifies local STRIPE_MODE overrides without returning their values', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-stripe-mode-classification-'));
+    const path = join(root, '.dev.vars');
+    try {
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'OTHER=value\n'));
+      await expect(readLocalStripeModeOverride(path)).resolves.toEqual({ present: false, test: false });
+      await import('node:fs/promises').then(({ writeFile }) => writeFile(path, 'STRIPE_MODE=test\n'));
+      await expect(readLocalStripeModeOverride(path)).resolves.toEqual({ present: true, test: true });
+      for (const value of ['live', 'unexpected']) {
+        await import('node:fs/promises').then(({ writeFile }) => writeFile(path, `STRIPE_MODE=${value}\n`));
+        const status = await readLocalStripeModeOverride(path);
+        expect(status).toEqual({ present: true, test: false });
+        expect(JSON.stringify(status)).not.toContain(value);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('does not convert a failed deploy secret-list probe into Stripe absence', async () => {
+    const runner = { run: vi.fn(async () => ({ stdout: '', stderr: 'authentication failed', exitCode: 1 })) };
+    const deploy: any = { mode: 'deploy', database: 'supabase', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', hyperdriveId: 'hd' } };
+    await expect(buildServicePresence(deploy, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', stripeModeTest: true, hostEnv: {} }))
+      .rejects.toThrow(/secret list failed/i);
+  });
+
+  it('documents both banner-free JSON invocations', () => {
+    expect(SETUP_HELP).toContain('node scripts/setup/index.mjs [options] --json');
+    expect(SETUP_HELP).toContain('npm run --silent setup -- [options] --json');
+  });
+
+  it('resolves the canonical local Hyperdrive URL for doctor and keeps it redactable', () => {
+    const canonical = 'postgres://doctor:secret@db.example.test/church';
+    expect(resolveDoctorDatabaseUrl({ mode: 'local', database: 'supabase' } as any, { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toBe(canonical);
+    expect(resolveDoctorDatabaseUrl({ mode: 'local', database: 'supabase' } as any, { SUPABASE_DB_URL: 'postgres://preferred:secret@db.example.test/church', CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toContain('preferred');
+    expect(resolveDoctorDatabaseUrl({ mode: 'deploy', database: 'supabase' } as any, { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: canonical })).toBeUndefined();
+    expect(JSON.stringify(redact({ message: `failed ${canonical}` }, [canonical]))).not.toContain(canonical);
+  });
+});

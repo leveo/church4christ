@@ -22,6 +22,7 @@ export const GRANTABLE_AREAS = [
   'children',
   'giving',
   'registration',
+  'payment-operations',
   'serve',
 ] as const;
 export type GrantableArea = (typeof GRANTABLE_AREAS)[number];
@@ -51,6 +52,7 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   ['/admin/people', 'people-basic'],
   ['/admin/groups', 'groups'],
   ['/admin/children', 'children'],
+  ['/admin/stripe-events', 'payment-operations'],
   ['/admin/giving', 'giving'],
   ['/admin/registration', 'registration'],
   ['/admin/ministries', 'serve'],

@@ -1,12 +1,19 @@
-# Supabase setup — for Giving and Registration
+# Supabase setup — for Portal, Giving, and Registration
 
-Most churches never need this page. The default setup uses Cloudflare **D1**, needs no
-extra accounts, and runs every part of the site except two: **Giving** (online donations)
-and **Registration** (paid event sign-ups). Those two modules need a full Postgres
-database and Stripe, so they run on **Supabase** instead of D1.
+Setup is capability-driven: selections among the 14 D1-compatible modules choose D1 unless
+you explicitly override the backend. **Member Portal**, **Giving**, and **Registration**
+require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
+Stripe is optional unless you accept payments.
 
-Read this guide only if you want online giving or paid registration. If you do not, follow
-[`deploy.md`](./deploy.md) with D1 and skip this entirely — you can always switch later.
+Start with the guided installer; it asks for features before choosing a database:
+
+```bash
+npm run setup
+```
+
+Local Supabase requires a local Postgres/Supabase database or a hosted Supabase project.
+Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supabase content
+migration, so this guide does not promise a lossless backend switch for an existing site.
 
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
 > explains, in plain language, what Cloudflare is and how the free hosting works. This page
@@ -14,16 +21,16 @@ Read this guide only if you want online giving or paid registration. If you do n
 > with a terminal.
 
 > **Prefer to have an AI assistant do it?** Hand it this file. A good first thing to say:
-> *"Read `docs/supabase-setup.md`, then walk me through switching this church site to the
-> Supabase backend so we can turn on Giving. Ask me for anything you need — my Supabase
+> *"Read `docs/supabase-setup.md`, then run the guided setup for Full Church on Supabase.
+> Ask me for anything you need — my Supabase
 > connection string, my Stripe keys — one question at a time, and run the commands for me."*
 
 ---
 
 ## 1. Which database should I pick?
 
-Both are free. The only reason to choose Supabase is to unlock the two Stripe-powered
-modules; everything else works identically on either one.
+Both offer free tiers. Choose Supabase to enable Member Portal, Giving, or Registration;
+the other 14 modules work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -31,15 +38,20 @@ modules; everything else works identically on either one.
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
 | **Giving** (online card donations, recurring gifts) | Not available | **Available** |
 | **Registration** (event sign-ups, free or paid) | Not available | **Available** |
-| **Everything else** (bulletins, sermons, events, people, prayer wall, volunteer scheduling, articles, ministries, themes, email, two languages) | Yes | Yes |
+| **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
+| **Other 14 modules** | Yes | Yes |
 | **Backups** | Nightly D1 → R2 copy you configure (`deploy.md` step 9) | Supabase's own automatic backups (nothing to configure) |
 | **Monthly cost** | $0 (Cloudflare free tier) | $0 (Supabase free tier + Cloudflare free tier) |
 
-Giving and Registration are **force-disabled on D1** — even if you switch them on in
-**Settings → Modules**, they stay hidden until the site runs on Supabase. Switching the
-backend is a one-line change (`DB_BACKEND`) plus the connection steps below.
+Member Portal, Giving, and Registration are **force-disabled on D1**, even if legacy
+settings say they are on. New setup writes explicit selected settings for all 17 modules.
 
 ---
+
+## Manual reference and troubleshooting
+
+The guided installer performs the database and configuration work below. Keep these steps
+as a reference for diagnosing an existing installation.
 
 ## 2. Create the Supabase project
 
@@ -68,6 +80,10 @@ backend is a one-line change (`DB_BACKEND`) plus the connection steps below.
 Cloudflare **Hyperdrive** sits between your Worker and Supabase, pooling connections and
 caching queries so a serverless Worker can talk to Postgres quickly. You create it once and
 paste its id into your config.
+
+Guided setup normally creates or imports this resource. Creating or recovering it requires
+explicit `--allow-hyperdrive-secret-in-argv` consent because Wrangler receives the database
+URL in its child-process arguments; importing an existing Hyperdrive does not.
 
 ```bash
 npx wrangler hyperdrive create church4christ-db \
@@ -111,9 +127,9 @@ SUPABASE_DB_URL="postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-us
 ```
 
 It prints `applying …` for each new file and finishes with `migrations up to date`. This
-creates every table — the same content tables as D1, **plus** the giving and registration
-tables. It does **not** load any content; a real deployment starts empty and you add your
-church's content through the admin area.
+creates every table — the same content tables as D1, **plus** the Portal, Giving, and
+Registration tables. It does **not** load any content; a real deployment starts empty and
+you add your church's content through the admin area.
 
 > The script reads `SUPABASE_DB_URL` (or `DATABASE_URL` if you prefer that name). If it
 > prints `set SUPABASE_DB_URL (or DATABASE_URL)`, you forgot the variable. If it reports an
@@ -132,23 +148,21 @@ SUPABASE_DB_URL="postgresql://…pooler.supabase.com:5432/postgres" npm run db:s
 
 ## 5. Set your secrets
 
-Secrets never go in `wrangler.jsonc`. Set them with `wrangler secret put` — each command
-prompts you to paste the value.
+Secrets never go in `wrangler.jsonc`. The manual session-secret command below prompts you
+to paste the value; guided setup imports Stripe test credentials separately in step 7.
 
 ```bash
 # Session signing key (same as the D1 setup). Generate a strong random value:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 npx wrangler secret put SESSION_SECRET
 
-# Stripe keys — do these after step 7, once you have the values from Stripe:
-npx wrangler secret put STRIPE_SECRET_KEY
-npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# Stripe test credentials are imported by guided setup; see step 7.
 ```
 
-If you already deployed on D1, `SESSION_SECRET` is set and you can leave it. The two Stripe
-secrets are the only new ones, and you can add them after you set up Stripe in step 7. Until
-`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are set, the online giving form is inert and
-paid registration cannot take money — everything else works. Redeploy after setting them:
+If you already deployed on D1, `SESSION_SECRET` is set and you can leave it. Stripe is
+available only on Supabase and only in test mode. Import its two test credentials through
+guided setup after step 7. Until they are stored, the online giving form is inert and paid
+registration cannot take money — everything else works. Redeploy after setting them:
 
 ```bash
 npm run deploy
@@ -156,25 +170,18 @@ npm run deploy
 
 ---
 
-## 6. Create the first admin
+## 6. Sign in as the first admin
 
-Your new database is empty, so create your first administrator directly. Open the Supabase
-dashboard → **SQL editor** → **New query**, and run this (adjust the name, email, and
-language — the email is stored lowercase, so enter it lowercase):
-
-```sql
-INSERT INTO people (display_name, email, role, lang)
-VALUES ('Your Name', 'you@yourchurch.org', 'admin', 'en');
-```
-
-This mirrors the D1 first-admin step in [`deploy.md`](./deploy.md#8-create-the-first-admin);
-you are just running it in Supabase's SQL editor instead of through `wrangler d1 execute`.
-Now open `https://<your-site>/en/signin`, enter that email, request a link, and click it —
+`npm run setup` creates or promotes the first administrator through the validated bootstrap
+path. Do not create this privileged identity with ad-hoc SQL. Open
+`https://<your-site>/en/signin`, enter the setup email, request a link, and click it —
 you are in as an admin.
 
-To let your treasurer manage giving without making them a full admin, open their profile in
-`/admin/people` and turn on the **finance** flag. That grants the giving-admin pages
-(record gifts, funds, reconcile) without the rest of the admin area.
+To delegate payment work without making someone a full admin, open their profile in
+`/admin/people` and turn on **Payment operations (Giving and paid Registration)**. This
+grants giving administration plus Stripe replay/dismiss, verified-session attachment,
+reconciliation, and explicit pending-registration cancellation. Grant it only to someone
+trusted with both kinds of payment operation.
 
 ---
 
@@ -187,11 +194,9 @@ number. Set this up once.
    mode** (the toggle in the dashboard) while you try things out — test-mode keys and
    webhooks are completely separate from live ones, so you can experiment safely.
 
-2. **Get your secret key.** In the Stripe dashboard → **Developers → API keys**, copy the
-   **Secret key** (`sk_test_…` in test mode, `sk_live_…` in live mode). This is
-   `STRIPE_SECRET_KEY`. For a hardened production setup you can instead create a
-   **restricted key** with write access to Checkout Sessions and Billing Portal Sessions,
-   and read access to Subscriptions.
+2. **Get your test secret key.** In the Stripe dashboard → **Developers → API keys**, copy
+   the test **Secret key** beginning `sk_test_…`. Church4Christ intentionally rejects every
+   other prefix.
 
 3. **Add the webhook endpoint.** In **Developers → Webhooks → Add endpoint**, set the
    endpoint URL to:
@@ -200,30 +205,51 @@ number. Set this up once.
    https://<your-site>/api/stripe/webhook
    ```
 
-   Subscribe it to exactly these six events (this one endpoint serves both Giving and
+   Subscribe it to exactly these eight events (this one endpoint serves both Giving and
    Registration — each event tells the app what happened):
 
    - `checkout.session.completed` — a card gift or a paid registration succeeded
    - `checkout.session.expired` — someone abandoned a registration checkout; frees the seat
+   - `checkout.session.async_payment_succeeded` — delayed payment succeeded; fulfills the gift or registration
+   - `checkout.session.async_payment_failed` — delayed registration payment failed; frees the seat
    - `invoice.paid` — a recurring gift renewed
    - `charge.refunded` — a gift was refunded
    - `customer.subscription.updated` — a recurring gift's status changed
    - `customer.subscription.deleted` — a recurring gift was canceled
 
-   After creating the endpoint, Stripe shows a **Signing secret** (`whsec_…`). That is
-   `STRIPE_WEBHOOK_SECRET` — set it with `wrangler secret put` (step 5).
+   After creating the test endpoint, Stripe shows a **Signing secret** (`whsec_…`).
 
-4. **Turn on the Customer Portal.** In **Settings → Billing → Customer portal**, activate
+4. **Import both values in one setup run.** Use the dedicated one-shot environment names:
+
+   ```bash
+   CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+   CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+   npm run setup
+   ```
+
+   Setup validates the pair before making changes, registers both values for redaction,
+   and stores them under the runtime secret names automatically. Do not expose them as
+   ambient `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` inputs to setup. A partial pair
+   or a live key is rejected before local or deployed configuration is changed.
+
+5. **Turn on the Customer Portal.** In **Settings → Billing → Customer portal**, activate
    it and save. This is what powers the **Manage** button on a member's *My giving* page,
    where they can update their card or cancel a recurring gift themselves.
 
-5. **Choose your currency (optional).** Gifts default to US dollars. To use another
+6. **Choose your currency (optional).** Gifts default to US dollars. To use another
    currency, sign in as an admin and set the `giving.currency` site setting to its
    three-letter code (for example `cad` or `eur`).
 
-6. **Go live when ready.** When you have tested with `sk_test_…` keys, switch Stripe to
-   **live mode**, create a *live* secret key and a *live* webhook endpoint (same URL, same
-   six events), and update both secrets to the live values, then `npm run deploy`.
+7. **Keep test mode visible.** The operations page at `/admin/stripe-events` labels every
+   screen and action **Stripe test mode** and provides no live-mode switch. Even when a
+   live event is separately signed with the configured webhook secret, the endpoint returns
+   exactly `400 live_mode_disabled` before durable storage.
+
+The generated Supabase Worker runs webhook-inbox and pending-Checkout recovery on
+`*/5 * * * *` (every five minutes). The page above gives admins and finance users bounded,
+audited recovery controls without rendering raw webhook payloads, Checkout request JSON,
+customer email, secrets, or Checkout URLs. D1 does not support Giving, Registration, Stripe
+operations, or this recovery schedule.
 
 See [`docs/features/giving.md`](./features/giving.md) and
 [`docs/features/registration.md`](./features/registration.md) for how each module works
@@ -233,7 +259,7 @@ day to day.
 
 ## 8. Optional: reconciliation (Stripe FDW)
 
-Once giving is live, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
+Once giving is enabled, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
 which cross-checks your local ledger against Stripe and flags any drift — a gift Stripe has
 but your ledger is missing, or the reverse. Online giving works fully without this; it is an
 audit convenience, not a requirement.
@@ -259,8 +285,9 @@ redeploy needed. Follow Supabase's own guide exactly:
 
 ## 9. Local development
 
-To run the Supabase backend on your own computer, point it at a local Postgres instead of a
-real Supabase project.
+To run the Supabase backend on your own computer, start a local Postgres (or use a hosted
+Supabase project), export its URL as `SUPABASE_DB_URL`, and run `npm run setup`. The setup
+handoff prints the canonical host variable required to start Wrangler.
 
 1. **Start a local Postgres** (Docker is easiest):
 
@@ -268,29 +295,36 @@ real Supabase project.
    docker run -d --name church-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
    ```
 
-2. **Tell the dev server to use it.** In your `.dev.vars` file (copied from
-   [`.dev.vars.example`](../.dev.vars.example)), set:
+2. **Run guided local setup** with `SUPABASE_DB_URL` exported. It writes the local Hyperdrive
+   binding and initializes the selected modules and first admin.
 
    ```bash
-   DB_BACKEND=supabase
-   WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
+   export SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres
+   npm run setup
    ```
 
-   That second variable points the `HYPERDRIVE` binding at your local database, so you do
-   **not** need a real Hyperdrive config for local dev.
+3. **Tell the dev server to use your local Postgres.** Export this in the same shell you run
+   `npm run dev` from (not `.dev.vars` — wrangler needs to see it before the dev server boots):
 
-3. **Migrate and seed the local database:**
+   ```bash
+   export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
+   ```
+
+   That variable points the `HYPERDRIVE` binding at your local database, so you do **not** need
+   a real Hyperdrive id for local dev.
+
+4. **Manual migration/seed troubleshooting:**
 
    ```bash
    SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres npm run db:migrate:supabase
    SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres npm run db:seed:supabase
    ```
 
-4. **Run it:** `npm run dev`, then open the address it prints (usually
-   `http://localhost:4321`). Giving and Registration now appear, backed by your local
-   Postgres.
+5. **Run it:** `npm run dev`, then open the address it prints (usually
+   `http://localhost:4321`). Member Portal, Giving, and Registration now appear, backed by
+   your local Postgres.
 
-5. **Testing Stripe locally (optional).** Put your test keys in `.dev.vars`
+6. **Testing Stripe locally (optional).** Put your test keys in `.dev.vars`
    (`STRIPE_SECRET_KEY=sk_test_…`), and use the [Stripe CLI](https://stripe.com/docs/stripe-cli)
    to forward webhooks to your dev server:
 

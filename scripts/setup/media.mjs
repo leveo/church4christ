@@ -1,0 +1,269 @@
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+
+const EXACT_MANIFEST_KEYS = ['version', 'generatedWith', 'contentType', 'uploadedBy', 'assets'];
+const EXACT_ASSET_KEYS = ['file', 'key', 'target'];
+const EXACT_OBJECT_MANIFEST_KEYS = ['files'];
+const EXACT_OBJECT_KEYS = ['file', 'key', 'contentType'];
+const CONTENT_TYPE = /^image\/(?:webp|png|jpeg|gif)$/;
+const OBJECT_CONTENT_TYPE = /^(?:application\/pdf|image\/(?:webp|png|jpeg|gif))$/;
+const OBJECT_KEY = /^[a-z0-9][a-z0-9._/-]{1,253}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SETTING_KEY = /^[a-z][a-z0-9_.-]*$/;
+
+function exactKeys(value, keys, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  const actual = Object.keys(value);
+  const unknown = actual.filter((key) => !keys.includes(key));
+  const missing = keys.filter((key) => !Object.hasOwn(value, key));
+  if (unknown.length || missing.length) throw new Error(`${label} has invalid fields`);
+}
+
+export function sanitizeFilename(filename) {
+  if (typeof filename !== 'string' || filename !== basename(filename) || filename.includes('\\')) {
+    throw new Error('media filename must be a plain filename');
+  }
+  const cleaned = filename.toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '') || 'file';
+  if (cleaned.length <= 64) return cleaned;
+  const dot = cleaned.lastIndexOf('.');
+  const extension = dot > 0 ? cleaned.slice(dot) : '';
+  return cleaned.slice(0, Math.max(1, 64 - extension.length)) + extension;
+}
+
+export function uploadKey(bytes, filename) {
+  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) throw new TypeError('media bytes are required');
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  return `uploads/${hash.slice(0, 16)}-${sanitizeFilename(filename)}`;
+}
+
+function validateTarget(target, index) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error(`media asset ${index} target is invalid`);
+  if (target.type === 'setting') {
+    exactKeys(target, ['type', 'key'], `media asset ${index} target`);
+    if (typeof target.key !== 'string' || !SETTING_KEY.test(target.key)) throw new Error(`media asset ${index} setting target is invalid`);
+  } else if (['event', 'ministry', 'person'].includes(target.type)) {
+    exactKeys(target, ['type', 'id'], `media asset ${index} target`);
+    if (!Number.isSafeInteger(target.id) || target.id <= 0) throw new Error(`media asset ${index} target id is invalid`);
+  } else {
+    throw new Error(`media asset ${index} target type is invalid`);
+  }
+  return Object.freeze({ ...target });
+}
+
+function loadObjectPlan(canonicalRoot, manifestPath) {
+  if (typeof manifestPath !== 'string' || isAbsolute(manifestPath)) throw new Error('object manifest path must be relative');
+  const absoluteManifest = resolve(canonicalRoot, manifestPath);
+  const manifestRelative = relative(canonicalRoot, absoluteManifest);
+  if (manifestRelative.startsWith('..') || isAbsolute(manifestRelative)) throw new Error('object manifest escapes root');
+  const manifestStats = lstatSync(absoluteManifest);
+  if (!manifestStats.isFile() || manifestStats.isSymbolicLink()) throw new Error('object manifest must be a regular file');
+  const canonicalManifest = realpathSync(absoluteManifest);
+  const canonicalManifestRelative = relative(canonicalRoot, canonicalManifest);
+  if (canonicalManifestRelative.startsWith('..') || isAbsolute(canonicalManifestRelative)) throw new Error('object manifest escapes root');
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(canonicalManifest, 'utf8')); } catch { throw new Error('object manifest is invalid JSON'); }
+  exactKeys(manifest, EXACT_OBJECT_MANIFEST_KEYS, 'object manifest');
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error('object files must be a non-empty array');
+  const directory = realpathSync(dirname(canonicalManifest));
+  const seenFiles = new Set(); const seenKeys = new Set();
+  return manifest.files.map((entry, index) => {
+    exactKeys(entry, EXACT_OBJECT_KEYS, `object file ${index}`);
+    sanitizeFilename(entry.file);
+    if (typeof entry.key !== 'string' || !OBJECT_KEY.test(entry.key) || entry.key.includes('..') || entry.key.includes('//')) {
+      throw new Error(`object file ${index} key is invalid`);
+    }
+    if (typeof entry.contentType !== 'string' || !OBJECT_CONTENT_TYPE.test(entry.contentType)) {
+      throw new Error(`object file ${index} content type is invalid`);
+    }
+    if (seenFiles.has(entry.file) || seenKeys.has(entry.key)) throw new Error(`duplicate object file ${entry.file}`);
+    const filePath = join(directory, entry.file);
+    const stats = lstatSync(filePath);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw new Error(`object file must be a regular non-symlink: ${entry.file}`);
+    const canonicalFile = realpathSync(filePath);
+    const fileRelative = relative(directory, canonicalFile);
+    if (fileRelative.startsWith('..') || isAbsolute(fileRelative)) throw new Error(`object file escapes object directory: ${entry.file}`);
+    const bytes = readFileSync(canonicalFile);
+    seenFiles.add(entry.file); seenKeys.add(entry.key);
+    return Object.freeze({
+      file: entry.file,
+      key: entry.key,
+      contentType: entry.contentType,
+      size: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      contentBase64: bytes.toString('base64'),
+    });
+  });
+}
+
+export function loadMediaPlan({ root, manifestPath = 'seed/media/manifest.json', includePortalFiles = false, portalManifestPath = 'seed/portal-files/manifest.json' }) {
+  if (typeof root !== 'string' || !isAbsolute(root)) throw new TypeError('media root must be absolute');
+  if (typeof manifestPath !== 'string' || isAbsolute(manifestPath)) throw new Error('media manifest path must be relative');
+  const canonicalRoot = realpathSync(root);
+  const absoluteManifest = resolve(canonicalRoot, manifestPath);
+  const manifestRelative = relative(canonicalRoot, absoluteManifest);
+  if (manifestRelative.startsWith('..') || isAbsolute(manifestRelative)) throw new Error('media manifest escapes root');
+  const manifestStats = lstatSync(absoluteManifest);
+  if (!manifestStats.isFile() || manifestStats.isSymbolicLink()) throw new Error('media manifest must be a regular file');
+  const canonicalManifest = realpathSync(absoluteManifest);
+  const canonicalManifestRelative = relative(canonicalRoot, canonicalManifest);
+  if (canonicalManifestRelative.startsWith('..') || isAbsolute(canonicalManifestRelative)) throw new Error('media manifest escapes root');
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(canonicalManifest, 'utf8')); } catch { throw new Error('media manifest is invalid JSON'); }
+  exactKeys(manifest, EXACT_MANIFEST_KEYS, 'media manifest');
+  if (manifest.version !== 1) throw new Error('media manifest version must be 1');
+  if (typeof manifest.generatedWith !== 'string' || !manifest.generatedWith) throw new Error('media generatedWith is invalid');
+  if (typeof manifest.contentType !== 'string' || !CONTENT_TYPE.test(manifest.contentType)) throw new Error('media content type is invalid');
+  if (typeof manifest.uploadedBy !== 'string' || !EMAIL.test(manifest.uploadedBy)) throw new Error('media uploadedBy is invalid');
+  if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('media assets must be a non-empty array');
+  const mediaDirectory = realpathSync(dirname(canonicalManifest));
+  const seenFiles = new Set(); const seenKeys = new Set(); const seenTargets = new Set();
+  const assets = manifest.assets.map((asset, index) => {
+    exactKeys(asset, EXACT_ASSET_KEYS, `media asset ${index}`);
+    sanitizeFilename(asset.file);
+    if (seenFiles.has(asset.file)) throw new Error(`duplicate media file: ${asset.file}`);
+    const filePath = join(mediaDirectory, asset.file);
+    const stats = lstatSync(filePath);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw new Error(`media file must be a regular non-symlink: ${asset.file}`);
+    const canonicalFile = realpathSync(filePath);
+    const fileRelative = relative(mediaDirectory, canonicalFile);
+    if (fileRelative.startsWith('..') || isAbsolute(fileRelative)) throw new Error(`media file escapes media directory: ${asset.file}`);
+    const bytes = readFileSync(canonicalFile);
+    const computed = uploadKey(bytes, asset.file);
+    if (asset.key !== computed) throw new Error(`Key mismatch for ${asset.file}: manifest has ${asset.key}, computed ${computed}`);
+    if (seenKeys.has(asset.key)) throw new Error(`duplicate media key: ${asset.key}`);
+    const target = validateTarget(asset.target, index);
+    const targetIdentity = JSON.stringify(target);
+    if (seenTargets.has(targetIdentity)) throw new Error(`duplicate media target for ${asset.file}`);
+    seenFiles.add(asset.file); seenKeys.add(asset.key); seenTargets.add(targetIdentity);
+    return Object.freeze({ file: asset.file, contentBase64: bytes.toString('base64'), key: asset.key, contentType: manifest.contentType, size: bytes.length, target });
+  });
+  const objects = includePortalFiles ? loadObjectPlan(canonicalRoot, portalManifestPath) : [];
+  return Object.freeze({
+    version: 1,
+    contentType: manifest.contentType,
+    uploadedBy: manifest.uploadedBy,
+    assets: Object.freeze(assets),
+    objects: Object.freeze(objects),
+  });
+}
+
+function targetStatement(db, asset) {
+  const { target, key } = asset;
+  if (target.type === 'setting') return db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(target.key, key);
+  if (target.type === 'event') return db.prepare('UPDATE events SET image_key = ? WHERE id = ?').bind(key, target.id);
+  if (target.type === 'ministry') return db.prepare('UPDATE ministries SET cover_key = ? WHERE id = ?').bind(key, target.id);
+  return db.prepare('UPDATE people SET avatar_url = ? WHERE id = ?').bind(`/media/${key}`, target.id);
+}
+
+function preflightStatement(db, asset) {
+  if (asset.target.type === 'setting') return null;
+  const table = asset.target.type === 'event' ? 'events' : asset.target.type === 'ministry' ? 'ministries' : 'people';
+  return db.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(asset.target.id);
+}
+
+function decodeAsset(asset) {
+  if (typeof asset.contentBase64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(asset.contentBase64)) {
+    throw new Error(`Media content is invalid for ${asset.file}`);
+  }
+  const bytes = Buffer.from(asset.contentBase64, 'base64');
+  if (bytes.toString('base64') !== asset.contentBase64 || bytes.length !== asset.size || uploadKey(bytes, asset.file) !== asset.key) {
+    throw new Error(`Media content verification failed for ${asset.file}`);
+  }
+  return bytes;
+}
+
+function decodeObject(object) {
+  if (typeof object.contentBase64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(object.contentBase64)) {
+    throw new Error(`Object content is invalid for ${object.file}`);
+  }
+  const bytes = Buffer.from(object.contentBase64, 'base64');
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('base64') !== object.contentBase64 || bytes.length !== object.size || digest !== object.sha256) {
+    throw new Error(`Object content verification failed for ${object.file}`);
+  }
+  return bytes;
+}
+
+export async function applyMediaPlan({ mediaPlan, db, uploadObject }) {
+  if (!mediaPlan || !Array.isArray(mediaPlan.assets) || !Array.isArray(mediaPlan.objects)) throw new TypeError('validated media plan is required');
+  if (!db || typeof db.prepare !== 'function' || typeof db.batch !== 'function') throw new TypeError('AppDb with batch is required');
+  if (typeof uploadObject !== 'function') throw new TypeError('uploadObject is required');
+  const relational = mediaPlan.assets.map((asset) => ({ asset, statement: preflightStatement(db, asset) })).filter((entry) => entry.statement);
+  if (relational.length) {
+    const found = await db.batch(relational.map((entry) => entry.statement));
+    if (!Array.isArray(found) || found.length !== relational.length) throw new Error('Media target preflight returned invalid results');
+    for (let index = 0; index < found.length; index += 1) {
+      const expectedId = relational[index].asset.target.id;
+      if (!Array.isArray(found[index]?.results) || found[index].results.length !== 1 || found[index].results[0]?.id !== expectedId) {
+        throw new Error(`Media target does not exist for ${relational[index].asset.file}`);
+      }
+    }
+  }
+
+  const staging = await mkdtemp(join(tmpdir(), 'church4christ-media-'));
+  try {
+    const staged = [];
+    for (let index = 0; index < mediaPlan.assets.length; index += 1) {
+      const asset = mediaPlan.assets[index];
+      const filePath = join(staging, `${index}-${sanitizeFilename(asset.file)}`);
+      await writeFile(filePath, decodeAsset(asset), { mode: 0o600, flag: 'wx' });
+      const stagedBytes = await readFile(filePath);
+      if (stagedBytes.length !== asset.size || uploadKey(stagedBytes, asset.file) !== asset.key) throw new Error(`Staged media verification failed for ${asset.file}`);
+      staged.push({ asset, filePath });
+    }
+    for (let index = 0; index < mediaPlan.objects.length; index += 1) {
+      const object = mediaPlan.objects[index];
+      const filePath = join(staging, `object-${index}-${sanitizeFilename(object.file)}`);
+      await writeFile(filePath, decodeObject(object), { mode: 0o600, flag: 'wx' });
+      const stagedBytes = await readFile(filePath);
+      const digest = createHash('sha256').update(stagedBytes).digest('hex');
+      if (stagedBytes.length !== object.size || digest !== object.sha256) throw new Error(`Staged object verification failed for ${object.file}`);
+      staged.push({ asset: object, filePath });
+    }
+    for (const { asset, filePath } of staged) {
+      await uploadObject({ key: asset.key, filePath, contentType: asset.contentType });
+    }
+    const statements = mediaPlan.assets.flatMap((asset) => [
+      db.prepare('INSERT INTO media (r2_key, filename, content_type, size, uploaded_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(r2_key) DO UPDATE SET filename = excluded.filename, content_type = excluded.content_type, size = excluded.size, uploaded_by = excluded.uploaded_by')
+        .bind(asset.key, asset.file, asset.contentType, asset.size, mediaPlan.uploadedBy),
+      targetStatement(db, asset),
+    ]);
+    const results = await db.batch(statements);
+    if (!Array.isArray(results) || results.length !== statements.length) throw new Error('Media database batch returned invalid results');
+    for (let index = 0; index < mediaPlan.assets.length; index += 1) {
+      const result = results[index * 2 + 1];
+      if (!result?.meta || !Number.isFinite(result.meta.changes) || result.meta.changes < 1) {
+        throw new Error(`Media target did not update for ${mediaPlan.assets[index].file}`);
+      }
+    }
+    return Object.freeze({ changed: true, uploaded: mediaPlan.assets.length + mediaPlan.objects.length });
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+export async function verifyMediaPlan({ mediaPlan, db, objectExists }) {
+  if (!mediaPlan || !Array.isArray(mediaPlan.assets) || !Array.isArray(mediaPlan.objects) || !db || typeof db.prepare !== 'function' || typeof objectExists !== 'function') {
+    throw new TypeError('media verification dependencies are required');
+  }
+  try {
+    for (const asset of mediaPlan.assets) {
+      const media = await db.prepare('SELECT r2_key, filename, content_type, size, uploaded_by FROM media WHERE r2_key=?').bind(asset.key).first();
+      if (!media || media.r2_key !== asset.key || media.filename !== asset.file || media.content_type !== asset.contentType ||
+          Number(media.size) !== asset.size || media.uploaded_by !== mediaPlan.uploadedBy) return false;
+      let target;
+      if (asset.target.type === 'setting') target = await db.prepare('SELECT value FROM settings WHERE key=?').bind(asset.target.key).first();
+      else if (asset.target.type === 'event') target = await db.prepare('SELECT image_key AS value FROM events WHERE id=?').bind(asset.target.id).first();
+      else if (asset.target.type === 'ministry') target = await db.prepare('SELECT cover_key AS value FROM ministries WHERE id=?').bind(asset.target.id).first();
+      else target = await db.prepare('SELECT avatar_url AS value FROM people WHERE id=?').bind(asset.target.id).first();
+      const expected = asset.target.type === 'person' ? `/media/${asset.key}` : asset.key;
+      if (target?.value !== expected || !await objectExists(asset.key)) return false;
+    }
+    for (const object of mediaPlan.objects) if (!await objectExists(object.key)) return false;
+    return true;
+  } catch { return false; }
+}

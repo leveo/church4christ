@@ -4,6 +4,16 @@ New to all of this? Start here. This page explains **what you are setting up, wh
 free, and the two ways to do it** — without assuming you are a developer. When you are
 ready for the exact commands, [`deploy.md`](./deploy.md) has the precise step-by-step.
 
+The supported first step after `npm install` is:
+
+```bash
+npm run setup
+```
+
+Choose Local or Deploy, then choose Website, Website + Community, Full Church, or individual
+features. Setup explains the required accounts, selects D1 or Supabase, prepares resources
+and data, and bootstraps the first admin. Run `npm run doctor` for a readiness report.
+
 You do **not** need to read this to try the site on your own computer first — that takes
 five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes)).
 This page is for when you want to put your site **online for real**.
@@ -30,11 +40,11 @@ You are only ever billed if a site gets very large or very busy — and Cloudfla
 long before that.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
-> default and runs everything except online **Giving** and **Registration** (paid event
-> sign-ups). Those two need a Postgres database and Stripe, so they run on a free service
-> called **Supabase** instead. Most churches start on D1 and never look back; if you want
-> giving or paid registration, [`supabase-setup.md`](./supabase-setup.md) is the plain-language
-> guide for that path. You can switch later — nothing is lost.
+> default for 14 modules. **Member Portal**, **Giving**, and **Registration** need Postgres,
+> so setup selects **Supabase** when any of them is enabled. Local D1 needs no external
+> account; deployed D1 needs Cloudflare. Local Supabase needs a local or hosted Supabase
+> database; deployed Supabase needs both Cloudflare and Supabase. There is no automated
+> D1↔Supabase content migration yet, so choose before entering production content.
 
 ## What it costs — honestly
 
@@ -44,7 +54,7 @@ long before that.
   has a domain, you can use it.
 - No plugins to buy, no monthly subscription, no per-page fees.
 
-## Two ways to set it up
+## Guided setup or manual reference
 
 ### Path A — Let an AI assistant do it (easiest)
 
@@ -61,10 +71,11 @@ This is the recommended path if commands and terminals are not your comfort zone
 [README's "Build it with an AI assistant"](../README.md#build-it-with-an-ai-assistant)
 section has more example requests.
 
-### Path B — Do it yourself (about an hour, one time)
+### Path B — Manual troubleshooting reference
 
 You will use a terminal and copy-paste a handful of commands. You do not need to write any
-code. Here is the shape of it; the exact commands live in [`deploy.md`](./deploy.md).
+code. Normally `npm run setup` performs these operations. Here is the underlying shape for
+troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
 
 1. **Make a free Cloudflare account** at
    [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up). Just an email and a
@@ -78,16 +89,32 @@ code. Here is the shape of it; the exact commands live in [`deploy.md`](./deploy
    you copy it in. (This file is safe to share — it holds no passwords.)
 5. **Create the tables** in your new database — one command.
 6. **Set your secret sign-in key** (`SESSION_SECRET`) — one command generates and stores a
-   strong random value. This is the one thing that is a real secret; it never goes in any
-   file you share.
+   strong random value. In the minimum D1 path, this is the only credential setup asks you
+   to create. Supabase database URLs, Stripe credentials, and backup credentials are
+   secrets too; none of them belongs in a file you share.
 7. **Turn on "log emails to the screen"** for your first try (`EMAIL_DEV_LOG=1`), so you can
    grab your own sign-in link without email being fully configured yet.
 8. **Publish** with `npm run deploy`. It prints a link you can open immediately.
-9. **Point your own domain at it** (optional but nice) and **make yourself the first
-   administrator** — one command each.
+9. **Point your own domain at it** (optional but nice). Setup has already bootstrapped the
+   first administrator you selected.
 
 Every one of these is spelled out, with the exact text to type, in
 [`deploy.md`](./deploy.md).
+
+**Stripe is test-only and Supabase-only.** D1 does not support Giving, Registration, or
+Stripe operations. If your selected Supabase features accept payments, keep Stripe in test
+mode and provide its credentials as one-shot inputs when you run setup:
+
+```bash
+CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+npm run setup
+```
+
+Setup stores the runtime secrets without printing them. It rejects live keys, and the site
+rejects signed live webhook events with `400 live_mode_disabled` without storing them. The
+Supabase configuration also installs the five-minute recovery schedule; D1 installs no
+Stripe schedule.
 
 ## After you are live
 

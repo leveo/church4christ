@@ -34,6 +34,13 @@ const sql = postgres(hyperdrive.connectionString, {
   onnotice: () => {},
 });
 try {
+  // Clear private rows before public rows because both private tables reference
+  // public records. Keep the qualified order explicit so later private tables
+  // cannot survive this per-file reset accidentally.
+  await sql.unsafe(
+    'TRUNCATE church_private.stripe_checkout_requests, church_private.stripe_webhook_events',
+  );
+
   const tables = await sql.unsafe<{ tablename: string }[]>(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_migrations'",
   );

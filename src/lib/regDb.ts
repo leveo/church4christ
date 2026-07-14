@@ -11,12 +11,10 @@
 // 'en' fallback (the givingDb style), not i18nJoin — reg_event_i18n/reg_question_i18n
 // key on title/description/label, not `name`.
 //
-// A pending registration HOLDS a seat until its Checkout session confirms or
-// expires, so taken_count (the capacity gate) counts confirmed rows plus pending
-// rows still within a 1h freshness window (see HOLDS_SEAT — a dead pending row
-// whose worker never attached a session id is freed after 1h); confirmed_count is
-// the settled subset. See createRegistration for the capacity-race backstop and
-// its documented non-serializable window.
+// A pending registration HOLDS a seat until a guarded Stripe or operator action
+// confirms/cancels it. Local age never frees a possibly valid Checkout session.
+// See createRegistration for the capacity-race backstop and its documented
+// non-serializable window.
 import type { AppDb, AppStatement } from './appDb';
 import type { Locale } from './db';
 import { csvCell } from './csv';
@@ -47,18 +45,13 @@ export interface RegEvent {
   taken_count: number;
 }
 
-// A registration HOLDS a seat when it is confirmed, OR pending and still fresh.
-// A pending row whose worker died before attachCheckoutSession keeps a NULL
-// stripe_checkout_session_id — unreachable by confirmBySession/cancelBySession
-// (both key on the session id) — so without a freshness bound it would hold a
-// seat forever and could falsely trigger event_full. Stripe checkout sessions
-// expire at 30min, so a pending row older than 1h is definitively dead; excluding
-// it frees the seat without a background job. Assumes the row is aliased `r`.
-const HOLDS_SEAT = `(r.status = 'confirmed'
-  OR (r.status = 'pending' AND r.created_at > datetime('now','-1 hours')))`;
+// Pending seats are durable: an ambiguous Checkout create can remain recoverable
+// for almost 24 hours, so only a guarded terminal transition may release one.
+// Assumes the row is aliased `r`.
+const HOLDS_SEAT = `r.status IN ('pending','confirmed')`;
 
 // The localized event projection shared by every event reader. Locale binds as
-// ?1; a confirmed OR fresh-pending registration counts toward taken_count (it
+// ?1; a confirmed OR pending registration counts toward taken_count (it
 // holds a seat — see HOLDS_SEAT), confirmed_count is the settled subset. Callers
 // append their own WHERE / ORDER BY (numbered from ?2) and bind the locale first.
 const EVENT_SELECT = `
@@ -307,8 +300,7 @@ export async function createRegistration(
     );
   }
   // Last statement: recount held seats + read capacity in the same transaction.
-  // Counts only LIVE seats (HOLDS_SEAT) so a stale/dead pending row can't wedge
-  // the event at capacity and reject a legitimate registration.
+  // Every pending/confirmed row is a durable held seat (HOLDS_SEAT).
   stmts.push(
     db
       .prepare(
@@ -367,6 +359,383 @@ export async function cancelBySession(db: AppDb, sessionId: string): Promise<boo
     .bind(sessionId)
     .run();
   return r.meta.changes > 0;
+}
+
+export type RegistrationCheckoutAction = 'confirm' | 'cancel' | 'attach_waiting' | 'attach_open';
+export type RegistrationCheckoutTransition = 'applied' | 'converged' | 'deferred' | 'mismatch';
+
+/**
+ * Resolve a Stripe Checkout session against one registration without trusting
+ * metadata alone. An unattached row may self-heal only through its exact private
+ * request; an already-attached legacy row converges by exact session ID.
+ */
+export async function applyRegistrationCheckoutSession(
+  db: AppDb,
+  input: {
+    registrationId: number;
+    requestId: string | null;
+    sessionId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    action: RegistrationCheckoutAction;
+  },
+  checkpoint?: () => Promise<void>,
+): Promise<RegistrationCheckoutTransition> {
+  const terminalStatus = input.action === 'confirm'
+    ? 'confirmed'
+    : input.action === 'cancel'
+      ? 'cancelled'
+      : 'pending';
+  await checkpoint?.();
+  const result = await db
+    .prepare(
+      `UPDATE registrations
+       SET status = ?1,
+           stripe_checkout_session_id = ?2,
+           stripe_payment_intent_id = CASE WHEN ?1 = 'confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
+           updated_at = datetime('now')
+       WHERE id = ?4
+         AND (
+           status = 'pending'
+           OR (
+             ?1 = 'confirmed' AND status = 'cancelled'
+             AND EXISTS (
+               SELECT 1 FROM church_private.stripe_checkout_requests manual_q
+               WHERE manual_q.request_id = CAST(?7 AS TEXT)
+                 AND manual_q.registration_id = ?4
+                 AND manual_q.state = 'resolved'
+                 AND manual_q.last_error = 'manual_cancel'
+             )
+           )
+         )
+         AND amount_cents = ?5
+         AND currency = ?6
+         AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id = ?2)
+         AND (
+           stripe_checkout_session_id = ?2
+           OR (
+             CAST(?7 AS TEXT) IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM church_private.stripe_checkout_requests q
+               WHERE q.request_id = CAST(?7 AS TEXT) AND q.registration_id = ?4
+             )
+           )
+         )`,
+    )
+    .bind(
+      terminalStatus,
+      input.sessionId,
+      input.paymentIntentId,
+      input.registrationId,
+      input.amountCents,
+      input.currency,
+      input.requestId,
+    )
+    .run();
+
+  let transition: RegistrationCheckoutTransition;
+  if (result.meta.changes > 0) {
+    transition = 'applied';
+  } else {
+    const evidence = await db
+      .prepare(
+        `SELECT r.status AS status,
+                r.amount_cents AS amount_cents,
+                r.currency AS currency,
+                r.stripe_checkout_session_id AS stripe_checkout_session_id,
+                EXISTS (
+                  SELECT 1 FROM church_private.stripe_checkout_requests q
+                  WHERE CAST(?2 AS TEXT) IS NOT NULL
+                    AND q.request_id = CAST(?2 AS TEXT)
+                    AND q.registration_id = ?1
+                ) AS request_matches
+         FROM (SELECT 1) seed
+         LEFT JOIN registrations r ON r.id = ?1
+         LIMIT 1`,
+      )
+      .bind(input.registrationId, input.requestId)
+      .first<{
+        status: 'pending' | 'confirmed' | 'cancelled' | null;
+        amount_cents: number | null;
+        currency: string | null;
+        stripe_checkout_session_id: string | null;
+        request_matches: boolean | number;
+      }>();
+    if (!evidence?.status) {
+      transition = evidence?.request_matches === true || evidence?.request_matches === 1
+        ? 'deferred'
+        : 'mismatch';
+    } else {
+      const exact = evidence.amount_cents === input.amountCents
+        && evidence.currency === input.currency
+        && evidence.stripe_checkout_session_id === input.sessionId;
+      const expectedTerminal = input.action === 'confirm'
+        ? evidence.status === 'confirmed'
+        : input.action === 'cancel'
+          ? evidence.status === 'cancelled'
+          : evidence.status === 'pending';
+      transition = exact && expectedTerminal ? 'converged' : 'mismatch';
+    }
+  }
+
+  if ((transition === 'applied' || transition === 'converged') && input.requestId !== null) {
+    const terminal = input.action === 'confirm' || input.action === 'cancel';
+    await checkpoint?.();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE church_private.stripe_checkout_requests
+           SET state = ?1,
+               request_json = CASE WHEN ?1 = 'resolved' THEN NULL ELSE request_json END,
+               session_url = CASE WHEN ?1 = 'resolved' THEN NULL ELSE session_url END,
+               next_reconcile_at = NULL,
+               last_error = CASE
+                 WHEN last_error = 'manual_cancel' AND ?4 = 'cancel' THEN last_error
+                 ELSE NULL
+               END,
+               updated_at = datetime('now')
+           WHERE registration_id = ?2
+             AND request_id = CAST(?3 AS TEXT)`,
+        )
+        .bind(terminal ? 'resolved' : 'attached', input.registrationId, input.requestId, input.action),
+    ]);
+  }
+  return transition;
+}
+
+/** Apply a recovery result only while the exact Checkout claim version is current. */
+export async function applyClaimedRegistrationCheckoutSession(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimedState: 'creating' | 'attached' | 'manual_review';
+    claimVersion: string;
+    sessionId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    action: RegistrationCheckoutAction;
+    sessionUrl: string | null;
+    nextReconcileAt: string | null;
+    actorId: number | null;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  const terminal = input.action === 'confirm' || input.action === 'cancel';
+  const status = input.action === 'confirm'
+    ? 'confirmed'
+    : input.action === 'cancel'
+      ? 'cancelled'
+      : 'pending';
+  const state = terminal ? 'resolved' : 'attached';
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r
+         SET status=?1,stripe_checkout_session_id=?2,
+             stripe_payment_intent_id=CASE WHEN ?1='confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
+             updated_at=datetime('now')
+         WHERE r.id=?4 AND r.status='pending' AND r.amount_cents=?5 AND r.currency=?6
+           AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?2)
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?7 AND q.registration_id=r.id AND q.state=?8 AND q.updated_at=?9
+           )`,
+      ).bind(
+        status,
+        input.sessionId,
+        input.paymentIntentId,
+        input.registrationId,
+        input.amountCents,
+        input.currency,
+        input.requestId,
+        input.claimedState,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state=?1,request_json=NULL,session_url=?2,next_reconcile_at=?3,last_error=NULL,
+             last_action_by=COALESCE(?4,last_action_by),updated_at=?5
+         WHERE q.request_id=?6 AND q.registration_id=?7 AND q.state=?8 AND q.updated_at=?9
+           AND EXISTS (
+             SELECT 1 FROM registrations r
+             WHERE r.id=q.registration_id AND r.status=?10
+               AND r.stripe_checkout_session_id=?11 AND r.amount_cents=?12 AND r.currency=?13
+           )`,
+      ).bind(
+        state,
+        terminal ? null : input.sessionUrl,
+        terminal ? null : input.nextReconcileAt,
+        input.actorId,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimedState,
+        input.claimVersion,
+        status,
+        input.sessionId,
+        input.amountCents,
+        input.currency,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status=?2 AND r.stripe_checkout_session_id=?3
+             AND q.request_id=?4 AND q.state=?5 AND q.updated_at=?6
+             AND q.request_json IS NULL
+             AND (?7=0 OR (q.session_url IS NULL AND q.next_reconcile_at IS NULL))
+         ) THEN 1 ELSE 0 END AS recovery_guard`,
+      ).bind(
+        input.registrationId,
+        status,
+        input.sessionId,
+        input.requestId,
+        state,
+        input.updatedAt,
+        terminal ? 1 : 0,
+      ),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
+}
+
+/** Persist a strictly verified create response before any follow-up Stripe read. */
+export async function attachClaimedRegistrationCheckoutSessionId(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimVersion: string;
+    sessionId: string;
+    amountCents: number;
+    currency: string;
+    nextReconcileAt: string;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r
+         SET stripe_checkout_session_id=?1,updated_at=datetime('now')
+         WHERE r.id=?2 AND r.status='pending' AND r.amount_cents=?3 AND r.currency=?4
+           AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?1)
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?5 AND q.registration_id=r.id
+               AND q.state='creating' AND q.updated_at=?6
+           )`,
+      ).bind(
+        input.sessionId,
+        input.registrationId,
+        input.amountCents,
+        input.currency,
+        input.requestId,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state='attached',request_json=NULL,session_url=NULL,next_reconcile_at=?1,
+             last_error=NULL,updated_at=?2
+         WHERE q.request_id=?3 AND q.registration_id=?4
+           AND q.state='creating' AND q.updated_at=?5
+           AND EXISTS (
+             SELECT 1 FROM registrations r
+             WHERE r.id=q.registration_id AND r.status='pending'
+               AND r.stripe_checkout_session_id=?6 AND r.amount_cents=?7 AND r.currency=?8
+           )`,
+      ).bind(
+        input.nextReconcileAt,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimVersion,
+        input.sessionId,
+        input.amountCents,
+        input.currency,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status='pending' AND r.stripe_checkout_session_id=?2
+             AND q.request_id=?3 AND q.state='attached' AND q.updated_at=?4
+             AND q.request_json IS NULL AND q.next_reconcile_at=?5
+         ) THEN 1 ELSE 0 END AS attach_created_guard`,
+      ).bind(
+        input.registrationId,
+        input.sessionId,
+        input.requestId,
+        input.updatedAt,
+        input.nextReconcileAt,
+      ),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
+}
+
+/** Explicit operator cancellation guarded by the same request claim version. */
+export async function cancelClaimedRegistrationCheckoutRequest(
+  db: AppDb,
+  input: {
+    requestId: string;
+    registrationId: number;
+    claimedState: 'creating' | 'attached' | 'manual_review';
+    claimVersion: string;
+    actorId: number;
+    updatedAt: string;
+  },
+): Promise<boolean> {
+  try {
+    await db.batch([
+      db.prepare(
+        `UPDATE registrations r SET status='cancelled',updated_at=datetime('now')
+         WHERE r.id=?1 AND r.status='pending'
+           AND EXISTS (
+             SELECT 1 FROM church_private.stripe_checkout_requests q
+             WHERE q.request_id=?2 AND q.registration_id=r.id AND q.state=?3 AND q.updated_at=?4
+           )`,
+      ).bind(input.registrationId, input.requestId, input.claimedState, input.claimVersion),
+      db.prepare(
+        `UPDATE church_private.stripe_checkout_requests q
+         SET state='resolved',request_json=NULL,session_url=NULL,next_reconcile_at=NULL,
+             last_error='manual_cancel',last_action_by=?1,updated_at=?2
+         WHERE q.request_id=?3 AND q.registration_id=?4 AND q.state=?5 AND q.updated_at=?6
+           AND EXISTS (
+             SELECT 1 FROM registrations r WHERE r.id=q.registration_id AND r.status='cancelled'
+           )`,
+      ).bind(
+        input.actorId,
+        input.updatedAt,
+        input.requestId,
+        input.registrationId,
+        input.claimedState,
+        input.claimVersion,
+      ),
+      db.prepare(
+        `SELECT 1 / CASE WHEN EXISTS (
+           SELECT 1 FROM registrations r
+           JOIN church_private.stripe_checkout_requests q ON q.registration_id=r.id
+           WHERE r.id=?1 AND r.status='cancelled' AND q.request_id=?2 AND q.state='resolved'
+             AND q.request_json IS NULL AND q.session_url IS NULL AND q.next_reconcile_at IS NULL
+             AND q.last_action_by=?3 AND q.last_error='manual_cancel' AND q.updated_at=?4
+         ) THEN 1 ELSE 0 END AS manual_cancel_guard`,
+      ).bind(input.registrationId, input.requestId, input.actorId, input.updatedAt),
+    ]);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { code?: unknown }).code === '22012') return false;
+    throw error;
+  }
 }
 
 /**

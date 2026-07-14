@@ -20,6 +20,7 @@ import {
   attachCheckoutSession,
   confirmBySession,
   cancelBySession,
+  applyRegistrationCheckoutSession,
   cancelRegistration,
   listAllEvents,
   listEventsAdmin,
@@ -113,25 +114,23 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(2);
   });
 
-  it('a stale pending row (>1h, dead worker) frees its seat; fresh pending + confirmed still hold', async () => {
+  it('a pending row older than one hour permanently holds its seat until a guarded terminal transition', async () => {
     const ev = await openEvent({ title_en: 'Stale', title_zh: '过期', capacity: 2 });
     const mk = (name: string, status: 'pending' | 'confirmed') =>
       createRegistration(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
 
     const stale = await mk('Stale', 'pending');
-    // Simulate a worker that died before attachCheckoutSession: the pending row
-    // never got a session id and is now older than the 1h freshness window (well
-    // past Stripe's 30min checkout expiry).
+    // Simulate an ambiguous create whose local attachment never committed. Age
+    // alone cannot prove Stripe did not create a recoverable session.
     await sql.unsafe("UPDATE registrations SET created_at = datetime('now','-2 hours') WHERE id = $1", [stale]);
-    expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(0); // stale row freed
+    expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(1);
 
-    // A fresh pending row and a confirmed row DO hold seats → capacity (2) filled.
+    // The durable pending row still occupies one of two seats; one fresh row fills capacity.
     await mk('Fresh', 'pending');
-    await mk('Conf', 'confirmed');
     expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(2);
 
-    // The backstop counts only live seats, so with 2 held the event is full and a
-    // new registration overflows — the stale row never re-enters the count.
+    // The backstop counts every durable held seat, so the event is full and an
+    // Any additional registration overflows because the old pending seat never expired locally.
     await expect(mk('Over', 'pending')).rejects.toThrow('event_full');
   });
 
@@ -189,6 +188,101 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect(await cancelBySession(db, 'cs_canc')).toBe(true);
     expect(await cancelBySession(db, 'cs_canc')).toBe(false); // already cancelled
     expect(await confirmBySession(db, 'cs_canc', 'pi_x')).toBe(false); // cancelled can't confirm
+  });
+
+  it('guarded Checkout transition accepts only pending exact amount/currency and null-or-same session', async () => {
+    const ev = await openEvent();
+    const make = async (name: string, amountCents = 2500, currency = 'usd') => createRegistration(db, {
+      eventId: ev, personId: null, name, email: `${name}@x.com`, status: 'pending', amountCents, currency, answers: [],
+    });
+    const request = async (requestId: string, registrationId: number) => {
+      await sql.unsafe(
+        `INSERT INTO church_private.stripe_checkout_requests
+           (request_id, request_sha256, registration_id, request_json, state)
+         VALUES ($1, $2, $3, '{}', 'creating')`,
+        [requestId, 'b'.repeat(64), registrationId],
+      );
+    };
+    const input = (registrationId: number, requestId: string | null, over: Partial<Parameters<typeof applyRegistrationCheckoutSession>[1]> = {}) => ({
+      registrationId, requestId, sessionId: `cs_guard_${registrationId}`, paymentIntentId: `pi_guard_${registrationId}`,
+      amountCents: 2500, currency: 'usd', action: 'confirm' as const, ...over,
+    });
+
+    const exact = await make('guard-exact');
+    const exactRequest = '00000000-0000-4000-8000-000000000601';
+    await request(exactRequest, exact);
+    expect(await applyRegistrationCheckoutSession(db, input(exact, exactRequest))).toBe('applied');
+    expect(await applyRegistrationCheckoutSession(db, input(exact, exactRequest))).toBe('converged');
+    expect((await sql.unsafe('SELECT status, stripe_checkout_session_id FROM registrations WHERE id = $1', [exact]))[0])
+      .toMatchObject({ status: 'confirmed', stripe_checkout_session_id: `cs_guard_${exact}` });
+    expect((await sql.unsafe('SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1', [exactRequest]))[0])
+      .toMatchObject({ state: 'resolved', request_json: null });
+
+    const same = await make('guard-same');
+    await attachCheckoutSession(db, same, `cs_guard_${same}`);
+    expect(await applyRegistrationCheckoutSession(db, input(same, null))).toBe('applied');
+
+    const otherSession = await make('guard-other-session');
+    await attachCheckoutSession(db, otherSession, 'cs_already_other');
+    expect(await applyRegistrationCheckoutSession(db, input(otherSession, null))).toBe('mismatch');
+
+    const wrongAmount = await make('guard-amount');
+    expect(await applyRegistrationCheckoutSession(db, input(wrongAmount, null, { amountCents: 2501 }))).toBe('mismatch');
+    const wrongCurrency = await make('guard-currency');
+    expect(await applyRegistrationCheckoutSession(db, input(wrongCurrency, null, { currency: 'cad' }))).toBe('mismatch');
+  });
+
+  it('guarded cancellation never changes a confirmed registration', async () => {
+    const ev = await openEvent();
+    const reg = await createRegistration(db, {
+      eventId: ev, personId: null, name: 'confirmed-guard', email: 'confirmed-guard@x.com',
+      status: 'confirmed', amountCents: 2500, currency: 'usd', answers: [],
+    });
+    await attachCheckoutSession(db, reg, 'cs_confirmed_guard');
+    expect(await applyRegistrationCheckoutSession(db, {
+      registrationId: reg, requestId: null, sessionId: 'cs_confirmed_guard', paymentIntentId: null,
+      amountCents: 2500, currency: 'usd', action: 'cancel',
+    })).toBe('mismatch');
+    expect((await sql.unsafe('SELECT status FROM registrations WHERE id = $1', [reg]))[0].status).toBe('confirmed');
+  });
+
+  it('checkpoints the registration write and private cleanup independently, then replay converges cleanup', async () => {
+    const ev = await openEvent();
+    const reg = await createRegistration(db, {
+      eventId: ev, personId: null, name: 'lease-guard', email: 'lease-guard@x.com',
+      status: 'pending', amountCents: 4200, currency: 'usd', answers: [],
+    });
+    const requestId = '00000000-0000-4000-8000-000000000699';
+    await sql.unsafe(
+      `INSERT INTO church_private.stripe_checkout_requests
+         (request_id, request_sha256, registration_id, request_json, state)
+       VALUES ($1, $2, $3, '{}', 'creating')`,
+      [requestId, 'c'.repeat(64), reg],
+    );
+    const input = {
+      registrationId: reg, requestId, sessionId: 'cs_lease_guard', paymentIntentId: 'pi_lease_guard',
+      amountCents: 4200, currency: 'usd', action: 'confirm' as const,
+    };
+    let checkpoints = 0;
+    const checkpoint = async () => {
+      checkpoints += 1;
+      if (checkpoints === 2) throw new Error('stripe_attempt_lease_lost');
+    };
+
+    await expect(applyRegistrationCheckoutSession(db, input, checkpoint))
+      .rejects.toThrow('stripe_attempt_lease_lost');
+    expect(checkpoints).toBe(2);
+    expect((await sql.unsafe('SELECT status FROM registrations WHERE id = $1', [reg]))[0].status).toBe('confirmed');
+    expect((await sql.unsafe(
+      'SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0]).toMatchObject({ state: 'creating', request_json: '{}' });
+
+    expect(await applyRegistrationCheckoutSession(db, input, async () => undefined)).toBe('converged');
+    expect((await sql.unsafe(
+      'SELECT state, request_json FROM church_private.stripe_checkout_requests WHERE request_id = $1',
+      [requestId],
+    ))[0]).toMatchObject({ state: 'resolved', request_json: null });
   });
 
   // ── saveQuestions replace-all preserves surviving answers ────────────────────

@@ -17,6 +17,9 @@ describe('portal group-file R2 demo fixture', () => {
 
     const output = execFileSync('node', ['scripts/db/seed-media-local.mjs', '--dry-run'], { encoding: 'utf8' });
     expect(output).toContain('church4christ-media/group-files/1/demo-young-adults-welcome.pdf');
-    expect(output).toContain('seed/portal-files/young-adults-welcome.pdf');
+    // Setup stages validated manifest bytes into a private temporary file before
+    // upload, so the command must reference the stable staged filename rather
+    // than trusting the mutable repository path after planning.
+    expect(output).toContain('object-0-young-adults-welcome.pdf');
   });
 });

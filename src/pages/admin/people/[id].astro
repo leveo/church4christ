@@ -45,6 +45,7 @@ import {
 import { sendServeInvite } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
 import { LOCALES, localePath, type Locale } from '../../../lib/locales';
+import { paymentOperationsEnabled } from '../../../lib/modules';
 import {
   tin,
   lab,
@@ -70,6 +71,7 @@ const db = Astro.locals.db;
 const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 const hasPeople = Astro.locals.modules.has('people');
 const hasGiving = Astro.locals.modules.has('giving');
+const hasPaymentOperations = paymentOperationsEnabled(Astro.locals.modules);
 // Group activity (memberships/attendance + registrations) is its own module
 // gate, independent of the people module.
 const hasGroups = Astro.locals.modules.has('groups');
@@ -98,6 +100,7 @@ const AREA_LABEL_KEYS: Record<GrantableArea, string> = {
   children: 'admin.nav.children',
   giving: 'admin.giving.title',
   registration: 'admin.reg.title',
+  'payment-operations': 'admin.areas.paymentOperations',
   serve: 'admin.areas.serve',
 };
 
@@ -156,13 +159,13 @@ if (Astro.request.method === 'POST') {
     const role = ROLES.find((r) => r === roleRaw);
     const nextSuper = role === 'admin' && fd.get('super_admin') !== null;
     const areas = fd.getAll('areas').map(String);
-    // The finance flag (giving admin access) is only shown — and only read — when
-    // the giving module is on; a crafted POST while off is ignored, leaving it as set.
+    // The finance flag grants payment operations for Giving or Registration. A
+    // crafted POST while both modules are off is ignored, leaving it as set.
     try {
       await setPersonFlags(db, id, {
         role,
         active: fd.get('active') !== null,
-        ...(hasGiving ? { finance: fd.get('finance') !== null } : {}),
+        ...(hasPaymentOperations ? { finance: fd.get('finance') !== null } : {}),
         superAdmin: nextSuper,
         adminAreas: areas,
       });
@@ -553,7 +556,7 @@ const summaryErrors = Object.entries(errors)
               <input type="checkbox" name="active" checked={person.active === 1} />
               <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
             </label>
-            {hasGiving && (
+            {hasPaymentOperations && (
               <label class="flex items-center gap-2">
                 <input type="checkbox" name="finance" checked={person.finance === 1} />
                 <span class="text-sm">{t(lang, 'admin.people.finance')}</span>
@@ -575,7 +578,7 @@ const summaryErrors = Object.entries(errors)
                         name="areas"
                         value={a}
                         checked={personAreas.includes(a)}
-                        disabled={(a === 'giving' || a === 'registration') && Astro.locals.dbBackend !== 'supabase'}
+                        disabled={(a === 'giving' || a === 'registration' || a === 'payment-operations') && Astro.locals.dbBackend !== 'supabase'}
                       />
                       <span class="text-sm">{t(lang, AREA_LABEL_KEYS[a])}</span>
                     </label>
@@ -598,7 +601,7 @@ const summaryErrors = Object.entries(errors)
                 <dt class="text-ink-muted">{t(lang, 'admin.person.activeLabel')}</dt>
                 <dd><span class={`${badge} ${person.active === 1 ? badgeActive : badgeInactive}`}>{t(lang, person.active === 1 ? 'admin.people.active' : 'admin.people.inactive')}</span></dd>
               </div>
-              {hasGiving && (
+              {hasPaymentOperations && (
                 <div class="flex items-center gap-2">
                   <dt class="text-ink-muted">{t(lang, 'admin.people.finance')}</dt>
                   <dd><span class={`${badge} ${person.finance === 1 ? badgeActive : badgeInactive}`}>{t(lang, person.finance === 1 ? 'admin.people.active' : 'admin.people.inactive')}</span></dd>

@@ -22,9 +22,12 @@ export type DbEnv = {
   HYPERDRIVE?: { connectionString: string };
 };
 
-/** 'supabase' iff DB_BACKEND === 'supabase'; every other value (incl. unset) is 'd1'. */
+/** Parse the exact configured backend, defaulting only unset/empty values to D1. */
 export function getBackend(env: DbEnv): DbBackend {
-  return env.DB_BACKEND === 'supabase' ? 'supabase' : 'd1';
+  const value = env.DB_BACKEND;
+  if (value === undefined || value === '') return 'd1';
+  if (value === 'd1' || value === 'supabase') return value;
+  throw new Error(`Invalid DB_BACKEND=${JSON.stringify(value)}; expected "d1" or "supabase"`);
 }
 
 /**

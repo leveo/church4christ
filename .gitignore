@@ -8,6 +8,7 @@ src/styles/tokens.generated.css
 src/lib/themeMeta.generated.ts
 .DS_Store
 .superpowers/
-
 # Internal design/process docs — never published (kept in local repo only)
 docs/superpowers/
+.worktrees/
+.church/

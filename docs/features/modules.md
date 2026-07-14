@@ -2,8 +2,8 @@
 
 ## What it does
 
-Church4Christ ships with everything turned on — bulletins, sermons, a prayer wall,
-volunteer scheduling, events, articles, and more. That is a lot for a church that just
+Church4Christ can ship with bulletins, sermons, a prayer wall, volunteer scheduling,
+events, articles, and more. That is a lot for a church that just
 wants a simple site with service times and a sermon archive. **Modules** let you keep
 only the parts you use.
 
@@ -14,9 +14,11 @@ history stay exactly where they are — so if you change your mind, you flip the
 on and everything returns. New churches start with a smaller, less intimidating site;
 established churches can turn features on as they grow into them.
 
-Everything is on by default, which is why the demo shows the full feature set. Turning a
-module off never touches the always-on core: the home page, visit and about pages, staff
-directory, the `/give` page, sign-in, settings, and the nightly backup are always present.
+New setup records an explicit on/off row for every module based on the selected preset or
+custom feature list. Older installations remain compatible: a legacy missing row defaults
+to on. Turning a module off never touches the always-on core: the home page, visit and about
+pages, staff directory, the `/give` page, sign-in, settings, and the nightly backup are
+always present.
 
 ## How your team uses it
 
@@ -26,32 +28,35 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 16 modules:**
+**The 17 modules:**
 
-| Group | Module | What it includes |
-|---|---|---|
-| Content | **Bulletins** | Weekly service bulletins with program, offering, and announcements. |
-| Content | **Sermons** | The sermon archive with video and scripture references. |
-| Content | **Prayer Sheets** | Weekly prayer lists organized by section. |
-| Content | **Articles** | Long-form articles and devotional writing. |
-| Content | **Fellowships** | Fellowship groups and their gathering details. |
-| Content | **Page Builder** | The drag-and-drop design tool for custom pages. Turning it off only hides the design tool — any page you already built and published with it keeps rendering exactly as it was. See [`page-builder.md`](page-builder.md). |
-| Community | **Events** | Event cards and the home-page announcement ticker. |
-| Community | **Prayer Wall** | The public prayer-request form and the staff prayer board. |
-| Community | **Testimonies** | Member testimonies, with staff review before publishing. |
-| Community | **People** | Member profiles, households, pastoral notes, and invite-to-serve. Turning it off hides those panels and tools everywhere; the basic people directory that powers sign-in stays. |
-| Community | **Groups** | A public group directory, membership management, routine group events with attendance tracking, and special events created through Registration. |
-| Community | **Children** | The touch-friendly check-in kiosk for Sunday classes and a staff console with a live roster and attendance charts. See [`children-checkin.md`](children-checkin.md). |
-| Volunteering | **Serve** | Ministries, teams, scheduling, applications, and reminders. |
-| Volunteering | **Gifts Quiz** | The spiritual-gifts quiz with ministry recommendations. |
-| Giving *(needs Supabase)* | **Giving** | Online one-time and recurring giving through Stripe, a funds admin, check/cash recording, and a household giving history. See [`giving.md`](giving.md). |
-| Giving *(needs Supabase)* | **Registration** | Event sign-up with custom questions and optional Stripe payment. See [`registration.md`](registration.md). |
+<!-- capabilities:start -->
+| Key | English | 中文 | Required database |
+|---|---|---|---|
+| `bulletins` | Bulletins | 周报 | Either |
+| `sermons` | Sermons | 讲道 | Either |
+| `prayer-sheets` | Prayer Sheets | 祷告单 | Either |
+| `prayer-wall` | Prayer Wall | 祷告墙 | Either |
+| `events` | Events | 活动 | Either |
+| `serve` | Volunteer Scheduling | 服事排班 | Either |
+| `gifts` | Spiritual Gifts | 恩赐探索 | Either |
+| `testimonies` | Testimonies | 见证 | Either |
+| `articles` | Articles | 文章 | Either |
+| `fellowships` | Fellowships | 团契 | Either |
+| `groups` | Groups | 小组 | Either |
+| `people` | People & Households | 会友与家庭 | Either |
+| `children` | Children Check-in | 儿童报到 | Either |
+| `page-builder` | Page Builder | 页面编辑器 | Either |
+| `portal` | Member Portal | 会友平台 | Supabase |
+| `giving` | Giving | 奉献 | Supabase |
+| `registration` | Registration | 活动报名 | Supabase |
+<!-- capabilities:end -->
 
-**Two modules need the Supabase database.** Giving and Registration both use Stripe and a
-Postgres-only feature, so they only run on the optional **Supabase** backend (see
+**Three modules need the Supabase database.** Member Portal, Giving, and Registration run
+only on the optional **Supabase** backend (see
 [`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**
 database sees their checkboxes **greyed out** in the Modules panel with a note explaining
-why, and their pages simply do not exist (404) until the church switches databases. Every
+why, and their pages simply do not exist (404) on D1. Every
 other module works the same on either database.
 
 **What happens when a module is off.** The capability is hidden everywhere at once, not
@@ -80,8 +85,9 @@ never get a link to a page that no longer exists:
 - Turn **Serve off** but leave the gifts quiz on and the quiz still runs, just **without
   the ministry recommendations** that would point people at teams.
 
-Because the defaults are all-on, a brand-new site looks exactly like the demo. You only
-ever subtract.
+The Full Church preset enables all 17 modules; Website enables 8; Website + Community
+enables all 14 modules that are compatible with D1. Custom setup can select individual
+modules.
 
 ## How it fits together
 
@@ -95,10 +101,11 @@ soft-degrade so an off module never leaves a dangling reference.
 
 ## For developers
 
-- **Registry:** `src/lib/modules.ts` is the pure, tested source of truth. `MODULES` maps
-  each of the 16 keys to the locale-stripped route prefixes it owns (public and admin), its
+- **Registry:** `config/capabilities.json` is the canonical, validated catalog, adapted by
+  `src/lib/modules.ts` for runtime use. It maps each of the 17 keys to the locale-stripped
+  route prefixes it owns (public and admin), its
   nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
-  `requiresBackend: 'supabase'` for Giving and Registration. `moduleForPath` is the
+  `requiresBackend: 'supabase'` for Portal, Giving, and Registration. `moduleForPath` is the
   classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts` even
   though `/serve` also matches.
 - **Authoring-only exception:** `page-builder` owns only its `/admin/pages/builder` admin
@@ -107,8 +114,9 @@ soft-degrade so an off module never leaves a dangling reference.
   page a church already built and published with the tool keeps rendering unchanged. Every
   other module gates a whole surface, public and admin together; this one deliberately
   gates authoring only, never already-published content.
-- **Enablement + cache:** module state lives in the `module.<key>` settings rows (absent =
-  on; only the exact string `'0'` disables), then a shared `filterByBackend` helper drops any
+- **Enablement + cache:** new setup writes all 17 `module.<key>` rows explicitly. For legacy
+  installs, an absent row remains on; only the exact string `'0'` disables. A shared
+  `filterByBackend` helper then drops any
   module whose `requiresBackend` doesn't match the current database — so a Supabase-only
   module can never turn on for a D1 deployment even if its setting row says so.
   `getEnabledModules(db, backend)` applies both and caches per (backend, 60s); the middleware
@@ -123,7 +131,7 @@ soft-degrade so an off module never leaves a dangling reference.
   serving reminder and digest crons on the `serve` module; `src/worker.ts` clears the module
   cache before each scheduled run so a warm isolate reads fresh state.
 - **Admin panel:** `src/pages/admin/settings/index.astro` renders the grouped checkboxes and
-  writes all 16 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
+  writes all 17 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
   left partial), then calls `clearModuleCache()`.
 - **Tests:** `test/modules.test.ts` (registry, cache, `moduleForPath`) and
   `test/moduleGating.test.ts` (middleware 404s + hidden surfaces); module-off e2e assertions

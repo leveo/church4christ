@@ -5,8 +5,12 @@
 // matching the theme-cache semantics.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import stripeOperationsSource from '../src/pages/admin/stripe-events.astro?raw';
+import givingGuideSource from '../docs/features/giving.md?raw';
+import registrationGuideSource from '../docs/features/registration.md?raw';
+import supabaseGuideSource from '../docs/supabase-setup.md?raw';
 import { setSetting } from '../src/lib/settings';
-import { MODULE_KEYS, clearModuleCache, getEnabledModules, moduleForPath } from '../src/lib/modules';
+import { MODULE_KEYS, clearModuleCache, getEnabledModules, moduleForPath, paymentOperationsEnabled } from '../src/lib/modules';
 
 // The cache is module-level and survives across tests in this file; wipe both the
 // settings table and the cache before each test so reads see only that test's writes.
@@ -96,29 +100,75 @@ describe('moduleForPath — backend-gated module prefixes', () => {
 });
 
 describe('getEnabledModules — groups module', () => {
-  it('is on by default and turns off with the exact string \'0\'', async () => {
+  it("is on by default and turns off with the exact string '0'", async () => {
     expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(true);
     await setSetting(env.DB, 'module.groups', '0');
-    clearModuleCache(); // bust the per-isolate cache so the write is visible (see above)
+    clearModuleCache();
     expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(false);
   });
 
   it('is available on both backends (no requiresBackend gate)', async () => {
     expect((await getEnabledModules(env.DB, 'supabase')).has('groups')).toBe(true);
+    clearModuleCache();
     expect((await getEnabledModules(env.DB, 'd1')).has('groups')).toBe(true);
   });
 });
 
-describe('moduleForPath — groups module (public + admin routes 404 when off)', () => {
-  it('resolves the public groups/signup/attendance prefixes', () => {
+describe('moduleForPath — groups module', () => {
+  it('resolves the public groups, signup, and attendance prefixes', () => {
     expect(moduleForPath('/groups')).toBe('groups');
     expect(moduleForPath('/groups/7')).toBe('groups');
     expect(moduleForPath('/signup')).toBe('groups');
     expect(moduleForPath('/attendance/abc123')).toBe('groups');
   });
 
-  it('resolves the /admin/groups prefix', () => {
+  it('resolves the admin groups prefix', () => {
     expect(moduleForPath('/admin/groups')).toBe('groups');
     expect(moduleForPath('/admin/groups/7')).toBe('groups');
+  });
+});
+
+describe('Stripe operations module gate', () => {
+  it('is available when Giving or Registration is enabled, but not when both are off', () => {
+    expect(paymentOperationsEnabled(new Set())).toBe(false);
+    expect(paymentOperationsEnabled(new Set(['giving']))).toBe(true);
+    expect(paymentOperationsEnabled(new Set(['registration']))).toBe(true);
+    expect(paymentOperationsEnabled(new Set(['giving', 'registration']))).toBe(true);
+  });
+
+  it('keeps raw payloads, request JSON, secrets, and Checkout URLs out of the page source', () => {
+    for (const forbidden of ['payload_json', 'request_json', 'session_url', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']) {
+      expect(stripeOperationsSource).not.toContain(forbidden);
+    }
+    expect(stripeOperationsSource).toContain('admin.stripe.testMode');
+    expect(stripeOperationsSource).not.toMatch(/live.?mode switch/i);
+  });
+
+  it('uses bounded list projections and service-layer POST actions only', () => {
+    expect(stripeOperationsSource).toContain('listStripeWebhookEvents');
+    expect(stripeOperationsSource).toContain('listRegistrationCheckoutRequests');
+    for (const service of [
+      'replayStripeWebhookEvent', 'dismissStripeWebhookEvent', 'reconcileCheckoutRequestNow',
+      'attachVerifiedCheckoutSession', 'cancelPendingCheckoutRequest',
+    ]) expect(stripeOperationsSource).toContain(service);
+    for (const action of ['replay', 'dismiss', 'reconcile', 'attach', 'cancel']) {
+      expect(stripeOperationsSource).toContain(`value="${action}"`);
+    }
+    expect(stripeOperationsSource).toContain("Astro.request.method === 'POST'");
+    expect(stripeOperationsSource).toContain("user.isAdmin || user.finance === 1");
+    expect(stripeOperationsSource).toContain('stripeAdminActionAllowed(action, stripeEnv)');
+    expect(stripeOperationsSource).toContain('cancel-registration-${row.registrationId}');
+    expect(stripeOperationsSource).toContain('limit: PAGE_SIZE');
+    expect(stripeOperationsSource).toContain('offset:');
+  });
+
+  it('documents the complete shared async Checkout webhook contract and one-shot test setup', () => {
+    for (const guide of [givingGuideSource, registrationGuideSource, supabaseGuideSource]) {
+      expect(guide).toContain('checkout.session.async_payment_succeeded');
+      expect(guide).toContain('checkout.session.async_payment_failed');
+      expect(guide).toContain('CHURCH_SETUP_STRIPE_SECRET_KEY');
+      expect(guide).toContain('CHURCH_SETUP_STRIPE_WEBHOOK_SECRET');
+    }
+    expect(supabaseGuideSource).toContain('exactly these eight events');
   });
 });

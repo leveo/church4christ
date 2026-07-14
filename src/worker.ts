@@ -5,6 +5,7 @@ import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
 import { getBackend, openDb } from './lib/dbProvider';
+import { runStripeRecovery } from './lib/stripeRecovery';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -14,6 +15,7 @@ const REMINDER_CRON = '0 13 * * *'; // daily serving reminders (remind7 / remind
 const DIGEST_CRON = '0 14 * * 4'; // weekly serving digest (Thursday)
 const BACKUP_CRON = '0 9 * * *'; // daily D1 backup (slice 7)
 const ATTENDANCE_CRON = '0 * * * *'; // hourly group-attendance tracker emails
+const STRIPE_RECOVERY_CRON = '*/5 * * * *'; // Supabase durable inbox + Checkout recovery
 
 export default {
   fetch: (request, env, ctx) => handle(request, env, ctx),
@@ -55,6 +57,10 @@ export default {
           break;
         }
         ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv, new Date(controller.scheduledTime)));
+        break;
+      case STRIPE_RECOVERY_CRON:
+        if (getBackend(env as never) !== 'supabase') break;
+        ctx.waitUntil(runStripeRecovery({ env: env as never }));
         break;
       default:
         console.warn(`unhandled cron trigger: ${controller.cron}`);

@@ -13,7 +13,7 @@ export default async function () {
 
   const sql = postgres(url, { max: 1, fetch_types: false, onnotice: () => {} });
   try {
-    await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await sql.unsafe('DROP SCHEMA IF EXISTS church_private CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   } finally {
     await sql.end();
   }

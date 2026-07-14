@@ -13,6 +13,11 @@ import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
 import { getOpenEvent, listQuestions } from '../../../lib/regDb';
 import { btn, lab, tin, noticeErr, badge, badgeInactive } from '../../../lib/adminUi';
+import {
+  isCheckoutRequestId,
+  ownsRecoverableRegistrationCheckoutRequest,
+  registrationCheckoutRenderPolicy,
+} from '../../../lib/stripeCheckoutRequests';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -27,17 +32,46 @@ const questions = event ? await listQuestions(Astro.locals.db, locale, eventId) 
 
 const user = Astro.locals.user;
 const errParam = Astro.url.searchParams.get('error');
-const errorKey =
-  errParam === 'full' ? 'register.error.full' : errParam === 'invalid' ? 'register.error.invalid' : null;
-
 const paid = !!event && event.price_cents !== null && event.price_cents > 0;
-const isFull = !!event && event.capacity !== null && event.taken_count >= event.capacity;
+const requestedCheckoutId = errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null;
+const ownsWaitingSeat = Number.isSafeInteger(eventId)
+  && eventId > 0
+  && isCheckoutRequestId(requestedCheckoutId)
+  && await ownsRecoverableRegistrationCheckoutRequest(Astro.locals.db, requestedCheckoutId, eventId);
+const { checkoutRequestId, isFull } = registrationCheckoutRenderPolicy({
+  paid,
+  capacity: event?.capacity ?? null,
+  takenCount: event?.taken_count ?? 0,
+  error: errParam,
+  checkoutRequestId: requestedCheckoutId,
+  ownsWaitingSeat,
+});
+const errorKey =
+  errParam === 'full'
+    ? 'register.error.full'
+    : errParam === 'invalid' || errParam === 'waiting'
+      ? 'register.error.invalid'
+      : null;
+
 const priceLabel = paid ? `$${(event!.price_cents! / 100).toFixed(2)}` : t(locale, 'register.free');
 const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${event.starts_at.slice(11, 16)}` : '';
 ---
 
 {
-  !event ? (
+  !event && ownsWaitingSeat ? (
+    <Base title={t(locale, 'register.title')} locale={locale}>
+      <div class="container-content max-w-xl py-16 text-center">
+        {errorKey && <p class={noticeErr}>{t(locale, errorKey)}</p>}
+        <form method="post" action="/api/register/submit" class="mt-6">
+          <input type="hidden" name="locale" value={locale} />
+          <input type="hidden" name="event_id" value={eventId} />
+          <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
+          <input type="hidden" name="action" value="continue" />
+          <button type="submit" class={btn}>{t(locale, 'register.submit.paid')}</button>
+        </form>
+      </div>
+    </Base>
+  ) : !event ? (
     <Base title={t(locale, 'register.title')} locale={locale}>
       <div class="container-content max-w-xl py-16 text-center">
         <p class={noticeErr}>{t(locale, 'register.error.closed')}</p>
@@ -62,12 +96,21 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
 
         {errorKey && <p class={`${noticeErr} mt-6`}>{t(locale, errorKey)}</p>}
 
-        {isFull ? (
+        {ownsWaitingSeat ? (
+          <form method="post" action="/api/register/submit" class="mt-6">
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="event_id" value={event.id} />
+            <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
+            <input type="hidden" name="action" value="continue" />
+            <button type="submit" class={btn}>{t(locale, 'register.submit.paid')}</button>
+          </form>
+        ) : isFull ? (
           <p class={`${badge} ${badgeInactive} mt-6`}>{t(locale, 'register.full')}</p>
         ) : (
           <form method="post" action="/api/register/submit" class="mt-6 space-y-4">
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="event_id" value={event.id} />
+            <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
 
             {/* Honeypot: hidden from humans, tempting for bots. */}
             <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">

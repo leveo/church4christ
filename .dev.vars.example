@@ -23,11 +23,11 @@ AUTH_DEV_BYPASS_EMAIL=admin@example.com
 # STRIPE_SECRET_KEY=sk_test_xxx
 # STRIPE_WEBHOOK_SECRET=whsec_xxx
 
-# Local Postgres for `wrangler dev` when DB_BACKEND=supabase. wrangler points the
-# HYPERDRIVE binding at this URL locally (no real Hyperdrive needed). Migrate +
-# seed it first: `SUPABASE_DB_URL=<url> npm run db:migrate:supabase` then
-# `db:seed:supabase`. See docs/supabase-setup.md.
-# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5432/postgres
+# Local Supabase/Postgres uses the canonical host environment variable below. It is
+# consumed by Wrangler before Worker bindings load, so it MUST NOT be placed in
+# `.dev.vars`. Export it in the host shell that starts `npm run dev` instead:
+# export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE='postgres://postgres:postgres@localhost:5432/postgres'
+# See docs/supabase-setup.md. No assignment is included here intentionally.
 
 # Token for the nightly D1→R2 backup (src/lib/backup.ts). Set this plus the
 # CF_ACCOUNT_ID + D1_DATABASE_ID vars in wrangler.jsonc to enable backups; if

@@ -136,10 +136,33 @@ Every feature has its own plain-English guide. Start with any of these:
 
 **Pick your modules.** Every capability above is a **module** you can switch off from one
 panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling, and more.
-Everything starts on (which is why the demo shows it all), but a church that only wants
-service times and sermons can hide the rest in a click: the module's pages, links, and
-emails disappear together, and nothing is ever deleted, so you can turn any of it back on
-later. See [**`docs/features/modules.md`**](docs/features/modules.md).
+New installations write every module setting explicitly from the setup selection; the Full
+Church demo selects all 17. On older installations only, missing module rows retain the
+legacy default-on behavior. A church that wants only service times and sermons can hide the
+rest in a click: the module's pages, links, and emails disappear together, and nothing is
+deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
+
+<!-- capabilities:start -->
+| Key | English | 中文 | Required database |
+|---|---|---|---|
+| `bulletins` | Bulletins | 周报 | Either |
+| `sermons` | Sermons | 讲道 | Either |
+| `prayer-sheets` | Prayer Sheets | 祷告单 | Either |
+| `prayer-wall` | Prayer Wall | 祷告墙 | Either |
+| `events` | Events | 活动 | Either |
+| `serve` | Volunteer Scheduling | 服事排班 | Either |
+| `gifts` | Spiritual Gifts | 恩赐探索 | Either |
+| `testimonies` | Testimonies | 见证 | Either |
+| `articles` | Articles | 文章 | Either |
+| `fellowships` | Fellowships | 团契 | Either |
+| `groups` | Groups | 小组 | Either |
+| `people` | People & Households | 会友与家庭 | Either |
+| `children` | Children Check-in | 儿童报到 | Either |
+| `page-builder` | Page Builder | 页面编辑器 | Either |
+| `portal` | Member Portal | 会友平台 | Supabase |
+| `giving` | Giving | 奉献 | Supabase |
+| `registration` | Registration | 活动报名 | Supabase |
+<!-- capabilities:end -->
 
 ### A home for your members
 
@@ -162,7 +185,8 @@ default D1 backend simply do not see the portal controls or routes. Learn more i
 ## Try it in 5 minutes (on your own computer)
 
 You can run the whole site locally — with realistic sample content — before you commit
-to anything. You will need [Node.js](https://nodejs.org/) 22 or newer installed.
+to anything. You will need [Node.js](https://nodejs.org/) 22 or newer installed. The guided
+setup asks which initial feature set you want and chooses D1 or Supabase from that choice.
 
 ```bash
 # 1. Get the code and install it
@@ -170,32 +194,46 @@ git clone https://github.com/leveo/church4christ.git
 cd church4christ
 npm install
 
-# 2. Create your local settings (safe demo values, already filled in)
-cp .dev.vars.example .dev.vars
+# 2. Choose features, create the database, and bootstrap the first admin
+npm run setup
 
-# 3. Generate types, build the theme colors, create and fill the local demo
-npm run cf-typegen
-npm run tokens
-npm run db:migrate:local
-npm run db:seed:local
-npm run db:seed-media:local
-
-# 4. Start it
+# 3. For D1, start it (always follow the exact handoff setup prints)
 npm run dev
 ```
 
-Open the address it prints (usually `http://localhost:4321`). You will see the full
-public site with sample sermons, bulletins, events, ministries, and local demo images.
-The media step copies the generated image pack from `seed/media/` into local R2 and
-updates the local D1 rows that point at those objects. It is safe to run again after
-reseeding the database.
+For local Supabase, the handoff instead exports
+`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
+`npm run dev`; that connection URL must not go in `.dev.vars`.
 
-**Signing in to the admin area.** There is no password. On the sign-in page, enter
-`admin@example.com` and request a link — because local email is set to print instead of
-send, the **magic-link URL appears right in your terminal**. Paste it into the browser
-and you are in. (For even quicker poking around, `.dev.vars` also sets
-`AUTH_DEV_BYPASS_EMAIL=admin@example.com`, which signs you in automatically in local
-development — no link needed. Remove that line to test the real sign-in flow.)
+Open the address it prints (usually `http://localhost:4321`). If you chose demo data during
+setup, you will see sample sermons, bulletins, events, ministries, and local demo images.
+The media step copies the generated image pack from `seed/media/` into local R2 and updates
+the configured database records that refer to those objects. It is safe to run again after
+reseeding the database. Without demo data, setup leaves a clean installation for your own
+content.
+
+**Signing in to the admin area.** There is no password. On the sign-in page, enter the
+first-admin email from your setup answers, repeated in the setup handoff, and request a
+link. Because local email is set to print instead of send, the **magic-link URL appears
+right in your terminal**. Paste it into the browser and you are in. (For quicker local
+testing, setup writes that same address as `AUTH_DEV_BYPASS_EMAIL` in `.dev.vars`, which
+signs you in automatically. Remove that line to test the real sign-in flow.)
+
+Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 14
+D1-compatible modules), and **Full Church** (all 17 modules). Portal, Giving, and
+Registration select Supabase automatically; D1-compatible selections choose D1 unless you
+explicitly override the backend. Account requirements depend on Local versus Deploy mode,
+as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
+machine-readable result. For a human-readable noninteractive run, use the same complete
+flags with `npm run setup -- ... --yes` and omit `--json`. To keep stdout strictly JSON
+through npm, use the silent form:
+
+```bash
+npm run --silent setup -- --mode local --preset website --site-slug my-church \
+  --church-name "My Church" --locale en --admin-email admin@example.com \
+  --admin-name "First Admin" --app-origin http://localhost:4321 \
+  --email-from admin@example.com --demo-data --yes --json
+```
 
 ---
 
@@ -207,17 +245,26 @@ ways to get online (including letting an AI assistant do it for you). When you w
 exact commands, [**`docs/deploy.md`**](docs/deploy.md) is the full step-by-step
 walkthrough.
 
-In short: create a **free Cloudflare account**, create the database and storage bucket,
-paste their IDs into one config file, set one secret, and run **`npm run deploy`**. You
-can point your own domain (for example, `church.yourname.com`) at it in a few more
-clicks. The guide covers the first-admin setup and email so a real congregation can start
-using the site the same day. Deployment is manual on purpose — your Cloudflare keys never
-have to touch a public repo.
+Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
+It creates or imports the required resources, writes the generated configuration, applies
+migrations, records all 17 module settings, and bootstraps the first admin. It then hands
+off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness report.
 
-**Choosing your database.** The default setup uses Cloudflare **D1** and needs no extra
-accounts. It runs everything except online **Giving** and **Registration**, which need
-Postgres and Stripe and run on a free **Supabase** database instead. Want those two? Follow
-[**`docs/supabase-setup.md`**](docs/supabase-setup.md). You can start on D1 and switch later.
+**Choosing your database.** The 14 D1-compatible modules exclude **Member Portal**,
+**Giving**, and **Registration**, which require Postgres. Account requirements follow the
+mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
+Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase
+needs both Cloudflare and Supabase. There is no automated D1↔Supabase content migration yet,
+so choose the production database before entering real content. See
+[**`docs/supabase-setup.md`**](docs/supabase-setup.md).
+
+**Stripe starts and stays in test mode.** Giving and Registration are Supabase-only; D1
+does not support Stripe modules. When setup asks for either payment feature, import only an
+`sk_test_…` key and `whsec_…` signing secret with the one-shot
+`CHURCH_SETUP_STRIPE_SECRET_KEY` and `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment
+variables. Setup stores the runtime secrets automatically and rejects live keys. Signed live
+events are rejected with `400 live_mode_disabled` before storage, while Supabase runs durable
+recovery every five minutes. See the Supabase guide for the exact command.
 
 ---
 
