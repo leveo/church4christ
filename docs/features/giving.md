@@ -78,9 +78,11 @@ notes instead of failing.)
 **Who can see the money.** Giving figures are sensitive, so access is deliberately narrow:
 
 - The **giving admin** pages (record gifts, funds, reconcile) are open only to an **admin**
-  or to someone with the **finance** flag set on their profile. An admin turns that flag on
-  from a person's page in `/admin/people`, so a church treasurer can manage giving without
-  being made a full site admin.
+   or to someone with the **finance** flag set on their profile. An admin turns that flag on
+   from a person's page in `/admin/people`, so a church treasurer can manage giving without
+  being made a full site admin. This is a shared **payment operations** permission: when
+  paid Registration is enabled, it also grants Stripe recovery and registration-payment
+  cancellation authority.
 - The **My giving** page shows a giver only their **own household's** gifts — never another
   family's. Someone with no household sees just their own.
 - **Refunds** stay visible in a giver's history (so the refund is honest), but never count
@@ -102,22 +104,39 @@ D1 setup, because it needs Stripe, subscriptions, and a reconciliation database 
 cannot host. Stand up the Supabase backend first (see
 [`docs/supabase-setup.md`](../supabase-setup.md)), then:
 
-1. **Add your Stripe keys.** Set `STRIPE_SECRET_KEY` (a test-mode `sk_test_…` key while you
-   try it out, a live key in production) and `STRIPE_WEBHOOK_SECRET`. Also set `APP_ORIGIN`
-   to your site's address so Stripe knows where to send givers back after checkout. Until
-   the keys are set, the online form is inert — offline recording still works.
+1. **Import Stripe test credentials through setup.** Get an `sk_test_…` key and the test
+   endpoint's `whsec_…` signing secret, then pass them only to the setup process:
+
+   ```bash
+   CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+   CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+   npm run setup
+   ```
+
+   These `CHURCH_SETUP_STRIPE_*` names are one-shot setup inputs. Setup stores them under
+   the runtime secret names automatically; do not rename them to ambient `STRIPE_*`
+   variables before running setup. Live keys are rejected, and a separately signed live
+   webhook receives `400 live_mode_disabled` without being stored. Until the test
+   credentials are set, the online form is inert — offline recording still works.
 2. **Point a Stripe webhook at your site.** In the Stripe dashboard, add a webhook endpoint
-   at `https://your-site/api/stripe/webhook` and subscribe it to these events:
-   `checkout.session.completed`, `invoice.paid`, `charge.refunded`,
-   `customer.subscription.updated`, and `customer.subscription.deleted`. This is how a
-   completed payment, a monthly renewal, a refund, or a canceled subscription reaches your
-   ledger. Copy the endpoint's signing secret into `STRIPE_WEBHOOK_SECRET`.
+   at `https://your-site/api/stripe/webhook` and subscribe it to all eight shared events:
+   `checkout.session.completed`, `checkout.session.expired`,
+   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+   `invoice.paid`, `charge.refunded`, `customer.subscription.updated`, and
+   `customer.subscription.deleted`. This is how a completed or asynchronous payment, an
+   expiry, a monthly renewal, a refund, or a canceled subscription reaches the app. Use the endpoint's signing secret as the
+   `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` input in step 1.
 3. **Choose your currency (optional).** Gifts default to US dollars. To use another currency,
    set the `giving.currency` site setting to its three-letter code (for example `cad`).
 4. **Add your funds** on `/admin/giving/funds`, and **mark your treasurer** with the finance
    flag on their person page so they can manage giving.
 
-Once giving is live, reconciliation is an optional extra: a church can expose its Stripe
+The Supabase worker runs durable webhook and Checkout recovery every five minutes. Admins
+and finance users can inspect bounded receipts and retry or dismiss eligible test events at
+`/admin/stripe-events`; raw customer and payment payloads are never shown there. D1 does not
+support Giving or Stripe operations.
+
+Once giving is enabled, reconciliation is an optional extra: a church can expose its Stripe
 data to Supabase read-only to light up the Reconcile page's drift checks. Online giving works
 fully without it — reconciliation is an audit convenience, not a requirement.
 

@@ -15,7 +15,7 @@ import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '.
 import { t } from '../lib/i18n';
 import { getLogoImageKey } from '../lib/settings';
 import { mediaPath } from '../lib/mediaRef';
-import type { ModuleKey } from '../lib/modules';
+import { paymentOperationsEnabled, type ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
 import { hasAreaAccess, type AdminAreaKey } from '../lib/adminAreas';
 
@@ -74,6 +74,7 @@ const isConsole = isStaff || (user?.leaderTeamIds.length ?? 0) > 0;
 // none — it is core). Groups drop out once every child is hidden.
 const modules = Astro.locals.modules;
 const modOn = (m?: ModuleKey) => !m || modules.has(m);
+const hasPaymentOperations = paymentOperationsEnabled(modules);
 // Per-admin area filter: only narrows admins — editors/leaders/finance keep
 // their role-based rows (their `show` booleans), so non-admins pass areaOn.
 const areaOn = (a?: AdminAreaKey) => !a || !user?.isAdmin || hasAreaAccess(user, a);
@@ -128,6 +129,12 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.groups'), href: '/admin/groups', show: isAdmin, module: 'groups', area: 'groups' },
   { label: t(lang, 'admin.nav.children'), href: '/admin/children', show: isAdmin, module: 'children', area: 'children' },
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving', area: 'giving' },
+  {
+    label: t(lang, 'admin.stripe.title'),
+    href: '/admin/stripe-events',
+    show: isFinance && hasPaymentOperations,
+    area: 'payment-operations',
+  },
   {
     label: t(lang, 'admin.reg.title'),
     href: '/admin/registration',

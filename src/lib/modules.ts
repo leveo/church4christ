@@ -1,38 +1,33 @@
-// Module registry + enablement cache (spec addendum §A). Every non-core
+// Stable runtime module adapter + enablement cache (spec addendum §A). The
+// capability catalog is canonical; this module preserves the existing runtime
+// API over its metadata. Every non-core
 // capability is a MODULE a church can switch off to simplify onboarding; all
-// default ON. This file is the pure, tested source of truth: `MODULES` maps each
+// default ON. `MODULES` maps each
 // key to the locale-stripped route prefixes it owns, plus its nav dictionary keys
 // and soft `uses` (degrade-only, no hard deps). `moduleForPath` is the middleware
 // choke point's classifier; `getEnabledModules` reads the `module.<key>` settings
 // with the same per-isolate 60s cache the theme uses.
 import type { AppDb } from './appDb';
+import {
+  CAPABILITIES,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+  type CapabilityKey,
+} from './capabilityCatalog';
 import type { DbBackend } from './dbProvider';
 import { getSettings } from './settings';
 
-// The 17 module keys, in display order (drives the admin Modules panel + nav).
-// `giving`, `registration` and `portal` are appended last: they are backend-gated
-// (Supabase only) and stay off on the D1 backend regardless of their settings row.
-export const MODULE_KEYS = [
-  'bulletins',
-  'sermons',
-  'prayer-sheets',
-  'prayer-wall',
-  'events',
-  'serve',
-  'gifts',
-  'testimonies',
-  'articles',
-  'fellowships',
-  'groups',
-  'people',
-  'children',
-  'page-builder',
-  'giving',
-  'registration',
-  'portal',
-] as const;
+export const MODULE_KEYS = CAPABILITY_KEYS;
+export type ModuleKey = CapabilityKey;
 
-export type ModuleKey = (typeof MODULE_KEYS)[number];
+const BACKEND_REQUIREMENT_KEYS = {
+  d1: 'admin.modules.requiresD1',
+  supabase: 'admin.modules.requiresSupabase',
+} as const satisfies Record<DbBackend, string>;
+
+export function moduleBackendRequirementKey(backend: DbBackend): string {
+  return BACKEND_REQUIREMENT_KEYS[backend];
+}
 
 export interface ModuleDef {
   /** Locale-stripped public route prefixes this module owns. */
@@ -45,132 +40,80 @@ export interface ModuleDef {
   uses: ModuleKey[];
   /** Backend requirement: when set, the module is force-disabled on any other
    *  backend (the filter in getEnabledModules wins over its settings row). */
-  requiresBackend?: 'supabase';
+  requiresBackend?: DbBackend;
 }
 
-// Per-module route ownership. Notes: `/profile` stays CORE (auth surface), so it
-// is absent here; `gifts` owns `/serve/gifts` and `testimonies` owns
-// `/serve/testimonies`, which win over `serve`'s `/serve` by longest-prefix match;
-// `events` also owns `/admin/announcements` (the homepage ticker admin);
-// `people` deliberately owns NO route prefixes: its surfaces live inside
-// pre-existing CORE routes (`/profile`, `/admin/people`) and its opportunity
-// board is under `/serve` (the `serve` module). The People module therefore
-// gates only its added panels/sections via `locals.modules.has('people')` in
-// those pages (slice 9), never whole routes.
-export const MODULES: Record<ModuleKey, ModuleDef> = {
-  bulletins: {
-    publicPrefixes: ['/bulletin'],
-    adminPrefixes: ['/admin/bulletins'],
-    navKeys: ['nav.bulletin'],
-    uses: [],
-  },
-  sermons: {
-    publicPrefixes: ['/sermons'],
-    adminPrefixes: ['/admin/sermons'],
-    navKeys: ['nav.sermons'],
-    uses: [],
-  },
-  'prayer-sheets': {
-    publicPrefixes: ['/prayer'],
-    adminPrefixes: ['/admin/prayer-sheets'],
-    navKeys: ['nav.prayer'],
-    uses: [],
-  },
-  'prayer-wall': {
-    publicPrefixes: ['/api/prayer-request'],
-    adminPrefixes: ['/admin/prayer-wall'],
-    navKeys: [],
-    uses: [],
-  },
-  events: {
-    publicPrefixes: ['/events'],
-    adminPrefixes: ['/admin/events', '/admin/announcements'],
-    navKeys: ['nav.events'],
-    uses: [],
-  },
-  serve: {
-    publicPrefixes: ['/serve', '/my', '/cal', '/ministries'],
-    adminPrefixes: ['/admin/ministries', '/admin/service-types', '/admin/teams', '/admin/reports'],
-    navKeys: ['nav.serve', 'nav.ministries', 'nav.opportunities'],
-    uses: [],
-  },
-  gifts: {
-    publicPrefixes: ['/serve/gifts'],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve'],
-  },
-  testimonies: {
-    publicPrefixes: ['/serve/testimonies'],
-    adminPrefixes: ['/admin/testimonies'],
-    navKeys: [],
-    uses: [],
-  },
-  articles: {
-    publicPrefixes: ['/articles'],
-    adminPrefixes: [],
-    navKeys: ['nav.articles'],
-    uses: [],
-  },
-  fellowships: {
-    publicPrefixes: ['/fellowships'],
-    adminPrefixes: [],
-    navKeys: ['nav.fellowships'],
-    uses: [],
-  },
-  groups: {
-    publicPrefixes: ['/groups', '/signup', '/attendance'],
-    adminPrefixes: ['/admin/groups'],
-    navKeys: ['nav.groups'],
-    uses: ['people', 'registration'],
-  },
-  people: {
-    publicPrefixes: [],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve'],
-  },
-  children: {
-    publicPrefixes: ['/kiosk'],
-    adminPrefixes: ['/admin/children'],
-    navKeys: [],
-    uses: [],
-  },
-  'page-builder': {
-    // Gates AUTHORING only: published builder pages keep rendering when off
-    // (the /p/ route and block renderer are core, like the people module's
-    // panels) — a module toggle never breaks live content.
-    publicPrefixes: [],
-    adminPrefixes: ['/admin/pages/builder'],
-    navKeys: [],
-    uses: [],
-  },
-  giving: {
-    publicPrefixes: ['/give/checkout', '/my/giving', '/api/giving'],
-    adminPrefixes: ['/admin/giving'],
-    navKeys: [],
-    uses: ['people'],
-    requiresBackend: 'supabase',
-  },
-  registration: {
-    publicPrefixes: ['/register', '/api/register'],
-    adminPrefixes: ['/admin/registration'],
-    navKeys: ['nav.register'],
-    uses: [],
-    requiresBackend: 'supabase',
-  },
-  // Member self-service. Fuses onto the existing groups module (kind/term live in
-  // /admin/groups, event_admins in /admin/registration — no admin prefixes of its
-  // own; the Groups tab links to the shared /groups). Supabase-only (household
-  // owners, prayer wall + files live in the Supabase-only portal tables).
-  portal: {
-    publicPrefixes: ['/my/household', '/my/events', '/my/serving', '/my/prayer', '/email-change'],
-    adminPrefixes: [],
-    navKeys: [],
-    uses: ['serve', 'groups'],
-    requiresBackend: 'supabase',
-  },
-};
+function dbBackend(value: string | undefined): DbBackend | undefined {
+  if (value === undefined || value === 'd1' || value === 'supabase') return value;
+  throw new Error(`Unsupported database provider in capability catalog: ${value}`);
+}
+
+export const MODULES = Object.fromEntries(
+  MODULE_KEYS.map((key) => {
+    const def = CAPABILITIES[key];
+    const requiresBackend = dbBackend(def.requiresBackend);
+    return [
+      key,
+      {
+        publicPrefixes: [...def.publicPrefixes],
+        adminPrefixes: [...def.adminPrefixes],
+        navKeys: [...def.navKeys],
+        uses: [...def.uses],
+        ...(requiresBackend ? { requiresBackend } : {}),
+      },
+    ];
+  }),
+) as Record<ModuleKey, ModuleDef>;
+
+const MODULE_GROUP_CONFIG = [
+  { group: 'content', titleKey: 'admin.settings.modulesContentGroup' },
+  { group: 'community', titleKey: 'admin.settings.modulesCommunityGroup' },
+  { group: 'volunteering', titleKey: 'admin.settings.modulesVolunteeringGroup' },
+] as const;
+
+type SupportedModuleGroup = (typeof MODULE_GROUP_CONFIG)[number]['group'];
+
+export interface ModuleGroup {
+  group: SupportedModuleGroup;
+  titleKey: string;
+  keys: ModuleKey[];
+}
+
+export function buildModuleGroups(
+  keys: readonly ModuleKey[],
+  definitions: Record<ModuleKey, { group: string }>,
+  declaredGroups: readonly string[],
+): ModuleGroup[] {
+  const supported = new Set<string>(MODULE_GROUP_CONFIG.map(({ group }) => group));
+  const unsupportedDeclared = declaredGroups.filter((group) => !supported.has(group));
+  if (unsupportedDeclared.length) {
+    throw new Error(`Unsupported capability group(s): ${unsupportedDeclared.join(', ')}`);
+  }
+
+  const seen = new Set<ModuleKey>();
+  for (const key of keys) {
+    if (seen.has(key)) throw new Error(`Duplicate module key in grouping: ${key}`);
+    seen.add(key);
+    if (!Object.hasOwn(definitions, key)) {
+      throw new Error(`Missing capability definition for module grouping: ${key}`);
+    }
+    if (!supported.has(definitions[key].group)) {
+      throw new Error(`Unsupported capability group for ${key}: ${definitions[key].group}`);
+    }
+  }
+
+  return MODULE_GROUP_CONFIG.map(({ group, titleKey }) => ({
+    group,
+    titleKey,
+    keys: keys.filter((key) => definitions[key].group === group),
+  }));
+}
+
+export const MODULE_GROUPS = buildModuleGroups(
+  MODULE_KEYS,
+  CAPABILITIES,
+  CAPABILITY_CATALOG.groups,
+);
 
 // Flattened [prefix, key] pairs, built once. Every prefix a module owns (public
 // or admin) points back to its module; `moduleForPath` picks the longest match.
@@ -202,6 +145,11 @@ export function moduleForPath(path: string): ModuleKey | null {
     }
   }
   return best;
+}
+
+/** Shared gate for the global finance operations surface and role assignment. */
+export function paymentOperationsEnabled(modules: ReadonlySet<string>): boolean {
+  return modules.has('giving') || modules.has('registration');
 }
 
 // Per-isolate cache: reading the module settings on every request would hammer

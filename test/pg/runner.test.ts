@@ -34,6 +34,13 @@ describe.skipIf(!hasPg)('Supabase migration runner + seed script', () => {
     run('migrate-supabase.mjs'); // must not throw
     const rows = await sql.unsafe('SELECT name FROM _migrations ORDER BY name');
     expect(rows.map((r) => r.name)).toEqual(migrationFiles());
+    const privateRows = await sql.unsafe(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'church_private' ORDER BY table_name",
+    );
+    expect(privateRows.map((row) => row.table_name)).toEqual([
+      'stripe_checkout_requests',
+      'stripe_webhook_events',
+    ]);
   });
 
   it('seeds the demo data (people rows exist)', async () => {

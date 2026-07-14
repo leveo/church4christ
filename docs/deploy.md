@@ -13,12 +13,38 @@ an AI assistant").
 > R2 all have free allowances. A custom domain is the only thing you might pay for, and only
 > if you do not already own one.
 
-> **Which database?** This guide uses **D1**, the default — no extra accounts, simplest
-> setup, and it runs everything except online **Giving** and **Registration**. Those two
-> modules need Postgres and Stripe, which run on **Supabase** instead. If you want them,
-> follow [`supabase-setup.md`](./supabase-setup.md) for the database and Stripe parts and
-> come back here for the rest (domain, email, first admin). You can start on D1 and switch
-> later.
+> **Which database?** The 14 D1-compatible modules need only Cloudflare when deployed.
+> Member Portal, Giving, and Registration select Supabase and need both Cloudflare and a
+> Supabase account. There is no automated D1↔Supabase content migration yet.
+
+## Recommended: guided setup
+
+After `npm install`, run the guided installer first:
+
+```bash
+npm run setup
+```
+
+Choose **Deploy**, then Website (8 modules), Website + Community (all 14 D1-compatible
+modules), Full Church (all 17), or a custom feature list. Setup selects the database,
+creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
+migrations, stores explicit module settings, and bootstraps the first admin. It prints the
+next command, normally `npm run deploy`. Verify readiness at any time with:
+
+```bash
+npm run doctor
+```
+
+Deploying D1 requires a Cloudflare account. Deploying Supabase requires Cloudflare and
+Supabase. When a deploy setup must create or recover a Hyperdrive configuration, it refuses
+to put the connection URL in Wrangler's child-process arguments unless you explicitly add
+`--allow-hyperdrive-secret-in-argv` after reviewing that exposure. Importing an existing
+Hyperdrive does not require that consent.
+
+## Manual reference and troubleshooting
+
+The remaining commands explain the underlying Cloudflare operations and are useful when
+troubleshooting or maintaining an installation created by setup.
 
 ## Before you start
 
@@ -130,17 +156,12 @@ Using `church.yunfei-song.com` as the example:
    an address on that domain, then `npm run deploy` again so the running Worker knows its own
    origin (this matters for CSRF checks and absolute links).
 
-## 8. Create the first admin
+## 8. Sign in as the first admin
 
-The database is empty, so create your first administrator directly. Adjust the name, email,
-and language:
-
-```bash
-npx wrangler d1 execute church4christ-db --remote \
-  --command "INSERT INTO people (display_name, email, role, lang) VALUES ('Your Name', 'you@yourchurch.org', 'admin', 'en');"
-```
-
-Now open `https://church.yunfei-song.com/en/signin`, enter that email, and request a link.
+`npm run setup` creates or promotes the first administrator through the same validated,
+idempotent bootstrap path on both databases. Use the email you supplied to setup; do not
+insert an admin with ad-hoc SQL. Open `https://church.yunfei-song.com/en/signin`, enter that
+email, and request a link.
 The magic link is delivered by email (or, with `EMAIL_DEV_LOG=1`, appears in `wrangler tail`).
 Click it and you are in as an admin. From there, set your church's name, address, service
 times, and theme in **Settings**, and start adding content.

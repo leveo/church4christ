@@ -142,7 +142,7 @@ export function classifyRoute(pathname: string): RouteClass {
   // user reaches it without full site-admin — then admin-only areas, then the
   // console root + explicit console list, then fail closed (an unlisted /admin
   // path is adminOnly, never weaker).
-  if (under(p, '/admin/giving')) return 'finance';
+  if (under(p, '/admin/giving') || under(p, '/admin/stripe-events')) return 'finance';
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
   if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
   if (under(p, '/admin')) return 'adminOnly';

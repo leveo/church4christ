@@ -5,9 +5,27 @@
 // /ministries), and the always-on CORE paths that must resolve to null (/,
 // /profile, /admin/people, unknown, and segment-aware lookalikes).
 import { describe, expect, it } from 'vitest';
-import { MODULE_KEYS, MODULES, filterByBackend, moduleForPath } from '../src/lib/modules';
+import {
+  CAPABILITIES,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+} from '../src/lib/capabilityCatalog';
+import {
+  MODULE_GROUPS,
+  MODULE_KEYS,
+  MODULES,
+  moduleBackendRequirementKey,
+  buildModuleGroups,
+  filterByBackend,
+  moduleForPath,
+} from '../src/lib/modules';
 
 describe('MODULES registry', () => {
+  it('maps each supported backend to its requirement label key', () => {
+    expect(moduleBackendRequirementKey('supabase')).toBe('admin.modules.requiresSupabase');
+    expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
+  });
+
   it('has all 17 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
@@ -24,10 +42,29 @@ describe('MODULES registry', () => {
       'people',
       'children',
       'page-builder',
+      'portal',
       'giving',
       'registration',
-      'portal',
     ]);
+  });
+
+  it('matches the canonical catalog metadata while exposing independent arrays', () => {
+    expect(MODULE_KEYS).toEqual(CAPABILITY_KEYS);
+    for (const key of MODULE_KEYS) {
+      expect(MODULES[key]).toEqual({
+        publicPrefixes: CAPABILITIES[key].publicPrefixes,
+        adminPrefixes: CAPABILITIES[key].adminPrefixes,
+        navKeys: CAPABILITIES[key].navKeys,
+        uses: CAPABILITIES[key].uses,
+        ...(CAPABILITIES[key].requiresBackend
+          ? { requiresBackend: CAPABILITIES[key].requiresBackend }
+          : {}),
+      });
+      expect(MODULES[key].publicPrefixes).not.toBe(CAPABILITIES[key].publicPrefixes);
+      expect(MODULES[key].adminPrefixes).not.toBe(CAPABILITIES[key].adminPrefixes);
+      expect(MODULES[key].navKeys).not.toBe(CAPABILITIES[key].navKeys);
+      expect(MODULES[key].uses).not.toBe(CAPABILITIES[key].uses);
+    }
   });
 
   it('gifts/people softly use serve, giving softly uses people, groups softly uses people+registration, portal softly uses serve+groups; every other module has no deps', () => {
@@ -43,13 +80,39 @@ describe('MODULES registry', () => {
     }
   });
 
-  it('giving, registration and portal require the supabase backend; no other module does', () => {
+  it('giving, registration, and portal require the supabase backend; no other module does', () => {
     expect(MODULES.giving.requiresBackend).toBe('supabase');
     expect(MODULES.registration.requiresBackend).toBe('supabase');
     expect(MODULES.portal.requiresBackend).toBe('supabase');
     for (const key of MODULE_KEYS) {
       if (key !== 'giving' && key !== 'registration' && key !== 'portal') expect(MODULES[key].requiresBackend).toBeUndefined();
     }
+  });
+
+  it('groups every module exactly once and preserves catalog order within each group', () => {
+    const flattened = MODULE_GROUPS.flatMap((group) => group.keys);
+    expect([...flattened].sort()).toEqual([...MODULE_KEYS].sort());
+    expect(new Set(flattened).size).toBe(MODULE_KEYS.length);
+    for (const group of MODULE_GROUPS) {
+      expect(group.keys).toEqual(
+        MODULE_KEYS.filter((key) => CAPABILITIES[key].group === group.group),
+      );
+    }
+  });
+
+  it('rejects unsupported declared catalog groups instead of omitting them', () => {
+    expect(() =>
+      buildModuleGroups(MODULE_KEYS, CAPABILITIES, [
+        ...CAPABILITY_CATALOG.groups,
+        'missions',
+      ]),
+    ).toThrow(/unsupported capability group.*missions/i);
+  });
+
+  it('rejects duplicate module keys instead of grouping them more than once', () => {
+    expect(() =>
+      buildModuleGroups([...MODULE_KEYS, MODULE_KEYS[0]], CAPABILITIES, CAPABILITY_CATALOG.groups),
+    ).toThrow(/duplicate module key.*bulletins/i);
   });
 });
 
@@ -105,6 +168,14 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/signup', 'groups'],
     ['/attendance', 'groups'],
     ['/attendance/abc123', 'groups'],
+    // ── portal (backend-gated) prefixes; each beats serve's /my ──
+    ['/my/household', 'portal'],
+    ['/my/household/7', 'portal'],
+    ['/my/groups', 'portal'],
+    ['/my/events', 'portal'],
+    ['/my/serving', 'portal'],
+    ['/my/prayer', 'portal'],
+    ['/email-change', 'portal'],
     // ── giving (backend-gated) prefixes; /my/giving beats serve's /my ──
     ['/give/checkout', 'giving'],
     ['/give/checkout/thanks', 'giving'],
@@ -115,13 +186,6 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/register', 'registration'],
     ['/register/summer-camp', 'registration'],
     ['/api/register', 'registration'],
-    // ── portal (backend-gated); /my/* prefixes beat serve's /my by longest match ──
-    ['/my/household', 'portal'],
-    ['/my/events', 'portal'],
-    ['/my/serving', 'portal'],
-    ['/my/prayer', 'portal'],
-    ['/email-change', 'portal'],
-    ['/email-change/abc123', 'portal'],
     // ── admin prefixes ──
     ['/admin/bulletins', 'bulletins'],
     ['/admin/sermons', 'sermons'],
@@ -134,10 +198,10 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/teams', 'serve'],
     ['/admin/reports', 'serve'],
     ['/admin/testimonies', 'testimonies'],
-    ['/admin/groups', 'groups'],
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
     ['/admin/children', 'children'],
+    ['/admin/groups', 'groups'],
     // ── children's check-in kiosk ──
     ['/kiosk', 'children'],
     ['/kiosk/abc123', 'children'],
@@ -154,6 +218,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin', null],
     ['/admin/settings', null],
     ['/admin/people', null], // predates the module — core
+    ['/admin/fellowships', null],
     ['/admin/revisions', null],
     ['/admin/availability', null],
     ['/admin/applications', null],
@@ -174,6 +239,23 @@ describe('moduleForPath (longest-prefix wins)', () => {
     expect(moduleForPath('/serve/gifts/')).toBe('gifts');
     expect(moduleForPath('/bulletin/')).toBe('bulletins');
     expect(moduleForPath('/kiosk/')).toBe('children');
+  });
+
+  it('portal owns its /my sub-prefixes but not /my itself', () => {
+    expect(moduleForPath('/my')).toBe('serve');
+    expect(moduleForPath('/my/household')).toBe('portal');
+    expect(moduleForPath('/my/groups')).toBe('portal');
+    expect(moduleForPath('/my/events')).toBe('portal');
+    expect(moduleForPath('/my/serving')).toBe('portal');
+    expect(moduleForPath('/my/prayer')).toBe('portal');
+    expect(moduleForPath('/my/giving')).toBe('giving');
+    expect(moduleForPath('/my/calendar')).toBe('serve');
+    expect(moduleForPath('/email-change')).toBe('portal');
+  });
+
+  it('portal is supabase-only', () => {
+    expect(filterByBackend(['portal'], 'd1').has('portal')).toBe(false);
+    expect(filterByBackend(['portal'], 'supabase').has('portal')).toBe(true);
   });
 });
 

@@ -379,6 +379,17 @@ export async function markGiftRefunded(db: AppDb, paymentIntentId: string): Prom
   return r.meta.changes > 0;
 }
 
+/** Bounded convergence read after a refund UPDATE moved no row. */
+export async function giftStatusByPaymentIntent(
+  db: AppDb,
+  paymentIntentId: string,
+): Promise<'pending' | 'succeeded' | 'failed' | 'refunded' | null> {
+  return db
+    .prepare(`SELECT status FROM gifts WHERE stripe_payment_intent_id = ?1 LIMIT 1`)
+    .bind(paymentIntentId)
+    .first<'pending' | 'succeeded' | 'failed' | 'refunded'>('status');
+}
+
 /**
  * Upsert a recurring subscription keyed on its Stripe subscription id (UNIQUE),
  * so subscription.created and every later subscription.updated converge on one

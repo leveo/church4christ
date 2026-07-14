@@ -1,98 +1,283 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
+import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
+import {
+  discoverD1MigrationFiles,
+  normalizeIndexPredicate,
+  parseFinalD1Schema,
+  type D1Constraint,
+} from './schemaParity';
 
-// The D1 migration files whose CREATE TABLE / ADD COLUMN statements define the
-// shared schema this port must match. 0004 adds the two people giving columns.
-const D1_FILES = [
-  '0001_init.sql',
-  '0002_email.sql',
-  '0003_people.sql',
-  '0004_giving_people.sql',
-  '0005_custom_pages.sql',
-  '0006_groups.sql',
-  '0007_children_checkin.sql',
-  '0008_admin_permissions.sql',
-  '0010_member_portal.sql',
-];
+const D1_FILES = discoverD1MigrationFiles();
+
+// These feature tables intentionally have no D1 equivalent. Keeping this list
+// explicit makes a new Postgres-only table a reviewed schema decision.
+const SUPABASE_ONLY_TABLES = new Set([
+  // Giving
+  'funds',
+  'fund_i18n',
+  'gifts',
+  'recurring_gifts',
+  // Registration
+  'reg_events',
+  'reg_event_i18n',
+  'reg_questions',
+  'reg_question_i18n',
+  'registrations',
+  'reg_answers',
+  // Member portal
+  'group_files',
+  'event_admins',
+  'prayer_items',
+  // Groups bridge available only on the Supabase schema
+  'group_reg_events',
+]);
+
+// Private relations are qualified and deliberately separate from the public
+// Supabase-only allowlist so D1/public parity cannot absorb them accidentally.
+const SUPABASE_ONLY_PRIVATE_RELATIONS = new Set([
+  'church_private.stripe_checkout_requests',
+  'church_private.stripe_webhook_events',
+]);
+
+const INFRASTRUCTURE_TABLES = new Set(['_migrations']);
+
+function normalizePgDefault(value: string | null): string | null {
+  if (value === null) return null;
+  let normalized = value.trim();
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  if (/^datetime\s*\(\s*'now'::text(?:\s*,[\s\S]*)?\)$/i.test(normalized)) return 'utc-now';
+  const text = normalized.match(/^'((?:[^']|'')*)'::text$/i);
+  if (text) return text[1].replaceAll("''", "'");
+  return normalized.toLowerCase();
+}
+
+function expectedPgType(table: string, column: string, d1Type: string): string {
+  // SQLite's INTEGER affinity stores custom-page UUIDs in revisions.entity_id;
+  // Postgres must widen that shared column to text to preserve the same values.
+  if (table === 'revisions' && column === 'entity_id') return 'text';
+  if (d1Type === 'blob') return 'bytea';
+  return d1Type;
+}
+
+function pgIdentifierArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+    const body = value.slice(1, -1);
+    return body ? body.split(',').map((item) => item.replace(/^"|"$/g, '')) : [];
+  }
+  throw new Error(`unexpected Postgres identifier array: ${JSON.stringify(value)}`);
+}
+
+function constraintSignature(table: string, constraint: D1Constraint): string {
+  const target =
+    constraint.kind === 'foreign'
+      ? `->${constraint.foreignTable}(${constraint.foreignColumns?.join(',') ?? ''})`
+      : '';
+  return `${table}:${constraint.kind}(${constraint.columns.join(',')})${target}`;
+}
 
 describe.skipIf(!hasPg)('Postgres schema port', () => {
   const sql = hasPg ? pgClient() : (null as never);
+  const d1 = parseFinalD1Schema(
+    D1_FILES.map((file) => readFileSync(`migrations/${file}`, 'utf8')),
+  );
+
   beforeAll(async () => {
     await resetSchema(sql);
-    // Migrate via the runner so every migrations-supabase/*.sql applies in order
-    // (0001_init + 0002_giving), the way an operator ships it.
     execFileSync('node', ['scripts/db/migrate-supabase.mjs'], {
       env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
       encoding: 'utf8',
     });
   });
-  afterAll(async () => { await sql?.end(); });
-
-  it('creates every table the D1 migrations create', async () => {
-    // Parse table names straight out of the D1 migration files so this test
-    // can never drift from the source of truth.
-    const d1Sql = D1_FILES
-      .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
-      .join('\n');
-    // SQLite CHECK-constraint changes use the table-rebuild idiom (CREATE x_new
-    // -> copy -> DROP x -> RENAME x_new TO x); the intermediate name never
-    // exists in the final schema on either backend, so fold it into its target.
-    const renames = new Map<string, string>();
-    for (const m of d1Sql.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)/gi)) renames.set(m[1].toLowerCase(), m[2].toLowerCase());
-    const wanted = [
-      ...new Set(
-        [...d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)/gi)].map((m) => {
-          const t = m[1].toLowerCase();
-          return renames.get(t) ?? t;
-        }),
-      ),
-    ];
-    expect(wanted.length).toBeGreaterThan(35);
-    const rows = await sql.unsafe(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
-    );
-    const have = new Set(rows.map((r) => (r.table_name as string).toLowerCase()));
-    const missing = wanted.filter((t) => !have.has(t));
-    expect(missing).toEqual([]);
+  afterAll(async () => {
+    await sql?.end();
   });
 
-  it('ports every column of every table', async () => {
-    // Column-level parity: extract "name TYPE" pairs per table from the D1 SQL
-    // (including ALTER TABLE ADD COLUMN lines) and check information_schema.
-    const d1Sql = D1_FILES
-      .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
-      .join('\n');
-    const cols: Array<[string, string]> = [];
-    // Same rebuild-idiom fold as the tables test above.
-    const renames = new Map<string, string>();
-    for (const m of d1Sql.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)/gi)) renames.set(m[1].toLowerCase(), m[2].toLowerCase());
-    for (const m of d1Sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)? (\w+)\s*\(([\s\S]*?)\);/gi)) {
-      const table = renames.get(m[1].toLowerCase()) ?? m[1].toLowerCase();
-      for (const line of m[2].split('\n')) {
-        const cm = line.match(/^\s*(\w+)\s+(TEXT|INTEGER|REAL|BLOB)/i);
-        if (cm && !/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)$/i.test(cm[1])) cols.push([table, cm[1].toLowerCase()]);
+  it('has exactly the shared, explicitly Supabase-only, and migration tables', async () => {
+    const rows = await sql.unsafe(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+    );
+    const actual = new Set(rows.map((row) => String(row.table_name).toLowerCase()));
+    const expected = new Set([
+      ...d1.tables.keys(),
+      ...SUPABASE_ONLY_TABLES,
+      ...INFRASTRUCTURE_TABLES,
+    ]);
+
+    const missing = [...expected].filter((table) => !actual.has(table)).sort();
+    const unexpectedSharedDrift = [...actual].filter((table) => !expected.has(table)).sort();
+    expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
+  });
+
+  it('has exactly the explicitly qualified Supabase-only private relations', async () => {
+    const rows = await sql.unsafe(`
+      SELECT table_schema, table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'church_private' AND table_type = 'BASE TABLE'
+    `);
+    const actual = new Set(rows.map((row) => `${row.table_schema}.${row.table_name}`));
+    const missing = [...SUPABASE_ONLY_PRIVATE_RELATIONS].filter((relation) => !actual.has(relation)).sort();
+    const unexpectedPrivateDrift = [...actual].filter((relation) => !SUPABASE_ONLY_PRIVATE_RELATIONS.has(relation)).sort();
+    expect({ missing, unexpectedPrivateDrift }).toEqual({ missing: [], unexpectedPrivateDrift: [] });
+  });
+
+  it('matches shared columns, types, nullability, defaults, and identity metadata bidirectionally', async () => {
+    const rows = await sql.unsafe(`
+      SELECT table_name, column_name, data_type, is_nullable, column_default, is_identity
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+    `);
+    const actual = new Map(
+      rows
+        .filter((row) => d1.tables.has(String(row.table_name)))
+        .map((row) => [
+          `${row.table_name}.${row.column_name}`,
+          {
+            type: String(row.data_type).toLowerCase(),
+            nullable: row.is_nullable === 'YES',
+            defaultValue: normalizePgDefault(row.column_default as string | null),
+            identity: row.is_identity === 'YES',
+          },
+        ]),
+    );
+    const expected = new Map<string, (typeof actual extends Map<string, infer T> ? T : never)>();
+    for (const [tableName, table] of d1.tables) {
+      for (const [columnName, column] of table.columns) {
+        expected.set(`${tableName}.${columnName}`, {
+          type: expectedPgType(tableName, columnName, column.type),
+          nullable: column.nullable,
+          defaultValue: column.defaultValue,
+          identity: column.identity,
+        });
       }
     }
-    for (const m of d1Sql.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)/gi)) cols.push([m[1].toLowerCase(), m[2].toLowerCase()]);
-    const rows = await sql.unsafe(
-      "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'",
+
+    const missing = [...expected].flatMap(([key, value]) =>
+      JSON.stringify(actual.get(key)) === JSON.stringify(value)
+        ? []
+        : [`${key}: expected ${JSON.stringify(value)}, received ${JSON.stringify(actual.get(key))}`],
     );
-    const have = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
-    const missing = cols.filter(([t, c]) => !have.has(`${t}.${c}`)).map(([t, c]) => `${t}.${c}`);
-    expect(missing).toEqual([]);
+    const unexpectedSharedDrift = [...actual].flatMap(([key, value]) =>
+      JSON.stringify(expected.get(key)) === JSON.stringify(value)
+        ? []
+        : [`${key}: received ${JSON.stringify(value)}, expected ${JSON.stringify(expected.get(key))}`],
+    );
+    expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
   });
 
-  it('identity columns accept explicit ids and still autogenerate afterwards', async () => {
-    // people.display_name is NOT NULL with no default, so it is supplied here
-    // (the brief authorizes adjusting these INSERTs to the real schema).
+  it('matches shared primary, unique, and foreign-key constraints bidirectionally', async () => {
+    const rows = await sql.unsafe(`
+      SELECT rel.relname AS table_name, con.contype,
+        ARRAY(
+          SELECT att.attname
+          FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ord)
+          JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = key.attnum
+          ORDER BY key.ord
+        ) AS columns,
+        frel.relname AS foreign_table,
+        CASE WHEN con.confkey IS NULL THEN NULL ELSE ARRAY(
+          SELECT att.attname
+          FROM unnest(con.confkey) WITH ORDINALITY AS key(attnum, ord)
+          JOIN pg_attribute att ON att.attrelid = con.confrelid AND att.attnum = key.attnum
+          ORDER BY key.ord
+        ) END AS foreign_columns
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace namespace ON namespace.oid = rel.relnamespace
+      LEFT JOIN pg_class frel ON frel.oid = con.confrelid
+      WHERE namespace.nspname = 'public' AND con.contype IN ('p', 'u', 'f')
+    `);
+    const kinds = { p: 'primary', u: 'unique', f: 'foreign' } as const;
+    const actual = new Set(
+      rows
+        .filter((row) => d1.tables.has(String(row.table_name)))
+        .map((row) =>
+          constraintSignature(String(row.table_name), {
+            kind: kinds[row.contype as keyof typeof kinds],
+            columns: pgIdentifierArray(row.columns),
+            foreignTable: row.foreign_table ? String(row.foreign_table) : undefined,
+            foreignColumns:
+              row.foreign_columns === null ? undefined : pgIdentifierArray(row.foreign_columns),
+          }),
+        ),
+    );
+    const expected = new Set(
+      [...d1.tables].flatMap(([tableName, table]) =>
+        table.constraints.map((constraint) => constraintSignature(tableName, constraint)),
+      ),
+    );
+    const missing = [...expected].filter((value) => !actual.has(value)).sort();
+    const unexpectedSharedDrift = [...actual].filter((value) => !expected.has(value)).sort();
+    expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
+  });
+
+  it('matches every application-significant shared index bidirectionally', async () => {
+    const rows = await sql.unsafe(`
+      SELECT tbl.relname AS table_name, idx.relname AS index_name,
+        indexes.indisunique,
+        EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = indexes.indexrelid) AS is_constraint,
+        ARRAY(
+          SELECT pg_get_indexdef(indexes.indexrelid, position, true)
+          FROM generate_series(1, indexes.indnkeyatts) position
+          ORDER BY position
+        ) AS columns,
+        pg_get_expr(indexes.indpred, indexes.indrelid) AS predicate
+      FROM pg_index indexes
+      JOIN pg_class idx ON idx.oid = indexes.indexrelid
+      JOIN pg_class tbl ON tbl.oid = indexes.indrelid
+      JOIN pg_namespace namespace ON namespace.oid = tbl.relnamespace
+      WHERE namespace.nspname = 'public'
+    `);
+    const actual = new Map(
+      rows
+        .filter((row) => d1.tables.has(String(row.table_name)) && !row.is_constraint)
+        .map((row) => [
+          String(row.index_name),
+          {
+            table: String(row.table_name),
+            columns: pgIdentifierArray(row.columns),
+            unique: Boolean(row.indisunique),
+            predicate: normalizeIndexPredicate(row.predicate as string | null),
+          },
+        ]),
+    );
+    const expected = new Map(
+      [...d1.indexes].map(([name, index]) => [
+        name,
+        {
+          table: index.table,
+          columns: index.columns,
+          unique: index.unique,
+          predicate: normalizeIndexPredicate(index.predicate),
+        },
+      ]),
+    );
+    const missing = [...expected].flatMap(([key, value]) =>
+      JSON.stringify(actual.get(key)) === JSON.stringify(value)
+        ? []
+        : [`${key}: expected ${JSON.stringify(value)}, received ${JSON.stringify(actual.get(key))}`],
+    );
+    const unexpectedSharedDrift = [...actual].flatMap(([key, value]) =>
+      JSON.stringify(expected.get(key)) === JSON.stringify(value)
+        ? []
+        : [`${key}: received ${JSON.stringify(value)}, expected ${JSON.stringify(expected.get(key))}`],
+    );
+    expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
+  });
+
+  it('accepts explicit identity ids and still autogenerates afterwards', async () => {
     await sql.unsafe("INSERT INTO settings (key, value) VALUES ('probe', '1')");
-    await sql.unsafe("INSERT INTO people (id, first_name, last_name, display_name, email) VALUES (9000, 'A', 'B', 'A B', 'probe@example.com')");
+    await sql.unsafe(
+      "INSERT INTO people (id, first_name, last_name, display_name, email) VALUES (9000, 'A', 'B', 'A B', 'probe@example.com')",
+    );
     await sql.unsafe("SELECT setval(pg_get_serial_sequence('people', 'id'), (SELECT max(id) FROM people))");
-    const r = await sql.unsafe(
+    const rows = await sql.unsafe(
       "INSERT INTO people (first_name, last_name, display_name, email) VALUES ('C', 'D', 'C D', 'probe2@example.com') RETURNING id",
     );
-    expect(Number(r[0].id)).toBeGreaterThan(9000);
+    expect(Number(rows[0].id)).toBeGreaterThan(9000);
   });
 });

@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 // Same package-entry export deviation as vitest.config.ts (0.17.0 has no
 // `/config` subpath): cloudflareTest comes off the main entrypoint.
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandledConfig';
 
 // Postgres-backed e2e smoke: drives the BUILT worker (SELF.fetch) with the Supabase
 // backend selected (DB_BACKEND=supabase) and a HYPERDRIVE binding pointed at local
@@ -28,19 +29,25 @@ export default defineConfig({
       wrangler: { configPath: './test/e2e/wrangler.e2e.jsonc' },
       miniflare: {
         hyperdrives: { HYPERDRIVE: DATABASE_URL },
-        bindings: { DB_BACKEND: 'supabase' },
+        // Test-only credentials. The built worker must exercise signature
+        // verification and the hard live-event rejection without contacting
+        // Stripe or exposing any production key material.
+        bindings: {
+          DB_BACKEND: 'supabase',
+          STRIPE_MODE: 'test',
+          STRIPE_SECRET_KEY: 'sk_test_e2e_local_only',
+          STRIPE_WEBHOOK_SECRET: 'whsec_e2e_local_only',
+        },
       },
     }),
   ],
   test: {
     include: ['test/e2e-pg/**/*.test.ts'],
-    setupFiles: ['./test/e2e-pg/setup.ts'],
+    setupFiles: ['./test/e2e/knownUnhandled.ts', './test/e2e-pg/setup.ts'],
+    onUnhandledError: ignoreKnownUnhandledError,
     globalSetup: ['./test/e2e-pg/global-setup.ts'],
     // One shared Postgres database, reseeded per file — files must not run
     // concurrently or they clobber each other's TRUNCATE + reseed.
     fileParallelism: false,
-    // See vitest.e2e.config.ts: the built worker's benign es-module-lexer WASM
-    // compile rejection must not fail the run.
-    dangerouslyIgnoreUnhandledErrors: true,
   },
 });

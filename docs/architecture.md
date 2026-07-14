@@ -46,11 +46,12 @@ the whole thing fast worldwide because the Worker runs close to each visitor.
 | **Object storage (R2)** | Uploaded media (`uploads/`) and nightly backups (`backups/`) | binding `MEDIA` |
 | **Email** | Transactional mail through one choke point | binding `EMAIL` |
 
-## Data: Cloudflare D1
+## Data: D1 or Supabase
 
-All structured data lives in **D1**, Cloudflare's SQLite-backed database, reached through
-the `DB` binding. Schema changes are ordinary SQL migration files under `migrations/`,
-applied with `wrangler d1 migrations apply`. Translatable content uses companion `*_i18n`
+Structured data lives in **D1** or **Supabase Postgres**, selected during setup. D1 is
+reached through the `DB` binding; Supabase is reached through Hyperdrive. Schema changes
+are SQL migration files under `migrations/` and `migrations-supabase/`. Translatable
+content uses companion `*_i18n`
 tables joined with a `COALESCE` fallback to the default language (see
 [`docs/i18n.md`](i18n.md)), so adding a language never changes a table's shape.
 
@@ -74,20 +75,42 @@ run on either of two databases:
   binding. It rewrites D1/SQLite `?` placeholders to Postgres `$n` on the way to the driver
   and runs a `batch` as one real transaction.
 
+<!-- capabilities:start -->
+| Key | English | 中文 | Required database |
+|---|---|---|---|
+| `bulletins` | Bulletins | 周报 | Either |
+| `sermons` | Sermons | 讲道 | Either |
+| `prayer-sheets` | Prayer Sheets | 祷告单 | Either |
+| `prayer-wall` | Prayer Wall | 祷告墙 | Either |
+| `events` | Events | 活动 | Either |
+| `serve` | Volunteer Scheduling | 服事排班 | Either |
+| `gifts` | Spiritual Gifts | 恩赐探索 | Either |
+| `testimonies` | Testimonies | 见证 | Either |
+| `articles` | Articles | 文章 | Either |
+| `fellowships` | Fellowships | 团契 | Either |
+| `groups` | Groups | 小组 | Either |
+| `people` | People & Households | 会友与家庭 | Either |
+| `children` | Children Check-in | 儿童报到 | Either |
+| `page-builder` | Page Builder | 页面编辑器 | Either |
+| `portal` | Member Portal | 会友平台 | Supabase |
+| `giving` | Giving | 奉献 | Supabase |
+| `registration` | Registration | 活动报名 | Supabase |
+<!-- capabilities:end -->
+
 **Which backend runs** is the `DB_BACKEND` var: `getBackend` (`src/lib/dbProvider.ts`) reads
-it and returns `'supabase'` only for the exact string `supabase`, and `'d1'` for everything
-else (including unset). `openDb` then returns a **per-request** `{ db, backend, end }` — on
+it and defaults only an unset/empty value to D1. The exact values `d1` and `supabase`
+select their respective providers; any unknown non-empty value throws instead of silently
+selecting a provider. `openDb` then returns a **per-request** `{ db, backend, end }` — on
 D1 a zero-copy passthrough whose `end()` is a no-op; on Postgres a fresh postgres.js client
 over Hyperdrive (Workers sockets are request-scoped, so the client is never cached across
 requests) whose `end()` drains it after the response. The middleware opens this once per
 request and hands the page `locals.db` and `locals.dbBackend` (`src/middleware.ts`); the
 `scheduled` handler opens its own for the cron jobs that touch data.
 
-**Two modules require Postgres.** `giving` and `registration` are marked
+**Three modules require Postgres.** `portal`, `giving`, and `registration` are marked
 `requiresBackend: 'supabase'` in `src/lib/modules.ts`, and `getEnabledModules` force-disables
-any such module on a mismatched backend — so both stay off on D1 even when their settings row
-says on. They need Stripe, subscriptions, and checkout state that SQLite-scale D1 is not the
-right home for; see [`docs/supabase-setup.md`](supabase-setup.md) and
+any such module on a mismatched backend — so all three stay off on D1 even when their
+settings row says on. See [`docs/supabase-setup.md`](supabase-setup.md) and
 [`docs/features/giving.md`](features/giving.md).
 
 ## Media & backups: Cloudflare R2
@@ -132,7 +155,7 @@ The system is covered by **over 900 automated tests**. Unit and integration test
 the Cloudflare Workers test pool (`vitest`), end-to-end tests run against the actual built
 Worker (`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and
 checks routing, i18n, the health probe, and the security headers over HTTP. A separate `pg`
-project and `vitest.e2e.pg.config.ts` run the same kind of coverage for **Giving** and
-**Registration** against a real Postgres database — self-skipped when no `DATABASE_URL` is
+project and `vitest.e2e.pg.config.ts` run the same kind of coverage for **Member Portal**,
+**Giving**, and **Registration** against a real Postgres database — self-skipped when no `DATABASE_URL` is
 set, so the default D1 suite never depends on Postgres being available. See
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to run each suite.

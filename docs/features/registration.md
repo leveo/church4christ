@@ -123,17 +123,39 @@ up the Supabase backend first (see [`docs/supabase-setup.md`](../supabase-setup.
 work with no payment setup at all; to take money for paid events, add Stripe the same way the
 Giving module does:
 
-1. **Add your Stripe keys.** Set `STRIPE_SECRET_KEY` (a test-mode `sk_test_…` key while you try
-   it out, a live key in production) and `STRIPE_WEBHOOK_SECRET`. Also set `APP_ORIGIN` to your
-   site's address so Stripe knows where to send registrants back after checkout. If you already
-   set these up for Giving, registration uses the very same keys — there is nothing new to add.
-2. **Point a Stripe webhook at your site.** In the Stripe dashboard, add a webhook endpoint at
-   `https://your-site/api/stripe/webhook` and subscribe it to `checkout.session.completed` (this
-   confirms a paid seat) and `checkout.session.expired` (this frees a seat when someone abandons
-   checkout). Copy the endpoint's signing secret into `STRIPE_WEBHOOK_SECRET`. Registration and
-   Giving share this one endpoint — each event tells them apart on its own.
+1. **Import Stripe test credentials through setup.** Pass an `sk_test_…` key and the test
+   endpoint's `whsec_…` signing secret only to the setup process:
+
+   ```bash
+   CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
+   CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
+   npm run setup
+   ```
+
+   Setup writes the runtime secrets automatically. The `CHURCH_SETUP_STRIPE_*` values are
+   one-shot setup inputs, not ambient runtime variables. Live keys are rejected, and signed
+   live webhook events receive `400 live_mode_disabled` without storage. If Giving already
+   imported these test credentials, Registration uses the same pair.
+2. **Point a Stripe webhook at your site.** In the Stripe dashboard, add one shared endpoint at
+   `https://your-site/api/stripe/webhook` and subscribe it to all eight events:
+   `checkout.session.completed`, `checkout.session.expired`,
+   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+   `invoice.paid`, `charge.refunded`, `customer.subscription.updated`, and
+   `customer.subscription.deleted`. Completed or asynchronously successful payment confirms a
+   paid seat; expiry or asynchronous failure releases it. Use the signing secret as the
+   `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` input in step 1. Registration and Giving share this one
+   endpoint — each event tells them apart on its own.
 3. **Create your first event** on `/admin/registration`, add its questions on the event's
    **Questions & roster** page, and share the public link (`/register`).
+
+Supabase runs durable webhook and pending-Checkout recovery every five minutes. Admins and
+finance users can reconcile, attach a retrieved and verified `cs_test_…` session, or perform
+an explicitly confirmed cancellation from `/admin/stripe-events`; raw request and customer
+data are not displayed. D1 does not support Registration or Stripe operations.
+
+The **payment operations** permission covers both Giving and paid Registration. Grant it only
+to people trusted to reconcile Stripe events, attach verified sessions, and explicitly cancel
+pending paid registrations as well as manage gifts.
 
 Free events need none of the Stripe steps — create the event, add questions, and share the link.
 Add Stripe only when you want to charge for one.
