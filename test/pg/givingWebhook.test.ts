@@ -8,7 +8,7 @@
 // never throw on someone else's Stripe payload). Self-skips without DATABASE_URL.
 // The isDbConnectivityError describe at the bottom is pure (no DB) and deliberately
 // NOT gated — it runs on every `npm test`.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
 import { PgAdapter } from '../../src/lib/pgAdapter';
@@ -154,6 +154,33 @@ describe.skipIf(!hasPg)('handleStripeEvent (Postgres)', () => {
     await handleStripeEvent({ db, env: ENV }, event);
     await handleStripeEvent({ db, env: ENV }, event); // Stripe re-sends
     expect(await giftRow('stripe_payment_intent_id', 'pi_dup')).toHaveLength(1);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['empty', { payment_intent: '' }],
+    ['non-string', { payment_intent: { id: 'pi_object' } }],
+    ['foreign prefix', { payment_intent: 'ch_not_a_payment_intent' }],
+    ['control character', { payment_intent: 'pi_bad\nvalue' }],
+  ])('ignores a paid one-time gift with a %s payment intent before checkpoint or write', async (_label, fields) => {
+    const [before] = await sql.unsafe('SELECT count(*)::int AS n FROM gifts');
+    const checkpoint = vi.fn(async () => {});
+    const outcome = await handleStripeEvent(
+      { db, env: ENV, checkpoint },
+      ev('checkout.session.completed', {
+        id: `cs_test_malformed_pi_${_label.replace(/\s+/g, '_')}`,
+        mode: 'payment',
+        payment_status: 'paid',
+        amount_total: 1000,
+        currency: 'usd',
+        metadata: { kind: 'gift', fund_id: String(fund), person_id: '' },
+        ...fields,
+      }),
+    );
+    const [after] = await sql.unsafe('SELECT count(*)::int AS n FROM gifts');
+    expect(outcome).toEqual(ignored());
+    expect(checkpoint).not.toHaveBeenCalled();
+    expect(after.n).toBe(before.n);
   });
 
   // ── recurring ────────────────────────────────────────────────────────────────

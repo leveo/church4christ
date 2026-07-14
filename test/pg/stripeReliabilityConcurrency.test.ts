@@ -104,7 +104,12 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
     return Number(fund.id);
   }
 
-  function giftEvent(eventId: string, paymentIntentId: string, personId: string = '') {
+  function giftEvent(
+    eventId: string,
+    paymentIntentId: string,
+    giftFundId: number,
+    personId: string = '',
+  ) {
     return stripeEvent('checkout.session.completed', {
       id: `cs_test_${paymentIntentId}`,
       mode: 'payment',
@@ -114,7 +119,7 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
       currency: 'usd',
       customer: personId ? `cus_${paymentIntentId}` : null,
       customer_details: { email: `${paymentIntentId}@example.test` },
-      metadata: { kind: 'gift', fund_id: String(1), person_id: personId },
+      metadata: { kind: 'gift', fund_id: String(giftFundId), person_id: personId },
     }, { id: eventId, created: NOW_SECONDS });
   }
 
@@ -212,8 +217,7 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
 
   it('an expired gift worker can overlap its successor without duplicating the gift', async () => {
     const eventId = 'evt_test_expired_gift_overlap';
-    const event = giftEvent(eventId, 'pi_reliability_overlap');
-    event.data.object.metadata.fund_id = String(await fundId());
+    const event = giftEvent(eventId, 'pi_reliability_overlap', await fundId());
     await receive(event);
     const barrier = oneShotBarrier();
 
@@ -247,6 +251,50 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
        FROM church_private.stripe_webhook_events WHERE event_id=$1`,
       [eventId],
     )).toEqual([{ status: 'processed', outcome: 'gift_recorded', attempt_count: 2, lease_token: null }]);
+  });
+
+  it('a malformed paid gift without a PaymentIntent stays a no-op across an expired-lease overlap', async () => {
+    const eventId = 'evt_test_malformed_gift_overlap';
+    const event = stripeEvent('checkout.session.completed', {
+      id: 'cs_test_malformed_gift_overlap',
+      mode: 'payment',
+      payment_status: 'paid',
+      amount_total: 5000,
+      currency: 'usd',
+      metadata: { kind: 'gift', fund_id: String(await fundId()), person_id: '' },
+    }, { id: eventId, created: NOW_SECONDS });
+    await receive(event);
+    const barrier = oneShotBarrier();
+    const stale = processStripeWebhookEvent(eventId, {
+      env: ENV,
+      openDb: () => opened(dbA),
+      now: () => T0,
+      newLeaseToken: () => 'lease-malformed-gift',
+      dispatch: vi.fn(async (deps, storedEvent) => {
+        await barrier.wait();
+        return handleStripeEvent(deps, storedEvent);
+      }),
+    });
+    let successor;
+    try {
+      await barrier.waitUntilReached('malformed gift worker before domain dispatch');
+      successor = await processStripeWebhookEvent(eventId, {
+        env: ENV,
+        openDb: () => opened(dbB),
+        now: () => addMs(T0, STRIPE_LEASE_MS),
+        newLeaseToken: () => 'lease-malformed-gift-successor',
+      });
+    } finally {
+      barrier.release();
+    }
+
+    expect(successor).toEqual({ state: 'ignored', outcome: 'ignored' });
+    expect(await stale).toEqual({ state: 'failed' });
+    expect(await sqlA.unsafe('SELECT id FROM gifts')).toHaveLength(0);
+    expect(await sqlA.unsafe(
+      `SELECT status,outcome,attempt_count FROM church_private.stripe_webhook_events WHERE event_id=$1`,
+      [eventId],
+    )).toEqual([{ status: 'ignored', outcome: 'ignored', attempt_count: 2 }]);
   });
 
   it('an expired registration worker overlaps its successor without duplicating the row or held seat', async () => {
@@ -336,8 +384,7 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
 
   it('a crash after the gift write resumes through checkpoints without duplicating effects', async () => {
     const eventId = 'evt_test_crash_after_gift_write';
-    const event = giftEvent(eventId, 'pi_reliability_crash', '1');
-    event.data.object.metadata.fund_id = String(await fundId());
+    const event = giftEvent(eventId, 'pi_reliability_crash', await fundId(), '1');
     await receive(event);
     let firstCheckpoints = 0;
 
@@ -468,8 +515,7 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
 
   it('a duplicate delivery during processing returns durable 200 without a second mutation', async () => {
     const eventId = 'evt_test_duplicate_while_processing';
-    const event = giftEvent(eventId, 'pi_reliability_duplicate');
-    event.data.object.metadata.fund_id = String(await fundId());
+    const event = giftEvent(eventId, 'pi_reliability_duplicate', await fundId());
     const barrier = oneShotBarrier();
     const process = vi.fn(async (id: string) => processStripeWebhookEvent(id, {
       env: ENV,

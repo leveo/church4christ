@@ -130,6 +130,10 @@ function strOrNull(v: unknown): string | null {
 function strOr(v: unknown, fallback: string): string {
   return typeof v === 'string' && v.length > 0 ? v : fallback;
 }
+/** A concrete Stripe PaymentIntent id; expanded/foreign/malformed values are rejected. */
+function paymentIntentIdOrNull(v: unknown): string | null {
+  return typeof v === 'string' && /^pi_[A-Za-z0-9_]{1,252}$/.test(v) ? v : null;
+}
 /** A Stripe expandable reference may be an id string or an expanded object. */
 function expandableId(v: unknown): string | null {
   if (typeof v === 'string') return strOrNull(v);
@@ -287,14 +291,15 @@ async function onCheckoutCompleted(
   if (mode === 'payment') {
     // Only a SETTLED payment books a gift. A completed session whose payment is
     // still processing (async payment methods) or otherwise not 'paid' must not
-    // record money — Stripe re-fires completion when it settles. A paid card
-    // session always carries a payment_intent, so this gate also closes the
-    // null-PI double-insert gap (an unpaid session has no PI to dedup on).
+    // record money — Stripe re-fires completion when it settles. Require the
+    // concrete PaymentIntent id before any checkpoint/write: it is the durable
+    // idempotency key that closes the expired-lease double-insert gap.
     if (session.payment_status !== 'paid') return ignored('awaiting_async_payment');
     const meta = getMeta(session);
     const fundId = intOrNull(meta.fund_id);
     const amountTotal = session.amount_total;
-    if (fundId === null || typeof amountTotal !== 'number') return ignored();
+    const paymentIntentId = paymentIntentIdOrNull(session.payment_intent);
+    if (fundId === null || typeof amountTotal !== 'number' || paymentIntentId === null) return ignored();
     const personId = intOrNull(meta.person_id);
     const details = session.customer_details as { email?: unknown } | undefined;
     await checked(deps);
@@ -306,7 +311,7 @@ async function onCheckoutCompleted(
       amountCents: amountTotal,
       currency: strOr(session.currency, 'usd'),
       sessionId: strOrNull(session.id),
-      paymentIntentId: strOrNull(session.payment_intent),
+      paymentIntentId,
     });
     const customerId = strOrNull(session.customer);
     if (personId !== null && customerId) {
