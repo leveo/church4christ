@@ -49,6 +49,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify generated design artifacts
+        run: test -f src/styles/tokens.generated.css && test -f src/lib/themeMeta.generated.ts
+
       - name: Generate Cloudflare Worker types
         run: npx wrangler types
 

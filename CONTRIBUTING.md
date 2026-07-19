@@ -7,15 +7,18 @@ explains those rules.
 
 ## Getting set up
 
-You need [Node.js](https://nodejs.org/) 22+. Then:
+You need [Node.js](https://nodejs.org/) 22.12.0+. Then:
 
 ```bash
 git clone https://github.com/leveo/church4christ.git
 cd church4christ
-npm install
+npm ci
 npm run setup                       # choose local features and bootstrap the admin
 npm run dev
 ```
+
+If you use `npm ci --ignore-scripts`, run `npm run tokens` manually before `npm run setup`
+or `npm run dev`.
 
 Open the printed address (usually `http://localhost:4321`). To reach the admin area, use the
 first-admin email from your setup answers, repeated in the setup handoff. The magic link

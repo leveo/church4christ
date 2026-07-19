@@ -185,14 +185,14 @@ default D1 backend simply do not see the portal controls or routes. Learn more i
 ## Try it in 5 minutes (on your own computer)
 
 You can run the whole site locally — with realistic sample content — before you commit
-to anything. You will need [Node.js](https://nodejs.org/) 22 or newer installed. The guided
+to anything. You will need [Node.js](https://nodejs.org/) 22.12.0 or newer installed. The guided
 setup asks which initial feature set you want and chooses D1 or Supabase from that choice.
 
 ```bash
 # 1. Get the code and install it
 git clone https://github.com/leveo/church4christ.git
 cd church4christ
-npm install
+npm ci
 
 # 2. Choose features, create the database, and bootstrap the first admin
 npm run setup
@@ -200,6 +200,9 @@ npm run setup
 # 3. For D1, start it (always follow the exact handoff setup prints)
 npm run dev
 ```
+
+If you install with `npm ci --ignore-scripts`, run `npm run tokens` manually before
+`npm run setup` or `npm run dev`.
 
 For local Supabase, the handoff instead exports
 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
