@@ -16,13 +16,17 @@ export type CsvParseErrorCode =
   | 'too_many_columns'
   | 'cell_too_long';
 
-export type CsvParseResult =
-  | { ok: true; rows: string[][] }
-  | { ok: false; code: CsvParseErrorCode; row: number | null; column: number | null };
+type CsvParseFailure = { ok: false; code: CsvParseErrorCode; row: number | null; column: number | null };
+
+export type CsvParseResult = { ok: true; rows: string[][] } | CsvParseFailure;
+
+export type CsvParseWithRowNumbersResult =
+  | { ok: true; rows: string[][]; rowNumbers: number[] }
+  | CsvParseFailure;
 
 type CsvState = 'fieldStart' | 'unquoted' | 'quoted' | 'afterQuote';
 
-function csvError(code: CsvParseErrorCode, row: number | null, column: number | null): CsvParseResult {
+function csvError(code: CsvParseErrorCode, row: number | null, column: number | null): CsvParseFailure {
   return { ok: false, code, row, column };
 }
 
@@ -34,7 +38,10 @@ function assertLimits(limits: CsvParseLimits): void {
   }
 }
 
-export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvParseResult {
+export function parseUtf8CsvWithRowNumbers(
+  bytes: Uint8Array,
+  limits: CsvParseLimits,
+): CsvParseWithRowNumbersResult {
   assertLimits(limits);
 
   if (bytes.byteLength > limits.maxBytes) {
@@ -53,6 +60,7 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
   }
 
   const rows: string[][] = [];
+  const rowNumbers: number[] = [];
   let record: string[] = [];
   let field = '';
   let fieldChars = 0;
@@ -61,7 +69,7 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
   let state: CsvState = 'fieldStart';
   let recordStarted = false;
 
-  const append = (value: string): CsvParseResult | null => {
+  const append = (value: string): CsvParseFailure | null => {
     fieldChars += 1;
     if (fieldChars > limits.maxCellChars) {
       return csvError('cell_too_long', row, column);
@@ -70,7 +78,7 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
     return null;
   };
 
-  const finishField = (): CsvParseResult | null => {
+  const finishField = (): CsvParseFailure | null => {
     if (record.length + 1 > limits.maxColumns) {
       return csvError('too_many_columns', row, column);
     }
@@ -80,7 +88,7 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
     return null;
   };
 
-  const finishRecord = (): CsvParseResult | null => {
+  const finishRecord = (): CsvParseFailure | null => {
     const fieldError = finishField();
     if (fieldError) return fieldError;
 
@@ -89,6 +97,7 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
         return csvError('too_many_rows', row, 1);
       }
       rows.push(record);
+      rowNumbers.push(row);
     }
 
     record = [];
@@ -191,5 +200,11 @@ export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvPars
     if (recordError) return recordError;
   }
 
-  return { ok: true, rows };
+  return { ok: true, rows, rowNumbers };
+}
+
+export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvParseResult {
+  const result = parseUtf8CsvWithRowNumbers(bytes, limits);
+  if (!result.ok) return result;
+  return { ok: true, rows: result.rows };
 }

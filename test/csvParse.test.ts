@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseUtf8Csv, type CsvParseLimits } from '../src/lib/csvParse';
+import { parseUtf8Csv, parseUtf8CsvWithRowNumbers, type CsvParseLimits } from '../src/lib/csvParse';
 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
@@ -53,6 +53,17 @@ describe('parseUtf8Csv', () => {
 
   it('ignores records whose cells are all empty strings', () => {
     expect(parseUtf8Csv(encode('\n,\r\na,b\n,,\n'), limits())).toEqual({ ok: true, rows: [['a', 'b']] });
+  });
+
+  it('locates retained rows by logical CSV record while ignored records still advance coordinates', () => {
+    expect(parseUtf8CsvWithRowNumbers(encode('\n,\r\na,b\n,,\n"c\nc",d\n'), limits())).toEqual({
+      ok: true,
+      rows: [
+        ['a', 'b'],
+        ['c\nc', 'd'],
+      ],
+      rowNumbers: [3, 5],
+    });
   });
 
   it('does not treat whitespace-only cells as empty records', () => {

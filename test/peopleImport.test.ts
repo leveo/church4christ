@@ -26,6 +26,11 @@ const csvBytes = (
   return encode(`${lines.join('\n')}\n`);
 };
 
+const csvRecord = (
+  record: Partial<Record<PeopleImportHeader, string>>,
+  headers: readonly string[] = PEOPLE_IMPORT_HEADERS,
+): string => headers.map((header) => quoteCell(record[header as PeopleImportHeader] ?? '')).join(',');
+
 const parse = (
   records: Array<Partial<Record<PeopleImportHeader, string>>>,
   headers: readonly string[] = PEOPLE_IMPORT_HEADERS,
@@ -145,6 +150,18 @@ describe('parsePeopleImport headers and parser boundaries', () => {
     ]));
   });
 
+  it('uses the retained header logical record for header issues after ignored leading records', () => {
+    const headers: string[] = [...PEOPLE_IMPORT_HEADERS];
+    headers[0] = ' record_type';
+    const result = parsePeopleImport(encode(`\n,\n${headers.join(',')}\n`), { today: '2026-08-11' });
+
+    expect(result.model).toBeNull();
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'unknown_header', row: 3, field: null },
+      { severity: 'error', code: 'missing_header', row: 3, field: 'record_type' },
+    ]));
+  });
+
   it.each([
     ['invalid UTF-8', new Uint8Array([0xc3, 0x28]), 'invalid_utf8', null],
     ['NUL', encode('record_type\0'), 'nul_byte', null],
@@ -189,6 +206,35 @@ describe('parsePeopleImport headers and parser boundaries', () => {
 });
 
 describe('parsePeopleImport person fields', () => {
+  it('preserves the logical record coordinate after an ignored blank record', () => {
+    const invalid = validPerson({ display_name: '' });
+    const bytes = encode(`${PEOPLE_IMPORT_HEADERS.join(',')}\n\n${csvRecord(invalid)}\n`);
+    const result = parsePeopleImport(bytes, { today: '2026-08-11' });
+
+    expect(result.errors).toContainEqual({ severity: 'error', code: 'required', row: 3, field: 'display_name' });
+    expect(result.model?.people).toEqual([]);
+  });
+
+  it('advances coordinates for an all-empty comma record while retaining the next person row', () => {
+    const bytes = encode(
+      `${PEOPLE_IMPORT_HEADERS.join(',')}\n${','.repeat(PEOPLE_IMPORT_HEADERS.length - 1)}\n${csvRecord(validPerson())}\n`,
+    );
+    const result = parsePeopleImport(bytes, { today: '2026-08-11' });
+
+    expect(result.errors).toEqual([]);
+    expect(result.model?.people[0].row).toBe(3);
+  });
+
+  it('counts quoted embedded newlines within one logical record for following row coordinates', () => {
+    const bytes = encode(
+      `${PEOPLE_IMPORT_HEADERS.join(',')}\n${csvRecord(validPerson({ display_name: 'Alice\nExample' }))}\n\n${csvRecord(validPerson({ display_name: '', email: 'second@example.com' }))}\n`,
+    );
+    const result = parsePeopleImport(bytes, { today: '2026-08-11' });
+
+    expect(result.model?.people[0]).toMatchObject({ row: 2, displayName: 'Alice\nExample' });
+    expect(result.errors).toContainEqual({ severity: 'error', code: 'required', row: 4, field: 'display_name' });
+  });
+
   it.each([
     ['record_type', validPerson({ record_type: '' })],
     ['display_name', validPerson({ display_name: '' })],
@@ -398,6 +444,31 @@ describe('parsePeopleImport dependent fields and issue safety', () => {
 });
 
 describe('parsePeopleImport duplicate and household grouping rules', () => {
+  it('keeps duplicate and grouping issue rows aligned after an ignored record', () => {
+    const first = validPerson({
+      email: 'shared@example.com', household_key: 'family', household_name: 'Family',
+      household_role: 'adult', household_primary: 'true',
+    });
+    const second = validPerson({
+      display_name: 'Second', email: 'SHARED@EXAMPLE.COM', household_key: 'family',
+      household_role: 'adult', household_primary: 'true',
+    });
+    const bytes = encode(
+      `${PEOPLE_IMPORT_HEADERS.join(',')}\n\n${csvRecord(first)}\n${csvRecord(second)}\n`,
+    );
+    const result = parsePeopleImport(bytes, { today: '2026-08-11' });
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([
+      { severity: 'error', code: 'duplicate_email', row: 3, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 4, field: 'email' },
+    ]);
+    expect(result.errors.filter((issue) => issue.code === 'household_primary_multiple')).toEqual([
+      { severity: 'error', code: 'household_primary_multiple', row: 3, field: 'household_primary' },
+      { severity: 'error', code: 'household_primary_multiple', row: 4, field: 'household_primary' },
+    ]);
+    expect(result.model?.people.map((person) => person.row)).toEqual([3, 4]);
+  });
+
   it('reports a normalized duplicate email exactly once on every participating row', () => {
     const result = parse([
       validPerson({

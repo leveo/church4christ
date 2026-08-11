@@ -1,4 +1,4 @@
-import { parseUtf8Csv, type CsvParseErrorCode } from './csvParse';
+import { parseUtf8CsvWithRowNumbers, type CsvParseErrorCode } from './csvParse';
 import { isValidDateStr } from './dates';
 import { isEmail, MEMBERSHIP_STATUSES, type MembershipStatus } from './validate';
 
@@ -197,9 +197,10 @@ function normalizedRows(rows: string[][], headerIndexes: Map<PeopleImportHeader,
 function validateHeaders(
   headerCells: string[],
   issues: BoundedIssues,
+  row: number,
 ): Map<PeopleImportHeader, number> | null {
   if (headerCells.every((cell) => cell.trim() === '')) {
-    issues.add({ code: 'missing_header', row: 1, field: null });
+    issues.add({ code: 'missing_header', row, field: null });
     return null;
   }
 
@@ -207,13 +208,13 @@ function validateHeaders(
   let invalid = false;
   for (const [index, header] of headerCells.entries()) {
     if (!HEADER_SET.has(header)) {
-      issues.add({ code: 'unknown_header', row: 1, field: null });
+      issues.add({ code: 'unknown_header', row, field: null });
       invalid = true;
       continue;
     }
     const canonical = header as PeopleImportHeader;
     if (indexes.has(canonical)) {
-      issues.add({ code: 'duplicate_header', row: 1, field: canonical });
+      issues.add({ code: 'duplicate_header', row, field: canonical });
       invalid = true;
       continue;
     }
@@ -222,7 +223,7 @@ function validateHeaders(
 
   for (const header of PEOPLE_IMPORT_HEADERS) {
     if (!indexes.has(header)) {
-      issues.add({ code: 'missing_header', row: 1, field: header });
+      issues.add({ code: 'missing_header', row, field: header });
       invalid = true;
     }
   }
@@ -590,7 +591,7 @@ export function parsePeopleImport(
   if (!isValidDateStr(options.today)) throw new RangeError('today must be a valid YYYY-MM-DD date');
 
   const issues = new BoundedIssues();
-  const parsed = parseUtf8Csv(bytes, PEOPLE_IMPORT_LIMITS);
+  const parsed = parseUtf8CsvWithRowNumbers(bytes, PEOPLE_IMPORT_LIMITS);
   if (!parsed.ok) {
     issues.add({ code: parsed.code, row: parsed.row, field: null });
     return { model: null, ...issues.result() };
@@ -600,7 +601,7 @@ export function parsePeopleImport(
     return { model: null, ...issues.result() };
   }
 
-  const headerIndexes = validateHeaders(parsed.rows[0], issues);
+  const headerIndexes = validateHeaders(parsed.rows[0], issues, parsed.rowNumbers[0]);
   if (headerIndexes === null) return { model: null, ...issues.result() };
 
   const people: PeopleImportPerson[] = [];
@@ -610,7 +611,7 @@ export function parsePeopleImport(
   let householdLimitReported = false;
   const records = normalizedRows(parsed.rows.slice(1), headerIndexes);
   for (const [index, record] of records.entries()) {
-    const row = index + 2;
+    const row = parsed.rowNumbers[index + 1];
     const email = record.email.toLowerCase();
     if (email !== '' && codePointLength(email) <= 254 && isEmail(email)) {
       emailOccurrences.push({ row, email });
