@@ -4,23 +4,28 @@
 //
 // Drives system Chrome in headless mode over the Chrome DevTools Protocol (CDP)
 // via Node's built-in global WebSocket + fetch — no third-party dependency. It
-// captures every page in the PAGES table below at a fixed 1280x800 viewport and
-// writes PNGs under docs/images/**, asserting each is exactly 1280x800 and
-// larger than 20 KB (guards against blank/failed captures).
+// contains the PAGES manifest below and captures rows selected with `--only` at
+// a fixed 1280x800 viewport. The manifest intentionally mixes D1/Supabase and
+// several signed-in identities, so an unfiltered run is rejected before Chrome
+// starts or any file is written. Regeneration is split into the precise passes
+// documented below. Every capture is written under docs/images/** and asserted
+// to be exactly 1280x800 and larger than 20 KB (guards against blank captures).
 //
 // PREREQUISITES
-//   1. A seeded local D1 dev server is already running:
+//   1. A migrated and seeded dev server matching the selected rows is running.
+//      For public and D1 admin rows:
 //        npm run db:migrate:local && npm run db:seed:local
+//        npm run db:seed-media:local
 //        npm run dev                       # astro dev on http://localhost:4321
-//      (Admin pages — none in the default table — additionally need the dev
-//       server started with AUTH_DEV_BYPASS_EMAIL=admin@example.com so the
-//       import.meta.env.DEV auth bypass grants an admin session.)
+//      Admin rows additionally need the server started with
+//      AUTH_DEV_BYPASS_EMAIL=admin@example.com. Member identities and Supabase
+//      prerequisites are documented under AUTH'D SHOTS and `backend` below.
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
-//   npm run screenshots
-//   node scripts/screenshots.mjs --base http://localhost:4321
-//   node scripts/screenshots.mjs --only person-detail.png,opportunities.png
+//   npm run screenshots -- --only public/events.png,public/ministries.png
+//   node scripts/screenshots.mjs --base http://localhost:4321 --only public/events.png,public/ministries.png
+//   node scripts/screenshots.mjs --only public/events.png,public/ministries.png
 //
 // AUTH'D SHOTS (admin + member)
 //   The dev bypass is a single global env (AUTH_DEV_BYPASS_EMAIL) the dev server
@@ -31,11 +36,19 @@
 //   booted for that identity and `--only` selecting the matching shot(s):
 //     # public + admin pass
 //     AUTH_DEV_BYPASS_EMAIL=admin@example.com npm run dev &
-//     node scripts/screenshots.mjs --only opportunities.png,person-detail.png
-//     # member (David Chen) pass — the Chen-household self-service card
+//     node scripts/screenshots.mjs --only serve/opportunities.png,admin/person-detail.png
+//     # D1 member profile (David Chen) pass
 //     AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com npm run dev &
-//     node scripts/screenshots.mjs --only profile-household.png
+//     node scripts/screenshots.mjs --only public/profile-household.png
+//     # Supabase member portal (David Chen) pass
+//     AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com npm run dev &
+//     node scripts/screenshots.mjs --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
+//     # member portal group-files (Ben Wu) pass
+//     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
+//     node scripts/screenshots.mjs --only portal/group-files.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.
+//   Prefer full output-path tokens for batches so short filenames do not select
+//   unrelated outputs that happen to contain the same substring.
 //
 // VARIANTS (see PAGES rows)
 //   theme + mode : the theme is normally driven by the DB `theme.name` /
@@ -59,13 +72,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { assertExpectedScreenshotPage, requireScreenshotOnly } from './lib/screenshot-validation.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VIEWPORT = { width: 1280, height: 800 };
 const MIN_BYTES = 20 * 1024;
 
 // --- config -----------------------------------------------------------------
-// Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend? }
+// Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend?, expectedText? }
 //   path   — URL path on --base (default http://localhost:4321)
 //   out    — repo-relative PNG destination
 //   admin  — page needs an admin dev-bypass session (AUTH_DEV_BYPASS_EMAIL=
@@ -80,8 +94,12 @@ const MIN_BYTES = 20 * 1024;
 //   backend — documentation only, not enforced by this script: 'supabase' means
 //            the page 404s on the default D1 backend and needs its own dev-server
 //            pass with DB_BACKEND=supabase plus a migrated+seeded local Postgres
-//            (WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in .dev.vars;
-//            see docs/supabase-setup.md §9). Capture these together with --only.
+//            (CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE must be
+//            exported in the host shell before npm run dev; never put it in
+//            .dev.vars; see docs/supabase-setup.md §9). Capture these together
+//            with --only.
+//   expectedText — page marker required before capture; guards authenticated
+//            shots against redirects and other unexpected rendered pages
 //   postForm — after load, click every element matching `checkAll` (if given)
 //            then `requestSubmit()` the element matching `form` and wait for
 //            the resulting navigation before continuing. Used for the one shot
@@ -112,6 +130,16 @@ const PAGES = [
   { path: '/en/serve/opportunities', out: 'docs/images/serve/opportunities.png' },
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
+
+  // Member Portal — Supabase-only authenticated pages. Use full output-path
+  // tokens to avoid filename collisions.
+  // David: --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
+  // Ben: --only portal/group-files.png (in a separate identity pass)
+  { path: '/en/my', out: 'docs/images/portal/dashboard.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Family' },
+  { path: '/en/my/household', out: 'docs/images/portal/household.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Family' },
+  { path: '/en/my/events', out: 'docs/images/portal/events.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'My registrations' },
+  { path: '/en/my/prayer?tab=pending', out: 'docs/images/portal/prayer-moderation.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Pending' },
+  { path: '/en/groups/1', out: 'docs/images/portal/group-files.png', bypass: 'ben.wu@example.com', backend: 'supabase', anchor: 'Files', anchorMargin: 0, expectedText: 'young-adults-welcome.pdf' },
 
   // Admin permissions — a super admin's view of a limited admin's person page
   // (person 11, Lydia Kwan), framed on the "Access & status" panel so the
@@ -344,6 +372,12 @@ async function capture(cdp, base, row) {
       }
     }
 
+    const { result: pageState } = await send('Runtime.evaluate', {
+      expression: `({url:location.href,title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||''})`,
+      returnByValue: true,
+    }, sessionId);
+    assertExpectedScreenshotPage(row, pageState.value);
+
     const { data } = await send('Page.captureScreenshot',
       clip ? { format: 'png', clip, captureBeyondViewport: true } : { format: 'png' }, sessionId);
     const buf = Buffer.from(data, 'base64');
@@ -367,6 +401,8 @@ async function capture(cdp, base, row) {
 
 // --- main --------------------------------------------------------------------
 async function main() {
+  requireScreenshotOnly(process.argv);
+
   const baseIdx = process.argv.indexOf('--base');
   const base = baseIdx !== -1 ? process.argv[baseIdx + 1] : 'http://localhost:4321';
 

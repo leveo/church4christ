@@ -18,7 +18,7 @@ before choosing a production setup.
 |  |  |  |
 |---|---|---|
 | ![The English home page](docs/images/public/home-en.png) | ![The Chinese home page](docs/images/public/home-zh.png) | ![The prayer wall board](docs/images/admin/prayer-wall.png) |
-| ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Harvest theme](docs/images/themes/home-harvest-light.png) |
+| ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Member Portal dashboard](docs/images/portal/dashboard.png) |
 
 Two languages are included out of the box (English and Chinese), along with three
 ready-made looks and a modular starting point for further customization.
@@ -102,6 +102,8 @@ domain, support, and maintenance choices determine the real operating cost.
 
 Every feature has its own plain-English guide. Start with any of these:
 
+![The public website, staff admin, and Member Portal connect through a shared Astro Worker, D1 or Supabase database, R2 media, and email platform](docs/images/diagrams/product-overview.png)
+
 | | Feature | What it does |
 |---|---|---|
 | [![](docs/images/public/home-en.png)](docs/features/public-site-and-themes.md) | **[Public site & themes](docs/features/public-site-and-themes.md)** | Your church's front door — home, sermons, events, staff — in one of three ready-made looks. |
@@ -117,7 +119,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
-| 🔒 | **[Member portal](docs/features/member-portal.md)** | A signed-in home for members — household profiles, groups, events, serving, calendar, giving, and a scoped prayer wall. |
+| [![](docs/images/portal/dashboard.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | A signed-in home for members — household profiles, groups, events, serving, calendar, giving, and a scoped prayer wall. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
@@ -163,6 +165,8 @@ group and event leaders can moderate the prayers in their care. It uses the same
 passwordless sign-in links as the rest of Church4Christ — no new account or password to
 remember.
 
+![A member's signed-in home brings household, group, event, prayer, and serving details together](docs/images/portal/dashboard.png)
+
 The portal requires the optional **Supabase (Postgres)** backend because it adds member
 relationships, protected group files, and scoped prayer moderation. Churches using the
 default D1 backend simply do not see the portal controls or routes. Learn more in
@@ -175,6 +179,8 @@ default D1 backend simply do not see the portal controls or routes. Learn more i
 You can run the whole site locally — with realistic sample content — before you commit
 to anything. You will need [Node.js](https://nodejs.org/) 22.12.0 or newer installed. The guided
 setup asks which initial feature set you want and chooses D1 or Supabase from that choice.
+
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](docs/images/diagrams/setup-paths-overview.png)
 
 ```bash
 # 1. Get the code and install it
@@ -296,8 +302,8 @@ which is a big part of why the site loads quickly and costs so little to run. (T
 exception lives behind the staff login: the drag-and-drop page builder is a small React
 editor that only your team ever downloads; the pages it publishes are still plain HTML.)
 
-The whole look comes from **design tokens**: a set of color and type values in
-`design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
+The whole look comes from **[design tokens](design/README.md)**: a set of color and type
+values that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
 each with a light and a dark mode. The project has **extensive automated coverage** across
 its core workflows so maintainers can verify changes before deployment.
 

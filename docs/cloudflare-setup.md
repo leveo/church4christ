@@ -5,7 +5,8 @@ can start within free allowances, and the two ways to do it** — without assumi
 developer. When you are ready for the exact commands, [`deploy.md`](./deploy.md) has the
 precise step-by-step.
 
-The supported first step after `npm install` is:
+With Node.js 22.12.0 or newer installed, install the locked dependencies with `npm ci`.
+The supported next step is:
 
 ```bash
 npm run setup
@@ -14,6 +15,8 @@ npm run setup
 Choose Local or Deploy, then choose Website, Website + Community, Full Church, or individual
 features. Setup explains the required accounts, selects D1 or Supabase, prepares resources
 and data, and bootstraps the first admin. Run `npm run doctor` for a readiness report.
+Doctor checks what setup can inspect; it does not prove external email delivery, a live
+sign-in, scheduled execution, or recovery from a backup.
 
 You do **not** need to read this to try the site on your own computer first — that takes
 five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes-on-your-own-computer)).
@@ -79,6 +82,8 @@ launch and during operation.
 
 ## Guided setup or manual reference
 
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](./images/diagrams/setup-paths-overview.png)
+
 ### Path A — Let an AI assistant do it (easiest)
 
 If you have [Claude Code](https://claude.com/claude-code) or a similar AI coding assistant,
@@ -103,14 +108,18 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
 1. **Make a free Cloudflare account** at
    [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up). Just an email and a
    password.
-2. **Install the project** on your computer (`npm install`) — this also installs
+2. **Install Node.js 22.12.0 or newer, then install the project** on your computer
+   (`npm ci`) — this also installs
    `wrangler`, Cloudflare's command-line helper — and **sign in** once with
    `npx wrangler login`. A browser window confirms it is you.
-3. **Create your filing cabinet and storage room** — one command each creates your D1
-   database and your R2 bucket.
-4. **Paste one ID into a settings file** (`wrangler.jsonc`). The create command prints it;
-   you copy it in. (This file is safe to share — it holds no passwords.)
-5. **Create the tables** in your new database — one command.
+3. **Follow the deployment guide's [manual database fork](./deploy.md#manual-database-fork).**
+   D1 creates a D1 database and the shared R2 media bucket. Supabase creates **only** the
+   R2 bucket on Cloudflare, then creates the Postgres project and Hyperdrive connection;
+   do not create an unused D1 database for that path.
+4. **Configure the selected database in `wrangler.jsonc`.** D1 uses the id printed by its
+   create command. Supabase removes the sample D1 block and uses the Hyperdrive id. This
+   file is safe to share — it holds no passwords.
+5. **Create the tables** with the migration command for the selected database.
 6. **Set your secret sign-in key** (`SESSION_SECRET`) — one command generates and stores a
    strong random value. In the minimum D1 path, this is the only credential setup asks you
    to create. Supabase database URLs, Stripe credentials, and backup credentials are

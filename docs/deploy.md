@@ -16,13 +16,18 @@ hand it this file (see the README's "Build it with an AI assistant").
 > [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
 > and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
 
-> **Which database?** The 14 D1-compatible modules need only Cloudflare when deployed.
-> Member Portal, Giving, and Registration select Supabase and need both Cloudflare and a
-> Supabase account. There is no automated D1↔Supabase content migration yet.
+> **Choose the setup path before you deploy.** For the recommended guided path, stay on
+> this page and run `npm run setup`; it selects D1 for Website / Website + Community and
+> Supabase for Full Church or any custom selection with Member Portal, Giving, or
+> Registration. The manual reference has an explicit [database fork](#manual-database-fork):
+> D1 uses the numbered D1 steps, while Supabase creates only R2 here, completes the
+> database steps in [`supabase-setup.md`](./supabase-setup.md), and resumes at email setup.
+> There is no automated D1↔Supabase content migration yet.
 
 ## Recommended: guided setup
 
-After `npm install`, run the guided installer first:
+After installing Node.js 22.12.0 or newer and running `npm ci`, run the guided installer
+first:
 
 ```bash
 npm run setup
@@ -38,6 +43,10 @@ next command, normally `npm run deploy`. Verify readiness at any time with:
 npm run doctor
 ```
 
+Doctor reports configuration and resource readiness that the installer can inspect. It
+does not prove production email delivery, successful sign-in, route behavior, scheduled-job
+execution, or backup recovery; verify those outcomes with the go-live checklist below.
+
 Deploying D1 requires a Cloudflare account. Deploying Supabase requires Cloudflare and
 Supabase. When a deploy setup must create or recover a Hyperdrive configuration, it refuses
 to put the connection URL in Wrangler's child-process arguments unless you explicitly add
@@ -46,15 +55,16 @@ Hyperdrive does not require that consent.
 
 ## Manual reference and troubleshooting
 
-The remaining commands explain the underlying Cloudflare operations and are useful when
-troubleshooting or maintaining an installation created by setup.
+The remaining commands explain the underlying Cloudflare operations for troubleshooting
+or maintaining an installation created by guided setup. They are not a replacement for
+setup's module initialization and first-admin bootstrap on a new installation.
 
 ## Before you start
 
 You need:
 
-- **[Node.js](https://nodejs.org/) 22+** and the project installed locally (`npm install`).
-  The Cloudflare CLI, `wrangler`, comes with it.
+- **[Node.js](https://nodejs.org/) 22.12.0 or newer** and the project installed locally
+  with `npm ci`. The Cloudflare CLI, `wrangler`, comes with it.
 - A **free Cloudflare account** — sign up at [dash.cloudflare.com](https://dash.cloudflare.com/sign-up).
 - Optionally, a **domain** you want the site to live on (for example `church.yourname.com`).
 
@@ -64,7 +74,22 @@ Authenticate the CLI once:
 npx wrangler login
 ```
 
-## 1. Create the database (D1) and media bucket (R2)
+### Manual database fork
+
+- **D1:** continue with step 1 below.
+- **Supabase:** do **not** create a D1 database or run the D1 migration in steps 1–4.
+  Create only the shared media bucket:
+
+  ```bash
+  npx wrangler r2 bucket create church4christ-media
+  ```
+
+  Then complete sections 2–5 of [`supabase-setup.md`](./supabase-setup.md#2-create-the-supabase-project)
+  for the project, Hyperdrive configuration, Postgres migrations, and session secret.
+  Return to this page at [step 5, Set up email](#5-set-up-email), then continue through
+  deploy, domain, sign-in, and the go-live checklist. Skip the D1-only backup step 9.
+
+## 1. Create the database (D1) and media bucket (R2) — D1 path only
 
 ```bash
 npx wrangler d1 create church4christ-db
@@ -194,7 +219,7 @@ the `npm run dev` terminal instead. Click it and you are in as an admin. From th
 your church's name, address, service times, and theme in **Settings**, and start adding
 content.
 
-## 9. (Optional) Enable nightly backups
+## 9. (Optional, D1 only) Enable nightly backups
 
 The nightly D1 → R2 backup is off until you configure it. To turn it on:
 
@@ -220,6 +245,31 @@ can even reach `/admin`, on top of the app's own magic-link auth. This is defens
 and entirely optional; it does not replace application security, dependency maintenance,
 backups, or monitoring. Configure it in the Cloudflare Zero Trust dashboard as a
 self-hosted application covering the `/admin*` path.
+
+![Go-live proceeds from setup and doctor through deployment, domain and HTTPS, email and first-admin checks, then a backup restore drill and monitoring; each operator-managed step must be verified](./images/diagrams/go-live-readiness.png)
+
+## Go-live checklist
+
+Before announcing the site, collect evidence for every item that applies to the modules
+you enabled:
+
+- **Health:** request `https://your-domain/healthz` and confirm a `200` response with
+  `{"ok":true}`.
+- **First administrator:** request the first admin's magic link from the deployed sign-in
+  page, receive it through the production email path, open it, and confirm the admin home
+  loads.
+- **Production email:** send a representative transactional message to an allowed real
+  recipient and confirm delivery rather than relying on the local terminal email log.
+- **Routes:** open the enabled public and admin routes that the launch depends on using the
+  final domain; confirm disabled modules do not appear as enabled navigation.
+- **Schedules:** confirm the deployed cron triggers match the selected database and
+  enabled modules, then inspect a real invocation or controlled test in Worker logs.
+- **Backup artifact:** record the location and timestamp of a recent D1 export or Supabase
+  backup, plus the separate plan for uploaded R2 media.
+- **Restore drill:** restore that artifact into a non-production environment and verify
+  representative records and media references before depending on it for recovery.
+- **Monitoring:** configure a named owner and notifications for Worker, email, scheduled
+  job, and backup failures, then confirm a test notification reaches that owner.
 
 ## Keeping it running
 
