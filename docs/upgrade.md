@@ -104,8 +104,11 @@ npx wrangler d1 migrations apply DB --remote \
   --config /secure/path/wrangler.staging.jsonc
 ```
 
-For Supabase/Postgres staging, inject `SUPABASE_DB_URL` through the approved secret channel
-without printing it or placing it in the command text, then run:
+For Supabase/Postgres staging, first compare the expected staging project reference and host
+through the provider dashboard or approved connection profile. Record only those non-secret
+target identifiers; do not print or log a connection URL or credential. After verifying the
+target, inject `SUPABASE_DB_URL` through the approved secret channel without printing it or
+placing it in the command text, then run:
 
 ```bash
 npm run db:migrate:supabase
