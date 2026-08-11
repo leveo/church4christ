@@ -107,16 +107,34 @@ const householdPrimaryRecord = (
   ...overrides,
 });
 
-const twoPartyBarrier = (): (() => Promise<void>) => {
+const twoPartyBarrier = (timeoutMs = 5_000): (() => Promise<void>) => {
   let arrivals = 0;
+  let settled = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   let release!: () => void;
-  const released = new Promise<void>((resolve) => {
+  let reject!: (error: Error) => void;
+  const released = new Promise<void>((resolve, rejectPromise) => {
     release = resolve;
+    reject = rejectPromise;
   });
 
   return async () => {
-    arrivals += 1;
-    if (arrivals === 2) release();
+    if (!settled) {
+      arrivals += 1;
+      if (arrivals === 1) {
+        timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          timeout = undefined;
+          reject(new Error('two-party barrier timed out'));
+        }, timeoutMs);
+      } else if (arrivals === 2) {
+        settled = true;
+        if (timeout !== undefined) clearTimeout(timeout);
+        timeout = undefined;
+        release();
+      }
+    }
     await released;
   };
 };
@@ -150,6 +168,24 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     ]);
     return { people: people ?? 0, households: households ?? 0, members: members ?? 0 };
   };
+
+  it('rejects a stalled two-party barrier instead of waiting forever', async () => {
+    const stalled = twoPartyBarrier(25)().then(
+      () => 'released',
+      (error: unknown) => error,
+    );
+    let failSafe: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      stalled,
+      new Promise<'still-waiting'>((resolve) => {
+        failSafe = setTimeout(() => resolve('still-waiting'), 100);
+      }),
+    ]);
+    if (failSafe !== undefined) clearTimeout(failSafe);
+
+    expect(outcome).toBeInstanceOf(Error);
+    expect(outcome).toMatchObject({ message: 'two-party barrier timed out' });
+  });
 
   it('preflights live and soft-deleted emails plus only live canonical household names without writes', async () => {
     const parsed = parsePeopleImportRecords([
@@ -317,7 +353,38 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     ]);
   });
 
-  it('allows exactly one identical concurrent import after both preflights and keeps household identities connection-local', async () => {
+  it('keeps household currval local to each interleaved transaction session', async () => {
+    const clientA = pgClient();
+    const clientB = pgClient();
+    const barrier = twoPartyBarrier();
+    const insertAndReadOwnSequence = (
+      client: ReturnType<typeof pgClient>,
+      name: string,
+    ) => client.begin(async (tx) => {
+      const [inserted] = await tx.unsafe(
+        'INSERT INTO households (name) VALUES ($1) RETURNING id',
+        [name],
+      );
+      await barrier();
+      const [current] = await tx.unsafe(
+        "SELECT currval(pg_get_serial_sequence('households','id'))::int AS id",
+      );
+      expect(Number(current.id)).toBe(Number(inserted.id));
+      return Number(inserted.id);
+    });
+
+    try {
+      const [idA, idB] = await Promise.all([
+        insertAndReadOwnSequence(clientA, 'Interleaved transaction A'),
+        insertAndReadOwnSequence(clientB, 'Interleaved transaction B'),
+      ]);
+      expect(idA).not.toBe(idB);
+    } finally {
+      await Promise.all([clientA.end(), clientB.end()]);
+    }
+  });
+
+  it('allows exactly one identical concurrent import after both preflights', async () => {
     const records = [
       householdPrimaryRecord(1, {
         household_key: 'concurrent-first',
@@ -337,16 +404,8 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     const adapterA = new PgAdapter(clientA);
     const adapterB = new PgAdapter(clientB);
     const barrier = twoPartyBarrier();
-    const dbA = new TrackingDb(adapterA, async () => {
-      await adapterA.prepare('INSERT INTO households (name) VALUES (?)')
-        .bind('Connection A sentinel').run();
-      await barrier();
-    });
-    const dbB = new TrackingDb(adapterB, async () => {
-      await adapterB.prepare('INSERT INTO households (name) VALUES (?)')
-        .bind('Connection B sentinel').run();
-      await barrier();
-    });
+    const dbA = new TrackingDb(adapterA, barrier);
+    const dbB = new TrackingDb(adapterB, barrier);
 
     try {
       const settled = await Promise.allSettled([
@@ -378,7 +437,7 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
         { name: 'Concurrent First', email: 'concurrent-first@example.com' },
         { name: 'Concurrent Second', email: 'concurrent-second@example.com' },
       ]);
-      expect(await tableCounts()).toEqual({ people: 2, households: 4, members: 2 });
+      expect(await tableCounts()).toEqual({ people: 2, households: 2, members: 2 });
     } finally {
       await Promise.all([clientA.end(), clientB.end()]);
     }
