@@ -1,10 +1,14 @@
 import type { AppDb, AppStatement } from './appDb';
+import { isUniqueViolation } from './adminDb';
+import type { DbBackend } from './dbProvider';
 import {
   PEOPLE_IMPORT_LIMITS,
   parsePeopleImport,
+  type PeopleImportDependent,
   type PeopleImportHeader,
   type PeopleImportHousehold,
   type PeopleImportModel,
+  type PeopleImportPerson,
 } from './peopleImport';
 
 export type PeopleImportValidationResult = ReturnType<typeof parsePeopleImport>;
@@ -26,12 +30,36 @@ export interface PeopleImportPreflightResult {
   warnings: PeopleImportDbIssue[];
 }
 
+export interface PeopleImportCommitResult {
+  people: number;
+  households: number;
+  dependents: number;
+}
+
 export class PeopleImportNotReadyError extends Error {
   readonly code = 'import_not_ready' as const;
 
   constructor() {
     super('People import is not ready');
     this.name = 'PeopleImportNotReadyError';
+  }
+}
+
+export class PeopleImportConflictError extends Error {
+  readonly code = 'import_conflict' as const;
+
+  constructor() {
+    super('People import conflicts with existing data');
+    this.name = 'PeopleImportConflictError';
+  }
+}
+
+export class PeopleImportPersistenceError extends Error {
+  readonly code = 'import_failed' as const;
+
+  constructor() {
+    super('People import failed');
+    this.name = 'PeopleImportPersistenceError';
   }
 }
 
@@ -178,4 +206,177 @@ export async function preflightPeopleImport(
     });
   }
   return boundedResult(issues);
+}
+
+const PERSON_INSERT_SQL = `INSERT INTO people
+  (first_name, last_name, display_name, email, phone, role, active, lang,
+   birthday, address, membership_status, joined_on)
+VALUES
+  (?1, ?2, ?3, ?4, ?5, 'member', ?6, ?7, ?8, ?9, ?10, ?11)`;
+
+const HOUSEHOLD_INSERT_SQL =
+  'INSERT INTO households (name, address, phone) VALUES (?1, ?2, ?3)';
+
+function assertNever(_value: never): never {
+  throw new PeopleImportPersistenceError();
+}
+
+function householdIdentityExpression(backend: DbBackend): string {
+  switch (backend) {
+    case 'd1':
+      return 'last_insert_rowid()';
+    case 'supabase':
+      return "currval(pg_get_serial_sequence('households','id'))";
+    default:
+      return assertNever(backend);
+  }
+}
+
+function personInsert(db: AppDb, person: PeopleImportPerson): AppStatement {
+  return db.prepare(PERSON_INSERT_SQL).bind(
+    person.firstName ?? '',
+    person.lastName ?? '',
+    person.displayName,
+    person.email,
+    person.phone,
+    person.active ? 1 : 0,
+    person.language,
+    person.birthday,
+    person.address,
+    person.membershipStatus,
+    person.joinedOn,
+  );
+}
+
+function householdRole(person: PeopleImportPerson): 'adult' | 'child' {
+  if (person.household === null) {
+    throw new PeopleImportPersistenceError();
+  }
+  return person.household.role;
+}
+
+function primaryMembershipInsert(
+  db: AppDb,
+  identityExpression: string,
+  household: PeopleImportHousehold,
+  primary: PeopleImportPerson,
+): AppStatement {
+  return db.prepare(`INSERT INTO household_members
+  (household_id, person_id, display_name, role, is_primary)
+VALUES (
+  ${identityExpression},
+  COALESCE((SELECT id FROM people WHERE email = ?1), -1),
+  ?2, ?3, 1
+)`).bind(
+    household.primaryEmail,
+    primary.displayName,
+    householdRole(primary),
+  );
+}
+
+const EXISTING_HOUSEHOLD_LOOKUP = `COALESCE((
+    SELECT hm.household_id
+    FROM people primary_person
+    JOIN household_members hm
+      ON hm.person_id = primary_person.id AND hm.is_primary = 1
+    WHERE primary_person.email = ?1
+  ), -1)`;
+
+function personMembershipInsert(
+  db: AppDb,
+  household: PeopleImportHousehold,
+  person: PeopleImportPerson,
+): AppStatement {
+  return db.prepare(`INSERT INTO household_members
+  (household_id, person_id, display_name, role, is_primary)
+VALUES (
+  ${EXISTING_HOUSEHOLD_LOOKUP},
+  COALESCE((SELECT id FROM people WHERE email = ?2), -1),
+  ?3, ?4, 0
+)`).bind(
+    household.primaryEmail,
+    person.email,
+    person.displayName,
+    householdRole(person),
+  );
+}
+
+function dependentMembershipInsert(
+  db: AppDb,
+  household: PeopleImportHousehold,
+  dependent: PeopleImportDependent,
+): AppStatement {
+  return db.prepare(`INSERT INTO household_members
+  (household_id, person_id, display_name, role, is_primary)
+VALUES (
+  ${EXISTING_HOUSEHOLD_LOOKUP},
+  NULL,
+  ?2, ?3, 0
+)`).bind(
+    household.primaryEmail,
+    dependent.displayName,
+    dependent.household.role,
+  );
+}
+
+function householdStatements(
+  db: AppDb,
+  identityExpression: string,
+  household: PeopleImportHousehold,
+): AppStatement[] {
+  const primary = household.people.find((person) => person.email === household.primaryEmail);
+  if (primary === undefined) {
+    throw new PeopleImportPersistenceError();
+  }
+
+  const statements = [
+    db.prepare(HOUSEHOLD_INSERT_SQL).bind(household.name, household.address, household.phone),
+    primaryMembershipInsert(db, identityExpression, household, primary),
+  ];
+  const remaining = [
+    ...household.people
+      .filter((person) => person !== primary)
+      .map((person) => ({ row: person.row, statement: personMembershipInsert(db, household, person) })),
+    ...household.dependents
+      .map((dependent) => ({ row: dependent.row, statement: dependentMembershipInsert(db, household, dependent) })),
+  ].sort((left, right) => left.row - right.row);
+  statements.push(...remaining.map(({ statement }) => statement));
+  return statements;
+}
+
+export async function commitPeopleImport(
+  db: AppDb,
+  backend: DbBackend,
+  parsed: PeopleImportValidationResult,
+): Promise<PeopleImportCommitResult> {
+  const model = readyModel(parsed);
+  const result = {
+    people: model.people.length,
+    households: model.households.length,
+    dependents: model.dependents.length,
+  };
+  if (model.people.length === 0 && model.households.length === 0) {
+    return result;
+  }
+
+  const identityExpression = householdIdentityExpression(backend);
+  const preflight = await preflightPeopleImport(db, parsed);
+  if (preflight.errors.length > 0) {
+    throw new PeopleImportConflictError();
+  }
+
+  const statements = [
+    ...model.people.map((person) => personInsert(db, person)),
+    ...model.households.flatMap((household) =>
+      householdStatements(db, identityExpression, household)),
+  ];
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new PeopleImportConflictError();
+    }
+    throw new PeopleImportPersistenceError();
+  }
+  return result;
 }
