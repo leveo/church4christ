@@ -44,7 +44,14 @@ const colspan = hasPeople ? 7 : 5;
 <Admin title={t(lang, 'admin.people.title')}>
   <div class="flex items-center justify-between gap-4">
     <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.people.title')}</h1>
-    {canManagePeople && <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>}
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      {
+        hasPeople && canManagePeople && (
+          <a href="/admin/people/import" class={btn}>{t(lang, 'admin.peopleImport.title')}</a>
+        )
+      }
+      {canManagePeople && <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>}
+    </div>
   </div>
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}

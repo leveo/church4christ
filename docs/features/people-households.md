@@ -58,6 +58,61 @@ plainly on its face that leaders never see it.
 
 ![An admin's view of a person, with household and pastoral notes](../images/admin/person-detail.png)
 
+### CSV import for admins
+
+Admins with full People access can open `/admin/people/import`, download the canonical
+`church4christ-people-import.csv` template from
+`/admin/people/import/template.csv`, select a completed UTF-8 CSV, and choose **Preview**.
+Use the downloaded template rather than renaming or omitting columns: the header contract
+is exactly these 18 fields (the template keeps them in this order):
+
+```csv
+record_type,display_name,email,first_name,last_name,phone,language,membership_status,birthday,joined_on,address,active,household_key,household_name,household_address,household_phone,household_role,household_primary
+```
+
+The upload limit is 256 KiB, 200 data rows, and 100 households. The two record types work
+as follows:
+
+- A `person` row creates an account-bearing person. `display_name` and a valid, unique
+  `email` are required. Optional values include names, phone, `language` (`en` or `zh`),
+  `membership_status` (`visitor`, `regular`, `member`, or `inactive`), `YYYY-MM-DD` dates,
+  address, and `active` (`true` or `false`). The person can sign in only while `active`
+  is `true`; the imported application role is always `member`.
+- A `dependent` row creates a name-only household member, not a person or sign-in. It
+  requires `display_name` and `household_key`; person fields such as email, phone,
+  language, membership status, dates, address, and active must stay blank.
+- `household_key` is an import-local grouping key (`a-z`, `0-9`, `.`, `_`, or `-`, up to
+  64 characters). It never identifies or attaches to an existing household. Every key
+  needs a household name and at least one `person` row. Within each key there must be
+  **exactly one** `person` whose `household_role` is `adult` and whose
+  `household_primary` is `true`; that row is the primary contact. Other person rows use
+  an explicit `adult` or `child` role and `household_primary=false`. Dependents cannot be
+  primary. If household name, address, or phone is repeated on several rows for the same
+  key, the non-empty values must agree.
+
+This is deliberately a **create-only** operation. It does not update or merge people,
+revive soft-deleted people, change an existing person's email, attach rows to an existing
+household, grant admin/team privileges, or send email. An imported email conflicts whether
+the matching existing person is live and active, inactive, or soft-deleted. A same-name
+**live** household is a warning, not an attachment rule: acknowledging the warning creates
+a new, separate household. Review possible duplicates before continuing.
+
+Preview parses and preflights the CSV without writing any people, households, or
+memberships. Commit does not trust the preview response: the server reparses the uploaded
+file and reruns current database preflight checks before writing. Parser or email-conflict
+errors block the import; warnings must be explicitly acknowledged. A repeated or stale
+submission is checked again and conflicts instead of updating existing rows.
+
+All writes are one atomic database operation on both D1 and PostgreSQL: either every
+person, household, and membership is committed, or none is. The importer never chunks a
+file into partial commits. This matters for D1 capacity: D1 Free currently permits 50
+queries per Worker invocation, while the largest accepted import can require about 500
+batch statements (up to 200 people, 100 households, and 200 memberships) plus preflight
+scans. A large D1 import therefore needs a plan/runtime with a paid-capable invocation
+limit; otherwise reduce the file before previewing. Pricing and limits can change, so the
+current [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/) are
+authoritative.
+
 **Reaching out.** From a person's page, an admin (or a team leader, from their own leader
 view) can click **Invite to serve**, pick a team, and send a warm, localized email
 inviting that person to apply. Admins can invite to any team; a leader can only invite to
@@ -109,13 +164,18 @@ leader reaches out first with a logged invite.
   the actor is an adult of the target household.
 - **Outreach email:** `sendServeInvite` in `src/lib/notify.ts` (best-effort, logged to
   `email_log` as kind `outreach`); templated via the `invite.email.*` dictionary keys.
-- **Module gating:** the `people` module owns **no route prefixes** (its surfaces live in
-  the pre-existing `/profile` and `/admin/people` core routes, and the board is under the
-  `serve` module). Each added panel checks `Astro.locals.modules.has('people')`, so turning
-  the module off hides the depth without 404-ing the core directory or sign-in. See
-  [Modules](modules.md).
+- **Module gating:** the pre-existing `/profile` and `/admin/people` surfaces remain core
+  routes, and the board stays under the `serve` module. The exact
+  `/admin/people/import` subtree belongs to the `people` module and requires the full
+  People admin area; each other added panel checks
+  `Astro.locals.modules.has('people')`. Turning the module off hides the depth without
+  404-ing the core directory or sign-in. See [Modules](modules.md).
 - **Tests:** `test/schema.people.test.ts`, `test/householdDb.test.ts`,
   `test/notesDb.test.ts`, `test/opportunityDb.test.ts`, `test/adminDb.people.test.ts`, and
   the `parsePersonForm`/`parseHouseholdForm` cases in `test/validate.test.ts`; end-to-end
   coverage in `test/e2e/people-admin.e2e.test.ts` and the household/board/privacy
   assertions in `test/e2e/volunteer.e2e.test.ts`.
+- **CSV import:** `src/lib/peopleImport.ts` owns the exact header and pure validation
+  contract; `src/lib/peopleImportDb.ts` owns create-only preflight and atomic persistence.
+  The `/admin/people/import` routes repeat People-module and full-area authorization,
+  return only bounded issue metadata, and never include uploaded cell values in errors.

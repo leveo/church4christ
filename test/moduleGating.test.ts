@@ -6,6 +6,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import stripeOperationsSource from '../src/pages/admin/stripe-events.astro?raw';
+import peopleDirectorySource from '../src/pages/admin/people/index.astro?raw';
 import givingGuideSource from '../docs/features/giving.md?raw';
 import registrationGuideSource from '../docs/features/registration.md?raw';
 import supabaseGuideSource from '../docs/supabase-setup.md?raw';
@@ -125,6 +126,15 @@ describe('moduleForPath — groups module', () => {
   it('resolves the admin groups prefix', () => {
     expect(moduleForPath('/admin/groups')).toBe('groups');
     expect(moduleForPath('/admin/groups/7')).toBe('groups');
+  });
+});
+
+describe('People import directory entry', () => {
+  it('shows the import link only behind both the people module and full people grant', () => {
+    expect(peopleDirectorySource).toMatch(
+      /hasPeople\s*&&\s*canManagePeople\s*&&\s*\(\s*<a href="\/admin\/people\/import"/s,
+    );
+    expect(peopleDirectorySource.match(/href="\/admin\/people\/import"/g)).toHaveLength(1);
   });
 });
 

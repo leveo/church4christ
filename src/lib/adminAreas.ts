@@ -49,6 +49,9 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   ['/admin/revisions/announcement', 'events'],
   ['/admin/revisions/event', 'events'],
   ['/admin/prayer-wall', 'prayer-wall'],
+  // The directory remains a people-basic default, but bulk import is a full
+  // people-management capability. Longest-prefix matching keeps the split.
+  ['/admin/people/import', 'people'],
   ['/admin/people', 'people-basic'],
   ['/admin/groups', 'groups'],
   ['/admin/children', 'children'],

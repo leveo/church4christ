@@ -268,3 +268,14 @@ describe('page-builder module', () => {
     expect(moduleForPath('/p/about')).toBeNull(); // public rendering never gated
   });
 });
+
+describe('people import module', () => {
+  it('owns only the import subtree while the established people admin stays core', () => {
+    expect(moduleForPath('/admin/people/import')).toBe('people');
+    expect(moduleForPath('/admin/people/import/template.csv')).toBe('people');
+    expect(moduleForPath('/admin/people/import/preview')).toBe('people');
+    expect(moduleForPath('/admin/people/import/commit')).toBe('people');
+    expect(moduleForPath('/admin/people')).toBeNull();
+    expect(moduleForPath('/admin/people/4')).toBeNull();
+  });
+});
