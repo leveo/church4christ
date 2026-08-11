@@ -29,11 +29,17 @@ nothing is machine-translated — your team controls both.
 ![The Chinese home page](../images/public/home-zh.png)
 
 **The rest of the public site.** The header menu leads to the sermon archive, the
-weekly bulletin, an events page, the ministries directory, staff bios, the pastor's
-articles, and pages like "Plan a Visit." Each has its own doc, but they all share the
-same header, footer, and theme.
+weekly bulletin, events, ministries, staff bios, articles, and pages like "Plan a
+Visit." These surfaces are covered together in this guide and share the same header,
+footer, language controls, and theme.
 
 ![The sermon archive](../images/public/sermons.png)
+
+| Events | Ministries | Staff |
+|---|---|---|
+| ![The public events calendar and event cards](../images/public/events.png) | ![The public ministries directory](../images/public/ministries.png) | ![The public staff directory](../images/public/staff.png) |
+| Articles | Plan a Visit | |
+| ![The public articles archive](../images/public/articles.png) | ![The public Plan a Visit page](../images/public/visit.png) | |
 
 **Choosing a theme.** Three themes are included. Each one also has a light and a dark
 version, so there are six looks in total. You do not design these yourself; you pick

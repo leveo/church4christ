@@ -16,13 +16,17 @@ hand it this file (see the README's "Build it with an AI assistant").
 > [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
 > and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
 
-> **Which database?** The 14 D1-compatible modules need only Cloudflare when deployed.
-> Member Portal, Giving, and Registration select Supabase and need both Cloudflare and a
-> Supabase account. There is no automated D1↔Supabase content migration yet.
+> **Choose the database path before you deploy.** Website and Website + Community
+> installations use D1; continue with this guide. Full Church — or any custom installation
+> that enables Member Portal, Giving, or Registration — uses Supabase. Follow the database
+> path in [`supabase-setup.md`](./supabase-setup.md) first, then return here for the Worker,
+> R2, email, domain, and go-live steps. There is no automated D1↔Supabase content migration
+> yet.
 
 ## Recommended: guided setup
 
-After `npm install`, run the guided installer first:
+After installing Node.js 22.12.0 or newer and running `npm ci`, run the guided installer
+first:
 
 ```bash
 npm run setup
@@ -37,6 +41,10 @@ next command, normally `npm run deploy`. Verify readiness at any time with:
 ```bash
 npm run doctor
 ```
+
+Doctor reports configuration and resource readiness that the installer can inspect. It
+does not prove production email delivery, successful sign-in, route behavior, scheduled-job
+execution, or backup recovery; verify those outcomes with the go-live checklist below.
 
 Deploying D1 requires a Cloudflare account. Deploying Supabase requires Cloudflare and
 Supabase. When a deploy setup must create or recover a Hyperdrive configuration, it refuses
@@ -53,8 +61,8 @@ troubleshooting or maintaining an installation created by setup.
 
 You need:
 
-- **[Node.js](https://nodejs.org/) 22+** and the project installed locally (`npm install`).
-  The Cloudflare CLI, `wrangler`, comes with it.
+- **[Node.js](https://nodejs.org/) 22.12.0 or newer** and the project installed locally
+  with `npm ci`. The Cloudflare CLI, `wrangler`, comes with it.
 - A **free Cloudflare account** — sign up at [dash.cloudflare.com](https://dash.cloudflare.com/sign-up).
 - Optionally, a **domain** you want the site to live on (for example `church.yourname.com`).
 
@@ -203,6 +211,29 @@ can even reach `/admin`, on top of the app's own magic-link auth. This is defens
 and entirely optional; it does not replace application security, dependency maintenance,
 backups, or monitoring. Configure it in the Cloudflare Zero Trust dashboard as a
 self-hosted application covering the `/admin*` path.
+
+## Go-live checklist
+
+Before announcing the site, collect evidence for every item that applies to the modules
+you enabled:
+
+- **Health:** request `https://your-domain/healthz` and confirm a `200` response with
+  `{"ok":true}`.
+- **First administrator:** request the first admin's magic link from the deployed sign-in
+  page, receive it through the production email path, open it, and confirm the admin home
+  loads.
+- **Production email:** send a representative transactional message to an allowed real
+  recipient and confirm delivery rather than relying on the local terminal email log.
+- **Routes:** open the enabled public and admin routes that the launch depends on using the
+  final domain; confirm disabled modules do not appear as enabled navigation.
+- **Schedules:** confirm the deployed cron triggers match the selected database and
+  enabled modules, then inspect a real invocation or controlled test in Worker logs.
+- **Backup artifact:** record the location and timestamp of a recent D1 export or Supabase
+  backup, plus the separate plan for uploaded R2 media.
+- **Restore drill:** restore that artifact into a non-production environment and verify
+  representative records and media references before depending on it for recovery.
+- **Monitoring:** configure a named owner and notifications for Worker, email, scheduled
+  job, and backup failures, then confirm a test notification reaches that owner.
 
 ## Keeping it running
 

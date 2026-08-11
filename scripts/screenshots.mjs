@@ -4,23 +4,28 @@
 //
 // Drives system Chrome in headless mode over the Chrome DevTools Protocol (CDP)
 // via Node's built-in global WebSocket + fetch — no third-party dependency. It
-// captures every page in the PAGES table below at a fixed 1280x800 viewport and
-// writes PNGs under docs/images/**, asserting each is exactly 1280x800 and
-// larger than 20 KB (guards against blank/failed captures).
+// contains the PAGES manifest below and captures rows selected with `--only` at
+// a fixed 1280x800 viewport. With no filter it attempts every row, but the
+// manifest intentionally mixes D1/Supabase and several signed-in identities, so
+// normal regeneration is split into the precise passes documented below. Every
+// capture is written under docs/images/** and asserted to be exactly 1280x800
+// and larger than 20 KB (guards against blank/failed captures).
 //
 // PREREQUISITES
-//   1. A seeded local D1 dev server is already running:
+//   1. A migrated and seeded dev server matching the selected rows is running.
+//      For public and D1 admin rows:
 //        npm run db:migrate:local && npm run db:seed:local
+//        npm run db:seed-media:local
 //        npm run dev                       # astro dev on http://localhost:4321
-//      (Admin pages — none in the default table — additionally need the dev
-//       server started with AUTH_DEV_BYPASS_EMAIL=admin@example.com so the
-//       import.meta.env.DEV auth bypass grants an admin session.)
+//      Admin rows additionally need the server started with
+//      AUTH_DEV_BYPASS_EMAIL=admin@example.com. Member identities and Supabase
+//      prerequisites are documented under AUTH'D SHOTS and `backend` below.
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
-//   npm run screenshots
+//   npm run screenshots                   # attempts all mixed-environment rows
 //   node scripts/screenshots.mjs --base http://localhost:4321
-//   node scripts/screenshots.mjs --only person-detail.png,opportunities.png
+//   node scripts/screenshots.mjs --only public/events.png,public/ministries.png
 //
 // AUTH'D SHOTS (admin + member)
 //   The dev bypass is a single global env (AUTH_DEV_BYPASS_EMAIL) the dev server
@@ -31,8 +36,11 @@
 //   booted for that identity and `--only` selecting the matching shot(s):
 //     # public + admin pass
 //     AUTH_DEV_BYPASS_EMAIL=admin@example.com npm run dev &
-//     node scripts/screenshots.mjs --only opportunities.png,person-detail.png
-//     # member portal (David Chen) pass
+//     node scripts/screenshots.mjs --only serve/opportunities.png,admin/person-detail.png
+//     # D1 member profile (David Chen) pass
+//     AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com npm run dev &
+//     node scripts/screenshots.mjs --only public/profile-household.png
+//     # Supabase member portal (David Chen) pass
 //     AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com npm run dev &
 //     node scripts/screenshots.mjs --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
 //     # member portal group-files (Ben Wu) pass
