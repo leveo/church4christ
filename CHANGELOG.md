@@ -17,3 +17,22 @@ or GitHub Release exists.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
 - Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
+
+### Changed
+
+- Staging upgrade instructions now require an explicit staging Wrangler environment or
+  configuration for both D1 migrations and deployment.
+
+### Fixed
+
+- Corrected contributor guidance to use the project's five current rules consistently.
+
+### Security
+
+- Database export examples now write sensitive backups outside the repository and require
+  operators to verify the exact target database before migration.
+
+### Upgrade notes
+
+- Migration files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+  the frozen `main` baseline. Corrections must use a new numbered forward migration.

@@ -38,14 +38,16 @@ Back up:
      name in place of `<database-name>`:
 
      ```bash
-     npx wrangler d1 export <database-name> --remote --output=church4christ-before-upgrade.sql
+     npx wrangler d1 export <database-name> --remote \
+       --output=/secure/backups/church4christ-before-upgrade.sql
      ```
 
    - Supabase/Postgres: use the provider backup or `pg_dump` with a connection URL supplied
      through the environment, never committed to the repository:
 
      ```bash
-     pg_dump --format=custom --file=church4christ-before-upgrade.dump "$SUPABASE_DB_URL"
+     pg_dump --format=custom \
+       --file=/secure/backups/church4christ-before-upgrade.dump "$SUPABASE_DB_URL"
      ```
 
 2. **R2 media** — copy every object and its key to independent storage through the R2
@@ -79,13 +81,23 @@ npm run check
 npm run build
 ```
 
-Apply only the forward migrations for the selected staging backend:
+Apply only the forward migrations for the selected staging backend. For D1, first compare the
+staging binding with `npx wrangler d1 list --json` and confirm its exact database name and ID.
+A bare `npm run db:migrate:remote` uses the default Wrangler configuration and must not be used
+for a staging rehearsal. Choose one explicit staging target:
 
 ```bash
-# D1 staging, using its staging Wrangler environment/configuration
-npm run db:migrate:remote
+# Choose one; do not run both. Named environment in the reviewed Wrangler configuration:
+npm run db:migrate:remote -- --env staging
 
-# Supabase/Postgres staging; keep the URL in the environment
+# Or a separate reviewed staging configuration outside the production checkout
+npx wrangler d1 migrations apply DB --remote \
+  --config /secure/path/wrangler.staging.jsonc
+```
+
+For Supabase/Postgres staging, keep the staging-only URL in the environment:
+
+```bash
 SUPABASE_DB_URL=postgres://... npm run db:migrate:supabase
 ```
 
@@ -93,8 +105,23 @@ Do **not** run `npm run db:seed:local`, `npm run db:seed-media:local`, or
 `npm run db:seed:supabase` in production. Seed data is for disposable local development and
 tests; it is not an upgrade step.
 
-Deploy the target revision to staging, exercise sign-in and the church's critical workflows,
-then require the strict readiness check to pass:
+Deploy the target revision through the same explicit staging Wrangler environment or
+configuration. This target rule also applies to a Supabase-backed Worker. Then exercise
+sign-in and the church's critical workflows:
+
+```bash
+# Use the matching choice; do not run both
+npm run deploy -- --env staging
+npm run deploy -- --config /secure/path/wrangler.staging.jsonc
+```
+
+The doctor accepts `--strict` and `--json`, but it does not accept Wrangler `--env` or
+`--config` flags. Run it from an isolated staging checkout whose `church.config.json` and
+default `wrangler.jsonc` both point to the staging resources. If migration/deploy used a
+separate staging configuration, first render or place those reviewed settings as that
+checkout's default `wrangler.jsonc`. Never perform a staging rehearsal or run its doctor from
+a checkout whose manifest or default Wrangler configuration contains production bindings.
+Then require the strict readiness check to pass:
 
 ```bash
 npm run doctor -- --strict
@@ -123,10 +150,12 @@ compatibility sequence, the normal forward path is:
    depends on;
 6. record the deployed revision, migration result, verifier, and completion time.
 
-Migration runners are forward-only. Never edit, delete, rename, reorder, or manually mark an
-already-applied migration. In particular, do not rewrite D1's `d1_migrations` table or the
-Supabase runner's `_migrations` table. Investigate a mismatch and add a new forward migration
-when correction is needed.
+Migration runners are forward-only. Never edit, delete, rename, reorder, or manually mark a
+migration after it is merged into `main` or applied by any installation. Files `0001` through
+`0010` in `migrations/` and `migrations-supabase/` are the frozen current `main` baseline. In
+particular, do not rewrite D1's `d1_migrations` table or the Supabase runner's `_migrations`
+table. Investigate a mismatch and add a new numbered forward migration when correction is
+needed.
 
 ## 5. Recovery boundaries
 

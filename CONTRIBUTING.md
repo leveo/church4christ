@@ -57,17 +57,19 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, optionally scoped
 (`feat(serve): …`). This keeps history readable and releasable.
 
-### 5. Record operator impact and preserve released migrations
+### 5. Record operator impact and preserve shared migration history
 
 When a change affects database schema or data, installation, deployment, bindings,
 environment variables, secrets, module defaults, access rules, backup/restore, imports,
 operational limits, or required manual work, update `CHANGELOG.md` under `Unreleased` and the
 relevant runbook in the same PR. State explicitly when there is no operator impact.
 
-Once a migration is included in an immutable tag or GitHub Release, never edit, rename,
-delete, or reorder it. Add a new forward migration for corrections. Do not manually rewrite
-D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table to make histories look
-aligned. See [`docs/upgrade.md`](docs/upgrade.md) and
+Once a migration is merged into `main` or applied by any installation, never edit, rename,
+delete, or reorder it. The current `main` baseline files `0001` through `0010` in both
+`migrations/` and `migrations-supabase/` are already frozen. Add a new numbered forward
+migration for every correction. Do not manually rewrite D1's `d1_migrations` table or
+Supabase/Postgres's `_migrations` table to make histories look aligned. See
+[`docs/upgrade.md`](docs/upgrade.md) and
 [`docs/release-process.md`](docs/release-process.md).
 
 ## Running the checks
@@ -117,7 +119,8 @@ Before you open a PR, confirm:
 - [ ] Docs updated if behavior changed.
 - [ ] Operator impact is described and, when applicable, recorded under `Unreleased` in
       [`CHANGELOG.md`](CHANGELOG.md) with the relevant upgrade/deployment runbook updated.
-- [ ] Released migration files are unchanged; schema corrections use a new forward migration.
+- [ ] Migrations already on `main` or applied by an installation are unchanged; schema
+      corrections use a new numbered forward migration.
 
 ## Code of conduct
 

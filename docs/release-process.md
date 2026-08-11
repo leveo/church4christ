@@ -21,9 +21,11 @@ impact under `Unreleased` in [`CHANGELOG.md`](../CHANGELOG.md), including:
 - deployment, backup, restore, monitoring, or manual follow-up steps;
 - user-visible additions, fixes, security changes, removals, and known limitations.
 
-Do not edit or rename migration files that appeared in an earlier immutable tag or release.
-Create a new, ordered, forward migration instead. Never manufacture migration history by
-editing D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table.
+Do not edit, rename, delete, or reorder a migration once it is merged into `main` or applied by
+any installation; waiting for a tag or GitHub Release is too late. Files `0001` through `0010`
+in both `migrations/` and `migrations-supabase/` are the frozen current `main` baseline. Create
+a new, numbered, forward migration for every correction. Never manufacture migration history
+by editing D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table.
 
 ## Prepare the release pull request
 

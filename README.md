@@ -338,7 +338,7 @@ not legal advice.
 ## Contributing & roadmap
 
 Contributions are welcome — bug reports, translations, new features. Start with
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev setup and the project's four rules, and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev setup and the project's five rules, and
 [`SECURITY.md`](SECURITY.md) if you have found a security issue.
 
 **On the horizon (not built yet):** an adult/service attendance flow distinct from the
