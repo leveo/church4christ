@@ -296,8 +296,8 @@ which is a big part of why the site loads quickly and costs so little to run. (T
 exception lives behind the staff login: the drag-and-drop page builder is a small React
 editor that only your team ever downloads; the pages it publishes are still plain HTML.)
 
-The whole look comes from **design tokens**: a set of color and type values in
-`design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
+The whole look comes from **[design tokens](design/README.md)**: a set of color and type
+values that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
 each with a light and a dark mode. The project has **extensive automated coverage** across
 its core workflows so maintainers can verify changes before deployment.
 

@@ -1,123 +1,107 @@
 # Design system
 
-Every color, font, radius, and shadow on the site comes from **design tokens** — a small
-set of values in `design/` that compile into CSS variables. Components never hardcode a
-color or a font; they use semantic utilities (`bg-primary`, `text-ink-muted`) that resolve
-to those variables. This is what keeps the whole site visually consistent and lets an admin
-switch the entire look by choosing a different theme, with no rebuild.
+Church4Christ uses design tokens so components can express visual intent without knowing
+a theme's exact colors or fonts. A component asks for roles such as `bg-primary`,
+`text-ink-muted`, or `border-border`; each theme supplies the values for those roles in
+light and dark mode. That separation keeps public and admin interfaces consistent and
+allows the saved theme to change at runtime without rebuilding the application.
+
+This document explains the architecture. For the practical checklists for changing or
+creating themes, fonts, and semantic tokens, use the
+[theme authoring guide](../design/README.md). For the visitor-facing behavior, see
+[Public site and themes](features/public-site-and-themes.md).
 
 ## The token pipeline
 
-```
-design/foundation.json      (theme-independent: type scale, spacing, z, motion)
-design/themes/*.json         (per-theme: fonts, radius, shadow, light + dark colors)
+```text
+design/foundation.json      (theme-independent type, containers, z-index, motion)
+design/themes/*.json        (per-theme metadata, fonts, radius, shadow, light + dark colors)
         │
         │  npm run tokens   (scripts/build-tokens.mjs)
         ▼
-src/styles/tokens.generated.css      →  CSS custom properties, one block per theme × mode
-src/lib/themeMeta.generated.ts       →  swatches + labels for the admin theme picker
+src/styles/tokens.generated.css      CSS custom properties, one block per theme and mode
+src/lib/themeMeta.generated.ts       default-mode swatches and metadata for the picker
         │
-        │  imported by src/styles/base.css, consumed via Tailwind utilities
+        │  imported and mapped by src/styles/base.css
         ▼
-Components use  bg-primary · text-ink · border-subtle · font-display  (never raw hex)
+components consume semantic Tailwind utilities such as bg-primary and text-ink
 ```
 
-Both generated files are **git-ignored** and rebuilt from the JSON source of truth. Run
-`npm run tokens` after editing anything in `design/`. (The full build, `npm run build`,
-runs it for you.)
+The JSON files are the source of truth. Both generated files are git-ignored and rebuilt
+from those sources; direct edits to either output are temporary.
 
-### Foundation vs. themes
+### Foundation and theme responsibilities
 
-- **`design/foundation.json`** holds values that do *not* change between themes: the type
-  scale (`--text-*`), line heights (`--leading-*`, including a CJK-tuned value), letter
-  spacing, container widths, z-index layers, and motion durations. Themes may not override
-  these.
-- **`design/themes/{sanctuary,harvest,midnight}.json`** each hold that theme's fonts,
-  border radii, shadows, and — the heart of it — a full **light** palette and **dark**
-  palette of semantic colors.
+`design/foundation.json` contains values that do not vary by theme: the typography scale,
+line heights (including CJK leading), letter spacing, container widths, z-index layers,
+and motion durations/easing. It does not currently contain a spacing group, and themes
+may not override its values.
 
-### Semantic colors, not raw colors
+Each `design/themes/*.json` file owns `version`, `name`, `label`, `defaultMode`, fonts,
+radii, shadows, and complete light and dark semantic color palettes. Keeping these
+responsibilities separate prevents a theme from changing shared layout or motion rules.
 
-Palettes are named by *role*, not by hue. A theme defines `primary`, `on-primary`,
-`surface`, `surface-raised`, `ink`, `ink-muted`, `accent`, `success`, `warn`, `danger`,
-`info`, and their `-soft` / `-hover` variants, plus header and footer colors. Because
-components reference the role (`bg-primary`), the same component looks right in all three
-themes and both modes without change.
+## Why semantic colors
 
-### How a mode is emitted
+Semantic tokens are grouped by purpose:
 
-`scripts/build-tokens.mjs` writes, for each theme:
+- surfaces and ink describe page layers and text hierarchy;
+- primary and accent roles describe brand and action emphasis;
+- success, warning, danger, and information roles describe status;
+- borders, focus rings, header, footer, and scrim roles describe interface chrome.
 
-- `:root[data-theme="sanctuary"] { … }` — the theme's fonts, radius, shadow, and its
-  **default-mode** colors.
-- `:root[data-theme="sanctuary"][data-mode="dark"] { … }` — the **other mode's** color
-  overrides.
+Foreground roles are paired with their intended backgrounds. `on-primary` belongs on
+`primary`, `on-primary-soft` belongs on `primary-soft`, and header/footer ink belongs on
+the matching chrome background. The same role can therefore use different hues in every
+theme while preserving its meaning and readable contrast.
 
-`src/layouts/Base.astro` stamps `data-theme` and `data-mode` on `<html>` (with a tiny
-inline script that avoids a dark-mode flash), so switching either attribute reskins the
-page instantly.
+## Generated CSS and runtime resolution
 
-## Two enforcement gates
+For each theme, `scripts/build-tokens.mjs` emits an unqualified
+`:root[data-theme="name"]` block using that theme JSON's `defaultMode` palette, plus a
+`data-mode` override for the other palette. It also emits picker metadata using swatches
+from the JSON default mode. `src/styles/base.css` maps the custom properties into
+Tailwind's runtime theme namespace, so utilities continue to reference variables rather
+than fixed generated values.
 
-The design system is not a convention you have to remember — two build steps enforce it,
-and both run in CI.
+At request time, `src/lib/theme.ts` validates the stored `theme.name` against the runtime
+allowlist and resolves `theme.default_mode` from settings. Middleware makes the theme
+available to layouts; `src/layouts/Base.astro` and `src/layouts/Admin.astro` stamp
+`data-theme` and `data-mode` on `<html>`. Their small inline script applies a visitor's
+saved `c4c-mode` choice before paint, avoiding a light/dark flash. The settings save clears
+the per-isolate theme cache so the next render can use the new selection.
 
-### 1. Contrast gate (in `npm run tokens`)
+## Enforcement gates
 
-Before writing any CSS, the token builder checks **every theme, every mode, every
-foreground/background pair** (ink on surface, on-primary on primary, header ink on header
-background, and so on) against **WCAG 4.5:1** contrast. If any pair falls short, the build
-**fails** and prints the offending `theme/mode pair ratio`. You cannot ship a theme whose
-text is hard to read.
+### Contrast gate
 
-### 2. Token gate (`npm run tokens:check`)
+`npm run tokens` checks every declared foreground/background pair in every theme and mode
+against a 4.5:1 minimum before it writes outputs. A failure reports the theme, mode, pair,
+and measured ratio. The pair list lives in `scripts/build-tokens.mjs` so new readable
+foreground/background roles can join the same gate.
 
-`scripts/check-tokens.mjs` scans `src/**/*.{astro,ts,tsx,css}` (excluding the generated
-CSS) and **fails the build** on any hardcoded style value:
+### Literal-value gate
 
-- hex colors (`#31487A`, `#FFF`, `#RRGGBBAA`)
-- `rgb()` / `rgba()` / `hsl()` / `hsla()` literals
-- a `font-family` with anything other than `var(--font-*)` values
+`npm run tokens:check` scans `src/**/*.{astro,ts,tsx,css}`, excluding generated outputs,
+and rejects hardcoded hex, RGB/HSL color functions, and literal `font-family` values.
+Components normally consume semantic variables or utilities. The same-line
+`/* tokens-ok */` marker is reserved for narrow, reviewed exceptions that cannot use the
+token CSS.
 
-If you genuinely need a literal (for example, a system-font fallback in a bare error page
-that renders without the token CSS), append `/* tokens-ok */` on that line to allow it
-deliberately. Everything else must come from a token.
+Theme generation and linting run as build/CI gates, while `test/tokens.test.ts`,
+`test/themeMeta.test.ts`, and `test/theme.test.ts` cover generation, picker metadata,
+contrast behavior, and runtime resolution. The complete authoring and verification
+commands live in [the theme authoring guide](../design/README.md#generate-and-verify).
 
-## Editing or adding a theme
+## Key files
 
-### Tweak an existing theme
-
-1. Open `design/themes/sanctuary.json` (or `harvest` / `midnight`).
-2. Change the values you want — a `primary` color, a font family, a radius. Edit both the
-   `light` and `dark` palettes so both modes stay balanced.
-3. Run `npm run tokens`. If the contrast gate complains, adjust the pair it names until it
-   passes 4.5:1.
-4. Run `npm run dev` and check the pages in both light and dark mode.
-
-### Add a brand-new theme
-
-1. Copy an existing theme file to `design/themes/<yourtheme>.json` and change its `name`
-   (must match the filename stem), `label` (shown in the admin picker), and `defaultMode`.
-2. Fill in `fonts`, `radius`, `shadow`, and the full `light` + `dark` color palettes. Keep
-   every semantic key the existing themes have.
-3. If you introduce a new font family, add its `@fontsource-variable/*` package and import
-   it where the others are imported.
-4. Run `npm run tokens`. The new theme is now compiled into `tokens.generated.css`, and its
-   swatches appear automatically in the admin **Settings → theme picker** (from
-   `themeMeta.generated.ts`) — no other wiring needed.
-5. Run `npm run tokens:check` and the test suite (`test/tokens.test.ts`,
-   `test/themeMeta.test.ts`) to confirm everything is green.
-
-## Where it lives
-
-| Thing | Path |
+| Responsibility | Path |
 |---|---|
 | Foundation tokens | `design/foundation.json` |
-| Theme tokens | `design/themes/*.json` |
-| Token builder (+ contrast gate, theme meta) | `scripts/build-tokens.mjs` |
-| Token linter | `scripts/check-tokens.mjs` |
-| Generated CSS (git-ignored) | `src/styles/tokens.generated.css` |
-| Generated theme meta (git-ignored) | `src/lib/themeMeta.generated.ts` |
-| Base styles / utilities | `src/styles/base.css` |
-| Theme resolution at runtime | `src/lib/theme.ts`, `src/lib/settings.ts` |
-| Tests | `test/tokens.test.ts`, `test/themeMeta.test.ts`, `test/theme.test.ts` |
+| Theme sources | `design/themes/*.json` |
+| Generator and contrast pairs | `scripts/build-tokens.mjs` |
+| Literal-value linter | `scripts/check-tokens.mjs` |
+| Tailwind mappings and shared styles | `src/styles/base.css` |
+| Runtime theme resolution | `src/lib/theme.ts`, `src/lib/settings.ts` |
+| Public and admin activation | `src/layouts/Base.astro`, `src/layouts/Admin.astro` |
+| Authoring workflow | `design/README.md` |
