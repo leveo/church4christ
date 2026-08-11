@@ -131,6 +131,20 @@ describe('parsePeopleImport headers and parser boundaries', () => {
     expect(JSON.stringify(result.errors)).not.toContain('DISPLAY_NAME');
   });
 
+  it('requires exact canonical headers instead of trimming header cells', () => {
+    const headers: string[] = [...PEOPLE_IMPORT_HEADERS];
+    headers[0] = ' record_type';
+    headers[2] = 'email ';
+    const result = parsePeopleImport(encode(`${headers.join(',')}\n`), { today: '2026-08-11' });
+
+    expect(result.model).toBeNull();
+    expect(result.errors.filter((issue) => issue.code === 'unknown_header')).toHaveLength(2);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'missing_header', row: 1, field: 'record_type' },
+      { severity: 'error', code: 'missing_header', row: 1, field: 'email' },
+    ]));
+  });
+
   it.each([
     ['invalid UTF-8', new Uint8Array([0xc3, 0x28]), 'invalid_utf8', null],
     ['NUL', encode('record_type\0'), 'nul_byte', null],
@@ -430,6 +444,25 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([]);
   });
 
+  it('collects valid duplicate emails from every data row regardless of record type validity', () => {
+    const result = parse([
+      validDependent({ email: ' SHARED@EXAMPLE.COM ' }),
+      { record_type: 'mystery', display_name: 'Unknown', email: 'shared@example.com' },
+      validPerson({ display_name: '', email: 'shared@example.com' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([
+      { severity: 'error', code: 'duplicate_email', row: 2, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 3, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 4, field: 'email' },
+    ]);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'forbidden_field', row: 2, field: 'email' },
+      { severity: 'error', code: 'invalid_option', row: 3, field: 'record_type' },
+      { severity: 'error', code: 'required', row: 4, field: 'display_name' },
+    ]));
+  });
+
   it('keeps a standalone person without creating a household', () => {
     const result = parse([validPerson()]);
 
@@ -679,6 +712,46 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.warnings.map((warning) => warning.row)).toEqual([2, 3]);
   });
 
+  it('warns on duplicate canonical household names even when one group has no primary', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'valid', household_name: 'Shared Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'second@example.com', household_key: 'invalid', household_name: 'shared family',
+        household_role: 'adult', household_primary: 'false',
+      }),
+    ]);
+
+    expect(result.errors).toContainEqual({
+      severity: 'error', code: 'household_primary_required', row: 3, field: 'household_primary',
+    });
+    expect(result.model?.households.map((household) => household.key)).toEqual(['valid']);
+    expect(result.warnings).toEqual([
+      { severity: 'warning', code: 'duplicate_household_name', row: 2, field: 'household_name' },
+      { severity: 'warning', code: 'duplicate_household_name', row: 3, field: 'household_name' },
+    ]);
+  });
+
+  it('warns on duplicate canonical household names when duplicate emails exclude both groups', () => {
+    const result = parse([
+      validPerson({
+        email: 'shared@example.com', household_key: 'first', household_name: 'Shared Family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'SHARED@EXAMPLE.COM', household_key: 'second', household_name: 'shared family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.model?.households).toEqual([]);
+    expect(result.warnings).toEqual([
+      { severity: 'warning', code: 'duplicate_household_name', row: 2, field: 'household_name' },
+      { severity: 'warning', code: 'duplicate_household_name', row: 3, field: 'household_name' },
+    ]);
+  });
+
   it('blocks files with more than 100 distinct household keys and keeps a bounded first-100 preview', () => {
     const result = parse(Array.from({ length: 101 }, (_, index) => validPerson({
       display_name: `Person ${index}`,
@@ -721,6 +794,27 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.model?.households).toHaveLength(99);
     expect(result.model?.people).toHaveLength(99);
     expect(result.model?.dependents).toEqual([]);
+  });
+
+  it('counts a legal household key from an invalid record type toward the file limit', () => {
+    const validHouseholds = Array.from({ length: 100 }, (_, index) => validPerson({
+      display_name: `Person ${index}`,
+      email: `person-${index}@example.com`,
+      household_key: `family-${index}`,
+      household_name: `Family ${index}`,
+      household_role: 'adult',
+      household_primary: 'true',
+    }));
+    const result = parse([
+      ...validHouseholds,
+      { record_type: 'mystery', display_name: 'Unknown', household_key: 'unknown-family' },
+    ]);
+
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'too_many_households', row: 102, field: 'household_key' },
+      { severity: 'error', code: 'invalid_option', row: 102, field: 'record_type' },
+    ]));
+    expect(result.model?.households).toHaveLength(100);
   });
 
   it('does not regress inactive summary counts when a household is invalid', () => {

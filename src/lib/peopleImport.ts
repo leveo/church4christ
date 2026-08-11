@@ -198,15 +198,14 @@ function validateHeaders(
   headerCells: string[],
   issues: BoundedIssues,
 ): Map<PeopleImportHeader, number> | null {
-  const trimmed = headerCells.map((cell) => cell.trim());
-  if (trimmed.every((cell) => cell === '')) {
+  if (headerCells.every((cell) => cell.trim() === '')) {
     issues.add({ code: 'missing_header', row: 1, field: null });
     return null;
   }
 
   const indexes = new Map<PeopleImportHeader, number>();
   let invalid = false;
-  for (const [index, header] of trimmed.entries()) {
+  for (const [index, header] of headerCells.entries()) {
     if (!HEADER_SET.has(header)) {
       issues.add({ code: 'unknown_header', row: 1, field: null });
       invalid = true;
@@ -402,8 +401,12 @@ interface HouseholdGroup {
 }
 
 interface HouseholdCandidate {
-  firstRow: number;
   household: PeopleImportHousehold;
+}
+
+interface HouseholdNameObservation {
+  firstRow: number;
+  name: string;
 }
 
 function resolveHouseholdMetadata(
@@ -452,6 +455,7 @@ function groupHouseholds(
   const peopleByRow = new Map<number, PeopleImportPerson>();
   const dependentsByRow = new Map<number, PeopleImportDependent>();
   const candidates: HouseholdCandidate[] = [];
+  const householdNames: HouseholdNameObservation[] = [];
 
   for (const group of orderedGroups) {
     let valid = true;
@@ -471,6 +475,8 @@ function groupHouseholds(
     if (!name.conflict && name.value === null) {
       issues.add({ code: 'household_name_required', row: group.firstRow, field: 'household_name' });
       valid = false;
+    } else if (!name.conflict && name.value !== null) {
+      householdNames.push({ firstRow: group.firstRow, name: name.value });
     }
 
     const adultPrimaries = group.people.filter(
@@ -541,7 +547,6 @@ function groupHouseholds(
 
     if (candidates.length >= PEOPLE_IMPORT_LIMITS.maxHouseholds) continue;
     candidates.push({
-      firstRow: group.firstRow,
       household: {
         key: group.key,
         name: name.value,
@@ -555,17 +560,17 @@ function groupHouseholds(
   }
 
   const householdNameCounts = new Map<string, number>();
-  for (const candidate of candidates) {
-    const normalizedName = candidate.household.name.trim().toLowerCase();
+  for (const observation of householdNames) {
+    const normalizedName = observation.name.trim().normalize('NFC').toLowerCase();
     householdNameCounts.set(normalizedName, (householdNameCounts.get(normalizedName) ?? 0) + 1);
   }
-  for (const candidate of candidates) {
-    const normalizedName = candidate.household.name.trim().toLowerCase();
+  for (const observation of householdNames) {
+    const normalizedName = observation.name.trim().normalize('NFC').toLowerCase();
     if ((householdNameCounts.get(normalizedName) ?? 0) > 1) {
       issues.add({
         severity: 'warning',
         code: 'duplicate_household_name',
-        row: candidate.firstRow,
+        row: observation.firstRow,
         field: 'household_name',
       });
     }
@@ -606,26 +611,25 @@ export function parsePeopleImport(
   const records = normalizedRows(parsed.rows.slice(1), headerIndexes);
   for (const [index, record] of records.entries()) {
     const row = index + 2;
+    const email = record.email.toLowerCase();
+    if (email !== '' && codePointLength(email) <= 254 && isEmail(email)) {
+      emailOccurrences.push({ row, email });
+    }
+    const householdKey = record.household_key.toLowerCase();
+    if (/^[a-z0-9._-]{1,64}$/.test(householdKey) && !householdKeys.has(householdKey)) {
+      householdKeys.add(householdKey);
+      if (!householdLimitReported && householdKeys.size > PEOPLE_IMPORT_LIMITS.maxHouseholds) {
+        issues.add({ code: 'too_many_households', row, field: 'household_key' });
+        householdLimitReported = true;
+      }
+    }
+
     const recordType = record.record_type.toLowerCase();
     if (recordType === '') {
       issues.add({ code: 'required', row, field: 'record_type' });
       continue;
     }
-    if (recordType === 'person' || recordType === 'dependent') {
-      const householdKey = record.household_key.toLowerCase();
-      if (/^[a-z0-9._-]{1,64}$/.test(householdKey) && !householdKeys.has(householdKey)) {
-        householdKeys.add(householdKey);
-        if (!householdLimitReported && householdKeys.size > PEOPLE_IMPORT_LIMITS.maxHouseholds) {
-          issues.add({ code: 'too_many_households', row, field: 'household_key' });
-          householdLimitReported = true;
-        }
-      }
-    }
     if (recordType === 'person') {
-      const email = record.email.toLowerCase();
-      if (email !== '' && codePointLength(email) <= 254 && isEmail(email)) {
-        emailOccurrences.push({ row, email });
-      }
       const person = normalizePerson(record, row, issues, options.today);
       if (person) people.push(person);
       continue;
