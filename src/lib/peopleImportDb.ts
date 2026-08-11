@@ -359,20 +359,27 @@ export async function commitPeopleImport(
     return result;
   }
 
-  const identityExpression = householdIdentityExpression(backend);
-  const preflight = await preflightPeopleImport(db, parsed);
-  if (preflight.errors.length > 0) {
-    throw new PeopleImportConflictError();
-  }
-
-  const statements = [
-    ...model.people.map((person) => personInsert(db, person)),
-    ...model.households.flatMap((household) =>
-      householdStatements(db, identityExpression, household)),
-  ];
   try {
+    const identityExpression = householdIdentityExpression(backend);
+    const preflight = await preflightPeopleImport(db, parsed);
+    if (preflight.errors.length > 0) {
+      throw new PeopleImportConflictError();
+    }
+
+    const statements = [
+      ...model.people.map((person) => personInsert(db, person)),
+      ...model.households.flatMap((household) =>
+        householdStatements(db, identityExpression, household)),
+    ];
     await db.batch(statements);
   } catch (error) {
+    if (
+      error instanceof PeopleImportNotReadyError
+      || error instanceof PeopleImportConflictError
+      || error instanceof PeopleImportPersistenceError
+    ) {
+      throw error;
+    }
     if (isUniqueViolation(error)) {
       throw new PeopleImportConflictError();
     }

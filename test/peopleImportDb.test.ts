@@ -1004,6 +1004,98 @@ describe('commitPeopleImport household associations', () => {
 });
 
 describe('commitPeopleImport atomic behavior and safe errors', () => {
+  it('redacts an unexpected preflight query failure as import_failed', async () => {
+    const privateDetail = 'private.preflight@example.com in SELECT email FROM people';
+    const statement = {
+      bind() { return statement; },
+      first: async () => { throw new Error(privateDetail); },
+      all: async () => { throw new Error(privateDetail); },
+      run: async () => { throw new Error(privateDetail); },
+    } as AppStatement;
+    let batchCalls = 0;
+    const db: AppDb = {
+      prepare: () => statement,
+      batch: async () => {
+        batchCalls += 1;
+        return [];
+      },
+    };
+    const parsed = parsePeopleImportRecords([
+      personRecord(1, { email: 'private.preflight@example.com' }),
+    ]);
+
+    const error = await commitPeopleImport(db, 'd1', parsed).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PeopleImportPersistenceError);
+    expect(error).toMatchObject({ code: 'import_failed' });
+    expect(error).not.toHaveProperty('cause');
+    expect(error).not.toHaveProperty('detail');
+    expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateDetail);
+    expect(batchCalls).toBe(0);
+  });
+
+  it.each(['prepare', 'bind'] as const)(
+    'redacts an unexpected synchronous write %s failure as import_failed',
+    async (phase) => {
+      const privateDetail = `private.${phase}@example.com in INSERT INTO people`;
+      let batchCalls = 0;
+      const db: AppDb = {
+        prepare(sql: string): AppStatement {
+          if (!sql.startsWith('INSERT INTO people')) return env.DB.prepare(sql);
+          if (phase === 'prepare') throw new Error(privateDetail);
+          return {
+            bind: () => { throw new Error(privateDetail); },
+          } as unknown as AppStatement;
+        },
+        batch: async () => {
+          batchCalls += 1;
+          return [];
+        },
+      };
+      const parsed = parsePeopleImportRecords([
+        personRecord(1, { email: `private.${phase}@example.com` }),
+      ]);
+
+      const error = await commitPeopleImport(db, 'd1', parsed).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(PeopleImportPersistenceError);
+      expect(error).toMatchObject({ code: 'import_failed' });
+      expect(error).not.toHaveProperty('cause');
+      expect(error).not.toHaveProperty('detail');
+      expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateDetail);
+      expect(batchCalls).toBe(0);
+    },
+  );
+
+  it('maps a synchronous unique bind failure to a redacted import_conflict', async () => {
+    const privateDetail = 'UNIQUE constraint failed: private.unique@example.com';
+    let batchCalls = 0;
+    const db: AppDb = {
+      prepare(sql: string): AppStatement {
+        if (!sql.startsWith('INSERT INTO people')) return env.DB.prepare(sql);
+        return {
+          bind: () => { throw new Error(privateDetail); },
+        } as unknown as AppStatement;
+      },
+      batch: async () => {
+        batchCalls += 1;
+        return [];
+      },
+    };
+    const parsed = parsePeopleImportRecords([
+      personRecord(1, { email: 'private.unique@example.com' }),
+    ]);
+
+    const error = await commitPeopleImport(db, 'd1', parsed).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PeopleImportConflictError);
+    expect(error).toMatchObject({ code: 'import_conflict' });
+    expect(error).not.toHaveProperty('cause');
+    expect(error).not.toHaveProperty('detail');
+    expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateDetail);
+    expect(batchCalls).toBe(0);
+  });
+
   it('calls batch once, derives counts from arrays, and makes a second commit a zero-batch safe conflict', async () => {
     const parsed = parsePeopleImportRecords([
       householdPrimaryRecord(1),
