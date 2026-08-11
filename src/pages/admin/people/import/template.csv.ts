@@ -25,3 +25,9 @@ export const GET: APIRoute = async ({ locals }) => {
     },
   });
 };
+
+export const ALL: APIRoute = async () => peopleImportJson(
+  405,
+  { ok: false, code: 'method_not_allowed' },
+  { Allow: 'GET' },
+);

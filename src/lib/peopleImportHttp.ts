@@ -35,7 +35,12 @@ export function canManagePeopleImport(
 export type PeopleImportFileError = {
   ok: false;
   status: 400 | 413 | 415;
-  code: 'multipart_required' | 'missing_file' | 'file_too_large' | 'file_type_invalid';
+  code:
+    | 'multipart_required'
+    | 'multipart_invalid'
+    | 'missing_file'
+    | 'file_too_large'
+    | 'file_type_invalid';
 };
 
 export type PeopleImportFileResult = PeopleImportFileError | {
@@ -68,7 +73,11 @@ async function boundedRequestBody(request: Request): Promise<Uint8Array<ArrayBuf
       if (done) break;
       total += value.byteLength;
       if (total > PEOPLE_IMPORT_MULTIPART_MAX_BYTES) {
-        await reader.cancel();
+        try {
+          await reader.cancel();
+        } catch {
+          // The envelope is already known to be too large; cancellation is best-effort.
+        }
         return null;
       }
       chunks.push(value);
@@ -97,7 +106,7 @@ export async function readPeopleImportFile(request: Request): Promise<PeopleImpo
   try {
     body = await boundedRequestBody(request);
   } catch {
-    return fileError(400, 'missing_file');
+    return fileError(400, 'multipart_invalid');
   }
   if (body === null) return fileError(413, 'file_too_large');
 
@@ -107,11 +116,15 @@ export async function readPeopleImportFile(request: Request): Promise<PeopleImpo
       headers: { 'content-type': contentType },
     }).formData();
   } catch {
-    return fileError(400, 'missing_file');
+    return fileError(400, 'multipart_invalid');
   }
 
-  const file = form.get('csv');
-  if (!(file instanceof File)) return fileError(400, 'missing_file');
+  const csvParts = form.getAll('csv');
+  if (csvParts.length === 0) return fileError(400, 'missing_file');
+  if (csvParts.length !== 1 || !(csvParts[0] instanceof File)) {
+    return fileError(400, 'multipart_invalid');
+  }
+  const file = csvParts[0];
   if (file.size > PEOPLE_IMPORT_LIMITS.maxBytes) {
     return fileError(413, 'file_too_large');
   }

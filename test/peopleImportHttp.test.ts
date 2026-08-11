@@ -44,6 +44,15 @@ function uploadRequest(
   });
 }
 
+function multipartRequest(csvParts: Array<File | string>): Request {
+  const form = new FormData();
+  for (const part of csvParts) form.append('csv', part);
+  return new Request('https://church.example/admin/people/import/preview', {
+    method: 'POST',
+    body: form,
+  });
+}
+
 describe('canManagePeopleImport', () => {
   it('returns not_found first when the people module is off', () => {
     expect(canManagePeopleImport(null, new Set())).toBe('not_found');
@@ -159,7 +168,32 @@ describe('readPeopleImportFile', () => {
     expect(cancelled).toBe(true);
   });
 
-  it('maps a malformed multipart boundary and a missing/non-File csv to safe 400s', async () => {
+  it('keeps an oversize response at 413 when stream cancellation rejects', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(PEOPLE_IMPORT_MULTIPART_MAX_BYTES + 1));
+      },
+      cancel() {
+        cancelled = true;
+        throw new Error('private stream cancellation detail');
+      },
+    });
+    const request = new Request('https://church.example/import', {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=bounded' },
+      body,
+    });
+
+    await expect(readPeopleImportFile(request)).resolves.toEqual({
+      ok: false,
+      status: 413,
+      code: 'file_too_large',
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it('maps malformed multipart and body-read failures to multipart_invalid', async () => {
     const malformed = new Request('https://church.example/import', {
       method: 'POST',
       headers: { 'content-type': 'multipart/form-data; boundary=broken' },
@@ -168,8 +202,26 @@ describe('readPeopleImportFile', () => {
     await expect(readPeopleImportFile(malformed)).resolves.toEqual({
       ok: false,
       status: 400,
-      code: 'missing_file',
+      code: 'multipart_invalid',
     });
+
+    const unreadable = new Request('https://church.example/import', {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=broken' },
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.error(new Error('private body-read detail'));
+        },
+      }, { highWaterMark: 0 }),
+    });
+    await expect(readPeopleImportFile(unreadable)).resolves.toEqual({
+      ok: false,
+      status: 400,
+      code: 'multipart_invalid',
+    });
+  });
+
+  it('distinguishes a missing csv from invalid or duplicate csv parts', async () => {
     await expect(readPeopleImportFile(uploadRequest(null))).resolves.toEqual({
       ok: false,
       status: 400,
@@ -178,8 +230,17 @@ describe('readPeopleImportFile', () => {
     await expect(readPeopleImportFile(uploadRequest('not a file'))).resolves.toEqual({
       ok: false,
       status: 400,
-      code: 'missing_file',
+      code: 'multipart_invalid',
     });
+
+    const csv = () => new File(['ok'], 'people.csv', { type: 'text/csv' });
+    for (const parts of [[csv(), csv()], [csv(), 'not a file'], ['not a file', csv()]]) {
+      await expect(readPeopleImportFile(multipartRequest(parts))).resolves.toEqual({
+        ok: false,
+        status: 400,
+        code: 'multipart_invalid',
+      });
+    }
   });
 
   it('allows only the explicit CSV MIME allowlist', async () => {
@@ -250,9 +311,17 @@ describe('people import template route', () => {
     locals: { user, modules },
   }) as never;
 
-  it('exports GET only', () => {
+  it('exports GET and a safe method rejection for every other routed method', async () => {
     expect(typeof templateRoute.GET).toBe('function');
-    expect('POST' in templateRoute).toBe(false);
+    const all = Reflect.get(templateRoute, 'ALL') as undefined | ((context: never) => Promise<Response>);
+    expect(typeof all).toBe('function');
+
+    const response = await all!({} as never);
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('GET');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await response.json()).toEqual({ ok: false, code: 'method_not_allowed' });
   });
 
   it('returns module-off 404 before grant handling and 403 without the people grant', async () => {
