@@ -48,6 +48,16 @@ export type PeopleImportIssueCode =
   | 'future_date'
   | 'forbidden_field'
   | 'household_fields_without_key'
+  | 'duplicate_email'
+  | 'household_requires_person'
+  | 'household_name_required'
+  | 'household_primary_required'
+  | 'household_primary_multiple'
+  | 'household_primary_must_be_adult'
+  | 'household_metadata_conflict'
+  | 'duplicate_dependent'
+  | 'duplicate_household_name'
+  | 'too_many_households'
   | 'issues_truncated';
 
 export interface PeopleImportIssue {
@@ -382,6 +392,197 @@ function normalizeDependent(
   };
 }
 
+type HouseholdMember = PeopleImportPerson | PeopleImportDependent;
+
+interface HouseholdGroup {
+  key: string;
+  firstRow: number;
+  people: PeopleImportPerson[];
+  dependents: PeopleImportDependent[];
+}
+
+interface HouseholdCandidate {
+  firstRow: number;
+  household: PeopleImportHousehold;
+}
+
+function resolveHouseholdMetadata(
+  members: HouseholdMember[],
+  property: 'name' | 'address' | 'phone',
+  field: 'household_name' | 'household_address' | 'household_phone',
+  issues: BoundedIssues,
+): { value: string | null; conflict: boolean } {
+  const contributions: Array<{ row: number; value: string }> = [];
+  for (const member of members) {
+    const value = member.household?.[property] ?? null;
+    if (value !== null) contributions.push({ row: member.row, value });
+  }
+
+  if (new Set(contributions.map((contribution) => contribution.value)).size > 1) {
+    for (const contribution of contributions) {
+      issues.add({ code: 'household_metadata_conflict', row: contribution.row, field });
+    }
+    return { value: null, conflict: true };
+  }
+  return { value: contributions[0]?.value ?? null, conflict: false };
+}
+
+function groupHouseholds(
+  people: PeopleImportPerson[],
+  dependents: PeopleImportDependent[],
+  duplicateEmails: ReadonlySet<string>,
+  issues: BoundedIssues,
+): { people: PeopleImportPerson[]; dependents: PeopleImportDependent[]; households: PeopleImportHousehold[] } {
+  const groups = new Map<string, HouseholdGroup>();
+  const members: HouseholdMember[] = [...people, ...dependents].sort((left, right) => left.row - right.row);
+  for (const member of members) {
+    const household = member.household;
+    if (household === null) continue;
+    let group = groups.get(household.key);
+    if (!group) {
+      group = { key: household.key, firstRow: member.row, people: [], dependents: [] };
+      groups.set(household.key, group);
+    }
+    if (member.recordType === 'person') group.people.push(member);
+    else group.dependents.push(member);
+  }
+
+  const orderedGroups = [...groups.values()];
+  if (orderedGroups.length > PEOPLE_IMPORT_LIMITS.maxHouseholds) {
+    issues.add({
+      code: 'too_many_households',
+      row: orderedGroups[PEOPLE_IMPORT_LIMITS.maxHouseholds].firstRow,
+      field: 'household_key',
+    });
+  }
+
+  const peopleByRow = new Map<number, PeopleImportPerson>();
+  const dependentsByRow = new Map<number, PeopleImportDependent>();
+  const candidates: HouseholdCandidate[] = [];
+
+  for (const group of orderedGroups) {
+    let valid = true;
+    const groupMembers: HouseholdMember[] = [...group.people, ...group.dependents].sort(
+      (left, right) => left.row - right.row,
+    );
+
+    if (group.people.length === 0) {
+      issues.add({ code: 'household_requires_person', row: group.firstRow, field: 'household_key' });
+      valid = false;
+    }
+
+    const name = resolveHouseholdMetadata(groupMembers, 'name', 'household_name', issues);
+    const address = resolveHouseholdMetadata(groupMembers, 'address', 'household_address', issues);
+    const phone = resolveHouseholdMetadata(groupMembers, 'phone', 'household_phone', issues);
+    if (name.conflict || address.conflict || phone.conflict) valid = false;
+    if (!name.conflict && name.value === null) {
+      issues.add({ code: 'household_name_required', row: group.firstRow, field: 'household_name' });
+      valid = false;
+    }
+
+    const primaryPeople = group.people.filter((person) => person.household?.primary);
+    const adultPrimaries = primaryPeople.filter((person) => person.household?.role === 'adult');
+    for (const person of primaryPeople) {
+      if (person.household?.role === 'child') {
+        issues.add({ code: 'household_primary_must_be_adult', row: person.row, field: 'household_primary' });
+        valid = false;
+      }
+    }
+    if (adultPrimaries.length === 0) {
+      issues.add({ code: 'household_primary_required', row: group.firstRow, field: 'household_primary' });
+      valid = false;
+    }
+    if (primaryPeople.length > 1) {
+      for (const person of primaryPeople) {
+        issues.add({ code: 'household_primary_multiple', row: person.row, field: 'household_primary' });
+      }
+      valid = false;
+    }
+
+    const dependentsByIdentity = new Map<string, PeopleImportDependent[]>();
+    for (const dependent of group.dependents) {
+      const identity = `${dependent.displayName.trim().toLowerCase()}\u0000${dependent.household.role}`;
+      const matching = dependentsByIdentity.get(identity) ?? [];
+      matching.push(dependent);
+      dependentsByIdentity.set(identity, matching);
+    }
+    for (const matching of dependentsByIdentity.values()) {
+      if (matching.length < 2) continue;
+      for (const dependent of matching) {
+        issues.add({ code: 'duplicate_dependent', row: dependent.row, field: 'display_name' });
+      }
+      valid = false;
+    }
+
+    if (group.people.some((person) => duplicateEmails.has(person.email))) valid = false;
+    if (!valid || name.value === null) continue;
+
+    const canonicalPeople = group.people.map((person) => {
+      const canonical = {
+        ...person,
+        household: {
+          ...person.household!,
+          name: name.value,
+          address: address.value,
+          phone: phone.value,
+        },
+      };
+      peopleByRow.set(canonical.row, canonical);
+      return canonical;
+    });
+    const canonicalDependents = group.dependents.map((dependent) => {
+      const canonical = {
+        ...dependent,
+        household: {
+          ...dependent.household,
+          name: name.value,
+          address: address.value,
+          phone: phone.value,
+        },
+      };
+      dependentsByRow.set(canonical.row, canonical);
+      return canonical;
+    });
+
+    if (candidates.length >= PEOPLE_IMPORT_LIMITS.maxHouseholds) continue;
+    candidates.push({
+      firstRow: group.firstRow,
+      household: {
+        key: group.key,
+        name: name.value,
+        address: address.value,
+        phone: phone.value,
+        primaryEmail: adultPrimaries[0].email,
+        people: canonicalPeople,
+        dependents: canonicalDependents,
+      },
+    });
+  }
+
+  const householdNameCounts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const normalizedName = candidate.household.name.trim().toLowerCase();
+    householdNameCounts.set(normalizedName, (householdNameCounts.get(normalizedName) ?? 0) + 1);
+  }
+  for (const candidate of candidates) {
+    const normalizedName = candidate.household.name.trim().toLowerCase();
+    if ((householdNameCounts.get(normalizedName) ?? 0) > 1) {
+      issues.add({
+        severity: 'warning',
+        code: 'duplicate_household_name',
+        row: candidate.firstRow,
+        field: 'household_name',
+      });
+    }
+  }
+
+  return {
+    people: people.map((person) => peopleByRow.get(person.row) ?? person),
+    dependents: dependents.map((dependent) => dependentsByRow.get(dependent.row) ?? dependent),
+    households: candidates.map((candidate) => candidate.household),
+  };
+}
+
 export function parsePeopleImport(
   bytes: Uint8Array,
   options: { today: string },
@@ -425,15 +626,30 @@ export function parsePeopleImport(
     issues.add({ code: 'invalid_option', row, field: 'record_type' });
   }
 
+  const peopleByEmail = new Map<string, PeopleImportPerson[]>();
+  for (const person of people) {
+    const matching = peopleByEmail.get(person.email) ?? [];
+    matching.push(person);
+    peopleByEmail.set(person.email, matching);
+  }
+  const duplicateEmails = new Set<string>();
+  for (const person of people) {
+    const matching = peopleByEmail.get(person.email)!;
+    if (matching.length < 2) continue;
+    duplicateEmails.add(person.email);
+    issues.add({ code: 'duplicate_email', row: person.row, field: 'email' });
+  }
+
+  const grouped = groupHouseholds(people, dependents, duplicateEmails, issues);
   const model: PeopleImportModel = {
-    people,
-    dependents,
-    households: [],
+    people: grouped.people,
+    dependents: grouped.dependents,
+    households: grouped.households,
     summary: {
       dataRows: people.length + dependents.length,
       people: people.length,
       dependents: dependents.length,
-      households: 0,
+      households: grouped.households.length,
       inactivePeople: people.filter((person) => !person.active).length,
     },
   };

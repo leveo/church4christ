@@ -196,7 +196,15 @@ describe('parsePeopleImport person fields', () => {
     ['household_address', 200],
     ['household_phone', 40],
   ] as const)('enforces the %s code-point limit', (field, limit) => {
-    const boundary = parse([validPerson({ [field]: '😀'.repeat(limit), ...(field.startsWith('household_') ? { household_key: 'family', household_role: 'adult', household_primary: 'true' } : {}) })]);
+    const householdFields = field.startsWith('household_')
+      ? {
+          household_key: 'family',
+          household_name: field === 'household_name' ? '😀'.repeat(limit) : 'Family',
+          household_role: 'adult',
+          household_primary: 'true',
+        }
+      : {};
+    const boundary = parse([validPerson({ ...householdFields, [field]: '😀'.repeat(limit) })]);
     expect(boundary.errors).toEqual([]);
 
     const over = parse([validPerson({ [field]: '😀'.repeat(limit + 1), ...(field.startsWith('household_') ? { household_key: 'family', household_role: 'adult', household_primary: 'true' } : {}) })]);
@@ -272,7 +280,7 @@ describe('parsePeopleImport person fields', () => {
     expect(parse([validPerson(household)]).errors).toContainEqual({ severity: 'error', code, row: 2, field });
   });
 
-  it('normalizes a valid person household reference without grouping it yet', () => {
+  it('normalizes a valid person household reference and groups it', () => {
     const result = parse([validPerson({
       household_key: ' FAMILY.ONE ',
       household_name: ' Example Family ',
@@ -285,12 +293,19 @@ describe('parsePeopleImport person fields', () => {
     expect(result.model?.people[0].household).toEqual({
       key: 'family.one', name: 'Example Family', address: '1 Main St', phone: '555-0100', role: 'adult', primary: true,
     });
-    expect(result.model?.households).toEqual([]);
+    expect(result.model?.households).toHaveLength(1);
+    expect(result.model?.households[0]).toMatchObject({
+      key: 'family.one',
+      name: 'Example Family',
+      address: '1 Main St',
+      phone: '555-0100',
+      primaryEmail: 'alice@example.com',
+    });
   });
 });
 
 describe('parsePeopleImport dependent fields and issue safety', () => {
-  it('normalizes a dependent with a default child role and no person record', () => {
+  it('normalizes a dependent with a default child role but blocks a dependent-only household', () => {
     const result = parse([validDependent({ display_name: ' Child ', household_key: ' FAMILY ' })]);
     expect(result).toMatchObject({
       model: {
@@ -304,7 +319,11 @@ describe('parsePeopleImport dependent fields and issue safety', () => {
         households: [],
         summary: { dataRows: 1, people: 0, dependents: 1, households: 0, inactivePeople: 0 },
       },
-      errors: [],
+      errors: expect.arrayContaining([
+        { severity: 'error', code: 'household_requires_person', row: 2, field: 'household_key' },
+        { severity: 'error', code: 'household_name_required', row: 2, field: 'household_name' },
+        { severity: 'error', code: 'household_primary_required', row: 2, field: 'household_primary' },
+      ]),
       warnings: [],
     });
   });
@@ -361,5 +380,282 @@ describe('parsePeopleImport dependent fields and issue safety', () => {
     expect(result.model?.dependents).toEqual([]);
     expect(result.errors).toContainEqual({ severity: 'error', code: 'invalid_option', row: 2, field: 'record_type' });
     for (const secret of secrets) expect(JSON.stringify(result.errors)).not.toContain(secret);
+  });
+});
+
+describe('parsePeopleImport duplicate and household grouping rules', () => {
+  it('reports a normalized duplicate email exactly once on every participating row', () => {
+    const result = parse([
+      validPerson({
+        email: ' SHARED@EXAMPLE.COM ', household_key: 'family', household_name: 'Family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'shared@example.com', display_name: 'Second', household_key: 'family',
+        household_role: 'adult', household_primary: 'false',
+      }),
+      validPerson({ email: 'shared@example.com', display_name: 'Third' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([
+      { severity: 'error', code: 'duplicate_email', row: 2, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 3, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 4, field: 'email' },
+    ]);
+    expect(result.model?.people).toHaveLength(3);
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('keeps a standalone person without creating a household', () => {
+    const result = parse([validPerson()]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.model?.people[0].household).toBeNull();
+    expect(result.model?.households).toEqual([]);
+    expect(result.model?.summary.households).toBe(0);
+  });
+
+  it('groups a primary, another person, and a dependent in stable CSV order with inherited metadata', () => {
+    const result = parse([
+      validPerson({
+        display_name: 'Second Adult', email: 'second@example.com', active: 'false',
+        household_key: 'family', household_role: 'adult', household_primary: 'false',
+      }),
+      validDependent({ display_name: 'Young Person', household_key: 'family' }),
+      validPerson({
+        display_name: 'Primary Adult', email: 'primary@example.com',
+        household_key: 'family', household_name: 'Family Name', household_address: '1 Main St',
+        household_phone: '555-0100', household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.model?.households).toHaveLength(1);
+    expect(result.model?.households[0]).toMatchObject({
+      key: 'family',
+      name: 'Family Name',
+      address: '1 Main St',
+      phone: '555-0100',
+      primaryEmail: 'primary@example.com',
+    });
+    expect(result.model?.households[0].people.map((person) => person.email)).toEqual([
+      'second@example.com',
+      'primary@example.com',
+    ]);
+    expect(result.model?.households[0].dependents.map((dependent) => dependent.displayName)).toEqual(['Young Person']);
+    for (const member of [
+      ...(result.model?.households[0].people ?? []),
+      ...(result.model?.households[0].dependents ?? []),
+    ]) {
+      expect(member.household).toMatchObject({
+        key: 'family', name: 'Family Name', address: '1 Main St', phone: '555-0100',
+      });
+    }
+    expect(result.model?.summary).toEqual({
+      dataRows: 3, people: 2, dependents: 1, households: 1, inactivePeople: 1,
+    });
+  });
+
+  it('requires a household name and excludes the invalid group while retaining preview rows', () => {
+    const result = parse([
+      validPerson({ household_key: 'family', household_role: 'adult', household_primary: 'true' }),
+      validDependent({ household_key: 'family' }),
+    ]);
+
+    expect(result.errors).toContainEqual({
+      severity: 'error', code: 'household_name_required', row: 2, field: 'household_name',
+    });
+    expect(result.model?.people).toHaveLength(1);
+    expect(result.model?.dependents).toHaveLength(1);
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('requires one adult primary when no member is primary', () => {
+    const result = parse([validPerson({
+      household_key: 'family', household_name: 'Family', household_role: 'adult', household_primary: 'false',
+    })]);
+
+    expect(result.errors).toContainEqual({
+      severity: 'error', code: 'household_primary_required', row: 2, field: 'household_primary',
+    });
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('reports every primary row when a household has multiple primaries', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'family', household_name: 'Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: 'Second', email: 'second@example.com', household_key: 'family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'household_primary_multiple')).toEqual([
+      { severity: 'error', code: 'household_primary_multiple', row: 2, field: 'household_primary' },
+      { severity: 'error', code: 'household_primary_multiple', row: 3, field: 'household_primary' },
+    ]);
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('rejects a child primary and still reports that an adult primary is required', () => {
+    const result = parse([validPerson({
+      household_key: 'family', household_name: 'Family', household_role: 'child', household_primary: 'true',
+    })]);
+
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'household_primary_must_be_adult', row: 2, field: 'household_primary' },
+      { severity: 'error', code: 'household_primary_required', row: 2, field: 'household_primary' },
+    ]));
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('reports every nonblank contributor for conflicting household metadata', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'family', household_name: 'Family A', household_address: '1 Main St',
+        household_phone: '555-0100', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: 'Second', email: 'second@example.com', household_key: 'family',
+        household_name: 'Family B', household_address: '2 Main St', household_phone: '555-0101',
+        household_role: 'adult', household_primary: 'false',
+      }),
+    ]);
+
+    for (const field of ['household_name', 'household_address', 'household_phone'] as const) {
+      expect(result.errors.filter((issue) => issue.code === 'household_metadata_conflict' && issue.field === field)).toEqual([
+        { severity: 'error', code: 'household_metadata_conflict', row: 2, field },
+        { severity: 'error', code: 'household_metadata_conflict', row: 3, field },
+      ]);
+    }
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('reports duplicate dependents by normalized display name and role', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'family', household_name: 'Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validDependent({ display_name: ' Child ', household_key: 'family', household_role: 'child' }),
+      validDependent({ display_name: 'child', household_key: 'family', household_role: 'child' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_dependent')).toEqual([
+      { severity: 'error', code: 'duplicate_dependent', row: 3, field: 'display_name' },
+      { severity: 'error', code: 'duplicate_dependent', row: 4, field: 'display_name' },
+    ]);
+    expect(result.model?.dependents).toHaveLength(2);
+    expect(result.model?.households).toEqual([]);
+  });
+
+  it('keeps same-named households with different keys and warns on each first row', () => {
+    const result = parse([
+      validPerson({
+        email: 'second@example.com', household_key: 'second', household_name: 'Shared Family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'first@example.com', household_key: 'first', household_name: 'Shared Family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.model?.households.map((household) => household.key)).toEqual(['second', 'first']);
+    expect(result.warnings).toEqual([
+      { severity: 'warning', code: 'duplicate_household_name', row: 2, field: 'household_name' },
+      { severity: 'warning', code: 'duplicate_household_name', row: 3, field: 'household_name' },
+    ]);
+  });
+
+  it('compares household names case-insensitively across different keys', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'upper', household_name: 'Shared Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'second@example.com', household_key: 'lower', household_name: 'shared family',
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.model?.households).toHaveLength(2);
+    expect(result.warnings.map((warning) => warning.row)).toEqual([2, 3]);
+    expect(result.warnings.every((warning) => warning.code === 'duplicate_household_name')).toBe(true);
+  });
+
+  it('blocks files with more than 100 distinct household keys and keeps a bounded first-100 preview', () => {
+    const result = parse(Array.from({ length: 101 }, (_, index) => validPerson({
+      display_name: `Person ${index}`,
+      email: `person-${index}@example.com`,
+      household_key: `family-${index}`,
+      household_name: `Family ${index}`,
+      household_role: 'adult',
+      household_primary: 'true',
+    })));
+
+    expect(result.errors).toContainEqual({
+      severity: 'error', code: 'too_many_households', row: 102, field: 'household_key',
+    });
+    expect(result.model?.households).toHaveLength(100);
+    expect(result.model?.households.map((household) => household.key).at(-1)).toBe('family-99');
+    expect(result.model?.summary.households).toBe(100);
+  });
+
+  it('does not regress inactive summary counts when a household is invalid', () => {
+    const result = parse([
+      validPerson({
+        active: 'false', household_key: 'family', household_name: 'Family',
+        household_role: 'adult', household_primary: 'false',
+      }),
+      validPerson({ display_name: 'Standalone', email: 'standalone@example.com' }),
+    ]);
+
+    expect(result.model?.summary).toEqual({
+      dataRows: 2, people: 2, dependents: 0, households: 0, inactivePeople: 1,
+    });
+  });
+
+  it('keeps grouping issues free of names, emails, keys, and metadata values', () => {
+    const secrets = ['PRIVATE FAMILY', 'PRIVATE@EXAMPLE.COM', 'private-family', 'PRIVATE ADDRESS'];
+    const result = parse([
+      validPerson({
+        email: secrets[1], household_key: secrets[2], household_name: secrets[0],
+        household_address: secrets[3], household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: 'Second', email: secrets[1], household_key: secrets[2], household_name: 'OTHER FAMILY',
+        household_address: 'OTHER ADDRESS', household_role: 'adult', household_primary: 'false',
+      }),
+    ]);
+
+    const serialized = JSON.stringify(result.errors);
+    for (const secret of secrets) expect(serialized).not.toContain(secret);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      { severity: 'error', code: 'duplicate_email', row: 2, field: 'email' },
+      { severity: 'error', code: 'household_metadata_conflict', row: 2, field: 'household_name' },
+    ]));
+  });
+
+  it('caps grouping issues at 100 with one terminal truncation issue', () => {
+    const records = Array.from({ length: 51 }, (_, index) => [
+      validPerson({
+        display_name: `Primary A ${index}`, email: `a-${index}@example.com`, household_key: `family-${index}`,
+        household_name: `Family ${index}`, household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: `Primary B ${index}`, email: `b-${index}@example.com`, household_key: `family-${index}`,
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]).flat();
+    const result = parse(records);
+
+    expect(result.errors).toHaveLength(100);
+    expect(result.errors.at(-1)).toEqual({
+      severity: 'error', code: 'issues_truncated', row: null, field: null,
+    });
+    expect(result.model?.people).toHaveLength(102);
   });
 });
