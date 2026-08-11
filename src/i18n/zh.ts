@@ -736,6 +736,10 @@ export default {
   'admin.peopleImport.result.warnings_not_acknowledged': '导入前请确认预览中的警告。',
   'admin.peopleImport.result.import_conflict': '导入与当前数据冲突；数据库没有写入任何记录，请重新预览。',
   'admin.peopleImport.result.import_failed': '导入已安全失败，数据库没有写入任何记录。',
+  'admin.peopleImport.result.generic_error': '导入请求返回了异常响应。',
+  'admin.peopleImport.result.forbidden': '你没有导入会众的权限。',
+  'admin.peopleImport.result.not_found': '会众导入功能当前不可用。',
+  'admin.peopleImport.result.method_not_allowed': '不支持此导入操作。',
 
   'membership.visitor': '新朋友',
   'membership.regular': '稳定参加',

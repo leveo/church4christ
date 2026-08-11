@@ -4,6 +4,10 @@ import zh from '../src/i18n/zh';
 import { t } from '../src/lib/i18n';
 import { PEOPLE_IMPORT_HEADERS, type PeopleImportIssueCode } from '../src/lib/peopleImport';
 import type { PeopleImportDbIssueCode } from '../src/lib/peopleImportDb';
+import {
+  PEOPLE_IMPORT_HTTP_RESULT_CODES,
+  type PeopleImportHttpResultCode,
+} from '../src/lib/peopleImportContract';
 
 const dicts = { en, zh } as const;
 
@@ -99,12 +103,18 @@ const PEOPLE_IMPORT_RESULT_CODES = [
   'warnings_not_acknowledged',
   'import_conflict',
   'import_failed',
-] as const;
+  'generic_error',
+  'forbidden',
+  'not_found',
+  'method_not_allowed',
+] as const satisfies readonly PeopleImportHttpResultCode[];
 
 type MissingPeopleImportIssueCode = Exclude<PeopleImportIssueCode, (typeof PEOPLE_IMPORT_ISSUE_CODES)[number]>;
 type MissingPeopleImportDbIssueCode = Exclude<PeopleImportDbIssueCode, (typeof PEOPLE_IMPORT_DB_ISSUE_CODES)[number]>;
+type MissingPeopleImportResultCode = Exclude<PeopleImportHttpResultCode, (typeof PEOPLE_IMPORT_RESULT_CODES)[number]>;
 const everyPeopleImportIssueCodeIsListed: MissingPeopleImportIssueCode extends never ? true : never = true;
 const everyPeopleImportDbIssueCodeIsListed: MissingPeopleImportDbIssueCode extends never ? true : never = true;
+const everyPeopleImportResultCodeIsListed: MissingPeopleImportResultCode extends never ? true : never = true;
 
 describe('dictionaries (parity, ported from the reference stack)', () => {
   it('has a non-empty string for every key in both locales', () => {
@@ -166,6 +176,8 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
   it('provides every required People import UI, result, field, and issue key in both locales', () => {
     expect(everyPeopleImportIssueCodeIsListed).toBe(true);
     expect(everyPeopleImportDbIssueCodeIsListed).toBe(true);
+    expect(everyPeopleImportResultCodeIsListed).toBe(true);
+    expect(PEOPLE_IMPORT_HTTP_RESULT_CODES).toEqual(PEOPLE_IMPORT_RESULT_CODES);
 
     const required = [
       ...PEOPLE_IMPORT_COPY_KEYS,

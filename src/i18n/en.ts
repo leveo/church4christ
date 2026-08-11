@@ -738,6 +738,10 @@ export default {
   'admin.peopleImport.result.warnings_not_acknowledged': 'Acknowledge the preview warnings before importing.',
   'admin.peopleImport.result.import_conflict': 'The import conflicts with current data. Nothing was written; preview the file again.',
   'admin.peopleImport.result.import_failed': 'The import failed safely. Nothing was written.',
+  'admin.peopleImport.result.generic_error': 'The import request returned an unexpected response.',
+  'admin.peopleImport.result.forbidden': 'You do not have permission to import people.',
+  'admin.peopleImport.result.not_found': 'People import is not available.',
+  'admin.peopleImport.result.method_not_allowed': 'This import action is not supported.',
 
   'membership.visitor': 'Visitor',
   'membership.regular': 'Regular attender',

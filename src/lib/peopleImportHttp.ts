@@ -1,5 +1,6 @@
 import { hasAreaAccess } from './adminAreas';
 import { csvCell } from './csv';
+import type { PeopleImportHttpResultCode } from './peopleImportContract';
 import {
   PEOPLE_IMPORT_HEADERS,
   PEOPLE_IMPORT_LIMITS,
@@ -47,12 +48,12 @@ export function canManagePeopleImport(
 export type PeopleImportFileError = {
   ok: false;
   status: 400 | 413 | 415;
-  code:
+  code: Extract<PeopleImportHttpResultCode,
     | 'multipart_required'
     | 'multipart_invalid'
     | 'missing_file'
     | 'file_too_large'
-    | 'file_type_invalid';
+    | 'file_type_invalid'>;
 };
 
 export type PeopleImportFileResult = PeopleImportFileError | {

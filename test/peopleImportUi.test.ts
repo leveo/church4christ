@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import importPageSource from '../src/pages/admin/people/import/index.astro?raw';
+import peopleImportUiSource from '../src/lib/peopleImportUi.ts?raw';
 import {
   applyPeopleImportCommit,
   applyPeopleImportPreview,
   beginPeopleImportCommit,
   beginPeopleImportPreview,
   createPeopleImportUiState,
+  decidePeopleImportFailure,
+  parsePeopleImportCounts,
+  parsePeopleImportPreview,
+  parsePeopleImportResultCode,
+  parsePeopleImportSummary,
   peopleImportUiControls,
   rejectPeopleImportRequest,
   selectPeopleImportFile,
@@ -60,19 +66,39 @@ describe('people import UI state', () => {
 
   it('disables both actions while preview or commit is pending', () => {
     let state = createPeopleImportUiState();
-    expect(peopleImportUiControls(state)).toEqual({ previewDisabled: true, commitDisabled: true });
+    expect(peopleImportUiControls(state)).toEqual({
+      previewDisabled: true,
+      commitDisabled: true,
+      fileDisabled: false,
+    });
 
     state = selectPeopleImportFile(state, true);
-    expect(peopleImportUiControls(state)).toEqual({ previewDisabled: false, commitDisabled: true });
+    expect(peopleImportUiControls(state)).toEqual({
+      previewDisabled: false,
+      commitDisabled: true,
+      fileDisabled: false,
+    });
 
     const preview = beginPeopleImportPreview(state)!;
-    expect(peopleImportUiControls(preview.state)).toEqual({ previewDisabled: true, commitDisabled: true });
+    expect(peopleImportUiControls(preview.state)).toEqual({
+      previewDisabled: true,
+      commitDisabled: true,
+      fileDisabled: false,
+    });
 
     state = applyPeopleImportPreview(preview.state, preview.request, { summary, issues: [] });
-    expect(peopleImportUiControls(state)).toEqual({ previewDisabled: false, commitDisabled: false });
+    expect(peopleImportUiControls(state)).toEqual({
+      previewDisabled: false,
+      commitDisabled: false,
+      fileDisabled: false,
+    });
 
     const commit = beginPeopleImportCommit(state)!;
-    expect(peopleImportUiControls(commit.state)).toEqual({ previewDisabled: true, commitDisabled: true });
+    expect(peopleImportUiControls(commit.state)).toEqual({
+      previewDisabled: true,
+      commitDisabled: true,
+      fileDisabled: true,
+    });
   });
 
   it('blocks commit whenever the preview contains an error', () => {
@@ -120,7 +146,11 @@ describe('people import UI state', () => {
       failure: 'import_conflict',
       success: null,
     });
-    expect(peopleImportUiControls(state)).toEqual({ previewDisabled: false, commitDisabled: true });
+    expect(peopleImportUiControls(state)).toEqual({
+      previewDisabled: false,
+      commitDisabled: true,
+      fileDisabled: false,
+    });
   });
 
   it('retains exact success counts from the active commit response', () => {
@@ -137,7 +167,126 @@ describe('people import UI state', () => {
 
     expect(state.success).toEqual({ people: 2, households: 1, dependents: 1 });
     expect(state.pending).toBeNull();
+    expect(peopleImportUiControls(commit.state).fileDisabled).toBe(true);
+    expect(peopleImportUiControls(state).fileDisabled).toBe(false);
     expect(peopleImportUiControls(state).commitDisabled).toBe(true);
+  });
+});
+
+describe('people import response parsing', () => {
+  const previewBody = {
+    ok: true,
+    summary,
+    rows: [
+      {
+        row: 2,
+        recordType: 'person',
+        displayName: '<b>Ada</b>',
+        email: 'ada@example.com',
+        household: { name: 'Example Household' },
+      },
+    ],
+    issues: [
+      { severity: 'warning', code: 'household_name_exists', row: null, field: 'household_name' },
+    ],
+  };
+
+  it('rejects malformed or non-200 preview JSON without trusting nested values', () => {
+    expect(parsePeopleImportSummary(null)).toBeNull();
+    expect(parsePeopleImportSummary({ ...summary, people: -1 })).toBeNull();
+    expect(parsePeopleImportPreview(500, previewBody)).toBeNull();
+    expect(parsePeopleImportPreview(200, null)).toBeNull();
+    expect(parsePeopleImportPreview(200, { ...previewBody, rows: [{}] })).toBeNull();
+    expect(parsePeopleImportPreview(200, {
+      ...previewBody,
+      issues: [{ severity: 'notice', code: 'unknown', row: null, field: null }],
+    })).toBeNull();
+  });
+
+  it('projects a valid preview response into safe primitive UI values', () => {
+    expect(parsePeopleImportPreview(200, previewBody)).toEqual({
+      summary,
+      rows: [{
+        row: 2,
+        recordType: 'person',
+        displayName: '<b>Ada</b>',
+        email: 'ada@example.com',
+        householdName: 'Example Household',
+      }],
+      issues: [{
+        severity: 'warning',
+        code: 'household_name_exists',
+        row: null,
+        field: 'household_name',
+      }],
+    });
+  });
+
+  it('accepts commit counts only from an exact 201 success response', () => {
+    const body = { ok: true, counts: { people: 2, households: 1, dependents: 1 } };
+    expect(parsePeopleImportCounts(201, body)).toEqual(body.counts);
+    expect(parsePeopleImportCounts(200, body)).toBeNull();
+    expect(parsePeopleImportCounts(201, { ...body, counts: { ...body.counts, people: -1 } })).toBeNull();
+    expect(parsePeopleImportCounts(201, null)).toBeNull();
+  });
+
+  it('accepts only a shared, explicit HTTP result code', () => {
+    expect(parsePeopleImportResultCode({ code: 'forbidden' })).toBe('forbidden');
+    expect(parsePeopleImportResultCode({ code: 'made_up' })).toBeNull();
+    expect(parsePeopleImportResultCode(null)).toBeNull();
+  });
+
+  it('keeps the browser state module isolated from server HTTP and persistence dependencies', () => {
+    expect(peopleImportUiSource).toContain("from './peopleImportContract'");
+    expect(peopleImportUiSource).not.toContain("from './peopleImportHttp'");
+  });
+});
+
+describe('people import failure decisions', () => {
+  it('treats generic and transport commit failures as uncertain and requires a fresh preview', () => {
+    expect(decidePeopleImportFailure('commit', 'generic_error', false)).toEqual({
+      failure: 'generic',
+      messageKey: 'admin.peopleImport.genericError',
+      requiresFreshPreview: true,
+    });
+    expect(decidePeopleImportFailure('commit', null, true)).toEqual({
+      failure: 'network',
+      messageKey: 'admin.peopleImport.genericError',
+      requiresFreshPreview: true,
+    });
+  });
+
+  it('distinguishes a failed preview response from a true preview network failure', () => {
+    expect(decidePeopleImportFailure('preview', 'generic_error', false)).toEqual({
+      failure: 'generic',
+      messageKey: 'admin.peopleImport.previewError',
+      requiresFreshPreview: false,
+    });
+    expect(decidePeopleImportFailure('preview', null, true)).toEqual({
+      failure: 'network',
+      messageKey: 'admin.peopleImport.networkError',
+      requiresFreshPreview: false,
+    });
+  });
+
+  it('forces a re-preview for late warnings and conflicts but preserves accurate result copy', () => {
+    expect(decidePeopleImportFailure('commit', 'warnings_not_acknowledged', false)).toEqual({
+      failure: 'generic',
+      messageKey: 'admin.peopleImport.repreviewRequired',
+      requiresFreshPreview: true,
+    });
+    expect(decidePeopleImportFailure('commit', 'import_conflict', false)).toEqual({
+      failure: 'import_conflict',
+      messageKey: 'admin.peopleImport.repreviewRequired',
+      requiresFreshPreview: true,
+    });
+    for (const code of ['forbidden', 'not_found', 'method_not_allowed', 'missing_file', 'import_failed'] as const) {
+      expect(decidePeopleImportFailure('commit', code, false)).toEqual({
+        failure: 'generic',
+        messageKey: `admin.peopleImport.result.${code}`,
+        requiresFreshPreview: false,
+      });
+    }
   });
 });
 
@@ -177,26 +326,16 @@ describe('people import admin page contract', () => {
       'beginPeopleImportCommit',
       'applyPeopleImportCommit',
       'rejectPeopleImportRequest',
+      'parsePeopleImportPreview',
+      'parsePeopleImportCounts',
+      'decidePeopleImportFailure',
     ]) {
       expect(importPageSource).toContain(helper);
     }
   });
 
-  it('forces a fresh preview when commit discovers warnings that were not in the preview', () => {
-    expect(importPageSource).toContain("code === 'warnings_not_acknowledged'");
-    expect(importPageSource).toMatch(
-      /commitNeedsFreshPreview[\s\S]*warnings_not_acknowledged[\s\S]*selectPeopleImportFile/,
-    );
-    expect(importPageSource).toMatch(
-      /code === 'import_conflict'\s*\|\|\s*code === 'warnings_not_acknowledged'[\s\S]*admin\.peopleImport\.repreviewRequired/,
-    );
-  });
-
-  it('distinguishes a safe preview failure from a network error and an uncertain commit', () => {
-    expect(importPageSource).toContain('admin.peopleImport.previewError');
-    expect(importPageSource).toMatch(
-      /request\.kind === 'commit'[\s\S]*admin\.peopleImport\.genericError[\s\S]*requestWasUncertain[\s\S]*admin\.peopleImport\.networkError[\s\S]*admin\.peopleImport\.previewError/,
-    );
+  it('binds the pure commit-pending file lock to the actual file input', () => {
+    expect(importPageSource).toContain('fileInput.disabled = controls.fileDisabled');
   });
 
   it('renders uploaded and response values only through safe DOM text APIs', () => {
