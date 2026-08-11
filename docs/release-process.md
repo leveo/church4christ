@@ -21,11 +21,14 @@ impact under `Unreleased` in [`CHANGELOG.md`](../CHANGELOG.md), including:
 - deployment, backup, restore, monitoring, or manual follow-up steps;
 - user-visible additions, fixes, security changes, removals, and known limitations.
 
-Do not edit, rename, delete, or reorder a migration once it is merged into `main` or applied by
-any installation; waiting for a tag or GitHub Release is too late. Files `0001` through `0010`
-in both `migrations/` and `migrations-supabase/` are the frozen current `main` baseline. Create
-a new, numbered, forward migration for every correction. Never manufacture migration history
-by editing D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table.
+Do not edit, rename, delete, or reorder a migration once it is merged into `main` or applied to
+a persistent, shared, or deployed installation; waiting for a tag or GitHub Release is too
+late. Before merge, a proposed migration applied only to disposable local or CI databases may
+still change after those databases are reset or rebuilt. Merge to `main` establishes the
+permanent boundary even when no deployed installation has applied it. Files `0001` through
+`0010` in both `migrations/` and `migrations-supabase/` are the frozen current `main` baseline.
+Create a new, numbered, forward migration for every correction. Never manufacture migration
+history by editing D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table.
 
 ## Prepare the release pull request
 

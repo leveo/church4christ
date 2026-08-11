@@ -29,10 +29,14 @@ or GitHub Release exists.
 
 ### Security
 
-- Database export examples now write sensitive backups outside the repository and require
-  operators to verify the exact target database before migration.
+- Database export examples keep backups and PostgreSQL credential files outside the
+  repository and keep connection URLs and passwords out of `pg_dump` arguments.
+- Staging and production upgrade steps require operators to verify the exact non-secret D1 or
+  Supabase/Postgres target identifiers before migration.
 
 ### Upgrade notes
 
 - Migration files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
-  the frozen `main` baseline. Corrections must use a new numbered forward migration.
+  the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
+  before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
+  Corrections after that boundary must use a new numbered forward migration.

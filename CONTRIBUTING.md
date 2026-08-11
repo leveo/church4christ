@@ -64,12 +64,14 @@ environment variables, secrets, module defaults, access rules, backup/restore, i
 operational limits, or required manual work, update `CHANGELOG.md` under `Unreleased` and the
 relevant runbook in the same PR. State explicitly when there is no operator impact.
 
-Once a migration is merged into `main` or applied by any installation, never edit, rename,
-delete, or reorder it. The current `main` baseline files `0001` through `0010` in both
-`migrations/` and `migrations-supabase/` are already frozen. Add a new numbered forward
-migration for every correction. Do not manually rewrite D1's `d1_migrations` table or
-Supabase/Postgres's `_migrations` table to make histories look aligned. See
-[`docs/upgrade.md`](docs/upgrade.md) and
+Once a migration is merged into `main` or applied to a persistent, shared, or deployed
+installation, never edit, rename, delete, or reorder it. Before merge, a disposable local or
+CI database may be reset and rebuilt while its proposed migration remains under review; that
+does not establish a permanent freeze boundary. Merge to `main` does. The current `main`
+baseline files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+already frozen. Add a new numbered forward migration for every correction. Do not manually
+rewrite D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table to make histories
+look aligned. See [`docs/upgrade.md`](docs/upgrade.md) and
 [`docs/release-process.md`](docs/release-process.md).
 
 ## Running the checks
@@ -119,8 +121,8 @@ Before you open a PR, confirm:
 - [ ] Docs updated if behavior changed.
 - [ ] Operator impact is described and, when applicable, recorded under `Unreleased` in
       [`CHANGELOG.md`](CHANGELOG.md) with the relevant upgrade/deployment runbook updated.
-- [ ] Migrations already on `main` or applied by an installation are unchanged; schema
-      corrections use a new numbered forward migration.
+- [ ] Migrations already on `main` or applied to a persistent, shared, or deployed
+      installation are unchanged; schema corrections use a new numbered forward migration.
 
 ## Code of conduct
 

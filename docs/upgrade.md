@@ -42,13 +42,22 @@ Back up:
        --output=/secure/backups/church4christ-before-upgrade.sql
      ```
 
-   - Supabase/Postgres: use the provider backup or `pg_dump` with a connection URL supplied
-     through the environment, never committed to the repository:
+   - Supabase/Postgres: prefer the provider's managed backup or snapshot and verify its restore
+     instructions. When a CLI export is required, keep connection metadata and the password in
+     separate libpq files outside the repository. The service file must not contain a password;
+     both files must be owned by the operator and restricted to mode `0600`:
 
      ```bash
-     pg_dump --format=custom \
-       --file=/secure/backups/church4christ-before-upgrade.dump "$SUPABASE_DB_URL"
+     PGSERVICE=church4christ-backup \
+     PGSERVICEFILE=/secure/credentials/pg_service.conf \
+     PGPASSFILE=/secure/credentials/pgpass \
+       pg_dump --format=custom \
+       --file=/secure/backups/church4christ-before-upgrade.dump
      ```
+
+     Do not pass a credential-bearing connection URL or password as a `pg_dump` argument;
+     command arguments can be exposed through process listings, logs, or shell history. Do not
+     commit either libpq file.
 
 2. **R2 media** — copy every object and its key to independent storage through the R2
    S3-compatible API or another verified export process. A database export does not contain
@@ -95,10 +104,11 @@ npx wrangler d1 migrations apply DB --remote \
   --config /secure/path/wrangler.staging.jsonc
 ```
 
-For Supabase/Postgres staging, keep the staging-only URL in the environment:
+For Supabase/Postgres staging, inject `SUPABASE_DB_URL` through the approved secret channel
+without printing it or placing it in the command text, then run:
 
 ```bash
-SUPABASE_DB_URL=postgres://... npm run db:migrate:supabase
+npm run db:migrate:supabase
 ```
 
 Do **not** run `npm run db:seed:local`, `npm run db:seed-media:local`, or
@@ -141,21 +151,29 @@ Use the ordering documented for the target checkpoint. Unless its notes require 
 compatibility sequence, the normal forward path is:
 
 1. take and verify the final backups;
-2. apply all pending migrations for the selected backend with
-   `npm run db:migrate:remote` (D1) or
-   `SUPABASE_DB_URL=postgres://... npm run db:migrate:supabase` (Supabase/Postgres);
-3. deploy the exact reviewed source revision with `npm run deploy`;
-4. run `npm run doctor -- --strict` against production configuration;
-5. smoke-test sign-in, public pages, admin access, media, email, and the workflows the church
+2. confirm the production target immediately before migration: for D1, compare the default
+   production binding's exact database name and ID with `npx wrangler d1 list --json`; for
+   Supabase/Postgres, compare the expected project reference and host through the provider
+   dashboard or approved connection profile. Record the non-secret target identifiers, but
+   never print or log a connection URL or credential;
+3. apply all pending migrations for the selected backend with
+   `npm run db:migrate:remote` (D1) or, after secure `SUPABASE_DB_URL` injection,
+   `npm run db:migrate:supabase` (Supabase/Postgres);
+4. deploy the exact reviewed source revision with `npm run deploy`;
+5. run `npm run doctor -- --strict` against production configuration;
+6. smoke-test sign-in, public pages, admin access, media, email, and the workflows the church
    depends on;
-6. record the deployed revision, migration result, verifier, and completion time.
+7. record the deployed revision, migration result, verifier, and completion time.
 
 Migration runners are forward-only. Never edit, delete, rename, reorder, or manually mark a
-migration after it is merged into `main` or applied by any installation. Files `0001` through
-`0010` in `migrations/` and `migrations-supabase/` are the frozen current `main` baseline. In
-particular, do not rewrite D1's `d1_migrations` table or the Supabase runner's `_migrations`
-table. Investigate a mismatch and add a new numbered forward migration when correction is
-needed.
+migration after it is merged into `main` or applied to a persistent, shared, or deployed
+installation. Before merge, applying a proposed migration only to disposable local or CI
+databases does not create a permanent freeze boundary: reset or rebuild those databases while
+the migration remains under review. Merge to `main` freezes the file even if no production
+deployment has used it. Files `0001` through `0010` in `migrations/` and
+`migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
+D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
+and add a new numbered forward migration when correction is needed.
 
 ## 5. Recovery boundaries
 

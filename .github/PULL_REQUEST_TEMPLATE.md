@@ -27,11 +27,12 @@ Please confirm before requesting review (these mirror the five project rules):
 - [ ] **No secrets or real member data** committed (see `SECURITY.md`).
 - [ ] Docs updated if behavior changed.
 - [ ] **Operator impact** is stated above and recorded under `Unreleased` when applicable.
-- [ ] **Merged/applied migrations are immutable** — no migration already on `main` or applied
-      by an installation was edited, renamed, deleted, or reordered. The current `main`
-      baseline `0001`–`0010` files in both migration directories stay frozen; corrections use
-      a new numbered forward migration, and `d1_migrations` / `_migrations` history was not
-      rewritten.
+- [ ] **Merged/persistent migrations are immutable** — no migration already on `main` or
+      applied to a persistent, shared, or deployed installation was edited, renamed, deleted,
+      or reordered. A disposable local/CI database may be rebuilt while a migration is under
+      review before merge; merge to `main` freezes it. The current `main` baseline
+      `0001`–`0010` files in both migration directories stay frozen; corrections use a new
+      numbered forward migration, and `d1_migrations` / `_migrations` history was not rewritten.
 
 ## Notes for the reviewer
 
