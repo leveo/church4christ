@@ -1,9 +1,9 @@
 # Contributing to Church4Christ
 
 Thanks for helping — bug reports, translations, docs, and features are all welcome. This
-project aims to be the simplest, cheapest way for a church or nonprofit to run a real
-website, and it stays that way by keeping a few rules tight. This guide gets you set up and
-explains those rules.
+project aims to lower the starting and ongoing maintenance cost of a customized
+church-management system and website, and it stays focused by keeping a few rules tight.
+This guide gets you set up and explains those rules.
 
 ## Getting set up
 
@@ -26,10 +26,10 @@ prints to your terminal (local email is logged, not sent), and setup also writes
 address as the local auto-sign-in bypass for convenience. Full context is in the
 [README quickstart](README.md#try-it-in-5-minutes-on-your-own-computer).
 
-## The four project rules
+## The five project rules
 
-These are enforced automatically — CI will reject a PR that breaks one — so it is best to
-know them up front.
+CI enforces the mechanical parts of these rules; reviewers verify behavior and operator
+impact that automation cannot judge. It is best to know them up front.
 
 ### 1. Styling comes only from design tokens
 
@@ -56,6 +56,23 @@ a reviewer should be able to see the feature's important cases exercised.
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
 `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, optionally scoped
 (`feat(serve): …`). This keeps history readable and releasable.
+
+### 5. Record operator impact and preserve shared migration history
+
+When a change affects database schema or data, installation, deployment, bindings,
+environment variables, secrets, module defaults, access rules, backup/restore, imports,
+operational limits, or required manual work, update `CHANGELOG.md` under `Unreleased` and the
+relevant runbook in the same PR. State explicitly when there is no operator impact.
+
+Once a migration is merged into `main` or applied to a persistent, shared, or deployed
+installation, never edit, rename, delete, or reorder it. Before merge, a disposable local or
+CI database may be reset and rebuilt while its proposed migration remains under review; that
+does not establish a permanent freeze boundary. Merge to `main` does. The current `main`
+baseline files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+already frozen. Add a new numbered forward migration for every correction. Do not manually
+rewrite D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table to make histories
+look aligned. See [`docs/upgrade.md`](docs/upgrade.md) and
+[`docs/release-process.md`](docs/release-process.md).
 
 ## Running the checks
 
@@ -107,6 +124,10 @@ Before you open a PR, confirm:
 - [ ] Commits follow Conventional Commits.
 - [ ] No secrets, `.dev.vars`, or real member data are committed (see [`SECURITY.md`](SECURITY.md)).
 - [ ] Docs updated if behavior changed.
+- [ ] Operator impact is described and, when applicable, recorded under `Unreleased` in
+      [`CHANGELOG.md`](CHANGELOG.md) with the relevant upgrade/deployment runbook updated.
+- [ ] Migrations already on `main` or applied to a persistent, shared, or deployed
+      installation are unchanged; schema corrections use a new numbered forward migration.
 
 ## Code of conduct
 

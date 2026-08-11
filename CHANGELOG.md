@@ -1,0 +1,42 @@
+# Changelog
+
+This file records changes that affect churches, nonprofit operators, implementers, and
+maintainers. Church4Christ is pre-1.0, so upgrade notes are part of the change contract:
+read the relevant entries before moving an installation forward.
+
+The `Unreleased` section starts after baseline commit
+[`20b67f3`](https://github.com/leveo/church4christ/commit/20b67f3). Earlier development
+history is intentionally not reconstructed as releases. The `0.1.0` value in the private
+package metadata identifies the current source tree; it does not claim that a `0.1.0` tag
+or GitHub Release exists.
+
+## [Unreleased]
+
+### Added
+
+- Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
+  recovering from future upgrades.
+- Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
+
+### Changed
+
+- Staging upgrade instructions now require an explicit staging Wrangler environment or
+  configuration for both D1 migrations and deployment.
+
+### Fixed
+
+- Corrected contributor guidance to use the project's five current rules consistently.
+
+### Security
+
+- Database export examples keep backups and PostgreSQL credential files outside the
+  repository and keep connection URLs and passwords out of `pg_dump` arguments.
+- Staging and production upgrade steps require operators to verify the exact non-secret D1 or
+  Supabase/Postgres target identifiers before migration.
+
+### Upgrade notes
+
+- Migration files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+  the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
+  before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
+  Corrections after that boundary must use a new numbered forward migration.
