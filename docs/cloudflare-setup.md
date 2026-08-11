@@ -16,7 +16,7 @@ features. Setup explains the required accounts, selects D1 or Supabase, prepares
 and data, and bootstraps the first admin. Run `npm run doctor` for a readiness report.
 
 You do **not** need to read this to try the site on your own computer first — that takes
-five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes)).
+five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes-on-your-own-computer)).
 This page is for when you want to put your site **online for real**.
 
 ## What is Cloudflare, and why this project uses it
@@ -70,7 +70,7 @@ launch and during operation.
   deployment remains free.
 - **Production email to arbitrary recipients** currently requires Workers Paid. A
   Supabase/Postgres backend and optional operational services can also add charges.
-- **A domain name** (like `yourchurch.org`) is the one thing you might pay for — usually
+- **A domain name** (like `yourchurch.org`) is another possible cost — usually
   about **$10–15 a year** — unless you already own one. If your church already has a
   domain, you can use it.
 - The project has no per-page software fee, but hosting and third-party plans remain your

@@ -7,7 +7,7 @@ builder is one deliberate client-only React exception. The Worker uses Cloudflar
 for D1 or Hyperdrive-to-Postgres, R2, Email, and scheduled work. This is a compact
 architecture, but its deployment integration is Cloudflare-specific.
 
-![How Church4Christ runs on Cloudflare](images/diagrams/architecture.svg)
+![How Church4Christ uses either D1 or Hyperdrive to Postgres, plus R2, email, and provider-specific schedules on Cloudflare](images/diagrams/architecture.svg)
 
 ## The request path
 
@@ -48,7 +48,7 @@ updates, secret handling, backups, or monitoring.
 | **Pages & API** | Public site under `[locale]/`, admin under `/admin`, JSON under `/api` | `src/pages/**` |
 | **Data helpers** | One module per domain (admin, plans, prayer, email, …) | `src/lib/*Db.ts` |
 | **Database** | D1 or Supabase Postgres content, people, schedules, check-ins, revisions, logs | binding `DB` or `HYPERDRIVE` |
-| **Object storage (R2)** | Uploaded media (`uploads/`) and nightly backups (`backups/`) | binding `MEDIA` |
+| **Object storage (R2)** | Uploaded media (`uploads/`) and, on the D1 profile only, nightly backups (`backups/`) | binding `MEDIA` |
 | **Email** | Transactional mail through one choke point | binding `EMAIL` |
 
 ## Data: D1 or Supabase

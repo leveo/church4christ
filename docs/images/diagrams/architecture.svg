@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" font-family="system-ui, sans-serif" role="img" aria-label="How Church4Christ runs on Cloudflare: a browser reaches one Worker at the edge, which runs middleware then Astro SSR, and talks to D1, R2, and email — with cron triggers driving reminders, digest, and the nightly backup">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" font-family="system-ui, sans-serif" role="img" aria-label="Cloudflare deployment overview: browsers reach one Astro Worker. The Worker uses either a D1 binding or Hyperdrive to Supabase Postgres, plus R2 for media and an Email binding. Three shared schedules send daily reminders, a Thursday digest, and hourly attendance email. A fourth provider-specific schedule is either the D1-only nightly backup to R2 or Supabase Preview test Stripe recovery every five minutes.">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
@@ -7,65 +7,83 @@
       <path d="M0,0 L10,5 L0,10 z" fill="#2F7A4D"/>
     </marker>
   </defs>
+
   <rect x="0" y="0" width="880" height="560" fill="#F7F5F0"/>
-  <text x="32" y="44" font-size="22" font-weight="700" fill="#232630">How Church4Christ runs on Cloudflare</text>
-  <text x="32" y="70" font-size="14" fill="#565B6B">One Worker at the edge renders every page, guards each request, and reads from D1, R2, and email.</text>
+  <text x="28" y="38" font-size="22" font-weight="700" fill="#232630">How Church4Christ runs on Cloudflare</text>
+  <text x="28" y="62" font-size="13" fill="#565B6B">One Worker uses D1 or Hyperdrive → Postgres, plus R2 media, email, and four configured schedules.</text>
 
   <!-- Clients -->
-  <text x="32" y="104" font-size="13" font-weight="600" fill="#565B6B">Who visits</text>
-  <rect x="32" y="116" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="107" y="146" font-size="15" fill="#232630" text-anchor="middle">Visitor</text>
-  <text x="107" y="166" font-size="12" fill="#565B6B" text-anchor="middle">any browser</text>
-  <rect x="32" y="196" width="150" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="107" y="226" font-size="15" fill="#232630" text-anchor="middle">Church staff</text>
-  <text x="107" y="246" font-size="12" fill="#565B6B" text-anchor="middle">signed in at /admin</text>
-  <line x1="182" y1="148" x2="246" y2="180" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="182" y1="228" x2="246" y2="300" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="28" y="98" font-size="12.5" font-weight="600" fill="#565B6B">Browsers</text>
+  <rect x="28" y="110" width="124" height="60" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="90" y="137" font-size="14" fill="#232630" text-anchor="middle">Visitors</text>
+  <text x="90" y="157" font-size="11.5" fill="#565B6B" text-anchor="middle">public pages</text>
+  <rect x="28" y="188" width="124" height="60" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="90" y="215" font-size="14" fill="#232630" text-anchor="middle">Church staff</text>
+  <text x="90" y="235" font-size="11.5" fill="#565B6B" text-anchor="middle">signed-in admin</text>
+  <line x1="152" y1="140" x2="178" y2="157" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="152" y1="218" x2="178" y2="236" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Worker container -->
-  <rect x="248" y="92" width="356" height="286" rx="12" fill="#FFFFFF" stroke="#31487A" stroke-width="2"/>
-  <text x="426" y="118" font-size="15" font-weight="700" fill="#31487A" text-anchor="middle">Cloudflare Worker — Astro SSR</text>
+  <!-- Worker -->
+  <rect x="180" y="84" width="350" height="300" rx="12" fill="#FFFFFF" stroke="#31487A" stroke-width="2"/>
+  <text x="355" y="111" font-size="15" font-weight="700" fill="#31487A" text-anchor="middle">Cloudflare Worker — Astro SSR</text>
 
-  <!-- Middleware -->
-  <rect x="268" y="134" width="316" height="152" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
-  <text x="284" y="156" font-size="13" font-weight="700" fill="#232630">Middleware (every request)</text>
-  <text x="284" y="178" font-size="12.5" fill="#565B6B">Locale routing — / picks /en or /zh</text>
-  <text x="284" y="197" font-size="12.5" fill="#565B6B">Active theme — from the saved setting</text>
-  <text x="284" y="216" font-size="12.5" fill="#565B6B">CSRF — reject cross-origin writes</text>
-  <text x="284" y="235" font-size="12.5" fill="#565B6B">Session — reload the signed-in person</text>
-  <text x="284" y="254" font-size="12.5" fill="#565B6B">Route policy — role gate, fails closed</text>
-  <text x="284" y="273" font-size="12.5" fill="#565B6B">Security headers on every response</text>
+  <rect x="200" y="128" width="310" height="142" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
+  <text x="216" y="151" font-size="13" font-weight="700" fill="#232630">Middleware guards every request</text>
+  <text x="216" y="175" font-size="12" fill="#565B6B">Locale and active theme</text>
+  <text x="216" y="196" font-size="12" fill="#565B6B">CSRF and signed-in session reload</text>
+  <text x="216" y="217" font-size="12" fill="#565B6B">Fail-closed route and role policy</text>
+  <text x="216" y="238" font-size="12" fill="#565B6B">Security headers on every response</text>
+  <text x="216" y="259" font-size="12" fill="#565B6B">Per-request database connection</text>
 
-  <!-- Render -->
-  <rect x="268" y="300" width="316" height="56" rx="8" fill="#C29A5B"/>
-  <text x="426" y="324" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Render a page or API route</text>
-  <text x="426" y="342" font-size="12" fill="#232630" text-anchor="middle">public pages · /admin console · /api</text>
+  <rect x="200" y="284" width="310" height="58" rx="8" fill="#C29A5B"/>
+  <text x="355" y="308" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Render a page or API route</text>
+  <text x="355" y="328" font-size="12" fill="#232630" text-anchor="middle">public pages · /admin console · /api</text>
 
-  <!-- Services -->
-  <text x="650" y="104" font-size="13" font-weight="600" fill="#565B6B">Cloudflare storage &amp; email</text>
-  <rect x="650" y="116" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="750" y="146" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">D1 — SQL database</text>
-  <text x="750" y="168" font-size="12" fill="#565B6B" text-anchor="middle">content · people · schedules</text>
-  <rect x="650" y="204" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="750" y="234" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">R2 — object storage</text>
-  <text x="750" y="256" font-size="12" fill="#565B6B" text-anchor="middle">media · nightly backups</text>
-  <rect x="650" y="292" width="200" height="74" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="750" y="322" font-size="14" font-weight="600" fill="#232630" text-anchor="middle">Email binding</text>
-  <text x="750" y="344" font-size="12" fill="#565B6B" text-anchor="middle">magic links · reminders</text>
+  <rect x="200" y="354" width="310" height="20" rx="5" fill="#EEF2FA"/>
+  <text x="355" y="368" font-size="11.5" font-weight="600" fill="#31487A" text-anchor="middle">AppDb selects exactly one configured database backend</text>
 
-  <line x1="604" y1="236" x2="648" y2="154" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="604" y1="240" x2="648" y2="242" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="604" y1="244" x2="648" y2="328" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <!-- Bound services -->
+  <text x="565" y="98" font-size="12.5" font-weight="600" fill="#565B6B">Bound services</text>
+  <rect x="565" y="110" width="287" height="58" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="134" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">D1 — SQL database</text>
+  <text x="708.5" y="153" font-size="11.5" fill="#565B6B" text-anchor="middle">DB binding · selected D1 backend</text>
 
-  <!-- Cron -->
-  <rect x="248" y="398" width="356" height="92" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="268" y="420" font-size="13" font-weight="700" fill="#232630">Cron triggers → scheduled()</text>
-  <text x="268" y="442" font-size="12.5" fill="#565B6B">Daily — serving reminders (email)</text>
-  <text x="268" y="462" font-size="12.5" fill="#565B6B">Thursday — weekly serving digest (email)</text>
-  <text x="268" y="482" font-size="12.5" fill="#565B6B">Nightly — backup D1 → R2 (skips if unconfigured)</text>
-  <line x1="426" y1="398" x2="426" y2="380" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="565" y="180" width="287" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="205" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">Hyperdrive → Supabase / Postgres</text>
+  <text x="708.5" y="225" font-size="11.5" fill="#565B6B" text-anchor="middle">HYPERDRIVE binding · selected Postgres backend</text>
 
-  <!-- Backup path -->
-  <polyline points="604,470 626,470 626,242 648,242" fill="none" stroke="#2F7A4D" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowG)"/>
-  <text x="470" y="512" font-size="12" fill="#2F7A4D">— — nightly backup writes to R2</text>
+  <rect x="565" y="256" width="287" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="281" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">R2 — object storage</text>
+  <text x="708.5" y="300" font-size="11.5" fill="#565B6B" text-anchor="middle">media for either profile · D1 backups only</text>
+
+  <rect x="565" y="332" width="287" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="354" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">Email binding</text>
+  <text x="708.5" y="373" font-size="11.5" fill="#565B6B" text-anchor="middle">magic links · reminders · digests · attendance</text>
+
+  <line x1="530" y1="158" x2="563" y2="139" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="198" x2="563" y2="212" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="277" x2="563" y2="288" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="335" x2="563" y2="358" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Schedules -->
+  <rect x="28" y="410" width="824" height="118" rx="9" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="48" y="434" font-size="13" font-weight="700" fill="#232630">Cron triggers → scheduled()</text>
+  <line x1="440" y1="442" x2="440" y2="514" stroke="#DDD9CF"/>
+
+  <text x="48" y="458" font-size="12" font-weight="700" fill="#31487A">Three shared schedules</text>
+  <text x="48" y="478" font-size="11.5" fill="#565B6B">Daily reminders · 0 13 * * *</text>
+  <text x="48" y="496" font-size="11.5" fill="#565B6B">Thursday digest · 0 14 * * 4</text>
+  <text x="48" y="514" font-size="11.5" fill="#565B6B">Hourly attendance email · 0 * * * *</text>
+
+  <text x="460" y="458" font-size="12" font-weight="700" fill="#31487A">Provider-specific fourth schedule</text>
+  <text x="460" y="480" font-size="11.5" fill="#565B6B">D1: nightly backup · 0 9 * * * → R2</text>
+  <text x="460" y="500" font-size="11.5" fill="#565B6B">Supabase: Preview/test Stripe recovery · */5 * * * *</text>
+  <text x="460" y="518" font-size="10.8" fill="#8A5A2B">Recovery is test-only; it does not enable live payments.</text>
+
+  <line x1="355" y1="410" x2="355" y2="386" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <polyline points="808,480 864,480 864,288 854,288" fill="none" stroke="#2F7A4D" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowG)"/>
+
+  <text x="28" y="550" font-size="10.8" fill="#565B6B">Solid arrows: request or binding path</text>
+  <line x1="245" y1="546" x2="280" y2="546" stroke="#2F7A4D" stroke-width="2" stroke-dasharray="5 4"/>
+  <text x="289" y="550" font-size="10.8" fill="#2F7A4D">D1-only backup write to R2</text>
 </svg>

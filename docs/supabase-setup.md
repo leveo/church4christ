@@ -295,8 +295,9 @@ day to day.
 
 Once giving is enabled, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
 which cross-checks your local ledger against Stripe and flags any drift — a gift Stripe has
-but your ledger is missing, or the reverse. Online giving works fully without this; it is an
-audit convenience, not a requirement.
+but your ledger is missing, or the reverse. This is an optional audit convenience for the
+Preview/test-mode checkout flow; without it, test checkouts still work but are not
+cross-checked through the Reconcile page. It does not make the payment path live-ready.
 
 It uses Supabase's **Stripe Foreign Data Wrapper** to read your Stripe data read-only. The
 project ships the setup SQL as an example file:
