@@ -44,6 +44,16 @@ to put the connection URL in Wrangler's child-process arguments unless you expli
 `--allow-hyperdrive-secret-in-argv` after reviewing that exposure. Importing an existing
 Hyperdrive does not require that consent.
 
+## First deployment versus an upgrade
+
+This walkthrough provisions a new installation. Once an environment contains church data,
+uploaded media, custom code, or production configuration, treat the next deployment as an
+upgrade: review [`CHANGELOG.md`](../CHANGELOG.md), take verified database and R2 backups,
+rehearse the target revision in staging, apply only forward migrations, and test recovery.
+Follow the dedicated [`upgrade.md`](./upgrade.md) runbook rather than rerunning setup as an
+unreviewed one-click update. Setup can change resources, configuration, schema, module rows,
+and administrator state; it does not replace an operator-approved upgrade plan.
+
 ## Manual reference and troubleshooting
 
 The remaining commands explain the underlying Cloudflare operations and are useful when
@@ -223,8 +233,9 @@ self-hosted application covering the `/admin*` path.
 
 ## Keeping it running
 
-- **Redeploy** after any change with `npm run deploy`. That is the whole update loop:
-  change something, run one command, it is live.
+- **Redeploy reviewed application-only changes** with `npm run deploy`. For a source upgrade,
+  use [`upgrade.md`](./upgrade.md): inspect operator impact, back up state, rehearse in staging,
+  apply the selected backend's forward migrations, deploy, and verify.
 - **Deployment is intentionally manual.** This public repo's CI builds and tests every
   change but never deploys — so no Cloudflare credentials ever live in a public repo. If
   you want push-to-deploy, keep a **private** copy of the repo and add a deploy step there

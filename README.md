@@ -263,6 +263,14 @@ off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness repo
 Deployment is intentionally manual: repository automation tests changes but does not
 publish them or migrate production data for you.
 
+**First deployment and upgrades are different operations.** Guided setup provisions or
+imports resources and bootstraps a reviewed installation. It is not an unattended one-click
+upgrade for a site that already holds church data. Existing operators should start with the
+[upgrade runbook](docs/upgrade.md), back up the database, R2 media, configuration, and secrets
+inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELOG.md) before
+applying forward migrations. Maintainers preparing a future pre-1.0 checkpoint should follow
+the [release process](docs/release-process.md).
+
 **Choosing your database.** The 14 D1-compatible modules exclude **Member Portal**,
 **Giving**, and **Registration**, which require Postgres. Account requirements follow the
 mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
