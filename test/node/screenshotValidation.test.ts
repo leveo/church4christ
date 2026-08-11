@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { assertExpectedScreenshotPage } from '../../scripts/lib/screenshot-validation.mjs';
 
-const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Household' };
+const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
 describe('screenshot page validation', () => {
   test('accepts the expected portal page', () => {
@@ -9,7 +9,7 @@ describe('screenshot page validation', () => {
       url: 'http://localhost:4321/en/my',
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
-      body: 'Chen Household Owner My groups Upcoming events',
+      body: 'Chen Family Owner My groups Upcoming events',
     })).not.toThrow();
   });
 
@@ -38,12 +38,12 @@ describe('screenshot page validation', () => {
     expect(() => assertExpectedScreenshotPage({
       path: '/en/my/household',
       out: 'docs/images/portal/household.png',
-      expectedText: 'Chen Household',
+      expectedText: 'Chen Family',
     }, {
       url: 'http://localhost:4321/en/my',
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
-      body: 'Chen Household Owner',
+      body: 'Chen Family Owner',
     })).toThrow(/unexpected path.*\/en\/my.*\/en\/my\/household/i);
   });
 
@@ -74,7 +74,7 @@ describe('screenshot page validation', () => {
       url: 'http://localhost:4321/en/my',
       title: '页面未找到',
       headings: [],
-      body: 'Chen Household',
+      body: 'Chen Family',
     })).toThrow(/404/i);
   });
 
@@ -83,7 +83,7 @@ describe('screenshot page validation', () => {
       url: 'http://localhost:4321/en/my',
       title: '頁面未找到',
       headings: [],
-      body: 'Chen Household',
+      body: 'Chen Family',
     })).toThrow(/404/i);
   });
 
@@ -92,7 +92,7 @@ describe('screenshot page validation', () => {
       url: 'http://localhost:4321/en/my',
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
-      body: 'Chen Household called extension 404 for assistance.',
+      body: 'Chen Family called extension 404 for assistance.',
     })).not.toThrow();
   });
 
@@ -102,6 +102,6 @@ describe('screenshot page validation', () => {
       title: 'My Portal',
       headings: ['Welcome'],
       body: 'No seeded household here',
-    })).toThrow(/Chen Household/);
+    })).toThrow(/Chen Family/);
   });
 });

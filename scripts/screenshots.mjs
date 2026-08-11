@@ -32,10 +32,15 @@
 //     # public + admin pass
 //     AUTH_DEV_BYPASS_EMAIL=admin@example.com npm run dev &
 //     node scripts/screenshots.mjs --only opportunities.png,person-detail.png
-//     # member (David Chen) pass — the Chen-household self-service card
+//     # member portal (David Chen) pass
 //     AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com npm run dev &
-//     node scripts/screenshots.mjs --only profile-household.png
+//     node scripts/screenshots.mjs --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
+//     # member portal group-files (Ben Wu) pass
+//     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
+//     node scripts/screenshots.mjs --only portal/group-files.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.
+//   Prefer full output-path tokens for batches so short filenames do not select
+//   unrelated outputs that happen to contain the same substring.
 //
 // VARIANTS (see PAGES rows)
 //   theme + mode : the theme is normally driven by the DB `theme.name` /
@@ -81,8 +86,10 @@ const MIN_BYTES = 20 * 1024;
 //   backend — documentation only, not enforced by this script: 'supabase' means
 //            the page 404s on the default D1 backend and needs its own dev-server
 //            pass with DB_BACKEND=supabase plus a migrated+seeded local Postgres
-//            (CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in .dev.vars;
-//            see docs/supabase-setup.md §9). Capture these together with --only.
+//            (CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE must be
+//            exported in the host shell before npm run dev; never put it in
+//            .dev.vars; see docs/supabase-setup.md §9). Capture these together
+//            with --only.
 //   expectedText — page marker required before capture; guards authenticated
 //            shots against redirects and other unexpected rendered pages
 //   postForm — after load, click every element matching `checkAll` (if given)
@@ -116,10 +123,12 @@ const PAGES = [
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
 
-  // Member Portal — Supabase-only authenticated pages. Capture the David Chen
-  // rows together, then the Ben Wu group-files row in its own identity pass.
-  { path: '/en/my', out: 'docs/images/portal/dashboard.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Household' },
-  { path: '/en/my/household', out: 'docs/images/portal/household.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Household' },
+  // Member Portal — Supabase-only authenticated pages. Use full output-path
+  // tokens to avoid filename collisions.
+  // David: --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
+  // Ben: --only portal/group-files.png (in a separate identity pass)
+  { path: '/en/my', out: 'docs/images/portal/dashboard.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Family' },
+  { path: '/en/my/household', out: 'docs/images/portal/household.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Family' },
   { path: '/en/my/events', out: 'docs/images/portal/events.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'My registrations' },
   { path: '/en/my/prayer?tab=pending', out: 'docs/images/portal/prayer-moderation.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Pending' },
   { path: '/en/groups/1', out: 'docs/images/portal/group-files.png', bypass: 'ben.wu@example.com', backend: 'supabase', anchor: 'Files', expectedText: 'young-adults-welcome.pdf' },
