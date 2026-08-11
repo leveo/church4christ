@@ -669,7 +669,7 @@ export default {
   'admin.peopleImport.success.back': '返回会众列表',
   'admin.peopleImport.retry': '重试',
   'admin.peopleImport.repreviewRequired': '数据已变化或与另一项写入冲突。请重新预览原文件后再试。',
-  'admin.peopleImport.genericError': '导入未能完成，数据库没有写入任何记录。请重试。',
+  'admin.peopleImport.genericError': '无法确认本次导入结果。请先检查会众列表并重新预览文件，再决定是否重试。',
   'admin.peopleImport.networkError': '无法连接服务器，请检查网络后重试。',
 
   'admin.peopleImport.field.record_type': '记录类型',

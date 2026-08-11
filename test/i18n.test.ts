@@ -195,6 +195,22 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zhNotice).toContain('原子');
     expect(zhNotice).toMatch(/不会.*部分|不.*部分写入/);
   });
+
+  it('distinguishes an uncertain request result from a confirmed atomic import failure', () => {
+    const enGeneric = en['admin.peopleImport.genericError'];
+    expect(enGeneric).toMatch(/could not be confirmed/i);
+    expect(enGeneric).toMatch(/check People/i);
+    expect(enGeneric).toMatch(/preview.*before retrying/i);
+    expect(enGeneric).not.toMatch(/nothing was written/i);
+    expect(en['admin.peopleImport.result.import_failed']).toMatch(/nothing was written/i);
+
+    const zhGeneric = zh['admin.peopleImport.genericError'];
+    expect(zhGeneric).toContain('无法确认');
+    expect(zhGeneric).toMatch(/检查.*会众/);
+    expect(zhGeneric).toMatch(/重新预览.*重试/);
+    expect(zhGeneric).not.toMatch(/没有写入任何|未写入任何/);
+    expect(zh['admin.peopleImport.result.import_failed']).toMatch(/没有写入任何|未写入任何/);
+  });
 });
 
 describe('t()', () => {
