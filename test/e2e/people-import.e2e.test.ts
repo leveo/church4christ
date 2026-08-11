@@ -49,7 +49,11 @@ function standalonePerson(email: string, displayName: string): string {
   return csv([{ record_type: 'person', display_name: displayName, email }]);
 }
 
-function familyCsv(prefix: string, householdName = 'Migration Example Family'): string {
+function familyCsv(
+  prefix: string,
+  householdName = 'Migration Example Family',
+  dependentName = 'Casey Migration',
+): string {
   return csv([
     {
       record_type: 'person',
@@ -86,7 +90,7 @@ function familyCsv(prefix: string, householdName = 'Migration Example Family'): 
     },
     {
       record_type: 'dependent',
-      display_name: 'Casey Migration',
+      display_name: dependentName,
       household_key: `${prefix}-family`,
       household_role: 'child',
       household_primary: 'false',
@@ -357,6 +361,37 @@ describe('people import commit semantics', () => {
     expect(sameName?.n).toBe(2);
   });
 
+  it('rolls back every row when a late dependent membership insert fails', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const dependentMarker = 'Private Rollback Dependent 9843';
+    const databaseMarker = 'PRIVATE_DB_TRIGGER_9843';
+    const before = await tableCounts();
+
+    await env.DB.prepare(
+      `CREATE TRIGGER e2e_people_import_late_abort
+       BEFORE INSERT ON household_members
+       WHEN NEW.person_id IS NULL AND NEW.display_name = 'Private Rollback Dependent 9843'
+       BEGIN
+         SELECT RAISE(ABORT, 'PRIVATE_DB_TRIGGER_9843');
+       END`,
+    ).run();
+    try {
+      const response = await upload(
+        COMMIT,
+        admin,
+        familyCsv('late-rollback', 'Rollback Example Family', dependentMarker),
+      );
+      expect(response.status).toBe(500);
+      const body = await response.text();
+      expect(JSON.parse(body)).toEqual({ ok: false, code: 'import_failed' });
+      expect(body).not.toContain(dependentMarker);
+      expect(body).not.toContain(databaseMarker);
+      expect(await tableCounts()).toEqual(before);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER IF EXISTS e2e_people_import_late_abort').run();
+    }
+  });
+
   it('atomically imports family relationships with safe defaults and rejects a duplicate submit without side effects', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
     const contents = familyCsv('atomic-family');
@@ -404,16 +439,41 @@ describe('people import commit semantics', () => {
     ]);
 
     const members = await env.DB.prepare(
-      `SELECT hm.display_name, hm.role, hm.is_primary, hm.person_id IS NULL AS dependent
+      `SELECT hm.display_name, p.email, hm.role, hm.is_primary, hm.person_id IS NULL AS dependent
        FROM household_members hm
        JOIN households h ON h.id = hm.household_id
+       LEFT JOIN people p ON p.id = hm.person_id
        WHERE h.name = 'Migration Example Family'
        ORDER BY hm.id`,
-    ).all<{ display_name: string; role: string; is_primary: number; dependent: number }>();
+    ).all<{
+      display_name: string;
+      email: string | null;
+      role: string;
+      is_primary: number;
+      dependent: number;
+    }>();
     expect(members.results).toEqual([
-      { display_name: 'Jordan Migration', role: 'adult', is_primary: 1, dependent: 0 },
-      { display_name: 'Riley Migration', role: 'child', is_primary: 0, dependent: 0 },
-      { display_name: 'Casey Migration', role: 'child', is_primary: 0, dependent: 1 },
+      {
+        display_name: 'Jordan Migration',
+        email: 'atomic-family.primary@example.com',
+        role: 'adult',
+        is_primary: 1,
+        dependent: 0,
+      },
+      {
+        display_name: 'Riley Migration',
+        email: 'atomic-family.secondary@example.com',
+        role: 'child',
+        is_primary: 0,
+        dependent: 0,
+      },
+      {
+        display_name: 'Casey Migration',
+        email: null,
+        role: 'child',
+        is_primary: 0,
+        dependent: 1,
+      },
     ]);
 
     const afterFirst = await tableCounts();
