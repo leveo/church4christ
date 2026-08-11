@@ -24,9 +24,10 @@ Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supa
 migration, so this guide does not promise a lossless backend switch for an existing site.
 
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
-> explains, in plain language, what Cloudflare is and how its plan allowances work. This page
-> assumes you have already been through [`deploy.md`](./deploy.md) once, or are comfortable
-> with a terminal.
+> explains, in plain language, what Cloudflare is and how its plan allowances work. Guided
+> setup does not require reading the manual deployment sequence first. If you are tracing
+> the underlying commands, start at the deployment guide's explicit
+> [manual database fork](./deploy.md#manual-database-fork).
 
 > **Prefer to have an AI assistant do it?** Hand it this file. A good first thing to say:
 > *"Read `docs/supabase-setup.md`, then run the guided setup for Full Church on Supabase.
@@ -71,7 +72,11 @@ settings say they are on. New setup writes explicit selected settings for all 17
 ## Manual reference and troubleshooting
 
 The guided installer performs the database and configuration work below. Keep these steps
-as a reference for diagnosing an existing installation.
+as a reference for diagnosing an existing installation. The shared Cloudflare Worker still
+needs R2 media storage: the [manual database fork](./deploy.md#manual-database-fork) creates
+only that bucket, sends you through sections 2–5 here, and tells you exactly where to resume
+the shared email and deployment steps. Do not run the deployment guide's D1 create,
+migration, or D1-backup steps for this backend.
 
 ## 2. Create the Supabase project
 
@@ -113,9 +118,13 @@ npx wrangler hyperdrive create church4christ-db \
 Use your own Session pooler string from step 2 (with the real password). The command prints
 an **`id`** — copy it.
 
-Now open `wrangler.jsonc` and make three changes:
+Now open `wrangler.jsonc` and make four changes:
 
-1. **Uncomment the `hyperdrive` line and paste your id** in place of `YOUR_HYPERDRIVE_ID`:
+1. **Remove the entire `d1_databases` block.** The Supabase Worker does not use a `DB`
+   binding, and leaving the sample D1 placeholder in the deployed configuration can make
+   Wrangler validate a database that this path never created.
+
+2. **Uncomment the `hyperdrive` line and paste your id** in place of `YOUR_HYPERDRIVE_ID`:
 
    ```jsonc
    "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "PASTE_YOUR_HYPERDRIVE_ID_HERE" }],
@@ -124,13 +133,13 @@ Now open `wrangler.jsonc` and make three changes:
    Leave the `"binding": "HYPERDRIVE"` name exactly as it is — the app looks for that name,
    and deploying with `DB_BACKEND=supabase` but no `HYPERDRIVE` binding fails on purpose.
 
-2. **Switch the backend** by changing `DB_BACKEND` from `"d1"` to `"supabase"`:
+3. **Switch the backend** by changing `DB_BACKEND` from `"d1"` to `"supabase"`:
 
    ```jsonc
    "DB_BACKEND": "supabase"
    ```
 
-3. **Replace the D1 cron list with the Supabase cron list:**
+4. **Replace the D1 cron list with the Supabase cron list:**
 
    ```jsonc
    "triggers": {
@@ -143,7 +152,7 @@ Now open `wrangler.jsonc` and make three changes:
    D1-only nightly backup cron `0 9 * * *`; do not keep it alongside the five-minute
    recovery cron.
 
-All three changes live in `wrangler.jsonc`, which is **safe to commit** — the Hyperdrive id
+All four changes live in `wrangler.jsonc`, which is **safe to commit** — the Hyperdrive id
 and cron strings are not secrets, and your database password stays inside the Hyperdrive
 config in your Cloudflare account, not in this file.
 
@@ -195,11 +204,12 @@ npx wrangler secret put SESSION_SECRET
 If you already deployed on D1, `SESSION_SECRET` is set and you can leave it. Stripe is
 available only on Supabase and only in test mode. Import its two test credentials through
 guided setup after step 7. Until they are stored, the online giving form is inert and paid
-registration cannot take money — everything else works. Redeploy after setting them:
+registration cannot take money — everything else works.
 
-```bash
-npm run deploy
-```
+For the manual troubleshooting sequence, stop here and return to
+[`deploy.md` step 5](./deploy.md#5-set-up-email). That shared sequence configures email,
+deploys the Worker, connects the domain, and verifies sign-in. The R2-only creation command
+comes before this page in the deployment guide's manual database fork.
 
 ---
 
