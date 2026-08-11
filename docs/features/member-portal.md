@@ -30,6 +30,8 @@ registration details. Choose these modules explicitly in a custom setup—Portal
 
 ![The signed-in dashboard for David Chen, with his household, group, prayer approval, event, and serving summary](../images/portal/dashboard.png)
 
+![After passwordless sign-in, My Portal leads to household, groups and files, events, serving, calendar, giving, and prayer views, with prayer scopes from church-wide to private](../images/diagrams/member-portal-journey.png)
+
 There is no portal password to distribute or reset. In production, a member opens
 `/<locale>/signin`, requests a magic link, and follows it from their email. Local
 development can use `AUTH_DEV_BYPASS_EMAIL` only while running `astro dev`; the

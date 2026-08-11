@@ -102,6 +102,8 @@ domain, support, and maintenance choices determine the real operating cost.
 
 Every feature has its own plain-English guide. Start with any of these:
 
+![The public website, staff admin, and Member Portal connect through a shared Astro Worker, D1 or Supabase database, R2 media, and email platform](docs/images/diagrams/product-overview.png)
+
 | | Feature | What it does |
 |---|---|---|
 | [![](docs/images/public/home-en.png)](docs/features/public-site-and-themes.md) | **[Public site & themes](docs/features/public-site-and-themes.md)** | Your church's front door — home, sermons, events, staff — in one of three ready-made looks. |
@@ -177,6 +179,8 @@ default D1 backend simply do not see the portal controls or routes. Learn more i
 You can run the whole site locally — with realistic sample content — before you commit
 to anything. You will need [Node.js](https://nodejs.org/) 22.12.0 or newer installed. The guided
 setup asks which initial feature set you want and chooses D1 or Supabase from that choice.
+
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](docs/images/diagrams/setup-paths-overview.png)
 
 ```bash
 # 1. Get the code and install it

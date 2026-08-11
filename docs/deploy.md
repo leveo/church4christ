@@ -229,6 +229,8 @@ and entirely optional; it does not replace application security, dependency main
 backups, or monitoring. Configure it in the Cloudflare Zero Trust dashboard as a
 self-hosted application covering the `/admin*` path.
 
+![Go-live proceeds from setup and doctor through deployment, domain and HTTPS, email and first-admin checks, then a backup restore drill and monitoring; each operator-managed step must be verified](./images/diagrams/go-live-readiness.png)
+
 ## Go-live checklist
 
 Before announcing the site, collect evidence for every item that applies to the modules

@@ -82,6 +82,8 @@ launch and during operation.
 
 ## Guided setup or manual reference
 
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](./images/diagrams/setup-paths-overview.png)
+
 ### Path A — Let an AI assistant do it (easiest)
 
 If you have [Claude Code](https://claude.com/claude-code) or a similar AI coding assistant,
