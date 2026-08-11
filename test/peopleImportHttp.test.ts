@@ -642,16 +642,26 @@ describe('people import preview endpoint', () => {
       inactivePeople: 0,
     });
     expect(body.rows).toHaveLength(2);
-    expect(body.rows[0]).toMatchObject({
+    expect(body.rows[0]).toEqual({
       row: 2,
       recordType: 'person',
       displayName: 'Primary one',
       email: 'primary-one@example.com',
+      firstName: null,
+      lastName: null,
+      phone: null,
+      language: null,
+      membershipStatus: 'visitor',
+      birthday: null,
+      joinedOn: null,
+      address: null,
       active: true,
       role: 'member',
       household: {
         key: 'family-one',
         name: 'Family one',
+        address: 'one Main St',
+        phone: '555-one',
         role: 'adult',
         primary: true,
       },
