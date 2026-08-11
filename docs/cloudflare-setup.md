@@ -110,11 +110,14 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
    (`npm ci`) — this also installs
    `wrangler`, Cloudflare's command-line helper — and **sign in** once with
    `npx wrangler login`. A browser window confirms it is you.
-3. **Create your filing cabinet and storage room** — one command each creates your D1
-   database and your R2 bucket.
-4. **Paste one ID into a settings file** (`wrangler.jsonc`). The create command prints it;
-   you copy it in. (This file is safe to share — it holds no passwords.)
-5. **Create the tables** in your new database — one command.
+3. **Follow the deployment guide's [manual database fork](./deploy.md#manual-database-fork).**
+   D1 creates a D1 database and the shared R2 media bucket. Supabase creates **only** the
+   R2 bucket on Cloudflare, then creates the Postgres project and Hyperdrive connection;
+   do not create an unused D1 database for that path.
+4. **Configure the selected database in `wrangler.jsonc`.** D1 uses the id printed by its
+   create command. Supabase removes the sample D1 block and uses the Hyperdrive id. This
+   file is safe to share — it holds no passwords.
+5. **Create the tables** with the migration command for the selected database.
 6. **Set your secret sign-in key** (`SESSION_SECRET`) — one command generates and stores a
    strong random value. In the minimum D1 path, this is the only credential setup asks you
    to create. Supabase database URLs, Stripe credentials, and backup credentials are

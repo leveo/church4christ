@@ -69,7 +69,12 @@ Run these before opening a PR — they are the same steps CI runs:
 | `npm run build` | Production build (also rebuilds tokens) |
 | `bash scripts/smoke.sh` | Boots the built worker; checks routing, i18n, health, security headers |
 | `npm run test:e2e` | End-to-end tests against the actual built worker |
-| `npm run screenshots` | (Optional) regenerates the docs screenshots from the seeded dev server |
+| `npm run screenshots -- --only public/events.png,public/ministries.png` | (Optional) regenerates one precise, environment-compatible screenshot pass from the seeded dev server |
+
+The screenshot manifest spans public, admin, D1, Supabase, and multiple member identities,
+so the harness rejects a bare `npm run screenshots` before writing files. Start the seeded
+dev server for one backend and identity, then pass full output-path tokens with `--only`;
+the environment-specific examples are documented at the top of `scripts/screenshots.mjs`.
 
 ### The Postgres tests (for Portal, Giving, and Registration)
 

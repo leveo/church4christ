@@ -168,7 +168,7 @@ With the seeded dev server already running, the screenshot harness can capture o
 two rows you are reviewing. For example:
 
 ```bash
-node scripts/screenshots.mjs --only home-harvest-light.png,home-harvest-dark.png
+node scripts/screenshots.mjs --only themes/home-harvest-light.png,themes/home-harvest-dark.png
 ```
 
 Replace those output names with the two rows for a new theme. `--only` filters the table;

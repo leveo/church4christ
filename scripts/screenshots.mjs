@@ -5,11 +5,11 @@
 // Drives system Chrome in headless mode over the Chrome DevTools Protocol (CDP)
 // via Node's built-in global WebSocket + fetch — no third-party dependency. It
 // contains the PAGES manifest below and captures rows selected with `--only` at
-// a fixed 1280x800 viewport. With no filter it attempts every row, but the
-// manifest intentionally mixes D1/Supabase and several signed-in identities, so
-// normal regeneration is split into the precise passes documented below. Every
-// capture is written under docs/images/** and asserted to be exactly 1280x800
-// and larger than 20 KB (guards against blank/failed captures).
+// a fixed 1280x800 viewport. The manifest intentionally mixes D1/Supabase and
+// several signed-in identities, so an unfiltered run is rejected before Chrome
+// starts or any file is written. Regeneration is split into the precise passes
+// documented below. Every capture is written under docs/images/** and asserted
+// to be exactly 1280x800 and larger than 20 KB (guards against blank captures).
 //
 // PREREQUISITES
 //   1. A migrated and seeded dev server matching the selected rows is running.
@@ -23,8 +23,8 @@
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
-//   npm run screenshots                   # attempts all mixed-environment rows
-//   node scripts/screenshots.mjs --base http://localhost:4321
+//   npm run screenshots -- --only public/events.png,public/ministries.png
+//   node scripts/screenshots.mjs --base http://localhost:4321 --only public/events.png,public/ministries.png
 //   node scripts/screenshots.mjs --only public/events.png,public/ministries.png
 //
 // AUTH'D SHOTS (admin + member)
@@ -72,7 +72,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { assertExpectedScreenshotPage } from './lib/screenshot-validation.mjs';
+import { assertExpectedScreenshotPage, requireScreenshotOnly } from './lib/screenshot-validation.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VIEWPORT = { width: 1280, height: 800 };
@@ -401,6 +401,8 @@ async function capture(cdp, base, row) {
 
 // --- main --------------------------------------------------------------------
 async function main() {
+  requireScreenshotOnly(process.argv);
+
   const baseIdx = process.argv.indexOf('--base');
   const base = baseIdx !== -1 ? process.argv[baseIdx + 1] : 'http://localhost:4321';
 

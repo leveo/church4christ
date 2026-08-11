@@ -253,7 +253,7 @@ Boot Astro dev with `AUTH_DEV_BYPASS_EMAIL=pastor.david@example.com` and the hos
 Supabase connection variable, then run:
 
 ```bash
-node scripts/screenshots.mjs --only dashboard.png,household.png,events.png,prayer-moderation.png
+node scripts/screenshots.mjs --only portal/dashboard.png,portal/household.png,portal/events.png,portal/prayer-moderation.png
 ```
 
 Expected: four `1280x800` portal PNGs, each larger than 20 KB, with content validation
@@ -264,7 +264,7 @@ passing.
 Restart Astro dev with `AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com`, then run:
 
 ```bash
-node scripts/screenshots.mjs --only group-files.png
+node scripts/screenshots.mjs --only portal/group-files.png
 ```
 
 Expected: one `1280x800` portal PNG showing “Shared files.”

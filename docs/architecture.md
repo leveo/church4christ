@@ -176,11 +176,15 @@ config is absent, so the demo deploy runs all its crons without backups configur
 ## Testing
 
 The system has **extensive automated coverage across unit, Worker/D1, Postgres, and
-end-to-end workflows**. Unit and integration tests run in the Cloudflare Workers test pool
-(`vitest`), end-to-end tests run against the actual built Worker
-(`vitest.e2e.config.ts`), and `scripts/smoke.sh` boots the production build and checks
-routing, i18n, the health probe, and the security headers over HTTP. A separate `pg`
-project and `vitest.e2e.pg.config.ts` run the same kind of coverage for **Member Portal**,
-**Giving**, and **Registration** against a real Postgres database — self-skipped when no
-`DATABASE_URL` is set, so the default D1 suite never depends on Postgres being available. See
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to run each suite.
+end-to-end workflows**. The default `npm test` configuration separates three projects:
+pure Node tests for filesystem, setup, and generation logic; Workers tests running in
+workerd with a live D1 binding; and `test/pg/**` tests running in Node against Postgres.
+Database-dependent `pg` suites self-skip when `DATABASE_URL` is unset, while their
+database-independent logic still runs.
+
+The built-Worker suites are separate. `npm run test:e2e` exercises the D1 build;
+`npm run test:e2e:pg` uses `vitest.e2e.pg.config.ts` for the Supabase-backed smoke path and
+**requires** `DATABASE_URL` (it fails before running if the variable is absent).
+`scripts/smoke.sh` also boots the production build and checks routing, i18n, the health
+probe, and security headers over HTTP. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the
+commands and the warning about using a disposable Postgres database.

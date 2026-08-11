@@ -1,5 +1,11 @@
 const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
+export function requireScreenshotOnly(argv) {
+  if (!argv.includes('--only')) {
+    throw new Error('Refusing unfiltered screenshot capture: pass --only with output-path tokens for one backend and identity; no files were written.');
+  }
+}
+
 export function assertExpectedScreenshotPage(row, snapshot) {
   const actualUrl = new URL(snapshot.url);
   const expectedUrl = new URL(row.path, actualUrl.origin);

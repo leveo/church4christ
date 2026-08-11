@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { assertExpectedScreenshotPage } from '../../scripts/lib/screenshot-validation.mjs';
+import { assertExpectedScreenshotPage, requireScreenshotOnly } from '../../scripts/lib/screenshot-validation.mjs';
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
@@ -103,5 +103,12 @@ describe('screenshot page validation', () => {
       headings: ['Welcome'],
       body: 'No seeded household here',
     })).toThrow(/Chen Family/);
+  });
+});
+
+describe('screenshot capture selection', () => {
+  test('rejects an unfiltered run before capture can start', () => {
+    expect(() => requireScreenshotOnly(['node', 'scripts/screenshots.mjs']))
+      .toThrow(/refusing unfiltered screenshot capture.*--only.*no files were written/i);
   });
 });
