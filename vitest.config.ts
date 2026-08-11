@@ -15,6 +15,7 @@ const NODE_ONLY = [
   'test/tokens.test.ts',
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
+  'test/node/screenshotValidation.test.ts',
   'test/node/setup/**/*.test.ts',
   'test/setup/*.test.ts',
 ];

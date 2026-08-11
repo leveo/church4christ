@@ -59,13 +59,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { assertExpectedScreenshotPage } from './lib/screenshot-validation.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VIEWPORT = { width: 1280, height: 800 };
 const MIN_BYTES = 20 * 1024;
 
 // --- config -----------------------------------------------------------------
-// Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend? }
+// Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend?, expectedText? }
 //   path   — URL path on --base (default http://localhost:4321)
 //   out    — repo-relative PNG destination
 //   admin  — page needs an admin dev-bypass session (AUTH_DEV_BYPASS_EMAIL=
@@ -80,8 +81,10 @@ const MIN_BYTES = 20 * 1024;
 //   backend — documentation only, not enforced by this script: 'supabase' means
 //            the page 404s on the default D1 backend and needs its own dev-server
 //            pass with DB_BACKEND=supabase plus a migrated+seeded local Postgres
-//            (WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in .dev.vars;
+//            (CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in .dev.vars;
 //            see docs/supabase-setup.md §9). Capture these together with --only.
+//   expectedText — page marker required before capture; guards authenticated
+//            shots against redirects and other unexpected rendered pages
 //   postForm — after load, click every element matching `checkAll` (if given)
 //            then `requestSubmit()` the element matching `form` and wait for
 //            the resulting navigation before continuing. Used for the one shot
@@ -112,6 +115,14 @@ const PAGES = [
   { path: '/en/serve/opportunities', out: 'docs/images/serve/opportunities.png' },
   { path: '/en/profile', out: 'docs/images/public/profile-household.png', bypass: 'pastor.david@example.com', anchor: 'Household' },
   { path: '/admin/people/2', out: 'docs/images/admin/person-detail.png', admin: true, anchor: 'Household' },
+
+  // Member Portal — Supabase-only authenticated pages. Capture the David Chen
+  // rows together, then the Ben Wu group-files row in its own identity pass.
+  { path: '/en/my', out: 'docs/images/portal/dashboard.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Household' },
+  { path: '/en/my/household', out: 'docs/images/portal/household.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Household' },
+  { path: '/en/my/events', out: 'docs/images/portal/events.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'My registrations' },
+  { path: '/en/my/prayer?tab=pending', out: 'docs/images/portal/prayer-moderation.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Pending' },
+  { path: '/en/groups/1', out: 'docs/images/portal/group-files.png', bypass: 'ben.wu@example.com', backend: 'supabase', anchor: 'Files', expectedText: 'young-adults-welcome.pdf' },
 
   // Admin permissions — a super admin's view of a limited admin's person page
   // (person 11, Lydia Kwan), framed on the "Access & status" panel so the
@@ -343,6 +354,12 @@ async function capture(cdp, base, row) {
         clip = { x: 0, y, width: VIEWPORT.width, height: VIEWPORT.height, scale: 1 };
       }
     }
+
+    const { result: pageState } = await send('Runtime.evaluate', {
+      expression: `({url:location.href,title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||''})`,
+      returnByValue: true,
+    }, sessionId);
+    assertExpectedScreenshotPage(row, pageState.value);
 
     const { data } = await send('Page.captureScreenshot',
       clip ? { format: 'png', clip, captureBeyondViewport: true } : { format: 'png' }, sessionId);
