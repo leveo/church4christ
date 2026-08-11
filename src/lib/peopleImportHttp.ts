@@ -3,8 +3,20 @@ import { csvCell } from './csv';
 import {
   PEOPLE_IMPORT_HEADERS,
   PEOPLE_IMPORT_LIMITS,
+  type PeopleImportDependent,
   type PeopleImportHeader,
+  type PeopleImportHouseholdReference,
+  type PeopleImportIssue,
+  type PeopleImportPerson,
 } from './peopleImport';
+import {
+  PeopleImportConflictError,
+  PeopleImportNotReadyError,
+  PeopleImportPersistenceError,
+  type PeopleImportDbIssue,
+  type PeopleImportPreflightResult,
+  type PeopleImportValidationResult,
+} from './peopleImportDb';
 import type { SessionUser } from './types';
 
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
@@ -137,6 +149,148 @@ export async function readPeopleImportFile(request: Request): Promise<PeopleImpo
     bytes: new Uint8Array(await file.arrayBuffer()),
     acknowledgeWarnings: form.get('acknowledge_warnings') === 'true',
   };
+}
+
+export interface PeopleImportPreviewIssue {
+  severity: 'error' | 'warning';
+  code: PeopleImportIssue['code'] | PeopleImportDbIssue['code'];
+  row: number | null;
+  field: PeopleImportHeader | null;
+}
+
+function householdReferenceDto(household: PeopleImportHouseholdReference) {
+  return {
+    key: household.key,
+    name: household.name,
+    address: household.address,
+    phone: household.phone,
+    role: household.role,
+    primary: household.primary,
+  };
+}
+
+function personRowDto(person: PeopleImportPerson) {
+  return {
+    row: person.row,
+    recordType: person.recordType,
+    displayName: person.displayName,
+    email: person.email,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    phone: person.phone,
+    language: person.language,
+    membershipStatus: person.membershipStatus,
+    birthday: person.birthday,
+    joinedOn: person.joinedOn,
+    address: person.address,
+    active: person.active,
+    role: person.role,
+    household: person.household === null ? null : householdReferenceDto(person.household),
+  };
+}
+
+function dependentRowDto(dependent: PeopleImportDependent) {
+  return {
+    row: dependent.row,
+    recordType: dependent.recordType,
+    displayName: dependent.displayName,
+    household: householdReferenceDto(dependent.household),
+  };
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function comparePreviewIssues(left: PeopleImportPreviewIssue, right: PeopleImportPreviewIssue): number {
+  const severity = (left.severity === 'error' ? 0 : 1) - (right.severity === 'error' ? 0 : 1);
+  if (severity !== 0) return severity;
+  const row = (left.row ?? Number.MAX_SAFE_INTEGER) - (right.row ?? Number.MAX_SAFE_INTEGER);
+  if (row !== 0) return row;
+  const field = compareText(left.field ?? '', right.field ?? '');
+  return field !== 0 ? field : compareText(left.code, right.code);
+}
+
+function previewIssues(
+  parsed: PeopleImportValidationResult,
+  preflight: PeopleImportPreflightResult,
+): PeopleImportPreviewIssue[] {
+  const supplied = [
+    ...parsed.errors,
+    ...parsed.warnings,
+    ...preflight.errors,
+    ...preflight.warnings,
+  ];
+  const alreadyTruncated = supplied.some((issue) => issue.code === 'issues_truncated');
+  const concrete = supplied
+    .filter((issue) => issue.code !== 'issues_truncated')
+    .map((issue) => ({
+      severity: issue.severity,
+      code: issue.code,
+      row: issue.row,
+      field: issue.field,
+    } satisfies PeopleImportPreviewIssue))
+    .sort(comparePreviewIssues);
+
+  if (!alreadyTruncated && concrete.length <= PEOPLE_IMPORT_LIMITS.maxIssues) return concrete;
+  return [
+    ...concrete.slice(0, PEOPLE_IMPORT_LIMITS.maxIssues - 1),
+    { severity: 'error', code: 'issues_truncated', row: null, field: null },
+  ];
+}
+
+export function peopleImportPreviewDto(
+  parsed: PeopleImportValidationResult,
+  preflight: PeopleImportPreflightResult = { errors: [], warnings: [] },
+) {
+  const model = parsed.model;
+  const summary = model === null
+    ? { dataRows: 0, people: 0, dependents: 0, households: 0, inactivePeople: 0 }
+    : {
+        dataRows: model.summary.dataRows,
+        people: model.summary.people,
+        dependents: model.summary.dependents,
+        households: model.summary.households,
+        inactivePeople: model.summary.inactivePeople,
+      };
+  const rows = model === null
+    ? []
+    : [
+        ...model.people.map(personRowDto),
+        ...model.dependents.map(dependentRowDto),
+      ].sort((left, right) => left.row - right.row);
+  const households = model === null
+    ? []
+    : model.households.map((household) => ({
+        key: household.key,
+        name: household.name,
+        address: household.address,
+        phone: household.phone,
+        primaryEmail: household.primaryEmail,
+        peopleRows: household.people.map((person) => person.row),
+        dependentRows: household.dependents.map((dependent) => dependent.row),
+      }));
+
+  return {
+    ok: true as const,
+    summary,
+    rows,
+    households,
+    issues: previewIssues(parsed, preflight),
+  };
+}
+
+export function peopleImportCommitErrorResponse(error: unknown): Response {
+  if (error instanceof PeopleImportNotReadyError) {
+    return peopleImportJson(400, { ok: false, code: 'validation_failed' });
+  }
+  if (error instanceof PeopleImportConflictError) {
+    return peopleImportJson(409, { ok: false, code: 'import_conflict' });
+  }
+  if (error instanceof PeopleImportPersistenceError) {
+    return peopleImportJson(500, { ok: false, code: 'import_failed' });
+  }
+  return peopleImportJson(500, { ok: false, code: 'generic_error' });
 }
 
 const examplePerson: Partial<Record<PeopleImportHeader, string>> = {
