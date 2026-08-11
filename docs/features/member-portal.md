@@ -12,16 +12,21 @@ the page they requested.
 The portal itself is optional and **Supabase (Postgres)-only**. It is force-disabled
 on D1 even if a stale setting says it is on. Groups and Volunteer Scheduling still
 work independently on D1, while Giving and Registration have their own Supabase-only
-module gates.
+module gates. Portal declares soft `uses` of Volunteer Scheduling and Groups, not hard
+dependencies, so selecting Portal in a custom setup does not automatically enable either
+one.
 
 ## How members use it
 
 ### Start from one dashboard
 
 The dashboard at `/my` greets the signed-in member and keeps their nearest actions
-together: their household, groups, approvals they can handle, event registrations,
-and upcoming serving. The exact cards and tabs depend on which related modules are
-enabled, so a church can expose only the workflows it uses.
+together. The complete composition pictured below uses **Portal + Volunteer Scheduling +
+Groups**: Volunteer Scheduling owns `/my`, Calendar, and the serving data; Portal adds the
+household, event, and prayer views; and Groups supplies the Groups card/tab and protected
+file surface. Giving and Registration are separate switches that add their own tab or
+registration details. Choose these modules explicitly in a custom setup—Portal's soft
+`uses` do not select them for you.
 
 ![The signed-in dashboard for David Chen, with his household, group, prayer approval, event, and serving summary](../images/portal/dashboard.png)
 
@@ -115,9 +120,11 @@ its admin board.
 ### Production or guided setup
 
 1. Follow [`docs/supabase-setup.md`](../supabase-setup.md) and run `npm run setup`.
-   Choose **Full Church**, or explicitly select **Member Portal**; setup selects
-   Supabase, writes the `HYPERDRIVE` and `MEDIA` bindings, runs the current migrations,
-   and records every module setting.
+   Choose **Full Church** for the complete composition pictured above, or explicitly
+   select **Member Portal + Volunteer Scheduling + Groups**. Portal's soft `uses` do not
+   auto-enable the other two. Setup selects Supabase, writes the `HYPERDRIVE` and `MEDIA`
+   bindings, runs the current migrations, and records every module setting. Giving and
+   Registration remain independently gated selections.
 2. Configure the production `MEDIA` R2 bucket. Protected group-file rows in Postgres
    are not useful without the matching R2 objects.
 3. Configure production email by following [Email & automation](email-automation.md).
@@ -138,18 +145,22 @@ its admin board.
 
 The local demo must use a dedicated test Postgres database—never a production database.
 Set `SUPABASE_DB_URL` in the host shell without placing or echoing it in `.dev.vars`, then
-run the normal setup. For manual troubleshooting, the existing commands are:
+run `npm run setup` in Local mode with demo data. That guided path is provider-aware: for a
+Supabase selection it migrates and seeds Postgres, then stages, uploads, and verifies the
+checked-in demo assets in local R2. Never select demo data for a production database.
+
+For DB-only migration or seed troubleshooting, the existing commands are:
 
 ```bash
 npm run db:migrate:supabase
 npm run db:seed:supabase
-npm run db:seed-media:local
 ```
 
-`db:seed:supabase` loads only the repository's fictional people, households, events,
-giving rows, registrations, group-file record, and prayer items. Skip it for production.
-`db:seed-media:local` copies the checked-in demo image pack and protected group PDF into
-local R2 and is safe to rerun after reseeding.
+`db:seed:supabase` loads the entire fictional development seed plus the Giving,
+Registration, and Portal fixtures. It is for an isolated local/demo database only, never
+production. After DB-only troubleshooting, rerun the same guided `npm run setup` Local
+demo-data flow with the same choices so its provider-aware `seed-media` step verifies and
+repairs the matching local R2 image and protected-file objects.
 
 Start local development from the same host shell so Wrangler can build the local
 Hyperdrive binding:
@@ -169,14 +180,17 @@ the module to use the preserved portal data again.
 
 ## Route and module boundaries
 
-The portal navigation is a composition of independently gated capabilities. The table
-below matches `config/capabilities.json` and `src/components/PortalNav.astro`.
+The portal navigation is a composition of independently gated capabilities. A custom
+selection does not follow soft `uses`: selecting Portal alone does not enable Volunteer
+Scheduling or Groups. The full dashboard shown in this guide therefore requires Portal +
+Volunteer Scheduling + Groups. The table below matches `config/capabilities.json` and
+`src/components/PortalNav.astro`.
 
 | Surface | Owning module | Behavior at the boundary |
 |---|---|---|
-| `/my`, `/my/blockouts`, `/my/calendar`, `/cal/*` | `serve` | Available with Volunteer Scheduling; `/my` and the calendar add portal/group/registration data only when those modules are enabled. |
-| `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated, Supabase-only portal routes; Portal has soft uses of Groups and Volunteer Scheduling, not hard dependencies. |
-| `/groups/*`, `/signup/*`, `/attendance/*` | `groups` | Works on either backend. Roster and membership rules belong to Groups; protected file panels/downloads additionally require Portal and R2. |
+| `/my`, `/my/blockouts`, `/my/calendar`, `/cal/*` | `serve` | Volunteer Scheduling must be selected for the dashboard and Calendar; Portal does not enable it automatically. Portal/group/registration records enrich these surfaces only when their modules are also enabled. |
+| `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated, Supabase-only portal routes. Its `uses` of Groups and Volunteer Scheduling are soft composition hints, not auto-enabled dependencies. |
+| `/groups/*`, `/signup/*`, `/attendance/*` | `groups` | Groups must be selected for the Groups card/tab and directory. It works on either backend; protected file panels/downloads additionally require Portal and R2. |
 | `/events` and `/admin/events` | `events` | Public event and announcement publishing; independent from registration records shown in My Events. |
 | `/register/*`, `/api/register/*`, `/admin/registration/*` | `registration` | Supabase-only and independently switched; enables the open-registration section and registered-event calendar marks. |
 | `/my/giving`, `/give/checkout/*`, `/api/giving/*`, `/admin/giving/*` | `giving` | Supabase-only and independently switched; its PortalNav tab appears only while Giving is enabled. |

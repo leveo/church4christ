@@ -131,7 +131,7 @@ const PAGES = [
   { path: '/en/my/household', out: 'docs/images/portal/household.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Chen Family' },
   { path: '/en/my/events', out: 'docs/images/portal/events.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'My registrations' },
   { path: '/en/my/prayer?tab=pending', out: 'docs/images/portal/prayer-moderation.png', bypass: 'pastor.david@example.com', backend: 'supabase', expectedText: 'Pending' },
-  { path: '/en/groups/1', out: 'docs/images/portal/group-files.png', bypass: 'ben.wu@example.com', backend: 'supabase', anchor: 'Files', expectedText: 'young-adults-welcome.pdf' },
+  { path: '/en/groups/1', out: 'docs/images/portal/group-files.png', bypass: 'ben.wu@example.com', backend: 'supabase', anchor: 'Files', anchorMargin: 0, expectedText: 'young-adults-welcome.pdf' },
 
   // Admin permissions — a super admin's view of a limited admin's person page
   // (person 11, Lydia Kwan), framed on the "Access & status" panel so the
