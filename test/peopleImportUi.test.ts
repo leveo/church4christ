@@ -195,6 +195,7 @@ describe('people import response parsing', () => {
     expect(parsePeopleImportSummary(null)).toBeNull();
     expect(parsePeopleImportSummary({ ...summary, people: -1 })).toBeNull();
     expect(parsePeopleImportPreview(500, previewBody)).toBeNull();
+    expect(parsePeopleImportPreview(200, { ...previewBody, ok: false })).toBeNull();
     expect(parsePeopleImportPreview(200, null)).toBeNull();
     expect(parsePeopleImportPreview(200, { ...previewBody, rows: [{}] })).toBeNull();
     expect(parsePeopleImportPreview(200, {
@@ -222,9 +223,43 @@ describe('people import response parsing', () => {
     });
   });
 
+  it('keeps an incomplete household row and its validation issue in the preview', () => {
+    const incompleteBody = {
+      ...previewBody,
+      rows: [{
+        ...previewBody.rows[0],
+        household: { name: null },
+      }],
+      issues: [{
+        severity: 'error',
+        code: 'household_name_required',
+        row: 2,
+        field: 'household_name',
+      }],
+    };
+
+    expect(parsePeopleImportPreview(200, incompleteBody)).toEqual({
+      summary,
+      rows: [{
+        row: 2,
+        recordType: 'person',
+        displayName: '<b>Ada</b>',
+        email: 'ada@example.com',
+        householdName: '',
+      }],
+      issues: [{
+        severity: 'error',
+        code: 'household_name_required',
+        row: 2,
+        field: 'household_name',
+      }],
+    });
+  });
+
   it('accepts commit counts only from an exact 201 success response', () => {
     const body = { ok: true, counts: { people: 2, households: 1, dependents: 1 } };
     expect(parsePeopleImportCounts(201, body)).toEqual(body.counts);
+    expect(parsePeopleImportCounts(201, { ...body, ok: false })).toBeNull();
     expect(parsePeopleImportCounts(200, body)).toBeNull();
     expect(parsePeopleImportCounts(201, { ...body, counts: { ...body.counts, people: -1 } })).toBeNull();
     expect(parsePeopleImportCounts(201, null)).toBeNull();
@@ -278,6 +313,11 @@ describe('people import failure decisions', () => {
     expect(decidePeopleImportFailure('commit', 'import_conflict', false)).toEqual({
       failure: 'import_conflict',
       messageKey: 'admin.peopleImport.repreviewRequired',
+      requiresFreshPreview: true,
+    });
+    expect(decidePeopleImportFailure('commit', 'validation_failed', false)).toEqual({
+      failure: 'generic',
+      messageKey: 'admin.peopleImport.result.validation_failed',
       requiresFreshPreview: true,
     });
     for (const code of ['forbidden', 'not_found', 'method_not_allowed', 'missing_file', 'import_failed'] as const) {

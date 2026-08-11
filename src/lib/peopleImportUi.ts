@@ -134,8 +134,8 @@ export function parsePeopleImportPreview(
     const household = isObject(candidate.household) ? candidate.household : null;
     let householdName = '';
     if (household !== null) {
-      if (typeof household.name !== 'string') return null;
-      householdName = household.name;
+      if (household.name !== null && typeof household.name !== 'string') return null;
+      householdName = household.name ?? '';
     }
     rows.push({
       row,
