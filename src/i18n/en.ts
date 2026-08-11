@@ -673,6 +673,7 @@ export default {
   'admin.peopleImport.repreviewRequired': 'The data changed or conflicts with another write. Preview the original file again before retrying.',
   'admin.peopleImport.genericError': 'The import result could not be confirmed. Check People and preview the file again before retrying.',
   'admin.peopleImport.networkError': 'The server could not be reached. Check your connection and try again.',
+  'admin.peopleImport.previewError': 'The preview failed safely. No database changes were made. Try previewing the file again.',
 
   'admin.peopleImport.field.record_type': 'Record type',
   'admin.peopleImport.field.display_name': 'Display name',

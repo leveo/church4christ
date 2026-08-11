@@ -671,6 +671,7 @@ export default {
   'admin.peopleImport.repreviewRequired': '数据已变化或与另一项写入冲突。请重新预览原文件后再试。',
   'admin.peopleImport.genericError': '无法确认本次导入结果。请先检查会众列表并重新预览文件，再决定是否重试。',
   'admin.peopleImport.networkError': '无法连接服务器，请检查网络后重试。',
+  'admin.peopleImport.previewError': '预览已安全失败，没有更改数据库。请重新预览文件。',
 
   'admin.peopleImport.field.record_type': '记录类型',
   'admin.peopleImport.field.display_name': '显示名称',

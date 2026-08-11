@@ -1,0 +1,558 @@
+---
+import Admin from '../../../../layouts/Admin.astro';
+import en from '../../../../i18n/en';
+import { t } from '../../../../lib/i18n';
+import { canManagePeopleImport } from '../../../../lib/peopleImportHttp';
+import { btn, btnSecondary, card, noticeErr, noticeOk, th, tin } from '../../../../lib/adminUi';
+import type { Locale } from '../../../../lib/locales';
+
+const access = canManagePeopleImport(Astro.locals.user, Astro.locals.modules);
+if (access === 'not_found') return new Response(null, { status: 404 });
+if (access === 'forbidden') return new Response(null, { status: 403 });
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const title = t(lang, 'admin.peopleImport.title');
+const importCopyKeys = Object.keys(en)
+  .filter((key) => key.startsWith('admin.peopleImport.'))
+  .sort();
+const disabledButton = 'disabled:cursor-not-allowed disabled:opacity-50';
+---
+
+<Admin title={title}>
+  <main data-people-import class="mx-auto max-w-5xl">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="font-display text-heading-md font-bold">{title}</h1>
+        <p class="mt-2 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.peopleImport.intro')}</p>
+      </div>
+      <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.peopleImport.success.back')}</a>
+    </div>
+
+    <section class={`mt-6 ${card} space-y-3`} aria-labelledby="people-import-guidance">
+      <h2 id="people-import-guidance" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImport.template')}
+      </h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImport.limits')}</p>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImport.createOnly')}</p>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImport.privacy')}</p>
+      <p class="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-ink-muted">
+        {t(lang, 'admin.peopleImport.d1Notice')}
+      </p>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <a href="/admin/people/import/template.csv" class={btnSecondary}>
+          {t(lang, 'admin.peopleImport.template')}
+        </a>
+        <span class="text-xs text-ink-subtle">{t(lang, 'admin.peopleImport.templateHint')}</span>
+      </div>
+    </section>
+
+    <section class={`mt-6 ${card}`} aria-labelledby="people-import-file-heading">
+      <h2 id="people-import-file-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImport.fileLabel')}
+      </h2>
+      <label class="mt-4 block">
+        <span class="sr-only">{t(lang, 'admin.peopleImport.fileLabel')}</span>
+        <input
+          id="people-import-file"
+          type="file"
+          accept=".csv,text/csv,application/vnd.ms-excel,application/octet-stream"
+          aria-describedby="people-import-file-hint"
+          class={tin}
+        />
+      </label>
+      <p id="people-import-file-hint" class="mt-2 text-xs text-ink-subtle">
+        {t(lang, 'admin.peopleImport.fileHint')}
+      </p>
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          id="people-import-preview-button"
+          type="button"
+          class={`${btn} ${disabledButton}`}
+          disabled
+        >
+          {t(lang, 'admin.peopleImport.preview')}
+        </button>
+        <button
+          id="people-import-retry-button"
+          type="button"
+          class={`${btnSecondary} ${disabledButton}`}
+          hidden
+        >
+          {t(lang, 'admin.peopleImport.retry')}
+        </button>
+      </div>
+      <p id="people-import-status" class={`mt-4 ${noticeErr}`} role="alert" aria-live="polite" hidden></p>
+    </section>
+
+    <section id="people-import-preview" class="mt-6 space-y-6" hidden>
+      <section class={card} aria-labelledby="people-import-summary-heading">
+        <h2 id="people-import-summary-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImport.summary.title')}
+        </h2>
+        <dl class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {
+            [
+              ['dataRows', 'admin.peopleImport.summary.dataRows'],
+              ['people', 'admin.peopleImport.summary.people'],
+              ['dependents', 'admin.peopleImport.summary.dependents'],
+              ['households', 'admin.peopleImport.summary.households'],
+              ['inactivePeople', 'admin.peopleImport.summary.inactivePeople'],
+            ].map(([key, label]) => (
+              <div class="rounded-md border border-border bg-surface-sunken px-3 py-2">
+                <dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, label)}</dt>
+                <dd class="mt-1 text-xl font-bold" data-import-summary={key}>0</dd>
+              </div>
+            ))
+          }
+        </dl>
+      </section>
+
+      <section class={card} aria-labelledby="people-import-rows-heading">
+        <h2 id="people-import-rows-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImport.previewRows')}
+        </h2>
+        <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+          <table class="w-full border-collapse">
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.row')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.field.record_type')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.field.display_name')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.field.email')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.field.household_name')}</th>
+              </tr>
+            </thead>
+            <tbody id="people-import-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="people-import-issues-section" class={card} aria-labelledby="people-import-issues-heading" hidden>
+        <h2 id="people-import-issues-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImport.issues.title')}
+        </h2>
+        <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+          <table class="w-full border-collapse">
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.severity')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.row')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.field')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.title')}</th>
+              </tr>
+            </thead>
+            <tbody id="people-import-issues"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class={card}>
+        <div id="people-import-warning-ack" hidden>
+          <label class="flex items-start gap-3 text-sm">
+            <input id="people-import-warning-checkbox" type="checkbox" class="mt-1" />
+            <span>{t(lang, 'admin.peopleImport.warningAck')}</span>
+          </label>
+          <p class="mt-2 text-xs text-ink-subtle">{t(lang, 'admin.peopleImport.warningAckRequired')}</p>
+        </div>
+        <button
+          id="people-import-commit-button"
+          type="button"
+          class={`mt-4 ${btn} ${disabledButton}`}
+          disabled
+        >
+          {t(lang, 'admin.peopleImport.commit')}
+        </button>
+      </section>
+    </section>
+
+    <section id="people-import-success" class={`mt-6 ${noticeOk}`} role="status" aria-live="polite" hidden>
+      <h2 class="font-semibold">{t(lang, 'admin.peopleImport.success.title')}</h2>
+      <p id="people-import-success-body" class="mt-1"></p>
+      <a href="/admin/people" class="mt-3 inline-block font-semibold underline">
+        {t(lang, 'admin.peopleImport.success.back')}
+      </a>
+    </section>
+
+    <div id="people-import-copy" hidden aria-hidden="true">
+      {
+        importCopyKeys.map((key) => (
+          <span data-import-copy={key}>{t(lang, key)}</span>
+        ))
+      }
+    </div>
+  </main>
+</Admin>
+
+<script>
+  import {
+    applyPeopleImportCommit,
+    applyPeopleImportPreview,
+    beginPeopleImportCommit,
+    beginPeopleImportPreview,
+    createPeopleImportUiState,
+    peopleImportUiControls,
+    rejectPeopleImportRequest,
+    selectPeopleImportFile,
+    setPeopleImportWarningsAcknowledged,
+    type PeopleImportUiFailure,
+    type PeopleImportUiRequest,
+    type PeopleImportUiState,
+    type PeopleImportUiSummary,
+  } from '../../../../lib/peopleImportUi';
+
+  type JsonObject = Record<string, unknown>;
+  type PreviewIssue = {
+    severity: 'error' | 'warning';
+    code: string;
+    row: number | null;
+    field: string | null;
+  };
+  type PreviewRow = {
+    row: number;
+    recordType: string;
+    displayName: string;
+    email: string;
+    householdName: string;
+  };
+  type PreviewPayload = {
+    summary: PeopleImportUiSummary;
+    rows: PreviewRow[];
+    issues: PreviewIssue[];
+  };
+
+  const PREVIEW_PATH = '/admin/people/import/preview';
+  const COMMIT_PATH = '/admin/people/import/commit';
+
+  function isObject(value: unknown): value is JsonObject {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  function safeString(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
+
+  function safeCount(value: unknown): number | null {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  function parseSummary(value: unknown): PeopleImportUiSummary | null {
+    if (!isObject(value)) return null;
+    const dataRows = safeCount(value.dataRows);
+    const people = safeCount(value.people);
+    const dependents = safeCount(value.dependents);
+    const households = safeCount(value.households);
+    const inactivePeople = safeCount(value.inactivePeople);
+    if ([dataRows, people, dependents, households, inactivePeople].some((count) => count === null)) {
+      return null;
+    }
+    return {
+      dataRows: dataRows!,
+      people: people!,
+      dependents: dependents!,
+      households: households!,
+      inactivePeople: inactivePeople!,
+    };
+  }
+
+  function parsePreview(value: unknown): PreviewPayload | null {
+    if (!isObject(value) || value.ok !== true || !Array.isArray(value.rows) || !Array.isArray(value.issues)) {
+      return null;
+    }
+    const summary = parseSummary(value.summary);
+    if (summary === null) return null;
+
+    const rows: PreviewRow[] = [];
+    for (const candidate of value.rows) {
+      if (!isObject(candidate)) return null;
+      const row = safeCount(candidate.row);
+      if (row === null) return null;
+      const household = isObject(candidate.household) ? candidate.household : null;
+      rows.push({
+        row,
+        recordType: safeString(candidate.recordType),
+        displayName: safeString(candidate.displayName),
+        email: safeString(candidate.email),
+        householdName: household === null ? '' : safeString(household.name),
+      });
+    }
+
+    const issues: PreviewIssue[] = [];
+    for (const candidate of value.issues) {
+      if (!isObject(candidate) || (candidate.severity !== 'error' && candidate.severity !== 'warning')) {
+        return null;
+      }
+      const row = candidate.row === null ? null : safeCount(candidate.row);
+      if (row === null && candidate.row !== null) return null;
+      issues.push({
+        severity: candidate.severity,
+        code: safeString(candidate.code),
+        row,
+        field: candidate.field === null ? null : safeString(candidate.field),
+      });
+    }
+    return { summary, rows, issues };
+  }
+
+  function parseCounts(value: unknown): { people: number; households: number; dependents: number } | null {
+    if (!isObject(value) || value.ok !== true || !isObject(value.counts)) return null;
+    const people = safeCount(value.counts.people);
+    const households = safeCount(value.counts.households);
+    const dependents = safeCount(value.counts.dependents);
+    return people === null || households === null || dependents === null
+      ? null
+      : { people, households, dependents };
+  }
+
+  function responseCode(value: unknown): string | null {
+    return isObject(value) && typeof value.code === 'string' ? value.code : null;
+  }
+
+  async function readJson(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function upload(file: File, path: string, acknowledgeWarnings: boolean): Promise<Response> {
+    const form = new FormData();
+    form.append('csv', file);
+    if (acknowledgeWarnings) form.append('acknowledge_warnings', 'true');
+    return fetch(path, {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+  }
+
+  function requiredElement<T extends Element>(root: HTMLElement, selector: string): T {
+    const element = root.querySelector<T>(selector);
+    if (element === null) throw new Error('People import page is incomplete.');
+    return element;
+  }
+
+  function initPeopleImport(root: HTMLElement): void {
+    const fileInput = requiredElement<HTMLInputElement>(root, '#people-import-file');
+    const previewButton = requiredElement<HTMLButtonElement>(root, '#people-import-preview-button');
+    const retryButton = requiredElement<HTMLButtonElement>(root, '#people-import-retry-button');
+    const commitButton = requiredElement<HTMLButtonElement>(root, '#people-import-commit-button');
+    const status = requiredElement<HTMLElement>(root, '#people-import-status');
+    const previewSection = requiredElement<HTMLElement>(root, '#people-import-preview');
+    const rowsBody = requiredElement<HTMLTableSectionElement>(root, '#people-import-rows');
+    const issuesSection = requiredElement<HTMLElement>(root, '#people-import-issues-section');
+    const issuesBody = requiredElement<HTMLTableSectionElement>(root, '#people-import-issues');
+    const warningWrap = requiredElement<HTMLElement>(root, '#people-import-warning-ack');
+    const warningCheckbox = requiredElement<HTMLInputElement>(root, '#people-import-warning-checkbox');
+    const successSection = requiredElement<HTMLElement>(root, '#people-import-success');
+    const successBody = requiredElement<HTMLElement>(root, '#people-import-success-body');
+
+    const copies = new Map<string, string>();
+    root.querySelectorAll<HTMLElement>('[data-import-copy]').forEach((node) => {
+      const key = node.dataset.importCopy;
+      if (key) copies.set(key, node.textContent ?? '');
+    });
+    const copy = (key: string): string => copies.get(key) ?? copies.get('admin.peopleImport.genericError') ?? '';
+    const formatCopy = (key: string, values: Record<string, number>): string =>
+      copy(key).replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+        Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : placeholder,
+      );
+
+    let state: PeopleImportUiState = createPeopleImportUiState();
+    let selectedFile: File | null = null;
+    let previewPayload: PreviewPayload | null = null;
+    let failureKey: string | null = null;
+
+    const setText = (element: HTMLElement, value: string | number): void => {
+      element.textContent = String(value);
+    };
+    const tableCell = (value: string | number): HTMLTableCellElement => {
+      const cell = document.createElement('td');
+      cell.className = 'px-3 py-2 text-sm';
+      cell.textContent = String(value);
+      return cell;
+    };
+
+    function renderPreview(payload: PreviewPayload): void {
+      root.querySelectorAll<HTMLElement>('[data-import-summary]').forEach((node) => {
+        const key = node.dataset.importSummary as keyof PeopleImportUiSummary | undefined;
+        if (key && key in payload.summary) setText(node, payload.summary[key]);
+      });
+
+      const rowNodes = payload.rows.map((row) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-border';
+        tr.replaceChildren(
+          tableCell(row.row),
+          tableCell(row.recordType),
+          tableCell(row.displayName),
+          tableCell(row.email || '—'),
+          tableCell(row.householdName || '—'),
+        );
+        return tr;
+      });
+      rowsBody.replaceChildren(...rowNodes);
+
+      const issueNodes = payload.issues.map((issue) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-border align-top';
+        const severity = copy(`admin.peopleImport.issues.${issue.severity}`);
+        const row = issue.row === null ? copy('admin.peopleImport.issues.file') : String(issue.row);
+        const fieldKey = issue.field === null ? null : `admin.peopleImport.field.${issue.field}`;
+        const field = fieldKey && copies.has(fieldKey) ? copy(fieldKey) : copy('admin.peopleImport.issues.file');
+        const issueKey = `admin.peopleImport.issue.${issue.code}`;
+        const message = copies.has(issueKey) ? copy(issueKey) : copy('admin.peopleImport.genericError');
+        tr.replaceChildren(tableCell(severity), tableCell(row), tableCell(field), tableCell(message));
+        return tr;
+      });
+      issuesBody.replaceChildren(...issueNodes);
+      issuesSection.hidden = payload.issues.length === 0;
+    }
+
+    function render(): void {
+      const controls = peopleImportUiControls(state);
+      const hasWarnings = state.preview?.issues.some((issue) => issue.severity === 'warning') ?? false;
+      previewButton.disabled = controls.previewDisabled;
+      commitButton.disabled = controls.commitDisabled;
+      retryButton.disabled = state.pending !== null || !state.hasFile;
+      previewButton.textContent = copy(
+        state.pending === 'preview' ? 'admin.peopleImport.previewPending' : 'admin.peopleImport.preview',
+      );
+      commitButton.textContent = copy(
+        state.pending === 'commit' ? 'admin.peopleImport.commitPending' : 'admin.peopleImport.commit',
+      );
+      status.hidden = failureKey === null;
+      status.textContent = failureKey === null ? '' : copy(failureKey);
+      retryButton.hidden = failureKey === null || !state.hasFile || state.success !== null;
+      previewSection.hidden = state.preview === null || previewPayload === null || state.success !== null;
+      warningWrap.hidden = !hasWarnings || previewSection.hidden;
+      warningCheckbox.checked = state.warningsAcknowledged;
+      successSection.hidden = state.success === null;
+      if (state.success !== null) {
+        successBody.textContent = formatCopy('admin.peopleImport.success.body', {
+          people: state.success.people,
+          households: state.success.households,
+          dependents: state.success.dependents,
+        });
+      } else {
+        successBody.textContent = '';
+      }
+    }
+
+    function rejectRequest(
+      request: PeopleImportUiRequest,
+      code: string | null,
+      requestWasUncertain: boolean,
+    ): void {
+      const failure: PeopleImportUiFailure = code === 'import_conflict'
+        ? 'import_conflict'
+        : requestWasUncertain ? 'network' : 'generic';
+      const next = rejectPeopleImportRequest(state, request, failure);
+      if (next === state) return;
+      state = next;
+
+      const resultKey = code === null ? null : `admin.peopleImport.result.${code}`;
+      if (code === 'import_conflict' || code === 'warnings_not_acknowledged') {
+        failureKey = 'admin.peopleImport.repreviewRequired';
+      } else if (resultKey && copies.has(resultKey)) {
+        failureKey = resultKey;
+      } else if (request.kind === 'commit') {
+        failureKey = 'admin.peopleImport.genericError';
+      } else if (requestWasUncertain) {
+        failureKey = 'admin.peopleImport.networkError';
+      } else {
+        failureKey = 'admin.peopleImport.previewError';
+      }
+
+      const commitNeedsFreshPreview = request.kind === 'commit' && (
+        requestWasUncertain || code === null || code === 'generic_error' || code === 'validation_failed' ||
+        code === 'warnings_not_acknowledged'
+      );
+      if (commitNeedsFreshPreview) {
+        state = selectPeopleImportFile(state, selectedFile !== null);
+      }
+      if (state.preview === null) previewPayload = null;
+      render();
+    }
+
+    async function previewSelectedFile(): Promise<void> {
+      const file = selectedFile;
+      if (file === null) return;
+      const operation = beginPeopleImportPreview(state);
+      if (operation === null) return;
+      state = operation.state;
+      previewPayload = null;
+      failureKey = null;
+      render();
+
+      try {
+        const response = await upload(file, PREVIEW_PATH, false);
+        const body = await readJson(response);
+        const payload = response.ok ? parsePreview(body) : null;
+        if (payload === null) {
+          rejectRequest(operation.request, responseCode(body), false);
+          return;
+        }
+        const next = applyPeopleImportPreview(state, operation.request, payload);
+        if (next === state) return;
+        state = next;
+        previewPayload = payload;
+        renderPreview(payload);
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    async function commitSelectedFile(): Promise<void> {
+      const file = selectedFile;
+      if (file === null) return;
+      const operation = beginPeopleImportCommit(state);
+      if (operation === null) return;
+      const acknowledged = operation.state.warningsAcknowledged;
+      state = operation.state;
+      failureKey = null;
+      render();
+
+      try {
+        const response = await upload(file, COMMIT_PATH, acknowledged);
+        const body = await readJson(response);
+        const counts = response.status === 201 ? parseCounts(body) : null;
+        if (counts === null) {
+          rejectRequest(operation.request, responseCode(body), false);
+          return;
+        }
+        const next = applyPeopleImportCommit(state, operation.request, counts);
+        if (next === state) return;
+        state = next;
+        previewPayload = null;
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    fileInput.addEventListener('change', () => {
+      selectedFile = fileInput.files?.item(0) ?? null;
+      state = selectPeopleImportFile(state, selectedFile !== null);
+      previewPayload = null;
+      failureKey = null;
+      rowsBody.replaceChildren();
+      issuesBody.replaceChildren();
+      render();
+    });
+    previewButton.addEventListener('click', () => void previewSelectedFile());
+    retryButton.addEventListener('click', () => void previewSelectedFile());
+    commitButton.addEventListener('click', () => void commitSelectedFile());
+    warningCheckbox.addEventListener('change', () => {
+      state = setPeopleImportWarningsAcknowledged(state, warningCheckbox.checked);
+      render();
+    });
+    render();
+  }
+
+  const peopleImportRoot = document.querySelector<HTMLElement>('[data-people-import]');
+  if (peopleImportRoot) initPeopleImport(peopleImportRoot);
+</script>

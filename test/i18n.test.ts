@@ -86,6 +86,7 @@ const PEOPLE_IMPORT_COPY_KEYS = [
   'admin.peopleImport.repreviewRequired',
   'admin.peopleImport.genericError',
   'admin.peopleImport.networkError',
+  'admin.peopleImport.previewError',
 ] as const;
 
 const PEOPLE_IMPORT_RESULT_CODES = [
@@ -210,6 +211,13 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zhGeneric).toMatch(/重新预览.*重试/);
     expect(zhGeneric).not.toMatch(/没有写入任何|未写入任何/);
     expect(zh['admin.peopleImport.result.import_failed']).toMatch(/没有写入任何|未写入任何/);
+  });
+
+  it('states that an unexpected preview failure made no database changes', () => {
+    expect(en['admin.peopleImport.previewError']).toMatch(/preview/i);
+    expect(en['admin.peopleImport.previewError']).toMatch(/no (?:database )?(?:changes|writes)/i);
+    expect(zh['admin.peopleImport.previewError']).toContain('预览');
+    expect(zh['admin.peopleImport.previewError']).toMatch(/没有更改数据库|没有写入|未写入/);
   });
 });
 

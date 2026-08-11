@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import importPageSource from '../src/pages/admin/people/import/index.astro?raw';
 import {
   applyPeopleImportCommit,
   applyPeopleImportPreview,
@@ -137,5 +138,73 @@ describe('people import UI state', () => {
     expect(state.success).toEqual({ people: 2, households: 1, dependents: 1 });
     expect(state.pending).toBeNull();
     expect(peopleImportUiControls(state).commitDisabled).toBe(true);
+  });
+});
+
+describe('people import admin page contract', () => {
+  it('repeats module and full-grant authorization before rendering the shell', () => {
+    expect(importPageSource).toContain('canManagePeopleImport');
+    expect(importPageSource).toContain("access === 'not_found'");
+    expect(importPageSource).toContain('status: 404');
+    expect(importPageSource).toContain("access === 'forbidden'");
+    expect(importPageSource).toContain('status: 403');
+    expect(importPageSource.indexOf('canManagePeopleImport')).toBeLessThan(
+      importPageSource.indexOf('<Admin'),
+    );
+  });
+
+  it('server-renders the operational limits, privacy, create-only, and D1 notices', () => {
+    for (const key of [
+      'admin.peopleImport.limits',
+      'admin.peopleImport.privacy',
+      'admin.peopleImport.createOnly',
+      'admin.peopleImport.d1Notice',
+    ]) {
+      expect(importPageSource).toContain(key);
+    }
+  });
+
+  it('uses absolute import URLs and retains a browser File for both requests', () => {
+    expect(importPageSource).toContain('/admin/people/import/template.csv');
+    expect(importPageSource).toContain("'/admin/people/import/preview'");
+    expect(importPageSource).toContain("'/admin/people/import/commit'");
+    expect(importPageSource).toMatch(/let selectedFile:\s*File \| null/);
+    expect(importPageSource).toContain("form.append('csv', file)");
+    for (const helper of [
+      'selectPeopleImportFile',
+      'beginPeopleImportPreview',
+      'applyPeopleImportPreview',
+      'beginPeopleImportCommit',
+      'applyPeopleImportCommit',
+      'rejectPeopleImportRequest',
+    ]) {
+      expect(importPageSource).toContain(helper);
+    }
+  });
+
+  it('forces a fresh preview when commit discovers warnings that were not in the preview', () => {
+    expect(importPageSource).toContain("code === 'warnings_not_acknowledged'");
+    expect(importPageSource).toMatch(
+      /commitNeedsFreshPreview[\s\S]*warnings_not_acknowledged[\s\S]*selectPeopleImportFile/,
+    );
+    expect(importPageSource).toMatch(
+      /code === 'import_conflict'\s*\|\|\s*code === 'warnings_not_acknowledged'[\s\S]*admin\.peopleImport\.repreviewRequired/,
+    );
+  });
+
+  it('distinguishes a safe preview failure from a network error and an uncertain commit', () => {
+    expect(importPageSource).toContain('admin.peopleImport.previewError');
+    expect(importPageSource).toMatch(
+      /request\.kind === 'commit'[\s\S]*admin\.peopleImport\.genericError[\s\S]*requestWasUncertain[\s\S]*admin\.peopleImport\.networkError[\s\S]*admin\.peopleImport\.previewError/,
+    );
+  });
+
+  it('renders uploaded and response values only through safe DOM text APIs', () => {
+    expect(importPageSource).toContain('.textContent =');
+    expect(importPageSource).toContain('document.createElement');
+    expect(importPageSource).toContain('.replaceChildren(');
+    expect(importPageSource).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|set:html/);
+    expect(importPageSource).not.toMatch(/localStorage|sessionStorage|URLSearchParams/);
+    expect(importPageSource).not.toMatch(/console\.(?:log|info|warn|error|debug)/);
   });
 });
