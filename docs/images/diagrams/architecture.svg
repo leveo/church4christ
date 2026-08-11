@@ -43,26 +43,29 @@
   <text x="355" y="368" font-size="11.5" font-weight="600" fill="#31487A" text-anchor="middle">AppDb selects exactly one configured database backend</text>
 
   <!-- Bound services -->
-  <text x="565" y="98" font-size="12.5" font-weight="600" fill="#565B6B">Bound services</text>
-  <rect x="565" y="110" width="287" height="58" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="708.5" y="134" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">D1 — SQL database</text>
-  <text x="708.5" y="153" font-size="11.5" fill="#565B6B" text-anchor="middle">DB binding · selected D1 backend</text>
+  <text x="565" y="98" font-size="12.5" font-weight="600" fill="#565B6B">Database binding — choose one</text>
+  <rect x="565" y="110" width="287" height="50" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="131" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">D1 — SQL database</text>
+  <text x="708.5" y="149" font-size="11.5" fill="#565B6B" text-anchor="middle">DB binding · selected D1 backend</text>
 
-  <rect x="565" y="180" width="287" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="175" font-size="11" font-weight="700" fill="#31487A" text-anchor="middle">OR</text>
+
+  <rect x="565" y="183" width="287" height="56" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="708.5" y="205" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">Hyperdrive → Supabase / Postgres</text>
   <text x="708.5" y="225" font-size="11.5" fill="#565B6B" text-anchor="middle">HYPERDRIVE binding · selected Postgres backend</text>
 
-  <rect x="565" y="256" width="287" height="64" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="708.5" y="281" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">R2 — object storage</text>
-  <text x="708.5" y="300" font-size="11.5" fill="#565B6B" text-anchor="middle">media for either profile · D1 backups only</text>
+  <text x="565" y="260" font-size="12.5" font-weight="600" fill="#565B6B">Shared service bindings</text>
+  <rect x="565" y="270" width="287" height="50" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="708.5" y="291" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">R2 — object storage</text>
+  <text x="708.5" y="309" font-size="11.5" fill="#565B6B" text-anchor="middle">media for either profile · D1 backups only</text>
 
   <rect x="565" y="332" width="287" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="708.5" y="354" font-size="13.5" font-weight="600" fill="#232630" text-anchor="middle">Email binding</text>
   <text x="708.5" y="373" font-size="11.5" fill="#565B6B" text-anchor="middle">magic links · reminders · digests · attendance</text>
 
-  <line x1="530" y1="158" x2="563" y2="139" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="530" y1="198" x2="563" y2="212" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="530" y1="277" x2="563" y2="288" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="158" x2="563" y2="135" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="198" x2="563" y2="211" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="277" x2="563" y2="295" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="530" y1="335" x2="563" y2="358" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Schedules -->

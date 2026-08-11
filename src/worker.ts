@@ -13,7 +13,7 @@ import { runStripeRecovery } from './lib/stripeRecovery';
 // cron strings in sync with that file.
 const REMINDER_CRON = '0 13 * * *'; // daily serving reminders (remind7 / remind3)
 const DIGEST_CRON = '0 14 * * 4'; // weekly serving digest (Thursday)
-const BACKUP_CRON = '0 9 * * *'; // daily D1 backup (slice 7)
+const BACKUP_CRON = '0 9 * * *'; // daily D1 export schedule (unused by Supabase)
 const ATTENDANCE_CRON = '0 * * * *'; // hourly group-attendance tracker emails
 const STRIPE_RECOVERY_CRON = '*/5 * * * *'; // Supabase durable inbox + Checkout recovery
 
@@ -46,14 +46,17 @@ export default {
         break;
       }
       case BACKUP_CRON:
-        // The D1 SQL export is D1-specific: on the supabase backend, skip it —
-        // Supabase runs its own managed backups (getBackend reads the var without
-        // opening a client). Otherwise export D1 and write backups/YYYY-MM-DD.sql
-        // to R2 (also log-and-skips when the export vars/secret are unset, e.g.
-        // demo deploy). The key date comes from the cron's scheduledTime, not
-        // wall clock, so jitter can't shift the date.
+        // The application-level SQL export is D1-specific. Supabase operators
+        // need manual off-site exports or backups included with their selected
+        // Supabase plan (getBackend reads the var without opening a client).
+        // Otherwise export D1 and write backups/YYYY-MM-DD.sql to R2 (also
+        // log-and-skips when the export vars/secret are unset, e.g. demo deploy).
+        // The key date comes from the cron's scheduledTime, not wall clock, so
+        // jitter can't shift the date.
         if (getBackend(env as never) !== 'd1') {
-          console.log('backup skipped: supabase backend has its own backups');
+          console.log(
+            'backup skipped: Supabase needs manual off-site exports or backups from the selected Supabase plan',
+          );
           break;
         }
         ctx.waitUntil(runBackup(env as unknown as MaybeBackupEnv, new Date(controller.scheduledTime)));
