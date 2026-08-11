@@ -64,10 +64,12 @@ editable, in both languages, so the messages sound like your church rather than 
 whether the binding accepted it, failed, or (in local development) only logged it. An `email_log`
 row is evidence of a send attempt, not proof that the message reached an inbox.
 
-**Three timed jobs.** Behind the scenes, three jobs run on a schedule: the daily **reminders**, the
-weekly **digest**, and — separate from email entirely — a nightly **backup** that exports your
-database to storage. The backup sends no mail; it simply keeps a safe copy, and it skips itself
-quietly if backups have not been configured.
+**Four scheduled jobs.** The shared schedule runs daily **reminders**, the weekly **digest**, an
+hourly **attendance-email** pass that attempts to send eligible group admins a tracker link after
+a meeting, and — separate from email entirely — a nightly **backup** that exports your database
+to storage.
+The backup sends no mail; it simply keeps a safe copy, and it skips itself quietly if backups
+have not been configured.
 
 **Development mode.** When the site is running locally with `EMAIL_DEV_LOG=1`, messages are
 printed to the `npm run dev` terminal (magic link included) and marked as `devlog` in the log,
@@ -97,11 +99,13 @@ dev-log and remote-send branches on the right, and the separate backup cron belo
   via the Cloudflare `send_email` binding, and records that attempt in `email_log`; a row does not
   guarantee delivery. Local `EMAIL_DEV_LOG=1` routes to the terminal + a `devlog` row.
 - **Touchpoints:** `src/lib/notify.ts` (magic link, scheduling request, decline, application
-  received/result) and `src/lib/digest.ts` (`sendReminders`, `sendWeeklyDigest`).
-- **Crons:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts` — reminders `0 13 * * *`,
-  digest `0 14 * * 4`, backup `0 9 * * *`. The backup itself is `src/lib/backup.ts` (`runBackup`,
-  D1 → R2, skips gracefully without `D1_EXPORT_TOKEN`).
+  received/result), `src/lib/digest.ts` (`sendReminders`, `sendWeeklyDigest`), and
+  `src/lib/groupAttendance.ts` (`sendAttendanceEmails`).
+- **Shared crons:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts` — reminders
+  `0 13 * * *`, digest `0 14 * * 4`, attendance `0 * * * *`, and backup `0 9 * * *`. The backup
+  itself is `src/lib/backup.ts` (`runBackup`, D1 → R2, skips gracefully without
+  `D1_EXPORT_TOKEN`).
 - **Rules, templates, log:** `src/lib/emailSettingsDb.ts` (`listRules`, `setRule`, templates,
   `listEmailLog`, `fillTemplate`) behind `src/components/admin/EmailTab.astro`.
 - **Tests:** `test/email.test.ts`, `test/notify.test.ts`, `test/digest.test.ts`,
-  `test/backup.test.ts`, `test/emailSettings.test.ts`.
+  `test/groupAttendance.test.ts`, `test/backup.test.ts`, `test/emailSettings.test.ts`.
