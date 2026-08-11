@@ -188,7 +188,7 @@ function normalizedRows(rows: string[][], headerIndexes: Map<PeopleImportHeader,
   return rows.map((cells) => {
     const record = {} as NormalizedRow;
     for (const header of PEOPLE_IMPORT_HEADERS) {
-      record[header] = (cells[headerIndexes.get(header) ?? -1] ?? '').trim();
+      record[header] = (cells[headerIndexes.get(header) ?? -1] ?? '').trim().normalize('NFC');
     }
     return record;
   });
@@ -448,13 +448,6 @@ function groupHouseholds(
   }
 
   const orderedGroups = [...groups.values()];
-  if (orderedGroups.length > PEOPLE_IMPORT_LIMITS.maxHouseholds) {
-    issues.add({
-      code: 'too_many_households',
-      row: orderedGroups[PEOPLE_IMPORT_LIMITS.maxHouseholds].firstRow,
-      field: 'household_key',
-    });
-  }
 
   const peopleByRow = new Map<number, PeopleImportPerson>();
   const dependentsByRow = new Map<number, PeopleImportDependent>();
@@ -480,20 +473,22 @@ function groupHouseholds(
       valid = false;
     }
 
-    const primaryPeople = group.people.filter((person) => person.household?.primary);
-    const adultPrimaries = primaryPeople.filter((person) => person.household?.role === 'adult');
-    for (const person of primaryPeople) {
-      if (person.household?.role === 'child') {
-        issues.add({ code: 'household_primary_must_be_adult', row: person.row, field: 'household_primary' });
-        valid = false;
-      }
+    const adultPrimaries = group.people.filter(
+      (person) => person.household?.primary && person.household.role === 'adult',
+    );
+    const childPrimaries = group.people.filter(
+      (person) => person.household?.primary && person.household.role === 'child',
+    );
+    for (const person of childPrimaries) {
+      issues.add({ code: 'household_primary_must_be_adult', row: person.row, field: 'household_primary' });
+      valid = false;
     }
     if (adultPrimaries.length === 0) {
       issues.add({ code: 'household_primary_required', row: group.firstRow, field: 'household_primary' });
       valid = false;
     }
-    if (primaryPeople.length > 1) {
-      for (const person of primaryPeople) {
+    if (adultPrimaries.length > 1) {
+      for (const person of adultPrimaries) {
         issues.add({ code: 'household_primary_multiple', row: person.row, field: 'household_primary' });
       }
       valid = false;
@@ -605,6 +600,9 @@ export function parsePeopleImport(
 
   const people: PeopleImportPerson[] = [];
   const dependents: PeopleImportDependent[] = [];
+  const emailOccurrences: Array<{ row: number; email: string }> = [];
+  const householdKeys = new Set<string>();
+  let householdLimitReported = false;
   const records = normalizedRows(parsed.rows.slice(1), headerIndexes);
   for (const [index, record] of records.entries()) {
     const row = index + 2;
@@ -613,7 +611,21 @@ export function parsePeopleImport(
       issues.add({ code: 'required', row, field: 'record_type' });
       continue;
     }
+    if (recordType === 'person' || recordType === 'dependent') {
+      const householdKey = record.household_key.toLowerCase();
+      if (/^[a-z0-9._-]{1,64}$/.test(householdKey) && !householdKeys.has(householdKey)) {
+        householdKeys.add(householdKey);
+        if (!householdLimitReported && householdKeys.size > PEOPLE_IMPORT_LIMITS.maxHouseholds) {
+          issues.add({ code: 'too_many_households', row, field: 'household_key' });
+          householdLimitReported = true;
+        }
+      }
+    }
     if (recordType === 'person') {
+      const email = record.email.toLowerCase();
+      if (email !== '' && codePointLength(email) <= 254 && isEmail(email)) {
+        emailOccurrences.push({ row, email });
+      }
       const person = normalizePerson(record, row, issues, options.today);
       if (person) people.push(person);
       continue;
@@ -626,18 +638,15 @@ export function parsePeopleImport(
     issues.add({ code: 'invalid_option', row, field: 'record_type' });
   }
 
-  const peopleByEmail = new Map<string, PeopleImportPerson[]>();
-  for (const person of people) {
-    const matching = peopleByEmail.get(person.email) ?? [];
-    matching.push(person);
-    peopleByEmail.set(person.email, matching);
+  const emailCounts = new Map<string, number>();
+  for (const occurrence of emailOccurrences) {
+    emailCounts.set(occurrence.email, (emailCounts.get(occurrence.email) ?? 0) + 1);
   }
   const duplicateEmails = new Set<string>();
-  for (const person of people) {
-    const matching = peopleByEmail.get(person.email)!;
-    if (matching.length < 2) continue;
-    duplicateEmails.add(person.email);
-    issues.add({ code: 'duplicate_email', row: person.row, field: 'email' });
+  for (const occurrence of emailOccurrences) {
+    if ((emailCounts.get(occurrence.email) ?? 0) < 2) continue;
+    duplicateEmails.add(occurrence.email);
+    issues.add({ code: 'duplicate_email', row: occurrence.row, field: 'email' });
   }
 
   const grouped = groupHouseholds(people, dependents, duplicateEmails, issues);

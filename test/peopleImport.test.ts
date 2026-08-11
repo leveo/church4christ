@@ -406,6 +406,30 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.model?.households).toEqual([]);
   });
 
+  it('includes a valid email from a row rejected for another field in duplicate detection', () => {
+    const result = parse([
+      validPerson({ email: ' SHARED@EXAMPLE.COM ' }),
+      validPerson({ display_name: '', email: 'shared@example.com' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([
+      { severity: 'error', code: 'duplicate_email', row: 2, field: 'email' },
+      { severity: 'error', code: 'duplicate_email', row: 3, field: 'email' },
+    ]);
+    expect(result.errors).toContainEqual({ severity: 'error', code: 'required', row: 3, field: 'display_name' });
+    expect(result.model?.people).toHaveLength(1);
+  });
+
+  it('does not include invalid emails in duplicate detection', () => {
+    const result = parse([
+      validPerson({ email: 'not-an-email' }),
+      validPerson({ display_name: 'Second', email: 'NOT-AN-EMAIL' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'invalid_email')).toHaveLength(2);
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_email')).toEqual([]);
+  });
+
   it('keeps a standalone person without creating a household', () => {
     const result = parse([validPerson()]);
 
@@ -511,6 +535,25 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.model?.households).toEqual([]);
   });
 
+  it('does not count a child primary as a second primary when an adult primary exists', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'family', household_name: 'Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: 'Child Person', email: 'child@example.com', household_key: 'family',
+        household_role: 'child', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'household_primary_must_be_adult')).toEqual([
+      { severity: 'error', code: 'household_primary_must_be_adult', row: 3, field: 'household_primary' },
+    ]);
+    expect(result.errors.filter((issue) => issue.code === 'household_primary_multiple')).toEqual([]);
+    expect(result.errors.filter((issue) => issue.code === 'household_primary_required')).toEqual([]);
+    expect(result.model?.households).toEqual([]);
+  });
+
   it('reports every nonblank contributor for conflicting household metadata', () => {
     const result = parse([
       validPerson({
@@ -533,6 +576,24 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.model?.households).toEqual([]);
   });
 
+  it('canonicalizes user text to NFC and accepts canonically equivalent household metadata', () => {
+    const result = parse([
+      validPerson({
+        display_name: 'Jos\u00e9', household_key: 'family', household_name: '\u00c9glise',
+        household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        display_name: 'Second', email: 'second@example.com', household_key: 'family',
+        household_name: 'E\u0301glise', household_role: 'adult', household_primary: 'false',
+      }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'household_metadata_conflict')).toEqual([]);
+    expect(result.model?.people[0].displayName).toBe('Jos\u00e9');
+    expect(result.model?.people[1].household?.name).toBe('\u00c9glise');
+    expect(result.model?.households[0].name).toBe('\u00c9glise');
+  });
+
   it('reports duplicate dependents by normalized display name and role', () => {
     const result = parse([
       validPerson({
@@ -548,6 +609,22 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     ]);
     expect(result.model?.dependents).toHaveLength(2);
     expect(result.model?.households).toEqual([]);
+  });
+
+  it('detects canonically equivalent dependent identities and returns NFC names', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'family', household_name: 'Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validDependent({ display_name: 'Jos\u00e9', household_key: 'family', household_role: 'child' }),
+      validDependent({ display_name: 'Jose\u0301', household_key: 'family', household_role: 'child' }),
+    ]);
+
+    expect(result.errors.filter((issue) => issue.code === 'duplicate_dependent')).toEqual([
+      { severity: 'error', code: 'duplicate_dependent', row: 3, field: 'display_name' },
+      { severity: 'error', code: 'duplicate_dependent', row: 4, field: 'display_name' },
+    ]);
+    expect(result.model?.dependents.map((dependent) => dependent.displayName)).toEqual(['Jos\u00e9', 'Jos\u00e9']);
   });
 
   it('keeps same-named households with different keys and warns on each first row', () => {
@@ -586,6 +663,22 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.warnings.every((warning) => warning.code === 'duplicate_household_name')).toBe(true);
   });
 
+  it('compares household names with NFC normalization across different keys', () => {
+    const result = parse([
+      validPerson({
+        household_key: 'composed', household_name: '\u00c9glise', household_role: 'adult', household_primary: 'true',
+      }),
+      validPerson({
+        email: 'second@example.com', household_key: 'decomposed', household_name: 'E\u0301GLISE',
+        household_role: 'adult', household_primary: 'true',
+      }),
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.model?.households.map((household) => household.name)).toEqual(['\u00c9glise', '\u00c9GLISE']);
+    expect(result.warnings.map((warning) => warning.row)).toEqual([2, 3]);
+  });
+
   it('blocks files with more than 100 distinct household keys and keeps a bounded first-100 preview', () => {
     const result = parse(Array.from({ length: 101 }, (_, index) => validPerson({
       display_name: `Person ${index}`,
@@ -602,6 +695,32 @@ describe('parsePeopleImport duplicate and household grouping rules', () => {
     expect(result.model?.households).toHaveLength(100);
     expect(result.model?.households.map((household) => household.key).at(-1)).toBe('family-99');
     expect(result.model?.summary.households).toBe(100);
+  });
+
+  it('counts valid normalized keys from rejected person and dependent rows toward the file limit', () => {
+    const validHouseholds = Array.from({ length: 99 }, (_, index) => validPerson({
+      display_name: `Person ${index}`,
+      email: `person-${index}@example.com`,
+      household_key: `family-${index}`,
+      household_name: `Family ${index}`,
+      household_role: 'adult',
+      household_primary: 'true',
+    }));
+    const result = parse([
+      ...validHouseholds,
+      validPerson({
+        display_name: '', email: 'rejected-person@example.com', household_key: 'rejected-person-family',
+        household_name: 'Rejected Person Family', household_role: 'adult', household_primary: 'true',
+      }),
+      validDependent({ household_key: 'rejected-dependent-family', email: 'forbidden@example.com' }),
+    ]);
+
+    expect(result.errors).toContainEqual({
+      severity: 'error', code: 'too_many_households', row: 102, field: 'household_key',
+    });
+    expect(result.model?.households).toHaveLength(99);
+    expect(result.model?.people).toHaveLength(99);
+    expect(result.model?.dependents).toEqual([]);
   });
 
   it('does not regress inactive summary counts when a household is invalid', () => {
