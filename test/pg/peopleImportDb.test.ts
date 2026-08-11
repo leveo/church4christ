@@ -107,6 +107,20 @@ const householdPrimaryRecord = (
   ...overrides,
 });
 
+const twoPartyBarrier = (): (() => Promise<void>) => {
+  let arrivals = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return async () => {
+    arrivals += 1;
+    if (arrivals === 2) release();
+    await released;
+  };
+};
+
 describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
   const sql = hasPg ? pgClient() : (null as never);
   let db: AppDb;
@@ -173,6 +187,45 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     });
     expect(await tableCounts()).toEqual(before);
     expect(JSON.stringify(result)).not.toMatch(/live@example|deleted@example|Caf/i);
+  });
+
+  it('preflights non-ASCII case-fold and Kelvin-sign collisions for emails and household names', async () => {
+    const parsed = parsePeopleImportRecords([
+      personRecord(1, { email: 'élodie@example.com' }),
+      personRecord(2, { email: 'kelvin@example.com' }),
+      householdPrimaryRecord(3, {
+        email: 'accent-primary@example.com',
+        household_name: 'étoile Family',
+      }),
+      householdPrimaryRecord(4, {
+        email: 'kelvin-primary@example.com',
+        household_name: 'kelvin Family',
+      }),
+    ]);
+    await db.batch([
+      db.prepare('INSERT INTO people (display_name, email) VALUES (?, ?)')
+        .bind('Accent collision', 'ÉLODIE@EXAMPLE.COM'),
+      db.prepare('INSERT INTO people (display_name, email) VALUES (?, ?)')
+        .bind('Kelvin collision', 'KELVIN@EXAMPLE.COM'),
+      db.prepare('INSERT INTO households (name) VALUES (?)').bind('ÉTOILE FAMILY'),
+      db.prepare('INSERT INTO households (name) VALUES (?)').bind('KELVIN FAMILY'),
+    ]);
+    const before = await tableCounts();
+
+    const result = await preflightPeopleImport(db, parsed);
+
+    expect(result).toEqual({
+      errors: [
+        { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
+        { severity: 'error', code: 'email_exists', row: 3, field: 'email' },
+      ],
+      warnings: [
+        { severity: 'warning', code: 'household_name_exists', row: 4, field: 'household_name' },
+        { severity: 'warning', code: 'household_name_exists', row: 5, field: 'household_name' },
+      ],
+    });
+    expect(await tableCounts()).toEqual(before);
+    expect(JSON.stringify(result)).not.toMatch(/élodie|kelvin|etoile/i);
   });
 
   it('persists the shared fixture with ordered memberships, blank names, active flags, and safe defaults', async () => {
@@ -264,6 +317,73 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     ]);
   });
 
+  it('allows exactly one identical concurrent import after both preflights and keeps household identities connection-local', async () => {
+    const records = [
+      householdPrimaryRecord(1, {
+        household_key: 'concurrent-first',
+        household_name: 'Concurrent First',
+        email: 'concurrent-first@example.com',
+      }),
+      householdPrimaryRecord(2, {
+        household_key: 'concurrent-second',
+        household_name: 'Concurrent Second',
+        email: 'concurrent-second@example.com',
+      }),
+    ];
+    const parsedA = parsePeopleImportRecords(records);
+    const parsedB = parsePeopleImportRecords(records);
+    const clientA = pgClient();
+    const clientB = pgClient();
+    const adapterA = new PgAdapter(clientA);
+    const adapterB = new PgAdapter(clientB);
+    const barrier = twoPartyBarrier();
+    const dbA = new TrackingDb(adapterA, async () => {
+      await adapterA.prepare('INSERT INTO households (name) VALUES (?)')
+        .bind('Connection A sentinel').run();
+      await barrier();
+    });
+    const dbB = new TrackingDb(adapterB, async () => {
+      await adapterB.prepare('INSERT INTO households (name) VALUES (?)')
+        .bind('Connection B sentinel').run();
+      await barrier();
+    });
+
+    try {
+      const settled = await Promise.allSettled([
+        commitPeopleImport(dbA, 'supabase', parsedA),
+        commitPeopleImport(dbB, 'supabase', parsedB),
+      ]);
+      const successes = settled.filter((result) => result.status === 'fulfilled');
+      const failures = settled.filter((result) => result.status === 'rejected');
+
+      expect(successes).toHaveLength(1);
+      expect(successes[0]).toMatchObject({
+        value: { people: 2, households: 2, dependents: 0 },
+      });
+      expect(failures).toHaveLength(1);
+      expect((failures[0] as PromiseRejectedResult).reason)
+        .toBeInstanceOf(PeopleImportConflictError);
+      expect(dbA.batchCalls).toBe(1);
+      expect(dbB.batchCalls).toBe(1);
+
+      const { results } = await db.prepare(`
+        SELECT h.name, p.email
+        FROM households h
+        JOIN household_members hm ON hm.household_id = h.id AND hm.is_primary = 1
+        JOIN people p ON p.id = hm.person_id
+        WHERE h.name LIKE 'Concurrent %'
+        ORDER BY h.name
+      `).all();
+      expect(results).toEqual([
+        { name: 'Concurrent First', email: 'concurrent-first@example.com' },
+        { name: 'Concurrent Second', email: 'concurrent-second@example.com' },
+      ]);
+      expect(await tableCounts()).toEqual({ people: 2, households: 4, members: 2 });
+    } finally {
+      await Promise.all([clientA.end(), clientB.end()]);
+    }
+  }, 20_000);
+
   it('maps a late 23505 membership conflict safely and rolls back people, households, and members', async () => {
     const privateEmail = 'private.primary@example.com';
     const parsed = parsePeopleImportRecords([
@@ -315,6 +435,32 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     expect(await tableCounts()).toEqual({ people: 0, households: 0, members: 0 });
   });
 
+  it('maps a missing person lookup 23503 safely and rolls back the complete import', async () => {
+    const privateMissingEmail = 'missing.private.person@example.com';
+    const parsed = parsePeopleImportRecords([
+      householdPrimaryRecord(1),
+      personRecord(2, {
+        household_key: 'family-1',
+        household_role: 'adult',
+        household_primary: 'false',
+      }),
+    ]);
+    parsed.model!.households[0].people[1] = {
+      ...parsed.model!.households[0].people[1],
+      email: privateMissingEmail,
+    };
+
+    const error = await commitPeopleImport(db, 'supabase', parsed).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PeopleImportPersistenceError);
+    expect(error).toMatchObject({ code: 'import_failed' });
+    expect(error).not.toHaveProperty('cause');
+    expect(error).not.toHaveProperty('detail');
+    expect(`${String(error)} ${JSON.stringify(error)}`)
+      .not.toMatch(/23503|foreign key|missing\.private\.person/i);
+    expect(await tableCounts()).toEqual({ people: 0, households: 0, members: 0 });
+  });
+
   it('executes the maximum model in one 500-statement batch with every value bound', async () => {
     const records: Array<Partial<Record<PeopleImportHeader, string>>> = [];
     for (let family = 0; family < 100; family += 1) {
@@ -339,9 +485,34 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
 
     expect(trackingDb.batchCalls).toBe(1);
     expect(trackingDb.lastBatchSize).toBe(500);
-    expect(trackingDb.prepared.every((call) => call.values.every((value) => value !== undefined))).toBe(true);
-    expect(trackingDb.prepared.filter((call) => call.operation === null)
-      .every((call) => !call.sql.includes('@example.com') && !call.sql.includes('Family 0'))).toBe(true);
+    const preflightCalls = trackingDb.prepared.filter((call) => call.operation === 'all');
+    const writeCalls = trackingDb.prepared.filter((call) => call.operation === null);
+    const personCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO people'));
+    const householdCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO households'));
+    const membershipCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO household_members'));
+    const primaryMembershipCalls = membershipCalls.filter((call) => call.sql.includes('currval('));
+    const otherMembershipCalls = membershipCalls.filter((call) => !call.sql.includes('currval('));
+
+    expect(preflightCalls).toHaveLength(2);
+    expect(preflightCalls.map((call) => call.values.length)).toEqual([0, 0]);
+    expect(writeCalls).toHaveLength(500);
+    expect(personCalls).toHaveLength(200);
+    expect(householdCalls).toHaveLength(100);
+    expect(primaryMembershipCalls).toHaveLength(100);
+    expect(otherMembershipCalls).toHaveLength(100);
+    expect(personCalls.every((call) => call.values.length === 11)).toBe(true);
+    expect(householdCalls.every((call) => call.values.length === 3)).toBe(true);
+    expect(primaryMembershipCalls.every((call) => call.values.length === 3)).toBe(true);
+    expect(otherMembershipCalls.every((call) => call.values.length === 4)).toBe(true);
+    expect(writeCalls.every((call) => call.values.every((value) => value !== undefined))).toBe(true);
+    for (const dynamicValue of [
+      'person-0@example.com',
+      'Imported Person 0',
+      'Family 0',
+    ]) {
+      expect(writeCalls.some((call) => call.sql.includes(dynamicValue))).toBe(false);
+      expect(writeCalls.some((call) => call.values.includes(dynamicValue))).toBe(true);
+    }
     expect(await tableCounts()).toEqual({ people: 200, households: 100, members: 200 });
   }, 30_000);
 });
