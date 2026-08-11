@@ -1,10 +1,11 @@
 # Architecture
 
 Church4Christ is a single **Astro** application rendered on the server and deployed as
-one **Cloudflare Worker**. There is no separate backend service and no client-side
-JavaScript framework: every page is server-rendered HTML, and the Worker talks directly
-to Cloudflare's data services. This keeps the moving parts few, the hosting free, and
-the whole thing fast worldwide because the Worker runs close to each visitor.
+one **Cloudflare Worker**. There is no separate application backend service. Public pages
+render server-side HTML and do not ship a client framework; the authenticated admin page
+builder is one deliberate client-only React exception. The Worker uses Cloudflare bindings
+for D1 or Hyperdrive-to-Postgres, R2, Email, and scheduled work. This is a compact
+architecture, but its deployment integration is Cloudflare-specific.
 
 ![How Church4Christ runs on Cloudflare](images/diagrams/architecture.svg)
 
@@ -34,6 +35,10 @@ the whole thing fast worldwide because the Worker runs close to each visitor.
    no-store` on any page rendered for a signed-in user (public assets and media set their
    own caching).
 
+These controls are security layers, not a guarantee. Optional Cloudflare Access can add
+defense in depth around `/admin`, but it does not replace application review, dependency
+updates, secret handling, backups, or monitoring.
+
 ## The pieces
 
 | Layer | What it is | Where |
@@ -42,7 +47,7 @@ the whole thing fast worldwide because the Worker runs close to each visitor.
 | **Middleware** | Auth, CSRF, route policy, locale, theme, headers | `src/middleware.ts` |
 | **Pages & API** | Public site under `[locale]/`, admin under `/admin`, JSON under `/api` | `src/pages/**` |
 | **Data helpers** | One module per domain (admin, plans, prayer, email, …) | `src/lib/*Db.ts` |
-| **Database (D1)** | Content, people, schedules, check-ins, revisions, logs | binding `DB` |
+| **Database** | D1 or Supabase Postgres content, people, schedules, check-ins, revisions, logs | binding `DB` or `HYPERDRIVE` |
 | **Object storage (R2)** | Uploaded media (`uploads/`) and nightly backups (`backups/`) | binding `MEDIA` |
 | **Email** | Transactional mail through one choke point | binding `EMAIL` |
 
@@ -50,8 +55,10 @@ the whole thing fast worldwide because the Worker runs close to each visitor.
 
 Structured data lives in **D1** or **Supabase Postgres**, selected during setup. D1 is
 reached through the `DB` binding; Supabase is reached through Hyperdrive. Schema changes
-are SQL migration files under `migrations/` and `migrations-supabase/`. Translatable
-content uses companion `*_i18n`
+are SQL migration files under `migrations/` and `migrations-supabase/`. The application has
+no automated D1↔Postgres data migration; changing backends requires a planned manual
+export, transformation/migration, validation, and cutover. Translatable content uses
+companion `*_i18n`
 tables joined with a `COALESCE` fallback to the default language (see
 [`docs/i18n.md`](i18n.md)), so adding a language never changes a table's shape.
 
@@ -68,8 +75,9 @@ structurally, with no adapter and no copy** (a compile-time check in `appDb.ts` 
 `astro check` if a future D1 type bump ever breaks that). That one seam lets the whole app
 run on either of two databases:
 
-- **Cloudflare D1** (the default) — the `DB` binding *is* the `AppDb`. This is the
-  zero-setup, free path the rest of these docs assume.
+- **Cloudflare D1** (the default) — the `DB` binding *is* the `AppDb`. Local D1 needs no
+  external database account; deployed D1 uses the allowances and limits of the selected
+  Cloudflare plan.
 - **Postgres / Supabase** — `PgAdapter` (`src/lib/pgAdapter.ts`) implements the same
   interface over the `postgres.js` driver, reached through the Cloudflare **Hyperdrive**
   binding. It rewrites D1/SQLite `?` placeholders to Postgres `$n` on the way to the driver
@@ -113,13 +121,26 @@ any such module on a mismatched backend — so all three stay off on D1 even whe
 settings row says on. See [`docs/supabase-setup.md`](supabase-setup.md) and
 [`docs/features/giving.md`](features/giving.md).
 
+## Portability and operations
+
+The code, SQL migrations, Markdown, and media formats provide useful control over the
+application and its data. They do not remove switching work: deployment configuration,
+bindings, scheduled jobs, email delivery, database behavior, and provider APIs would need
+replacement or adaptation away from Cloudflare. D1↔Postgres moves are manual; keep current
+exports and rehearse the migration or restore process before relying on it.
+
+Managed services also do not remove application operations. A production owner still
+needs a plan for dependency and security updates, scoped credentials, database and media
+backups, restore drills, logs and alerting, capacity/plan limits, and incident response.
+
 ## Media & backups: Cloudflare R2
 
 Uploaded images live in **R2** under the `uploads/` prefix and are served back only
-through the `/media/[...key]` route, which is structurally incapable of reaching anything
-outside `uploads/` — so the `backups/` prefix (where the nightly database dump lands) is
-never publicly reachable. Uploads are restricted to a small allowlist of image types
-(no SVG) with a size cap; see [`SECURITY.md`](../SECURITY.md).
+through the `/media/[...key]` route, whose key validation restricts requests to `uploads/`.
+The D1 backup job writes to the separate `backups/` prefix, which that route does not
+serve. Uploads are restricted to a small allowlist of image types (no SVG) with a size cap;
+see [`SECURITY.md`](../SECURITY.md). These are defense-in-depth controls, not a substitute
+for private-bucket configuration, access review, or restore testing.
 
 Local demo media uses the same path as real uploads. The generated image pack in
 `seed/media/` contains WebP hero, event, ministry-cover, and profile-avatar images plus a

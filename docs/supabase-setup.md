@@ -1,9 +1,12 @@
-# Supabase setup — for Portal, Giving, and Registration
+# Supabase setup — Portal, Giving, and Registration (Stripe Preview/test only)
 
 Setup is capability-driven: selections among the 14 D1-compatible modules choose D1 unless
 you explicitly override the backend. **Member Portal**, **Giving**, and **Registration**
 require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
-Stripe is optional unless you accept payments.
+Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
+the runtime rejects live-mode events. It is not a production payment path. Production
+email remains on the Cloudflare Email binding and requires a verified sender/domain plus
+the current Workers Paid plan when sending to arbitrary recipients.
 
 Start with the guided installer; it asks for features before choosing a database:
 
@@ -16,7 +19,7 @@ Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supa
 migration, so this guide does not promise a lossless backend switch for an existing site.
 
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
-> explains, in plain language, what Cloudflare is and how the free hosting works. This page
+> explains, in plain language, what Cloudflare is and how its plan allowances work. This page
 > assumes you have already been through [`deploy.md`](./deploy.md) once, or are comfortable
 > with a terminal.
 
@@ -29,19 +32,29 @@ migration, so this guide does not promise a lossless backend switch for an exist
 
 ## 1. Which database should I pick?
 
-Both offer free tiers. Choose Supabase to enable Member Portal, Giving, or Registration;
-the other 14 modules work on either database.
+Both offer a Free plan for eligible usage. Choose Supabase to enable Member Portal, Giving,
+or Registration; the other 14 modules work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
-| **Extra accounts to create** | None — just Cloudflare | A free Supabase account |
+| **Extra accounts to create** | None — just Cloudflare | A Supabase account |
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
 | **Giving** (online card donations, recurring gifts) | Not available | **Available** |
 | **Registration** (event sign-ups, free or paid) | Not available | **Available** |
 | **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
 | **Other 14 modules** | Yes | Yes |
-| **Backups** | Nightly D1 → R2 copy you configure (`deploy.md` step 9) | Supabase's own automatic backups (nothing to configure) |
-| **Monthly cost** | $0 (Cloudflare free tier) | $0 (Supabase free tier + Cloudflare free tier) |
+| **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
+| **Plan considerations** | Cloudflare allowances and email plan rules apply | Supabase limits, continuity needs, and Cloudflare/email plan rules all apply |
+
+As an **August 2026 snapshot**, Supabase Free is suitable for evaluation or a small active
+site that remains within its limits. A project with low activity over about seven days may
+be paused. Free does not include automatic daily backups, so run `supabase db dump`
+regularly, keep encrypted/off-site copies, and perform restore drills. Pro currently
+includes daily backups with seven-day retention. Choose a production plan based on the
+church's continuity and recovery risk, not only expected database size. Terms can change;
+check [Supabase pricing](https://supabase.com/pricing),
+[database backups](https://supabase.com/docs/guides/platform/backups), and
+[Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Member Portal, Giving, and Registration are **force-disabled on D1**, even if legacy
 settings say they are on. New setup writes explicit selected settings for all 17 modules.
@@ -185,10 +198,11 @@ trusted with both kinds of payment operation.
 
 ---
 
-## 7. Stripe setup (for Giving and Registration)
+## 7. Stripe Preview setup (test-only, for Giving and Registration)
 
-Card payments for both modules run through **Stripe**, so the church never handles a card
-number. Set this up once.
+This integration is for previewing and testing the payment flows only. It accepts Stripe
+test-mode credentials and does not support live production payments. In test mode, card
+details are handled by **Stripe**, not by this application.
 
 1. **Create a Stripe account** at [stripe.com](https://stripe.com/) and stay in **test
    mode** (the toggle in the dashboard) while you try things out — test-mode keys and
@@ -350,7 +364,9 @@ site still runs on Cloudflare, exactly as `deploy.md` describes:
   seed is separate from the Supabase data seed; for a real church, upload images through
   the admin and profile pages after launch.
 - **Email** — sign-in links, volunteer reminders, and the weekly digest still send through
-  the Cloudflare **Email** binding.
+  the Cloudflare **Email** binding. Production sending requires a verified sender/domain;
+  arbitrary recipients currently require Workers Paid. `EMAIL_DEV_LOG=1` remains a
+  terminal-only local-development aid, not a deployed email option.
 - **Scheduled jobs (crons)** — the nightly and weekly tasks in `wrangler.jsonc` (publishing
   scheduled bulletins, sending the digest) still run on Cloudflare's schedule.
 - **Hyperdrive** — lives in your Cloudflare account and is what connects the Worker to
@@ -358,6 +374,11 @@ site still runs on Cloudflare, exactly as `deploy.md` describes:
 
 **Backups.** The nightly **D1 → R2** backup (`deploy.md` step 9) is a D1-only feature — it
 does not run on the Supabase backend, so leave `CF_ACCOUNT_ID`, `D1_DATABASE_ID`, and the
-`D1_EXPORT_TOKEN` secret unset. Instead, rely on **Supabase's own automatic backups** (the
-free tier takes daily backups; paid tiers add point-in-time recovery). Your data is still
-yours, and still backed up — just by Supabase rather than by the Cloudflare cron.
+`D1_EXPORT_TOKEN` secret unset. Supabase Free does not include automatic daily backups:
+schedule regular `supabase db dump` exports, store copies off-site, protect them as member
+data, and test restoration. As of August 2026, Supabase Pro includes daily backups retained
+for seven days; evaluate paid plans and optional recovery features against acceptable data
+loss and downtime. Recheck [pricing](https://supabase.com/pricing),
+[backup behavior](https://supabase.com/docs/guides/platform/backups), and
+[Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)
+because plan terms are subject to change.
