@@ -42,11 +42,15 @@ this **August 2026 snapshot**:
 
 - `EMAIL_DEV_LOG=1` is a local-development aid: it prints messages, including magic links,
   to the terminal and sends no email. Do not deploy it as an email configuration.
-- Sending to a destination address verified in your Cloudflare account is available for
-  controlled testing on the applicable free path.
-- Sending to arbitrary recipients requires the current **Workers Paid** plan.
-- Production sending also requires a verified sending address/domain and a matching
-  `allowed_sender_addresses` / `EMAIL_FROM` configuration.
+- Before any remote send, the sender domain must use Cloudflare DNS and be
+  [onboarded for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+- After that onboarding, a destination address verified in your Cloudflare account can be
+  used for free controlled testing. Sending to arbitrary recipients requires the current
+  **Workers Paid** plan.
+- `allowed_sender_addresses` is a Worker-binding allowlist and `EMAIL_FROM` chooses the
+  application's From address; neither setting onboards or verifies a domain. Configure
+  both with an address on the onboarded sender domain. See
+  [send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
 
 Plans and limits can change. Check the official [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
 and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) before
@@ -113,8 +117,8 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
    secrets too; none of them belongs in a file you share.
 7. **For a local first try, use the terminal-only email log** (`EMAIL_DEV_LOG=1`, which
    guided Local setup writes to `.dev.vars`) to read your own sign-in link without sending
-   email. A deployed test instead needs a verified destination; production delivery needs
-   the sender/domain and plan described above.
+   email. A deployed test instead needs both an onboarded sender domain and a verified
+   destination; production delivery also needs the plan described above.
 8. **Publish** with `npm run deploy`. It prints a link you can open immediately.
 9. **Point your own domain at it** (optional but nice). Setup has already bootstrapped the
    first administrator you selected.

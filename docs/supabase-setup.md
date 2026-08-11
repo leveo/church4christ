@@ -5,8 +5,13 @@ you explicitly override the backend. **Member Portal**, **Giving**, and **Regist
 require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
 Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
 the runtime rejects live-mode events. It is not a production payment path. Production
-email remains on the Cloudflare Email binding and requires a verified sender/domain plus
-the current Workers Paid plan when sending to arbitrary recipients.
+email remains on the Cloudflare Email binding. Before remote sending, the sender domain
+must use Cloudflare DNS and be
+[onboarded for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/);
+arbitrary recipients then require the current Workers Paid plan.
+`allowed_sender_addresses` / `EMAIL_FROM` configure the
+[binding](https://developers.cloudflare.com/email-service/configuration/send-bindings/)
+and From address but do not perform domain onboarding.
 
 Start with the guided installer; it asks for features before choosing a database:
 
@@ -39,8 +44,10 @@ or Registration; the other 14 modules work on either database.
 |---|---|---|
 | **Extra accounts to create** | None — just Cloudflare | A Supabase account |
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
-| **Giving** (online card donations, recurring gifts) | Not available | **Available** |
-| **Registration** (event sign-ups, free or paid) | Not available | **Available** |
+| **Giving — offline/manual ledger** | Not available | **Implemented** |
+| **Giving — Stripe online/recurring** | Not available | **Preview/test-only**; live payments unavailable |
+| **Registration — free events** | Not available | **Implemented** |
+| **Registration — paid via Stripe** | Not available | **Preview/test-only**; live payments unavailable |
 | **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
 | **Other 14 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
@@ -364,11 +371,17 @@ site still runs on Cloudflare, exactly as `deploy.md` describes:
   seed is separate from the Supabase data seed; for a real church, upload images through
   the admin and profile pages after launch.
 - **Email** — sign-in links, volunteer reminders, and the weekly digest still send through
-  the Cloudflare **Email** binding. Production sending requires a verified sender/domain;
-  arbitrary recipients currently require Workers Paid. `EMAIL_DEV_LOG=1` remains a
-  terminal-only local-development aid, not a deployed email option.
-- **Scheduled jobs (crons)** — the nightly and weekly tasks in `wrangler.jsonc` (publishing
-  scheduled bulletins, sending the digest) still run on Cloudflare's schedule.
+  the Cloudflare **Email** binding. Any remote send first requires a sender domain on
+  Cloudflare DNS that has been onboarded for Email Sending. Verified destinations support
+  controlled testing; arbitrary recipients currently require Workers Paid.
+  `allowed_sender_addresses` / `EMAIL_FROM` configure the binding and From address but do
+  not onboard the domain. See [Email Sending setup](https://developers.cloudflare.com/email-service/get-started/send-emails/)
+  and [send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
+  `EMAIL_DEV_LOG=1` remains a terminal-only local-development aid.
+- **Scheduled jobs (crons)** — daily serving reminders, the weekly serving digest, and
+  hourly group-attendance mail use the shared Cloudflare schedules. Generated Supabase
+  configuration also runs the Preview/test-only Stripe inbox and Checkout recovery every
+  five minutes; payment processing honors the enabled Giving and Registration modules.
 - **Hyperdrive** — lives in your Cloudflare account and is what connects the Worker to
   Supabase.
 

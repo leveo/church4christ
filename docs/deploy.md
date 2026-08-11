@@ -121,17 +121,24 @@ Rotate this secret if it is ever exposed; changing it signs everyone out. See
 
 Church4Christ sends transactional email (sign-in magic links, scheduling requests, the
 weekly digest) through the Cloudflare **Email** binding declared in `wrangler.jsonc`
-(`send_email`). Choose the path that matches what you are doing:
+(`send_email`). Before any remote send, put the sender domain on Cloudflare DNS and
+[onboard it for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/)
+in the Cloudflare dashboard. The `allowed_sender_addresses` binding option restricts which
+From addresses the Worker may use, and `EMAIL_FROM` selects the application's From address;
+neither setting onboards or verifies the sending domain. See the official
+[send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
+
+Then choose the path that matches what you are doing:
 
 - **Local development only:** guided Local setup writes `EMAIL_DEV_LOG=1` to `.dev.vars`.
   Messages, including magic links, print in the `npm run dev` terminal and are not sent.
   Do not add this setting to deployed `wrangler.jsonc` configuration.
-- **Controlled deployed testing:** verify a destination address in your Cloudflare account
-  and send only to that address. Cloudflare currently permits sends to verified
-  destinations on the free path.
-- **Production recipients:** sending to arbitrary addresses currently requires the
-  **Workers Paid** plan. Before launch, verify the sending address/domain with Cloudflare
-  and set `allowed_sender_addresses` and `EMAIL_FROM` to that verified identity.
+- **Controlled deployed testing:** after onboarding the sending domain, verify a
+  destination address in your Cloudflare account and send only to that address. Cloudflare
+  currently does not charge for sends to verified destinations.
+- **Production recipients:** after onboarding the sending domain, sending to arbitrary
+  addresses currently requires the **Workers Paid** plan. Set
+  `allowed_sender_addresses` and `EMAIL_FROM` to an address on that onboarded domain.
 
 These plan rules are an **August 2026 snapshot** and are subject to change. Confirm them on
 the official [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)

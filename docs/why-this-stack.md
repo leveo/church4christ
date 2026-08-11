@@ -62,10 +62,12 @@ balancer + TLS certificates. That means:
   project still needs dependency and security updates, backup and restore practice, and
   monitoring of application, scheduled-job, and email failures.
 - **Useful free allowances for the base stack.** Workers, D1, and R2 can support evaluation
-  and smaller sites within their current limits. Email is separate: controlled sends to
-  verified destinations are available on the free path, while arbitrary recipients
-  currently require Workers Paid. These are **August 2026 snapshots** and are subject to
-  change; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+  and smaller sites within their current limits. Email is separate: every remote send first
+  requires a sender domain on Cloudflare DNS that is onboarded for Email Sending. After
+  onboarding, verified destinations support free controlled testing, while arbitrary
+  recipients currently require Workers Paid. These are **August 2026 snapshots** and are
+  subject to change; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+  [Email Sending setup](https://developers.cloudflare.com/email-service/get-started/send-emails/),
   and [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
 - **Fast everywhere.** Pages are served from a location near the visitor, worldwide — which
   matters for diaspora congregations with members in other countries. A single-region
@@ -88,8 +90,10 @@ lossless switching guarantee.
 
 Many churches can use **Cloudflare D1** — locally it needs no external account, and it runs
 all 14 D1-compatible modules. **Member Portal**, **Giving**, and **Registration** require
-Postgres, so selecting any of those features chooses Supabase. Stripe remains optional for
-installations that do not accept payments.
+Postgres, so selecting any of those features chooses Supabase. Stripe integration is
+currently limited to Preview/test-only online Giving and paid Registration flows; live
+payments are unavailable. The offline/manual giving ledger and free Registration flows do
+not depend on live Stripe processing.
 
 The second backend is **Supabase** (managed Postgres). Guided setup chooses it from the
 selected features and configures Hyperdrive. No automated D1↔Supabase content migration
