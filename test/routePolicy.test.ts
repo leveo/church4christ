@@ -101,6 +101,10 @@ describe('classifyRoute', () => {
     // ── adminOnly ──
     ['/admin/people', 'adminOnly'],
     ['/admin/people/4', 'adminOnly'],
+    ['/admin/people/import', 'adminOnly'],
+    ['/admin/people/import/template.csv', 'adminOnly'],
+    ['/admin/people/import/preview', 'adminOnly'],
+    ['/admin/people/import/commit', 'adminOnly'],
     ['/admin/service-types', 'adminOnly'],
     ['/admin/settings', 'adminOnly'],
     ['/admin/reports', 'adminOnly'],
