@@ -1,86 +1,75 @@
 # Church4Christ
 
-**A complete church website your team can actually run — for $0/month.**
+**An open-source bilingual church website and church-management foundation for
+customized implementations.**
 
-Church4Christ is a full church website and admin system: a bilingual public site
-(home, sermons, weekly bulletins, events, ministries, staff, articles, a prayer
-form) plus a private area where your staff and volunteers update content, care for
-prayer requests, schedule people to serve, and manage members and households. Its
-optional **Member Portal** gives each member one signed-in place for their household,
-groups, registrations, serving, calendar, and prayers. It runs on a free hosting
-plan, loads fast anywhere in the world, and is yours to keep — the site and the code
-both.
+Church4Christ combines a bilingual public site with an admin system for content,
+prayer care, volunteer scheduling, people, and households. Optional modules add a
+member portal and other church-management workflows. The project aims to lower the
+startup and ongoing maintenance cost of a customized implementation while keeping the
+code and deployment configuration available to its operators.
+
+Church4Christ is **pre-1.0** software, not a turnkey managed service. Local evaluation
+is free, and some deployments can fit within provider free allowances, but production
+hosting, email, databases, domains, backups, and other services may charge based on
+configuration and usage. See [Deployment profiles and costs](#deployment-profiles-and-costs)
+before choosing a production setup.
 
 |  |  |  |
 |---|---|---|
 | ![The English home page](docs/images/public/home-en.png) | ![The Chinese home page](docs/images/public/home-zh.png) | ![The prayer wall board](docs/images/admin/prayer-wall.png) |
 | ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Harvest theme](docs/images/themes/home-harvest-light.png) |
 
-Two languages out of the box (English and Chinese), three ready-made looks, and no
-monthly bill. The rest of this page explains why that is possible and how to try it.
+Two languages are included out of the box (English and Chinese), along with three
+ready-made looks and a modular starting point for further customization.
 
 ---
 
 ## Who is this for?
 
-Small and mid-size churches, fellowships, and nonprofits — **especially bilingual and
-immigrant congregations** — that want a fast, modern website without a monthly bill or a
-professional web team. It fits best if you want to **own your content and your members'
-data**, and you either have one technically-comfortable volunteer or are happy to let an
-AI assistant do the setup. If you would rather pay for a hands-off, all-in-one church
-platform, a mature service like **Planning Center** may suit you better — the
-comparison below and [`docs/why-this-stack.md`](docs/why-this-stack.md) are honest about
-when to choose which.
+Church4Christ is intended for small and mid-size churches, fellowships, and nonprofits —
+especially bilingual and immigrant congregations — that need a public website and a
+customizable church-management base. It fits best when a technically comfortable staff
+member, volunteer, or implementation partner can own deployment and maintenance. A
+managed platform may be a better fit when the organization prefers vendor-operated setup,
+support, upgrades, and operational responsibility over source-level customization.
 
-## Why not WordPress, Wix, or a service like Planning Center?
+## How does this approach compare?
 
-Those are good tools. For many churches, though, they mean a monthly bill that never
-stops, a site that slows down as you add plugins, and content that lives on someone
-else's platform. Church4Christ takes a different path: the whole site is a small,
-self-contained project that runs on **Cloudflare's free tier**, so a typical church
-site costs **nothing per month** to host.
+Different product categories serve different needs, and provider terms vary. This table
+compares operating models rather than promising universal prices, portability, or data
+rights.
 
-| | **Church4Christ** | WordPress (self-hosted) | Wix / Squarespace | Church SaaS (e.g. Planning Center) |
+| | **Church4Christ** | **Self-managed plugin CMS** | **Hosted site builder** | **Managed church platform** |
 |---|---|---|---|---|
-| **Monthly cost** | $0 (free tier) | Hosting + plugins, ongoing | Subscription, ongoing | Subscription, per module |
-| **Speed worldwide** | Fast everywhere (served near the visitor) | Depends on host | Good | Good |
-| **You own your data** | Yes, fully | Yes | No — lives on their platform | No — lives on their platform |
-| **You own the code** | Yes — it is all here, open source | Yes | No | No |
-| **Vendor lock-in** | None | Some (plugins) | High | High |
-| **Security upkeep** | Almost none — no plugin treadmill | Constant plugin/security updates | Handled for you | Handled for you |
-| **Bilingual** | Built in (English + Chinese) | Add-on plugin | Add-on / manual | Limited |
-| **Public website + CMS + volunteers** | All in one, free | Website only (add plugins) | Website only | Strong on management; website often separate |
-| **Set-up difficulty** | Needs one technical volunteer or an AI assistant, once | Moderate | Easy | Easy |
-| **Drag-and-drop page builder** | Yes, for your own pages (optional) | Yes (plugins) | Yes | Varies |
+| **Primary fit** | Customized bilingual website plus modular church workflows | Extensible content website assembled from plugins | Provider-managed public website | Provider-managed church workflows |
+| **Cost model** | Infrastructure and service usage; some profiles may fit free allowances | Hosting, extensions, and maintenance | Subscription and add-ons | Subscription, often by tier or module |
+| **Customization** | Source-level changes and optional modules | Themes, plugins, and source changes where available | Provider-supported templates and extensions | Provider-supported configuration and integrations |
+| **Operations** | Your team or implementation partner deploys, updates, monitors, and backs up | Your team or host manages core and plugin upkeep | Provider manages most platform operations | Provider manages most platform operations |
+| **Portability** | Code and database access support migration, but migration is manual | Depends on hosting, plugins, and formats | Depends on provider exports and terms | Depends on provider exports, APIs, and terms |
+| **Bilingual starting point** | English and Chinese included | Depends on selected extensions | Depends on the service and plan | Depends on the service and plan |
 
-**The honest trade-offs.** The built-in pages — home, sermons, bulletins, and the rest —
-are still shaped by the theme, not something you drag around; the drag-and-drop canvas is
-for your own custom pages only, and its blocks are simpler than a WordPress page-builder
-plugin's. WordPress's huge plugin ecosystem can also extend a site in thousands of
-ready-made directions that this project simply does not try to match. Mature church
-platforms like **Planning
-Center** are genuinely excellent at internal church management (giving, check-ins,
-membership) and ask nothing technical of you — this project is **not trying to out-feature
-them**; it trades their polish and hands-off convenience for **$0 cost, full control, and
-a unified public site**. And the **initial setup** (creating the free account, deploying
-once, entering your church's details) needs someone comfortable with a few commands **or**
-an AI assistant to do it for you. After that, the day-to-day — writing bulletins, adding
-sermons, scheduling volunteers — is ordinary form-filling that any staff member can do.
+**The trade-offs.** Church4Christ is optimized for Cloudflare Workers and its bindings;
+moving to another hosting stack is possible source work, not a supported one-click path.
+There is also no automated D1-to-Supabase content migration. The built-in pages are shaped
+by themes, while drag-and-drop editing applies only to custom pages. The project is
+pre-1.0, so adopters should expect implementation work and evolving interfaces.
 
-What you get in return: **no monthly bill, no plugin updates to babysit, no vendor who
-can raise your price or shut you down, and a site that stays fast** as it grows. The full
-reasoning — including why Cloudflare instead of a server on AWS/Azure/GCP, and why this
-particular tech stack — is in [**`docs/why-this-stack.md`**](docs/why-this-stack.md).
+Operating the project also means maintaining it. Your technical owner remains responsible
+for dependency updates, security review and configuration, monitoring, backups and restore
+testing, and deploying fixes. The architecture reduces some infrastructure work, but it
+does not remove security or operational upkeep. See
+[**`docs/why-this-stack.md`**](docs/why-this-stack.md) for the design rationale.
 
 ---
 
 ## Build it with an AI assistant
 
-You do not have to be a developer to run this project. This repository is written to be
-**read by an AI coding assistant** — tools like [Claude Code](https://www.claude.com/product/claude-code)
-or Codex. Every feature has a plain-English guide in [`docs/features/`](docs/features/),
-and the code is covered by **over 900 automated tests**, so an assistant can make changes
-with confidence and you can tell whether they worked.
+You do not have to make every change by hand. This repository is organized so an AI coding
+assistant can follow the plain-English guides in [`docs/features/`](docs/features/) and
+work against extensive automated test coverage. That can lower customization and
+maintenance effort, but a maintainer must still review the changes, run the relevant
+tests, and deploy them deliberately.
 
 The idea: open this project with an AI assistant, describe what you want in normal
 language, and let it do the editing. Some real examples you could paste in:
@@ -93,20 +82,19 @@ language, and let it do the editing. Some real examples you could paste in:
 > "Set up my church's name, address, and service times in the seed data, then deploy
 > following `docs/deploy.md`."
 
-Maintenance works the same way. Need to fix a typo across the site, add a new ministry,
-or change the weekly digest wording? Describe it in a sentence and let the assistant
-handle the details — keeping a site running becomes about as hard as sending a chat
-message.
+The same workflow can help with maintenance: describe a change, inspect the proposed
+diff, test it locally, and deploy only after the result has been reviewed. AI assistance
+does not replace security decisions, backups, production testing, or operational ownership.
 
 ---
 
 ## Our mission
 
-**To be the simplest, fastest, and cheapest way for a church or nonprofit to run a real
-website** — one that is easy to maintain, especially with an AI assistant helping. No
-subscription, no lock-in, no compromise on speed or ownership. A small congregation
-should be able to stand up a professional bilingual site and keep it running for years
-without a line item in the budget or a developer on call.
+**To lower the cost and effort of starting a customized church-management system and
+bilingual website.** Church4Christ provides a tested, modular foundation that a church or
+implementation partner can adapt instead of starting from zero. It does not promise a
+zero-subscription or zero-budget production service: infrastructure, email, database,
+domain, support, and maintenance choices determine the real operating cost.
 
 ---
 
@@ -117,7 +105,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | | Feature | What it does |
 |---|---|---|
 | [![](docs/images/public/home-en.png)](docs/features/public-site-and-themes.md) | **[Public site & themes](docs/features/public-site-and-themes.md)** | Your church's front door — home, sermons, events, staff — in one of three ready-made looks. |
-| [![](docs/images/admin/dashboard.png)](docs/features/cms-admin.md) | **[The admin area](docs/features/cms-admin.md)** | Passwordless sign-in, roles, and a one-click undo on every edit. |
+| [![](docs/images/admin/dashboard.png)](docs/features/cms-admin.md) | **[The admin area](docs/features/cms-admin.md)** | Passwordless sign-in, roles, and one-click restore for content types that record revisions. |
 | [![](docs/images/admin/person-permissions.png)](docs/features/admin-permissions.md) | **[Admin permissions](docs/features/admin-permissions.md)** | Grant each admin only the areas they need — prayer wall and the member directory come free, the rest by choice. |
 | [![](docs/images/admin/bulletin-editor.png)](docs/features/bulletins.md) | **[Weekly bulletins](docs/features/bulletins.md)** | Build the Sunday service sheet and schedule it to publish on its own. |
 | [![](docs/images/public/sermons.png)](docs/features/sermons.md) | **[Sermon archive](docs/features/sermons.md)** | Paste a YouTube link; get a searchable, fast-loading library of past messages. |
@@ -127,20 +115,20 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/groups/directory.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, join requests, routine and special events, and email-link attendance tracking. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
-| [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Receive card gifts online through Stripe, record checks and cash by hand, and let every family see its own giving history. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Put events online for sign-up — free or paid through Stripe — with your own questions and a roster you can export. |
+| [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
 | 🔒 | **[Member portal](docs/features/member-portal.md)** | A signed-in home for members — household profiles, groups, events, serving, calendar, giving, and a scoped prayer wall. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
-| [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and a weekly digest that send themselves. |
+| [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
 
-**Pick your modules.** Every capability above is a **module** you can switch off from one
-panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling, and more.
-New installations write every module setting explicitly from the setup selection; the Full
-Church demo selects all 17. On older installations only, missing module rows retain the
-legacy default-on behavior. A church that wants only service times and sermons can hide the
-rest in a click: the module's pages, links, and emails disappear together, and nothing is
-deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
+**Pick your modules.** Most optional domain capabilities are **modules** you can switch
+off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
+and more. New installations write every module setting explicitly from the setup selection;
+the Full Church demo selects all 17. On older installations only, missing module rows retain
+the legacy default-on behavior. A church that wants only service times and sermons can hide
+the rest in a click: the module's pages, links, and emails disappear together, and nothing
+is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -240,10 +228,30 @@ npm run --silent setup -- --mode local --preset website --site-slug my-church \
 
 ---
 
+## Deployment profiles and costs
+
+These are planning profiles, not price guarantees. Pricing below is current as of
+**August 2026**, is subject to change, and should be confirmed on the linked official
+pricing pages before deployment.
+
+| Profile | Included scope | Cost and readiness notes |
+|---|---|---|
+| **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
+| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 14 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
+| **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
+| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 17 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. Backup availability and retention vary by plan; confirm the current [backup options](https://supabase.com/docs/guides/platform/backups) and test a restore before production. Stripe payment paths remain Preview/test-only in this repository. |
+
+Provider free allowances can be useful for evaluation or modest deployments, but they are
+not a promise that a production service will remain free. Budget for technical ownership,
+dependency and security maintenance, monitoring, backups, restore testing, and future
+usage growth as well as the services listed above.
+
+---
+
 ## Putting it online
 
 New to this? Start with [**`docs/cloudflare-setup.md`**](docs/cloudflare-setup.md) — a
-plain-language guide that explains what Cloudflare is, why hosting is free, and the two
+plain-language guide that explains what Cloudflare is, its cost model, and the two
 ways to get online (including letting an AI assistant do it for you). When you want the
 exact commands, [**`docs/deploy.md`**](docs/deploy.md) is the full step-by-step
 walkthrough.
@@ -252,6 +260,8 @@ Start with `npm run setup`, choose **Deploy**, and answer the feature and church
 It creates or imports the required resources, writes the generated configuration, applies
 migrations, records all 17 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness report.
+Deployment is intentionally manual: repository automation tests changes but does not
+publish them or migrate production data for you.
 
 **Choosing your database.** The 14 D1-compatible modules exclude **Member Portal**,
 **Giving**, and **Registration**, which require Postgres. Account requirements follow the
@@ -261,9 +271,11 @@ needs both Cloudflare and Supabase. There is no automated D1↔Supabase content 
 so choose the production database before entering real content. See
 [**`docs/supabase-setup.md`**](docs/supabase-setup.md).
 
-**Stripe starts and stays in test mode.** Giving and Registration are Supabase-only; D1
-does not support Stripe modules. When setup asks for either payment feature, import only an
-`sk_test_…` key and `whsec_…` signing secret with the one-shot
+**Stripe payment paths are Preview/test-only.** The Giving offline ledger and free
+Registration flow are implemented, but online gifts and paid registrations must not be
+treated as production payment features. Giving and Registration are Supabase-only; D1 does
+not support those modules. When setup asks for either module, import only an `sk_test_…`
+key and `whsec_…` signing secret with the one-shot
 `CHURCH_SETUP_STRIPE_SECRET_KEY` and `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment
 variables. Setup stores the runtime secrets automatically and rejects live keys. Signed live
 events are rejected with `400 live_mode_disabled` before storage, while Supabase runs durable
@@ -284,12 +296,12 @@ editor that only your team ever downloads; the pages it publishes are still plai
 
 The whole look comes from **design tokens**: a set of color and type values in
 `design/` that compile into three ready-made themes (Sanctuary, Harvest, Midnight),
-each with a light and a dark mode. And the code is held together by **over 1,000 automated
-tests**, so changes — yours or an AI assistant's — are verifiable, not hopeful.
+each with a light and a dark mode. The project has **extensive automated coverage** across
+its core workflows so maintainers can verify changes before deployment.
 
-**Why these choices?** Why Cloudflare instead of a rented server on AWS, Azure, or GCP;
-why Astro + Tailwind + TypeScript with no heavy framework; and when a mature service like
-Planning Center is the better call — all of that is laid out honestly in
+**Why these choices?** The reasons for the Cloudflare-optimized deployment, the
+Astro + Tailwind + TypeScript stack, and the cases where a managed platform may be the
+better operating model are laid out in
 [**`docs/why-this-stack.md`**](docs/why-this-stack.md). For the technical picture, see
 [`docs/architecture.md`](docs/architecture.md),
 [`docs/design-system.md`](docs/design-system.md), and [`docs/i18n.md`](docs/i18n.md).
@@ -299,12 +311,17 @@ Planning Center is the better call — all of that is laid out honestly in
 ## License
 
 Church4Christ is free and open-source software under the **[GNU General Public License
-v3](LICENSE)** (GPL-3.0). In plain terms: you are free to **use, study, modify, and
-share** this software, for your church or anyone else's, at no cost. If you distribute a
-modified version, it must **stay open source under the same license** — improvements
-come back to the community rather than disappearing into a closed product. Taking this
-codebase closed-source or selling it as a proprietary product is **not permitted**. See
-[`LICENSE`](LICENSE) for the full text.
+v3](LICENSE)** (GPL-3.0). You may use and study it, modify it privately, share copies, and
+charge for copies, custom development, hosting, support, or other commercial services.
+
+If you distribute a covered modified version, the GPL's conditions apply: recipients must
+receive the applicable GPL freedoms, and corresponding source must be made available under
+the GPL as the license requires. Private modifications do not have to be published. Merely
+running a modified version as a network service, without distributing a copy, does not by
+itself trigger an AGPL-style source-sharing obligation under GPLv3.
+
+[`LICENSE`](LICENSE) is authoritative. This summary is provided for orientation and is
+not legal advice.
 
 ---
 
@@ -314,9 +331,10 @@ Contributions are welcome — bug reports, translations, new features. Start wit
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev setup and the project's four rules, and
 [`SECURITY.md`](SECURITY.md) if you have found a security issue.
 
-**On the horizon (not built yet):** a Sunday check-in flow and a between-churches "swap
-marketplace" for sharing themes and content are ideas we are considering, not promises.
-If one matters to your church, open an issue and let's talk.
+**On the horizon (not built yet):** an adult/service attendance flow distinct from the
+existing children's check-in, and a between-churches "swap marketplace" for sharing
+themes and content, are ideas we are considering, not promises. If one matters to your
+church, open an issue and let's talk.
 
 ---
 
