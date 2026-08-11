@@ -92,6 +92,47 @@ async function reset(): Promise<void> {
   ]);
 }
 
+async function seedCollidingPeople(count: number): Promise<void> {
+  if (count === 0) return;
+  await env.DB.prepare(`
+    WITH RECURSIVE sequence(n) AS (
+      SELECT 0
+      UNION ALL
+      SELECT n + 1 FROM sequence WHERE n + 1 < ?
+    )
+    INSERT INTO people (display_name, email)
+    SELECT 'Existing ' || n, 'person-' || n || '@example.com' FROM sequence
+  `).bind(count).run();
+}
+
+async function seedPagedIdentifiers(count: number, targetId: number): Promise<void> {
+  await env.DB.prepare(`
+    WITH RECURSIVE sequence(n) AS (
+      SELECT 1
+      UNION ALL
+      SELECT n + 1 FROM sequence WHERE n < ?
+    )
+    INSERT INTO people (id, display_name, email)
+    SELECT
+      n,
+      'Existing ' || n,
+      CASE WHEN n = ? THEN 'target@example.com' ELSE 'existing-' || n || '@example.com' END
+    FROM sequence
+  `).bind(count, targetId).run();
+  await env.DB.prepare(`
+    WITH RECURSIVE sequence(n) AS (
+      SELECT 1
+      UNION ALL
+      SELECT n + 1 FROM sequence WHERE n < ?
+    )
+    INSERT INTO households (id, name)
+    SELECT
+      n,
+      CASE WHEN n = ? THEN 'Target Family' ELSE 'Existing Family ' || n END
+    FROM sequence
+  `).bind(count, targetId).run();
+}
+
 beforeEach(reset);
 
 describe('preflightPeopleImport readiness', () => {
@@ -232,9 +273,9 @@ describe('preflightPeopleImport email collisions', () => {
     const result = await preflightPeopleImport(db, parsed);
 
     expect(result.errors.map((issue) => issue.row)).toEqual([2, 40]);
-    const emailQueries = db.prepared.filter((call) => call.sql.includes('LOWER(TRIM(email)) IN'));
+    const emailQueries = db.prepared.filter((call) => call.sql.includes('FROM people'));
     expect(emailQueries).toHaveLength(1);
-    expect(emailQueries[0].values).toEqual(['same@example.com']);
+    expect(emailQueries[0].values).toEqual([]);
   });
 });
 
@@ -266,39 +307,117 @@ describe('preflightPeopleImport household warnings', () => {
     expect(db.batchCalls).toBe(0);
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM households').first<number>('n')).toBe(3);
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM household_members').first<number>('n')).toBe(0);
-    const householdQueries = db.prepared.filter((call) => call.sql.includes('LOWER(TRIM(name)) IN'));
+    const householdQueries = db.prepared.filter((call) => call.sql.includes('FROM households'));
     expect(householdQueries).toHaveLength(1);
-    expect(householdQueries[0].values).toEqual(['smith family', 'archived family']);
+    expect(householdQueries[0].values).toEqual([]);
   });
 });
 
-describe('preflightPeopleImport bounded query construction', () => {
+describe('preflightPeopleImport bounded canonical scans', () => {
   it.each([
-    [0, 0],
-    [1, 1],
-    [100, 1],
-    [101, 2],
-    [200, 2],
-  ])('checks %i email candidates in %i non-empty chunks of at most 100 binds', async (count, chunks) => {
+    [0, 0, false],
+    [1, 1, false],
+    [100, 100, false],
+    [101, 100, true],
+    [200, 100, true],
+  ])('maps %i email candidates into %i bounded issues (truncated: %s)', async (count, issueCount, truncated) => {
     const parsed = parsePeopleImportRecords(
       Array.from({ length: count }, (_, index) => personRecord(index)),
     );
     expect(parsed.errors).toEqual([]);
+    await seedCollidingPeople(count);
     const db = new RecordingDb(env.DB);
 
-    await preflightPeopleImport(db, parsed);
+    const result = await preflightPeopleImport(db, parsed);
 
-    const emailQueries = db.prepared.filter((call) => call.sql.includes('LOWER(TRIM(email)) IN'));
-    expect(emailQueries).toHaveLength(chunks);
-    expect(emailQueries.every((call) => call.values.length > 0 && call.values.length <= 100)).toBe(true);
-    expect(db.prepared.every((call) => !call.sql.includes('IN ()'))).toBe(true);
+    const emailQueries = db.prepared.filter((call) => call.sql.includes('FROM people'));
+    expect(emailQueries).toHaveLength(count === 0 ? 0 : 1);
+    expect(emailQueries.every((call) => call.sql.includes('ORDER BY id LIMIT 500'))).toBe(true);
+    expect(emailQueries.every((call) => !call.sql.includes('LOWER(') && !call.sql.includes(' IN ('))).toBe(true);
+    expect(result.errors).toHaveLength(issueCount);
+    expect(result.errors.at(-1)?.code === 'issues_truncated').toBe(truncated);
+    expect(result.errors.slice(0, truncated ? 99 : issueCount).map((issue) => issue.row)).toEqual(
+      Array.from({ length: truncated ? 99 : issueCount }, (_, index) => index + 2),
+    );
     expect(db.prepared.every((call) => call.operation === 'all')).toBe(true);
     expect(db.batchCalls).toBe(0);
   });
+
+  it('uses fixed 500-row id-keyset pages for both identifier kinds', async () => {
+    await seedPagedIdentifiers(501, 501);
+    const parsed = parsePeopleImportRecords([
+      householdPrimaryRecord(999, {
+        email: 'target@example.com',
+        household_name: 'Target Family',
+      }),
+    ]);
+    const db = new RecordingDb(env.DB);
+
+    const result = await preflightPeopleImport(db, parsed);
+
+    expect(result).toEqual({
+      errors: [{ severity: 'error', code: 'email_exists', row: 2, field: 'email' }],
+      warnings: [{ severity: 'warning', code: 'household_name_exists', row: 2, field: 'household_name' }],
+    });
+    const emailPages = db.prepared.filter((call) => call.sql.includes('FROM people'));
+    expect(emailPages).toEqual([
+      expect.objectContaining({
+        sql: 'SELECT id, email AS identifier FROM people ORDER BY id LIMIT 500',
+        values: [],
+      }),
+      expect.objectContaining({
+        sql: 'SELECT id, email AS identifier FROM people WHERE id > ? ORDER BY id LIMIT 500',
+        values: [500],
+      }),
+    ]);
+    const householdPages = db.prepared.filter((call) => call.sql.includes('FROM households'));
+    expect(householdPages).toEqual([
+      expect.objectContaining({
+        sql: 'SELECT id, name AS identifier FROM households WHERE deleted_at IS NULL ORDER BY id LIMIT 500',
+        values: [],
+      }),
+      expect.objectContaining({
+        sql: 'SELECT id, name AS identifier FROM households WHERE deleted_at IS NULL AND id > ? ORDER BY id LIMIT 500',
+        values: [500],
+      }),
+    ]);
+  });
+
+  it('stops after the first page once every imported identity is found', async () => {
+    await seedPagedIdentifiers(600, 1);
+    const parsed = parsePeopleImportRecords([personRecord(999, { email: 'target@example.com' })]);
+    const db = new RecordingDb(env.DB);
+
+    const result = await preflightPeopleImport(db, parsed);
+
+    expect(result.errors).toEqual([
+      { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
+    ]);
+    expect(db.prepared.filter((call) => call.sql.includes('FROM people'))).toEqual([
+      expect.objectContaining({
+        sql: 'SELECT id, email AS identifier FROM people ORDER BY id LIMIT 500',
+        values: [],
+      }),
+    ]);
+  });
+
+  it('does not scan an identifier kind with no candidates', async () => {
+    const standalone = parsePeopleImportRecords([personRecord(1)]);
+    const householdOnly = parsePeopleImportRecords([householdPrimaryRecord(2)]);
+    householdOnly.model!.people = [];
+    const standaloneDb = new RecordingDb(env.DB);
+    const householdDb = new RecordingDb(env.DB);
+
+    await preflightPeopleImport(standaloneDb, standalone);
+    await preflightPeopleImport(householdDb, householdOnly);
+
+    expect(standaloneDb.prepared.some((call) => call.sql.includes('FROM households'))).toBe(false);
+    expect(householdDb.prepared.some((call) => call.sql.includes('FROM people'))).toBe(false);
+  });
 });
 
-describe('preflightPeopleImport Unicode parity fallback', () => {
-  it('matches composed/decomposed and non-ASCII case variants for emails through a JS full-column read', async () => {
+describe('preflightPeopleImport Unicode parity scan', () => {
+  it('matches composed/decomposed and non-ASCII case variants for emails in JavaScript', async () => {
     const parsed = parsePeopleImportRecords([
       personRecord(1, { email: 'jos\u00e9@example.com' }),
       personRecord(2, { email: '\u00e9lodie@example.com' }),
@@ -315,11 +434,14 @@ describe('preflightPeopleImport Unicode parity fallback', () => {
       severity: 'error', code: 'email_exists', row, field: 'email',
     })));
     expect(db.prepared).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sql: expect.stringMatching(/^SELECT email AS identifier FROM people$/), values: [] }),
+      expect.objectContaining({
+        sql: expect.stringMatching(/^SELECT id, email AS identifier FROM people ORDER BY id LIMIT 500$/),
+        values: [],
+      }),
     ]));
   });
 
-  it('matches composed/decomposed and non-ASCII case variants for live household names only', async () => {
+  it('matches composed/decomposed and non-ASCII case variants for live household names in JavaScript', async () => {
     const parsed = parsePeopleImportRecords([
       householdPrimaryRecord(1, { household_name: 'Caf\u00e9 Family' }),
       householdPrimaryRecord(2, { household_name: '\u00e9toile Family' }),
@@ -339,10 +461,36 @@ describe('preflightPeopleImport Unicode parity fallback', () => {
     })));
     expect(db.prepared).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sql: expect.stringMatching(/^SELECT name AS identifier FROM households WHERE deleted_at IS NULL$/),
+        sql: expect.stringMatching(/^SELECT id, name AS identifier FROM households WHERE deleted_at IS NULL ORDER BY id LIMIT 500$/),
         values: [],
       }),
     ]));
+  });
+
+  it('matches an existing Kelvin-sign email to an imported ASCII k identity', async () => {
+    const parsed = parsePeopleImportRecords([personRecord(1, { email: 'k@example.com' })]);
+    await env.DB.prepare('INSERT INTO people (display_name, email) VALUES (?, ?)')
+      .bind('Kelvin', '\u212A@example.com')
+      .run();
+
+    const result = await preflightPeopleImport(env.DB, parsed);
+
+    expect(result.errors).toEqual([
+      { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
+    ]);
+  });
+
+  it('matches an existing Kelvin-sign household to an imported ASCII k identity', async () => {
+    const parsed = parsePeopleImportRecords([
+      householdPrimaryRecord(1, { household_name: 'k family' }),
+    ]);
+    await env.DB.prepare('INSERT INTO households (name) VALUES (?)').bind('\u212A FAMILY').run();
+
+    const result = await preflightPeopleImport(env.DB, parsed);
+
+    expect(result.warnings).toEqual([
+      { severity: 'warning', code: 'household_name_exists', row: 2, field: 'household_name' },
+    ]);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { AppDb } from './appDb';
+import type { AppDb, AppStatement } from './appDb';
 import {
   PEOPLE_IMPORT_LIMITS,
   parsePeopleImport,
@@ -43,15 +43,14 @@ interface ImportedIdentifier {
 }
 
 interface IdentifierRow {
+  id: number;
   identifier: string;
 }
 
-const QUERY_BIND_LIMIT = 100;
+const IDENTIFIER_PAGE_SIZE = 500;
 
 const canonicalIdentity = (value: string): string =>
   value.trim().normalize('NFC').toLowerCase();
-
-const containsNonAscii = (value: string): boolean => /[^\u0000-\u007f]/u.test(value);
 
 function readyModel(parsed: PeopleImportValidationResult): PeopleImportModel {
   if (parsed.model === null || parsed.errors.length > 0) {
@@ -67,22 +66,21 @@ function householdRow(household: PeopleImportHousehold): number {
   );
 }
 
-function querySql(kind: IdentifierKind, bindCount: number): string {
-  const placeholders = Array.from({ length: bindCount }, () => '?').join(',');
+function firstPageSql(kind: IdentifierKind): string {
   switch (kind) {
     case 'email':
-      return `SELECT email AS identifier FROM people WHERE LOWER(TRIM(email)) IN (${placeholders})`;
+      return 'SELECT id, email AS identifier FROM people ORDER BY id LIMIT 500';
     case 'household_name':
-      return `SELECT name AS identifier FROM households WHERE deleted_at IS NULL AND LOWER(TRIM(name)) IN (${placeholders})`;
+      return 'SELECT id, name AS identifier FROM households WHERE deleted_at IS NULL ORDER BY id LIMIT 500';
   }
 }
 
-function fallbackSql(kind: IdentifierKind): string {
+function nextPageSql(kind: IdentifierKind): string {
   switch (kind) {
     case 'email':
-      return 'SELECT email AS identifier FROM people';
+      return 'SELECT id, email AS identifier FROM people WHERE id > ? ORDER BY id LIMIT 500';
     case 'household_name':
-      return 'SELECT name AS identifier FROM households WHERE deleted_at IS NULL';
+      return 'SELECT id, name AS identifier FROM households WHERE deleted_at IS NULL AND id > ? ORDER BY id LIMIT 500';
   }
 }
 
@@ -91,28 +89,26 @@ async function existingIdentities(
   kind: IdentifierKind,
   candidates: ImportedIdentifier[],
 ): Promise<Set<string>> {
-  const imported = new Set(candidates.map((candidate) => candidate.identity));
-  const identities = [...imported];
+  const remaining = new Set(candidates.map((candidate) => candidate.identity));
   const existing = new Set<string>();
+  if (remaining.size === 0) return existing;
 
-  for (let start = 0; start < identities.length; start += QUERY_BIND_LIMIT) {
-    const chunk = identities.slice(start, start + QUERY_BIND_LIMIT);
-    const { results } = await db
-      .prepare(querySql(kind, chunk.length))
-      .bind(...chunk)
-      .all<IdentifierRow>();
+  // Do not use SQL LOWER for identity matching: D1 LOWER is ASCII-only, while
+  // JavaScript NFC/lowercase can map Unicode identifiers (such as K) to ASCII.
+  // Fixed id-keyset pages keep each response bounded while preserving parity.
+  let cursor: number | null = null;
+  while (remaining.size > 0) {
+    const statement: AppStatement = cursor === null
+      ? db.prepare(firstPageSql(kind))
+      : db.prepare(nextPageSql(kind)).bind(cursor);
+    const { results } = await statement.all<IdentifierRow>();
     for (const row of results) {
       const identity = canonicalIdentity(row.identifier);
-      if (imported.has(identity)) existing.add(identity);
+      if (!remaining.delete(identity)) continue;
+      existing.add(identity);
     }
-  }
-
-  if (identities.some(containsNonAscii)) {
-    const { results } = await db.prepare(fallbackSql(kind)).all<IdentifierRow>();
-    for (const row of results) {
-      const identity = canonicalIdentity(row.identifier);
-      if (imported.has(identity)) existing.add(identity);
-    }
+    if (remaining.size === 0 || results.length < IDENTIFIER_PAGE_SIZE) break;
+    cursor = results[results.length - 1].id;
   }
 
   return existing;
