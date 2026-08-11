@@ -113,7 +113,7 @@ npx wrangler hyperdrive create church4christ-db \
 Use your own Session pooler string from step 2 (with the real password). The command prints
 an **`id`** — copy it.
 
-Now open `wrangler.jsonc` and make two changes:
+Now open `wrangler.jsonc` and make three changes:
 
 1. **Uncomment the `hyperdrive` line and paste your id** in place of `YOUR_HYPERDRIVE_ID`:
 
@@ -130,9 +130,22 @@ Now open `wrangler.jsonc` and make two changes:
    "DB_BACKEND": "supabase"
    ```
 
-Both of these live in `wrangler.jsonc`, which is **safe to commit** — the id is not a
-secret, and your database password stays inside the Hyperdrive config in your Cloudflare
-account, not in this file.
+3. **Replace the D1 cron list with the Supabase cron list:**
+
+   ```jsonc
+   "triggers": {
+     "crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "*/5 * * * *"]
+   },
+   ```
+
+   This preserves daily serving reminders, the weekly serving digest, and hourly group
+   attendance, then adds the Supabase Preview/test-only Stripe recovery pass. Remove the
+   D1-only nightly backup cron `0 9 * * *`; do not keep it alongside the five-minute
+   recovery cron.
+
+All three changes live in `wrangler.jsonc`, which is **safe to commit** — the Hyperdrive id
+and cron strings are not secrets, and your database password stays inside the Hyperdrive
+config in your Cloudflare account, not in this file.
 
 ---
 
