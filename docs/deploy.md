@@ -101,6 +101,23 @@ The local `npm run db:seed-media:local` command is only for the developer demo. 
 media starts empty too; admins can upload the homepage hero, event images, ministry covers,
 and profile pictures through the admin area or profile pages after the site is live.
 
+### D1 capacity for People CSV imports
+
+The People admin's CSV importer is atomic on both D1 and PostgreSQL: it reparses and
+preflights the selected file on the server, then commits every person, household, and
+membership together or commits nothing. Do **not** work around a D1 limit by splitting one
+request into chunks; the importer intentionally never makes partial commits.
+
+D1 Free currently allows 50 queries per Worker invocation. The largest accepted CSV (200
+data rows and up to 100 households) can require about 500 batch statements — up to 200
+person inserts, 100 household inserts, and 200 membership inserts — plus the preflight
+scans of existing emails and household names. Large D1 imports therefore require a
+plan/runtime with a paid-capable per-invocation limit; if the deployment cannot accommodate
+the complete preflight and atomic batch, reduce the CSV before retrying. Cloudflare prices
+and limits change, so treat the current
+[Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/) as
+authoritative rather than relying on this snapshot.
+
 ## 4. Set the session secret
 
 Sessions are signed with `SESSION_SECRET`. Generate a strong random value (32+ bytes) and
