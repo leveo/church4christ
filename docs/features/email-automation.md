@@ -22,7 +22,9 @@ production recipient coverage. Check the current
 
 When production email is configured, the site can send transactional messages for sign-in,
 scheduling, volunteer responses, attendance links, application results, reminders, and the
-weekly digest. There is also a separate nightly job that backs up configured data.
+weekly digest. With D1, the provider-specific fourth schedule is a nightly database backup to
+R2. With Supabase, the fourth schedule instead runs the Preview/test-mode Stripe recovery path
+every five minutes.
 
 Every send request passes through one place in the code. That single door records each send
 attempt consistently and prevents a provider error from crashing a separate database write.
