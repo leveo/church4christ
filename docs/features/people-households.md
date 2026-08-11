@@ -73,11 +73,11 @@ record_type,display_name,email,first_name,last_name,phone,language,membership_st
 The upload limit is 256 KiB, 200 data rows, and 100 households. The two record types work
 as follows:
 
-- A `person` row creates a person who can sign in. `display_name` and a valid, unique
+- A `person` row creates an account-bearing person. `display_name` and a valid, unique
   `email` are required. Optional values include names, phone, `language` (`en` or `zh`),
   `membership_status` (`visitor`, `regular`, `member`, or `inactive`), `YYYY-MM-DD` dates,
-  address, and `active` (`true` or `false`). The imported application role is always
-  `member`.
+  address, and `active` (`true` or `false`). The person can sign in only while `active`
+  is `true`; the imported application role is always `member`.
 - A `dependent` row creates a name-only household member, not a person or sign-in. It
   requires `display_name` and `household_key`; person fields such as email, phone,
   language, membership status, dates, address, and active must stay blank.
