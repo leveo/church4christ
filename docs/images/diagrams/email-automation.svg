@@ -18,8 +18,8 @@
   <rect x="30" y="240" width="250" height="44" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="155" y="267" font-size="13" fill="#232630" text-anchor="middle">Application received / result</text>
   <rect x="30" y="292" width="250" height="44" rx="8" fill="#C29A5B"/>
-  <text x="155" y="313" font-size="12" fill="#232630" text-anchor="middle">Timed: reminders · digest · attendance</text>
-  <text x="155" y="329" font-size="10" fill="#232630" text-anchor="middle">Rules: reminders/digest · Groups module: attendance</text>
+  <text x="155" y="310" font-size="11" fill="#232630" text-anchor="middle">Email rules: reminders · digest</text>
+  <text x="155" y="327" font-size="11" fill="#232630" text-anchor="middle">Groups module: attendance</text>
 
   <!-- Choke point -->
   <rect x="330" y="150" width="160" height="112" rx="8" fill="#31487A"/>
