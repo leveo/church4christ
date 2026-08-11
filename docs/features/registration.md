@@ -1,13 +1,15 @@
-# Registration (sign-ups for events, free or paid)
+# Registration (free sign-ups and paid checkout Preview)
+
+> **Preview — Stripe test mode only.** Free event registration is implemented and does not
+> require Stripe. Paid registration is a test-only Preview that accepts test credentials and
+> test cards; it must not be used to collect event fees.
 
 ## What it does
 
-**Registration** lets your church put an event online and collect sign-ups — a free family
-retreat, a paid marriage dinner, a summer camp with a T-shirt size to choose. You create the
-event, add whatever questions you need to ask, set a price and a seat limit if there is one,
-and share the link. Members and first-time guests fill in the form, pay by card when the event
-costs money, and land on a confirmation page. Your team watches the roster fill up and exports
-it to a spreadsheet whenever they need it.
+**Registration** lets your church put a free event online and collect sign-ups, custom answers,
+and roster data without Stripe. You create the event, add the questions you need, set a seat
+limit if there is one, and share the link. The same module includes a paid-checkout Preview for
+evaluating the Stripe test flow, but that path is not available for production fees.
 
 It brings together the things a church normally patches from a paper sign-up sheet, a
 separate payment link, and a spreadsheet:
@@ -19,17 +21,18 @@ separate payment link, and a spreadsheet:
   **T-shirt size** as a dropdown, **dietary needs** as a paragraph, **first time?** as a
   yes/no — five field types in all, each in English and Chinese, each optional or required as
   you choose.
-- **Payment built in, when it is a paid event.** Set a price and the sign-up continues to
-  **Stripe's** secure checkout; the church never handles a card number. A free event skips
-  payment entirely and confirms on the spot.
+- **Paid-checkout Preview.** Set a test price and the sign-up can continue to **Stripe test
+  mode**, where Stripe handles test-card details. This is for evaluating the workflow only;
+  a free event skips Stripe entirely and confirms on the spot.
 - **A roster your team can export.** Every registration lands on the event's roster with its
   answers laid out in columns. One click downloads the whole roster as a spreadsheet
   (CSV) — names, emails, amounts, and every answer — ready for name tags, meal counts, or a
   check-in list.
 
-Because some events cost money and every roster holds people's names and emails, the module is
-careful: card numbers are handled only by Stripe, a paid seat is only ever confirmed by
-Stripe's own signed notification, and the roster and its export are open only to your staff.
+Because every roster holds people's names and emails, its pages and exports are open only to
+staff. In the paid Preview, test-card details stay at Stripe and a pending test seat is confirmed
+only by Stripe's signed test-mode notification. Those controls do not make paid registration
+production-ready.
 
 ## How your team uses it
 
@@ -38,8 +41,8 @@ for sign-up — each as a card with its date, location, and price or a **Free** 
 **Full** badge once every seat is taken. Opening an event shows its details and a form built
 from the questions you set. A signed-in member sees their name and email already filled in; a
 guest types both. For a free event, submitting registers them right away and shows a
-"you're registered" page. For a paid event, submitting continues to Stripe to pay, and the seat
-is confirmed the moment the payment clears.
+"you're registered" page. For a paid Preview event, submitting continues to Stripe test
+checkout, and the seat is confirmed when the signed test event is processed.
 
 ![The public list of events open for sign-up, each with its date, place, and price](../images/register/list.png)
 
@@ -85,16 +88,14 @@ list.
 
 ![The event roster — each sign-up with its status, amount, and answers in columns, and an Export CSV button](../images/admin/registration-roster.png)
 
-**Payments (Stripe).** A paid event runs its money through **Stripe**, exactly like the Giving
-module — the church never sees a card number. When someone registers for a paid event, the seat
-is held as **pending** while they are at Stripe's checkout, and it becomes **confirmed** only
-when Stripe sends back its signed confirmation that the payment cleared. If they abandon the
-payment, Stripe's expiry notice releases the held seat automatically, so an unfinished checkout
-never quietly blocks a spot. A free event never touches Stripe at all.
+**Paid checkout (Stripe Preview).** In test mode, a paid event exercises the same checkout
+lifecycle as Giving. The seat is held as **pending** during Stripe test checkout and becomes
+**confirmed** only after the signed test event is processed. An expiry event releases the test
+hold. A free event never touches Stripe, and the paid path must not be used for event fees.
 
 **Capacity and the sign-up window.** When you set a **capacity**, both confirmed sign-ups and
-seats currently being paid for count toward it — so a seat someone is in the middle of paying
-for is not quietly handed to someone else. When every seat is taken, the event shows **Full** and its form is replaced
+pending test checkouts count toward it, so the paid Preview can exercise seat holds. When every
+seat is taken, the event shows **Full** and its form is replaced
 by a "this event is full" notice. Leave capacity blank for an unlimited event. The **Opens** and
 **Closes** times let you schedule when sign-ups begin and end; outside that window the event
 simply does not appear as open.
@@ -108,20 +109,19 @@ drops bot submissions so they can never exhaust an event's seats.
 
 ## How it fits together
 
-You create an event and add its questions. Members and guests sign up on the public page; a
-free sign-up confirms immediately, while a paid one continues to Stripe and confirms when the
-payment clears. Every sign-up lands on the event's roster with its answers, which your team can
-export to a spreadsheet at any time.
+You create an event and add its questions. Members and guests can complete implemented free
+sign-ups on the public page. A paid Preview continues to Stripe test checkout and exercises the
+pending-to-confirmed lifecycle. Every resulting registration lands on the event roster with its
+answers for CSV export.
 
 ![How free and paid sign-ups flow into one roster you can export](../images/diagrams/registration.svg)
 
 ## Setting it up
 
-Registration runs on the **Supabase (Postgres) backend** — it stays switched off on the default
-D1 setup, because paid events need Stripe and a database that can hold the checkout state. Stand
-up the Supabase backend first (see [`docs/supabase-setup.md`](../supabase-setup.md)). Free events
-work with no payment setup at all; to take money for paid events, add Stripe the same way the
-Giving module does:
+Registration is **Supabase (Postgres)-only in the current implementation**. The module gate keeps
+it off in the D1 configuration as a current repository boundary. Stand up the Supabase backend first (see
+[`docs/supabase-setup.md`](../supabase-setup.md)). Free events need no payment setup; configure
+Stripe only to evaluate the paid test Preview:
 
 1. **Import Stripe test credentials through setup.** Pass an `sk_test_…` key and the test
    endpoint's `whsec_…` signing secret only to the setup process:
@@ -136,8 +136,9 @@ Giving module does:
    one-shot setup inputs, not ambient runtime variables. Live keys are rejected, and signed
    live webhook events receive `400 live_mode_disabled` without storage. If Giving already
    imported these test credentials, Registration uses the same pair.
-2. **Point a Stripe webhook at your site.** In the Stripe dashboard, add one shared endpoint at
-   `https://your-site/api/stripe/webhook` and subscribe it to all eight events:
+2. **Point a Stripe test-mode webhook at your site.** In the Stripe dashboard's test mode, add
+   one shared endpoint at `https://your-site/api/stripe/webhook` and subscribe it to all eight
+   events:
    `checkout.session.completed`, `checkout.session.expired`,
    `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
    `invoice.paid`, `charge.refunded`, `customer.subscription.updated`, and
@@ -148,24 +149,25 @@ Giving module does:
 3. **Create your first event** on `/admin/registration`, add its questions on the event's
    **Questions & roster** page, and share the public link (`/register`).
 
-Supabase runs durable webhook and pending-Checkout recovery every five minutes. Admins and
+Supabase runs durable test-webhook and pending-Checkout recovery every five minutes. Admins and
 finance users can reconcile, attach a retrieved and verified `cs_test_…` session, or perform
 an explicitly confirmed cancellation from `/admin/stripe-events`; raw request and customer
-data are not displayed. D1 does not support Registration or Stripe operations.
+data are not displayed. The current D1 implementation does not enable Registration or Stripe
+operations.
 
 The **payment operations** permission covers both Giving and paid Registration. Grant it only
 to people trusted to reconcile Stripe events, attach verified sessions, and explicitly cancel
 pending paid registrations as well as manage gifts.
 
 Free events need none of the Stripe steps — create the event, add questions, and share the link.
-Add Stripe only when you want to charge for one.
+Use the Stripe steps only to test the paid Preview; they do not enable production charges.
 
 ## For developers
 
-- **Backend gating:** `registration` is a Supabase-only module (`requiresBackend: 'supabase'` in
-  `src/lib/modules.ts`) — the enablement filter force-disables it on D1 regardless of its
-  settings row. It owns the `/register` and `/api/register` public prefixes and the
-  `/admin/registration` admin prefix, and depends on no other module.
+- **Backend gating:** `registration` is Supabase-only in the current implementation
+  (`requiresBackend: 'supabase'` in `src/lib/modules.ts`) — the enablement filter force-disables
+  it on D1 regardless of its settings row. It owns the `/register` and `/api/register` public
+  prefixes and the `/admin/registration` admin prefix, and depends on no other module.
 - **Schema:** `migrations-supabase/0003_registration.sql` adds `reg_events` + `reg_event_i18n`,
   `reg_questions` + `reg_question_i18n`, `registrations`, and `reg_answers`. Money is **integer
   cents**; a paid registration carries a partial unique index on `stripe_checkout_session_id` so

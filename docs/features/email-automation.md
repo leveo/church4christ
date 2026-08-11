@@ -1,24 +1,42 @@
 # Email and automation
 
+## Deployment, cost, and availability
+
+> **August 2026 snapshot; verify before deployment.** Cloudflare Email Sending is currently
+> beta. `EMAIL_DEV_LOG=1` is local-development output only: messages, including magic links,
+> print in the `npm run dev` terminal and are not sent. Do not use it as deployed email.
+
+Before any production send, the sender domain must use Cloudflare DNS and be
+[onboarded for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+The binding's `allowed_sender_addresses` allowlist limits which From addresses code may use; it
+does **not** onboard or verify the domain. See Cloudflare's
+[send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
+
+Sending to arbitrary production recipients currently requires **Workers Paid**. A verified
+destination address is free on all plans, but it is a controlled testing path rather than
+production recipient coverage. Check the current
+[Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/) and
+[Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) before rollout.
+
 ## What it does
 
-The site sends email so your team does not have to. Some messages go out the moment something
-happens — a sign-in link, a scheduling request, a decline notice, an application result — and
-others run on a timer, like reminders and the weekly digest. There is also a nightly job that
-quietly backs up your data.
+When production email is configured, the site can send transactional messages for sign-in,
+scheduling, volunteer responses, attendance links, application results, reminders, and the
+weekly digest. There is also a separate nightly job that backs up configured data.
 
-Every message, no matter what triggers it, passes through one place in the code. That single
-door is deliberate: it means all mail is logged the same way, and a mail problem can never crash
-the action that caused it — a failed email is recorded and shrugged off, never thrown at the user.
+Every send request passes through one place in the code. That single door records each send
+attempt consistently and prevents a provider error from crashing a separate database write.
+The attempt log does not prove delivery, and a flow that depends on the recipient receiving a
+link cannot complete without working email.
 
 You stay in control from the admin Email tab. You can turn the automatic reminders and digest on
-or off, edit the wording of the templates, and read a log of everything that has been sent. And
-while you are developing or testing, the site can print emails to the console instead of sending
-them, so you can complete a sign-in from your terminal without wiring up a real mail provider.
+or off, edit the wording of the templates, and read the send-attempt log. During local development,
+the site can print messages to the terminal instead of sending them, so a developer can copy the
+printed magic-link URL without configuring remote email.
 
 ## How your team uses it
 
-**The emails that go out:**
+**Messages the site attempts when email is available:**
 
 - **Sign-in magic link** — sent when someone requests a login link.
 - **Scheduling request** — sent to a volunteer when a leader assigns them, with an accept/decline
@@ -42,40 +60,42 @@ reminder, and the weekly digest. Out of the box the 7-day reminder and the diges
 **Templates.** The wording of the reminder, request, application-result, and digest emails is
 editable, in both languages, so the messages sound like your church rather than a generic system.
 
-**The send log.** Every attempt is recorded — who it went to, what kind it was, and whether it was
-sent, failed, or (in development) just logged. When someone says "I never got the email," this is
-where you check.
+**The send log.** Every attempt is recorded — who it was addressed to, what kind it was, and
+whether the binding accepted it, failed, or (in local development) only logged it. An `email_log`
+row is evidence of a send attempt, not proof that the message reached an inbox.
 
 **Three timed jobs.** Behind the scenes, three jobs run on a schedule: the daily **reminders**, the
 weekly **digest**, and — separate from email entirely — a nightly **backup** that exports your
 database to storage. The backup sends no mail; it simply keeps a safe copy, and it skips itself
 quietly if backups have not been configured.
 
-**Development mode.** When the site is running locally with dev-mode email turned on, messages are
-printed to the console (magic link included) and marked as `devlog` in the log, instead of being
-sent. That lets a developer test every flow end-to-end with no real mail account.
+**Development mode.** When the site is running locally with `EMAIL_DEV_LOG=1`, messages are
+printed to the `npm run dev` terminal (magic link included) and marked as `devlog` in the log,
+instead of being sent. This setting is terminal-only and must not be treated as deployed mail.
 
 **Good to know:**
 
 - Emails go out in the reader's own language when the site knows it, and in both languages stacked
   otherwise, so a message is never unreadable to its recipient.
-- Automatic mail is best-effort: if a message cannot be sent, the underlying action (signing in,
-  declining a slot, saving an application) still succeeds — the failure is only logged.
-- If email is not configured at all, the site keeps working; those messages are simply recorded as
-  failed rather than crashing anything.
+- Some database writes are deliberately best-effort with respect to notification: a provider
+  failure is logged instead of turning a saved record into a server error. That does not make
+  mail-dependent follow-up usable.
+- If email is unavailable, public content remains available. Magic-link sign-in, volunteer
+  response and reminder links, attendance links, and other flows that depend on delivered mail
+  are unavailable until production email works.
 
 ## How it fits together
 
-The diagram shows the triggers on the left, the single choke point in the middle, the dev-log and
-live-send branches on the right, and the separate backup cron below.
+The diagram shows the triggers on the left, the single choke point in the middle, the local
+dev-log and remote-send branches on the right, and the separate backup cron below.
 
 ![Triggers to the email choke point, plus the backup cron](../images/diagrams/email-automation.svg)
 
 ## For developers
 
-- **The choke point:** `src/lib/email.ts` (`sendEmail`) — builds the MIME message, sends via the
-  Cloudflare `send_email` binding, logs to `email_log`, never throws; `EMAIL_DEV_LOG=1` routes to
-  the console + a `devlog` row.
+- **The choke point:** `src/lib/email.ts` (`sendEmail`) — builds the MIME message, attempts a send
+  via the Cloudflare `send_email` binding, and records that attempt in `email_log`; a row does not
+  guarantee delivery. Local `EMAIL_DEV_LOG=1` routes to the terminal + a `devlog` row.
 - **Touchpoints:** `src/lib/notify.ts` (magic link, scheduling request, decline, application
   received/result) and `src/lib/digest.ts` (`sendReminders`, `sendWeeklyDigest`).
 - **Crons:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts` — reminders `0 13 * * *`,

@@ -1,25 +1,33 @@
 # The admin area
 
+> **Production sign-in depends on working production email.** Passwordless access requires the
+> sender domain, Cloudflare Email Sending, binding, From address, and recipient plan to be
+> configured correctly. `EMAIL_DEV_LOG=1` prints links only during local development; see
+> [Email and automation](email-automation.md).
+
 ## What it does
 
 The admin area is the private side of the site — the place your staff and volunteers
 go to update content, review prayer requests, schedule people to serve, and manage
 who can do what. Everyone reaches it at `/admin` after signing in.
 
-There are no passwords to remember or reset. You type your email, we send you a link,
-you click it, and you are in. That link works once and expires quickly, so there is no
-password to leak, forget, or share. This is called **magic-link sign-in**.
+There are no passwords to remember or reset. With production email configured, you type your
+email, the site sends a link, and opening it signs you in. The link works once and expires
+quickly, so there is no password to leak, forget, or share. This is called **magic-link
+sign-in**; without deliverable email, a new production sign-in cannot complete.
 
 What you can see and change depends on your **role**. A member can see their own serving
 schedule; an editor can update bulletins, sermons, and news; an admin can do everything,
 including managing people and settings. On top of that, a **team leader** gets scheduling
-tools just for their own team. And because every save keeps a copy of the previous
-version, a wrong edit is never permanent — you can restore the old one with one click.
+tools just for their own team. Revision snapshots exist for specific content types, with
+one-click restore where noted below; other admin changes do not automatically get that safety
+net.
 
 ## How your team uses it
 
-**Signing in.** Go to the sign-in page and enter your email. You will get a message with
-a link. Open it and you are signed in for the next 30 days on that device.
+**Signing in.** After production email is configured, go to the sign-in page and enter your
+email. Open the delivered link and you are signed in for the next 30 days on that device. In a
+local run with `EMAIL_DEV_LOG=1`, copy the link from the `npm run dev` terminal instead.
 
 ![The sign-in page](../images/public/signin.png)
 
@@ -43,9 +51,11 @@ buttons that would just say "not allowed."
 
 ![The admin console overview](../images/admin/console-overview.png)
 
-**The safety net.** Every time you save a bulletin, sermon, announcement, event, or prayer
-sheet, the previous version is tucked away in its history. If someone deletes a paragraph
-or fat-fingers a date, open the item's revision history and restore an earlier version.
+**The safety net.** Revision snapshots are recorded for bulletins, sermons, prayer sheets,
+announcements, events, and custom pages. The revision-history screen supports one-click restore
+for bulletins, sermons, prayer sheets, announcements, and events. Custom-page saves are
+snapshotted for traceability but are not exposed through that restore screen. Quick toggles and
+other admin edits do not necessarily create a revision.
 
 ![Revision history for a piece of content](../images/admin/revisions.png)
 
@@ -68,8 +78,8 @@ or fat-fingers a date, open the item's revision history and restore an earlier v
 
 ## How it fits together
 
-Sign-in has no passwords, your role decides which doors open, and every save is backed up
-by a restorable snapshot. The diagram shows all three.
+Sign-in has no passwords but depends on deliverable email, your role decides which doors open,
+and the listed content types record revision snapshots. The diagram shows those three ideas.
 
 ![Sign-in, roles, and the revision safety net](../images/diagrams/cms-admin.svg)
 
@@ -83,8 +93,11 @@ by a restorable snapshot. The diagram shows all three.
   unknown `/admin` paths. The `Admin.astro` layout and each admin page enforce the finer
   editor/admin/leader rules.
 - **Dashboard:** `src/lib/adminOverviewDb.ts` feeds `src/pages/admin/index.astro`.
-- **Revisions:** `src/lib/adminDb.ts` (`snapshot`, `listRevisions`, `getRevision`,
-  `restoreRevision`) and `src/pages/admin/revisions/[entity]/[id].astro`.
+- **Revisions:** `src/lib/adminDb.ts` writes and restores bulletin, sermon, prayer-sheet,
+  announcement, and event snapshots through `listRevisions`, `getRevision`, and
+  `restoreRevision`; `src/pages/admin/revisions/[entity]/[id].astro` is their restore screen.
+  `src/lib/pagesDb.ts` separately writes `custom_page` snapshots without adding that entity to
+  the generic restore switch.
 - **Tests:** `test/auth.test.ts`, `test/authFlow.test.ts`, `test/session.test.ts`,
   `test/routePolicy.test.ts`, `test/middlewareAuth.test.ts`,
   `test/adminDb.revisions.test.ts`; authz redirects and magic-link replay-safety live in
