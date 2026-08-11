@@ -1,8 +1,9 @@
 # Cloudflare setup — a plain-language guide
 
-New to all of this? Start here. This page explains **what you are setting up, why it is
-free, and the two ways to do it** — without assuming you are a developer. When you are
-ready for the exact commands, [`deploy.md`](./deploy.md) has the precise step-by-step.
+New to all of this? Start here. This page explains **what you are setting up, which parts
+can start within free allowances, and the two ways to do it** — without assuming you are a
+developer. When you are ready for the exact commands, [`deploy.md`](./deploy.md) has the
+precise step-by-step.
 
 The supported first step after `npm install` is:
 
@@ -15,15 +16,16 @@ features. Setup explains the required accounts, selects D1 or Supabase, prepares
 and data, and bootstraps the first admin. Run `npm run doctor` for a readiness report.
 
 You do **not** need to read this to try the site on your own computer first — that takes
-five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes)).
+five minutes and no accounts (see the [README quickstart](../README.md#try-it-in-5-minutes-on-your-own-computer)).
 This page is for when you want to put your site **online for real**.
 
 ## What is Cloudflare, and why this project uses it
 
 Cloudflare is a company that runs a huge, fast network of computers all over the world.
-They let anyone put a website on that network, and — for a site the size of a typical
-church — **it costs nothing.** Your pages load quickly whether a visitor is across town or
-across the ocean, because Cloudflare serves them from a location near that visitor.
+This project deploys to that network so pages can be served from locations near visitors.
+Workers, D1, and R2 have free allowances that may cover a small site, but actual cost
+depends on traffic, storage, email recipients, the selected database, and any optional
+services.
 
 This project uses four Cloudflare services. You do not need to understand how they work,
 just what each one is for:
@@ -35,9 +37,24 @@ just what each one is for:
 | **R2** | A photo/file storage room. | Images you upload in the admin area. |
 | **Email** | A mail carrier. | Sign-in links and volunteer reminders. |
 
-All four have a **free allowance** that a normal church website stays comfortably inside.
-You are only ever billed if a site gets very large or very busy — and Cloudflare warns you
-long before that.
+Email has different plan rules from the base Worker, database, and storage services. As of
+this **August 2026 snapshot**:
+
+- `EMAIL_DEV_LOG=1` is a local-development aid: it prints messages, including magic links,
+  to the terminal and sends no email. Do not deploy it as an email configuration.
+- Before any remote send, the sender domain must use Cloudflare DNS and be
+  [onboarded for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+- After that onboarding, a destination address verified in your Cloudflare account can be
+  used for free controlled testing. Sending to arbitrary recipients requires the current
+  **Workers Paid** plan.
+- `allowed_sender_addresses` is a Worker-binding allowlist and `EMAIL_FROM` chooses the
+  application's From address; neither setting onboards or verifies a domain. Configure
+  both with an address on the onboarded sender domain. See
+  [send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
+
+Plans and limits can change. Check the official [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
+and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) before
+launch and during operation.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
 > default for 14 modules. **Member Portal**, **Giving**, and **Registration** need Postgres,
@@ -48,11 +65,17 @@ long before that.
 
 ## What it costs — honestly
 
-- **The website itself: $0/month** on Cloudflare's free tier.
-- **A domain name** (like `yourchurch.org`) is the one thing you might pay for — usually
-  about **$10–15 a year** — and only if you do not already own one. If your church already
-  has a domain, you can use it.
-- No plugins to buy, no monthly subscription, no per-page fees.
+- **The base Worker, D1, and R2 resources** can begin within Cloudflare's free allowances
+  when usage stays within current limits. This is not a promise that every production
+  deployment remains free.
+- **Production email to arbitrary recipients** currently requires Workers Paid. A
+  Supabase/Postgres backend and optional operational services can also add charges.
+- **A domain name** (like `yourchurch.org`) is another possible cost — usually
+  about **$10–15 a year** — unless you already own one. If your church already has a
+  domain, you can use it.
+- The project has no per-page software fee, but hosting and third-party plans remain your
+  responsibility. These statements are an August 2026 snapshot and are subject to change;
+  review the pricing links above for current terms.
 
 ## Guided setup or manual reference
 
@@ -92,8 +115,10 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
    strong random value. In the minimum D1 path, this is the only credential setup asks you
    to create. Supabase database URLs, Stripe credentials, and backup credentials are
    secrets too; none of them belongs in a file you share.
-7. **Turn on "log emails to the screen"** for your first try (`EMAIL_DEV_LOG=1`), so you can
-   grab your own sign-in link without email being fully configured yet.
+7. **For a local first try, use the terminal-only email log** (`EMAIL_DEV_LOG=1`, which
+   guided Local setup writes to `.dev.vars`) to read your own sign-in link without sending
+   email. A deployed test instead needs both an onboarded sender domain and a verified
+   destination; production delivery also needs the plan described above.
 8. **Publish** with `npm run deploy`. It prints a link you can open immediately.
 9. **Point your own domain at it** (optional but nice). Setup has already bootstrapped the
    first administrator you selected.
@@ -120,11 +145,12 @@ Stripe schedule.
 
 - **Changing your site** is one command: `npm run deploy`. Edit content in the admin area;
   redeploy only when you change the code or design.
-- **Your data is yours.** It lives in your Cloudflare account, and the nightly backup
-  (optional, see `deploy.md`) writes a copy you control.
-- **Keep it safe.** Read [`SECURITY.md`](../SECURITY.md) — it is short and tells you the few
-  things that matter (mainly: never share your secret key, and never commit the `.dev.vars`
-  file).
+- **Keep control of your code and data.** Data lives in the Cloudflare D1 or Supabase
+  account you select. Export it periodically; D1's optional nightly export is described in
+  `deploy.md`, and Supabase needs the backup plan described in `supabase-setup.md`.
+- **Operate it deliberately.** Read [`SECURITY.md`](../SECURITY.md), never share secret
+  keys or commit `.dev.vars`, and keep up with dependency updates, backups, restore tests,
+  and monitoring.
 
 ## If you get stuck
 

@@ -129,6 +129,15 @@ describe('catalog-owned docs', () => {
     expect(contributing).not.toContain('sign in as `admin@example.com`');
   });
 
+  it('keeps Supabase backup operations explicit in the Worker source', () => {
+    const worker = readFileSync('src/worker.ts', 'utf8');
+    expect(worker).not.toMatch(
+      /supabase[^\n]{0,100}(?:own|managed|automatic)[^\n]{0,40}backups/i,
+    );
+    expect(worker).toMatch(/manual off-site exports/i);
+    expect(worker).toMatch(/selected Supabase plan/i);
+  });
+
   it('keeps capability defaults, account requirements, and secrets mode-specific', () => {
     const readme = readFileSync('README.md', 'utf8');
     expect(readme).not.toMatch(/Everything starts on/i);

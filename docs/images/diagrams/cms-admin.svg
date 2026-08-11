@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 480" font-family="system-ui, sans-serif" role="img" aria-label="Passwordless sign-in, roles that gate the admin console, and the revision safety net">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 480" font-family="system-ui, sans-serif" role="img" aria-label="Passwordless sign-in and roles gate the admin console. The generic revision restore screen supports bulletins, sermons, prayer sheets, announcements, and events. Custom pages create snapshots for traceability but are not on that restore screen; other edits and toggles may have no snapshot.">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
@@ -41,14 +41,16 @@
   <text x="703" y="284" font-size="13" fill="#232630" text-anchor="middle">scheduling for their team</text>
 
   <!-- Console + revisions -->
-  <rect x="30" y="356" width="360" height="90" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="210" y="388" font-size="15" font-weight="600" fill="#232630" text-anchor="middle">/admin console</text>
-  <text x="210" y="412" font-size="13" fill="#565B6B" text-anchor="middle">Dashboard · content · prayer wall ·</text>
-  <text x="210" y="430" font-size="13" fill="#565B6B" text-anchor="middle">people · serve · settings (tabs by role)</text>
-  <rect x="440" y="356" width="360" height="90" rx="8" fill="#2F7A4D"/>
-  <text x="620" y="388" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">Every save snapshots the old version</text>
-  <text x="620" y="412" font-size="13" fill="#FFFFFF" text-anchor="middle">one-click restore of any version</text>
-  <text x="620" y="430" font-size="13" fill="#DDD9CF" text-anchor="middle">nothing is ever lost by accident</text>
-  <line x1="390" y1="401" x2="438" y2="401" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="210" y1="304" x2="210" y2="354" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="342" width="360" height="116" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
+  <text x="210" y="374" font-size="15" font-weight="600" fill="#232630" text-anchor="middle">/admin console</text>
+  <text x="210" y="404" font-size="13" fill="#565B6B" text-anchor="middle">Dashboard · content · prayer wall ·</text>
+  <text x="210" y="422" font-size="13" fill="#565B6B" text-anchor="middle">people · serve · settings (tabs by role)</text>
+  <rect x="440" y="342" width="360" height="116" rx="8" fill="#2F7A4D"/>
+  <text x="620" y="368" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">Supported revision restore</text>
+  <text x="620" y="390" font-size="12" fill="#FFFFFF" text-anchor="middle">Bulletins · sermons · prayer sheets ·</text>
+  <text x="620" y="408" font-size="12" fill="#FFFFFF" text-anchor="middle">announcements · events</text>
+  <text x="620" y="432" font-size="11" fill="#DDD9CF" text-anchor="middle">Custom pages: snapshot / trace only, not generic restore</text>
+  <text x="620" y="448" font-size="11" fill="#DDD9CF" text-anchor="middle">Other edits and toggles may have no snapshot</text>
+  <line x1="390" y1="400" x2="438" y2="400" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="210" y1="304" x2="210" y2="340" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
 </svg>

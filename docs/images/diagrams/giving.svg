@@ -1,21 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="Giving: online card gifts come in through Stripe and offline checks and cash are recorded by the finance team, all landing in one ledger tagged by fund (General, Missions, Building); each giver sees only their own household's history, per-year totals, and recurring gifts, which they manage through the Stripe billing portal; the finance team reconciles the ledger against Stripe to flag missing, mismatched, or refunded gifts">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="system-ui, sans-serif" role="img" aria-label="Giving: the offline check-and-cash ledger is implemented for normal use. The entire online card, recurring gift, billing portal, and Stripe reconciliation branch is Preview / Stripe test mode only and cannot collect real money.">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#565B6B"/>
     </marker>
   </defs>
   <rect x="0" y="0" width="820" height="560" fill="#F7F5F0"/>
-  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">Giving: online and offline gifts, one ledger by fund</text>
+  <text x="30" y="42" font-size="22" font-weight="700" fill="#232630">Giving: offline ledger + Stripe test preview</text>
 
   <!-- Left card: how gifts come in -->
   <rect x="30" y="72" width="350" height="214" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
   <path d="M40,72 H370 Q380,72 380,82 V106 H30 V82 Q30,72 40,72 Z" fill="#31487A"/>
   <text x="46" y="94" font-size="14" font-weight="700" fill="#FFFFFF">How gifts come in</text>
 
-  <text x="46" y="132" font-size="13" font-weight="700" fill="#232630">Online &#8212; card, through Stripe</text>
-  <rect x="46" y="142" width="120" height="17" rx="8" fill="#31487A"/>
-  <text x="106" y="154" font-size="11" fill="#FFFFFF" text-anchor="middle">member or guest</text>
-  <text x="46" y="176" font-size="12" fill="#565B6B">one-time, or recurring weekly / monthly</text>
+  <text x="46" y="132" font-size="13" font-weight="700" fill="#232630">Online &#8212; Preview / Stripe test mode only</text>
+  <rect x="46" y="142" width="168" height="17" rx="8" fill="#31487A"/>
+  <text x="130" y="154" font-size="11" fill="#FFFFFF" text-anchor="middle">test card · member or guest</text>
+  <text x="46" y="176" font-size="12" fill="#565B6B">test one-time or recurring flow; no real money</text>
 
   <text x="46" y="206" font-size="13" font-weight="700" fill="#232630">Offline &#8212; check or cash</text>
   <rect x="46" y="216" width="80" height="17" rx="8" fill="#F7F5F0" stroke="#DDD9CF"/>
@@ -23,8 +23,8 @@
   <text x="132" y="228" font-size="12" fill="#565B6B">the finance team records it</text>
 
   <line x1="46" y1="244" x2="364" y2="244" stroke="#DDD9CF" stroke-width="1"/>
-  <text x="46" y="262" font-size="12" fill="#565B6B">Every gift is tagged to a fund and lands in</text>
-  <text x="46" y="278" font-size="12" fill="#565B6B">one ledger &#8212; General &#183; Missions &#183; Building.</text>
+  <text x="46" y="262" font-size="12" fill="#565B6B">Offline gifts become fund-tagged ledger rows.</text>
+  <text x="46" y="278" font-size="12" fill="#565B6B">Stripe test data only previews the online shape.</text>
 
   <!-- Right card: what each giver sees -->
   <rect x="440" y="72" width="350" height="214" rx="10" fill="#FFFFFF" stroke="#DDD9CF"/>
@@ -37,19 +37,19 @@
 
   <text x="456" y="166" font-size="13" fill="#232630">Per-year totals</text>
 
-  <text x="456" y="196" font-size="13" fill="#232630">Recurring gifts</text>
+  <text x="456" y="196" font-size="13" fill="#232630">Test recurring previews</text>
   <rect x="640" y="184" width="72" height="17" rx="8" fill="#31487A"/>
-  <text x="676" y="196" font-size="11" fill="#FFFFFF" text-anchor="middle">Manage</text>
+  <text x="676" y="196" font-size="11" fill="#FFFFFF" text-anchor="middle">Test only</text>
 
   <line x1="456" y1="220" x2="774" y2="220" stroke="#DDD9CF" stroke-width="1"/>
   <text x="456" y="240" font-size="12" fill="#565B6B">A giver sees only their own household.</text>
   <text x="456" y="258" font-size="12" fill="#565B6B">Refunds stay visible but never count in a total.</text>
-  <text x="456" y="276" font-size="12" fill="#565B6B">Card numbers are handled only by Stripe.</text>
+  <text x="456" y="276" font-size="12" fill="#565B6B">Online cards use Stripe test mode only.</text>
 
   <!-- Bottom: recurring giving flow -->
-  <text x="30" y="322" font-size="15" font-weight="700" fill="#232630">Recurring giving and reconciliation</text>
+  <text x="30" y="322" font-size="15" font-weight="700" fill="#232630">Recurring and reconciliation &#8212; test-mode preview</text>
 
-  <text x="30" y="348" font-size="12" font-weight="600" fill="#565B6B">A member sets up a recurring gift that renews on its own</text>
+  <text x="30" y="348" font-size="12" font-weight="600" fill="#565B6B">Preview / Stripe test mode only &#8212; no real renewal or charge</text>
 
   <rect x="30" y="356" width="150" height="56" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="105" y="381" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Member</text>
@@ -59,21 +59,21 @@
   <text x="207" y="376" font-size="10" fill="#565B6B" text-anchor="middle">sets up</text>
 
   <rect x="235" y="356" width="170" height="56" rx="8" fill="#31487A"/>
-  <text x="320" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Recurring gift</text>
-  <text x="320" y="399" font-size="11" fill="#DDD9CF" text-anchor="middle">weekly / monthly</text>
+  <text x="320" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Test recurring gift</text>
+  <text x="320" y="399" font-size="11" fill="#DDD9CF" text-anchor="middle">weekly / monthly preview</text>
 
   <line x1="405" y1="384" x2="459" y2="384" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="432" y="376" font-size="10" fill="#565B6B" text-anchor="middle">renews</text>
+  <text x="432" y="376" font-size="10" fill="#565B6B" text-anchor="middle">simulates</text>
 
   <rect x="460" y="356" width="170" height="56" rx="8" fill="#2F7A4D"/>
-  <text x="545" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Ledger</text>
-  <text x="545" y="399" font-size="11" fill="#FFFFFF" text-anchor="middle">a new gift row each time</text>
+  <text x="545" y="381" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">Test ledger row</text>
+  <text x="545" y="399" font-size="11" fill="#FFFFFF" text-anchor="middle">preview data only</text>
 
   <text x="655" y="380" font-size="11" fill="#565B6B">Manage anytime in the</text>
-  <text x="655" y="396" font-size="11" fill="#565B6B">Stripe billing portal &#8212;</text>
-  <text x="655" y="412" font-size="11" fill="#565B6B">update card or cancel.</text>
+  <text x="655" y="396" font-size="11" fill="#565B6B">Stripe test portal &#8212;</text>
+  <text x="655" y="412" font-size="11" fill="#565B6B">preview update / cancel.</text>
 
-  <text x="30" y="446" font-size="12" font-weight="600" fill="#565B6B">The finance team keeps the records honest</text>
+  <text x="30" y="446" font-size="12" font-weight="600" fill="#565B6B">Stripe reconciliation is also a test-mode preview</text>
 
   <rect x="30" y="454" width="180" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
   <text x="120" y="484" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Finance team</text>
@@ -82,7 +82,8 @@
   <text x="398" y="472" font-size="11" fill="#565B6B" text-anchor="middle">Reconcile &#8212; flags missing, mismatched, or refunded gifts</text>
 
   <rect x="580" y="454" width="190" height="52" rx="8" fill="#FFFFFF" stroke="#DDD9CF"/>
-  <text x="675" y="484" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Stripe</text>
+  <text x="675" y="484" font-size="13" font-weight="700" fill="#232630" text-anchor="middle">Stripe test mode</text>
 
-  <text x="30" y="536" font-size="12" fill="#565B6B">Online card gifts flow in through Stripe, offline gifts are keyed by hand &#8212; both become rows in the one fund-tagged ledger.</text>
+  <text x="30" y="532" font-size="12" fill="#565B6B">Offline check/cash ledger: implemented and usable. Online card and recurring flows: Preview / Stripe test mode only;</text>
+  <text x="30" y="548" font-size="12" fill="#565B6B">they cannot collect real money.</text>
 </svg>

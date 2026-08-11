@@ -1,17 +1,20 @@
 # Deploying to Cloudflare
 
 This is the full, from-scratch walkthrough to put Church4Christ online on Cloudflare's
-free tier, with your own domain. It takes most people under an hour the first time. If you
-would rather have an AI assistant do it, hand it this file (see the README's "Build it with
-an AI assistant").
+platform, with your own domain. The base Worker, D1, and R2 resources can start within free
+allowances; production email and usage beyond plan limits can require a paid plan. It takes
+most people under an hour the first time. If you would rather have an AI assistant do it,
+hand it this file (see the README's "Build it with an AI assistant").
 
 > **Not sure what any of this means?** Read [`cloudflare-setup.md`](./cloudflare-setup.md)
 > first — it explains, in plain language, what Cloudflare is, what it costs, and the two
 > ways to set it up. Then come back here for the exact commands.
 
-> **Cost.** A typical church site fits inside Cloudflare's **free tier** — Workers, D1, and
-> R2 all have free allowances. A custom domain is the only thing you might pay for, and only
-> if you do not already own one.
+> **Cost (August 2026 snapshot; subject to change).** Workers, D1, and R2 have free
+> allowances, but a production deployment is not guaranteed to remain free. Sending email
+> to arbitrary recipients currently requires Workers Paid. Check the official
+> [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
+> and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
 
 > **Which database?** The 14 D1-compatible modules need only Cloudflare when deployed.
 > Member Portal, Giving, and Registration select Supabase and need both Cloudflare and a
@@ -118,21 +121,28 @@ Rotate this secret if it is ever exposed; changing it signs everyone out. See
 
 Church4Christ sends transactional email (sign-in magic links, scheduling requests, the
 weekly digest) through the Cloudflare **Email** binding declared in `wrangler.jsonc`
-(`send_email`). To send real mail you must verify a sender address with Cloudflare and set
-`allowed_sender_addresses` / `EMAIL_FROM` to it — see Cloudflare's Email documentation for
-verifying a domain or address.
+(`send_email`). Before any remote send, put the sender domain on Cloudflare DNS and
+[onboard it for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/)
+in the Cloudflare dashboard. The `allowed_sender_addresses` binding option restricts which
+From addresses the Worker may use, and `EMAIL_FROM` selects the application's From address;
+neither setting onboards or verifies the sending domain. See the official
+[send-binding configuration](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
 
-**For a first trial, before email is fully set up:** add `"EMAIL_DEV_LOG": "1"` to `vars`
-in `wrangler.jsonc`. With it on, outgoing mail is **written to the Worker logs instead of
-sent**. You can watch the logs with:
+Then choose the path that matches what you are doing:
 
-```bash
-npx wrangler tail
-```
+- **Local development only:** guided Local setup writes `EMAIL_DEV_LOG=1` to `.dev.vars`.
+  Messages, including magic links, print in the `npm run dev` terminal and are not sent.
+  Do not add this setting to deployed `wrangler.jsonc` configuration.
+- **Controlled deployed testing:** after onboarding the sending domain, verify a
+  destination address in your Cloudflare account and send only to that address. Cloudflare
+  currently does not charge for sends to verified destinations.
+- **Production recipients:** after onboarding the sending domain, sending to arbitrary
+  addresses currently requires the **Workers Paid** plan. Set
+  `allowed_sender_addresses` and `EMAIL_FROM` to an address on that onboarded domain.
 
-and read the sign-in magic link straight from there — enough to complete the first admin
-sign-in (step 8) and try the site end-to-end. Turn `EMAIL_DEV_LOG` off (remove it) once real
-email is configured, so people actually receive their messages.
+These plan rules are an **August 2026 snapshot** and are subject to change. Confirm them on
+the official [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
+and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) pages.
 
 ## 6. Deploy
 
@@ -162,9 +172,10 @@ Using `church.yunfei-song.com` as the example:
 idempotent bootstrap path on both databases. Use the email you supplied to setup; do not
 insert an admin with ad-hoc SQL. Open `https://church.yunfei-song.com/en/signin`, enter that
 email, and request a link.
-The magic link is delivered by email (or, with `EMAIL_DEV_LOG=1`, appears in `wrangler tail`).
-Click it and you are in as an admin. From there, set your church's name, address, service
-times, and theme in **Settings**, and start adding content.
+The magic link is delivered by email. For a local run only, `EMAIL_DEV_LOG=1` prints it in
+the `npm run dev` terminal instead. Click it and you are in as an admin. From there, set
+your church's name, address, service times, and theme in **Settings**, and start adding
+content.
 
 ## 9. (Optional) Enable nightly backups
 
@@ -189,8 +200,9 @@ token scoped to the minimum and treat the bucket as private — see [`SECURITY.m
 
 For an extra layer, you can require Cloudflare **Access** (Zero Trust) sign-in before anyone
 can even reach `/admin`, on top of the app's own magic-link auth. This is defense in depth
-and entirely optional; the app is secure without it. Configure it in the Cloudflare Zero
-Trust dashboard as a self-hosted application covering the `/admin*` path.
+and entirely optional; it does not replace application security, dependency maintenance,
+backups, or monitoring. Configure it in the Cloudflare Zero Trust dashboard as a
+self-hosted application covering the `/admin*` path.
 
 ## Keeping it running
 
@@ -201,4 +213,6 @@ Trust dashboard as a self-hosted application covering the `/admin*` path.
   you want push-to-deploy, keep a **private** copy of the repo and add a deploy step there
   with a scoped `CLOUDFLARE_API_TOKEN` secret; your keys stay off the public internet.
 - **Update dependencies** periodically and run `npm audit` (see [`SECURITY.md`](../SECURITY.md)).
+- **Monitor and recover:** review Worker and email failures, verify scheduled backups, keep
+  an off-site copy where appropriate, and rehearse restores before an incident.
 - **Never commit** `.dev.vars` or any secret — verify before every commit.

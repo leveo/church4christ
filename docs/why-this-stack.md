@@ -22,18 +22,19 @@ claim this is right for everyone.
 
 If your church wants **zero technical involvement**, has budget for a subscription, and
 needs a deep church-management suite (giving, check-ins, membership), a mature
-commercial product is likely the better fit — see the section below. This project is
-for the churches that want **$0 cost, full control, and are fine with a little setup**.
+commercial product is likely the better fit — see the section below. This project is for
+churches that value **low starting infrastructure cost, control of their code and data,
+and are fine with some setup and ongoing operation**.
 
 ## The pain points it solves
 
 | Pain | The usual situation | What this project does |
 |---|---|---|
-| **Recurring cost** | WordPress hosting, Wix subscriptions, or per-seat/per-module SaaS fees that grow as you grow. | **$0/month** on Cloudflare's free tier. A domain (~$10–15/year) is the only likely cost. |
+| **Recurring cost** | WordPress hosting, Wix subscriptions, or per-seat/per-module SaaS fees that grow as you grow. | The base Worker, D1, and R2 resources can start within free allowances. Email to arbitrary recipients currently needs Workers Paid, and usage, a domain, Supabase, or operational services can add cost. |
 | **Vendor lock-in** | Your content and member data sit on a vendor's servers under their terms. | Your data lives in **your own account**, in open formats (a SQL database, Markdown files, plain image files) you can export anytime. |
 | **The maintenance treadmill** | WordPress needs constant plugin and security updates; a self-run server needs OS patches and monitoring. | A small, self-contained, **heavily tested** codebase with no plugin ecosystem to keep patched. Update on your schedule. |
 | **Bilingual is hard** | Multi-language is a bolt-on, a paid plugin, or two separate sites. | **Built in** from the ground up: per-field translation, a Simplified→Traditional toggle, and graceful fallback. |
-| **Volunteer scheduling is a separate tool** | A second subscription (rosters, sign-ups, reminders). | **Integrated and free**: ministries, teams, plans, sign-ups, conflict checks, reminder emails, and an iCal feed. |
+| **Volunteer scheduling is a separate tool** | A second subscription (rosters, sign-ups, reminders). | **Integrated in the codebase**: ministries, teams, plans, sign-ups, conflict checks, reminder emails, and an iCal feed. Email delivery follows the provider's plan rules. |
 | **"The volunteer who built it left"** | The site becomes unmaintainable when its one technical person moves on. | The code and docs are written to be **read and changed by an AI assistant**, so the next person can maintain it by asking, in plain language. |
 
 ## Why Cloudflare — and not a server on AWS, Azure, or GCP
@@ -57,64 +58,68 @@ balancer + TLS certificates. That means:
 
 **Cloudflare's model is different — "serverless at the edge":**
 
-- **Nothing to run or patch.** You deploy code; Cloudflare runs it. No VM, no OS, no
-  instance bill, no scaling to configure.
-- **A free tier that genuinely covers a church.** Workers, the D1 database, R2 storage,
-  email, and scheduled jobs all have free allowances (at the time of writing, on the order
-  of 100,000 requests a day) that a normal congregation stays well inside. Check
-  [Cloudflare's pricing](https://developers.cloudflare.com/workers/platform/pricing/) for
-  current numbers.
+- **No VM or OS to administer.** You deploy code and Cloudflare runs the Worker. The
+  project still needs dependency and security updates, backup and restore practice, and
+  monitoring of application, scheduled-job, and email failures.
+- **Useful free allowances for the base stack.** Workers, D1, and R2 can support evaluation
+  and smaller sites within their current limits. Email is separate: every remote send first
+  requires a sender domain on Cloudflare DNS that is onboarded for Email Sending. After
+  onboarding, verified destinations support free controlled testing, while arbitrary
+  recipients currently require Workers Paid. These are **August 2026 snapshots** and are
+  subject to change; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+  [Email Sending setup](https://developers.cloudflare.com/email-service/get-started/send-emails/),
+  and [Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
 - **Fast everywhere.** Pages are served from a location near the visitor, worldwide — which
   matters for diaspora congregations with members in other countries. A single-region
   server is slower for distant visitors unless you add (and pay for) a CDN.
-- **One platform, one config, one command.** Workers + D1 + R2 + Email + Cron are the same
-  platform, described in a single `wrangler.jsonc` file, shipped with `npm run deploy`. No
-  CI/CD pipeline or infrastructure-as-code is required to get started.
+- **One deployment integration.** Workers, D1 or Hyperdrive-to-Postgres, R2, Email, and
+  Cron are wired through Cloudflare-specific configuration and shipped with
+  `npm run deploy`. No CI/CD pipeline or infrastructure-as-code is required to get started.
 - **No egress fees on R2.** Serving images and files does not rack up bandwidth charges the
   way some object stores do.
 
 **The honest trade-offs.** The Workers runtime is an edge runtime, not a full server, and
-D1 is SQLite-scale — great for a church website, not the right tool for an app with
-millions of rows or heavy background computation. You are also choosing Cloudflare as your
-platform, so the deployment glue is Cloudflare-specific. But your **data stays portable**
-(standard SQL, Markdown, and image files), and the code is open source (GPL v3), so you are
-never trapped: you can export everything and move if you ever need to.
+D1 is SQLite-scale — useful for a church website, but not the right tool for an app with
+millions of rows or heavy background computation. The deployment glue is
+Cloudflare-specific. The open-source code and exportable SQL, Markdown, and image data give
+you meaningful control, but moving still requires manual exports, schema/data migration,
+replacement service integrations, testing, and planned downtime. There is no zero-cost or
+lossless switching guarantee.
 
 ## One database by default, a second one only if you need it
 
 Many churches can use **Cloudflare D1** — locally it needs no external account, and it runs
 all 14 D1-compatible modules. **Member Portal**, **Giving**, and **Registration** require
-Postgres, so selecting any of those features chooses Supabase. Stripe remains optional for
-installations that do not accept payments.
+Postgres, so selecting any of those features chooses Supabase. Stripe integration is
+currently limited to Preview/test-only online Giving and paid Registration flows; live
+payments are unavailable. The offline/manual giving ledger and free Registration flows do
+not depend on live Stripe processing.
 
 The second backend is **Supabase** (managed Postgres). Guided setup chooses it from the
 selected features and configures Hyperdrive. No automated D1↔Supabase content migration
-exists yet; SQL portability should not be read as a lossless-switch promise. See
+exists; moving either direction requires a manual export and migration, and SQL portability
+should not be read as a lossless-switch promise. See
 [`supabase-setup.md`](./supabase-setup.md).
 
 ## Why Astro + Tailwind + TypeScript
 
-- **Astro** renders real HTML on the server and ships **almost no JavaScript** by default.
-  For a site that is mostly content, that means pages are fast, accessible, work without
-  JavaScript, and are simple to reason about — no heavy single-page-app framework to learn
-  or maintain. Astro has first-class Cloudflare support, and its content collections give a
-  clean, Markdown-based model for evergreen pages (about, beliefs, staff, articles). The
-  few interactive pieces (the prayer-wall board, menus, the theme and language toggles) are
-  small vanilla-JavaScript "islands" that **degrade gracefully** — everything still works
-  with JavaScript turned off.
+- **Astro** renders real HTML on the server. Public pages do not ship a client framework;
+  their interactive pieces use small vanilla-JavaScript scripts. The authenticated admin
+  page builder is the deliberate exception: it loads one client-only React island. Astro
+  has first-class Cloudflare support, and its content collections give a clean,
+  Markdown-based model for evergreen pages (about, beliefs, staff, articles).
 - **Tailwind (v4)** is driven entirely by the **design-token files**. Colors, fonts, radii,
   and shadows come from `design/*.json`, so re-theming the whole site — or adding a new
   theme — is a change to one config file, checked by an automatic contrast (accessibility)
   gate. There is no sprawling hand-written stylesheet to untangle, and a lint step forbids
   hardcoded colors so the design system can't be quietly bypassed.
-- **TypeScript** catches mistakes before they ship and, just as importantly, makes the code
-  **safe for an AI assistant or a non-expert to change** — the types guide correct edits and
-  the 900+ automated tests catch regressions. That combination is what makes "maintain your
-  site by chatting with Claude Code" actually trustworthy rather than a gamble.
+- **TypeScript** catches many mistakes before they ship and makes changes easier to review —
+  the types guide edits and the automated tests cover regressions. Tests and types reduce
+  risk; they do not replace review, security updates, backups, or production monitoring.
 
-The theme throughout: **fewer moving parts.** No client framework, no plugin ecosystem, no
-server to babysit — a smaller thing that a small team (or one person and an AI) can actually
-keep running for years.
+The theme throughout: **fewer moving parts.** Public pages avoid a client framework, the
+authenticated page builder uses React where its editing model benefits from it, and there
+is no plugin ecosystem or VM to administer.
 
 ## Why not a mature church-management SaaS?
 
@@ -123,9 +128,10 @@ trying to out-feature them.** If you want a polished, zero-maintenance, deeply i
 church-management suite and you have the budget, they are an excellent choice. The
 difference is in what you optimize for:
 
-- **Cost and model.** Those tools are subscription SaaS, often priced
-  per module and scaling with congregation size and features. This project is **free and
-  yours** — no monthly bill, no per-seat math.
+- **Cost and model.** Those tools are subscription SaaS, often priced per module and
+  scaling with congregation size and features. This project's code is open source and has
+  no per-seat software fee; Cloudflare, Supabase, email, domains, and operations can still
+  create recurring costs.
 - **Ownership and control.** With SaaS, your members' data lives on the vendor's servers
   under their terms, and you customize only within what the product allows. Here you own the
   **database and the code**, and you can change anything.
@@ -133,8 +139,8 @@ difference is in what you optimize for:
   operations (giving, check-ins, membership). The **public-facing website** is often a
   separate problem — many churches pair a management tool with WordPress or Wix for the
   public site, which brings back exactly the cost and upkeep this project avoids. This
-  project unifies the **public site + content CMS + volunteer scheduling** in one free,
-  owned codebase.
+  project unifies the **public site + content CMS + volunteer scheduling** in one
+  self-controlled codebase.
 - **Language and customization.** Bilingual and immigrant-church needs (English + Chinese,
   Simplified and Traditional) are often poorly served by template-based SaaS. Here they are
   a core, fully-customizable feature.
@@ -143,9 +149,9 @@ difference is in what you optimize for:
 church-management features (online giving, check-in kiosks, a full membership database), and
 owning the code is not a priority.
 
-**Choose this project when:** you want $0 hosting cost, full control of your content and
-data, a fast bilingual public site, and you are comfortable with a one-time setup — or you
-have an AI assistant to do it for you.
+**Choose this project when:** you want control of your content and data, a low-cost path for
+smaller workloads, a fast bilingual public site, and you are prepared for setup plus
+ongoing dependency, security, backup, and monitoring work.
 
 ---
 
