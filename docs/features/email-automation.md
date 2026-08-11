@@ -64,12 +64,16 @@ editable, in both languages, so the messages sound like your church rather than 
 whether the binding accepted it, failed, or (in local development) only logged it. An `email_log`
 row is evidence of a send attempt, not proof that the message reached an inbox.
 
-**Four scheduled jobs.** The shared schedule runs daily **reminders**, the weekly **digest**, an
-hourly **attendance-email** pass that attempts to send eligible group admins a tracker link after
-a meeting, and — separate from email entirely — a nightly **backup** that exports your database
-to storage.
-The backup sends no mail; it simply keeps a safe copy, and it skips itself quietly if backups
-have not been configured.
+**Four triggers per database provider.** Three triggers are shared: daily **reminders**
+(`0 13 * * *`), the weekly **digest** (`0 14 * * 4`), and an hourly **attendance-email** pass
+(`0 * * * *`) that attempts to send eligible group admins a tracker link after a meeting. The
+fourth trigger is provider-specific: D1 runs a nightly database **backup** (`0 9 * * *`) to R2,
+while Supabase runs the Preview/test-mode Stripe recovery path every five minutes
+(`*/5 * * * *`).
+
+Neither provider-specific trigger sends email. The D1 backup skips itself quietly if backup
+credentials are not configured. The Supabase recovery trigger belongs only to the repository's
+Stripe Preview/test path; it does not make live payments production-ready.
 
 **Development mode.** When the site is running locally with `EMAIL_DEV_LOG=1`, messages are
 printed to the `npm run dev` terminal (magic link included) and marked as `devlog` in the log,
@@ -88,10 +92,10 @@ instead of being sent. This setting is terminal-only and must not be treated as 
 
 ## How it fits together
 
-The diagram shows the triggers on the left, the single choke point in the middle, the local
-dev-log and remote-send branches on the right, and the separate backup cron below.
+The diagram shows the mail triggers on the left, the single choke point in the middle, the local
+dev-log and remote-send branches on the right, and each provider's distinct fourth trigger below.
 
-![Triggers to the email choke point, plus the backup cron](../images/diagrams/email-automation.svg)
+![Mail triggers to the email choke point, plus the provider-specific D1 backup or Supabase test-mode Stripe recovery trigger](../images/diagrams/email-automation.svg)
 
 ## For developers
 
@@ -101,10 +105,11 @@ dev-log and remote-send branches on the right, and the separate backup cron belo
 - **Touchpoints:** `src/lib/notify.ts` (magic link, scheduling request, decline, application
   received/result), `src/lib/digest.ts` (`sendReminders`, `sendWeeklyDigest`), and
   `src/lib/groupAttendance.ts` (`sendAttendanceEmails`).
-- **Shared crons:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts` — reminders
-  `0 13 * * *`, digest `0 14 * * 4`, attendance `0 * * * *`, and backup `0 9 * * *`. The backup
-  itself is `src/lib/backup.ts` (`runBackup`, D1 → R2, skips gracefully without
-  `D1_EXPORT_TOKEN`).
+- **Scheduled triggers:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts`. Both
+  providers run reminders (`0 13 * * *`), digest (`0 14 * * 4`), and attendance
+  (`0 * * * *`). D1's fourth trigger is backup (`0 9 * * *`) via `src/lib/backup.ts`
+  (`runBackup`, D1 → R2, skips gracefully without `D1_EXPORT_TOKEN`). Supabase's fourth trigger
+  is the Preview/test-mode Stripe recovery path (`*/5 * * * *`).
 - **Rules, templates, log:** `src/lib/emailSettingsDb.ts` (`listRules`, `setRule`, templates,
   `listEmailLog`, `fillTemplate`) behind `src/components/admin/EmailTab.astro`.
 - **Tests:** `test/email.test.ts`, `test/notify.test.ts`, `test/digest.test.ts`,
