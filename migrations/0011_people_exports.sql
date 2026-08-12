@@ -7,7 +7,20 @@ CREATE TABLE audit_events (
   action_kind TEXT NOT NULL
     CHECK (action_kind IN ('people_notes_export_generated')),
   structural_counts_json TEXT NOT NULL
-    CHECK (length(structural_counts_json) BETWEEN 2 AND 256),
+    CHECK (
+      length(structural_counts_json) BETWEEN 2 AND 256
+      AND CASE WHEN json_valid(structural_counts_json) THEN
+        json_type(structural_counts_json) = 'object'
+        AND json_type(structural_counts_json, '$.people') = 'integer'
+        AND json_type(structural_counts_json, '$.notes') = 'integer'
+        AND json_extract(structural_counts_json, '$.people') BETWEEN 0 AND 5000
+        AND json_extract(structural_counts_json, '$.notes') BETWEEN 0 AND 5000
+        AND structural_counts_json = json_object(
+          'people', json_extract(structural_counts_json, '$.people'),
+          'notes', json_extract(structural_counts_json, '$.notes')
+        )
+      ELSE 0 END
+    ),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

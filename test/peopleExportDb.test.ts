@@ -132,11 +132,11 @@ describe('portable export migration', () => {
 
     await expect(env.DB.prepare(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
-      VALUES (999, 'people_notes_export_generated', '{}')
+      VALUES (999, 'people_notes_export_generated', '{"people":0,"notes":0}')
     `).run()).rejects.toThrow();
     await expect(env.DB.prepare(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
-      VALUES (1, 'other_kind', '{}')
+      VALUES (1, 'other_kind', '{"people":0,"notes":0}')
     `).run()).rejects.toThrow();
     await expect(env.DB.prepare(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
@@ -146,6 +146,48 @@ describe('portable export migration', () => {
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
       VALUES (?, 'people_notes_export_generated', ?)
     `).bind(1, 'x'.repeat(257)).run()).rejects.toThrow();
+  });
+
+  it('accepts only canonical numeric people/notes JSON at the database boundary', async () => {
+    await env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Actor', 'actor@example.com')")
+      .run();
+    for (const counts of [
+      '{"people":0,"notes":0}',
+      '{"people":5000,"notes":5000}',
+    ]) {
+      await expect(env.DB.prepare(`
+        INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
+        VALUES (1, 'people_notes_export_generated', ?)
+      `).bind(counts).run()).resolves.not.toThrow();
+    }
+
+    for (const counts of [
+      'not-json-private@example.com',
+      '[]',
+      '{}',
+      '{"people":1}',
+      '{"people":1,"notes":1,"body":"PRIVATE PASTORAL NOTE"}',
+      '{"people":"1","notes":1}',
+      '{"people":true,"notes":1}',
+      '{"people":1,"notes":null}',
+      '{"people":1.5,"notes":1}',
+      '{"people":-1,"notes":1}',
+      '{"people":1,"notes":5001}',
+    ]) {
+      await expect(env.DB.prepare(`
+        INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
+        VALUES (1, 'people_notes_export_generated', ?)
+      `).bind(counts).run()).rejects.toThrow();
+    }
+
+    const { results } = await env.DB.prepare(`
+      SELECT structural_counts_json FROM audit_events ORDER BY id
+    `).all<{ structural_counts_json: string }>();
+    expect(results).toEqual([
+      { structural_counts_json: '{"people":0,"notes":0}' },
+      { structural_counts_json: '{"people":5000,"notes":5000}' },
+    ]);
+    expect(JSON.stringify(results)).not.toMatch(/PRIVATE PASTORAL NOTE|private@example/i);
   });
 });
 
@@ -212,6 +254,30 @@ describe('loadCanonicalPeopleExport', () => {
     expect(result.counts.issues).toBeGreaterThan(0);
     expect(Object.values(result.counts).every(Number.isSafeInteger)).toBe(true);
     expect(JSON.stringify(result)).not.toMatch(/csv|Deleted Member|Malformed Household|deleted@example/i);
+  });
+
+  it('counts every membership row attached to a soft-deleted household and returns no CSV or deleted-household PII', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Live Person', 'live@example.com')"),
+      env.DB.prepare("INSERT INTO households (id, name, deleted_at) VALUES (10, 'Private Deleted Household', '2026-01-01')"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (100, 10, 1, 'Live Person', 'adult', 1)"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, NULL, 'Private Deleted Dependent', 'child', 0)"),
+    ]);
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY);
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBe(2);
+    expect(source.people).toEqual([expect.objectContaining({
+      email: 'live@example.com',
+      household: null,
+    })]);
+    expect(source.dependents).toEqual([]);
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 1, dependents: 0, households: 0, issues: 2 },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/csv|Private Deleted Household|Private Deleted Dependent|live@example/i);
   });
 
   it('keeps equal normalized household names and Unicode ordering deterministic', async () => {

@@ -209,7 +209,10 @@ export async function loadCanonicalPeopleExport(
       integrityIssues += 1;
       continue;
     }
-    if (!membership.householdLive) continue;
+    if (!membership.householdLive) {
+      integrityIssues += 1;
+      continue;
+    }
     const household = householdsById.get(membership.householdId);
     if (!household) {
       integrityIssues += 1;

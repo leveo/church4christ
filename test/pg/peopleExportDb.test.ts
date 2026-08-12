@@ -59,11 +59,11 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
 
     await expect(sql.unsafe(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
-      VALUES (999, 'people_notes_export_generated', '{}')
+      VALUES (999, 'people_notes_export_generated', '{"people":0,"notes":0}')
     `)).rejects.toMatchObject({ code: '23503' });
     await expect(sql.unsafe(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
-      VALUES (1, 'other_kind', '{}')
+      VALUES (1, 'other_kind', '{"people":0,"notes":0}')
     `)).rejects.toMatchObject({ code: '23514' });
     await expect(sql.unsafe(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
@@ -86,5 +86,61 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
       action_kind: 'people_notes_export_generated',
       structural_counts_json: '{"people":2,"notes":4}',
     }]);
+  });
+
+  it('rejects every non-canonical or non-integer audit count shape at the database boundary', async () => {
+    await sql.unsafe("INSERT INTO people (id, display_name, email) VALUES (1, 'Actor', 'actor@example.com')");
+    for (const counts of [
+      '{"people":0,"notes":0}',
+      '{"people":5000,"notes":5000}',
+    ]) {
+      await expect(sql.unsafe(`
+        INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
+        VALUES (1, 'people_notes_export_generated', $1)
+      `, [counts])).resolves.not.toThrow();
+    }
+    for (const counts of [
+      'not-json-private@example.com',
+      '[]',
+      '{}',
+      '{"people":1}',
+      '{"people":1,"notes":1,"body":"PRIVATE PASTORAL NOTE"}',
+      '{"people":"1","notes":1}',
+      '{"people":true,"notes":1}',
+      '{"people":1,"notes":null}',
+      '{"people":1.5,"notes":1}',
+      '{"people":-1,"notes":1}',
+      '{"people":1,"notes":5001}',
+    ]) {
+      await expect(sql.unsafe(`
+        INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
+        VALUES (1, 'people_notes_export_generated', $1)
+      `, [counts])).rejects.toBeDefined();
+    }
+
+    const rows = await sql.unsafe('SELECT structural_counts_json FROM audit_events ORDER BY id');
+    expect(rows).toEqual([
+      { structural_counts_json: '{"people":0,"notes":0}' },
+      { structural_counts_json: '{"people":5000,"notes":5000}' },
+    ]);
+  });
+
+  it('fails closed for every membership row attached to a soft-deleted household', async () => {
+    await db.batch([
+      db.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Live Person', 'live@example.com')"),
+      db.prepare("INSERT INTO households (id, name, deleted_at) VALUES (10, 'Private Deleted Household', '2026-01-01')"),
+      db.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (100, 10, 1, 'Live Person', 'adult', 1)"),
+      db.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, NULL, 'Private Deleted Dependent', 'child', 0)"),
+    ]);
+
+    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY);
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBe(2);
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 1, dependents: 0, households: 0, issues: 2 },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/csv|Private Deleted Household|Private Deleted Dependent|live@example/i);
   });
 });

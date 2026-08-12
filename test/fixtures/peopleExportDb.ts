@@ -62,11 +62,6 @@ export async function seedPortableExportFixture(db: AppDb): Promise<void> {
       ) VALUES (?, ?, NULL, ?, ?, 0)
     `).bind(102, 10, '=Formula Child', 'child'),
     db.prepare(`
-      INSERT INTO household_members (
-        id, household_id, person_id, display_name, role, is_primary
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(103, 11, 4, 'Ignored Deleted Household Link', 'adult', 1),
-    db.prepare(`
       INSERT INTO person_notes (id, person_id, author_email, body, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).bind(200, 1, 'former.author@example.com', '=Call after service', '2026-08-10 09:00:00'),
