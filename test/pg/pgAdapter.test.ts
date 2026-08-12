@@ -49,6 +49,36 @@ describe.skipIf(!hasPg)('PgAdapter', () => {
     expect(r1.meta.changes).toBe(1);
     expect((r2.results[0] as { c: number }).c).toBeGreaterThan(0);
   });
+  it('snapshotBatch() holds one repeatable-read snapshot across concurrent commits', async () => {
+    await db.prepare('INSERT INTO t (name, n) VALUES (?, ?)').bind('snapshot-row', 1).run();
+    const concurrent = pgClient();
+    try {
+      const snapshot = db.snapshotBatch([
+        db.prepare("SELECT n, pg_sleep(0.4) FROM t WHERE name = 'snapshot-row'"),
+        db.prepare("SELECT n FROM t WHERE name = 'snapshot-row'"),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await concurrent.unsafe("UPDATE t SET n = 2 WHERE name = 'snapshot-row'");
+
+      const [first, second] = await snapshot;
+
+      expect(first.results).toEqual([expect.objectContaining({ n: 1 })]);
+      expect(second.results).toEqual([{ n: 1 }]);
+      expect(await db.prepare("SELECT n FROM t WHERE name = 'snapshot-row'").first<number>('n')).toBe(2);
+    } finally {
+      await concurrent.end();
+    }
+  });
+  it('snapshotBatch() is read-only without changing ordinary batch write behavior', async () => {
+    await expect(db.snapshotBatch([
+      db.prepare("INSERT INTO t (name, n) VALUES ('snapshot-write', 1)"),
+    ])).rejects.toMatchObject({ code: '25006' });
+    expect(await db.prepare("SELECT 1 FROM t WHERE name = 'snapshot-write'").first()).toBeNull();
+
+    await expect(db.batch([
+      db.prepare("INSERT INTO t (name, n) VALUES ('ordinary-write', 1)"),
+    ])).resolves.not.toThrow();
+  });
   it('unique violations surface postgres code 23505', async () => {
     const err = await db.prepare('INSERT INTO t (name) VALUES (?)').bind('a').run().catch((e) => e);
     expect((err as { code?: string }).code).toBe('23505');

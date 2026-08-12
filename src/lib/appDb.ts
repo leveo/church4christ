@@ -17,6 +17,27 @@ export interface AppStatement {
 export interface AppDb {
   prepare(sql: string): AppStatement;
   batch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]>;
+  /** Optional stronger read seam. D1's transactional batch is the fallback. */
+  snapshotBatch?<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]>;
+}
+
+export type SnapshotBackend = 'd1' | 'supabase';
+
+export function assertSnapshotBatchSupport(db: AppDb, backend: SnapshotBackend): void {
+  if (backend === 'supabase' && typeof db.snapshotBatch !== 'function') {
+    throw new Error('export_snapshot_unavailable');
+  }
+}
+
+export function readSnapshotBatch<T = unknown>(
+  db: AppDb,
+  backend: SnapshotBackend,
+  statements: AppStatement[],
+): Promise<AppDbResult<T>[]> {
+  assertSnapshotBatchSupport(db, backend);
+  return db.snapshotBatch
+    ? db.snapshotBatch<T>(statements)
+    : db.batch<T>(statements);
 }
 
 // Compile-time proof that the real D1 binding satisfies AppDb — if a future

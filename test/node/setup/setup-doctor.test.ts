@@ -33,6 +33,7 @@ const SUPABASE_MIGRATIONS = [
   '0008_page_builder.sql',
   '0009_member_portal.sql',
   '0010_stripe_webhook_events.sql',
+  '0011_people_exports.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -260,7 +261,7 @@ describe('doctor database check', () => {
       ['database.d1-migrations-unavailable', 'info'], ['database.ok', 'info'],
     ]);
     const supabase = { ...baseManifest, preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
-    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => [SUPABASE_MIGRATIONS[9], SUPABASE_MIGRATIONS[8], SUPABASE_MIGRATIONS[0], 'ignore.example', ...SUPABASE_MIGRATIONS.slice(1, 8)] });
+    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => [SUPABASE_MIGRATIONS.at(-1)!, SUPABASE_MIGRATIONS.at(-2)!, SUPABASE_MIGRATIONS[0], 'ignore.example', ...SUPABASE_MIGRATIONS.slice(1, -2)] });
     expect(pg).toEqual([expect.objectContaining({ code: 'database.ok', severity: 'info' })]);
   });
 
@@ -309,7 +310,9 @@ describe('doctor database check', () => {
     ]));
     expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
-    expect(TABLES_BY_CAPABILITY.people).toEqual(expect.arrayContaining(['households', 'household_members', 'person_notes']));
+    expect(TABLES_BY_CAPABILITY.people).toEqual([
+      'households', 'household_members', 'person_notes', 'audit_events',
+    ]);
     expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat(), ...Object.values(SUPABASE_TABLES_BY_CAPABILITY).flat()])];

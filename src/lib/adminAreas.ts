@@ -52,6 +52,9 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   // The directory remains a people-basic default, but bulk import is a full
   // people-management capability. Longest-prefix matching keeps the split.
   ['/admin/people/import', 'people'],
+  ['/admin/people/export', 'people'],
+  ['/admin/people/export.csv', 'people'],
+  ['/admin/people/export-notes', 'people'],
   ['/admin/people', 'people-basic'],
   ['/admin/groups', 'groups'],
   ['/admin/children', 'children'],

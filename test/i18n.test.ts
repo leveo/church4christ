@@ -195,6 +195,59 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     }
   });
 
+  it('provides complete portable-export and sensitive-notes copy in both locales', () => {
+    const required = [
+      'admin.peopleExport.standardTitle',
+      'admin.peopleExport.standardBody',
+      'admin.peopleExport.standardDownload',
+      'admin.peopleExport.discoverySummary',
+      'admin.peopleExport.discoveryParts',
+      'admin.peopleExport.discoveryRows',
+      'admin.peopleExport.discoveryHouseholds',
+      'admin.peopleExport.discoveryPart',
+      'admin.peopleExport.discoveryDownload',
+      'admin.peopleExport.discoveryRepairTitle',
+      'admin.peopleExport.discoveryRepairBody',
+      'admin.peopleExport.discoveryIssues',
+      'admin.peopleExport.discoveryErrorTitle',
+      'admin.peopleExport.discoveryErrorBody',
+      'admin.peopleExport.notesTitle',
+      'admin.peopleExport.notesBody',
+      'admin.peopleExport.notesWarning',
+      'admin.peopleExport.notesAudit',
+      'admin.peopleExport.notesAcknowledge',
+      'admin.peopleExport.notesDownload',
+      'admin.peopleExport.back',
+    ] as const;
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of required) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
+    expect(en['admin.peopleExport.standardBody']).toMatch(/pastoral notes/i);
+    expect(en['admin.peopleExport.standardBody']).toMatch(/roles|permissions|security/i);
+    expect(en['admin.peopleExport.standardBody']).toMatch(/multiple.*part/i);
+    expect(zh['admin.peopleExport.standardBody']).toContain('牧养记录');
+    expect(zh['admin.peopleExport.standardBody']).toMatch(/角色|权限|安全/);
+    expect(zh['admin.peopleExport.standardBody']).toMatch(/多个.*分卷|多.*文件/);
+
+    expect(en['admin.peopleExport.notesBody']).toMatch(/sensitive/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/note (?:text|body)|pastoral-note text/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/email/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/secure/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/identity/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/time/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/count/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/note (?:text|body).*(?:never|not).*audit|never.*note (?:text|body).*audit/i);
+
+    expect(zh['admin.peopleExport.notesBody']).toContain('敏感');
+    expect(zh['admin.peopleExport.notesBody']).toMatch(/牧养记录全文|牧养记录正文/);
+    expect(zh['admin.peopleExport.notesBody']).toContain('邮箱');
+    expect(zh['admin.peopleExport.notesBody']).toContain('安全');
+    expect(zh['admin.peopleExport.notesAudit']).toContain('身份');
+    expect(zh['admin.peopleExport.notesAudit']).toContain('时间');
+    expect(zh['admin.peopleExport.notesAudit']).toMatch(/数量|资料数量/);
+    expect(zh['admin.peopleExport.notesAudit']).toMatch(/正文.*不会.*审计|不会.*正文.*审计/);
+  });
+
   it('discloses D1 Free and maximum-import atomicity limits in both locales', () => {
     const enNotice = en['admin.peopleImport.d1Notice'];
     expect(enNotice).toMatch(/\b50\b/);

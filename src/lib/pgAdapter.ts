@@ -104,4 +104,24 @@ export class PgAdapter implements AppDb {
       return out;
     }) as Promise<AppDbResult<T>[]>;
   }
+
+  /** One consistent cross-statement read snapshot; ordinary write batches remain unchanged. */
+  async snapshotBatch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]> {
+    const stmts = statements as PgStatement[];
+    return this.sql.begin('isolation level repeatable read read only', async (tx) => {
+      const out: AppDbResult<T>[] = [];
+      for (const statement of stmts) {
+        const rows = await tx.unsafe(
+          translatePlaceholders(statement.sqlText),
+          statement.params as never[],
+        );
+        out.push({
+          results: rows as unknown as T[],
+          meta: { changes: rows.count ?? 0 },
+          success: true,
+        });
+      }
+      return out;
+    }) as Promise<AppDbResult<T>[]>;
+  }
 }
