@@ -4,6 +4,8 @@ import { isValidDateStr } from './dates';
 import { normalizeNewcomerEmail, normalizeNewcomerPhone, type NewcomerFieldType, type NewcomerQueueFilters } from './newcomerValidation';
 import type { SessionUser } from './types';
 
+const UTF8 = new TextEncoder();
+
 export class NewcomerInvalidError extends Error {
   readonly code = 'newcomer_invalid' as const;
   constructor() { super('Newcomer input is invalid'); this.name = 'NewcomerInvalidError'; }
@@ -34,7 +36,8 @@ export const NEWCOMER_DB_LIMITS = {
   customFields: 100,
   allFields: 107,
   optionsPerField: 100,
-  optionsTotal: 1_000,
+  activeOptions: 1_000,
+  allOptions: 10_700,
   serviceTypes: 100,
   answers: 100,
   notes: 5_000,
@@ -74,7 +77,18 @@ function capturedArray(value: unknown, maximumWithSentinel: number): unknown[] |
     if (!lengthDescriptor || !('value' in lengthDescriptor) || typeof lengthDescriptor.value !== 'number') return null;
     const length = lengthDescriptor.value;
     if (!Number.isSafeInteger(length) || length < 0 || length > maximumWithSentinel) return null;
-    if (Reflect.ownKeys(descriptors).length !== length + 1) return null;
+    // postgres.js returns a real Array with a fixed set of own, data-only
+    // RowList metadata properties.  Accept those without dereferencing them;
+    // every index and the length are still snapshotted exactly once below.
+    const rowListMetadata = new Set(['count', 'state', 'command', 'columns', 'statement']);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length') continue;
+      if (typeof key !== 'string') return null;
+      const index = /^(?:0|[1-9]\d*)$/.test(key) ? Number(key) : null;
+      if (index !== null && index < length) continue;
+      const descriptor = descriptors[key];
+      if (!rowListMetadata.has(key) || !descriptor || !('value' in descriptor)) return null;
+    }
     const output: unknown[] = [];
     for (let index = 0; index < length; index += 1) {
       const descriptor = descriptors[String(index)];
@@ -215,6 +229,7 @@ function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean
   const statusWhere = activeOnly ? 'WHERE status.active=1' : '';
   const fieldWhere = activeOnly ? 'WHERE field.active=1 AND field.id>7' : '';
   const optionWhere = activeOnly ? 'WHERE option.active=1 AND field.active=1 AND field.id>7' : '';
+  const optionLimit = activeOnly ? 1_001 : 10_701;
   return [
     db.prepare(`
       SELECT status.id,status.key,status.category,status.sort,status.active,status.is_initial,
@@ -248,7 +263,7 @@ function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean
         ON english.field_id=option.field_id AND english.value=option.value AND english.locale='en'
       ${optionWhere}
       ORDER BY option.field_id,option.sort,option.value
-      LIMIT 1001
+      LIMIT ${optionLimit}
     `).bind(requested),
     db.prepare(`
       SELECT service.id,COALESCE(localized.name,english.name,'service-' || service.id) AS label
@@ -261,21 +276,35 @@ function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean
       ORDER BY service.sort,service.id
       LIMIT 101
     `).bind(requested),
+    db.prepare(`
+      SELECT option.field_id
+      FROM newcomer_field_options option
+      WHERE option.active=1
+      ORDER BY option.field_id,option.sort,option.value
+      LIMIT 1001
+    `),
   ];
 }
 
 function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): NewcomerAdminConfiguration {
-  const results = batchResults(resultsValue, 4);
+  const results = batchResults(resultsValue, 5);
   const statusRows = resultRows(results[0], 101);
   const fieldRows = resultRows(results[1], 108);
-  const optionRows = resultRows(results[2], 1001);
+  const optionRows = resultRows(results[2], activeOnly ? 1001 : 10_701);
   const serviceRows = resultRows(results[3], 101);
+  const activeOptionRows = resultRows(results[4], 1001);
   if (statusRows.length > NEWCOMER_DB_LIMITS.statuses) throw new NewcomerLimitError();
   const fieldMaximum = activeOnly ? NEWCOMER_DB_LIMITS.customFields : NEWCOMER_DB_LIMITS.allFields;
-  if (fieldRows.length > fieldMaximum || optionRows.length > NEWCOMER_DB_LIMITS.optionsTotal) {
+  const optionMaximum = activeOnly ? NEWCOMER_DB_LIMITS.activeOptions : NEWCOMER_DB_LIMITS.allOptions;
+  if (fieldRows.length > fieldMaximum || optionRows.length > optionMaximum
+    || activeOptionRows.length > NEWCOMER_DB_LIMITS.activeOptions) {
     throw new NewcomerLimitError();
   }
   if (serviceRows.length > NEWCOMER_DB_LIMITS.serviceTypes) throw new NewcomerLimitError();
+  for (const value of activeOptionRows) {
+    const row = plainRow(value, ['field_id']);
+    if (!row || positiveId(row.field_id) === null) throw new NewcomerPersistenceError();
+  }
 
   const statuses: NewcomerConfigurationStatus[] = statusRows.map((value) => {
     const row = plainRow(value, ['id', 'key', 'category', 'sort', 'active', 'is_initial', 'label']);
@@ -418,6 +447,8 @@ function queueRow(value: unknown): NewcomerQueueRow {
   const name = row ? text(row.name, 200) : null;
   const email = row ? text(row.email, 254, true) : null;
   const phone = row ? text(row.phone, 16, true) : null;
+  const normalizedEmail = email === null ? null : normalizeNewcomerEmail(email);
+  const normalizedPhone = phone === null ? null : normalizeNewcomerPhone(phone);
   const selectedLocale = row ? locale(row.locale) : null;
   const visitDate = row && typeof row.visit_date === 'string' && isValidDateStr(row.visit_date) ? row.visit_date : null;
   const serviceTypeId = row?.service_type_id === null ? null : positiveId(row?.service_type_id);
@@ -438,6 +469,10 @@ function queueRow(value: unknown): NewcomerQueueRow {
     !id || !name || !selectedLocale || !visitDate || source === null || statusId === null || !statusLabel
     || version === null || version < 0 || !createdAt || !updatedAt
     || (row?.service_type_id !== null && serviceTypeId === null)
+    || (serviceTypeId !== null && serviceLabel === null)
+    || (serviceTypeId === null && serviceLabel !== null)
+    || (row?.email !== null && (email === null || !normalizedEmail?.ok || normalizedEmail.value !== email))
+    || (row?.phone !== null && (phone === null || !normalizedPhone?.ok || normalizedPhone.value !== phone))
     || (row?.assignee_person_id !== null && assigneePersonId === null)
     || (row?.next_follow_up_date !== null && nextFollowUpDate === null)
     || (row?.contact_consent_at !== null && consentAt === null)
@@ -505,7 +540,7 @@ export async function listNewcomerQueue(
     const result = await db.prepare(`
       SELECT submission.id,submission.name,submission.email,submission.phone,submission.locale,
              submission.visit_date,submission.service_type_id,
-             COALESCE(service_local.name,service_en.name) AS service_label,
+             COALESCE(service_local.name,service_en.name,'service-' || service.id) AS service_label,
              submission.contact_consent_at,submission.source,submission.status_id,
              COALESCE(status_local.label,status_en.label,status.key) AS status_label,
              submission.assignee_person_id,submission.next_follow_up_date,submission.version,
@@ -575,7 +610,7 @@ export async function getNewcomerDetail(
     db.prepare(`
       SELECT submission.id,submission.name,submission.email,submission.phone,submission.locale,
              submission.visit_date,submission.service_type_id,
-             COALESCE(service_local.name,service_en.name) AS service_label,
+             COALESCE(service_local.name,service_en.name,'service-' || service.id) AS service_label,
              submission.contact_consent_at,submission.source,submission.status_id,
              COALESCE(status_local.label,status_en.label,status.key) AS status_label,
              submission.assignee_person_id,submission.next_follow_up_date,submission.version,
@@ -696,19 +731,26 @@ export async function findNewcomerDuplicateHints(
   try {
     const result = await db.prepare(`
       SELECT kind_order,kind,record_id,status_id FROM (
-        SELECT 1 AS kind_order,'person_live' AS kind,CAST(person.id AS TEXT) AS record_id,NULL AS status_id
+        SELECT 1 AS kind_order,'person_live' AS kind,CAST(person.id AS TEXT) AS record_id,
+          CAST(NULL AS INTEGER) AS status_id
         FROM people person
-        WHERE person.deleted_at IS NULL AND ((? IS NOT NULL AND person.email=?) OR (? IS NOT NULL AND person.phone=?))
+        WHERE person.deleted_at IS NULL
+          AND ((CAST(? AS TEXT) IS NOT NULL AND person.email=?)
+            OR (CAST(? AS TEXT) IS NOT NULL AND person.phone=?))
         UNION ALL
-        SELECT 2 AS kind_order,'person_deleted' AS kind,CAST(person.id AS TEXT) AS record_id,NULL AS status_id
+        SELECT 2 AS kind_order,'person_deleted' AS kind,CAST(person.id AS TEXT) AS record_id,
+          CAST(NULL AS INTEGER) AS status_id
         FROM people person
-        WHERE person.deleted_at IS NOT NULL AND ((? IS NOT NULL AND person.email=?) OR (? IS NOT NULL AND person.phone=?))
+        WHERE person.deleted_at IS NOT NULL
+          AND ((CAST(? AS TEXT) IS NOT NULL AND person.email=?)
+            OR (CAST(? AS TEXT) IS NOT NULL AND person.phone=?))
         UNION ALL
-        SELECT 3 AS kind_order,'submission_open' AS kind,submission.id AS record_id,submission.status_id
+        SELECT 3 AS kind_order,'submission_open' AS kind,CAST(submission.id AS TEXT) AS record_id,submission.status_id
         FROM newcomer_submissions submission
         JOIN newcomer_statuses status ON status.id=submission.status_id AND status.category='open'
-        WHERE submission.deleted_at IS NULL AND (? IS NULL OR submission.id<>?)
-          AND ((? IS NOT NULL AND submission.email=?) OR (? IS NOT NULL AND submission.phone=?))
+        WHERE submission.deleted_at IS NULL AND (CAST(? AS TEXT) IS NULL OR submission.id<>?)
+          AND ((CAST(? AS TEXT) IS NOT NULL AND submission.email=?)
+            OR (CAST(? AS TEXT) IS NOT NULL AND submission.phone=?))
       ) hints
       ORDER BY kind_order,record_id
       LIMIT 26
@@ -740,5 +782,380 @@ export async function findNewcomerDuplicateHints(
   } catch (error) {
     if (error instanceof NewcomerLimitError || error instanceof NewcomerPersistenceError) throw error;
     throw new NewcomerPersistenceError();
+  }
+}
+
+function assertSuperAdmin(user: SessionUser | null): asserts user is SessionUser {
+  if (!user?.isAdmin || !user.isSuperAdmin) throw new NewcomerForbiddenError();
+}
+
+function boundedSettingText(value: unknown, maximumBytes: number, nullable = false): string | null {
+  if (value === null && nullable) return null;
+  if (typeof value !== 'string') throw new NewcomerInvalidError();
+  let normalized: string;
+  try {
+    normalized = value.normalize('NFC').trim();
+  } catch {
+    throw new NewcomerInvalidError();
+  }
+  if ((!nullable && normalized.length === 0) || normalized.includes('\0') || UTF8.encode(normalized).byteLength > maximumBytes) {
+    throw new NewcomerInvalidError();
+  }
+  return normalized.length === 0 && nullable ? null : normalized;
+}
+
+function validSort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 100_000;
+}
+
+function mutationRows(result: unknown, expected: number): unknown[] {
+  const rows = resultRows(result, expected);
+  if (rows.length !== expected) throw new NewcomerConflictError();
+  return rows;
+}
+
+function databaseConflict(error: unknown): boolean {
+  try {
+    const code = error !== null && typeof error === 'object'
+      ? Object.getOwnPropertyDescriptor(error, 'code')?.value
+      : null;
+    const rendered = String(error);
+    return code === '23503' || code === '23505' || code === '23514'
+      || rendered.includes('SQLITE_CONSTRAINT')
+      || rendered.includes('FOREIGN KEY constraint failed')
+      || rendered.includes('UNIQUE constraint failed')
+      || rendered.includes('newcomer_status_')
+      || rendered.includes('newcomer_field_');
+  } catch {
+    return false;
+  }
+}
+
+function rethrowMutation(error: unknown): never {
+  if (
+    error instanceof NewcomerInvalidError
+    || error instanceof NewcomerForbiddenError
+    || error instanceof NewcomerLimitError
+    || error instanceof NewcomerConflictError
+    || error instanceof NewcomerPersistenceError
+  ) throw error;
+  if (databaseConflict(error)) throw new NewcomerConflictError();
+  throw new NewcomerPersistenceError();
+}
+
+export interface CreateNewcomerStatusInput {
+  key: string;
+  category: 'open' | 'closed';
+  sort: number;
+  active: boolean;
+  labelEn: string;
+  labelZh: string;
+}
+
+export async function createNewcomerStatus(
+  db: AppDb,
+  user: SessionUser | null,
+  input: CreateNewcomerStatusInput,
+): Promise<number> {
+  assertSuperAdmin(user);
+  const row = plainRow(input, ['key', 'category', 'sort', 'active', 'labelEn', 'labelZh']);
+  const key = row && typeof row.key === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(row.key) ? row.key : null;
+  const category = row?.category === 'open' || row?.category === 'closed' ? row.category : null;
+  const active = row ? row.active : null;
+  if (!key || !category || !validSort(row?.sort) || typeof active !== 'boolean') throw new NewcomerInvalidError();
+  const labelEn = boundedSettingText(row.labelEn, 100);
+  const labelZh = boundedSettingText(row.labelZh, 100);
+  try {
+    const statements = [
+      db.prepare(`
+        INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
+        SELECT COALESCE(MAX(id),5)+1,?1,?2,?3,?4,0 FROM newcomer_statuses
+        HAVING COUNT(*)<100
+        RETURNING id
+      `).bind(key, category, row.sort, active ? 1 : 0),
+      db.prepare(`INSERT INTO newcomer_status_i18n (status_id,locale,label)
+        SELECT id,'en',?1 FROM newcomer_statuses WHERE key=?2 RETURNING status_id`).bind(labelEn, key),
+      db.prepare(`INSERT INTO newcomer_status_i18n (status_id,locale,label)
+        SELECT id,'zh',?1 FROM newcomer_statuses WHERE key=?2 RETURNING status_id`).bind(labelZh, key),
+    ];
+    const results = batchResults(await db.batch(statements), statements.length);
+    const created = resultRows(results[0], 1);
+    if (created.length === 0) throw new NewcomerLimitError();
+    const createdRow = plainRow(created[0], ['id']);
+    const id = createdRow ? positiveId(createdRow.id) : null;
+    if (id === null || id <= 5) throw new NewcomerPersistenceError();
+    for (let index = 1; index < results.length; index += 1) mutationRows(results[index], 1);
+    return id;
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface UpdateNewcomerStatusInput {
+  id: number;
+  sort: number;
+  active: boolean;
+  initialStatusId: number;
+  labelEn: string;
+  labelZh: string;
+}
+
+export async function updateNewcomerStatus(
+  db: AppDb,
+  user: SessionUser | null,
+  input: UpdateNewcomerStatusInput,
+): Promise<void> {
+  assertSuperAdmin(user);
+  const row = plainRow(input, ['id', 'sort', 'active', 'initialStatusId', 'labelEn', 'labelZh']);
+  const id = row ? positiveId(row.id) : null;
+  const initialStatusId = row ? positiveId(row.initialStatusId) : null;
+  if (id === null || initialStatusId === null || !validSort(row?.sort) || typeof row?.active !== 'boolean') {
+    throw new NewcomerInvalidError();
+  }
+  const labelEn = boundedSettingText(row.labelEn, 100);
+  const labelZh = boundedSettingText(row.labelZh, 100);
+  const active = row.active ? 1 : 0;
+  try {
+    const statements = [
+      db.prepare(`
+        UPDATE newcomer_statuses SET is_initial=0
+        WHERE is_initial=1 AND id<>?1 AND EXISTS (
+          SELECT 1 FROM newcomer_statuses target
+          WHERE target.id=?1 AND target.category='open'
+            AND ((target.id<>?2 AND target.active=1) OR (target.id=?2 AND ?3=1))
+        )
+      `).bind(initialStatusId, id, active),
+      db.prepare(`UPDATE newcomer_statuses SET sort=?1,active=?2 WHERE id=?3 RETURNING id`)
+        .bind(row.sort, active, id),
+      db.prepare(`UPDATE newcomer_statuses SET is_initial=1
+        WHERE id=? AND category='open' AND active=1 RETURNING id`).bind(initialStatusId),
+      db.prepare(`INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (?1,'en',?2)
+        ON CONFLICT(status_id,locale) DO UPDATE SET label=excluded.label RETURNING status_id`).bind(id, labelEn),
+      db.prepare(`INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (?1,'zh',?2)
+        ON CONFLICT(status_id,locale) DO UPDATE SET label=excluded.label RETURNING status_id`).bind(id, labelZh),
+      db.prepare(`
+        INSERT INTO newcomer_status_i18n (status_id,locale,label)
+        SELECT 0,'en','guard' WHERE
+          NOT EXISTS (SELECT 1 FROM newcomer_statuses WHERE id=?1 AND sort=?2 AND active=?3) OR
+          NOT EXISTS (SELECT 1 FROM newcomer_statuses
+            WHERE id=?4 AND active=1 AND category='open' AND is_initial=1) OR
+          (SELECT COUNT(*) FROM newcomer_statuses
+            WHERE active=1 AND category='open' AND is_initial=1)<>1
+      `).bind(id, row.sort, active, initialStatusId),
+    ];
+    const results = batchResults(await db.batch(statements), statements.length);
+    mutationRows(results[1], 1);
+    mutationRows(results[2], 1);
+    mutationRows(results[3], 1);
+    mutationRows(results[4], 1);
+    if (resultRows(results[5], 1).length !== 0) throw new NewcomerPersistenceError();
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface NewcomerFieldOptionInput {
+  value: string;
+  sort: number;
+  active: boolean;
+  labelEn: string;
+  labelZh: string;
+}
+
+interface SafeOption extends NewcomerFieldOptionInput {}
+
+function safeOptions(value: unknown): SafeOption[] {
+  const candidates = capturedArray(value, NEWCOMER_DB_LIMITS.optionsPerField);
+  if (!candidates) throw new NewcomerInvalidError();
+  const options: SafeOption[] = [];
+  const values = new Set<string>();
+  for (const candidate of candidates) {
+    const row = plainRow(candidate, ['value', 'sort', 'active', 'labelEn', 'labelZh']);
+    const optionValue = row && typeof row.value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(row.value)
+      ? row.value : null;
+    if (!optionValue || values.has(optionValue) || !validSort(row?.sort) || typeof row?.active !== 'boolean') {
+      throw new NewcomerInvalidError();
+    }
+    values.add(optionValue);
+    options.push({
+      value: optionValue,
+      sort: row.sort,
+      active: row.active,
+      labelEn: boundedSettingText(row.labelEn, 100) as string,
+      labelZh: boundedSettingText(row.labelZh, 100) as string,
+    });
+  }
+  return options;
+}
+
+interface CommonFieldInput {
+  required: boolean;
+  active: boolean;
+  sort: number;
+  labelEn: string;
+  labelZh: string;
+  helpEn: string | null;
+  helpZh: string | null;
+  options: NewcomerFieldOptionInput[];
+}
+
+function safeFieldCommon(row: DataRow): CommonFieldInput {
+  if (typeof row.required !== 'boolean' || typeof row.active !== 'boolean' || !validSort(row.sort)) {
+    throw new NewcomerInvalidError();
+  }
+  return {
+    required: row.required,
+    active: row.active,
+    sort: row.sort,
+    labelEn: boundedSettingText(row.labelEn, 100) as string,
+    labelZh: boundedSettingText(row.labelZh, 100) as string,
+    helpEn: boundedSettingText(row.helpEn, 500, true),
+    helpZh: boundedSettingText(row.helpZh, 500, true),
+    options: safeOptions(row.options),
+  };
+}
+
+function optionStatements(
+  db: AppDb,
+  fieldLookup: { column: 'key' | 'id'; value: string | number },
+  options: SafeOption[],
+) {
+  const suffix = fieldLookup.column === 'key'
+    ? { insert: 'key=?4', label: 'key=?3' }
+    : { insert: "id=?4 AND fixed=0 AND type='select'", label: "id=?3 AND fixed=0 AND type='select'" };
+  return options.flatMap((option) => [
+    db.prepare(`INSERT INTO newcomer_field_options (field_id,value,sort,active)
+      SELECT id,?1,?2,?3 FROM newcomer_fields WHERE ${suffix.insert}
+      RETURNING field_id,value`).bind(option.value, option.sort, option.active ? 1 : 0, fieldLookup.value),
+    db.prepare(`INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label)
+      SELECT id,?1,'en',?2 FROM newcomer_fields WHERE ${suffix.label}
+      RETURNING field_id,value`).bind(option.value, option.labelEn, fieldLookup.value),
+    db.prepare(`INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label)
+      SELECT id,?1,'zh',?2 FROM newcomer_fields WHERE ${suffix.label}
+      RETURNING field_id,value`).bind(option.value, option.labelZh, fieldLookup.value),
+  ]);
+}
+
+export interface CreateNewcomerFieldInput extends CommonFieldInput {
+  key: string;
+  type: NewcomerFieldType;
+}
+
+export async function createNewcomerField(
+  db: AppDb,
+  user: SessionUser | null,
+  input: CreateNewcomerFieldInput,
+): Promise<number> {
+  assertSuperAdmin(user);
+  const row = plainRow(input, [
+    'key', 'type', 'required', 'active', 'sort', 'labelEn', 'labelZh', 'helpEn', 'helpZh', 'options',
+  ]);
+  const key = row && typeof row.key === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(row.key) ? row.key : null;
+  const type = row && ['text', 'textarea', 'select', 'checkbox'].includes(String(row.type))
+    ? row.type as NewcomerFieldType : null;
+  if (!row || !key || !type) throw new NewcomerInvalidError();
+  const common = safeFieldCommon(row);
+  if ((type === 'select') !== (common.options.length > 0) || (type === 'select' && !common.options.some((option) => option.active))) {
+    throw new NewcomerInvalidError();
+  }
+  const newActiveOptions = common.options.filter((option) => option.active).length;
+  try {
+    const statements = [
+      // A no-op write on one protected core row is the cross-backend mutex for
+      // the global active-option cap. D1 serializes the batch; PostgreSQL waits
+      // on this row so the following COUNT observes the preceding commit.
+      db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
+      db.prepare(`
+        INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+        SELECT COALESCE(MAX(id),7)+1,?1,?2,?3,?4,?5,0 FROM newcomer_fields
+        HAVING SUM(CASE WHEN id>7 THEN 1 ELSE 0 END)<100
+          AND (SELECT COUNT(*) FROM newcomer_field_options WHERE active=1)+?6<=1000
+        RETURNING id
+      `).bind(key, type, common.required ? 1 : 0, common.active ? 1 : 0, common.sort, newActiveOptions),
+      db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help)
+        SELECT id,'en',?1,?2 FROM newcomer_fields WHERE key=?3 RETURNING field_id`)
+        .bind(common.labelEn, common.helpEn, key),
+      db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help)
+        SELECT id,'zh',?1,?2 FROM newcomer_fields WHERE key=?3 RETURNING field_id`)
+        .bind(common.labelZh, common.helpZh, key),
+      ...optionStatements(db, { column: 'key', value: key }, common.options),
+    ];
+    const results = batchResults(await db.batch(statements), statements.length);
+    mutationRows(results[0], 1);
+    const created = resultRows(results[1], 1);
+    if (created.length === 0) throw new NewcomerLimitError();
+    const createdRow = plainRow(created[0], ['id']);
+    const id = createdRow ? positiveId(createdRow.id) : null;
+    if (id === null || id <= 7) throw new NewcomerPersistenceError();
+    for (let index = 2; index < results.length; index += 1) mutationRows(results[index], 1);
+    return id;
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface UpdateNewcomerFieldInput extends CommonFieldInput {
+  id: number;
+}
+
+export async function updateNewcomerField(
+  db: AppDb,
+  user: SessionUser | null,
+  input: UpdateNewcomerFieldInput,
+): Promise<void> {
+  assertSuperAdmin(user);
+  const row = plainRow(input, [
+    'id', 'required', 'active', 'sort', 'labelEn', 'labelZh', 'helpEn', 'helpZh', 'options',
+  ]);
+  if (!row) throw new NewcomerInvalidError();
+  const id = positiveId(row.id);
+  if (id === null) throw new NewcomerInvalidError();
+  const common = safeFieldCommon(row);
+  if (id <= 7 && (common.required || !common.active || common.options.length !== 0)) throw new NewcomerInvalidError();
+  const optionCount = common.options.length;
+  const activeOptionCount = common.options.filter((option) => option.active).length;
+  try {
+    const optionWrites = optionStatements(db, { column: 'id', value: id }, common.options);
+    const statements = [
+      db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
+      db.prepare(`
+        UPDATE newcomer_fields SET
+          required=CASE WHEN fixed=1 THEN required ELSE ?1 END,
+          active=CASE WHEN fixed=1 THEN active ELSE ?2 END,
+          sort=?3
+        WHERE id=?4 AND (
+          (fixed=1 AND ?1=0 AND ?2=1 AND ?5=0) OR
+          (fixed=0 AND ((type='select' AND ?5>0 AND ?6>0) OR (type<>'select' AND ?5=0)))
+        )
+        RETURNING id,type,fixed
+      `).bind(common.required ? 1 : 0, common.active ? 1 : 0, common.sort, id, optionCount, activeOptionCount),
+      db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (?1,'en',?2,?3)
+        ON CONFLICT(field_id,locale) DO UPDATE SET label=excluded.label,help=excluded.help RETURNING field_id`)
+        .bind(id, common.labelEn, common.helpEn),
+      db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (?1,'zh',?2,?3)
+        ON CONFLICT(field_id,locale) DO UPDATE SET label=excluded.label,help=excluded.help RETURNING field_id`)
+        .bind(id, common.labelZh, common.helpZh),
+      db.prepare(`DELETE FROM newcomer_field_option_i18n WHERE field_id=?1
+        AND EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND fixed=0)`).bind(id),
+      db.prepare(`DELETE FROM newcomer_field_options WHERE field_id=?1
+        AND EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND fixed=0)`).bind(id),
+      ...optionWrites,
+      db.prepare(`
+        INSERT INTO newcomer_field_i18n (field_id,locale,label)
+        SELECT 0,'en','guard' WHERE
+          NOT EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND required=?2 AND active=?3 AND sort=?4) OR
+          (SELECT COUNT(*) FROM newcomer_field_options WHERE field_id=?1)<>?5 OR
+          (SELECT COUNT(*) FROM newcomer_field_options WHERE active=1)>1000
+      `).bind(id, common.required ? 1 : 0, common.active ? 1 : 0, common.sort, optionCount),
+    ];
+    const results = batchResults(await db.batch(statements), statements.length);
+    mutationRows(results[0], 1);
+    mutationRows(results[1], 1);
+    mutationRows(results[2], 1);
+    mutationRows(results[3], 1);
+    for (let index = 6; index < 6 + optionWrites.length; index += 1) mutationRows(results[index], 1);
+    if (resultRows(results[results.length - 1], 1).length !== 0) throw new NewcomerPersistenceError();
+  } catch (error) {
+    rethrowMutation(error);
   }
 }

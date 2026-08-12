@@ -4,11 +4,18 @@ import type { AppDb } from '../src/lib/appDb';
 import {
   NewcomerForbiddenError,
   NewcomerLimitError,
+  NewcomerConflictError,
+  NewcomerInvalidError,
+  NewcomerPersistenceError,
+  createNewcomerField,
+  createNewcomerStatus,
   findNewcomerDuplicateHints,
   getNewcomerDetail,
   listNewcomerAdminConfiguration,
   listNewcomerFormDefinition,
   listNewcomerQueue,
+  updateNewcomerField,
+  updateNewcomerStatus,
 } from '../src/lib/newcomerDb';
 import type { SessionUser } from '../src/lib/types';
 
@@ -64,6 +71,157 @@ describe('newcomer read authorization', () => {
       email: 'private@example.test', phone: null, excludeSubmissionId: null,
     })).rejects.toBeInstanceOf(NewcomerForbiddenError);
     expect(prepares).toBe(0);
+  });
+
+  it('rejects every settings mutation before preparing SQL unless the actor is super-admin', async () => {
+    let prepares = 0;
+    const forbiddenDb = {
+      prepare() { prepares += 1; throw new Error('SQL must not be touched'); },
+      batch() { throw new Error('batch must not be touched'); },
+    } as AppDb;
+    const scoped = user();
+    await expect(createNewcomerStatus(forbiddenDb, scoped, {
+      key: 'reviewing', category: 'open', sort: 6, active: true, labelEn: 'Reviewing', labelZh: '审核中',
+    })).rejects.toBeInstanceOf(NewcomerForbiddenError);
+    await expect(updateNewcomerStatus(forbiddenDb, scoped, {
+      id: 1, sort: 1, active: true, initialStatusId: 1, labelEn: 'New', labelZh: '新朋友',
+    })).rejects.toBeInstanceOf(NewcomerForbiddenError);
+    await expect(createNewcomerField(forbiddenDb, scoped, {
+      key: 'story', type: 'textarea', required: false, active: true, sort: 8,
+      labelEn: 'Story', labelZh: '故事', helpEn: null, helpZh: null, options: [],
+    })).rejects.toBeInstanceOf(NewcomerForbiddenError);
+    await expect(updateNewcomerField(forbiddenDb, scoped, {
+      id: 1, required: false, active: true, sort: 1,
+      labelEn: 'Name', labelZh: '姓名', helpEn: null, helpZh: null, options: [],
+    })).rejects.toBeInstanceOf(NewcomerForbiddenError);
+    expect(prepares).toBe(0);
+  });
+
+  it('fails closed on accessor-backed result wrappers without invoking private getters', async () => {
+    let invoked = 0;
+    const hostileResult = { meta: { changes: 0 }, success: true } as Record<string, unknown>;
+    Object.defineProperty(hostileResult, 'results', {
+      enumerable: true,
+      get() { invoked += 1; return [{ private_contact: 'must-not-read' }]; },
+    });
+    const fakeDb = {
+      prepare() {
+        return { bind() { return this; }, first: async () => null, all: async () => hostileResult, run: async () => hostileResult };
+      },
+      batch: async () => [hostileResult, hostileResult, hostileResult, hostileResult, hostileResult],
+    } as unknown as AppDb;
+    const error = await listNewcomerAdminConfiguration(fakeDb, 'd1', user(), 'en')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(error)).not.toContain('must-not-read');
+    expect(invoked).toBe(0);
+  });
+
+  it('rejects malformed non-null contact rows without returning them as null', async () => {
+    const unsafeEmail = 'PRIVATE VALUE';
+    const result = {
+      results: [{
+        id: '10000000-0000-4000-8000-000000000001', name: 'Safe', email: unsafeEmail, phone: null,
+        locale: 'en', visit_date: '2026-08-12', service_type_id: null, service_label: null,
+        contact_consent_at: null, source: 'staff', status_id: 1, status_label: 'New',
+        assignee_person_id: null, next_follow_up_date: null, version: 0,
+        created_at: '2026-08-12 10:00:00', updated_at: '2026-08-12 10:00:00',
+      }],
+      meta: { changes: 0 },
+    };
+    const statement = { bind() { return this; }, first: async () => null, all: async () => result, run: async () => result };
+    const fakeDb = { prepare: () => statement, batch: async () => [] } as unknown as AppDb;
+    const error = await listNewcomerQueue(fakeDb, user(), 'en', { page: 1, limit: 25 }, '2026-08-12')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(error)).not.toContain(unsafeEmail);
+  });
+});
+
+describe('newcomer super-admin configuration mutations', () => {
+  const superAdmin = user({
+    role: 'admin', isAdmin: true, isSuperAdmin: true, adminAreas: [],
+  });
+
+  it('creates custom statuses and atomically switches the one active open initial', async () => {
+    const createdId = await createNewcomerStatus(env.DB, superAdmin, {
+      key: 'reviewing', category: 'open', sort: 6, active: true,
+      labelEn: 'Reviewing', labelZh: '审核中',
+    });
+    expect(createdId).toBe(6);
+    await updateNewcomerStatus(env.DB, superAdmin, {
+      id: createdId, sort: 7, active: true, initialStatusId: createdId,
+      labelEn: 'Under review', labelZh: '审核中',
+    });
+    expect(await env.DB.prepare(`SELECT id,key,category,sort,active,is_initial
+      FROM newcomer_statuses WHERE id=?`).bind(createdId).first()).toEqual({
+      id: 6, key: 'reviewing', category: 'open', sort: 7, active: 1, is_initial: 1,
+    });
+    expect(await env.DB.prepare('SELECT is_initial FROM newcomer_statuses WHERE id=1').first('is_initial')).toBe(0);
+    expect(await env.DB.prepare("SELECT label FROM newcomer_status_i18n WHERE status_id=6 AND locale='en'").first('label'))
+      .toBe('Under review');
+
+    await updateNewcomerStatus(env.DB, superAdmin, {
+      id: createdId, sort: 7, active: false, initialStatusId: 1,
+      labelEn: 'Under review', labelZh: '审核中',
+    });
+    expect(await env.DB.prepare('SELECT active,is_initial FROM newcomer_statuses WHERE id=6').first())
+      .toEqual({ active: 0, is_initial: 0 });
+    expect(await env.DB.prepare('SELECT is_initial FROM newcomer_statuses WHERE id=1').first('is_initial')).toBe(1);
+  });
+
+  it('rolls back every status change when the desired final initial is invalid', async () => {
+    const before = await env.DB.prepare('SELECT sort,active,is_initial FROM newcomer_statuses WHERE id=1').first();
+    await expect(updateNewcomerStatus(env.DB, superAdmin, {
+      id: 1, sort: 99, active: false, initialStatusId: 4,
+      labelEn: 'Changed label must roll back', labelZh: '必须回滚',
+    })).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare('SELECT sort,active,is_initial FROM newcomer_statuses WHERE id=1').first()).toEqual(before);
+    expect(await env.DB.prepare("SELECT label FROM newcomer_status_i18n WHERE status_id=1 AND locale='en'").first('label'))
+      .toBe('New');
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_statuses
+      WHERE active=1 AND category='open' AND is_initial=1`).first('n')).toBe(1);
+  });
+
+  it('creates and updates bounded custom fields/options while keeping type immutable', async () => {
+    const fieldId = await createNewcomerField(env.DB, superAdmin, {
+      key: 'connection_path', type: 'select', required: true, active: true, sort: 8,
+      labelEn: 'Connection path', labelZh: '连接方式', helpEn: 'Choose one', helpZh: null,
+      options: [
+        { value: 'group', sort: 1, active: true, labelEn: 'Small group', labelZh: '小组' },
+        { value: 'serve', sort: 2, active: true, labelEn: 'Serve', labelZh: '服事' },
+      ],
+    });
+    expect(fieldId).toBe(8);
+    await updateNewcomerField(env.DB, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 9,
+      labelEn: 'Next step', labelZh: '下一步', helpEn: null, helpZh: '请选择',
+      options: [{ value: 'group', sort: 2, active: true, labelEn: 'A group', labelZh: '一个小组' }],
+    });
+    expect(await env.DB.prepare('SELECT key,type,required,active,sort FROM newcomer_fields WHERE id=8').first())
+      .toEqual({ key: 'connection_path', type: 'select', required: 0, active: 1, sort: 9 });
+    expect((await env.DB.prepare('SELECT value,sort FROM newcomer_field_options WHERE field_id=8 ORDER BY value').all()).results)
+      .toEqual([{ value: 'group', sort: 2 }]);
+    expect(await env.DB.prepare("SELECT help FROM newcomer_field_i18n WHERE field_id=8 AND locale='zh'").first('help'))
+      .toBe('请选择');
+  });
+
+  it('allows only labels/help/sort changes for fixed fields and rolls back invalid option replacement', async () => {
+    await updateNewcomerField(env.DB, superAdmin, {
+      id: 1, required: false, active: true, sort: 20,
+      labelEn: 'Full name', labelZh: '完整姓名', helpEn: 'As you prefer', helpZh: null, options: [],
+    });
+    expect(await env.DB.prepare('SELECT type,required,active,sort,fixed FROM newcomer_fields WHERE id=1').first())
+      .toEqual({ type: 'text', required: 0, active: 1, sort: 20, fixed: 1 });
+    await expect(updateNewcomerField(env.DB, superAdmin, {
+      id: 1, required: true, active: true, sort: 30,
+      labelEn: 'Must roll back', labelZh: '必须回滚', helpEn: null, helpZh: null,
+      options: [{ value: 'bad', sort: 1, active: true, labelEn: 'Bad', labelZh: '错误' }],
+    })).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect(await env.DB.prepare('SELECT required,sort FROM newcomer_fields WHERE id=1').first())
+      .toEqual({ required: 0, sort: 20 });
+    expect(await env.DB.prepare("SELECT label FROM newcomer_field_i18n WHERE field_id=1 AND locale='en'").first('label'))
+      .toBe('Full name');
   });
 });
 
@@ -131,6 +289,24 @@ describe('newcomer localized configuration reads', () => {
     await env.DB.batch(statements);
     await expect(listNewcomerFormDefinition(env.DB, 'd1', 'en')).rejects.toBeInstanceOf(NewcomerLimitError);
   });
+
+  it('applies the 1000 total sentinel to active options without hiding bounded inactive options', async () => {
+    await env.DB.batch(Array.from({ length: 11 }, (_, fieldIndex) => env.DB.prepare(
+      'INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (?,?,?,?,1,?,0)',
+    ).bind(200 + fieldIndex, `archived_${fieldIndex}`, 'select', 0, 200 + fieldIndex)));
+    const statements = [];
+    for (let fieldIndex = 0; fieldIndex < 11; fieldIndex += 1) {
+      for (let optionIndex = 0; optionIndex < 100; optionIndex += 1) {
+        statements.push(env.DB.prepare(
+          'INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (?,?,?,?)',
+        ).bind(200 + fieldIndex, `v_${optionIndex}`, optionIndex, optionIndex === 0 ? 1 : 0));
+      }
+    }
+    await env.DB.batch(statements);
+    const config = await listNewcomerAdminConfiguration(env.DB, 'd1', user(), 'en');
+    expect(config.fields.filter((field) => field.id >= 200)
+      .reduce((count, field) => count + field.options.length, 0)).toBe(1_100);
+  });
 });
 
 describe('newcomer queue, detail, and duplicate hints', () => {
@@ -140,7 +316,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
         (9701,'Live exact','live@example.test','+13125550101',NULL),
         (9702,'Deleted exact','deleted@example.test','+13125550102','2026-08-01 12:00:00'),
         (9703,'Worker','worker@example.test',NULL,NULL)`),
-      env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9701,1)"),
+      env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9701,1),(9702,2)"),
       env.DB.prepare("INSERT INTO service_type_i18n VALUES (9701,'en','Welcome')"),
       env.DB.prepare("INSERT INTO newcomer_fields VALUES (8,'story','textarea',0,1,8,0)"),
       env.DB.prepare("INSERT INTO newcomer_field_i18n VALUES (8,'en','Story',NULL)"),
@@ -150,7 +326,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
         VALUES
         ('10000000-0000-4000-8000-000000000001','First','live@example.test',NULL,'en','2026-08-10',9701,
           '2026-08-10 10:00:00','public',1,9703,'2026-08-11','2026-08-10 10:00:00','2026-08-12 10:00:00'),
-        ('10000000-0000-4000-8000-000000000002','Second',NULL,'+13125550102','zh','2026-08-11',NULL,
+        ('10000000-0000-4000-8000-000000000002','Second',NULL,'+13125550102','zh','2026-08-11',9702,
           NULL,'staff',2,NULL,NULL,'2026-08-11 10:00:00','2026-08-12 11:00:00')`),
       env.DB.prepare(`INSERT INTO newcomer_answers VALUES
         ('10000000-0000-4000-8000-000000000001',8,'Private answer')`),
@@ -194,6 +370,10 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       activity: [{ kind: 'assigned', metadata: { assignee_person_id: 9703 } }],
     });
     expect(JSON.stringify(detail)).not.toContain('worker@example.test');
+    const untranslated = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000002', 'zh',
+    );
+    expect(untranslated?.submission.serviceLabel).toBe('service-9702');
   });
 
   it('returns exact minimal live/deleted/open hints without contact or person names', async () => {
