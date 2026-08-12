@@ -195,6 +195,30 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     }
   });
 
+  it('provides complete portable-export and sensitive-notes copy in both locales', () => {
+    const required = [
+      'admin.peopleExport.standardTitle',
+      'admin.peopleExport.standardBody',
+      'admin.peopleExport.standardDownload',
+      'admin.peopleExport.notesTitle',
+      'admin.peopleExport.notesBody',
+      'admin.peopleExport.notesWarning',
+      'admin.peopleExport.notesAudit',
+      'admin.peopleExport.notesAcknowledge',
+      'admin.peopleExport.notesDownload',
+      'admin.peopleExport.back',
+    ] as const;
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of required) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
+    expect(en['admin.peopleExport.standardBody']).toMatch(/pastoral notes/i);
+    expect(en['admin.peopleExport.standardBody']).toMatch(/roles|permissions|security/i);
+    expect(en['admin.peopleExport.standardBody']).toMatch(/multiple.*part/i);
+    expect(zh['admin.peopleExport.standardBody']).toContain('牧养记录');
+    expect(zh['admin.peopleExport.standardBody']).toMatch(/角色|权限|安全/);
+    expect(zh['admin.peopleExport.standardBody']).toMatch(/多个.*分卷|多.*文件/);
+  });
+
   it('discloses D1 Free and maximum-import atomicity limits in both locales', () => {
     const enNotice = en['admin.peopleImport.d1Notice'];
     expect(enNotice).toMatch(/\b50\b/);

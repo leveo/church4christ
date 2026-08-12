@@ -636,6 +636,17 @@ export default {
   'admin.people.filterApply': 'Apply filters',
   'admin.people.finance': 'Payment operations (Giving and paid Registration)',
 
+  'admin.peopleExport.standardTitle': 'Export people and households',
+  'admin.peopleExport.standardBody': 'Download portable canonical CSV data. Pastoral notes, roles, permissions, and security fields are excluded. Large directories may be divided into multiple numbered parts.',
+  'admin.peopleExport.standardDownload': 'Download standard CSV',
+  'admin.peopleExport.notesTitle': 'Export pastoral notes',
+  'admin.peopleExport.notesBody': 'This separate export contains sensitive pastoral-note text and current subject email addresses. Store it only in an approved secure location.',
+  'admin.peopleExport.notesWarning': 'Sensitive data: this download contains confidential pastoral notes.',
+  'admin.peopleExport.notesAudit': 'Generating this file records your identity, the time, and structural counts in the audit log. Note text is never copied into the audit record.',
+  'admin.peopleExport.notesAcknowledge': 'I understand this export contains sensitive pastoral notes.',
+  'admin.peopleExport.notesDownload': 'Acknowledge and download notes CSV',
+  'admin.peopleExport.back': 'Back to People',
+
   'admin.peopleImport.title': 'Import people and households',
   'admin.peopleImport.intro': 'Preview a canonical CSV, review every issue, then create all valid records in one atomic import.',
   'admin.peopleImport.limits': 'Use a UTF-8 CSV no larger than 256 KiB, with at most 200 data rows and 100 new households.',

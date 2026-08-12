@@ -10,7 +10,7 @@ import { t } from '../../../lib/i18n';
 import { listPeople } from '../../../lib/adminDb';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { MEMBERSHIP_STATUSES } from '../../../lib/validate';
-import { badge, badgeRole, badgeActive, badgeInactive, btn, tin, th, td, noticeOk } from '../../../lib/adminUi';
+import { badge, badgeRole, badgeActive, badgeInactive, btn, btnSecondary, card, tin, th, td, noticeOk } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 const user = Astro.locals.user!;
@@ -56,6 +56,40 @@ const colspan = hasPeople ? 7 : 5;
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.deleted')}</p>}
+
+  {
+    hasPeople && canManagePeople && (
+      <section class={`mt-6 ${card}`} aria-labelledby="people-export-heading">
+        <h2 id="people-export-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleExport.standardTitle')}
+        </h2>
+        <p class="mt-2 max-w-3xl text-sm text-ink-muted">
+          {t(lang, 'admin.peopleExport.standardBody')}
+        </p>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <a href="/admin/people/export.csv" class={btnSecondary}>
+            {t(lang, 'admin.peopleExport.standardDownload')}
+          </a>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    hasPeople && user.isSuperAdmin && (
+      <section class={`mt-4 ${card}`} aria-labelledby="pastoral-notes-export-heading">
+        <h2 id="pastoral-notes-export-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleExport.notesTitle')}
+        </h2>
+        <p class="mt-2 max-w-3xl text-sm text-danger">
+          {t(lang, 'admin.peopleExport.notesWarning')}
+        </p>
+        <a href="/admin/people/export-notes" class={`mt-4 ${btnSecondary}`}>
+          {t(lang, 'admin.peopleExport.notesDownload')}
+        </a>
+      </section>
+    )
+  }
 
   <form method="get" class="mt-6 flex flex-wrap items-end gap-3">
     <label class="block">

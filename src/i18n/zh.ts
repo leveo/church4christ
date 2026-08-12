@@ -634,6 +634,17 @@ export default {
   'admin.people.filterApply': '应用筛选',
   'admin.people.finance': '付款操作（奉献和付费报名）',
 
+  'admin.peopleExport.standardTitle': '导出会众与家庭',
+  'admin.peopleExport.standardBody': '下载可迁移的标准 CSV 数据。内容不包含牧养记录、角色、权限或安全字段。资料较多时可能分成多个编号分卷。',
+  'admin.peopleExport.standardDownload': '下载标准 CSV',
+  'admin.peopleExport.notesTitle': '导出牧养记录',
+  'admin.peopleExport.notesBody': '此独立导出包含敏感的牧养记录全文与当前受关怀者邮箱，请仅存放在教会批准的安全位置。',
+  'admin.peopleExport.notesWarning': '敏感资料：此下载包含保密的牧养记录。',
+  'admin.peopleExport.notesAudit': '生成此文件时，系统会在审计日志中记录你的身份、时间与资料数量；牧养记录正文不会写入审计日志。',
+  'admin.peopleExport.notesAcknowledge': '我明白此次导出包含敏感的牧养记录。',
+  'admin.peopleExport.notesDownload': '确认并下载牧养记录 CSV',
+  'admin.peopleExport.back': '返回会众',
+
   'admin.peopleImport.title': '导入会众与家庭',
   'admin.peopleImport.intro': '先预览标准 CSV、逐项检查问题，再以一次原子操作创建所有有效记录。',
   'admin.peopleImport.limits': '请使用不超过 256 KiB 的 UTF-8 CSV，最多包含 200 条数据记录和 100 个新家庭。',

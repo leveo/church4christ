@@ -1,0 +1,87 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { appendAuditEvent } from '../../../lib/auditDb';
+import { todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import { loadPastoralNotesExport } from '../../../lib/peopleExportDb';
+import {
+  PEOPLE_NOTES_ACKNOWLEDGEMENT,
+  canExportPastoralNotes,
+  handlePastoralNotesExport,
+  peopleExportJson,
+  type PastoralNotesExportRuntime,
+} from '../../../lib/peopleExportHttp';
+import { buildPastoralNotesExport } from '../../../lib/pastoralNotesExport';
+import { btn, btnSecondary, card } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const access = canExportPastoralNotes(Astro.locals.user, Astro.locals.modules);
+if (access === 'not_found') return peopleExportJson(404, { ok: false, code: 'not_found' });
+if (access === 'forbidden') return peopleExportJson(403, { ok: false, code: 'forbidden' });
+
+const method = Astro.request.method;
+if (method !== 'GET' && method !== 'POST') {
+  return peopleExportJson(
+    405,
+    { ok: false, code: 'method_not_allowed' },
+    { Allow: 'GET, POST' },
+  );
+}
+
+if (method === 'POST') {
+  const runtime: PastoralNotesExportRuntime = {
+    loadNotes: loadPastoralNotesExport,
+    buildNotes: buildPastoralNotesExport,
+    appendAudit: appendAuditEvent,
+  };
+  return handlePastoralNotesExport({
+    request: Astro.request,
+    user: Astro.locals.user,
+    modules: Astro.locals.modules,
+    db: Astro.locals.db,
+    backend: Astro.locals.dbBackend,
+    today: todayInTz(),
+  }, runtime);
+}
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const title = t(lang, 'admin.peopleExport.notesTitle');
+---
+
+<Admin title={title}>
+  <main data-pastoral-notes-export class="mx-auto max-w-3xl">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="font-display text-heading-md font-bold">{title}</h1>
+        <p class="mt-2 max-w-2xl text-sm text-ink-muted">
+          {t(lang, 'admin.peopleExport.notesBody')}
+        </p>
+      </div>
+      <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.peopleExport.back')}</a>
+    </div>
+
+    <section class={`mt-6 ${card} space-y-4`} aria-labelledby="notes-export-warning">
+      <h2 id="notes-export-warning" class="font-display text-heading-sm font-bold text-danger">
+        {t(lang, 'admin.peopleExport.notesWarning')}
+      </h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleExport.notesAudit')}</p>
+
+      <form method="post" enctype="application/x-www-form-urlencoded" class="space-y-4">
+        <label class="flex items-start gap-3 text-sm font-medium">
+          <input
+            type="checkbox"
+            name="acknowledgement"
+            value={PEOPLE_NOTES_ACKNOWLEDGEMENT}
+            required
+            class="mt-1"
+          />
+          <span>{t(lang, 'admin.peopleExport.notesAcknowledge')}</span>
+        </label>
+        <button type="submit" class={btn}>{t(lang, 'admin.peopleExport.notesDownload')}</button>
+      </form>
+    </section>
+  </main>
+</Admin>
