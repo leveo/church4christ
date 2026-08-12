@@ -179,4 +179,99 @@ describe('test runner hardening', () => {
     expect(workflow).toContain('node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1');
     expect(workflow).toMatch(/mkdirSync\('\.tmp', \{ recursive: true \}\)/);
   });
+
+  it('uses the current major versions of the checkout and Node setup actions', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+
+    expect(workflow).toContain('actions/checkout@v7');
+    expect(workflow).toContain('actions/setup-node@v7');
+    expect(workflow).not.toContain('actions/checkout@v4');
+    expect(workflow).not.toContain('actions/setup-node@v4');
+  });
+
+  it('uses the exact Node version that satisfies the package engine lower bound', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const exactVersion = readFileSync('.nvmrc', 'utf8').trim();
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      engines: { node: string };
+    };
+
+    expect(exactVersion).toBe('22.12.0');
+    expect(pkg.engines.node).toBe('>=22.12.0');
+    expect(pkg.engines.node).toBe(`>=${exactVersion}`);
+    expect(workflow).toContain(
+      'uses: actions/setup-node@v7\n        with:\n          node-version-file: .nvmrc\n          cache: npm',
+    );
+    expect(workflow).not.toMatch(/^\s*node-version:\s/m);
+  });
+
+  it('deduplicates pull request runs without cancelling main pushes', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const concurrencyIndex = workflow.indexOf('\nconcurrency:\n');
+    const jobsIndex = workflow.indexOf('\njobs:\n');
+    const cancelEvent = workflow.match(
+      /cancel-in-progress: \$\{\{ github\.event_name == '([^']+)' \}\}/,
+    )?.[1];
+
+    expect(concurrencyIndex).toBeGreaterThan(-1);
+    expect(concurrencyIndex).toBeLessThan(jobsIndex);
+    expect(workflow).toContain(
+      'group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+    );
+    expect(cancelEvent).toBe('pull_request');
+    expect('pull_request' === cancelEvent).toBe(true);
+    expect('push' === cancelEvent).toBe(false);
+  });
+
+  it('limits the build-test job to thirty minutes', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+
+    expect(workflow).toContain(
+      'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
+    );
+  });
+
+  it('preserves permissions, Postgres, caching, and every CI run step', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const runCommands = [
+      'npm ci',
+      'test -f src/styles/tokens.generated.css && test -f src/lib/themeMeta.generated.ts',
+      'npx wrangler types',
+      `node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+      'npm run docs:check',
+      'npx vitest run --project node test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts',
+      'npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json',
+      'node scripts/ci/assert-vitest-json.mjs .tmp/setup-pg.json 1',
+      'npm run tokens',
+      'npm run tokens:check',
+      'npm test',
+      'npm run check',
+      'npm run build',
+      'npm run db:migrate:local',
+      'npm run db:seed:local',
+      'npm run db:seed-media:local',
+      'bash scripts/smoke.sh',
+      'npm run test:e2e',
+      'npm run db:migrate:supabase',
+      'npm run db:seed:supabase',
+      'npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json',
+      'node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1',
+      'npm run test:e2e:pg',
+    ];
+    const criticalDatabaseSteps = [
+      'Prove setup dry-run and clean D1 install',
+      'Prove clean Supabase setup',
+      'Apply D1 migrations (local)',
+      'Seed demo data (local)',
+      'Apply Supabase migrations (Postgres)',
+      'Seed demo data (Postgres)',
+    ];
+
+    expect(workflow).toContain('permissions:\n      contents: read');
+    expect(workflow).toContain('services:\n      postgres:\n        image: postgres:16');
+    expect(workflow).toContain('cache: npm');
+    expect(workflow.match(/^\s+run:(?:\s|$)/gm)).toHaveLength(runCommands.length);
+    for (const command of runCommands) expect(workflow).toContain(command);
+    for (const step of criticalDatabaseSteps) expect(workflow).toContain(`- name: ${step}`);
+  });
 });
