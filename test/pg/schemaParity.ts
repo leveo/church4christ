@@ -23,9 +23,20 @@ export type D1Index = {
   predicate: string | null;
 };
 
+export type D1Trigger = {
+  name: string;
+  table: string;
+  timing: 'before' | 'after';
+  event: 'insert' | 'update' | 'delete';
+  when: string | null;
+  bodyGuard: string | null;
+  abortMessage: string;
+};
+
 export type D1Schema = {
   tables: Map<string, { columns: Map<string, D1Column>; constraints: D1Constraint[] }>;
   indexes: Map<string, D1Index>;
+  triggers: Map<string, D1Trigger>;
 };
 
 export function discoverD1MigrationFiles(directory = 'migrations'): string[] {
@@ -175,6 +186,108 @@ function stripLineComments(sql: string): string {
     result += char;
   }
   return result;
+}
+
+function normalizeTriggerExpression(value: string): string {
+  return mapOutsideSqlQuotes(
+    value.trim(),
+    (segment) => segment.replace(/\s+/g, ' ').toLowerCase(),
+  ).replace(/\s+/g, ' ').trim();
+}
+
+function triggerAbort(rawBody: string): Pick<D1Trigger, 'bodyGuard' | 'abortMessage'> {
+  const body = rawBody.trim();
+  const unconditional = body.match(
+    /^SELECT\s+RAISE\s*\(\s*ABORT\s*,\s*'((?:[^']|'')*)'\s*\)\s*;?$/i,
+  );
+  if (unconditional) {
+    return { bodyGuard: null, abortMessage: unconditional[1].replaceAll("''", "'") };
+  }
+  const guarded = body.match(
+    /^SELECT\s+CASE\s+WHEN\s+([\s\S]+?)\s+THEN\s+RAISE\s*\(\s*ABORT\s*,\s*'((?:[^']|'')*)'\s*\)\s+END\s*;?$/i,
+  );
+  if (guarded) {
+    return {
+      bodyGuard: normalizeTriggerExpression(guarded[1]),
+      abortMessage: guarded[2].replaceAll("''", "'"),
+    };
+  }
+  throw new Error(`unsupported trigger body: ${body}`);
+}
+
+function parseTrigger(statement: string): D1Trigger {
+  const parsed = statement.match(
+    /^CREATE\s+TRIGGER\s+(\S+)\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+(\S+)(?:\s+FOR\s+EACH\s+ROW)?(?:\s+WHEN\s+([\s\S]+?))?\s+BEGIN\s+([\s\S]*)\s+END\s*;$/i,
+  );
+  if (!parsed) throw new Error(`unsupported trigger definition: ${statement}`);
+  return {
+    name: identifier(parsed[1]),
+    table: identifier(parsed[4]),
+    timing: parsed[2].toLowerCase() as D1Trigger['timing'],
+    event: parsed[3].toLowerCase() as D1Trigger['event'],
+    when: parsed[5] ? normalizeTriggerExpression(parsed[5]) : null,
+    ...triggerAbort(parsed[6]),
+  };
+}
+
+function extractTriggers(sql: string): { statements: string[]; remainder: string } {
+  const starts = [...sql.matchAll(/^\s*CREATE\s+TRIGGER\b/gim)].map((match) => match.index);
+  const ranges: Array<[number, number]> = [];
+  const statements: string[] = [];
+  for (const start of starts) {
+    let quote: "'" | '"' | null = null;
+    let sawBegin = false;
+    let caseDepth = 0;
+    let end = -1;
+    for (let index = start; index < sql.length;) {
+      const char = sql[index];
+      if (quote) {
+        if (char === quote && sql[index + 1] === quote) index += 2;
+        else if (char === quote) { quote = null; index += 1; }
+        else index += 1;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        index += 1;
+        continue;
+      }
+      const token = sql.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0];
+      if (!token) { index += 1; continue; }
+      const keyword = token.toLowerCase();
+      index += token.length;
+      if (!sawBegin) {
+        if (keyword === 'begin') sawBegin = true;
+        continue;
+      }
+      if (keyword === 'case') {
+        caseDepth += 1;
+        continue;
+      }
+      if (keyword !== 'end') continue;
+      if (caseDepth > 0) {
+        caseDepth -= 1;
+        continue;
+      }
+      while (/\s/.test(sql[index] ?? '')) index += 1;
+      if (sql[index] !== ';') throw new Error(`unsupported trigger definition: ${sql.slice(start, index)}`);
+      end = index + 1;
+      break;
+    }
+    if (end < 0 || !sawBegin || quote || caseDepth !== 0) {
+      throw new Error(`unterminated trigger definition: ${sql.slice(start)}`);
+    }
+    ranges.push([start, end]);
+    statements.push(sql.slice(start, end).trim());
+  }
+  let remainder = '';
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    remainder += sql.slice(cursor, start);
+    cursor = end;
+  }
+  remainder += sql.slice(cursor);
+  return { statements, remainder };
 }
 
 function splitSql(sql: string, delimiter: ',' | ';'): string[] {
@@ -343,18 +456,21 @@ function parseTableConstraint(entry: string): D1Constraint | null {
 }
 
 export function parseFinalD1Schema(sources: string[]): D1Schema {
-  const schema: D1Schema = { tables: new Map(), indexes: new Map() };
-  // Triggers can contain semicolons inside BEGIN/END, so remove each complete
-  // trigger as one recognized, non-relational schema object before statement
-  // splitting. The parity suite compares tables, constraints, and indexes; real
-  // backend suites exercise trigger behavior directly.
-  const statements = sources.flatMap((source) => splitSql(
-    stripLineComments(source).replace(
-      /^CREATE\s+TRIGGER\b[\s\S]*?^END\s*;/gim,
-      '',
-    ),
-    ';',
-  ));
+  const schema: D1Schema = { tables: new Map(), indexes: new Map(), triggers: new Map() };
+  // A trigger is one schema object even though its BEGIN/END body contains
+  // semicolons. Parse it before ordinary statement splitting and reject every
+  // body except the two explicit abort forms above; trigger DDL cannot silently
+  // disappear from the parity model.
+  const statements = sources.flatMap((source) => {
+    const withoutComments = stripLineComments(source);
+    const extracted = extractTriggers(withoutComments);
+    for (const statement of extracted.statements) {
+      const trigger = parseTrigger(statement);
+      if (schema.triggers.has(trigger.name)) throw new Error(`duplicate trigger: ${trigger.name}`);
+      schema.triggers.set(trigger.name, trigger);
+    }
+    return splitSql(extracted.remainder, ';');
+  });
 
   for (const statement of statements) {
     const createTable = statement.match(
@@ -401,6 +517,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       for (const [name, index] of schema.indexes) {
         if (index.table === tableName) schema.indexes.delete(name);
       }
+      for (const [name, trigger] of schema.triggers) {
+        if (trigger.table === tableName) schema.triggers.delete(name);
+      }
       continue;
     }
 
@@ -414,6 +533,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       schema.tables.set(to, table);
       for (const index of schema.indexes.values()) {
         if (index.table === from) index.table = to;
+      }
+      for (const trigger of schema.triggers.values()) {
+        if (trigger.table === from) trigger.table = to;
       }
       continue;
     }
@@ -448,6 +570,11 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
     // analysis so a future migration cannot silently disappear from the model.
     if (/^(?:CREATE|ALTER|DROP)\b/i.test(statement)) {
       throw new Error(`unsupported schema DDL: ${statement}`);
+    }
+  }
+  for (const trigger of schema.triggers.values()) {
+    if (!schema.tables.has(trigger.table)) {
+      throw new Error(`trigger ${trigger.name} targets missing table ${trigger.table}`);
     }
   }
   return schema;

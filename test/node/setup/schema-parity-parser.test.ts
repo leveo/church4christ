@@ -125,6 +125,75 @@ describe('final D1 schema parser', () => {
     });
   });
 
+  it('models trigger metadata, WHEN guards, and abort body semantics instead of stripping them', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE protected_rows (id INTEGER PRIMARY KEY, fixed INTEGER NOT NULL);
+       CREATE TRIGGER protected_rows_fixed_insert
+       BEFORE INSERT ON protected_rows
+       WHEN NEW.fixed <> 0
+       BEGIN
+         SELECT RAISE(ABORT, 'protected_rows_fixed');
+       END;
+       CREATE TRIGGER protected_rows_no_delete
+       BEFORE DELETE ON protected_rows
+       BEGIN
+         SELECT CASE WHEN OLD.fixed = 1
+           THEN RAISE(ABORT, 'protected_rows_immutable') END;
+       END;`,
+    ]);
+
+    expect([...schema.triggers.values()]).toEqual([
+      {
+        name: 'protected_rows_fixed_insert',
+        table: 'protected_rows',
+        timing: 'before',
+        event: 'insert',
+        when: 'new.fixed <> 0',
+        bodyGuard: null,
+        abortMessage: 'protected_rows_fixed',
+      },
+      {
+        name: 'protected_rows_no_delete',
+        table: 'protected_rows',
+        timing: 'before',
+        event: 'delete',
+        when: null,
+        bodyGuard: 'old.fixed = 1',
+        abortMessage: 'protected_rows_immutable',
+      },
+    ]);
+  });
+
+  it('models every actual D1 trigger, including guarded service-attendance bodies', () => {
+    const schema = finalSchema();
+    expect([...schema.triggers.keys()]).toEqual([
+      'service_checkin_links_no_overlap_insert',
+      'service_checkin_links_close_only',
+      'service_checkin_links_no_delete',
+    ]);
+    expect(schema.triggers.get('service_checkin_links_no_overlap_insert')).toMatchObject({
+      table: 'service_type_checkin_events',
+      timing: 'before',
+      event: 'insert',
+      when: 'new.ends_on is null or new.ends_on > new.starts_on',
+      abortMessage: 'service_attendance_link_conflict',
+    });
+    expect(schema.triggers.get('service_checkin_links_no_overlap_insert')?.bodyGuard)
+      .toMatch(/^exists \( select 1 from service_type_checkin_events existing where /);
+  });
+
+  it('fails closed on unsupported trigger bodies and duplicate trigger names', () => {
+    expect(() => parseFinalD1Schema([
+      `CREATE TABLE example (id INTEGER PRIMARY KEY);
+       CREATE TRIGGER example_log AFTER INSERT ON example BEGIN INSERT INTO example VALUES (2); END;`,
+    ])).toThrow(/unsupported trigger body/i);
+    expect(() => parseFinalD1Schema([
+      `CREATE TABLE example (id INTEGER PRIMARY KEY);
+       CREATE TRIGGER duplicate BEFORE DELETE ON example BEGIN SELECT RAISE(ABORT, 'one'); END;
+       CREATE TRIGGER duplicate BEFORE DELETE ON example BEGIN SELECT RAISE(ABORT, 'two'); END;`,
+    ])).toThrow(/duplicate trigger/i);
+  });
+
   it('fails closed when schema DDL contains an unsupported column type', () => {
     expect(() => parseFinalD1Schema(['CREATE TABLE example (id INTEGER PRIMARY KEY, payload JSON);'])).toThrow(
       /unsupported table entry.*payload JSON/i,

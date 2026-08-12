@@ -80,6 +80,20 @@ function constraintSignature(table: string, constraint: D1Constraint): string {
   return `${table}:${constraint.kind}(${constraint.columns.join(',')})${target}`;
 }
 
+function pgTriggerSignature(row: Record<string, unknown>): string {
+  const definition = String(row.definition).replace(/\s+/g, ' ').trim();
+  const parsed = definition.match(
+    /^CREATE TRIGGER (\S+) (BEFORE|AFTER) (INSERT|UPDATE|DELETE) ON public\.(\S+) FOR EACH ROW(?: WHEN \([\s\S]+\))? EXECUTE FUNCTION (\S+)\(\)$/i,
+  );
+  if (!parsed) throw new Error(`unsupported Postgres trigger definition: ${definition}`);
+  const messages = [...String(row.function_source).matchAll(/\bRAISE\s+EXCEPTION\s+'((?:[^']|'')*)'/gi)];
+  if (messages.length !== 1) throw new Error(`Postgres trigger ${parsed[1]} must have exactly one abort message`);
+  return [
+    parsed[1].toLowerCase(), parsed[4].toLowerCase(), parsed[2].toLowerCase(), parsed[3].toLowerCase(),
+    messages[0][1].replaceAll("''", "'"),
+  ].join(':');
+}
+
 describe.skipIf(!hasPg)('Postgres schema port', () => {
   const sql = hasPg ? pgClient() : (null as never);
   const d1 = parseFinalD1Schema(
@@ -267,6 +281,27 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
         : [`${key}: received ${JSON.stringify(value)}, expected ${JSON.stringify(expected.get(key))}`],
     );
     expect({ missing, unexpectedSharedDrift }).toEqual({ missing: [], unexpectedSharedDrift: [] });
+  });
+
+  it('matches shared trigger identity, target, timing, event, and abort semantics bidirectionally', async () => {
+    const rows = await sql.unsafe(`
+      SELECT trigger.tgname, pg_get_triggerdef(trigger.oid) AS definition,
+        procedure.prosrc AS function_source
+      FROM pg_trigger trigger
+      JOIN pg_class relation ON relation.oid = trigger.tgrelid
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      JOIN pg_proc procedure ON procedure.oid = trigger.tgfoid
+      WHERE namespace.nspname = 'public' AND NOT trigger.tgisinternal
+      ORDER BY trigger.tgname
+    `);
+    const actual = new Set(rows.map((row) => pgTriggerSignature(row)));
+    const expected = new Set([...d1.triggers.values()].map((trigger) => [
+      trigger.name, trigger.table, trigger.timing, trigger.event, trigger.abortMessage,
+    ].join(':')));
+    expect({
+      missing: [...expected].filter((signature) => !actual.has(signature)).sort(),
+      unexpectedSharedDrift: [...actual].filter((signature) => !expected.has(signature)).sort(),
+    }).toEqual({ missing: [], unexpectedSharedDrift: [] });
   });
 
   it('accepts explicit identity ids and still autogenerates afterwards', async () => {
