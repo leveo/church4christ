@@ -209,8 +209,8 @@ describe('test runner hardening', () => {
       engines: { node: string };
     };
 
-    expect(exactVersion).toBe('22.12.0');
-    expect(pkg.engines.node).toBe('>=22.12.0');
+    expect(exactVersion).toBe('22.22.1');
+    expect(pkg.engines.node).toBe('>=22.22.1');
     expect(pkg.engines.node).toBe(`>=${exactVersion}`);
     expect(workflow).toContain(
       'uses: actions/setup-node@v7\n        with:\n          node-version-file: .nvmrc\n          cache: npm',
