@@ -33,8 +33,8 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 14 D1-compatible
-modules), Full Church (all 17), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (all 15 D1-compatible
+modules), Full Church (all 18), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:
@@ -160,6 +160,12 @@ deployment that needs large mapped imports must be paid-capable for the required
 per-invocation query volume. Smaller imports can fit lower limits; verify the current
 Cloudflare limits for the deployed plan instead of assuming profile storage changes the
 atomic commit cost.
+
+Aggregate Service Attendance uses forward migration `0013_service_attendance.sql` on both
+backends. Apply it before enabling the `attendance` module or deploying
+`/admin/attendance`; it creates the adult aggregate, effective Children-event links, and
+link-state tables. See [`features/service-attendance.md`](./features/service-attendance.md)
+for the privacy, access, and report limits.
 
 ## 4. Set the session secret
 

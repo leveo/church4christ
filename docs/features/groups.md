@@ -77,8 +77,9 @@ custom questions, and the roster are managed by staff in the Registration admin 
 - **Private groups** are invisible to non-members everywhere: directory, page, and search.
 - The **manage page** opens only for that group's admins and site admins; anyone else sees
   "not found," the same as a page that does not exist.
-- The **attendance sheet** opens only from an emailed tracker link or for a signed-in group
-  admin of that group.
+- The **attendance sheet** opens from an emailed tracker link, or in a signed-in session for
+  an admin with the Groups grant, that group's active group admin, or a super-admin. The
+  aggregate Service Attendance grant does not grant this group or per-person access.
 
 ## How it fits together
 
@@ -118,7 +119,11 @@ member's profile as activity history.
 - **Authorization:** group admins are ordinary members; their console lives on the public-side
   `/groups/<id>/manage` page with in-page checks (site admin or `isGroupAdmin`), never the
   `console` route class — and unauthorized viewers get the same 404 a private group gives.
-  Every mutating action on the manage page is scoped to the group's own rows.
+  Every mutating action on the manage page is scoped to the group's own rows. For session
+  attendance overrides, `canRecordAttendance` accepts only an actor with the Groups grant,
+  the occurrence group's active group admin, or a super-admin. An Attendance grant does not
+  grant the Groups checklist or a person's Groups attendance history. Token attendance is
+  unchanged: the hashed 72-hour emailed token stays multi-use so corrections remain possible.
 - **Tests:** `test/groupDb.test.ts`, `test/groupEventDb.test.ts`, `test/groupAttendance.test.ts`,
   `test/groupForms.test.ts`, `test/groupEventForms.test.ts` (workers project),
   `test/pg/groupRegDb.test.ts` and the `groupDb`/`groupEventDb` blocks in

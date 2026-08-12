@@ -173,7 +173,7 @@ migration after it is merged into `main` or applied to a persistent, shared, or 
 installation. Before merge, applying a proposed migration only to disposable local or CI
 databases does not create a permanent freeze boundary: reset or rebuild those databases while
 the migration remains under review. Merge to `main` freezes the file even if no production
-deployment has used it. Files `0001` through `0012` in `migrations/` and
+deployment has used it. Files `0001` through `0013` in `migrations/` and
 `migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.
@@ -188,6 +188,12 @@ create-only source-column mappings on both providers. Apply it before deploying
 `/admin/people/import/map`. It stores expected headers and mapping configuration; it does not
 store uploaded CSV bytes, source rows, or sample values. Code rollback does not remove
 profiles, and operators must not rewrite `0012` after this frozen boundary.
+
+Migration `0013_service_attendance.sql` creates the aggregate Service Attendance tables on
+both providers. Apply it before deploying `/admin/attendance` or enabling the `attendance`
+module. The migration adds adult aggregates plus append/close Children-event links; it does
+not create an adult roster. A code rollback does not remove those rows. Back up and verify
+the schema on staging, and do not rewrite `0013` after this frozen boundary.
 
 ## 5. Recovery boundaries
 

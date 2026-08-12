@@ -68,6 +68,13 @@ attendance, and lets staff override a checkout. A long, unguessable token in the
 own URL is the only thing gating it — no parent sign-in — and regenerating that token
 is how a lost or stolen device gets cut off.
 
+[Service Attendance](service-attendance.md) can optionally link service types to these
+check-in events and derive a distinct child total from historical check-ins. A child who
+visited two linked rooms on the same service date is deduplicated, while checkout state and
+an event's current active flag do not rewrite history. Turning Children off hides the link
+editor and the Children's kiosk/admin surfaces, but Service Attendance historical reports
+remain readable and continue deriving totals from the existing links and check-ins.
+
 ![Households feed the kiosk; the kiosk and the admin console share one set of check-ins](../images/diagrams/children-checkin.svg)
 
 ## For developers
@@ -79,6 +86,11 @@ is how a lost or stolen device gets cut off.
   `(event_id, household_member_id, checkin_date)` makes a repeat check-in idempotent).
   Children are the same `household_members` rows (`role = 'child'`) introduced by the
   People module — nothing new to create per child.
+- **Service-attendance integration:** migration `migrations/0013_service_attendance.sql`
+  (with PostgreSQL parity) adds append/close effective links from service types to check-in
+  events. Attendance reports count `DISTINCT household_member_id` directly from historical
+  check-ins and deliberately do not filter current household membership, event activity, or
+  checkout state.
 - **Data library:** `src/lib/checkinDb.ts` — `searchHouseholds` (name-substring mode
   under 4 digits, phone-digit mode at 4+, matching either the household phone or an
   adult member's own phone; only households with at least one child ever match),

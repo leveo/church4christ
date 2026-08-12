@@ -97,7 +97,7 @@ describe('catalog-owned docs', () => {
     for (const path of docs) {
       const text = readFileSync(path, 'utf8');
       expect(text).not.toMatch(
-        /15 modules|two modules need|everything except (online )?giving and registration/i,
+        /14 modules|two modules need|everything except (online )?giving and registration/i,
       );
       expect(text).not.toMatch(/switch later[^.\n]*(nothing is lost|without losing)/i);
     }
