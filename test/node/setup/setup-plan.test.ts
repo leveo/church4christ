@@ -14,7 +14,7 @@ const base = {
 };
 
 describe('buildSetupPlan', () => {
-  it('turns Website into a D1 plan with all 17 settings explicit', () => {
+  it('turns Website into a D1 plan with all 18 settings explicit', () => {
     const plan = buildSetupPlan({ ...base, preset: 'website' }, raw);
     expect(plan.backend).toBe('d1');
     expect(plan.preset).toBe('website');
