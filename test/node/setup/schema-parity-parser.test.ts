@@ -76,6 +76,14 @@ describe('final D1 schema parser', () => {
     expect(schema.tables.get('managed')?.columns.get('id')?.identity).toBe(false);
   });
 
+  it('does not confuse a nullable date CHECK with a column NOT NULL constraint', () => {
+    const schema = finalSchema();
+    expect(schema.tables.get('service_type_checkin_events')?.columns.get('ends_on')).toMatchObject({
+      nullable: true,
+      type: 'text',
+    });
+  });
+
   it('captures normalized keys, foreign targets, and application indexes', () => {
     const schema = finalSchema();
     const ministryI18n = schema.tables.get('ministry_i18n');
