@@ -39,7 +39,7 @@ CREATE TABLE people_import_mappings (
     ),
   created_by_person_id INTEGER NOT NULL REFERENCES people(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+) WITHOUT ROWID;
 
 CREATE UNIQUE INDEX idx_people_import_mappings_name_key
   ON people_import_mappings(name_key);

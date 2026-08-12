@@ -47,7 +47,7 @@ describe('people import mapping profile schema', () => {
 
     expect(columns.results.map((column) => [column.name, column.type, column.notnull, column.pk]))
       .toEqual([
-        ['id', 'INTEGER', 0, 1],
+        ['id', 'INTEGER', 1, 1],
         ['name', 'TEXT', 1, 0],
         ['name_key', 'TEXT', 1, 0],
         ['version', 'INTEGER', 1, 0],
@@ -62,6 +62,7 @@ describe('people import mapping profile schema', () => {
     const table = await env.DB.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'people_import_mappings'",
     ).first<{ sql: string }>();
+    expect(table?.sql).toMatch(/WITHOUT\s+ROWID\s*$/i);
     expect(table?.sql).toMatch(/CHECK\s*\(\s*id\s+BETWEEN\s+1\s+AND\s+100\s*\)/i);
     expect(table?.sql).toMatch(/CHECK\s*\(\s*version\s*=\s*1\s*\)/i);
     expect(table?.sql).toMatch(/json_valid\s*\(\s*expected_headers_json\s*\)/i);
@@ -106,7 +107,14 @@ describe('people import mapping profile schema', () => {
          constants_json, enum_translations_json, created_by_person_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(...values).run();
+    const insertWithoutId = () => env.DB.prepare(`
+      INSERT INTO people_import_mappings
+        (name, name_key, version, expected_headers_json, field_mappings_json,
+         constants_json, enum_translations_json, created_by_person_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(...canonical.slice(1)).run();
 
+    await expect(insertWithoutId()).rejects.toThrow();
     await expect(insert(canonical.with(3, 2))).rejects.toThrow();
     await expect(insert(canonical.with(4, '{}'))).rejects.toThrow();
     await expect(insert(canonical.with(5, '[]'))).rejects.toThrow();
