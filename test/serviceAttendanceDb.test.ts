@@ -498,14 +498,22 @@ describe('attendance reports and historical child counts', () => {
     )).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
     expect(nameReads).toBe(0);
 
-    const oversizedChild = { ...reportRow, service_name: 'Public Service', child_count: 100001 };
-    const oversizedStatement = {
-      ...statement,
-      all: async <T>() => ({ results: [oversizedChild] as T[], meta: { changes: 0 } }),
+    const exactDerivedDb: AppDb = {
+      prepare: () => env.DB.prepare(`
+        SELECT 9240 AS service_type_id, 'Public Service' AS service_name,
+          1 AS service_sort, '2026-08-12' AS attendance_date,
+          1 AS adult_count, 100001 AS child_count
+        WHERE ?1 IS NOT NULL AND ?2 IS NOT NULL AND ?3 IS NOT NULL
+      `),
+      batch: async () => [],
     };
     await expect(listServiceAttendanceReport(
-      { prepare: () => oversizedStatement, batch: async () => [] },
+      exactDerivedDb,
       'en', { from: '2026-08-12', to: '2026-08-12' },
-    )).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
+    )).resolves.toEqual([expect.objectContaining({
+      adultCount: 1,
+      childCount: 100001,
+      combinedCount: 100002,
+    })]);
   });
 });

@@ -62,7 +62,7 @@ describe('service attendance page source boundaries', () => {
   });
 
   it('offers service-type editing only behind the Serve-area gate', () => {
-    expect(page).toContain("const canManageServiceTypes = hasAreaAccess(user, 'serve')");
+    expect(page).toContain("const canManageServiceTypes = modules.has('serve') && hasAreaAccess(user, 'serve')");
     expect(page).toMatch(/canManageServiceTypes\s*&&\s*<a[^>]+href="\/admin\/service-types"/);
     expect(page).toContain("t(lang, 'admin.attendance.emptyServicesAsk')");
   });

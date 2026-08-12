@@ -528,9 +528,7 @@ export async function listServiceAttendanceReport(
       if (
         serviceTypeId === null || serviceName === null || serviceSort === null || attendanceDate === null
         || adultCount === null || adultCount < 0 || adultCount > SERVICE_ATTENDANCE_LIMITS.maxAdultCount
-        || (childCount !== null && (
-          childCount < 0 || childCount > SERVICE_ATTENDANCE_LIMITS.maxAdultCount
-        ))
+        || (childCount !== null && childCount < 0)
         || (combinedCount !== null && !Number.isSafeInteger(combinedCount))
       ) throw new ServiceAttendancePersistenceError();
       report.push({

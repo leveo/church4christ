@@ -69,7 +69,7 @@ if (childrenEnabled && serviceTypes.length > 0) {
   }
 }
 
-const canManageServiceTypes = hasAreaAccess(user, 'serve');
+const canManageServiceTypes = modules.has('serve') && hasAreaAccess(user, 'serve');
 const saved = Astro.url.searchParams.get('saved');
 const hasError = windowError || Astro.url.searchParams.has('error');
 const reportQuery = new URLSearchParams({ from: window.from, to: window.to });

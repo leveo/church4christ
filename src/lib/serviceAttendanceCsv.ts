@@ -21,6 +21,10 @@ function validCount(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0 && value <= SERVICE_ATTENDANCE_LIMITS.maxAdultCount;
 }
 
+function validDerivedCount(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 function validRow(row: ServiceAttendanceReportRow): boolean {
   if (
     !row
@@ -35,7 +39,7 @@ function validRow(row: ServiceAttendanceReportRow): boolean {
   if (row.childCount === null || row.combinedCount === null) {
     return row.childCount === null && row.combinedCount === null;
   }
-  return validCount(row.childCount)
+  return validDerivedCount(row.childCount)
     && Number.isSafeInteger(row.combinedCount)
     && row.combinedCount === row.adultCount + row.childCount;
 }

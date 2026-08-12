@@ -30,6 +30,12 @@ describe('serializeServiceAttendanceCsv', () => {
     expect(csv.replaceAll('\r\n', '')).not.toContain('\n');
   });
 
+  it('preserves an exact derived child count above the adult-entry limit', () => {
+    expect(serializeServiceAttendanceCsv([
+      row({ adultCount: 1, childCount: 100001, combinedCount: 100002 }),
+    ])).toContain(',1,100001,100002\r\n');
+  });
+
   it('neutralizes a formula-like service name and never mutates input ordering', () => {
     const rows = [
       row({ serviceTypeId: 2, serviceName: '=HYPERLINK("https://example.com")', serviceSort: 2 }),
