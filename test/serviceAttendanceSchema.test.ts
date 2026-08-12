@@ -48,6 +48,11 @@ describe('service attendance schema', () => {
         (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
       VALUES (8201, '2026-02-30', 1, 8101, 8101)
     `).run()).rejects.toThrow();
+    await expect(env.DB.prepare(`
+      INSERT INTO service_attendance
+        (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
+      VALUES (8201, 'abcd-02-29', 1, 8101, 8101)
+    `).run()).rejects.toThrow();
     await env.DB.prepare(`
       INSERT INTO service_attendance
         (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
@@ -110,6 +115,11 @@ describe('service attendance schema', () => {
       INSERT INTO service_type_checkin_events
         (service_type_id, checkin_event_id, starts_on, created_by_person_id)
       VALUES (8203, 8303, '2026-02-30', 8101)
+    `).run()).rejects.toThrow();
+    await expect(env.DB.prepare(`
+      INSERT INTO service_type_checkin_events
+        (service_type_id, checkin_event_id, starts_on, created_by_person_id)
+      VALUES (8203, 8303, 'abcd-02-29', 8101)
     `).run()).rejects.toThrow();
     await expect(env.DB.prepare(`
       INSERT INTO service_type_checkin_events

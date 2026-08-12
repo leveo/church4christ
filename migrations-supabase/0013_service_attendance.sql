@@ -7,7 +7,7 @@ CREATE TABLE service_attendance (
       substr(attendance_date, 6, 2) BETWEEN '01' AND '12' AND substr(attendance_date, 9, 2) BETWEEN '01' AND '31' AND
       (substr(attendance_date, 6, 2) NOT IN ('04','06','09','11') OR substr(attendance_date, 9, 2) <= '30') AND
       (substr(attendance_date, 6, 2) <> '02' OR substr(attendance_date, 9, 2) <= '29') AND
-      date(attendance_date, '+0 days') = attendance_date
+      date(attendance_date, '+0 days') IS NOT NULL AND date(attendance_date, '+0 days') = attendance_date
     ),
   adult_count INTEGER NOT NULL CHECK (adult_count BETWEEN 0 AND 100000),
   recorded_by_person_id INTEGER NOT NULL REFERENCES people(id),
@@ -27,7 +27,7 @@ CREATE TABLE service_type_checkin_events (
       substr(starts_on, 6, 2) BETWEEN '01' AND '12' AND substr(starts_on, 9, 2) BETWEEN '01' AND '31' AND
       (substr(starts_on, 6, 2) NOT IN ('04','06','09','11') OR substr(starts_on, 9, 2) <= '30') AND
       (substr(starts_on, 6, 2) <> '02' OR substr(starts_on, 9, 2) <= '29') AND
-      date(starts_on, '+0 days') = starts_on
+      date(starts_on, '+0 days') IS NOT NULL AND date(starts_on, '+0 days') = starts_on
     ),
   ends_on TEXT
     CHECK (ends_on IS NULL OR (
@@ -35,7 +35,7 @@ CREATE TABLE service_type_checkin_events (
       substr(ends_on, 6, 2) BETWEEN '01' AND '12' AND substr(ends_on, 9, 2) BETWEEN '01' AND '31' AND
       (substr(ends_on, 6, 2) NOT IN ('04','06','09','11') OR substr(ends_on, 9, 2) <= '30') AND
       (substr(ends_on, 6, 2) <> '02' OR substr(ends_on, 9, 2) <= '29') AND
-      date(ends_on, '+0 days') = ends_on AND ends_on >= starts_on
+      date(ends_on, '+0 days') IS NOT NULL AND date(ends_on, '+0 days') = ends_on AND ends_on >= starts_on
     )),
   created_by_person_id INTEGER NOT NULL REFERENCES people(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
