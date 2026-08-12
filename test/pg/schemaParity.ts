@@ -315,7 +315,17 @@ function parseTableConstraint(entry: string): D1Constraint | null {
 
 export function parseFinalD1Schema(sources: string[]): D1Schema {
   const schema: D1Schema = { tables: new Map(), indexes: new Map() };
-  const statements = sources.flatMap((source) => splitSql(stripLineComments(source), ';'));
+  // Triggers can contain semicolons inside BEGIN/END, so remove each complete
+  // trigger as one recognized, non-relational schema object before statement
+  // splitting. The parity suite compares tables, constraints, and indexes; real
+  // backend suites exercise trigger behavior directly.
+  const statements = sources.flatMap((source) => splitSql(
+    stripLineComments(source).replace(
+      /^CREATE\s+TRIGGER\b[\s\S]*?^END\s*;/gim,
+      '',
+    ),
+    ';',
+  ));
 
   for (const statement of statements) {
     const createTable = statement.match(
