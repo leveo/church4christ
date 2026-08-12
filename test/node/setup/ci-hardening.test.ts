@@ -246,8 +246,9 @@ describe('test runner hardening', () => {
 
   it('accepts the exact workflow source with CRLF line endings', () => {
     const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const crlfFixture = workflow.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
 
-    expect(() => validateCiWorkflow(workflow.replaceAll('\n', '\r\n'))).not.toThrow();
+    expect(() => validateCiWorkflow(crlfFixture)).not.toThrow();
   });
 
   it('does not contain deployment, release, or publish commands', () => {
