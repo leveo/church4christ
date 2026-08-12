@@ -166,6 +166,41 @@ describe('newcomer foundation schema (D1)', () => {
     await reject("UPDATE newcomer_field_options SET field_id=4 WHERE field_id=89 AND value='first_visit'");
   });
 
+  it('rejects every post-seed core insert without replacing its bilingual labels', async () => {
+    const readCore = () => env.DB.prepare(`
+      SELECT id,key,type,required,active,sort,fixed FROM newcomer_fields WHERE id=1
+    `).first<Record<string, string | number>>();
+    const readLabels = () => env.DB.prepare(`
+      SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=1 ORDER BY locale
+    `).all<Record<string, string | null>>();
+    const beforeCore = await readCore();
+    const beforeLabels = (await readLabels()).results;
+    const statements = [
+      "INSERT OR REPLACE INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'name','text',0,1,1,1)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'name','text',0,1,1,1)",
+      "INSERT OR REPLACE INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'custom_core_id','text',0,1,1,0)",
+      "INSERT OR REPLACE INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'name','text',0,1,89,0)",
+    ];
+    const rejected: boolean[] = [];
+    for (const statement of statements) {
+      try {
+        await env.DB.prepare(statement).run();
+        rejected.push(false);
+      } catch {
+        rejected.push(true);
+      }
+    }
+    expect(rejected).toEqual([true, true, true, true]);
+    expect(await readCore()).toEqual(beforeCore);
+    expect((await readLabels()).results).toEqual(beforeLabels);
+    expect(beforeLabels).toHaveLength(2);
+
+    await env.DB.prepare(`
+      INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+      VALUES (188,'ordinary_custom','text',0,1,188,0)
+    `).run();
+  });
+
   it('rejects invalid workflow initial states, enums, booleans, ranges, and labels', async () => {
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (90,'closed','closed',90,1,1)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,0,1)");

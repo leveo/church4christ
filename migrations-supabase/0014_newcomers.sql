@@ -195,7 +195,21 @@ INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES
   (6,'en','Service type',NULL),         (6,'zh','聚会类型',NULL),
   (7,'en','Contact consent',NULL),      (7,'zh','联系同意',NULL);
 
-CREATE OR REPLACE FUNCTION newcomer_fields_boundary_guard()
+CREATE OR REPLACE FUNCTION newcomer_fields_insert_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT (
+    NEW.id > 7 AND
+    NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND
+    NEW.fixed = 0
+  ) THEN
+    RAISE EXCEPTION 'newcomer_field_boundary';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION newcomer_fields_update_guard()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT (
@@ -216,10 +230,10 @@ $$;
 
 CREATE TRIGGER newcomer_fields_boundary_insert
 BEFORE INSERT ON newcomer_fields FOR EACH ROW
-EXECUTE FUNCTION newcomer_fields_boundary_guard();
+EXECUTE FUNCTION newcomer_fields_insert_guard();
 CREATE TRIGGER newcomer_fields_boundary_update
 BEFORE UPDATE ON newcomer_fields FOR EACH ROW
-EXECUTE FUNCTION newcomer_fields_boundary_guard();
+EXECUTE FUNCTION newcomer_fields_update_guard();
 
 CREATE OR REPLACE FUNCTION newcomer_fields_core_delete_guard()
 RETURNS trigger LANGUAGE plpgsql AS $$

@@ -111,14 +111,9 @@ INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES
 CREATE TRIGGER newcomer_fields_boundary_insert
 BEFORE INSERT ON newcomer_fields
 WHEN NOT (
-  (NEW.id = 1 AND NEW.key = 'name' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 2 AND NEW.key = 'email' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 3 AND NEW.key = 'phone' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 4 AND NEW.key = 'preferred_language' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 5 AND NEW.key = 'visit_date' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 6 AND NEW.key = 'service_type' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id = 7 AND NEW.key = 'contact_consent' AND NEW.type = 'checkbox' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
-  (NEW.id > 7 AND NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND NEW.fixed = 0)
+  NEW.id > 7 AND
+  NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND
+  NEW.fixed = 0
 )
 BEGIN
   SELECT RAISE(ABORT, 'newcomer_field_boundary');

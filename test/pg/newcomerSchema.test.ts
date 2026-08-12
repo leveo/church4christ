@@ -153,6 +153,41 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     await rejects("UPDATE newcomer_field_options SET field_id=4 WHERE field_id=89 AND value='first_visit'");
   });
 
+  it('rejects every post-seed core insert or upsert without changing its bilingual labels', async () => {
+    const readCore = async () => (await sql.unsafe<Record<string, string | number>[]>(`
+      SELECT id,key,type,required,active,sort,fixed FROM newcomer_fields WHERE id=1
+    `))[0];
+    const readLabels = () => sql.unsafe<Record<string, string | null>[]>(`
+      SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=1 ORDER BY locale
+    `);
+    const beforeCore = await readCore();
+    const beforeLabels = await readLabels();
+    const statements = [
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'name','text',0,1,1,1) ON CONFLICT (id) DO UPDATE SET sort=EXCLUDED.sort",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'name','text',0,1,1,1)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (1,'custom_core_id','text',0,1,1,0) ON CONFLICT (id) DO UPDATE SET key=EXCLUDED.key",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'name','text',0,1,89,0) ON CONFLICT (key) DO UPDATE SET sort=EXCLUDED.sort",
+    ];
+    const rejected: boolean[] = [];
+    for (const statement of statements) {
+      try {
+        await sql.unsafe(statement);
+        rejected.push(false);
+      } catch {
+        rejected.push(true);
+      }
+    }
+    expect(rejected).toEqual([true, true, true, true]);
+    expect(await readCore()).toEqual(beforeCore);
+    expect(await readLabels()).toEqual(beforeLabels);
+    expect(beforeLabels).toHaveLength(2);
+
+    await sql.unsafe(`
+      INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+      VALUES (188,'ordinary_custom','text',0,1,188,0)
+    `);
+  });
+
   it('enforces every newcomer foreign key with real Postgres mutations', async () => {
     await sql.unsafe("INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (97,'fk_custom','text',0,1,97,0)");
     await sql.unsafe(`INSERT INTO newcomer_submissions

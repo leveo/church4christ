@@ -191,29 +191,31 @@ describe('final D1 schema parser', () => {
       .toMatch(/^\( new \. ends_on is null or new \. ends_on > new \. starts_on \) and \( exists \(/);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')?.bodyGuard)
       .toMatch(/^exists \( select 1 from service_type_checkin_events existing where /);
-    expect(schema.triggers.get('newcomer_fields_boundary_insert')).toMatchObject({
-      table: 'newcomer_fields',
-      timing: 'before',
-      event: 'insert',
-      abortMessage: 'newcomer_field_boundary',
-    });
-    expect(schema.triggers.get('newcomer_fields_boundary_insert')?.semanticGuard)
-      .toMatch(/^not \( \( new \. id = 1 and new \. key = 'name'/);
-    expect(schema.triggers.get('newcomer_fields_boundary_update')?.semanticGuard)
-      .toBe(schema.triggers.get('newcomer_fields_boundary_insert')?.semanticGuard);
-    expect(schema.triggers.get('newcomer_fields_core_delete')).toMatchObject({
-      table: 'newcomer_fields',
-      timing: 'before',
-      event: 'delete',
-      semanticGuard: 'old . fixed = 1',
-      abortMessage: 'newcomer_field_immutable',
-    });
-    expect(schema.triggers.get('newcomer_answers_custom_insert')).toMatchObject({
-      table: 'newcomer_answers',
-      timing: 'before',
-      event: 'insert',
-      semanticGuard: 'exists ( select 1 from newcomer_fields where id = new . field_id and fixed = 1 )',
-      abortMessage: 'newcomer_answers_custom_only',
+    const newcomerGuards = Object.fromEntries(
+      [...schema.triggers]
+        .filter(([name]) => name.startsWith('newcomer_'))
+        .map(([name, trigger]) => [name, trigger.semanticGuard]),
+    );
+    const customField = "new . id > 7 and new . key not in ( 'name' , 'email' , 'phone' , 'preferred_language' , 'visit_date' , 'service_type' , 'contact_consent' ) and new . fixed = 0";
+    const boundaryUpdate = `not ( ${[
+      "( new . id = 1 and new . key = 'name' and new . type = 'text' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 2 and new . key = 'email' and new . type = 'text' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 3 and new . key = 'phone' and new . type = 'text' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 4 and new . key = 'preferred_language' and new . type = 'select' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 5 and new . key = 'visit_date' and new . type = 'text' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 6 and new . key = 'service_type' and new . type = 'select' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      "( new . id = 7 and new . key = 'contact_consent' and new . type = 'checkbox' and new . required = 0 and new . active = 1 and new . fixed = 1 )",
+      `( ${customField} )`,
+    ].join(' or ')} )`;
+    const customValueGuard = 'exists ( select 1 from newcomer_fields where id = new . field_id and fixed = 1 )';
+    expect(newcomerGuards).toEqual({
+      newcomer_fields_boundary_insert: `not ( ${customField} )`,
+      newcomer_fields_boundary_update: boundaryUpdate,
+      newcomer_fields_core_delete: 'old . fixed = 1',
+      newcomer_field_options_custom_insert: customValueGuard,
+      newcomer_field_options_custom_update: customValueGuard,
+      newcomer_answers_custom_insert: customValueGuard,
+      newcomer_answers_custom_update: customValueGuard,
     });
   });
 
