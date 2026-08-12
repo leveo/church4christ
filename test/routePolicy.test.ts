@@ -121,6 +121,10 @@ describe('classifyRoute', () => {
     ['/admin/navigation', 'adminOnly'],
     ['/admin/children', 'adminOnly'],
     ['/admin/children/kiosk', 'adminOnly'],
+    ['/admin/attendance', 'adminOnly'],
+    ['/admin/attendance/count', 'adminOnly'],
+    ['/admin/attendance/checkin-links', 'adminOnly'],
+    ['/admin/attendance/report.csv', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

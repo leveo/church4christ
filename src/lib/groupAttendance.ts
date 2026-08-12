@@ -4,6 +4,7 @@
 // occurrence ends, the attendance upsert, and the session-auth check. Emails are
 // best-effort (email_log records the attempt) and module-gated on 'groups'.
 import type { AppDb } from './appDb';
+import { hasAreaAccess } from './adminAreas';
 import { sha256Hex } from './auth';
 import { addDays, todayInTz } from './dates';
 import { getBackend, type DbEnv } from './dbProvider';
@@ -12,6 +13,7 @@ import { ensureOccurrences, listOccurrencesNeedingAttendance } from './groupEven
 import { t } from './i18n';
 import { type Locale } from './locales';
 import { getEnabledModules } from './modules';
+import type { SessionUser } from './types';
 
 const TZ = 'America/Chicago';
 const TOKEN_TTL = '+72 hours';
@@ -75,15 +77,12 @@ export async function verifyAttendanceToken(db: AppDb, rawToken: string): Promis
 
 /**
  * Authorize a session (not token) actor to record attendance for an occurrence:
- * a site admin (people.role = 'admin') always, otherwise an active group-admin of
- * the occurrence's group.
+ * a super-admin or Groups-area admin always, otherwise a current group-admin of
+ * the occurrence's group. Aggregate Attendance access deliberately grants no
+ * access to this per-person checklist.
  */
-export async function canRecordAttendance(db: AppDb, occurrenceId: number, personId: number): Promise<boolean> {
-  const person = await db
-    .prepare(`SELECT role FROM people WHERE id = ?1 AND deleted_at IS NULL AND active = 1`)
-    .bind(personId)
-    .first<{ role: string }>();
-  if (person?.role === 'admin') return true;
+export async function canRecordAttendance(db: AppDb, occurrenceId: number, user: SessionUser): Promise<boolean> {
+  if (user.isSuperAdmin || hasAreaAccess(user, 'groups')) return true;
   const row = await db
     .prepare(
       `SELECT 1 AS x FROM group_event_occurrences geo
@@ -91,7 +90,7 @@ export async function canRecordAttendance(db: AppDb, occurrenceId: number, perso
        JOIN group_members gm ON gm.group_id = ge.group_id AND gm.person_id = ?2 AND gm.is_admin = 1 AND gm.removed_at IS NULL
        WHERE geo.id = ?1`,
     )
-    .bind(occurrenceId, personId)
+    .bind(occurrenceId, user.id)
     .first<{ x: number }>();
   return row !== null;
 }

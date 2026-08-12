@@ -589,6 +589,7 @@ export default {
   'admin.nav.people': '会众',
   'admin.nav.groups': '小组',
   'admin.nav.children': '儿童事工',
+  'admin.nav.attendance': '崇拜出席',
   'admin.nav.settings': '设置',
   'admin.nav.navigation': '导航',
   'admin.nav.viewSite': '查看网站',

@@ -591,6 +591,7 @@ export default {
   'admin.nav.people': 'People',
   'admin.nav.groups': 'Groups',
   'admin.nav.children': 'Children',
+  'admin.nav.attendance': 'Service attendance',
   'admin.nav.settings': 'Settings',
   'admin.nav.navigation': 'Navigation',
   'admin.nav.viewSite': 'View site',

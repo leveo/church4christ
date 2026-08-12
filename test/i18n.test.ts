@@ -203,6 +203,11 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['site.tagline']).toBe('城市中的教会');
   });
 
+  it('provides the aggregate Attendance grant label in both locales', () => {
+    expect(en['admin.nav.attendance']).toBe('Service attendance');
+    expect(zh['admin.nav.attendance']).toBe('崇拜出席');
+  });
+
   it('provides complete bilingual Stripe test-mode operations copy', () => {
     const keys = [
       'admin.stripe.title', 'admin.stripe.testMode', 'admin.stripe.events', 'admin.stripe.requests',

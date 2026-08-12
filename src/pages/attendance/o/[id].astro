@@ -27,7 +27,7 @@ if (!occurrence) {
 const user = Astro.locals.user;
 if (!user) return Astro.redirect(`/${DEFAULT_LOCALE}/signin`, 303);
 
-if (!(await canRecordAttendance(db, occurrence.id, user.id))) {
+if (!(await canRecordAttendance(db, occurrence.id, user))) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');
 }

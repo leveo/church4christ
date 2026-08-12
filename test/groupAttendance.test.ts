@@ -6,6 +6,7 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clearModuleCache } from '../src/lib/modules';
 import { setSetting } from '../src/lib/settings';
+import type { SessionUser } from '../src/lib/types';
 import {
   canRecordAttendance,
   claimOccurrenceForEmail,
@@ -37,6 +38,24 @@ async function reset(): Promise<void> {
   clearModuleCache();
 }
 beforeEach(reset);
+
+function sessionUser(id: number, over: Partial<SessionUser> = {}): SessionUser {
+  return {
+    id,
+    email: `person${id}@example.com`,
+    displayName: `Person ${id}`,
+    role: 'member',
+    isAdmin: false,
+    isEditor: false,
+    finance: 0,
+    memberTeamIds: [],
+    leaderTeamIds: [],
+    lang: 'en',
+    isSuperAdmin: false,
+    adminAreas: [],
+    ...over,
+  };
+}
 
 /** A group with a tracked event and one materialized occurrence; returns ids. */
 async function scaffold(opts: { endsAt?: string; startsOn?: string } = {}): Promise<{ groupId: number; occId: number }> {
@@ -100,15 +119,42 @@ describe('claimOccurrenceForEmail', () => {
 });
 
 describe('canRecordAttendance', () => {
-  it('allows a group admin and a site admin, rejects a plain member', async () => {
+  it('allows the occurrence group current admin', async () => {
     const { groupId, occId } = await scaffold();
-    // Person 3 is a group admin, person 2 a plain member.
     await env.DB.prepare(`INSERT INTO group_members (group_id, person_id, display_name, is_admin) VALUES (?1, 3, 'Group Admin', 1)`).bind(groupId).run();
+
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(3))).toBe(true);
+  });
+
+  it('rejects a removed group admin and a plain member', async () => {
+    const { groupId, occId } = await scaffold();
+    await env.DB.prepare(`INSERT INTO group_members (group_id, person_id, display_name, is_admin, removed_at) VALUES (?1, 3, 'Former Admin', 1, datetime('now'))`).bind(groupId).run();
     await env.DB.prepare(`INSERT INTO group_members (group_id, person_id, display_name, is_admin) VALUES (?1, 2, 'Member Two', 0)`).bind(groupId).run();
 
-    expect(await canRecordAttendance(env.DB, occId, 3)).toBe(true); // group admin
-    expect(await canRecordAttendance(env.DB, occId, 2)).toBe(false); // plain member
-    expect(await canRecordAttendance(env.DB, occId, 1)).toBe(true); // site admin, not a member
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(3))).toBe(false);
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(2))).toBe(false);
+  });
+
+  it('allows a super admin or a Groups-area admin without membership', async () => {
+    const { occId } = await scaffold();
+
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(1, {
+      role: 'admin', isAdmin: true, isSuperAdmin: true,
+    }))).toBe(true);
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(1, {
+      role: 'admin', isAdmin: true, adminAreas: ['groups'],
+    }))).toBe(true);
+  });
+
+  it('rejects a generic admin and an attendance-only admin', async () => {
+    const { occId } = await scaffold();
+
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(1, {
+      role: 'admin', isAdmin: true,
+    }))).toBe(false);
+    expect(await canRecordAttendance(env.DB, occId, sessionUser(1, {
+      role: 'admin', isAdmin: true, adminAreas: ['attendance'],
+    }))).toBe(false);
   });
 });
 
