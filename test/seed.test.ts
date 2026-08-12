@@ -99,7 +99,7 @@ describe('demo seed: aggregate service attendance', () => {
 
     const anchor = await env.DB.prepare("SELECT date('now','weekday 0','-7 days') AS d").first<{ d: string }>();
     const oldest = await env.DB.prepare("SELECT date('now','weekday 0','-28 days') AS d").first<{ d: string }>();
-    const report = await listServiceAttendanceReport(env.DB, 'en', { from: oldest!.d, to: anchor!.d, days: 22 });
+    const report = await listServiceAttendanceReport(env.DB, 'en', { from: oldest!.d, to: anchor!.d });
     const latestEnglish = report.find((row) => row.attendanceDate === anchor!.d && row.serviceTypeId === 1);
     const latestChinese = report.find((row) => row.attendanceDate === anchor!.d && row.serviceTypeId === 2);
     expect(latestEnglish).toMatchObject({ adultCount: 142, childCount: 2, combinedCount: 144 });
