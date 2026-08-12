@@ -19,6 +19,7 @@ import {
   peopleImportCommitErrorResponse,
   peopleImportJson,
   peopleImportTemplate,
+  readBoundedCsvMultipart,
   readPeopleImportFile,
 } from '../src/lib/peopleImportHttp';
 import * as templateRoute from '../src/pages/admin/people/import/template.csv';
@@ -227,6 +228,27 @@ describe('peopleImportTemplate', () => {
 });
 
 describe('readPeopleImportFile', () => {
+  it('exposes the same bounded CSV primitive for server-authoritative import flows', async () => {
+    const form = new FormData();
+    form.set('csv', new File(['header\nvalue\n'], 'source.csv', { type: 'text/csv' }));
+    form.set('profile_id', '7');
+    const request = new Request('https://church.example/import', {
+      method: 'POST',
+      body: form,
+    });
+
+    const result = await readBoundedCsvMultipart(request, {
+      maxBodyBytes: PEOPLE_IMPORT_MULTIPART_MAX_BYTES,
+      maxFileBytes: PEOPLE_IMPORT_LIMITS.maxBytes,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(new TextDecoder().decode(result.bytes)).toBe('header\nvalue\n');
+      expect(result.form.get('profile_id')).toBe('7');
+    }
+  });
+
   it('rejects a non-multipart request without reading its body', async () => {
     let pulled = false;
     const body = new ReadableStream<Uint8Array>({
@@ -299,6 +321,7 @@ describe('readPeopleImportFile', () => {
       code: 'file_too_large',
     });
     expect(cancelled).toBe(true);
+    expect(request.body?.locked).toBe(false);
   });
 
   it('keeps an oversize response at 413 when stream cancellation rejects', async () => {

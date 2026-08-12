@@ -4,6 +4,7 @@ import {
   PEOPLE_IMPORT_LIMITS,
   parsePeopleImport,
   type PeopleImportHeader,
+  validatePeopleImportRows,
 } from '../src/lib/peopleImport';
 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -51,6 +52,25 @@ const validDependent = (overrides: Partial<Record<PeopleImportHeader, string>> =
 });
 
 describe('parsePeopleImport headers and parser boundaries', () => {
+  it('validates pre-parsed canonical rows with their supplied source coordinates', () => {
+    const invalid = validPerson({ display_name: '' });
+    const result = validatePeopleImportRows({
+      rows: [
+        [...PEOPLE_IMPORT_HEADERS],
+        PEOPLE_IMPORT_HEADERS.map((header) => invalid[header] ?? ''),
+      ],
+      rowNumbers: [7, 11],
+    }, { today: '2026-08-11' });
+
+    expect(result.model?.people).toEqual([]);
+    expect(result.errors).toContainEqual({
+      severity: 'error',
+      code: 'required',
+      row: 11,
+      field: 'display_name',
+    });
+  });
+
   it('normalizes a valid person without importing privileges', () => {
     const result = parse([
       validPerson({

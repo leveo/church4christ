@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseUtf8Csv, parseUtf8CsvWithRowNumbers, type CsvParseLimits } from '../src/lib/csvParse';
+import {
+  parseUtf8Csv,
+  parseUtf8CsvWithPhysicalRowNumbers,
+  parseUtf8CsvWithRowNumbers,
+  type CsvParseLimits,
+} from '../src/lib/csvParse';
 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
@@ -63,6 +68,21 @@ describe('parseUtf8Csv', () => {
         ['c\nc', 'd'],
       ],
       rowNumbers: [3, 5],
+    });
+  });
+
+  it('locates retained rows by physical starting line across quoted multiline fields', () => {
+    const source = 'header\n"first\nrecord"\n\nsecond\n';
+
+    expect(parseUtf8CsvWithRowNumbers(encode(source), limits())).toEqual({
+      ok: true,
+      rows: [['header'], ['first\nrecord'], ['second']],
+      rowNumbers: [1, 2, 4],
+    });
+    expect(parseUtf8CsvWithPhysicalRowNumbers(encode(source), limits())).toEqual({
+      ok: true,
+      rows: [['header'], ['first\nrecord'], ['second']],
+      rowNumbers: [1, 2, 5],
     });
   });
 

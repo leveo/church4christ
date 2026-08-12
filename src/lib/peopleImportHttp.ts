@@ -62,19 +62,33 @@ export type PeopleImportFileResult = PeopleImportFileError | {
   acknowledgeWarnings: boolean;
 };
 
+export interface BoundedCsvMultipartOptions {
+  maxBodyBytes: number;
+  maxFileBytes: number;
+}
+
+export type BoundedCsvMultipartResult = PeopleImportFileError | {
+  ok: true;
+  bytes: Uint8Array;
+  form: FormData;
+};
+
 const fileError = (
   status: PeopleImportFileError['status'],
   code: PeopleImportFileError['code'],
 ): PeopleImportFileError => ({ ok: false, status, code });
 
-function contentLengthOverLimit(request: Request): boolean {
+function contentLengthOverLimit(request: Request, maxBodyBytes: number): boolean {
   const raw = request.headers.get('content-length');
   if (raw === null || !/^\d+$/.test(raw)) return false;
   const length = Number(raw);
-  return !Number.isSafeInteger(length) || length > PEOPLE_IMPORT_MULTIPART_MAX_BYTES;
+  return !Number.isSafeInteger(length) || length > maxBodyBytes;
 }
 
-async function boundedRequestBody(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
+async function boundedRequestBody(
+  request: Request,
+  maxBodyBytes: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
   if (request.body === null) return new Uint8Array();
 
   const reader = request.body.getReader();
@@ -85,7 +99,7 @@ async function boundedRequestBody(request: Request): Promise<Uint8Array<ArrayBuf
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > PEOPLE_IMPORT_MULTIPART_MAX_BYTES) {
+      if (total > maxBodyBytes) {
         try {
           await reader.cancel();
         } catch {
@@ -108,16 +122,19 @@ async function boundedRequestBody(request: Request): Promise<Uint8Array<ArrayBuf
   return body;
 }
 
-export async function readPeopleImportFile(request: Request): Promise<PeopleImportFileResult> {
+export async function readBoundedCsvMultipart(
+  request: Request,
+  options: BoundedCsvMultipartOptions,
+): Promise<BoundedCsvMultipartResult> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!/^multipart\/form-data(?:\s*;|$)/i.test(contentType)) {
     return fileError(415, 'multipart_required');
   }
-  if (contentLengthOverLimit(request)) return fileError(413, 'file_too_large');
+  if (contentLengthOverLimit(request, options.maxBodyBytes)) return fileError(413, 'file_too_large');
 
   let body: Uint8Array<ArrayBuffer> | null;
   try {
-    body = await boundedRequestBody(request);
+    body = await boundedRequestBody(request, options.maxBodyBytes);
   } catch {
     return fileError(400, 'multipart_invalid');
   }
@@ -138,7 +155,7 @@ export async function readPeopleImportFile(request: Request): Promise<PeopleImpo
     return fileError(400, 'multipart_invalid');
   }
   const file = csvParts[0];
-  if (file.size > PEOPLE_IMPORT_LIMITS.maxBytes) {
+  if (file.size > options.maxFileBytes) {
     return fileError(413, 'file_too_large');
   }
   if (!ACCEPTED_MIME_TYPES.has(file.type.toLowerCase())) {
@@ -148,7 +165,20 @@ export async function readPeopleImportFile(request: Request): Promise<PeopleImpo
   return {
     ok: true,
     bytes: new Uint8Array(await file.arrayBuffer()),
-    acknowledgeWarnings: form.get('acknowledge_warnings') === 'true',
+    form,
+  };
+}
+
+export async function readPeopleImportFile(request: Request): Promise<PeopleImportFileResult> {
+  const upload = await readBoundedCsvMultipart(request, {
+    maxBodyBytes: PEOPLE_IMPORT_MULTIPART_MAX_BYTES,
+    maxFileBytes: PEOPLE_IMPORT_LIMITS.maxBytes,
+  });
+  if (!upload.ok) return upload;
+  return {
+    ok: true,
+    bytes: upload.bytes,
+    acknowledgeWarnings: upload.form.get('acknowledge_warnings') === 'true',
   };
 }
 

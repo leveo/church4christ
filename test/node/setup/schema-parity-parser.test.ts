@@ -64,6 +64,18 @@ describe('final D1 schema parser', () => {
     });
   });
 
+  it('distinguishes rowid identity from application-managed WITHOUT ROWID primary keys', () => {
+    const schema = parseFinalD1Schema([
+      [
+        'CREATE TABLE generated (id INTEGER PRIMARY KEY, name TEXT NOT NULL);',
+        'CREATE TABLE managed (id INTEGER PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;',
+      ].join('\n'),
+    ]);
+
+    expect(schema.tables.get('generated')?.columns.get('id')?.identity).toBe(true);
+    expect(schema.tables.get('managed')?.columns.get('id')?.identity).toBe(false);
+  });
+
   it('captures normalized keys, foreign targets, and application indexes', () => {
     const schema = finalSchema();
     const ministryI18n = schema.tables.get('ministry_i18n');

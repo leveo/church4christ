@@ -9,6 +9,8 @@ import type { Locale } from '../../../../lib/locales';
 const access = canManagePeopleImport(Astro.locals.user, Astro.locals.modules);
 if (access === 'not_found') return new Response(null, { status: 404 });
 if (access === 'forbidden') return new Response(null, { status: 403 });
+const hasPeople = Astro.locals.modules.has('people');
+const canManagePeople = access === 'ok';
 
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
@@ -26,7 +28,16 @@ const disabledButton = 'disabled:cursor-not-allowed disabled:opacity-50';
         <h1 class="font-display text-heading-md font-bold">{title}</h1>
         <p class="mt-2 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.peopleImport.intro')}</p>
       </div>
-      <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.peopleImport.success.back')}</a>
+      <div class="flex flex-wrap gap-2">
+        {
+          hasPeople && canManagePeople && (
+            <a href="/admin/people/import/map" class={btnSecondary}>
+              {t(lang, 'admin.peopleImportMapping.entry')}
+            </a>
+          )
+        }
+        <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.peopleImport.success.back')}</a>
+      </div>
     </div>
 
     <section class={`mt-6 ${card} space-y-3`} aria-labelledby="people-import-guidance">

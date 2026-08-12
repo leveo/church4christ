@@ -1,0 +1,999 @@
+---
+import Admin from '../../../../../layouts/Admin.astro';
+import { btn, btnSecondary, card, noticeErr, noticeOk, th, tin } from '../../../../../lib/adminUi';
+import { t } from '../../../../../lib/i18n';
+import { canManagePeopleImport } from '../../../../../lib/peopleImportHttp';
+import { PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES } from '../../../../../lib/peopleImportMappingContract';
+import {
+  PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
+  PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES,
+} from '../../../../../lib/peopleImportMappingUi';
+import type { Locale } from '../../../../../lib/locales';
+
+export const prerender = false;
+
+const access = canManagePeopleImport(Astro.locals.user, Astro.locals.modules);
+if (access === 'not_found') return new Response(null, { status: 404 });
+if (access === 'forbidden') return new Response(null, { status: 403 });
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const title = t(lang, 'admin.peopleImportMapping.title');
+const peopleImportIssueCodes = [
+  'file_too_large', 'invalid_utf8', 'nul_byte', 'unclosed_quote', 'illegal_quote',
+  'lone_cr', 'too_many_rows', 'too_many_columns', 'cell_too_long', 'empty_file',
+  'missing_header', 'duplicate_header', 'unknown_header', 'required', 'too_long',
+  'invalid_email', 'invalid_option', 'invalid_date', 'future_date', 'forbidden_field',
+  'household_fields_without_key', 'duplicate_email', 'household_requires_person',
+  'household_name_required', 'household_primary_required', 'household_primary_multiple',
+  'household_primary_must_be_adult', 'household_metadata_conflict', 'duplicate_dependent',
+  'duplicate_household_name', 'too_many_households', 'issues_truncated', 'email_exists',
+  'household_name_exists',
+] as const;
+const clientCopyKeys = [
+  'admin.peopleImportMapping.profileChoose',
+  'admin.peopleImportMapping.profileNew',
+  'admin.peopleImportMapping.translationSource',
+  'admin.peopleImportMapping.translationRemove',
+  'admin.peopleImportMapping.inspectInvalid',
+  'admin.peopleImportMapping.headers',
+  'admin.peopleImportMapping.profileCloneSuffix',
+  'admin.peopleImportMapping.chooseValidFile',
+  'admin.peopleImportMapping.failure.network',
+  'admin.peopleImportMapping.failure.unexpected',
+  'admin.peopleImportMapping.failure.uncertainCreate',
+  'admin.peopleImportMapping.failure.uncertainCommit',
+  'admin.peopleImportMapping.failure.headerDrift',
+  'admin.peopleImport.issues.file',
+  'admin.peopleImport.issues.error',
+  'admin.peopleImport.issues.warning',
+  'admin.peopleImport.preview',
+  'admin.peopleImport.previewPending',
+  'admin.peopleImport.commit',
+  'admin.peopleImport.commitPending',
+  'admin.peopleImport.success.body',
+  ...PEOPLE_IMPORT_MAPPING_UI_FIELDS.map((field) => `admin.peopleImport.field.${field}`),
+  ...PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS.flatMap((field) =>
+    PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field].map(
+      (value) => `admin.peopleImportMapping.enum.${field}.${value}`,
+    ),
+  ),
+  ...peopleImportIssueCodes.map((code) => `admin.peopleImport.issue.${code}`),
+  ...PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES.map((code) => `admin.peopleImportMapping.issue.${code}`),
+  ...PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.map((code) => `admin.peopleImportMapping.result.${code}`),
+];
+const enumFields = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS);
+const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
+---
+
+<Admin title={title}>
+  <main data-people-import-mapping class="mx-auto max-w-6xl">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="font-display text-heading-md font-bold">{title}</h1>
+        <p class="mt-2 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.intro')}</p>
+      </div>
+      <a href="/admin/people/import" class={btnSecondary}>{t(lang, 'admin.peopleImportMapping.canonicalLink')}</a>
+    </div>
+
+    <section class={`mt-6 ${card} space-y-3`} aria-labelledby="mapping-safety-heading">
+      <h2 id="mapping-safety-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImportMapping.safetyTitle')}
+      </h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.privacy')}</p>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.createOnly')}</p>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.profileImmutable')}</p>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.modeBoundary')}</p>
+      <p class="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-ink-muted">
+        {t(lang, 'admin.peopleImportMapping.d1Notice')}
+      </p>
+    </section>
+
+    <section class={`mt-6 ${card}`} aria-labelledby="mapping-file-heading">
+      <h2 id="mapping-file-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImportMapping.fileTitle')}
+      </h2>
+      <label class="mt-4 block">
+        <span class="mb-1 block text-sm font-semibold">{t(lang, 'admin.peopleImport.fileLabel')}</span>
+        <input
+          id="mapping-file"
+          type="file"
+          accept=".csv,text/csv,application/vnd.ms-excel,application/octet-stream"
+          class={tin}
+        />
+      </label>
+      <p class="mt-2 text-xs text-ink-subtle">{t(lang, 'admin.peopleImportMapping.sameFile')}</p>
+      <div id="mapping-inspection" class="mt-4" hidden>
+        <p><span class="font-semibold">{t(lang, 'admin.peopleImportMapping.dataRows')}:</span> <span id="mapping-data-rows">0</span></p>
+        <p class="mt-1 text-sm text-ink-muted">
+          <span class="font-semibold">{t(lang, 'admin.peopleImportMapping.headers')}:</span>
+          <span id="mapping-headers"></span>
+        </p>
+      </div>
+    </section>
+
+    <section class={`mt-6 ${card}`} aria-labelledby="mapping-profile-heading">
+      <h2 id="mapping-profile-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImportMapping.profileTitle')}
+      </h2>
+      <div class="mt-4 flex flex-wrap items-end gap-3">
+        <label class="block min-w-64 flex-1">
+          <span class="mb-1 block text-sm font-semibold">{t(lang, 'admin.peopleImportMapping.profileSelect')}</span>
+          <select id="mapping-profile-select" class={tin}>
+            <option value="">{t(lang, 'admin.peopleImportMapping.profileChoose')}</option>
+            <option value="__new">{t(lang, 'admin.peopleImportMapping.profileNew')}</option>
+          </select>
+        </label>
+        <button id="mapping-profile-refresh" type="button" class={`${btnSecondary} ${disabled}`}>
+          {t(lang, 'admin.peopleImportMapping.profileRefresh')}
+        </button>
+      </div>
+      <div id="mapping-selected-profile" class="mt-4 rounded-md border border-border bg-surface-sunken px-4 py-3" hidden>
+        <p class="font-semibold" id="mapping-selected-profile-name"></p>
+        <p class="mt-1 text-sm text-ink-muted" id="mapping-selected-profile-headers"></p>
+        <button id="mapping-clone-profile" type="button" class={`mt-3 ${btnSecondary} ${disabled}`}>
+          {t(lang, 'admin.peopleImportMapping.profileClone')}
+        </button>
+      </div>
+    </section>
+
+    <section id="mapping-draft" class={`mt-6 ${card}`} aria-labelledby="mapping-draft-heading" hidden>
+      <h2 id="mapping-draft-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImportMapping.draftTitle')}
+      </h2>
+      <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.draftHint')}</p>
+      <label class="mt-4 block max-w-xl">
+        <span class="mb-1 block text-sm font-semibold">{t(lang, 'admin.peopleImportMapping.profileName')}</span>
+        <input id="mapping-profile-name" type="text" class={tin} />
+      </label>
+
+      <div class="mt-5 overflow-x-auto rounded-xl border border-border">
+        <table class="w-full border-collapse">
+          <thead class="bg-surface-sunken">
+            <tr>
+              <th class={th}>{t(lang, 'admin.peopleImportMapping.canonicalField')}</th>
+              <th class={th}>{t(lang, 'admin.peopleImportMapping.mode')}</th>
+              <th class={th}>{t(lang, 'admin.peopleImportMapping.sourceOrConstant')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              PEOPLE_IMPORT_MAPPING_UI_FIELDS.map((field) => (
+                <tr class="border-t border-border" data-mapping-field-row={field}>
+                  <td class="px-3 py-3 text-sm font-medium">{t(lang, `admin.peopleImport.field.${field}`)}</td>
+                  <td class="px-3 py-3">
+                    <select class={tin} data-mapping-mode={field}>
+                      <option value="empty">{t(lang, 'admin.peopleImportMapping.mode.empty')}</option>
+                      <option value="source">{t(lang, 'admin.peopleImportMapping.mode.source')}</option>
+                      {enumFields.has(field) && (
+                        <option value="constant">{t(lang, 'admin.peopleImportMapping.mode.constant')}</option>
+                      )}
+                    </select>
+                  </td>
+                  <td class="px-3 py-3">
+                    <select class={tin} data-mapping-source={field} hidden></select>
+                    {
+                      enumFields.has(field) && (
+                        <select class={tin} data-mapping-constant={field} hidden>
+                          {PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field as keyof typeof PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES].map((value) => (
+                            <option value={value}>{t(lang, `admin.peopleImportMapping.enum.${field}.${value}`)}</option>
+                          ))}
+                        </select>
+                      )
+                    }
+                    <span class="text-sm text-ink-subtle" data-mapping-empty={field}>
+                      {t(lang, 'admin.peopleImportMapping.mode.emptyHint')}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <section class="mt-6" aria-labelledby="mapping-translations-heading">
+        <h3 id="mapping-translations-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImportMapping.translationTitle')}
+        </h3>
+        <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.translationHint')}</p>
+        <div class="mt-4 space-y-4">
+          {
+            PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS.map((field) => (
+              <article class="rounded-xl border border-border p-4" data-translation-section={field} hidden>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <h4 class="font-semibold">{t(lang, `admin.peopleImport.field.${field}`)}</h4>
+                  <button type="button" class={btnSecondary} data-add-translation={field}>
+                    {t(lang, 'admin.peopleImportMapping.translationAdd')}
+                  </button>
+                </div>
+                <div class="mt-3 space-y-2" data-translation-rows={field}></div>
+              </article>
+            ))
+          }
+        </div>
+      </section>
+
+      <div class="mt-5 flex flex-wrap items-center gap-3">
+        <button id="mapping-save-profile" type="button" class={`${btn} ${disabled}`} disabled>
+          {t(lang, 'admin.peopleImportMapping.profileSave')}
+        </button>
+        <p class="text-xs text-ink-subtle">{t(lang, 'admin.peopleImportMapping.profileSaveHint')}</p>
+      </div>
+    </section>
+
+    <section class={`mt-6 ${card}`} aria-labelledby="mapping-preview-heading">
+      <h2 id="mapping-preview-heading" class="font-display text-heading-sm font-bold">
+        {t(lang, 'admin.peopleImportMapping.previewTitle')}
+      </h2>
+      <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.previewHint')}</p>
+      <button id="mapping-preview-button" type="button" class={`mt-4 ${btn} ${disabled}`} disabled>
+        {t(lang, 'admin.peopleImport.preview')}
+      </button>
+      <p id="mapping-status" class={`mt-4 ${noticeErr}`} role="alert" aria-live="polite" hidden></p>
+      <a id="mapping-check-people" href="/admin/people" class="mt-3 inline-block font-semibold underline" hidden>
+        {t(lang, 'admin.peopleImportMapping.checkPeople')}
+      </a>
+    </section>
+
+    <section id="mapping-preview-result" class="mt-6 space-y-5" hidden>
+      <section class={card} aria-labelledby="mapping-summary-heading">
+        <h2 id="mapping-summary-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImport.summary.title')}
+        </h2>
+        <dl class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {
+            [
+              ['dataRows', 'admin.peopleImport.summary.dataRows'],
+              ['people', 'admin.peopleImport.summary.people'],
+              ['dependents', 'admin.peopleImport.summary.dependents'],
+              ['households', 'admin.peopleImport.summary.households'],
+              ['inactivePeople', 'admin.peopleImport.summary.inactivePeople'],
+            ].map(([key, label]) => (
+              <div class="rounded-md border border-border bg-surface-sunken px-3 py-2">
+                <dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, label)}</dt>
+                <dd class="mt-1 text-xl font-bold" data-mapping-summary={key}>0</dd>
+              </div>
+            ))
+          }
+        </dl>
+      </section>
+
+      <section class={card} aria-labelledby="mapping-issues-heading">
+        <h2 id="mapping-issues-heading" class="font-display text-heading-sm font-bold">
+          {t(lang, 'admin.peopleImport.issues.title')}
+        </h2>
+        <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+          <table class="w-full border-collapse">
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.severity')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.row')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.field')}</th>
+                <th class={th}>{t(lang, 'admin.peopleImport.issues.title')}</th>
+              </tr>
+            </thead>
+            <tbody id="mapping-issues"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class={card}>
+        <div id="mapping-warning-wrap" hidden>
+          <label class="flex items-start gap-3 text-sm">
+            <input id="mapping-warning-ack" type="checkbox" class="mt-1" />
+            <span>{t(lang, 'admin.peopleImportMapping.warningAck')}</span>
+          </label>
+          <p class="mt-2 text-xs text-ink-subtle">{t(lang, 'admin.peopleImport.warningAckRequired')}</p>
+        </div>
+        <button id="mapping-commit-button" type="button" class={`mt-4 ${btn} ${disabled}`} disabled>
+          {t(lang, 'admin.peopleImport.commit')}
+        </button>
+      </section>
+    </section>
+
+    <section id="mapping-success" class={`mt-6 ${noticeOk}`} role="status" aria-live="polite" hidden>
+      <h2 class="font-semibold">{t(lang, 'admin.peopleImport.success.title')}</h2>
+      <p id="mapping-success-body" class="mt-1"></p>
+      <a href="/admin/people" class="mt-3 inline-block font-semibold underline">
+        {t(lang, 'admin.peopleImport.success.back')}
+      </a>
+    </section>
+
+    <div hidden aria-hidden="true">
+      {clientCopyKeys.map((key) => <span data-mapping-copy={key}>{t(lang, key)}</span>)}
+    </div>
+  </main>
+</Admin>
+
+<script>
+  import {
+    PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
+    PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
+    PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+    applyPeopleImportMappingCommit,
+    applyPeopleImportMappingInspect,
+    applyPeopleImportMappingPreview,
+    applyPeopleImportMappingProfile,
+    applyPeopleImportMappingProfiles,
+    beginPeopleImportMappingRequest,
+    classifyPeopleImportMappingCommitResponse,
+    clonePeopleImportMappingDraft,
+    createPeopleImportMappingDraft,
+    createPeopleImportMappingUiState,
+    decidePeopleImportMappingFailure,
+    editPeopleImportMappingDraft,
+    isValidPeopleImportMappingProfileName,
+    mappingDraftConfig,
+    parsePeopleImportMappingInspect,
+    parsePeopleImportMappingPreview,
+    parsePeopleImportMappingProfile,
+    parsePeopleImportMappingProfiles,
+    parsePeopleImportMappingResultCode,
+    peopleImportMappingUiControls,
+    rejectPeopleImportMappingRequest,
+    selectPeopleImportMappingFile,
+    selectPeopleImportMappingProfile,
+    setPeopleImportMappingWarningAcknowledgement,
+    updatePeopleImportMappingDraftField,
+    updatePeopleImportMappingDraftTranslations,
+    type PeopleImportMappingProfileSummary,
+    type PeopleImportMappingRequest,
+    type PeopleImportMappingTranslationRow,
+    type PeopleImportMappingUiEnumField,
+    type PeopleImportMappingUiField,
+    type PeopleImportMappingUiProfile,
+    type PeopleImportMappingUiState,
+  } from '../../../../../lib/peopleImportMappingUi';
+
+  const INSPECT_PATH = '/admin/people/import/map/inspect';
+  const PROFILES_PATH = '/admin/people/import/map/profiles';
+  const PREVIEW_PATH = '/admin/people/import/map/preview';
+  const COMMIT_PATH = '/admin/people/import/map/commit';
+
+  async function readJson(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function requiredElement<T>(root: HTMLElement, selector: string): T {
+    const element = root.querySelector(selector);
+    if (element === null) throw new Error('People import mapping page is incomplete.');
+    return element as T;
+  }
+
+  function csvForm(file: File): FormData {
+    const form = new FormData();
+    form.append('csv', file);
+    return form;
+  }
+
+  function initPeopleImportMapping(root: HTMLElement): void {
+    const fileInput = requiredElement<HTMLInputElement>(root, '#mapping-file');
+    const inspectionWrap = requiredElement<HTMLElement>(root, '#mapping-inspection');
+    const dataRows = requiredElement<HTMLElement>(root, '#mapping-data-rows');
+    const headersText = requiredElement<HTMLElement>(root, '#mapping-headers');
+    const profileSelect = requiredElement<HTMLSelectElement>(root, '#mapping-profile-select');
+    const profileRefresh = requiredElement<HTMLButtonElement>(root, '#mapping-profile-refresh');
+    const selectedProfileWrap = requiredElement<HTMLElement>(root, '#mapping-selected-profile');
+    const selectedProfileName = requiredElement<HTMLElement>(root, '#mapping-selected-profile-name');
+    const selectedProfileHeaders = requiredElement<HTMLElement>(root, '#mapping-selected-profile-headers');
+    const cloneProfileButton = requiredElement<HTMLButtonElement>(root, '#mapping-clone-profile');
+    const draftWrap = requiredElement<HTMLElement>(root, '#mapping-draft');
+    const profileNameInput = requiredElement<HTMLInputElement>(root, '#mapping-profile-name');
+    const saveProfileButton = requiredElement<HTMLButtonElement>(root, '#mapping-save-profile');
+    const previewButton = requiredElement<HTMLButtonElement>(root, '#mapping-preview-button');
+    const commitButton = requiredElement<HTMLButtonElement>(root, '#mapping-commit-button');
+    const status = requiredElement<HTMLElement>(root, '#mapping-status');
+    const checkPeople = requiredElement<HTMLAnchorElement>(root, '#mapping-check-people');
+    const previewWrap = requiredElement<HTMLElement>(root, '#mapping-preview-result');
+    const issuesBody = requiredElement<HTMLTableSectionElement>(root, '#mapping-issues');
+    const warningWrap = requiredElement<HTMLElement>(root, '#mapping-warning-wrap');
+    const warningAck = requiredElement<HTMLInputElement>(root, '#mapping-warning-ack');
+    const successWrap = requiredElement<HTMLElement>(root, '#mapping-success');
+    const successBody = requiredElement<HTMLElement>(root, '#mapping-success-body');
+
+    const copies = new Map<string, string>();
+    root.querySelectorAll('[data-mapping-copy]').forEach((candidate) => {
+      const node = candidate as HTMLElement;
+      const key = node.dataset.mappingCopy;
+      if (key) copies.set(key, node.textContent ?? '');
+    });
+    const copy = (key: string): string => copies.get(key) ?? copies.get('admin.peopleImportMapping.failure.unexpected') ?? '';
+    const format = (key: string, values: Record<string, number>): string =>
+      copy(key).replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+        Object.hasOwn(values, name) ? String(values[name]) : placeholder,
+      );
+
+    let state: PeopleImportMappingUiState = createPeopleImportMappingUiState();
+    let selectedFile: File | null = null;
+    let failureKey: string | null = null;
+    let showCheckPeople = false;
+    let draftValid = true;
+    let translationInputs: Partial<Record<PeopleImportMappingUiEnumField, PeopleImportMappingTranslationRow[]>> = {};
+
+    const setText = (element: HTMLElement, value: string | number): void => {
+      element.textContent = String(value);
+    };
+    const option = (value: string, label: string): HTMLOptionElement => {
+      const node = document.createElement('option');
+      node.value = value;
+      node.textContent = label;
+      return node;
+    };
+    const tableCell = (value: string | number): HTMLTableCellElement => {
+      const node = document.createElement('td');
+      node.className = 'px-3 py-2 text-sm';
+      node.textContent = String(value);
+      return node;
+    };
+
+    function clearFailure(): void {
+      failureKey = null;
+      showCheckPeople = false;
+    }
+
+    function rejectRequest(
+      request: PeopleImportMappingRequest,
+      code: ReturnType<typeof parsePeopleImportMappingResultCode>,
+      uncertain: boolean,
+    ): void {
+      rejectDecision(request, decidePeopleImportMappingFailure(request.kind, code, uncertain));
+    }
+
+    function rejectDecision(
+      request: PeopleImportMappingRequest,
+      decision: ReturnType<typeof decidePeopleImportMappingFailure>,
+    ): void {
+      const next = rejectPeopleImportMappingRequest(state, request, decision);
+      if (next === state) return;
+      state = next;
+      failureKey = decision.messageKey;
+      showCheckPeople = decision.checkPeople;
+      render();
+    }
+
+    function profileOptions(profiles: PeopleImportMappingProfileSummary[]): void {
+      const current = state.selectedProfile === null ? '' : String(state.selectedProfile.id);
+      profileSelect.replaceChildren(
+        option('', copy('admin.peopleImportMapping.profileChoose')),
+        option('__new', copy('admin.peopleImportMapping.profileNew')),
+        ...profiles.map((profile) => option(String(profile.id), profile.name)),
+      );
+      profileSelect.value = current;
+    }
+
+    function currentFieldMode(field: PeopleImportMappingUiField): 'empty' | 'source' | 'constant' {
+      const draft = state.draft;
+      if (draft === null) return 'empty';
+      if (Object.hasOwn(draft.constants, field)) return 'constant';
+      return draft.fieldMappings[field] === null ? 'empty' : 'source';
+    }
+
+    function renderFieldControls(): void {
+      const draft = state.draft;
+      const headers = draft?.expectedHeaders ?? [];
+      for (const field of PEOPLE_IMPORT_MAPPING_UI_FIELDS) {
+        const mode = currentFieldMode(field);
+        const modeSelect = requiredElement<HTMLSelectElement>(root, `[data-mapping-mode="${field}"]`);
+        const sourceSelect = requiredElement<HTMLSelectElement>(root, `[data-mapping-source="${field}"]`);
+        const emptyHint = requiredElement<HTMLElement>(root, `[data-mapping-empty="${field}"]`);
+        modeSelect.value = mode;
+        modeSelect.disabled = peopleImportMappingUiControls(state).draftDisabled;
+        sourceSelect.replaceChildren(...headers.map((header, index) => option(String(index), header)));
+        sourceSelect.value = draft?.fieldMappings[field] === null || draft?.fieldMappings[field] === undefined
+          ? '0'
+          : String(draft.fieldMappings[field]);
+        sourceSelect.hidden = mode !== 'source';
+        sourceSelect.disabled = peopleImportMappingUiControls(state).draftDisabled;
+        emptyHint.hidden = mode !== 'empty';
+        const constantSelect = root.querySelector(`[data-mapping-constant="${field}"]`) as HTMLSelectElement | null;
+        if (constantSelect !== null) {
+          constantSelect.hidden = mode !== 'constant';
+          constantSelect.disabled = peopleImportMappingUiControls(state).draftDisabled;
+          const enumField = field as PeopleImportMappingUiEnumField;
+          constantSelect.value = draft?.constants[enumField]
+            ?? PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[enumField][0];
+        }
+        const translationSection = root.querySelector(`[data-translation-section="${field}"]`) as HTMLElement | null;
+        if (translationSection !== null) translationSection.hidden = mode !== 'source';
+      }
+    }
+
+    function translationRow(field: PeopleImportMappingUiEnumField, row: PeopleImportMappingTranslationRow, index: number): HTMLElement {
+      const wrap = document.createElement('div');
+      wrap.className = 'grid gap-2 sm:grid-cols-[1fr_1fr_auto]';
+      wrap.dataset.translationRow = field;
+      wrap.dataset.translationIndex = String(index);
+      const source = document.createElement('input');
+      source.type = 'text';
+      source.className = 'rounded-lg border border-border bg-surface px-3 py-2 text-sm';
+      source.placeholder = copy('admin.peopleImportMapping.translationSource');
+      source.value = row.source;
+      source.dataset.translationSource = field;
+      source.dataset.translationIndex = String(index);
+      const target = document.createElement('select');
+      target.className = 'rounded-lg border border-border bg-surface px-3 py-2 text-sm';
+      target.dataset.translationTarget = field;
+      target.dataset.translationIndex = String(index);
+      target.replaceChildren(...PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field].map((value) => (
+        option(value, copy(`admin.peopleImportMapping.enum.${field}.${value}`))
+      )));
+      target.value = row.target;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'rounded-lg border border-border px-3 py-2 text-sm font-semibold';
+      remove.textContent = copy('admin.peopleImportMapping.translationRemove');
+      remove.dataset.removeTranslation = field;
+      remove.dataset.translationIndex = String(index);
+      wrap.replaceChildren(source, target, remove);
+      return wrap;
+    }
+
+    function renderTranslationRows(): void {
+      for (const field of PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS) {
+        const container = requiredElement<HTMLElement>(root, `[data-translation-rows="${field}"]`);
+        const rows = translationInputs[field] ?? [];
+        container.replaceChildren(...rows.map((row, index) => translationRow(field, row, index)));
+      }
+    }
+
+    function captureTranslationInputs(): void {
+      if (state.draft === null) return;
+      const next = {} as Partial<Record<PeopleImportMappingUiEnumField, PeopleImportMappingTranslationRow[]>>;
+      for (const field of PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS) {
+        const rows = state.draft.translationRows[field];
+        if (rows) next[field] = rows.map((row) => ({ ...row }));
+      }
+      translationInputs = next;
+      draftValid = true;
+      renderTranslationRows();
+    }
+
+    function renderPreview(): void {
+      const payload = state.preview;
+      previewWrap.hidden = payload === null || state.success !== null;
+      if (payload === null) {
+        issuesBody.replaceChildren();
+        return;
+      }
+      const summary = payload.preview?.summary ?? {
+        dataRows: 0, people: 0, dependents: 0, households: 0, inactivePeople: 0,
+      };
+      root.querySelectorAll('[data-mapping-summary]').forEach((candidate) => {
+        const node = candidate as HTMLElement;
+        const key = node.dataset.mappingSummary as keyof typeof summary | undefined;
+        if (key && key in summary) setText(node, summary[key]);
+      });
+      const issueRows: HTMLTableRowElement[] = [];
+      for (const issue of payload.mappingIssues) {
+        const row = document.createElement('tr');
+        row.className = 'border-t border-border align-top';
+        const field = issue.field === null ? copy('admin.peopleImport.issues.file') : copy(`admin.peopleImport.field.${issue.field}`);
+        row.replaceChildren(
+          tableCell(copy('admin.peopleImport.issues.error')),
+          tableCell(issue.row ?? copy('admin.peopleImport.issues.file')),
+          tableCell(field),
+          tableCell(copy(`admin.peopleImportMapping.issue.${issue.code}`)),
+        );
+        issueRows.push(row);
+      }
+      for (const issue of payload.preview?.issues ?? []) {
+        const row = document.createElement('tr');
+        row.className = 'border-t border-border align-top';
+        const field = issue.field === null ? copy('admin.peopleImport.issues.file') : copy(`admin.peopleImport.field.${issue.field}`);
+        row.replaceChildren(
+          tableCell(copy(`admin.peopleImport.issues.${issue.severity}`)),
+          tableCell(issue.row ?? copy('admin.peopleImport.issues.file')),
+          tableCell(field),
+          tableCell(copy(`admin.peopleImport.issue.${issue.code}`)),
+        );
+        issueRows.push(row);
+      }
+      issuesBody.replaceChildren(...issueRows);
+    }
+
+    function render(): void {
+      const controls = peopleImportMappingUiControls(state);
+      fileInput.disabled = controls.fileDisabled;
+      profileSelect.disabled = controls.profileDisabled;
+      profileRefresh.disabled = state.pending !== null;
+      cloneProfileButton.disabled = controls.profileDisabled;
+      profileNameInput.disabled = controls.draftDisabled;
+      root.querySelectorAll<HTMLElement>(
+        '[data-add-translation], [data-translation-source], [data-translation-target], [data-remove-translation]',
+      ).forEach((control) => {
+        if (
+          control instanceof HTMLInputElement
+          || control instanceof HTMLSelectElement
+          || control instanceof HTMLButtonElement
+        ) control.disabled = controls.draftDisabled;
+      });
+      saveProfileButton.disabled = controls.saveDisabled
+        || !draftValid
+        || !isValidPeopleImportMappingProfileName(profileNameInput.value);
+      previewButton.disabled = controls.previewDisabled;
+      commitButton.disabled = controls.commitDisabled;
+      warningAck.disabled = state.pending !== null;
+      warningAck.checked = state.warningsAcknowledged;
+      inspectionWrap.hidden = state.inspection === null;
+      if (state.inspection !== null) {
+        setText(dataRows, state.inspection.dataRows);
+        setText(headersText, state.inspection.headers?.join(', ') ?? copy('admin.peopleImportMapping.inspectInvalid'));
+      }
+      selectedProfileWrap.hidden = state.selectedProfile === null;
+      if (state.selectedProfile !== null) {
+        setText(selectedProfileName, state.selectedProfile.name);
+        setText(selectedProfileHeaders, `${copy('admin.peopleImportMapping.headers')}: ${state.selectedProfile.expectedHeaders.join(', ')}`);
+      }
+      draftWrap.hidden = state.draft === null;
+      status.hidden = failureKey === null;
+      status.textContent = failureKey === null ? '' : copy(failureKey);
+      checkPeople.hidden = !showCheckPeople;
+      previewButton.textContent = copy(state.pending === 'preview'
+        ? 'admin.peopleImport.previewPending'
+        : 'admin.peopleImport.preview');
+      commitButton.textContent = copy(state.pending === 'commit'
+        ? 'admin.peopleImport.commitPending'
+        : 'admin.peopleImport.commit');
+      const warnings = state.preview?.preview?.issues.some((issue) => issue.severity === 'warning') ?? false;
+      warningWrap.hidden = !warnings || state.preview === null;
+      successWrap.hidden = state.success === null;
+      successBody.textContent = state.success === null ? '' : format('admin.peopleImport.success.body', {
+        people: state.success.people,
+        households: state.success.households,
+        dependents: state.success.dependents,
+      });
+      renderFieldControls();
+      renderPreview();
+    }
+
+    async function loadProfiles(): Promise<void> {
+      const operation = beginPeopleImportMappingRequest(state, 'profiles');
+      if (operation === null) return;
+      state = operation.state;
+      clearFailure();
+      render();
+      try {
+        const response = await fetch(PROFILES_PATH, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const body = await readJson(response);
+        const profiles = parsePeopleImportMappingProfiles(response.status, body);
+        if (profiles === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
+        const next = applyPeopleImportMappingProfiles(state, operation.request, profiles);
+        if (next === state) return;
+        state = next;
+        profileOptions(profiles);
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    async function inspectFile(): Promise<void> {
+      const file = selectedFile;
+      if (file === null) return;
+      const operation = beginPeopleImportMappingRequest(state, 'inspect');
+      if (operation === null) return;
+      state = operation.state;
+      clearFailure();
+      render();
+      try {
+        const response = await fetch(INSPECT_PATH, {
+          method: 'POST', body: csvForm(file), credentials: 'same-origin', headers: { Accept: 'application/json' },
+        });
+        const body = await readJson(response);
+        const inspection = parsePeopleImportMappingInspect(response.status, body);
+        if (inspection === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
+        const next = applyPeopleImportMappingInspect(state, operation.request, inspection);
+        if (next === state) return;
+        state = next;
+        if (inspection.headers === null) failureKey = 'admin.peopleImportMapping.inspectInvalid';
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    async function loadProfile(id: string): Promise<void> {
+      state = selectPeopleImportMappingProfile(state, null);
+      const operation = beginPeopleImportMappingRequest(state, 'profile');
+      if (operation === null) return;
+      state = operation.state;
+      clearFailure();
+      render();
+      try {
+        const response = await fetch(`${PROFILES_PATH}?id=${encodeURIComponent(id)}`, {
+          credentials: 'same-origin', headers: { Accept: 'application/json' },
+        });
+        const body = await readJson(response);
+        const profile = parsePeopleImportMappingProfile(response.status, body);
+        if (profile === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
+        const next = applyPeopleImportMappingProfile(state, operation.request, profile);
+        if (next === state) return;
+        state = next;
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    function enterDraft(profile: PeopleImportMappingUiProfile | null = null): void {
+      const headers = profile?.expectedHeaders ?? state.inspection?.headers;
+      if (headers === null || headers === undefined) {
+        failureKey = 'admin.peopleImportMapping.chooseValidFile';
+        render();
+        return;
+      }
+      const draft = profile === null ? createPeopleImportMappingDraft(headers) : clonePeopleImportMappingDraft(profile);
+      state = editPeopleImportMappingDraft(state, draft);
+      profileNameInput.value = profile === null ? '' : `${profile.name} — ${copy('admin.peopleImportMapping.profileCloneSuffix')}`;
+      captureTranslationInputs();
+      clearFailure();
+      render();
+    }
+
+    function setDraft(next: ReturnType<typeof updatePeopleImportMappingDraftField>): void {
+      if (next === null) {
+        draftValid = false;
+      } else {
+        state = editPeopleImportMappingDraft(state, next);
+        draftValid = true;
+        captureTranslationInputs();
+      }
+      clearFailure();
+      render();
+    }
+
+    async function saveProfile(): Promise<void> {
+      const file = selectedFile;
+      const draft = state.draft;
+      const config = draft === null ? null : mappingDraftConfig(draft);
+      if (
+        file === null
+        || config === null
+        || !draftValid
+        || !isValidPeopleImportMappingProfileName(profileNameInput.value)
+      ) return;
+      const operation = beginPeopleImportMappingRequest(state, 'create');
+      if (operation === null) return;
+      state = operation.state;
+      clearFailure();
+      render();
+      const form = csvForm(file);
+      form.append('profile_name', profileNameInput.value);
+      form.append('mapping_config', JSON.stringify(config));
+      try {
+        const response = await fetch(PROFILES_PATH, {
+          method: 'POST', body: form, credentials: 'same-origin', headers: { Accept: 'application/json' },
+        });
+        const body = await readJson(response);
+        const profile = parsePeopleImportMappingProfile(response.status, body);
+        if (profile === null) {
+          const code = parsePeopleImportMappingResultCode(response.status, body);
+          return rejectRequest(operation.request, code, code === null);
+        }
+        const next = applyPeopleImportMappingProfile(state, operation.request, profile);
+        if (next === state) return;
+        state = next;
+        profileOptions(state.profiles);
+        profileSelect.value = String(profile.id);
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    async function previewImport(): Promise<void> {
+      const file = selectedFile;
+      const profile = state.selectedProfile;
+      if (file === null || profile === null) return;
+      const operation = beginPeopleImportMappingRequest(state, 'preview');
+      if (operation === null) return;
+      state = operation.state;
+      clearFailure();
+      render();
+      const form = csvForm(file);
+      form.append('profile_id', String(profile.id));
+      try {
+        const response = await fetch(PREVIEW_PATH, {
+          method: 'POST', body: form, credentials: 'same-origin', headers: { Accept: 'application/json' },
+        });
+        const body = await readJson(response);
+        const preview = parsePeopleImportMappingPreview(response.status, body);
+        if (preview === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
+        if (preview.profile.id !== operation.request.profileId) {
+          return rejectRequest(operation.request, null, false);
+        }
+        const next = applyPeopleImportMappingPreview(state, operation.request, preview);
+        if (next === state) return;
+        state = next;
+        if (preview.mappingIssues.some((issue) => issue.code === 'header_drift')) {
+          failureKey = 'admin.peopleImportMapping.failure.headerDrift';
+        }
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    async function commitImport(): Promise<void> {
+      const file = selectedFile;
+      const profile = state.selectedProfile;
+      if (file === null || profile === null) return;
+      const operation = beginPeopleImportMappingRequest(state, 'commit');
+      if (operation === null) return;
+      const acknowledged = operation.state.warningsAcknowledged;
+      state = operation.state;
+      clearFailure();
+      render();
+      const form = csvForm(file);
+      form.append('profile_id', String(profile.id));
+      if (acknowledged) form.append('acknowledge_warnings', 'true');
+      try {
+        const response = await fetch(COMMIT_PATH, {
+          method: 'POST', body: form, credentials: 'same-origin', headers: { Accept: 'application/json' },
+        });
+        const body = await readJson(response);
+        const result = classifyPeopleImportMappingCommitResponse(response.status, body);
+        if (!result.ok) return rejectDecision(operation.request, result.decision);
+        const next = applyPeopleImportMappingCommit(state, operation.request, result.counts);
+        if (next === state) return;
+        state = next;
+        render();
+      } catch {
+        rejectRequest(operation.request, null, true);
+      }
+    }
+
+    fileInput.addEventListener('change', () => {
+      if (state.pending === 'create' || state.pending === 'commit') return;
+      selectedFile = fileInput.files?.item(0) ?? null;
+      state = selectPeopleImportMappingFile(state, selectedFile !== null);
+      translationInputs = {};
+      draftValid = true;
+      clearFailure();
+      renderTranslationRows();
+      render();
+      if (selectedFile !== null) void inspectFile();
+    });
+    profileRefresh.addEventListener('click', () => void loadProfiles());
+    profileSelect.addEventListener('change', () => {
+      if (profileSelect.value === '__new') enterDraft();
+      else if (profileSelect.value !== '') void loadProfile(profileSelect.value);
+      else state = selectPeopleImportMappingProfile(state, null);
+      render();
+    });
+    cloneProfileButton.addEventListener('click', () => enterDraft(state.selectedProfile));
+    profileNameInput.addEventListener('input', () => {
+      if (state.draft !== null) state = editPeopleImportMappingDraft(state, state.draft);
+      clearFailure();
+      render();
+    });
+    saveProfileButton.addEventListener('click', () => void saveProfile());
+    previewButton.addEventListener('click', () => void previewImport());
+    commitButton.addEventListener('click', () => void commitImport());
+    warningAck.addEventListener('change', () => {
+      state = setPeopleImportMappingWarningAcknowledgement(state, warningAck.checked);
+      render();
+    });
+
+    root.querySelectorAll('[data-mapping-mode]').forEach((candidate) => {
+      const select = candidate as unknown as HTMLSelectElement;
+      select.addEventListener('change', () => {
+        const field = select.dataset.mappingMode as PeopleImportMappingUiField;
+        const draft = state.draft;
+        if (draft === null) return;
+        if (select.value === 'empty') setDraft(updatePeopleImportMappingDraftField(draft, field, { mode: 'empty' }));
+        if (select.value === 'source') {
+          const source = requiredElement<HTMLSelectElement>(root, `[data-mapping-source="${field}"]`);
+          setDraft(updatePeopleImportMappingDraftField(draft, field, { mode: 'source', sourceIndex: Number(source.value) }));
+        }
+        if (select.value === 'constant') {
+          const constant = requiredElement<HTMLSelectElement>(root, `[data-mapping-constant="${field}"]`);
+          setDraft(updatePeopleImportMappingDraftField(draft, field, { mode: 'constant', value: constant.value }));
+        }
+      });
+    });
+    root.querySelectorAll('[data-mapping-source]').forEach((candidate) => {
+      const select = candidate as unknown as HTMLSelectElement;
+      select.addEventListener('change', () => {
+        const field = select.dataset.mappingSource as PeopleImportMappingUiField;
+        if (state.draft !== null) setDraft(updatePeopleImportMappingDraftField(
+          state.draft, field, { mode: 'source', sourceIndex: Number(select.value) },
+        ));
+      });
+    });
+    root.querySelectorAll('[data-mapping-constant]').forEach((candidate) => {
+      const select = candidate as unknown as HTMLSelectElement;
+      select.addEventListener('change', () => {
+        const field = select.dataset.mappingConstant as PeopleImportMappingUiField;
+        if (state.draft !== null) setDraft(updatePeopleImportMappingDraftField(
+          state.draft, field, { mode: 'constant', value: select.value },
+        ));
+      });
+    });
+    root.querySelectorAll('[data-add-translation]').forEach((candidate) => {
+      const button = candidate as HTMLButtonElement;
+      button.addEventListener('click', () => {
+        const field = button.dataset.addTranslation as PeopleImportMappingUiEnumField;
+        const rows = translationInputs[field] ?? [];
+        translationInputs[field] = [
+          ...rows,
+          { source: '', target: PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field][0] },
+        ];
+        if (state.draft !== null) state = editPeopleImportMappingDraft(state, state.draft);
+        draftValid = false;
+        renderTranslationRows();
+        render();
+      });
+    });
+    root.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.dataset.translationSource) return;
+      const field = target.dataset.translationSource as PeopleImportMappingUiEnumField;
+      const index = Number(target.dataset.translationIndex);
+      const rows = translationInputs[field] ?? [];
+      if (!Number.isSafeInteger(index) || rows[index] === undefined || state.draft === null) return;
+      rows[index] = { ...rows[index], source: target.value };
+      translationInputs[field] = rows;
+      const next = updatePeopleImportMappingDraftTranslations(state.draft, field, rows);
+      if (next === null) {
+        state = editPeopleImportMappingDraft(state, state.draft);
+        draftValid = false;
+      } else {
+        state = editPeopleImportMappingDraft(state, next);
+        draftValid = true;
+      }
+      clearFailure();
+      render();
+    });
+    root.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement) || !target.dataset.translationTarget) return;
+      const field = target.dataset.translationTarget as PeopleImportMappingUiEnumField;
+      const index = Number(target.dataset.translationIndex);
+      const rows = translationInputs[field] ?? [];
+      if (!Number.isSafeInteger(index) || rows[index] === undefined || state.draft === null) return;
+      rows[index] = { ...rows[index], target: target.value };
+      translationInputs[field] = rows;
+      const next = updatePeopleImportMappingDraftTranslations(state.draft, field, rows);
+      if (next === null) {
+        state = editPeopleImportMappingDraft(state, state.draft);
+        draftValid = false;
+      } else {
+        state = editPeopleImportMappingDraft(state, next);
+        draftValid = true;
+      }
+      clearFailure();
+      render();
+    });
+    root.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement) || !target.dataset.removeTranslation) return;
+      const field = target.dataset.removeTranslation as PeopleImportMappingUiEnumField;
+      const index = Number(target.dataset.translationIndex);
+      const rows = translationInputs[field] ?? [];
+      if (!Number.isSafeInteger(index) || rows[index] === undefined || state.draft === null) return;
+      const nextRows = rows.filter((_, candidate) => candidate !== index);
+      translationInputs[field] = nextRows;
+      const next = updatePeopleImportMappingDraftTranslations(state.draft, field, nextRows);
+      state = editPeopleImportMappingDraft(state, next ?? state.draft);
+      draftValid = next !== null;
+      renderTranslationRows();
+      render();
+    });
+
+    profileOptions([]);
+    renderTranslationRows();
+    render();
+    void loadProfiles();
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-people-import-mapping]');
+  if (root !== null) initPeopleImportMapping(root);
+</script>

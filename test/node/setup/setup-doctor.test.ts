@@ -34,6 +34,7 @@ const SUPABASE_MIGRATIONS = [
   '0009_member_portal.sql',
   '0010_stripe_webhook_events.sql',
   '0011_people_exports.sql',
+  '0012_people_import_mappings.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -311,7 +312,7 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.people).toEqual([
-      'households', 'household_members', 'person_notes', 'audit_events',
+      'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);
     expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;

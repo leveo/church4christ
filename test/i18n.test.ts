@@ -8,6 +8,14 @@ import {
   PEOPLE_IMPORT_HTTP_RESULT_CODES,
   type PeopleImportHttpResultCode,
 } from '../src/lib/peopleImportContract';
+import { PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES } from '../src/lib/peopleImportMappingContract';
+import {
+  EVERY_PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODE_IS_LISTED,
+  PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
+  PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES,
+} from '../src/lib/peopleImportMappingUi';
 
 const dicts = { en, zh } as const;
 
@@ -116,6 +124,58 @@ const everyPeopleImportIssueCodeIsListed: MissingPeopleImportIssueCode extends n
 const everyPeopleImportDbIssueCodeIsListed: MissingPeopleImportDbIssueCode extends never ? true : never = true;
 const everyPeopleImportResultCodeIsListed: MissingPeopleImportResultCode extends never ? true : never = true;
 
+const PEOPLE_IMPORT_MAPPING_COPY_KEYS = [
+  'admin.peopleImportMapping.entry',
+  'admin.peopleImportMapping.title',
+  'admin.peopleImportMapping.intro',
+  'admin.peopleImportMapping.canonicalLink',
+  'admin.peopleImportMapping.safetyTitle',
+  'admin.peopleImportMapping.privacy',
+  'admin.peopleImportMapping.createOnly',
+  'admin.peopleImportMapping.profileImmutable',
+  'admin.peopleImportMapping.modeBoundary',
+  'admin.peopleImportMapping.d1Notice',
+  'admin.peopleImportMapping.fileTitle',
+  'admin.peopleImportMapping.sameFile',
+  'admin.peopleImportMapping.dataRows',
+  'admin.peopleImportMapping.headers',
+  'admin.peopleImportMapping.inspectInvalid',
+  'admin.peopleImportMapping.profileTitle',
+  'admin.peopleImportMapping.profileSelect',
+  'admin.peopleImportMapping.profileChoose',
+  'admin.peopleImportMapping.profileNew',
+  'admin.peopleImportMapping.profileRefresh',
+  'admin.peopleImportMapping.profileClone',
+  'admin.peopleImportMapping.profileCloneSuffix',
+  'admin.peopleImportMapping.profileName',
+  'admin.peopleImportMapping.profileSave',
+  'admin.peopleImportMapping.profileSaveHint',
+  'admin.peopleImportMapping.draftTitle',
+  'admin.peopleImportMapping.draftHint',
+  'admin.peopleImportMapping.canonicalField',
+  'admin.peopleImportMapping.mode',
+  'admin.peopleImportMapping.sourceOrConstant',
+  'admin.peopleImportMapping.mode.empty',
+  'admin.peopleImportMapping.mode.source',
+  'admin.peopleImportMapping.mode.constant',
+  'admin.peopleImportMapping.mode.emptyHint',
+  'admin.peopleImportMapping.translationTitle',
+  'admin.peopleImportMapping.translationHint',
+  'admin.peopleImportMapping.translationAdd',
+  'admin.peopleImportMapping.translationSource',
+  'admin.peopleImportMapping.translationRemove',
+  'admin.peopleImportMapping.previewTitle',
+  'admin.peopleImportMapping.previewHint',
+  'admin.peopleImportMapping.warningAck',
+  'admin.peopleImportMapping.checkPeople',
+  'admin.peopleImportMapping.chooseValidFile',
+  'admin.peopleImportMapping.failure.network',
+  'admin.peopleImportMapping.failure.unexpected',
+  'admin.peopleImportMapping.failure.uncertainCreate',
+  'admin.peopleImportMapping.failure.uncertainCommit',
+  'admin.peopleImportMapping.failure.headerDrift',
+] as const;
+
 describe('dictionaries (parity, ported from the reference stack)', () => {
   it('has a non-empty string for every key in both locales', () => {
     for (const locale of ['en', 'zh'] as const) {
@@ -193,6 +253,48 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
         expect(dicts[locale][key as keyof (typeof dicts)[typeof locale]], `${locale}:${key}`).toBeTruthy();
       }
     }
+  });
+
+  it('provides exhaustive bilingual source-mapping workflow copy', () => {
+    const required = [
+      ...PEOPLE_IMPORT_MAPPING_COPY_KEYS,
+      ...PEOPLE_IMPORT_MAPPING_UI_FIELDS.map((field) => `admin.peopleImport.field.${field}`),
+      ...PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES.map((code) => `admin.peopleImportMapping.issue.${code}`),
+      ...PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.map((code) => `admin.peopleImportMapping.result.${code}`),
+      ...PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS.flatMap((field) => (
+        PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field].map((value) => `admin.peopleImportMapping.enum.${field}.${value}`)
+      )),
+    ];
+
+    expect(PEOPLE_IMPORT_MAPPING_UI_FIELDS).toHaveLength(18);
+    expect(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS).toHaveLength(6);
+    expect(EVERY_PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODE_IS_LISTED).toBe(true);
+    expect(PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES).toHaveLength(17);
+    expect(PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES).toHaveLength(23);
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of required) {
+        expect(dicts[locale][key as keyof (typeof dicts)[typeof locale]], `${locale}:${key}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('states source-mapping privacy, immutable/create-only boundaries, and D1 atomicity', () => {
+    expect(en['admin.peopleImportMapping.privacy']).toMatch(/not retained|not saved/i);
+    expect(en['admin.peopleImportMapping.createOnly']).toMatch(/create only/i);
+    expect(en['admin.peopleImportMapping.profileImmutable']).toMatch(/immutable|cannot be edited/i);
+    expect(en['admin.peopleImportMapping.modeBoundary']).toMatch(/six|6/);
+    expect(en['admin.peopleImportMapping.d1Notice']).toMatch(/\b50\b/);
+    expect(en['admin.peopleImportMapping.d1Notice']).toMatch(/\b500\b/);
+    expect(en['admin.peopleImportMapping.d1Notice']).toMatch(/atomic/i);
+    expect(zh['admin.peopleImportMapping.privacy']).toMatch(/不会保留|不会保存/);
+    expect(zh['admin.peopleImportMapping.createOnly']).toContain('仅创建');
+    expect(zh['admin.peopleImportMapping.profileImmutable']).toMatch(/不可变|不能编辑/);
+    expect(zh['admin.peopleImportMapping.modeBoundary']).toContain('6');
+    expect(zh['admin.peopleImportMapping.d1Notice']).toContain('50');
+    expect(zh['admin.peopleImportMapping.d1Notice']).toContain('500');
+    expect(zh['admin.peopleImportMapping.d1Notice']).toContain('原子');
+    expect(zh['admin.peopleImportMapping.issue.header_drift']).toContain('顺序');
+    expect(zh['admin.peopleImportMapping.issue.header_drift']).not.toContain('排序后的');
   });
 
   it('provides complete portable-export and sensitive-notes copy in both locales', () => {
@@ -276,6 +378,13 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zhGeneric).toMatch(/重新预览.*重试/);
     expect(zhGeneric).not.toMatch(/没有写入任何|未写入任何/);
     expect(zh['admin.peopleImport.result.import_failed']).toMatch(/没有写入任何|未写入任何/);
+  });
+
+  it('warns that an uncertain mapping-profile save may have succeeded', () => {
+    expect(en['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/may have been saved/i);
+    expect(en['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/refresh/i);
+    expect(zh['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/可能.*保存/);
+    expect(zh['admin.peopleImportMapping.failure.uncertainCreate']).toContain('刷新');
   });
 
   it('states that an unexpected preview failure made no database changes', () => {

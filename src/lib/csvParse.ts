@@ -25,6 +25,7 @@ export type CsvParseWithRowNumbersResult =
   | CsvParseFailure;
 
 type CsvState = 'fieldStart' | 'unquoted' | 'quoted' | 'afterQuote';
+type CsvRowCoordinate = 'logical' | 'physical';
 
 function csvError(code: CsvParseErrorCode, row: number | null, column: number | null): CsvParseFailure {
   return { ok: false, code, row, column };
@@ -38,9 +39,10 @@ function assertLimits(limits: CsvParseLimits): void {
   }
 }
 
-export function parseUtf8CsvWithRowNumbers(
+function parseUtf8CsvWithCoordinates(
   bytes: Uint8Array,
   limits: CsvParseLimits,
+  coordinate: CsvRowCoordinate,
 ): CsvParseWithRowNumbersResult {
   assertLimits(limits);
 
@@ -64,15 +66,20 @@ export function parseUtf8CsvWithRowNumbers(
   let record: string[] = [];
   let field = '';
   let fieldChars = 0;
-  let row = 1;
+  let logicalRow = 1;
+  let physicalRow = 1;
+  let recordPhysicalRow = 1;
   let column = 1;
   let state: CsvState = 'fieldStart';
   let recordStarted = false;
 
+  const currentRow = (): number => coordinate === 'logical' ? logicalRow : physicalRow;
+  const recordRow = (): number => coordinate === 'logical' ? logicalRow : recordPhysicalRow;
+
   const append = (value: string): CsvParseFailure | null => {
     fieldChars += 1;
     if (fieldChars > limits.maxCellChars) {
-      return csvError('cell_too_long', row, column);
+      return csvError('cell_too_long', currentRow(), column);
     }
     field += value;
     return null;
@@ -80,7 +87,7 @@ export function parseUtf8CsvWithRowNumbers(
 
   const finishField = (): CsvParseFailure | null => {
     if (record.length + 1 > limits.maxColumns) {
-      return csvError('too_many_columns', row, column);
+      return csvError('too_many_columns', currentRow(), column);
     }
     record.push(field);
     field = '';
@@ -94,16 +101,16 @@ export function parseUtf8CsvWithRowNumbers(
 
     if (record.some((cell) => cell !== '')) {
       if (rows.length + 1 > limits.maxRows) {
-        return csvError('too_many_rows', row, 1);
+        return csvError('too_many_rows', recordRow(), 1);
       }
       rows.push(record);
-      rowNumbers.push(row);
+      rowNumbers.push(recordRow());
     }
 
     record = [];
     field = '';
     fieldChars = 0;
-    row += 1;
+    logicalRow += 1;
     column = 1;
     state = 'fieldStart';
     recordStarted = false;
@@ -124,15 +131,17 @@ export function parseUtf8CsvWithRowNumbers(
         continue;
       }
       if (char === '\r') {
-        if (source[offset + 1] !== '\n') return csvError('lone_cr', row, column);
+        if (source[offset + 1] !== '\n') return csvError('lone_cr', currentRow(), column);
         const appendError = append('\n');
         if (appendError) return appendError;
+        physicalRow += 1;
         offset += 2;
         continue;
       }
 
       const appendError = append(char);
       if (appendError) return appendError;
+      if (char === '\n') physicalRow += 1;
       offset += width;
       continue;
     }
@@ -146,10 +155,10 @@ export function parseUtf8CsvWithRowNumbers(
         continue;
       }
       if (char !== ',' && char !== '\n' && char !== '\r') {
-        return csvError('illegal_quote', row, column);
+        return csvError('illegal_quote', currentRow(), column);
       }
     } else if (char === '"') {
-      if (state === 'unquoted') return csvError('illegal_quote', row, column);
+      if (state === 'unquoted') return csvError('illegal_quote', currentRow(), column);
       state = 'quoted';
       recordStarted = true;
       offset += width;
@@ -161,7 +170,7 @@ export function parseUtf8CsvWithRowNumbers(
       if (fieldError) return fieldError;
       column += 1;
       if (column > limits.maxColumns) {
-        return csvError('too_many_columns', row, column);
+        return csvError('too_many_columns', currentRow(), column);
       }
       state = 'fieldStart';
       recordStarted = true;
@@ -172,14 +181,18 @@ export function parseUtf8CsvWithRowNumbers(
     if (char === '\n') {
       const recordError = finishRecord();
       if (recordError) return recordError;
+      physicalRow += 1;
+      recordPhysicalRow = physicalRow;
       offset += width;
       continue;
     }
 
     if (char === '\r') {
-      if (source[offset + 1] !== '\n') return csvError('lone_cr', row, column);
+      if (source[offset + 1] !== '\n') return csvError('lone_cr', currentRow(), column);
       const recordError = finishRecord();
       if (recordError) return recordError;
+      physicalRow += 1;
+      recordPhysicalRow = physicalRow;
       offset += 2;
       continue;
     }
@@ -192,7 +205,7 @@ export function parseUtf8CsvWithRowNumbers(
   }
 
   if (state === 'quoted') {
-    return csvError('unclosed_quote', row, column);
+    return csvError('unclosed_quote', currentRow(), column);
   }
 
   if (recordStarted || record.length > 0 || field !== '') {
@@ -201,6 +214,20 @@ export function parseUtf8CsvWithRowNumbers(
   }
 
   return { ok: true, rows, rowNumbers };
+}
+
+export function parseUtf8CsvWithRowNumbers(
+  bytes: Uint8Array,
+  limits: CsvParseLimits,
+): CsvParseWithRowNumbersResult {
+  return parseUtf8CsvWithCoordinates(bytes, limits, 'logical');
+}
+
+export function parseUtf8CsvWithPhysicalRowNumbers(
+  bytes: Uint8Array,
+  limits: CsvParseLimits,
+): CsvParseWithRowNumbersResult {
+  return parseUtf8CsvWithCoordinates(bytes, limits, 'physical');
 }
 
 export function parseUtf8Csv(bytes: Uint8Array, limits: CsvParseLimits): CsvParseResult {

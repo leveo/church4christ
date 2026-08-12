@@ -3,15 +3,15 @@ import { isUniqueViolation } from './adminDb';
 import type { DbBackend } from './dbProvider';
 import {
   PEOPLE_IMPORT_LIMITS,
-  parsePeopleImport,
   type PeopleImportDependent,
   type PeopleImportHeader,
   type PeopleImportHousehold,
   type PeopleImportModel,
   type PeopleImportPerson,
+  type PeopleImportValidationResult,
 } from './peopleImport';
 
-export type PeopleImportValidationResult = ReturnType<typeof parsePeopleImport>;
+export type { PeopleImportValidationResult } from './peopleImport';
 
 export type PeopleImportDbIssueCode =
   | 'email_exists'

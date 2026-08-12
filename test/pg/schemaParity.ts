@@ -318,7 +318,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
   const statements = sources.flatMap((source) => splitSql(stripLineComments(source), ';'));
 
   for (const statement of statements) {
-    const createTable = statement.match(/^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(\S+)\s*\(([\s\S]*)\)$/i);
+    const createTable = statement.match(
+      /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(\S+)\s*\(([\s\S]*)\)(?:\s+(WITHOUT\s+ROWID))?$/i,
+    );
     if (createTable) {
       const name = identifier(createTable[1]);
       const table = { columns: new Map<string, D1Column>(), constraints: [] as D1Constraint[] };
@@ -334,6 +336,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
         else if (!/^(?:CONSTRAINT\s+\S+\s+)?CHECK\b/i.test(entry)) {
           throw new Error(`unsupported table entry in ${name}: ${entry}`);
         }
+      }
+      if (createTable[3]) {
+        for (const column of table.columns.values()) column.identity = false;
       }
       schema.tables.set(name, table);
       continue;

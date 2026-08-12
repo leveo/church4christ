@@ -124,6 +124,12 @@ export interface PeopleImportModel {
   };
 }
 
+export interface PeopleImportValidationResult {
+  model: PeopleImportModel | null;
+  errors: PeopleImportIssue[];
+  warnings: PeopleImportIssue[];
+}
+
 type NormalizedRow = Record<PeopleImportHeader, string>;
 type IssueInput = Omit<PeopleImportIssue, 'severity'> & { severity?: PeopleImportIssue['severity'] };
 
@@ -584,18 +590,13 @@ function groupHouseholds(
   };
 }
 
-export function parsePeopleImport(
-  bytes: Uint8Array,
+export function validatePeopleImportRows(
+  parsed: { rows: string[][]; rowNumbers: number[] },
   options: { today: string },
-): { model: PeopleImportModel | null; errors: PeopleImportIssue[]; warnings: PeopleImportIssue[] } {
+): PeopleImportValidationResult {
   if (!isValidDateStr(options.today)) throw new RangeError('today must be a valid YYYY-MM-DD date');
 
   const issues = new BoundedIssues();
-  const parsed = parseUtf8CsvWithRowNumbers(bytes, PEOPLE_IMPORT_LIMITS);
-  if (!parsed.ok) {
-    issues.add({ code: parsed.code, row: parsed.row, field: null });
-    return { model: null, ...issues.result() };
-  }
   if (parsed.rows.length === 0) {
     issues.add({ code: 'empty_file', row: null, field: null });
     return { model: null, ...issues.result() };
@@ -668,4 +669,19 @@ export function parsePeopleImport(
     },
   };
   return { model, ...issues.result() };
+}
+
+export function parsePeopleImport(
+  bytes: Uint8Array,
+  options: { today: string },
+): PeopleImportValidationResult {
+  if (!isValidDateStr(options.today)) throw new RangeError('today must be a valid YYYY-MM-DD date');
+
+  const parsed = parseUtf8CsvWithRowNumbers(bytes, PEOPLE_IMPORT_LIMITS);
+  if (!parsed.ok) {
+    const issues = new BoundedIssues();
+    issues.add({ code: parsed.code, row: parsed.row, field: null });
+    return { model: null, ...issues.result() };
+  }
+  return validatePeopleImportRows(parsed, options);
 }

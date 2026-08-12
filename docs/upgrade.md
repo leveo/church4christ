@@ -173,7 +173,7 @@ migration after it is merged into `main` or applied to a persistent, shared, or 
 installation. Before merge, applying a proposed migration only to disposable local or CI
 databases does not create a permanent freeze boundary: reset or rebuild those databases while
 the migration remains under review. Merge to `main` freezes the file even if no production
-deployment has used it. Files `0001` through `0011` in `migrations/` and
+deployment has used it. Files `0001` through `0012` in `migrations/` and
 `migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.
@@ -182,6 +182,12 @@ Migration `0011_people_exports.sql` creates `audit_events` for sensitive pastora
 export auditing on both D1 and Supabase/PostgreSQL. Apply it before deploying code that
 exposes `/admin/people/export-notes`; the standard People/Household export is read-only,
 but a successful notes download must be able to append its audit row or it fails closed.
+
+Migration `0012_people_import_mappings.sql` creates the immutable saved-profile table for
+create-only source-column mappings on both providers. Apply it before deploying
+`/admin/people/import/map`. It stores expected headers and mapping configuration; it does not
+store uploaded CSV bytes, source rows, or sample values. Code rollback does not remove
+profiles, and operators must not rewrite `0012` after this frozen boundary.
 
 ## 5. Recovery boundaries
 
