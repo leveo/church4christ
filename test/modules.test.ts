@@ -275,6 +275,7 @@ describe('people import module', () => {
     expect(moduleForPath('/admin/people/import/template.csv')).toBe('people');
     expect(moduleForPath('/admin/people/import/preview')).toBe('people');
     expect(moduleForPath('/admin/people/import/commit')).toBe('people');
+    expect(moduleForPath('/admin/people/export')).toBe('people');
     expect(moduleForPath('/admin/people/export.csv')).toBe('people');
     expect(moduleForPath('/admin/people/export-notes')).toBe('people');
     expect(moduleForPath('/admin/people')).toBeNull();

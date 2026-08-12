@@ -32,6 +32,7 @@ describe('adminAreaForPath', () => {
     ['/admin/people/import/template.csv', 'people'],
     ['/admin/people/import/preview', 'people'],
     ['/admin/people/import/commit', 'people'],
+    ['/admin/people/export', 'people'],
     ['/admin/people/export.csv', 'people'],
     ['/admin/people/export-notes', 'people'],
     ['/admin/groups', 'groups'],

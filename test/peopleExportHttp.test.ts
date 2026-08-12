@@ -86,7 +86,7 @@ function notesRequest(
   const body = init.body ?? new URLSearchParams({ acknowledgement });
   return new Request('https://church.example/admin/people/export-notes', {
     method: init.method ?? 'POST',
-    body: init.method === 'GET' ? undefined : body,
+    body: init.method === 'GET' || init.method === 'HEAD' ? undefined : body,
     headers: init.headers,
   });
 }
@@ -107,6 +107,10 @@ function notesContext(request = notesRequest(), over: {
 }
 
 describe('people export access', () => {
+  it('fixes the sensitive-notes acknowledgement to the tracked literal', () => {
+    expect(PEOPLE_NOTES_ACKNOWLEDGEMENT).toBe('EXPORT PASTORAL NOTES');
+  });
+
   it('fails module-off before role checks and requires a full People grant for standard export', () => {
     expect(canManagePeopleExport(null, new Set())).toBe('not_found');
     expect(canManagePeopleExport(grantedAdmin, new Set())).toBe('not_found');
@@ -236,7 +240,7 @@ describe('pastoral notes export handler', () => {
   });
 
   it('accepts only a bounded URL-encoded form with the exact literal acknowledgement', async () => {
-    for (const acknowledgement of ['', 'on', PEOPLE_NOTES_ACKNOWLEDGEMENT.toUpperCase(), ` ${PEOPLE_NOTES_ACKNOWLEDGEMENT}`]) {
+    for (const acknowledgement of ['', 'on', PEOPLE_NOTES_ACKNOWLEDGEMENT.toLowerCase(), ` ${PEOPLE_NOTES_ACKNOWLEDGEMENT}`]) {
       const response = await handlePastoralNotesExport(notesContext(notesRequest(acknowledgement)), runtime());
       expect(response.status, acknowledgement).toBe(400);
       expect(await response.json()).toEqual({ ok: false, code: 'acknowledgement_required' });
@@ -285,6 +289,70 @@ describe('pastoral notes export handler', () => {
     })), runtime());
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({ ok: false, code: 'form_too_large' });
+  });
+
+  it('accepts a valid body without Content-Length and ignores a lying small length', async () => {
+    const validBody = `acknowledgement=${encodeURIComponent('EXPORT PASTORAL NOTES')}`;
+    const accepted = await handlePastoralNotesExport(notesContext(notesRequest('', {
+      body: validBody,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    })), runtime());
+    expect(accepted.status).toBe(200);
+
+    const lied = await handlePastoralNotesExport(notesContext(notesRequest('', {
+      body: new Uint8Array(PEOPLE_NOTES_FORM_MAX_BYTES + 1),
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-length': '1',
+      },
+    })), runtime());
+    expect(lied.status).toBe(413);
+    expect(await lied.json()).toEqual({ ok: false, code: 'form_too_large' });
+  });
+
+  it('cancels an actual oversize stream and remains 413 when cancellation rejects', async () => {
+    for (const cancelRejects of [false, true]) {
+      let cancelled = false;
+      let sent = false;
+      const request = notesRequest('', {
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent) return controller.close();
+            sent = true;
+            controller.enqueue(new Uint8Array(PEOPLE_NOTES_FORM_MAX_BYTES + 1));
+          },
+          cancel() {
+            cancelled = true;
+            if (cancelRejects) throw new Error('private cancellation detail');
+          },
+        }),
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+      const response = await handlePastoralNotesExport(notesContext(request), runtime());
+      expect(response.status).toBe(413);
+      expect(cancelled).toBe(true);
+      expect(await response.json()).toEqual({ ok: false, code: 'form_too_large' });
+    }
+  });
+
+  it('maps body-read failures and invalid UTF-8 to generic safe form errors', async () => {
+    const unreadable = notesRequest('', {
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) { controller.error(new Error('private body detail')); },
+      }, { highWaterMark: 0 }),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const invalidUtf8 = notesRequest('', {
+      body: new Uint8Array([0x61, 0x63, 0x6b, 0x3d, 0xc3, 0x28]),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    for (const request of [unreadable, invalidUtf8]) {
+      const response = await handlePastoralNotesExport(notesContext(request), runtime());
+      expect(response.status).toBe(400);
+      const body = await response.text();
+      expect(body).toBe('{"ok":false,"code":"form_invalid"}');
+      expect(body).not.toContain('private');
+    }
   });
 
   it('awaits the PII-free audit before exposing notes bytes', async () => {
@@ -349,10 +417,15 @@ describe('pastoral notes export handler', () => {
     expect(await failed.text()).toBe('{"ok":false,"code":"export_failed"}');
   });
 
-  it('rejects non-POST methods safely after authorization without reading a body', async () => {
-    const response = await handlePastoralNotesExport(notesContext(notesRequest('', { method: 'GET' })), runtime());
-    expect(response.status).toBe(405);
-    expect(response.headers.get('allow')).toBe('POST');
-    expect(await response.json()).toEqual({ ok: false, code: 'method_not_allowed' });
+  it('rejects GET, HEAD, and OPTIONS safely after authorization without reading a body', async () => {
+    for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+      const response = await handlePastoralNotesExport(
+        notesContext(notesRequest('', { method })),
+        runtime(),
+      );
+      expect(response.status, method).toBe(405);
+      expect(response.headers.get('allow'), method).toBe('POST');
+      expect(await response.json()).toEqual({ ok: false, code: 'method_not_allowed' });
+    }
   });
 });

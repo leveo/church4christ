@@ -7,7 +7,7 @@ import type { PastoralNotesExportResult, PastoralNotesExportSource } from './pas
 import type { SessionUser } from './types';
 
 export const PEOPLE_NOTES_ACKNOWLEDGEMENT =
-  'I understand this export contains sensitive pastoral notes' as const;
+  'EXPORT PASTORAL NOTES' as const;
 export const PEOPLE_NOTES_FORM_MAX_BYTES = 8 * 1024;
 
 export type PeopleExportAccess = 'ok' | 'not_found' | 'forbidden';
@@ -38,6 +38,28 @@ export interface PeopleExportContext {
   backend: DbBackend;
   today: string;
 }
+
+export interface PeopleExportDiscoveryPart {
+  number: number;
+  rowCount: number;
+  householdCount: number;
+  href: string;
+}
+
+export type PeopleExportDiscoveryResult =
+  | { status: 'response'; response: Response }
+  | {
+      status: 'success';
+      partCount: number;
+      totalRows: number;
+      totalHouseholds: number;
+      parts: PeopleExportDiscoveryPart[];
+    }
+  | {
+      status: 'repair_required';
+      counts: { people: number; dependents: number; households: number; issues: number };
+    }
+  | { status: 'error' };
 
 export function canManagePeopleExport(
   user: SessionUser | null,
@@ -96,6 +118,76 @@ function csvHeaders(filename: string): Headers {
   headers.set('content-type', 'text/csv; charset=utf-8');
   headers.set('content-disposition', `attachment; filename="${filename}"`);
   return headers;
+}
+
+function structuralCount(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+export async function loadPeopleExportDiscovery(
+  context: PeopleExportContext,
+  runtime: StandardPeopleExportRuntime,
+): Promise<PeopleExportDiscoveryResult> {
+  const denied = accessResponse(canManagePeopleExport(context.user, context.modules));
+  if (denied) return { status: 'response', response: denied };
+  if (context.request.method !== 'GET') {
+    return {
+      status: 'response',
+      response: peopleExportJson(
+        405,
+        { ok: false, code: 'method_not_allowed' },
+        { Allow: 'GET' },
+      ),
+    };
+  }
+  if (!validToday(context.today)) return { status: 'error' };
+
+  try {
+    const source = await runtime.loadCanonical(context.db, context.today, context.backend);
+    const result = runtime.buildCanonical(source);
+    if (result.status === 'repair_required') {
+      return {
+        status: 'repair_required',
+        counts: {
+          people: result.counts.people,
+          dependents: result.counts.dependents,
+          households: result.counts.households,
+          issues: result.counts.issues,
+        },
+      };
+    }
+    if (result.parts.length === 0) return { status: 'error' };
+    let totalRows = 0;
+    let totalHouseholds = 0;
+    const parts: PeopleExportDiscoveryPart[] = [];
+    for (const [index, part] of result.parts.entries()) {
+      if (
+        part.number !== index + 1
+        || !structuralCount(part.rowCount)
+        || !structuralCount(part.householdCount)
+      ) return { status: 'error' };
+      totalRows += part.rowCount;
+      totalHouseholds += part.householdCount;
+      if (!Number.isSafeInteger(totalRows) || !Number.isSafeInteger(totalHouseholds)) {
+        return { status: 'error' };
+      }
+      parts.push({
+        number: part.number,
+        rowCount: part.rowCount,
+        householdCount: part.householdCount,
+        href: `/admin/people/export.csv?part=${part.number}`,
+      });
+    }
+    return {
+      status: 'success',
+      partCount: parts.length,
+      totalRows,
+      totalHouseholds,
+      parts,
+    };
+  } catch {
+    return { status: 'error' };
+  }
 }
 
 export async function handlePeopleExport(
