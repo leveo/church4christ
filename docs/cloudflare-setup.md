@@ -5,7 +5,7 @@ can start within free allowances, and the two ways to do it** — without assumi
 developer. When you are ready for the exact commands, [`deploy.md`](./deploy.md) has the
 precise step-by-step.
 
-With Node.js 22.12.0 or newer installed, install the locked dependencies with `npm ci`.
+With Node.js 22.22.1 or newer installed, install the locked dependencies with `npm ci`.
 The supported next step is:
 
 ```bash
@@ -108,7 +108,7 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
 1. **Make a free Cloudflare account** at
    [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up). Just an email and a
    password.
-2. **Install Node.js 22.12.0 or newer, then install the project** on your computer
+2. **Install Node.js 22.22.1 or newer, then install the project** on your computer
    (`npm ci`) — this also installs
    `wrangler`, Cloudflare's command-line helper — and **sign in** once with
    `npx wrangler login`. A browser window confirms it is you.

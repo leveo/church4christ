@@ -12,8 +12,8 @@ const nodeVersion = (await readFile('.nvmrc', 'utf8').catch(() => '')).trim();
 describe('fresh-clone installation contract', () => {
   test('declares the required runtime and TypeScript toolchain', () => {
     expect(packageJson.devDependencies).toHaveProperty('typescript');
-    expect(packageJson.engines?.node).toBe('>=22.12.0');
-    expect(nodeVersion).toBe('22.12.0');
+    expect(packageJson.engines?.node).toBe('>=22.22.1');
+    expect(nodeVersion).toBe('22.22.1');
   });
 
   test('runs generated artifacts and builds through the canonical scripts', () => {
