@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { softDeletePerson } from '../../src/lib/adminDb';
 import { appendAuditEvent } from '../../src/lib/auditDb';
@@ -54,6 +55,40 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
         + 'person-1,beta@example.com,\'+departed.author@example.com,"Line one,\nline two",2026-08-09 08:00:00\r\n'
         + 'person-2,zeta@example.com,former.author@example.com,\'=Call after service,2026-08-10 09:00:00\r\n',
     });
+  });
+
+  it('accepts the default postgres.js string results for COUNT and SUM through PgAdapter', async () => {
+    const rawSql = postgres(DATABASE_URL, {
+      max: 1,
+      fetch_types: false,
+      prepare: false,
+      onnotice: () => {},
+    });
+    try {
+      const rawDb = new PgAdapter(rawSql);
+      await seedPortableExportFixture(rawDb);
+      const rawStats = await rawSql.unsafe<{
+        people_count: unknown;
+        people_id_sum: unknown;
+      }[]>(`
+        SELECT COUNT(*) AS people_count, COALESCE(SUM(id), 0) AS people_id_sum
+        FROM people
+      `);
+
+      expect(rawStats[0]).toEqual({ people_count: '4', people_id_sum: '10' });
+
+      const canonical = buildCanonicalExportParts(
+        await loadCanonicalPeopleExport(rawDb, EXPORT_TODAY, 'supabase'),
+      );
+      const notes = buildPastoralNotesExport(await loadPastoralNotesExport(rawDb, 'supabase'));
+
+      expect(canonical).toEqual(buildCanonicalExportParts(expectedCanonicalPeopleExportSource()));
+      expect(notes.status).toBe('success');
+      if (notes.status !== 'success') throw new Error('expected success');
+      expect(notes.counts).toEqual({ people: 2, notes: 2 });
+    } finally {
+      await rawSql.end();
+    }
   });
 
   it('enforces audit constraints and persists the same canonical numeric JSON through PgAdapter', async () => {

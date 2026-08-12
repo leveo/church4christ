@@ -155,32 +155,44 @@ interface NotesSnapshotStats {
   total_bytes: number;
 }
 
-function nonnegativeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0;
+function parseBoundedDbInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  if (
+    typeof value !== 'string'
+    || value.length > String(Number.MAX_SAFE_INTEGER).length
+    || !/^(?:0|[1-9]\d*)$/.test(value)
+  ) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function canonicalStats(value: unknown): CanonicalSnapshotStats | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const row = value as DbRow;
-  if (
-    !nonnegativeInteger(row.people_count)
-    || !nonnegativeInteger(row.households_count)
-    || !nonnegativeInteger(row.memberships_count)
-    || !nonnegativeInteger(row.total_bytes)
-  ) return null;
+  const peopleCount = parseBoundedDbInteger(row.people_count);
+  const householdsCount = parseBoundedDbInteger(row.households_count);
+  const membershipsCount = parseBoundedDbInteger(row.memberships_count);
+  const totalBytes = parseBoundedDbInteger(row.total_bytes);
+  if (peopleCount === null || householdsCount === null || membershipsCount === null || totalBytes === null) {
+    return null;
+  }
   return {
-    people_count: row.people_count,
-    households_count: row.households_count,
-    memberships_count: row.memberships_count,
-    total_bytes: row.total_bytes,
+    people_count: peopleCount,
+    households_count: householdsCount,
+    memberships_count: membershipsCount,
+    total_bytes: totalBytes,
   };
 }
 
 function notesStats(value: unknown): NotesSnapshotStats | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const row = value as DbRow;
-  if (!nonnegativeInteger(row.notes_count) || !nonnegativeInteger(row.total_bytes)) return null;
-  return { notes_count: row.notes_count, total_bytes: row.total_bytes };
+  const notesCount = parseBoundedDbInteger(row.notes_count);
+  const totalBytes = parseBoundedDbInteger(row.total_bytes);
+  if (notesCount === null || totalBytes === null) return null;
+  return { notes_count: notesCount, total_bytes: totalBytes };
 }
 
 function positiveInteger(value: unknown): value is number {

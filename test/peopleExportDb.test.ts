@@ -90,6 +90,38 @@ class TrackingDb implements AppDb {
   }
 }
 
+class SnapshotStatsDb implements AppDb {
+  constructor(
+    private readonly delegate: AppDb,
+    private readonly overrideStats: (row: Record<string, unknown>) => void,
+  ) {}
+
+  prepare(sql: string): AppStatement {
+    return this.delegate.prepare(sql);
+  }
+
+  batch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]> {
+    return this.delegate.batch<T>(statements);
+  }
+
+  async snapshotBatch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]> {
+    const results = await this.delegate.batch<T>(statements);
+    const row = results[0]?.results[0];
+    if (typeof row === 'object' && row !== null && !Array.isArray(row)) {
+      this.overrideStats(row as Record<string, unknown>);
+    }
+    return results;
+  }
+}
+
+function stringifyAggregateStats(row: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(row)) {
+    if ((key.endsWith('_count') || key.endsWith('_bytes')) && typeof value === 'number') {
+      row[key] = String(value);
+    }
+  }
+}
+
 async function reset(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM audit_events'),
@@ -204,6 +236,57 @@ describe('portable export migration', () => {
 });
 
 describe('loadCanonicalPeopleExport', () => {
+  it('accepts canonical Postgres int8 aggregate strings for canonical and notes snapshots', async () => {
+    await seedPortableExportFixture(env.DB);
+    const db = new SnapshotStatsDb(env.DB, stringifyAggregateStats);
+
+    const canonical = buildCanonicalExportParts(
+      await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'd1'),
+    );
+    const notes = buildPastoralNotesExport(await loadPastoralNotesExport(db, 'd1'));
+
+    expect(canonical).toEqual(buildCanonicalExportParts(expectedCanonicalPeopleExportSource()));
+    expect(notes.status).toBe('success');
+    if (notes.status !== 'success') throw new Error('expected success');
+    expect(notes.counts).toEqual({ people: 2, notes: 2 });
+  });
+
+  it.each([
+    ['whitespace', ' 1'],
+    ['trailing whitespace', '1 '],
+    ['explicit plus', '+1'],
+    ['negative', '-1'],
+    ['leading zero', '01'],
+    ['empty string', ''],
+    ['fraction', '1.5'],
+    ['exponent', '1e1'],
+    ['infinity string', 'Infinity'],
+    ['unsafe decimal string', '9007199254740992'],
+    ['numeric infinity', Number.POSITIVE_INFINITY],
+    ['unsafe number', Number.MAX_SAFE_INTEGER + 1],
+  ])('fails closed for %s aggregate stats without exposing export PII', async (_label, invalid) => {
+    await seedPortableExportFixture(env.DB);
+    const canonicalDb = new SnapshotStatsDb(env.DB, (row) => {
+      stringifyAggregateStats(row);
+      row.people_count = invalid;
+    });
+    const notesDb = new SnapshotStatsDb(env.DB, (row) => {
+      stringifyAggregateStats(row);
+      row.notes_count = invalid;
+    });
+
+    const canonical = buildCanonicalExportParts(
+      await loadCanonicalPeopleExport(canonicalDb, EXPORT_TODAY, 'd1'),
+    );
+    const notes = buildPastoralNotesExport(await loadPastoralNotesExport(notesDb, 'd1'));
+
+    expect(canonical.status).toBe('repair_required');
+    expect(notes.status).toBe('repair_required');
+    expect(JSON.stringify({ canonical, notes })).not.toMatch(
+      /csv|zeta@example|beta@example|former\.author|Call after service/i,
+    );
+  });
+
   it('requires a real snapshot seam for Supabase before preparing or executing reads', async () => {
     const privateMessage = 'private.person@example.com must not escape';
     const prepare = vi.fn(() => { throw new Error(privateMessage); });
