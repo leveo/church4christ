@@ -16,11 +16,11 @@ const NEWCOMER_TABLES = [
 ] as const;
 
 const STATUS_ROWS = [
-  [1, 'open', 1, 1, 1, 'New', '新朋友'],
-  [2, 'open', 2, 1, 0, 'Assigned', '已分配'],
-  [3, 'open', 3, 1, 0, 'Contacted', '已联系'],
-  [4, 'closed', 4, 1, 0, 'Connected', '已连接'],
-  [5, 'closed', 5, 1, 0, 'Closed', '已关闭'],
+  [1, 'new', 'open', 1, 1, 1, 'New', '新朋友'],
+  [2, 'assigned', 'open', 2, 1, 0, 'Assigned', '已分配'],
+  [3, 'contacted', 'open', 3, 1, 0, 'Contacted', '已联系'],
+  [4, 'connected', 'closed', 4, 1, 0, 'Connected', '已连接'],
+  [5, 'closed', 'closed', 5, 1, 0, 'Closed', '已关闭'],
 ];
 
 const FIELD_ROWS = [
@@ -56,6 +56,7 @@ describe('newcomer foundation schema (D1)', () => {
       .all<{ name: string; type: string; notnull: number; pk: number }>();
     expect(statusColumns.results.map((column) => [column.name, column.type, column.notnull, column.pk])).toEqual([
       ['id', 'INTEGER', 1, 1],
+      ['key', 'TEXT', 1, 0],
       ['category', 'TEXT', 1, 0],
       ['sort', 'INTEGER', 1, 0],
       ['active', 'INTEGER', 1, 0],
@@ -96,14 +97,14 @@ describe('newcomer foundation schema (D1)', () => {
 
   it('seeds the exact stable workflow and fixed bilingual core-field catalog', async () => {
     const statuses = await env.DB.prepare(`
-      SELECT s.id,s.category,s.sort,s.active,s.is_initial,en.label AS en_label,zh.label AS zh_label
+      SELECT s.id,s.key,s.category,s.sort,s.active,s.is_initial,en.label AS en_label,zh.label AS zh_label
       FROM newcomer_statuses s
       JOIN newcomer_status_i18n en ON en.status_id=s.id AND en.locale='en'
       JOIN newcomer_status_i18n zh ON zh.status_id=s.id AND zh.locale='zh'
       ORDER BY s.id
     `).all<Record<string, string | number>>();
     expect(statuses.results.map((row) => [
-      row.id, row.category, row.sort, row.active, row.is_initial, row.en_label, row.zh_label,
+      row.id, row.key, row.category, row.sort, row.active, row.is_initial, row.en_label, row.zh_label,
     ])).toEqual(STATUS_ROWS);
     expect(await env.DB.prepare(`
       SELECT COUNT(*) AS n FROM newcomer_statuses
@@ -120,14 +121,59 @@ describe('newcomer foundation schema (D1)', () => {
     expect(fields.results.map((row) => [
       row.id, row.key, row.type, row.required, row.active, row.sort, row.fixed, row.en_label, row.zh_label,
     ])).toEqual(FIELD_ROWS);
+    expect(await env.DB.prepare(`
+      SELECT COUNT(*) AS n FROM newcomer_field_options WHERE field_id BETWEEN 1 AND 7
+    `).first<number>('n')).toBe(0);
+  });
+
+  it('keeps core field carriers immutable and answers/options custom-only', async () => {
+    for (const statement of [
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'custom_fixed','text',0,1,89,1)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'name','text',0,1,89,0)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (7,'custom_core_id','text',0,1,89,0)",
+      "UPDATE newcomer_fields SET key='renamed_name' WHERE id=1",
+      "UPDATE newcomer_fields SET id=8 WHERE id=1",
+      "UPDATE newcomer_fields SET type='textarea' WHERE id=1",
+      "UPDATE newcomer_fields SET fixed=0 WHERE id=1",
+      "UPDATE newcomer_fields SET active=0 WHERE id=1",
+      "UPDATE newcomer_fields SET required=1 WHERE id=1",
+      "DELETE FROM newcomer_fields WHERE id=1",
+    ]) await reject(statement);
+
+    await env.DB.prepare("UPDATE newcomer_fields SET sort=88 WHERE id=1").run();
+    await env.DB.prepare("UPDATE newcomer_field_i18n SET label='Display name' WHERE field_id=1 AND locale='en'").run();
+    expect(await env.DB.prepare("SELECT label FROM newcomer_field_i18n WHERE field_id=1 AND locale='en'").first('label'))
+      .toBe('Display name');
+
+    await env.DB.prepare(`
+      INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+      VALUES (89,'custom_select','select',0,1,89,0)
+    `).run();
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES ('61000000-0000-4000-8000-000000000001','Core boundary','en','2026-08-12','staff',
+        '2026-08-12 12:00:00','2026-08-12 12:00:00')`).run();
+    await reject(`INSERT INTO newcomer_answers (submission_id,field_id,value)
+      VALUES ('61000000-0000-4000-8000-000000000001',1,'must use submission column')`);
+    await env.DB.prepare(`INSERT INTO newcomer_answers (submission_id,field_id,value)
+      VALUES ('61000000-0000-4000-8000-000000000001',89,'custom value')`).run();
+    await reject(`UPDATE newcomer_answers SET field_id=1
+      WHERE submission_id='61000000-0000-4000-8000-000000000001' AND field_id=89`);
+    await reject("UPDATE newcomer_fields SET fixed=1 WHERE id=89");
+    await reject("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (4,'en',1,1)");
+    await reject("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (6,'service_9801',1,1)");
+    await env.DB.prepare("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (89,'first_visit',1,1)").run();
+    await reject("UPDATE newcomer_field_options SET field_id=4 WHERE field_id=89 AND value='first_visit'");
   });
 
   it('rejects invalid workflow initial states, enums, booleans, ranges, and labels', async () => {
-    await reject("INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (90,'closed',90,1,1)");
-    await reject("INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (91,'open',91,0,1)");
-    await reject("INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (92,'open',92,1,1)");
-    await reject("INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (93,'pending',93,1,0)");
-    await reject("INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (94,'open',-1,2,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (90,'closed','closed',90,1,1)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,0,1)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (92,'assigned','open',92,1,1)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (93,'contacted','pending',93,1,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (94,'connected','open',-1,2,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (95,'NEW','open',95,1,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'other','open',96,1,0)");
     await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'fr','Nouveau')");
     await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'en','')");
   });
@@ -190,6 +236,16 @@ describe('newcomer foundation schema (D1)', () => {
       base('not-a-uuid'),
       base('10000000-0000-4000-8000-000000000002', { name: 'NULL' }),
       base('10000000-0000-4000-8000-000000000003', { email: "'Ada@Example.test'" }),
+      base('10000000-0000-4000-8000-000000000014', { email: "'@@@'" }),
+      base('10000000-0000-4000-8000-000000000015', { email: "'@example.test'" }),
+      base('10000000-0000-4000-8000-000000000016', { email: "'local@'" }),
+      base('10000000-0000-4000-8000-000000000017', { email: "'a@@example.test'" }),
+      base('10000000-0000-4000-8000-000000000018', { email: "('a' || char(10) || '@example.test')" }),
+      base('10000000-0000-4000-8000-000000000019', { email: "('a' || char(9) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001a', { email: "('a' || char(31) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001b', { email: "('a' || char(127) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001c', { email: "'a @example.test'" }),
+      base('10000000-0000-4000-8000-00000000001d', { email: "('a' || char(0) || '@example.test')" }),
       base('10000000-0000-4000-8000-000000000004', { phone: "' +13125550100'" }),
       base('10000000-0000-4000-8000-000000000005', { locale: "'fr'" }),
       base('10000000-0000-4000-8000-000000000006', { visitDate: "'2026-02-30'" }),
@@ -208,6 +264,40 @@ describe('newcomer foundation schema (D1)', () => {
       base('10000000-0000-4000-8000-000000000013', { linked: '999999' }),
     ];
     for (const statement of invalid) await reject(statement);
+  });
+
+  it('rejects every NULL-producing SQLite date or timestamp parse, including metadata and rate windows', async () => {
+    await env.DB.prepare("INSERT OR IGNORE INTO people (id,display_name,email) VALUES (9810,'Date Author','date-author@example.test')").run();
+    const base = (id: string, overrides: Partial<Record<string, string>> = {}) => submission([
+      `'${id}'`, "'Date Visitor'", 'NULL', 'NULL', "'en'", overrides.visitDate ?? "'2026-08-12'", 'NULL',
+      overrides.consentAt ?? 'NULL', "'staff'", '1', '9810', 'NULL', overrides.followUp ?? 'NULL', '0', 'NULL',
+      overrides.closedAt ?? 'NULL', overrides.deletedAt ?? 'NULL',
+      overrides.createdAt ?? "'2026-08-12 12:00:00'", overrides.updatedAt ?? "'2026-08-12 12:00:00'",
+    ].join(','));
+    const invalidSubmissions = [
+      base('51000000-0000-4000-8000-000000000001', { visitDate: "'2026-13-01'" }),
+      base('51000000-0000-4000-8000-000000000002', { visitDate: "'2026/08/12'" }),
+      base('51000000-0000-4000-8000-000000000003', { followUp: "'2026-13-01'" }),
+      base('51000000-0000-4000-8000-000000000004', { consentAt: "'2026-13-01 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000005', { closedAt: "'2026-02-30 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000006', { deletedAt: "'2026/08/12 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000007', { createdAt: "'2026-13-01 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000008', { updatedAt: "'2026-02-30 12:00:00'" }),
+    ];
+    for (const statement of invalidSubmissions) await reject(statement);
+
+    await env.DB.prepare(base('51000000-0000-4000-8000-000000000010')).run();
+    await reject(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+      VALUES ('52000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000010',9810,
+        'Strict timestamp','2026-13-01 12:00:00')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json,created_at)
+      VALUES ('53000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000010',
+        'follow_up_scheduled','{"follow_up_date":"2026-13-01"}','2026-08-12 12:00:00')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json,created_at)
+      VALUES ('53000000-0000-4000-8000-000000000002','51000000-0000-4000-8000-000000000010',
+        'submission_created','{}','2026-02-30 12:00:00')`);
+    await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
+      VALUES ('${'f'.repeat(64)}','2026-13-01 12:10:00',1,'2026-08-14 12:10:00')`);
   });
 
   it('enforces bounded answer, private-note, and structural activity carriers without accepting arbitrary PII keys', async () => {
@@ -241,6 +331,18 @@ describe('newcomer foundation schema (D1)', () => {
       VALUES ('40000000-0000-4000-8000-000000000005','20000000-0000-4000-8000-000000000001','submission_created','{"email":"private@example.test"}')`);
     await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
       VALUES ('40000000-0000-4000-8000-000000000006','20000000-0000-4000-8000-000000000001','person_linked','{"person_id":"9802"}')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+      VALUES ('40000000-0000-4000-8000-000000000007','20000000-0000-4000-8000-000000000001','person_linked',
+        '{"person_id":"private@example.test","person_id":9802}')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+      VALUES ('40000000-0000-4000-8000-000000000008','20000000-0000-4000-8000-000000000001','person_linked',
+        '{ "person_id":9802}')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+      VALUES ('40000000-0000-4000-8000-000000000009','20000000-0000-4000-8000-000000000001','status_changed',
+        '{"to_status_id":2,"from_status_id":1}')`);
+    await reject(`INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+      VALUES ('40000000-0000-4000-8000-00000000000a','20000000-0000-4000-8000-000000000001','status_changed',
+        '{"from_status_id":1, "to_status_id":2}')`);
   });
 
   it('stores only canonical HMAC buckets in ten-minute windows with exact 48-hour expiry', async () => {

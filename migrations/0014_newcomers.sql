@@ -1,10 +1,11 @@
 -- Newcomer intake and follow-up foundation. Fixed core fields mirror columns on
 -- newcomer_submissions; only later custom fields store newcomer_answers rows.
--- Status zero-initial prevention and fixed-field management are application
--- invariants; the schema prevents invalid and multiple active open initials.
+-- Preventing zero active open initials remains an application invariant; the
+-- schema prevents invalid/multiple initials and protects fixed field carriers.
 
 CREATE TABLE newcomer_statuses (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
+  key TEXT NOT NULL UNIQUE CHECK (key IN ('new','assigned','contacted','connected','closed')),
   category TEXT NOT NULL CHECK (category IN ('open','closed')),
   sort INTEGER NOT NULL CHECK (sort BETWEEN 0 AND 100000),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
@@ -25,12 +26,12 @@ CREATE TABLE newcomer_status_i18n (
   PRIMARY KEY (status_id, locale)
 ) WITHOUT ROWID;
 
-INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES
-  (1,'open',1,1,1),
-  (2,'open',2,1,0),
-  (3,'open',3,1,0),
-  (4,'closed',4,1,0),
-  (5,'closed',5,1,0);
+INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES
+  (1,'new','open',1,1,1),
+  (2,'assigned','open',2,1,0),
+  (3,'contacted','open',3,1,0),
+  (4,'connected','closed',4,1,0),
+  (5,'closed','closed',5,1,0);
 INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES
   (1,'en','New'),       (1,'zh','新朋友'),
   (2,'en','Assigned'),  (2,'zh','已分配'),
@@ -105,6 +106,63 @@ INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES
   (6,'en','Service type',NULL),         (6,'zh','聚会类型',NULL),
   (7,'en','Contact consent',NULL),      (7,'zh','联系同意',NULL);
 
+-- The seven core carriers mirror newcomer_submissions columns. Their labels
+-- and ordering remain editable, but their schema identity cannot be changed.
+CREATE TRIGGER newcomer_fields_boundary_insert
+BEFORE INSERT ON newcomer_fields
+WHEN NOT (
+  (NEW.id = 1 AND NEW.key = 'name' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 2 AND NEW.key = 'email' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 3 AND NEW.key = 'phone' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 4 AND NEW.key = 'preferred_language' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 5 AND NEW.key = 'visit_date' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 6 AND NEW.key = 'service_type' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 7 AND NEW.key = 'contact_consent' AND NEW.type = 'checkbox' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id > 7 AND NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND NEW.fixed = 0)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_field_boundary');
+END;
+
+CREATE TRIGGER newcomer_fields_boundary_update
+BEFORE UPDATE ON newcomer_fields
+WHEN NOT (
+  (NEW.id = 1 AND NEW.key = 'name' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 2 AND NEW.key = 'email' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 3 AND NEW.key = 'phone' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 4 AND NEW.key = 'preferred_language' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 5 AND NEW.key = 'visit_date' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 6 AND NEW.key = 'service_type' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id = 7 AND NEW.key = 'contact_consent' AND NEW.type = 'checkbox' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+  (NEW.id > 7 AND NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND NEW.fixed = 0)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_field_boundary');
+END;
+
+CREATE TRIGGER newcomer_fields_core_delete
+BEFORE DELETE ON newcomer_fields
+WHEN OLD.fixed = 1
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_field_immutable');
+END;
+
+CREATE TRIGGER newcomer_field_options_custom_insert
+BEFORE INSERT ON newcomer_field_options
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1
+  ) THEN RAISE(ABORT, 'newcomer_field_options_custom_only') END;
+END;
+
+CREATE TRIGGER newcomer_field_options_custom_update
+BEFORE UPDATE ON newcomer_field_options
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1
+  ) THEN RAISE(ABORT, 'newcomer_field_options_custom_only') END;
+END;
+
 CREATE TABLE newcomer_submissions (
   id TEXT PRIMARY KEY
     CHECK (
@@ -117,7 +175,10 @@ CREATE TABLE newcomer_submissions (
   email TEXT CHECK (
     email IS NULL OR (
       email = lower(trim(email)) AND length(email) BETWEEN 3 AND 254 AND
-      email LIKE '%@%' AND email NOT LIKE '% %'
+      instr(email,'@') BETWEEN 2 AND length(email) - 1 AND
+      instr(substr(email,instr(email,'@') + 1),'@') = 0 AND
+      instr(email,char(0)) = 0 AND
+      email NOT GLOB ('*[' || char(1) || '-' || char(32) || char(127) || ']*')
     )
   ),
   phone TEXT CHECK (
@@ -146,8 +207,8 @@ CREATE TABLE newcomer_submissions (
       substr(contact_consent_at,12,2) BETWEEN '00' AND '23' AND
       substr(contact_consent_at,15,2) BETWEEN '00' AND '59' AND
       substr(contact_consent_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(contact_consent_at,1,10),'+0 days') = substr(contact_consent_at,1,10) AND
-      datetime(contact_consent_at,'+0 seconds') = contact_consent_at
+      (date(substr(contact_consent_at,1,10),'+0 days') = substr(contact_consent_at,1,10)) IS TRUE AND
+      (datetime(contact_consent_at,'+0 seconds') = contact_consent_at) IS TRUE
     )),
   source TEXT NOT NULL CHECK (source IN ('public','staff')),
   status_id INTEGER NOT NULL DEFAULT 1 REFERENCES newcomer_statuses(id),
@@ -170,7 +231,8 @@ CREATE TABLE newcomer_submissions (
       substr(closed_at,11,1) = ' ' AND substr(closed_at,14,1) = ':' AND substr(closed_at,17,1) = ':' AND
       substr(closed_at,1,4) BETWEEN '0001' AND '9999' AND substr(closed_at,12,2) BETWEEN '00' AND '23' AND
       substr(closed_at,15,2) BETWEEN '00' AND '59' AND substr(closed_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(closed_at,1,10),'+0 days') = substr(closed_at,1,10) AND datetime(closed_at,'+0 seconds') = closed_at
+      (date(substr(closed_at,1,10),'+0 days') = substr(closed_at,1,10)) IS TRUE AND
+      (datetime(closed_at,'+0 seconds') = closed_at) IS TRUE
     )),
   deleted_at TEXT
     CHECK (deleted_at IS NULL OR (
@@ -178,7 +240,8 @@ CREATE TABLE newcomer_submissions (
       substr(deleted_at,11,1) = ' ' AND substr(deleted_at,14,1) = ':' AND substr(deleted_at,17,1) = ':' AND
       substr(deleted_at,1,4) BETWEEN '0001' AND '9999' AND substr(deleted_at,12,2) BETWEEN '00' AND '23' AND
       substr(deleted_at,15,2) BETWEEN '00' AND '59' AND substr(deleted_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(deleted_at,1,10),'+0 days') = substr(deleted_at,1,10) AND datetime(deleted_at,'+0 seconds') = deleted_at
+      (date(substr(deleted_at,1,10),'+0 days') = substr(deleted_at,1,10)) IS TRUE AND
+      (datetime(deleted_at,'+0 seconds') = deleted_at) IS TRUE
     )),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
@@ -186,7 +249,8 @@ CREATE TABLE newcomer_submissions (
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10) AND datetime(created_at,'+0 seconds') = created_at
+      (date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10)) IS TRUE AND
+      (datetime(created_at,'+0 seconds') = created_at) IS TRUE
     ),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
@@ -194,7 +258,8 @@ CREATE TABLE newcomer_submissions (
       substr(updated_at,11,1) = ' ' AND substr(updated_at,14,1) = ':' AND substr(updated_at,17,1) = ':' AND
       substr(updated_at,1,4) BETWEEN '0001' AND '9999' AND substr(updated_at,12,2) BETWEEN '00' AND '23' AND
       substr(updated_at,15,2) BETWEEN '00' AND '59' AND substr(updated_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(updated_at,1,10),'+0 days') = substr(updated_at,1,10) AND datetime(updated_at,'+0 seconds') = updated_at
+      (date(substr(updated_at,1,10),'+0 days') = substr(updated_at,1,10)) IS TRUE AND
+      (datetime(updated_at,'+0 seconds') = updated_at) IS TRUE
     ),
   CHECK (name IS NOT NULL OR email IS NOT NULL OR phone IS NOT NULL)
 ) WITHOUT ROWID;
@@ -230,6 +295,22 @@ CREATE TABLE newcomer_answers (
 CREATE INDEX idx_newcomer_answers_field
   ON newcomer_answers(field_id, submission_id);
 
+CREATE TRIGGER newcomer_answers_custom_insert
+BEFORE INSERT ON newcomer_answers
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1
+  ) THEN RAISE(ABORT, 'newcomer_answers_custom_only') END;
+END;
+
+CREATE TRIGGER newcomer_answers_custom_update
+BEFORE UPDATE ON newcomer_answers
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1
+  ) THEN RAISE(ABORT, 'newcomer_answers_custom_only') END;
+END;
+
 CREATE TABLE newcomer_notes (
   id TEXT PRIMARY KEY
     CHECK (
@@ -246,7 +327,8 @@ CREATE TABLE newcomer_notes (
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10) AND datetime(created_at,'+0 seconds') = created_at
+      (date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10)) IS TRUE AND
+      (datetime(created_at,'+0 seconds') = created_at) IS TRUE
     )
 ) WITHOUT ROWID;
 CREATE INDEX idx_newcomer_notes_submission_created
@@ -304,8 +386,46 @@ CREATE TABLE newcomer_activity (
           json_type(metadata_json,'$.follow_up_date') = 'text' AND
           length(json_extract(metadata_json,'$.follow_up_date')) = 10 AND
           substr(json_extract(metadata_json,'$.follow_up_date'),1,4) BETWEEN '0001' AND '9999' AND
-          date(json_extract(metadata_json,'$.follow_up_date'),'+0 days') = json_extract(metadata_json,'$.follow_up_date')
-        ))
+          (date(json_extract(metadata_json,'$.follow_up_date'),'+0 days') =
+            json_extract(metadata_json,'$.follow_up_date')) IS TRUE
+        )) AND
+        metadata_json = json_patch(
+          json_patch(
+            json_patch(
+              json_patch(
+                json_patch(
+                  json_patch(
+                    json_patch(
+                      json_patch(
+                        json_patch(
+                          '{}',
+                          CASE WHEN json_type(metadata_json,'$.assignee_person_id') IS NULL THEN '{}'
+                            ELSE json_object('assignee_person_id',json_extract(metadata_json,'$.assignee_person_id')) END
+                        ),
+                        CASE WHEN json_type(metadata_json,'$.from_assignee_person_id') IS NULL THEN '{}'
+                          ELSE json_object('from_assignee_person_id',json_extract(metadata_json,'$.from_assignee_person_id')) END
+                      ),
+                      CASE WHEN json_type(metadata_json,'$.to_assignee_person_id') IS NULL THEN '{}'
+                        ELSE json_object('to_assignee_person_id',json_extract(metadata_json,'$.to_assignee_person_id')) END
+                    ),
+                    CASE WHEN json_type(metadata_json,'$.status_id') IS NULL THEN '{}'
+                      ELSE json_object('status_id',json_extract(metadata_json,'$.status_id')) END
+                  ),
+                  CASE WHEN json_type(metadata_json,'$.from_status_id') IS NULL THEN '{}'
+                    ELSE json_object('from_status_id',json_extract(metadata_json,'$.from_status_id')) END
+                ),
+                CASE WHEN json_type(metadata_json,'$.to_status_id') IS NULL THEN '{}'
+                  ELSE json_object('to_status_id',json_extract(metadata_json,'$.to_status_id')) END
+              ),
+              CASE WHEN json_type(metadata_json,'$.person_id') IS NULL THEN '{}'
+                ELSE json_object('person_id',json_extract(metadata_json,'$.person_id')) END
+            ),
+            CASE WHEN json_type(metadata_json,'$.note_id') IS NULL THEN '{}'
+              ELSE json_object('note_id',json_extract(metadata_json,'$.note_id')) END
+          ),
+          CASE WHEN json_type(metadata_json,'$.follow_up_date') IS NULL THEN '{}'
+            ELSE json_object('follow_up_date',json_extract(metadata_json,'$.follow_up_date')) END
+        )
       ELSE 0 END
     ),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -314,7 +434,8 @@ CREATE TABLE newcomer_activity (
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
-      date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10) AND datetime(created_at,'+0 seconds') = created_at
+      (date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10)) IS TRUE AND
+      (datetime(created_at,'+0 seconds') = created_at) IS TRUE
     )
 ) WITHOUT ROWID;
 CREATE INDEX idx_newcomer_activity_submission_created
@@ -331,14 +452,17 @@ CREATE TABLE newcomer_rate_limits (
       substr(window_start,11,1) = ' ' AND substr(window_start,14,1) = ':' AND substr(window_start,17,1) = ':' AND
       substr(window_start,1,4) BETWEEN '0001' AND '9999' AND substr(window_start,12,2) BETWEEN '00' AND '23' AND
       substr(window_start,15,2) BETWEEN '00' AND '59' AND substr(window_start,16,1) = '0' AND
-      substr(window_start,18,2) = '00' AND date(substr(window_start,1,10),'+0 days') = substr(window_start,1,10) AND
-      datetime(window_start,'+0 seconds') = window_start
+      substr(window_start,18,2) = '00' AND
+      (date(substr(window_start,1,10),'+0 days') = substr(window_start,1,10)) IS TRUE AND
+      (datetime(window_start,'+0 seconds') = window_start) IS TRUE
     ),
   attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts BETWEEN 1 AND 100000),
   expires_at TEXT NOT NULL
     CHECK (
-      length(expires_at) = 19 AND date(substr(expires_at,1,10),'+0 days') = substr(expires_at,1,10) AND
-      datetime(expires_at,'+0 seconds') = expires_at AND expires_at = datetime(window_start,'+48 hours')
+      length(expires_at) = 19 AND
+      (date(substr(expires_at,1,10),'+0 days') = substr(expires_at,1,10)) IS TRUE AND
+      (datetime(expires_at,'+0 seconds') = expires_at) IS TRUE AND
+      (expires_at = datetime(window_start,'+48 hours')) IS TRUE
     ),
   PRIMARY KEY (bucket_hash, window_start)
 ) WITHOUT ROWID;

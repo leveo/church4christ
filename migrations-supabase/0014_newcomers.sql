@@ -31,6 +31,27 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- Deliberately modest normalized-email shape validation, not RFC completeness.
+CREATE OR REPLACE FUNCTION newcomer_valid_email(value text)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  at_position integer;
+  ascii_code integer;
+BEGIN
+  IF value IS NULL THEN RETURN true; END IF;
+  IF value <> lower(trim(value)) OR length(value) NOT BETWEEN 3 AND 254 THEN RETURN false; END IF;
+  at_position := position('@' IN value);
+  IF at_position < 2 OR at_position >= length(value)
+     OR position('@' IN substring(value FROM at_position + 1)) <> 0 THEN
+    RETURN false;
+  END IF;
+  FOR ascii_code IN 1..32 LOOP
+    IF position(chr(ascii_code) IN value) <> 0 THEN RETURN false; END IF;
+  END LOOP;
+  RETURN position(chr(127) IN value) = 0;
+END;
+$$;
+
 -- Only non-PII structural keys enter activity metadata. Per-kind required-key
 -- combinations remain an application validator responsibility.
 CREATE OR REPLACE FUNCTION newcomer_valid_activity_metadata(value text)
@@ -39,6 +60,8 @@ DECLARE
   payload jsonb;
   key_name text;
   scalar text;
+  canonical text := '{';
+  separator text := '';
 BEGIN
   IF length(value) NOT BETWEEN 2 AND 512 THEN RETURN false; END IF;
   payload := value::jsonb;
@@ -63,7 +86,17 @@ BEGIN
          OR scalar::bigint > 2147483647 THEN RETURN false; END IF;
     END IF;
   END LOOP;
-  RETURN true;
+  FOREACH key_name IN ARRAY ARRAY[
+    'assignee_person_id','from_assignee_person_id','to_assignee_person_id',
+    'status_id','from_status_id','to_status_id','person_id','note_id','follow_up_date'
+  ] LOOP
+    IF payload ? key_name THEN
+      canonical := canonical || separator || to_json(key_name)::text || ':' || (payload->key_name)::text;
+      separator := ',';
+    END IF;
+  END LOOP;
+  canonical := canonical || '}';
+  RETURN value = canonical;
 EXCEPTION WHEN OTHERS THEN
   RETURN false;
 END;
@@ -71,6 +104,7 @@ $$;
 
 CREATE TABLE newcomer_statuses (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
+  key TEXT NOT NULL UNIQUE CHECK (key IN ('new','assigned','contacted','connected','closed')),
   category TEXT NOT NULL CHECK (category IN ('open','closed')),
   sort INTEGER NOT NULL CHECK (sort BETWEEN 0 AND 100000),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
@@ -91,12 +125,12 @@ CREATE TABLE newcomer_status_i18n (
   PRIMARY KEY (status_id, locale)
 );
 
-INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES
-  (1,'open',1,1,1),
-  (2,'open',2,1,0),
-  (3,'open',3,1,0),
-  (4,'closed',4,1,0),
-  (5,'closed',5,1,0);
+INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES
+  (1,'new','open',1,1,1),
+  (2,'assigned','open',2,1,0),
+  (3,'contacted','open',3,1,0),
+  (4,'connected','closed',4,1,0),
+  (5,'closed','closed',5,1,0);
 INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES
   (1,'en','New'),       (1,'zh','新朋友'),
   (2,'en','Assigned'),  (2,'zh','已分配'),
@@ -161,15 +195,65 @@ INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES
   (6,'en','Service type',NULL),         (6,'zh','聚会类型',NULL),
   (7,'en','Contact consent',NULL),      (7,'zh','联系同意',NULL);
 
+CREATE OR REPLACE FUNCTION newcomer_fields_boundary_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT (
+    (NEW.id = 1 AND NEW.key = 'name' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 2 AND NEW.key = 'email' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 3 AND NEW.key = 'phone' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 4 AND NEW.key = 'preferred_language' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 5 AND NEW.key = 'visit_date' AND NEW.type = 'text' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 6 AND NEW.key = 'service_type' AND NEW.type = 'select' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id = 7 AND NEW.key = 'contact_consent' AND NEW.type = 'checkbox' AND NEW.required = 0 AND NEW.active = 1 AND NEW.fixed = 1) OR
+    (NEW.id > 7 AND NEW.key NOT IN ('name','email','phone','preferred_language','visit_date','service_type','contact_consent') AND NEW.fixed = 0)
+  ) THEN
+    RAISE EXCEPTION 'newcomer_field_boundary';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER newcomer_fields_boundary_insert
+BEFORE INSERT ON newcomer_fields FOR EACH ROW
+EXECUTE FUNCTION newcomer_fields_boundary_guard();
+CREATE TRIGGER newcomer_fields_boundary_update
+BEFORE UPDATE ON newcomer_fields FOR EACH ROW
+EXECUTE FUNCTION newcomer_fields_boundary_guard();
+
+CREATE OR REPLACE FUNCTION newcomer_fields_core_delete_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.fixed = 1 THEN
+    RAISE EXCEPTION 'newcomer_field_immutable';
+  END IF;
+  RETURN OLD;
+END;
+$$;
+CREATE TRIGGER newcomer_fields_core_delete
+BEFORE DELETE ON newcomer_fields FOR EACH ROW
+EXECUTE FUNCTION newcomer_fields_core_delete_guard();
+
+CREATE OR REPLACE FUNCTION newcomer_field_options_custom_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1) THEN
+    RAISE EXCEPTION 'newcomer_field_options_custom_only';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER newcomer_field_options_custom_insert
+BEFORE INSERT ON newcomer_field_options FOR EACH ROW
+EXECUTE FUNCTION newcomer_field_options_custom_guard();
+CREATE TRIGGER newcomer_field_options_custom_update
+BEFORE UPDATE ON newcomer_field_options FOR EACH ROW
+EXECUTE FUNCTION newcomer_field_options_custom_guard();
+
 CREATE TABLE newcomer_submissions (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),
   name TEXT CHECK (name IS NULL OR (name = trim(name) AND length(name) BETWEEN 1 AND 200)),
-  email TEXT CHECK (
-    email IS NULL OR (
-      email = lower(trim(email)) AND length(email) BETWEEN 3 AND 254 AND
-      email LIKE '%@%' AND email NOT LIKE '% %'
-    )
-  ),
+  email TEXT CHECK (newcomer_valid_email(email)),
   phone TEXT CHECK (phone IS NULL OR phone ~ '^\+[0-9]{7,15}$'),
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
   visit_date TEXT NOT NULL CHECK (newcomer_valid_date(visit_date)),
@@ -219,6 +303,22 @@ CREATE TABLE newcomer_answers (
 );
 CREATE INDEX idx_newcomer_answers_field
   ON newcomer_answers(field_id, submission_id);
+
+CREATE OR REPLACE FUNCTION newcomer_answers_custom_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM newcomer_fields WHERE id = NEW.field_id AND fixed = 1) THEN
+    RAISE EXCEPTION 'newcomer_answers_custom_only';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER newcomer_answers_custom_insert
+BEFORE INSERT ON newcomer_answers FOR EACH ROW
+EXECUTE FUNCTION newcomer_answers_custom_guard();
+CREATE TRIGGER newcomer_answers_custom_update
+BEFORE UPDATE ON newcomer_answers FOR EACH ROW
+EXECUTE FUNCTION newcomer_answers_custom_guard();
 
 CREATE TABLE newcomer_notes (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),

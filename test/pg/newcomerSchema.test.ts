@@ -17,11 +17,21 @@ const NEWCOMER_TABLES = [
 ];
 
 const STATUS_ROWS = [
-  [1, 'open', 1, 1, 1, 'New', '新朋友'],
-  [2, 'open', 2, 1, 0, 'Assigned', '已分配'],
-  [3, 'open', 3, 1, 0, 'Contacted', '已联系'],
-  [4, 'closed', 4, 1, 0, 'Connected', '已连接'],
-  [5, 'closed', 5, 1, 0, 'Closed', '已关闭'],
+  [1, 'new', 'open', 1, 1, 1, 'New', '新朋友'],
+  [2, 'assigned', 'open', 2, 1, 0, 'Assigned', '已分配'],
+  [3, 'contacted', 'open', 3, 1, 0, 'Contacted', '已联系'],
+  [4, 'connected', 'closed', 4, 1, 0, 'Connected', '已连接'],
+  [5, 'closed', 'closed', 5, 1, 0, 'Closed', '已关闭'],
+];
+
+const FIELD_ROWS = [
+  [1, 'name', 'text', 0, 1, 1, 1, 'Name', '姓名'],
+  [2, 'email', 'text', 0, 1, 2, 1, 'Email', '电子邮箱'],
+  [3, 'phone', 'text', 0, 1, 3, 1, 'Phone', '电话'],
+  [4, 'preferred_language', 'select', 0, 1, 4, 1, 'Preferred language', '首选语言'],
+  [5, 'visit_date', 'text', 0, 1, 5, 1, 'Visit date', '到访日期'],
+  [6, 'service_type', 'select', 0, 1, 6, 1, 'Service type', '聚会类型'],
+  [7, 'contact_consent', 'checkbox', 0, 1, 7, 1, 'Contact consent', '联系同意'],
 ];
 
 function submission(values: string): string {
@@ -77,24 +87,107 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     ]);
 
     const rows = await sql.unsafe<Record<string, string | number>[]>(`
-      SELECT s.id,s.category,s.sort,s.active,s.is_initial,en.label AS en_label,zh.label AS zh_label
+      SELECT s.id,s.key,s.category,s.sort,s.active,s.is_initial,en.label AS en_label,zh.label AS zh_label
       FROM newcomer_statuses s
       JOIN newcomer_status_i18n en ON en.status_id=s.id AND en.locale='en'
       JOIN newcomer_status_i18n zh ON zh.status_id=s.id AND zh.locale='zh'
       ORDER BY s.id
     `);
     expect(rows.map((row) => [
-      Number(row.id), row.category, Number(row.sort), Number(row.active), Number(row.is_initial), row.en_label, row.zh_label,
+      Number(row.id), row.key, row.category, Number(row.sort), Number(row.active), Number(row.is_initial), row.en_label, row.zh_label,
     ])).toEqual(STATUS_ROWS);
+
+    const fields = await sql.unsafe<Record<string, string | number>[]>(`
+      SELECT f.id,f.key,f.type,f.required,f.active,f.sort,f.fixed,en.label AS en_label,zh.label AS zh_label
+      FROM newcomer_fields f
+      JOIN newcomer_field_i18n en ON en.field_id=f.id AND en.locale='en'
+      JOIN newcomer_field_i18n zh ON zh.field_id=f.id AND zh.locale='zh'
+      ORDER BY f.id
+    `);
+    expect(fields.map((row) => [
+      Number(row.id), row.key, row.type, Number(row.required), Number(row.active), Number(row.sort), Number(row.fixed),
+      row.en_label, row.zh_label,
+    ])).toEqual(FIELD_ROWS);
+    const [fixedOptionCount] = await sql.unsafe<{ count: string }[]>(`
+      SELECT COUNT(*) AS count FROM newcomer_field_options WHERE field_id BETWEEN 1 AND 7
+    `);
+    expect(Number(fixedOptionCount?.count)).toBe(0);
+  });
+
+  it('keeps core field carriers immutable and answers/options custom-only', async () => {
+    for (const statement of [
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'custom_fixed','text',0,1,89,1)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'name','text',0,1,89,0)",
+      "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (7,'custom_core_id','text',0,1,89,0)",
+      "UPDATE newcomer_fields SET key='renamed_name' WHERE id=1",
+      "UPDATE newcomer_fields SET id=8 WHERE id=1",
+      "UPDATE newcomer_fields SET type='textarea' WHERE id=1",
+      "UPDATE newcomer_fields SET fixed=0 WHERE id=1",
+      "UPDATE newcomer_fields SET active=0 WHERE id=1",
+      "UPDATE newcomer_fields SET required=1 WHERE id=1",
+      "DELETE FROM newcomer_fields WHERE id=1",
+    ]) await rejects(statement);
+
+    await sql.unsafe("UPDATE newcomer_fields SET sort=88 WHERE id=1");
+    await sql.unsafe("UPDATE newcomer_field_i18n SET label='Display name' WHERE field_id=1 AND locale='en'");
+    const [label] = await sql.unsafe<{ label: string }[]>(`
+      SELECT label FROM newcomer_field_i18n WHERE field_id=1 AND locale='en'
+    `);
+    expect(label?.label).toBe('Display name');
+
+    await sql.unsafe("INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (89,'custom_select','select',0,1,89,0)");
+    await sql.unsafe(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES ('61000000-0000-4000-8000-000000000001','Core boundary','en','2026-08-12','staff',
+        '2026-08-12 12:00:00','2026-08-12 12:00:00')`);
+    await rejects(`INSERT INTO newcomer_answers (submission_id,field_id,value)
+      VALUES ('61000000-0000-4000-8000-000000000001',1,'must use submission column')`);
+    await sql.unsafe(`INSERT INTO newcomer_answers (submission_id,field_id,value)
+      VALUES ('61000000-0000-4000-8000-000000000001',89,'custom value')`);
+    await rejects(`UPDATE newcomer_answers SET field_id=1
+      WHERE submission_id='61000000-0000-4000-8000-000000000001' AND field_id=89`);
+    await rejects("UPDATE newcomer_fields SET fixed=1 WHERE id=89");
+    await rejects("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (4,'en',1,1)");
+    await rejects("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (6,'service_9801',1,1)");
+    await sql.unsafe("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (89,'first_visit',1,1)");
+    await rejects("UPDATE newcomer_field_options SET field_id=4 WHERE field_id=89 AND value='first_visit'");
+  });
+
+  it('enforces every newcomer foreign key with real Postgres mutations', async () => {
+    await sql.unsafe("INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (97,'fk_custom','text',0,1,97,0)");
+    await sql.unsafe(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES ('62000000-0000-4000-8000-000000000001','FK owner','en','2026-08-12','staff',
+        '2026-08-12 12:00:00','2026-08-12 12:00:00')`);
+
+    const statements = [
+      "INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (999999,'en','Missing')",
+      "INSERT INTO newcomer_field_i18n (field_id,locale,label) VALUES (999999,'en','Missing')",
+      "INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (999999,'missing',1,1)",
+      "INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label) VALUES (999999,'missing','en','Missing')",
+      submission("'62000000-0000-4000-8000-000000000002','Missing service',NULL,NULL,'en','2026-08-12',999999,NULL,'staff',1,NULL,NULL,NULL,0,NULL,NULL,NULL,'2026-08-12 12:00:00','2026-08-12 12:00:00'"),
+      submission("'62000000-0000-4000-8000-000000000003','Missing status',NULL,NULL,'en','2026-08-12',NULL,NULL,'staff',999999,NULL,NULL,NULL,0,NULL,NULL,NULL,'2026-08-12 12:00:00','2026-08-12 12:00:00'"),
+      submission("'62000000-0000-4000-8000-000000000004','Missing assignee',NULL,NULL,'en','2026-08-12',NULL,NULL,'staff',1,999999,NULL,NULL,0,NULL,NULL,NULL,'2026-08-12 12:00:00','2026-08-12 12:00:00'"),
+      submission("'62000000-0000-4000-8000-000000000005','Missing linked',NULL,NULL,'en','2026-08-12',NULL,NULL,'staff',1,NULL,999999,NULL,0,NULL,NULL,NULL,'2026-08-12 12:00:00','2026-08-12 12:00:00'"),
+      "INSERT INTO newcomer_answers (submission_id,field_id,value) VALUES ('62000000-0000-4000-8000-999999999999',97,'Missing')",
+      "INSERT INTO newcomer_answers (submission_id,field_id,value) VALUES ('62000000-0000-4000-8000-000000000001',999999,'Missing')",
+      "INSERT INTO newcomer_notes (id,submission_id,author_person_id,body) VALUES ('63000000-0000-4000-8000-000000000001','62000000-0000-4000-8000-999999999999',9802,'Missing')",
+      "INSERT INTO newcomer_notes (id,submission_id,author_person_id,body) VALUES ('63000000-0000-4000-8000-000000000002','62000000-0000-4000-8000-000000000001',999999,'Missing')",
+      "INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json) VALUES ('64000000-0000-4000-8000-000000000001','62000000-0000-4000-8000-999999999999','submission_created','{}')",
+      "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json) VALUES ('64000000-0000-4000-8000-000000000002','62000000-0000-4000-8000-000000000001',999999,'submission_created','{}')",
+    ];
+    for (const statement of statements) await rejects(statement, '23503');
   });
 
   it('repeats workflow, field, option, and single-initial constraint behavior', async () => {
     for (const statement of [
-      "INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (90,'closed',90,1,1)",
-      "INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (91,'open',91,0,1)",
-      "INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (92,'open',92,1,1)",
-      "INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (93,'pending',93,1,0)",
-      "INSERT INTO newcomer_statuses (id,category,sort,active,is_initial) VALUES (94,'open',-1,2,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (90,'closed','closed',90,1,1)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,0,1)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (92,'assigned','open',92,1,1)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (93,'contacted','pending',93,1,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (94,'connected','open',-1,2,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (95,'NEW','open',95,1,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'other','open',96,1,0)",
       "INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'fr','Nouveau')",
       "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (91,'bad','radio',0,1,1,0)",
       "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (92,'BAD KEY','text',0,1,1,0)",
@@ -130,6 +223,16 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
       base('not-a-uuid'),
       base('10000000-0000-4000-8000-000000000002', { name: 'NULL' }),
       base('10000000-0000-4000-8000-000000000003', { email: "'Ada@Example.test'" }),
+      base('10000000-0000-4000-8000-000000000014', { email: "'@@@'" }),
+      base('10000000-0000-4000-8000-000000000015', { email: "'@example.test'" }),
+      base('10000000-0000-4000-8000-000000000016', { email: "'local@'" }),
+      base('10000000-0000-4000-8000-000000000017', { email: "'a@@example.test'" }),
+      base('10000000-0000-4000-8000-000000000018', { email: "('a' || chr(10) || '@example.test')" }),
+      base('10000000-0000-4000-8000-000000000019', { email: "('a' || chr(9) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001a', { email: "('a' || chr(31) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001b', { email: "('a' || chr(127) || '@example.test')" }),
+      base('10000000-0000-4000-8000-00000000001c', { email: "'a @example.test'" }),
+      base('10000000-0000-4000-8000-00000000001d', { email: "('a' || chr(0) || '@example.test')" }),
       base('10000000-0000-4000-8000-000000000004', { phone: "' +13125550100'" }),
       base('10000000-0000-4000-8000-000000000005', { locale: "'fr'" }),
       base('10000000-0000-4000-8000-000000000006', { visitDate: "'2026-02-30'" }),
@@ -145,6 +248,40 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
       base('10000000-0000-4000-8000-000000000010', { linked: '999999' }),
     ];
     for (const statement of invalid) await rejects(statement);
+  });
+
+  it('rejects every invalid calendar or timestamp parse, including metadata and rate windows', async () => {
+    const base = (id: string, overrides: Partial<Record<string, string>> = {}) => submission([
+      `'${id}'`, "'Date Visitor'", 'NULL', 'NULL', "'en'", overrides.visitDate ?? "'2026-08-12'", 'NULL',
+      overrides.consentAt ?? 'NULL', "'staff'", '1', '9801', 'NULL', overrides.followUp ?? 'NULL', '0', 'NULL',
+      overrides.closedAt ?? 'NULL', overrides.deletedAt ?? 'NULL',
+      overrides.createdAt ?? "'2026-08-12 12:00:00'", overrides.updatedAt ?? "'2026-08-12 12:00:00'",
+    ].join(','));
+    for (const statement of [
+      base('51000000-0000-4000-8000-000000000001', { visitDate: "'2026-13-01'" }),
+      base('51000000-0000-4000-8000-000000000002', { visitDate: "'2026/08/12'" }),
+      base('51000000-0000-4000-8000-000000000003', { followUp: "'2026-13-01'" }),
+      base('51000000-0000-4000-8000-000000000004', { consentAt: "'2026-13-01 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000005', { closedAt: "'2026-02-30 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000006', { deletedAt: "'2026/08/12 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000007', { createdAt: "'2026-13-01 12:00:00'" }),
+      base('51000000-0000-4000-8000-000000000008', { updatedAt: "'2026-02-30 12:00:00'" }),
+    ]) await rejects(statement);
+
+    await sql.unsafe(base('51000000-0000-4000-8000-000000000010'));
+    for (const statement of [
+      `INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+       VALUES ('52000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000010',9801,
+         'Strict timestamp','2026-13-01 12:00:00')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json,created_at)
+       VALUES ('53000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000010',
+         'follow_up_scheduled','{"follow_up_date":"2026-13-01"}','2026-08-12 12:00:00')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json,created_at)
+       VALUES ('53000000-0000-4000-8000-000000000002','51000000-0000-4000-8000-000000000010',
+         'submission_created','{}','2026-02-30 12:00:00')`,
+      `INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
+       VALUES ('${'f'.repeat(64)}','2026-13-01 12:10:00',1,'2026-08-14 12:10:00')`,
+    ]) await rejects(statement);
   });
 
   it('repeats bounded answer/note and PII-safe structural activity behavior', async () => {
@@ -177,6 +314,18 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
        VALUES ('40000000-0000-4000-8000-000000000005','20000000-0000-4000-8000-000000000001','submission_created','{"email":"private@example.test"}')`,
       `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
        VALUES ('40000000-0000-4000-8000-000000000006','20000000-0000-4000-8000-000000000001','person_linked','{"person_id":"9802"}')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+       VALUES ('40000000-0000-4000-8000-000000000007','20000000-0000-4000-8000-000000000001','person_linked',
+         '{"person_id":"private@example.test","person_id":9802}')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+       VALUES ('40000000-0000-4000-8000-000000000008','20000000-0000-4000-8000-000000000001','person_linked',
+         '{ "person_id":9802}')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+       VALUES ('40000000-0000-4000-8000-000000000009','20000000-0000-4000-8000-000000000001','status_changed',
+         '{"to_status_id":2,"from_status_id":1}')`,
+      `INSERT INTO newcomer_activity (id,submission_id,kind,metadata_json)
+       VALUES ('40000000-0000-4000-8000-00000000000a','20000000-0000-4000-8000-000000000001','status_changed',
+         '{"from_status_id":1, "to_status_id":2}')`,
     ]) await rejects(statement);
   });
 
