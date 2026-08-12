@@ -660,6 +660,148 @@ describe('buildCanonicalExportParts runtime source validation', () => {
       { people: 201, dependents: 0, households: 0, issues: 1 },
     );
   });
+
+  it('returns a constant PII-free repair result when a root getter throws', () => {
+    const privateText = 'PRIVATE_ROOT_GETTER_TEXT';
+    const candidate = {
+      today: TODAY,
+      get people(): never {
+        throw new Error(privateText);
+      },
+      dependents: [],
+    };
+
+    let repair: CanonicalExportResult | undefined;
+    expect(() => {
+      repair = buildFromUnknown(candidate);
+    }).not.toThrow();
+    expect(repair).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, dependents: 0, households: 0, issues: 1 },
+    });
+    expect(JSON.stringify(repair)).not.toContain(privateText);
+    expect(JSON.stringify(repair)).not.toContain('csv');
+  });
+
+  it('returns a constant PII-free repair result when a nested getter throws', () => {
+    const privateText = 'PRIVATE_NESTED_GETTER_TEXT';
+    const candidate: any = person('unused', 'nested-getter@example.com');
+    Object.defineProperty(candidate, 'stableKey', {
+      enumerable: true,
+      get: () => {
+        throw new Error(privateText);
+      },
+    });
+
+    const repair = buildFromUnknown(source([candidate]));
+
+    expect(repair).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, dependents: 0, households: 0, issues: 1 },
+    });
+    expect(JSON.stringify(repair)).not.toContain(privateText);
+    expect(JSON.stringify(repair)).not.toContain('csv');
+  });
+
+  it('returns a constant repair result for a revoked Proxy', () => {
+    const revocable = Proxy.revocable({}, {});
+    revocable.revoke();
+
+    expect(buildFromUnknown(revocable.proxy)).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, dependents: 0, households: 0, issues: 1 },
+    });
+  });
+
+  it('reads a changing membership status once and serializes the validated snapshot', () => {
+    let membershipReads = 0;
+    const candidate: any = person('changing-membership', 'changing-membership@example.com');
+    Object.defineProperty(candidate, 'membershipStatus', {
+      enumerable: true,
+      get: () => {
+        membershipReads += 1;
+        return membershipReads === 1 ? 'visitor' : null;
+      },
+    });
+
+    const result = buildFromUnknown(source([candidate]));
+
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') throw new Error('expected success');
+    expect(membershipReads).toBe(1);
+    const parsed = parsePeopleImport(new TextEncoder().encode(result.parts[0].csv), { today: TODAY });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.model?.people[0].membershipStatus).toBe('visitor');
+  });
+
+  it('reads every root, array element, record, and household property exactly once', () => {
+    const reads = new Map<string, number>();
+    const once = <T>(label: string, value: T): (() => T) => () => {
+      reads.set(label, (reads.get(label) ?? 0) + 1);
+      return value;
+    };
+    const record = (prefix: string, entries: Array<[string, unknown]>): Record<string, unknown> => {
+      const value: Record<string, unknown> = {};
+      for (const [property, propertyValue] of entries) {
+        Object.defineProperty(value, property, {
+          enumerable: true,
+          get: once(`${prefix}.${property}`, propertyValue),
+        });
+      }
+      return value;
+    };
+
+    const personHousehold = record('person.household', [
+      ['stableKey', 'single-read-house'],
+      ['name', 'Single Read Household'],
+      ['address', null],
+      ['phone', null],
+      ['role', 'adult'],
+      ['primary', true],
+    ]);
+    const dependentReference = record('dependent.household', [
+      ['stableKey', 'single-read-house'],
+      ['name', 'Single Read Household'],
+      ['address', null],
+      ['phone', null],
+      ['role', 'child'],
+    ]);
+    const sourcePerson = record('person', [
+      ['stableKey', 'single-read-person'],
+      ['displayName', 'Single Read Person'],
+      ['email', 'single-read@example.com'],
+      ['firstName', null],
+      ['lastName', null],
+      ['phone', null],
+      ['language', null],
+      ['membershipStatus', 'visitor'],
+      ['birthday', null],
+      ['joinedOn', null],
+      ['address', null],
+      ['active', true],
+      ['household', personHousehold],
+    ]);
+    const sourceDependent = record('dependent', [
+      ['stableKey', 'single-read-dependent'],
+      ['displayName', 'Single Read Dependent'],
+      ['household', dependentReference],
+    ]);
+    const people: unknown[] = [sourcePerson];
+    const dependents: unknown[] = [sourceDependent];
+    Object.defineProperty(people, 0, { get: once('people[0]', sourcePerson) });
+    Object.defineProperty(dependents, 0, { get: once('dependents[0]', sourceDependent) });
+    const candidate = record('source', [
+      ['today', TODAY],
+      ['people', people],
+      ['dependents', dependents],
+    ]);
+
+    const result = buildFromUnknown(candidate);
+
+    expect(result.status).toBe('success');
+    expect([...reads.values()]).toEqual([...reads.values()].map(() => 1));
+    expect([...reads.keys()]).toHaveLength(32);
+  });
 });
 
 describe('buildCanonicalExportParts importer-safe partitioning', () => {

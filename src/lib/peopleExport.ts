@@ -251,119 +251,252 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function safeArrayLength(value: unknown, maximum: number): number {
-  return Array.isArray(value) ? bounded(value.length, maximum) : 0;
-}
-
-function safeHouseholdCount(value: unknown): number {
-  if (!isRecord(value)) return 0;
-  const keys = new Set<string>();
-  for (const collection of [value.people, value.dependents]) {
-    if (!Array.isArray(collection)) continue;
-    for (const member of collection) {
-      if (!isRecord(member) || !isRecord(member.household)) continue;
-      if (typeof member.household.stableKey !== 'string') continue;
-      keys.add(member.household.stableKey);
-      if (keys.size >= PEOPLE_IMPORT_LIMITS.maxHouseholds + 1) {
-        return PEOPLE_IMPORT_LIMITS.maxHouseholds + 1;
-      }
-    }
-  }
-  return keys.size;
-}
-
-function repairRequired(
-  source: unknown,
-  householdCount: number | undefined,
+function repairResult(
+  peopleCount: number,
+  dependentCount: number,
+  householdCount: number,
   issueCount: number,
 ): CanonicalExportResult {
-  const record = isRecord(source) ? source : null;
   return {
     status: 'repair_required',
     counts: {
-      people: safeArrayLength(record?.people, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
-      dependents: safeArrayLength(record?.dependents, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
-      households: bounded(
-        householdCount ?? safeHouseholdCount(source),
-        PEOPLE_IMPORT_LIMITS.maxHouseholds + 1,
-      ),
+      people: bounded(peopleCount, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
+      dependents: bounded(dependentCount, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
+      households: bounded(householdCount, PEOPLE_IMPORT_LIMITS.maxHouseholds + 1),
       issues: bounded(issueCount, PEOPLE_IMPORT_LIMITS.maxIssues),
     },
   };
+}
+
+function repairRequired(
+  source: CanonicalPeopleExportSource,
+  householdCount: number,
+  issueCount: number,
+): CanonicalExportResult {
+  return repairResult(source.people.length, source.dependents.length, householdCount, issueCount);
+}
+
+function untrustedInputRepair(): CanonicalExportResult {
+  return repairResult(0, 0, 0, 1);
 }
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
 }
 
-function validatePerson(value: unknown): number {
-  if (!isRecord(value)) return 1;
-  let issues = 0;
-  if (typeof value.stableKey !== 'string') issues += 1;
-  if (typeof value.displayName !== 'string') issues += 1;
-  if (typeof value.email !== 'string') issues += 1;
-  for (const field of ['firstName', 'lastName', 'phone', 'birthday', 'joinedOn', 'address'] as const) {
-    if (!isNullableString(value[field])) issues += 1;
-  }
-  if (value.language !== null && value.language !== 'en' && value.language !== 'zh') issues += 1;
-  if (!(MEMBERSHIP_STATUSES as readonly unknown[]).includes(value.membershipStatus)) issues += 1;
-  if (typeof value.active !== 'boolean') issues += 1;
-
-  if (value.household !== null) {
-    if (!isRecord(value.household)) return issues + 1;
-    if (typeof value.household.stableKey !== 'string') issues += 1;
-    if (typeof value.household.name !== 'string') issues += 1;
-    if (!isNullableString(value.household.address)) issues += 1;
-    if (!isNullableString(value.household.phone)) issues += 1;
-    if (value.household.role !== 'adult' && value.household.role !== 'child') issues += 1;
-    if (typeof value.household.primary !== 'boolean') issues += 1;
-  }
-  return issues;
+interface SnapshotValue<T> {
+  value: T | null;
+  issues: number;
+  householdStableKey: string | null;
 }
 
-function validateDependent(value: unknown): number {
-  if (!isRecord(value)) return 1;
-  let issues = 0;
-  if (typeof value.stableKey !== 'string') issues += 1;
-  if (typeof value.displayName !== 'string') issues += 1;
-  if (!isRecord(value.household)) return issues + 1;
-  if (typeof value.household.stableKey !== 'string') issues += 1;
-  if (typeof value.household.name !== 'string') issues += 1;
-  if (!isNullableString(value.household.address)) issues += 1;
-  if (!isNullableString(value.household.phone)) issues += 1;
-  if (value.household.role !== 'adult' && value.household.role !== 'child') issues += 1;
-  return issues;
+interface SnapshotFailure {
+  ok: false;
+  result: CanonicalExportResult;
 }
 
-function validateSource(
+interface SnapshotSuccess {
+  ok: true;
+  source: CanonicalPeopleExportSource;
+}
+
+function snapshotPersonHousehold(
   value: unknown,
-): { ok: true; source: CanonicalPeopleExportSource } | { ok: false; issueCount: number } {
-  if (!isRecord(value)) return { ok: false, issueCount: 1 };
-  let issueCount = typeof value.today === 'string' && isValidDateStr(value.today) ? 0 : 1;
-  if (!Array.isArray(value.people)) issueCount += 1;
-  if (!Array.isArray(value.dependents)) issueCount += 1;
-  if (Array.isArray(value.people)) {
-    for (const person of value.people) issueCount += validatePerson(person);
-  }
-  if (Array.isArray(value.dependents)) {
-    for (const dependent of value.dependents) issueCount += validateDependent(dependent);
-  }
-  return issueCount === 0
-    ? { ok: true, source: value as unknown as CanonicalPeopleExportSource }
-    : { ok: false, issueCount };
+): SnapshotValue<CanonicalPeopleExportHouseholdReference> {
+  if (!isRecord(value)) return { value: null, issues: 1, householdStableKey: null };
+  const stableKey = value.stableKey;
+  const name = value.name;
+  const address = value.address;
+  const phone = value.phone;
+  const role = value.role;
+  const primary = value.primary;
+
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof name !== 'string') issues += 1;
+  if (!isNullableString(address)) issues += 1;
+  if (!isNullableString(phone)) issues += 1;
+  if (role !== 'adult' && role !== 'child') issues += 1;
+  if (typeof primary !== 'boolean') issues += 1;
+  return {
+    value: issues === 0 ? {
+      stableKey: stableKey as string,
+      name: name as string,
+      address: address as string | null,
+      phone: phone as string | null,
+      role: role as 'adult' | 'child',
+      primary: primary as boolean,
+    } : null,
+    issues,
+    householdStableKey: typeof stableKey === 'string' ? stableKey : null,
+  };
 }
 
-function excessiveInputIssueCount(value: unknown): number | null {
-  if (!isRecord(value)) return null;
-  const peopleRows = Array.isArray(value.people) ? value.people.length : 0;
-  const dependentRows = Array.isArray(value.dependents) ? value.dependents.length : 0;
-  if (peopleRows + dependentRows <= PEOPLE_EXPORT_LIMITS.maxDataRows) return null;
+function snapshotDependentHousehold(
+  value: unknown,
+): SnapshotValue<CanonicalPeopleExportDependentHouseholdReference> {
+  if (!isRecord(value)) return { value: null, issues: 1, householdStableKey: null };
+  const stableKey = value.stableKey;
+  const name = value.name;
+  const address = value.address;
+  const phone = value.phone;
+  const role = value.role;
 
-  let issues = 1;
-  if (typeof value.today !== 'string' || !isValidDateStr(value.today)) issues += 1;
-  if (!Array.isArray(value.people)) issues += 1;
-  if (!Array.isArray(value.dependents)) issues += 1;
-  return issues;
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof name !== 'string') issues += 1;
+  if (!isNullableString(address)) issues += 1;
+  if (!isNullableString(phone)) issues += 1;
+  if (role !== 'adult' && role !== 'child') issues += 1;
+  return {
+    value: issues === 0 ? {
+      stableKey: stableKey as string,
+      name: name as string,
+      address: address as string | null,
+      phone: phone as string | null,
+      role: role as 'adult' | 'child',
+    } : null,
+    issues,
+    householdStableKey: typeof stableKey === 'string' ? stableKey : null,
+  };
+}
+
+function snapshotPerson(value: unknown): SnapshotValue<CanonicalPeopleExportPerson> {
+  if (!isRecord(value)) return { value: null, issues: 1, householdStableKey: null };
+  const stableKey = value.stableKey;
+  const displayName = value.displayName;
+  const email = value.email;
+  const firstName = value.firstName;
+  const lastName = value.lastName;
+  const phone = value.phone;
+  const language = value.language;
+  const membershipStatus = value.membershipStatus;
+  const birthday = value.birthday;
+  const joinedOn = value.joinedOn;
+  const address = value.address;
+  const active = value.active;
+  const householdInput = value.household;
+
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof displayName !== 'string') issues += 1;
+  if (typeof email !== 'string') issues += 1;
+  if (!isNullableString(firstName)) issues += 1;
+  if (!isNullableString(lastName)) issues += 1;
+  if (!isNullableString(phone)) issues += 1;
+  if (language !== null && language !== 'en' && language !== 'zh') issues += 1;
+  if (!(MEMBERSHIP_STATUSES as readonly unknown[]).includes(membershipStatus)) issues += 1;
+  if (!isNullableString(birthday)) issues += 1;
+  if (!isNullableString(joinedOn)) issues += 1;
+  if (!isNullableString(address)) issues += 1;
+  if (typeof active !== 'boolean') issues += 1;
+
+  let household: CanonicalPeopleExportHouseholdReference | null = null;
+  let householdStableKey: string | null = null;
+  if (householdInput !== null) {
+    const snapshot = snapshotPersonHousehold(householdInput);
+    issues += snapshot.issues;
+    household = snapshot.value;
+    householdStableKey = snapshot.householdStableKey;
+  }
+
+  return {
+    value: issues === 0 ? {
+      stableKey: stableKey as string,
+      displayName: displayName as string,
+      email: email as string,
+      firstName: firstName as string | null,
+      lastName: lastName as string | null,
+      phone: phone as string | null,
+      language: language as 'en' | 'zh' | null,
+      membershipStatus: membershipStatus as MembershipStatus,
+      birthday: birthday as string | null,
+      joinedOn: joinedOn as string | null,
+      address: address as string | null,
+      active: active as boolean,
+      household,
+    } : null,
+    issues,
+    householdStableKey,
+  };
+}
+
+function snapshotDependent(value: unknown): SnapshotValue<CanonicalPeopleExportDependent> {
+  if (!isRecord(value)) return { value: null, issues: 1, householdStableKey: null };
+  const stableKey = value.stableKey;
+  const displayName = value.displayName;
+  const householdInput = value.household;
+
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof displayName !== 'string') issues += 1;
+  const household = snapshotDependentHousehold(householdInput);
+  issues += household.issues;
+  return {
+    value: issues === 0 ? {
+      stableKey: stableKey as string,
+      displayName: displayName as string,
+      household: household.value!,
+    } : null,
+    issues,
+    householdStableKey: household.householdStableKey,
+  };
+}
+
+function snapshotSource(
+  value: unknown,
+): SnapshotFailure | SnapshotSuccess {
+  if (!isRecord(value)) return { ok: false, result: untrustedInputRepair() };
+  const todayInput = value.today;
+  const peopleInput = value.people;
+  const dependentsInput = value.dependents;
+  const peopleIsArray = Array.isArray(peopleInput);
+  const dependentsIsArray = Array.isArray(dependentsInput);
+  const peopleLength = peopleIsArray ? peopleInput.length : 0;
+  const dependentLength = dependentsIsArray ? dependentsInput.length : 0;
+
+  let issues = typeof todayInput === 'string' && isValidDateStr(todayInput) ? 0 : 1;
+  if (!peopleIsArray) issues += 1;
+  if (!dependentsIsArray) issues += 1;
+  if (peopleLength + dependentLength > PEOPLE_EXPORT_LIMITS.maxDataRows) {
+    return {
+      ok: false,
+      result: repairResult(peopleLength, dependentLength, 0, issues + 1),
+    };
+  }
+
+  const people: CanonicalPeopleExportPerson[] = [];
+  const dependents: CanonicalPeopleExportDependent[] = [];
+  const householdKeys = new Set<string>();
+  if (peopleIsArray) {
+    for (let index = 0; index < peopleLength; index += 1) {
+      const memberInput = peopleInput[index];
+      const snapshot = snapshotPerson(memberInput);
+      issues += snapshot.issues;
+      if (snapshot.value !== null) people.push(snapshot.value);
+      if (snapshot.householdStableKey !== null) householdKeys.add(snapshot.householdStableKey);
+    }
+  }
+  if (dependentsIsArray) {
+    for (let index = 0; index < dependentLength; index += 1) {
+      const memberInput = dependentsInput[index];
+      const snapshot = snapshotDependent(memberInput);
+      issues += snapshot.issues;
+      if (snapshot.value !== null) dependents.push(snapshot.value);
+      if (snapshot.householdStableKey !== null) householdKeys.add(snapshot.householdStableKey);
+    }
+  }
+
+  if (issues > 0) {
+    return {
+      ok: false,
+      result: repairResult(peopleLength, dependentLength, householdKeys.size, issues),
+    };
+  }
+  return {
+    ok: true,
+    source: { today: todayInput as string, people, dependents },
+  };
 }
 
 function duplicateOccurrenceCount(values: readonly string[]): number {
@@ -466,12 +599,9 @@ function completedPart(part: PartBuilder, number: number): CanonicalExportPart {
   };
 }
 
-export function buildCanonicalExportParts(input: CanonicalPeopleExportSource): CanonicalExportResult {
-  const excessiveInputIssues = excessiveInputIssueCount(input);
-  if (excessiveInputIssues !== null) return repairRequired(input, 0, excessiveInputIssues);
-  const validated = validateSource(input);
-  if (!validated.ok) return repairRequired(input, undefined, validated.issueCount);
-  const source = validated.source;
+function buildCanonicalExportPartsFromSnapshot(
+  source: CanonicalPeopleExportSource,
+): CanonicalExportResult {
   const households = new Map<string, HouseholdGroup>();
   const standalone: CanonicalPeopleExportPerson[] = [];
   for (const person of source.people) {
@@ -538,4 +668,13 @@ export function buildCanonicalExportParts(input: CanonicalPeopleExportSource): C
   if (importerIssueCount > 0) return repairRequired(source, households.size, importerIssueCount);
 
   return { status: 'success', parts: completed };
+}
+
+export function buildCanonicalExportParts(input: CanonicalPeopleExportSource): CanonicalExportResult {
+  try {
+    const snapshot = snapshotSource(input);
+    return snapshot.ok ? buildCanonicalExportPartsFromSnapshot(snapshot.source) : snapshot.result;
+  } catch {
+    return untrustedInputRepair();
+  }
 }
