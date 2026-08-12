@@ -8,6 +8,7 @@ import {
 } from '../src/lib/peopleImport';
 import {
   buildCanonicalExportParts,
+  PEOPLE_EXPORT_LIMITS,
   type CanonicalPeopleExportDependent,
   type CanonicalPeopleExportDependentHouseholdReference,
   type CanonicalPeopleExportHouseholdReference,
@@ -166,6 +167,36 @@ const expectImporterSafeParts = (
   }
 };
 
+const buildFromUnknown = (value: unknown): CanonicalExportResult =>
+  buildCanonicalExportParts(value as CanonicalPeopleExportSource);
+
+const expectSafeRepair = (
+  value: unknown,
+  expectedCounts?: CanonicalExportRepairCounts,
+): void => {
+  let result: CanonicalExportResult | undefined;
+  expect(() => {
+    result = buildFromUnknown(value);
+  }).not.toThrow();
+  expect(result?.status).toBe('repair_required');
+  if (result?.status !== 'repair_required') throw new Error('expected repair_required');
+  if (expectedCounts) expect(result.counts).toEqual(expectedCounts);
+  expect(Object.values(result.counts).every(Number.isSafeInteger)).toBe(true);
+  expect(Object.values(result.counts).every((count) => count >= 0)).toBe(true);
+  expect(JSON.stringify(result)).not.toContain('csv');
+  expect(JSON.stringify(result)).not.toContain('private-invalid@example.com');
+  expect(JSON.stringify(result)).not.toContain('Private Invalid Person');
+};
+
+const validHouseholdSource = (): CanonicalPeopleExportSource => source(
+  [person('valid-primary', 'valid-primary@example.com', {
+    household: household('valid-household', { name: 'Valid Household' }),
+  })],
+  [dependent('valid-dependent', dependentHousehold('valid-household', {
+    name: 'Valid Household',
+  }))],
+);
+
 describe('buildCanonicalExportParts canonical CSV', () => {
   it('exposes an exact discriminated result shape without CSV on repair results', () => {
     expectTypeOf<CanonicalExportPart>().toEqualTypeOf<{
@@ -290,6 +321,20 @@ describe('buildCanonicalExportParts canonical CSV', () => {
       inactivePeople: 1,
     });
     expect(source).toEqual(before);
+  });
+
+  it('keeps an empty source importer-safe as one header-only part', () => {
+    const result = buildCanonicalExportParts(source([]));
+
+    expect(result).toEqual({
+      status: 'success',
+      parts: [{
+        number: 1,
+        rowCount: 0,
+        householdCount: 0,
+        csv: `${PEOPLE_IMPORT_HEADERS.join(',')}\r\n`,
+      }],
+    });
   });
 
   it('orders normalized households and every member deterministically before assigning file-local keys', () => {
@@ -485,9 +530,180 @@ describe('buildCanonicalExportParts structural preflight', () => {
       counts: { people: 201, dependents: 0, households: 0, issues: 100 },
     });
   });
+
+  it.each([
+    [
+      'missing primary',
+      source([person('missing-primary', 'missing-primary@example.com', {
+        household: household('missing-primary-house', { primary: false }),
+      })]),
+      1,
+    ],
+    [
+      'multiple adult primaries',
+      source([
+        person('adult-primary-one', 'adult-primary-one@example.com', {
+          household: household('adult-primary-house'),
+        }),
+        person('adult-primary-two', 'adult-primary-two@example.com', {
+          household: household('adult-primary-house'),
+        }),
+      ]),
+      1,
+    ],
+    [
+      'one child primary',
+      source([person('child-only-primary', 'child-only-primary@example.com', {
+        household: household('child-only-primary-house', { role: 'child' }),
+      })]),
+      1,
+    ],
+    [
+      'multiple primaries including a child',
+      source([
+        person('mixed-adult-primary', 'mixed-adult-primary@example.com', {
+          household: household('mixed-primary-house'),
+        }),
+        person('mixed-child-primary', 'mixed-child-primary@example.com', {
+          household: household('mixed-primary-house', { role: 'child' }),
+        }),
+      ]),
+      2,
+    ],
+  ])('counts %s as non-overlapping actionable issues', (_label, invalidSource, issues) => {
+    expect(buildCanonicalExportParts(invalidSource)).toEqual({
+      status: 'repair_required',
+      counts: {
+        people: invalidSource.people.length,
+        dependents: 0,
+        households: 1,
+        issues,
+      },
+    });
+  });
+});
+
+describe('buildCanonicalExportParts runtime source validation', () => {
+  it.each([
+    ['undefined source', undefined, { people: 0, dependents: 0, households: 0, issues: 1 }],
+    ['null source', null, { people: 0, dependents: 0, households: 0, issues: 1 }],
+    ['array source', [], { people: 0, dependents: 0, households: 0, issues: 1 }],
+    ['empty object source', {}, { people: 0, dependents: 0, households: 0, issues: 3 }],
+    [
+      'invalid people container',
+      { today: TODAY, people: null, dependents: [] },
+      { people: 0, dependents: 0, households: 0, issues: 1 },
+    ],
+    [
+      'invalid dependents container',
+      { today: TODAY, people: [], dependents: {} },
+      { people: 0, dependents: 0, households: 0, issues: 1 },
+    ],
+    [
+      'invalid today scalar',
+      { today: null, people: [], dependents: [] },
+      { people: 0, dependents: 0, households: 0, issues: 1 },
+    ],
+  ] as const)('fails closed without throwing for %s', (_label, invalidSource, counts) => {
+    expectSafeRepair(invalidSource, counts);
+  });
+
+  it.each([
+    ['person membership status', (candidate: any) => { candidate.people[0].membershipStatus = null; }],
+    ['person language', (candidate: any) => { candidate.people[0].language = 'fr'; }],
+    ['person active flag', (candidate: any) => { candidate.people[0].active = 'true'; }],
+    ['person stable key', (candidate: any) => { candidate.people[0].stableKey = []; }],
+    ['person display name', (candidate: any) => { candidate.people[0].displayName = undefined; }],
+    ['person email', (candidate: any) => { candidate.people[0].email = null; }],
+    ['person nullable field', (candidate: any) => { candidate.people[0].phone = []; }],
+    ['person household object', (candidate: any) => { candidate.people[0].household = []; }],
+    ['person household stable key', (candidate: any) => { candidate.people[0].household.stableKey = null; }],
+    ['person household name', (candidate: any) => { candidate.people[0].household.name = undefined; }],
+    ['person household nullable field', (candidate: any) => { candidate.people[0].household.address = {}; }],
+    ['person household role', (candidate: any) => { candidate.people[0].household.role = null; }],
+    ['person household primary', (candidate: any) => { candidate.people[0].household.primary = 1; }],
+    ['dependent stable key', (candidate: any) => { candidate.dependents[0].stableKey = undefined; }],
+    ['dependent display name', (candidate: any) => { candidate.dependents[0].displayName = null; }],
+    ['dependent household object', (candidate: any) => { candidate.dependents[0].household = []; }],
+    ['dependent household stable key', (candidate: any) => { candidate.dependents[0].household.stableKey = {}; }],
+    ['dependent household name', (candidate: any) => { candidate.dependents[0].household.name = null; }],
+    ['dependent household nullable field', (candidate: any) => { candidate.dependents[0].household.phone = []; }],
+    ['dependent household role', (candidate: any) => { candidate.dependents[0].household.role = null; }],
+  ])('fails closed before serialization for an invalid %s', (_label, mutate) => {
+    const candidate: any = structuredClone(validHouseholdSource());
+    candidate.people[0].displayName = 'Private Invalid Person';
+    candidate.people[0].email = 'private-invalid@example.com';
+    mutate(candidate);
+
+    expectSafeRepair(candidate, { people: 1, dependents: 1, households: 1, issues: 1 });
+  });
+
+  it('does not throw while validating multiple malformed rows', () => {
+    const candidate: any = validHouseholdSource();
+    candidate.people.push({ ...candidate.people[0], stableKey: null, email: null });
+    candidate.dependents.push({ ...candidate.dependents[0], stableKey: [] });
+
+    expectSafeRepair(candidate, { people: 2, dependents: 2, households: 1, issues: 3 });
+  });
+
+  it('rejects oversized input from safe lengths without reading any row value', () => {
+    const people: unknown[] = new Array(5_001);
+    Object.defineProperty(people, 0, {
+      configurable: true,
+      get: () => {
+        throw new Error('row value must not be read');
+      },
+    });
+
+    expectSafeRepair(
+      { today: TODAY, people, dependents: [] },
+      { people: 201, dependents: 0, households: 0, issues: 1 },
+    );
+  });
 });
 
 describe('buildCanonicalExportParts importer-safe partitioning', () => {
+  const onePersonHouseholds = (count: number): CanonicalPeopleExportPerson[] =>
+    Array.from({ length: count }, (_, index) => {
+      const suffix = index.toString().padStart(4, '0');
+      return person(`bounded-person-${suffix}`, `bounded-${suffix}@example.com`, {
+        household: household(`bounded-house-${suffix}`, { name: `Bounded Household ${suffix}` }),
+      });
+    });
+
+  it('publishes the conservative aggregate Worker limits', () => {
+    expect(PEOPLE_EXPORT_LIMITS).toEqual({
+      maxParts: 25,
+      maxDataRows: 5_000,
+      maxCsvBytes: 6_553_600,
+    });
+  });
+
+  it('allows exactly 25 small parts but fails closed before creating part 26', () => {
+    const exact = buildCanonicalExportParts(source(onePersonHouseholds(2_401)));
+    const over = buildCanonicalExportParts(source(onePersonHouseholds(2_501)));
+
+    expectImporterSafeParts(exact, 2_401, 2_401);
+    if (exact.status !== 'success') throw new Error('expected success');
+    expect(exact.parts).toHaveLength(PEOPLE_EXPORT_LIMITS.maxParts);
+    expect(exact.parts.at(-1)).toMatchObject({ number: 25, rowCount: 1, householdCount: 1 });
+    expect(over).toEqual({
+      status: 'repair_required',
+      counts: { people: 201, dependents: 0, households: 101, issues: 1 },
+    });
+    expect(JSON.stringify(over)).not.toContain('csv');
+  });
+
+  it('rejects total input above 5,000 rows before validating or accumulating rows', () => {
+    const repeated = person('bounded-standalone', 'bounded-standalone@example.com');
+    const result = buildCanonicalExportParts(source(new Array(5_001).fill(repeated)));
+
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 201, dependents: 0, households: 0, issues: 1 },
+    });
+  });
+
   it('keeps 200 rows in one part and deterministically moves row 201 to part two', () => {
     const firstTwoHundred = Array.from({ length: 200 }, (_, index) =>
       person(`row-${index.toString().padStart(3, '0')}`, `row-${index}@example.com`),

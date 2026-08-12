@@ -5,7 +5,14 @@ import {
   parsePeopleImport,
   type PeopleImportHeader,
 } from './peopleImport';
-import type { MembershipStatus } from './validate';
+import { isValidDateStr } from './dates';
+import { MEMBERSHIP_STATUSES, type MembershipStatus } from './validate';
+
+export const PEOPLE_EXPORT_LIMITS = {
+  maxParts: 25,
+  maxDataRows: 25 * PEOPLE_IMPORT_LIMITS.maxDataRows,
+  maxCsvBytes: 25 * PEOPLE_IMPORT_LIMITS.maxBytes,
+} as const;
 
 export interface CanonicalPeopleExportHouseholdReference {
   stableKey: string;
@@ -240,20 +247,123 @@ function bounded(value: number, maximum: number): number {
   return Math.min(Math.max(0, value), maximum);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function safeArrayLength(value: unknown, maximum: number): number {
+  return Array.isArray(value) ? bounded(value.length, maximum) : 0;
+}
+
+function safeHouseholdCount(value: unknown): number {
+  if (!isRecord(value)) return 0;
+  const keys = new Set<string>();
+  for (const collection of [value.people, value.dependents]) {
+    if (!Array.isArray(collection)) continue;
+    for (const member of collection) {
+      if (!isRecord(member) || !isRecord(member.household)) continue;
+      if (typeof member.household.stableKey !== 'string') continue;
+      keys.add(member.household.stableKey);
+      if (keys.size >= PEOPLE_IMPORT_LIMITS.maxHouseholds + 1) {
+        return PEOPLE_IMPORT_LIMITS.maxHouseholds + 1;
+      }
+    }
+  }
+  return keys.size;
+}
+
 function repairRequired(
-  source: CanonicalPeopleExportSource,
-  householdCount: number,
+  source: unknown,
+  householdCount: number | undefined,
   issueCount: number,
 ): CanonicalExportResult {
+  const record = isRecord(source) ? source : null;
   return {
     status: 'repair_required',
     counts: {
-      people: bounded(source.people.length, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
-      dependents: bounded(source.dependents.length, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
-      households: bounded(householdCount, PEOPLE_IMPORT_LIMITS.maxHouseholds + 1),
+      people: safeArrayLength(record?.people, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
+      dependents: safeArrayLength(record?.dependents, PEOPLE_IMPORT_LIMITS.maxDataRows + 1),
+      households: bounded(
+        householdCount ?? safeHouseholdCount(source),
+        PEOPLE_IMPORT_LIMITS.maxHouseholds + 1,
+      ),
       issues: bounded(issueCount, PEOPLE_IMPORT_LIMITS.maxIssues),
     },
   };
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+function validatePerson(value: unknown): number {
+  if (!isRecord(value)) return 1;
+  let issues = 0;
+  if (typeof value.stableKey !== 'string') issues += 1;
+  if (typeof value.displayName !== 'string') issues += 1;
+  if (typeof value.email !== 'string') issues += 1;
+  for (const field of ['firstName', 'lastName', 'phone', 'birthday', 'joinedOn', 'address'] as const) {
+    if (!isNullableString(value[field])) issues += 1;
+  }
+  if (value.language !== null && value.language !== 'en' && value.language !== 'zh') issues += 1;
+  if (!(MEMBERSHIP_STATUSES as readonly unknown[]).includes(value.membershipStatus)) issues += 1;
+  if (typeof value.active !== 'boolean') issues += 1;
+
+  if (value.household !== null) {
+    if (!isRecord(value.household)) return issues + 1;
+    if (typeof value.household.stableKey !== 'string') issues += 1;
+    if (typeof value.household.name !== 'string') issues += 1;
+    if (!isNullableString(value.household.address)) issues += 1;
+    if (!isNullableString(value.household.phone)) issues += 1;
+    if (value.household.role !== 'adult' && value.household.role !== 'child') issues += 1;
+    if (typeof value.household.primary !== 'boolean') issues += 1;
+  }
+  return issues;
+}
+
+function validateDependent(value: unknown): number {
+  if (!isRecord(value)) return 1;
+  let issues = 0;
+  if (typeof value.stableKey !== 'string') issues += 1;
+  if (typeof value.displayName !== 'string') issues += 1;
+  if (!isRecord(value.household)) return issues + 1;
+  if (typeof value.household.stableKey !== 'string') issues += 1;
+  if (typeof value.household.name !== 'string') issues += 1;
+  if (!isNullableString(value.household.address)) issues += 1;
+  if (!isNullableString(value.household.phone)) issues += 1;
+  if (value.household.role !== 'adult' && value.household.role !== 'child') issues += 1;
+  return issues;
+}
+
+function validateSource(
+  value: unknown,
+): { ok: true; source: CanonicalPeopleExportSource } | { ok: false; issueCount: number } {
+  if (!isRecord(value)) return { ok: false, issueCount: 1 };
+  let issueCount = typeof value.today === 'string' && isValidDateStr(value.today) ? 0 : 1;
+  if (!Array.isArray(value.people)) issueCount += 1;
+  if (!Array.isArray(value.dependents)) issueCount += 1;
+  if (Array.isArray(value.people)) {
+    for (const person of value.people) issueCount += validatePerson(person);
+  }
+  if (Array.isArray(value.dependents)) {
+    for (const dependent of value.dependents) issueCount += validateDependent(dependent);
+  }
+  return issueCount === 0
+    ? { ok: true, source: value as unknown as CanonicalPeopleExportSource }
+    : { ok: false, issueCount };
+}
+
+function excessiveInputIssueCount(value: unknown): number | null {
+  if (!isRecord(value)) return null;
+  const peopleRows = Array.isArray(value.people) ? value.people.length : 0;
+  const dependentRows = Array.isArray(value.dependents) ? value.dependents.length : 0;
+  if (peopleRows + dependentRows <= PEOPLE_EXPORT_LIMITS.maxDataRows) return null;
+
+  let issues = 1;
+  if (typeof value.today !== 'string' || !isValidDateStr(value.today)) issues += 1;
+  if (!Array.isArray(value.people)) issues += 1;
+  if (!Array.isArray(value.dependents)) issues += 1;
+  return issues;
 }
 
 function duplicateOccurrenceCount(values: readonly string[]): number {
@@ -287,11 +397,12 @@ function structuralIssueCount(
   for (const group of groups) {
     if (group.people.length === 0) issues += 1;
     const primaries = group.people.filter((person) => person.household?.primary);
-    const adultPrimaries = primaries.filter((person) => person.household?.role === 'adult');
-    if (primaries.length === 0) issues += 1;
-    if (primaries.length > 1) issues += primaries.length;
-    issues += primaries.length - adultPrimaries.length;
-    if (adultPrimaries.length === 0) issues += 1;
+    if (primaries.length === 0) {
+      issues += 1;
+    } else {
+      if (primaries.length > 1) issues += 1;
+      issues += primaries.filter((person) => person.household?.role !== 'adult').length;
+    }
 
     const names = observedMetadata(group, 'name');
     const addresses = observedMetadata(group, 'address');
@@ -355,7 +466,12 @@ function completedPart(part: PartBuilder, number: number): CanonicalExportPart {
   };
 }
 
-export function buildCanonicalExportParts(source: CanonicalPeopleExportSource): CanonicalExportResult {
+export function buildCanonicalExportParts(input: CanonicalPeopleExportSource): CanonicalExportResult {
+  const excessiveInputIssues = excessiveInputIssueCount(input);
+  if (excessiveInputIssues !== null) return repairRequired(input, 0, excessiveInputIssues);
+  const validated = validateSource(input);
+  if (!validated.ok) return repairRequired(input, undefined, validated.issueCount);
+  const source = validated.source;
   const households = new Map<string, HouseholdGroup>();
   const standalone: CanonicalPeopleExportPerson[] = [];
   for (const person of source.people) {
@@ -395,6 +511,9 @@ export function buildCanonicalExportParts(source: CanonicalPeopleExportSource): 
   for (const unit of units) {
     let serialized = serializeUnit(unit, current.householdCount + 1);
     if (!canAppend(current, serialized) && current.rows.length > 0) {
+      if (completed.length + 1 >= PEOPLE_EXPORT_LIMITS.maxParts) {
+        return repairRequired(source, households.size, 1);
+      }
       completed.push(completedPart(current, completed.length + 1));
       current = { rows: [], householdCount: 0, byteCount: headerBytes };
       serialized = serializeUnit(unit, 1);
