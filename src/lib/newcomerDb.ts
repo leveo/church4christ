@@ -48,6 +48,8 @@ export const NEWCOMER_DB_LIMITS = {
   answers: 100,
   notes: 5_000,
   activity: 5_000,
+  historyPage: 50,
+  maxHistoryPage: 100,
   duplicateHints: 25,
 } as const;
 
@@ -68,6 +70,27 @@ function plainRow(value: unknown, fields: readonly string[]): DataRow | null {
       const descriptor = descriptors[field];
       if (!descriptor || !('value' in descriptor)) return null;
       row[field] = descriptor.value;
+    }
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+function plainOptionalRow(value: unknown, allowed: readonly string[], required: readonly string[]): DataRow | null {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<string, PropertyDescriptor>;
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.some((key) => typeof key !== 'string' || !allowed.includes(key))
+      || required.some((key) => !keys.includes(key))) return null;
+    const row: DataRow = Object.create(null) as DataRow;
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor)) return null;
+      row[key] = descriptor.value;
     }
     return row;
   } catch {
@@ -594,42 +617,48 @@ export async function listNewcomerQueue(
 ): Promise<NewcomerQueuePage> {
   assertPrivateAccess(user);
   assertLocale(requested);
-  if (!isValidDateStr(today) || !Number.isSafeInteger(filters.page) || filters.page < 1 || filters.page > 10_000
-    || !Number.isSafeInteger(filters.limit) || filters.limit < 1 || filters.limit > 100) {
+  const captured = plainOptionalRow(filters, [
+    'statusId', 'assigneePersonId', 'due', 'visitFrom', 'visitTo', 'serviceTypeId', 'source', 'page', 'limit',
+  ], ['page', 'limit']);
+  const page = captured ? integer(captured.page) : null;
+  const limit = captured ? integer(captured.limit) : null;
+  if (!captured || !isValidDateStr(today) || page === null || page < 1 || page > 10_000
+    || limit === null || limit < 1 || limit > 100) {
     throw new NewcomerInvalidError();
   }
   const conditions = ['submission.deleted_at IS NULL'];
   const values: unknown[] = [requested];
-  const idFilter = (column: string, value: number | undefined) => {
+  const idFilter = (column: string, value: unknown) => {
     if (value === undefined) return;
     if (positiveId(value) === null) throw new NewcomerInvalidError();
     conditions.push(`${column}=?`);
     values.push(value);
   };
-  idFilter('submission.status_id', filters.statusId);
-  idFilter('submission.assignee_person_id', filters.assigneePersonId);
-  idFilter('submission.service_type_id', filters.serviceTypeId);
-  if (filters.due === 'overdue') {
+  idFilter('submission.status_id', captured.statusId);
+  idFilter('submission.assignee_person_id', captured.assigneePersonId);
+  idFilter('submission.service_type_id', captured.serviceTypeId);
+  if (captured.due === 'overdue') {
     conditions.push('submission.next_follow_up_date IS NOT NULL AND submission.next_follow_up_date<?');
     values.push(today);
-  } else if (filters.due === 'scheduled') conditions.push('submission.next_follow_up_date IS NOT NULL');
-  else if (filters.due === 'none') conditions.push('submission.next_follow_up_date IS NULL');
-  else if (filters.due !== undefined && filters.due !== 'all') throw new NewcomerInvalidError();
-  if (filters.visitFrom !== undefined) {
-    if (!isValidDateStr(filters.visitFrom)) throw new NewcomerInvalidError();
-    conditions.push('submission.visit_date>=?'); values.push(filters.visitFrom);
+  } else if (captured.due === 'scheduled') conditions.push('submission.next_follow_up_date IS NOT NULL');
+  else if (captured.due === 'none') conditions.push('submission.next_follow_up_date IS NULL');
+  else if (captured.due !== undefined && captured.due !== 'all') throw new NewcomerInvalidError();
+  if (captured.visitFrom !== undefined) {
+    if (typeof captured.visitFrom !== 'string' || !isValidDateStr(captured.visitFrom)) throw new NewcomerInvalidError();
+    conditions.push('submission.visit_date>=?'); values.push(captured.visitFrom);
   }
-  if (filters.visitTo !== undefined) {
-    if (!isValidDateStr(filters.visitTo)) throw new NewcomerInvalidError();
-    conditions.push('submission.visit_date<=?'); values.push(filters.visitTo);
+  if (captured.visitTo !== undefined) {
+    if (typeof captured.visitTo !== 'string' || !isValidDateStr(captured.visitTo)) throw new NewcomerInvalidError();
+    conditions.push('submission.visit_date<=?'); values.push(captured.visitTo);
   }
-  if (filters.visitFrom && filters.visitTo && filters.visitFrom > filters.visitTo) throw new NewcomerInvalidError();
-  if (filters.source !== undefined) {
-    if (filters.source !== 'public' && filters.source !== 'staff') throw new NewcomerInvalidError();
-    conditions.push('submission.source=?'); values.push(filters.source);
+  if (typeof captured.visitFrom === 'string' && typeof captured.visitTo === 'string'
+    && captured.visitFrom > captured.visitTo) throw new NewcomerInvalidError();
+  if (captured.source !== undefined) {
+    if (captured.source !== 'public' && captured.source !== 'staff') throw new NewcomerInvalidError();
+    conditions.push('submission.source=?'); values.push(captured.source);
   }
-  const offset = (filters.page - 1) * filters.limit;
-  values.push(filters.limit + 1, offset);
+  const offset = (page - 1) * limit;
+  values.push(limit + 1, offset);
   try {
     const result = await db.prepare(`
       SELECT submission.id,submission.name,submission.email,submission.phone,submission.locale,
@@ -654,7 +683,7 @@ export async function listNewcomerQueue(
       ORDER BY submission.updated_at DESC,submission.id DESC
       LIMIT ? OFFSET ?
     `).bind(...values).all<unknown>();
-    const rows = resultRows(result, filters.limit + 1);
+    const rows = resultRows(result, limit + 1);
     const decodedRows = rows.map(queueRow);
     const submissionIds = new Set<string>();
     let previous: NewcomerQueueRow | null = null;
@@ -667,8 +696,8 @@ export async function listNewcomerQueue(
       submissionIds.add(row.id);
       previous = row;
     }
-    const hasNext = decodedRows.length > filters.limit;
-    return { rows: decodedRows.slice(0, filters.limit), page: filters.page, limit: filters.limit, hasNext };
+    const hasNext = decodedRows.length > limit;
+    return { rows: decodedRows.slice(0, limit), page, limit, hasNext };
   } catch (error) {
     if (error instanceof NewcomerInvalidError || error instanceof NewcomerPersistenceError) throw error;
     throw new NewcomerPersistenceError();
@@ -678,8 +707,28 @@ export async function listNewcomerQueue(
 export interface NewcomerDetail {
   submission: NewcomerQueueRow & { linkedPersonId: number | null; closedAt: string | null };
   answers: Array<{ fieldId: number; fieldLabel: string; value: string }>;
-  notes: Array<{ id: string; authorPersonId: number; body: string; createdAt: string }>;
-  activity: Array<{ id: string; actorPersonId: number | null; kind: NewcomerActivityKind; metadata: Record<string, string | number>; createdAt: string }>;
+  notes: NewcomerHistoryPage<NewcomerNote>;
+  activity: NewcomerHistoryPage<NewcomerActivity>;
+}
+
+export interface NewcomerHistoryCursor { createdAt: string; id: string }
+export interface NewcomerHistoryInput {
+  limit?: number;
+  noteCursor?: NewcomerHistoryCursor;
+  activityCursor?: NewcomerHistoryCursor;
+}
+export interface NewcomerHistoryPage<T> {
+  items: T[];
+  hasNext: boolean;
+  nextCursor: NewcomerHistoryCursor | null;
+}
+export interface NewcomerNote { id: string; authorPersonId: number; body: string; createdAt: string }
+export interface NewcomerActivity {
+  id: string;
+  actorPersonId: number | null;
+  kind: NewcomerActivityKind;
+  metadata: Record<string, string | number>;
+  createdAt: string;
 }
 
 export const NEWCOMER_ACTIVITY_KINDS = [
@@ -766,16 +815,48 @@ export function decodeNewcomerActivityMetadata(
   return output;
 }
 
+function historyCursor(value: unknown): NewcomerHistoryCursor | null {
+  const row = plainRow(value, ['createdAt', 'id']);
+  const createdAt = row ? timestamp(row.createdAt) : null;
+  const id = row && validUuid(row.id) ? row.id : null;
+  return createdAt && id ? { createdAt, id } : null;
+}
+
+function historyInput(value: unknown): Required<Pick<NewcomerHistoryInput, 'limit'>>
+  & Pick<NewcomerHistoryInput, 'noteCursor' | 'activityCursor'> {
+  if (value === undefined) return { limit: NEWCOMER_DB_LIMITS.historyPage };
+  const row = plainOptionalRow(value, ['limit', 'noteCursor', 'activityCursor'], []);
+  if (!row) throw new NewcomerInvalidError();
+  const limit = row.limit === undefined ? NEWCOMER_DB_LIMITS.historyPage : integer(row.limit);
+  if (limit === null || limit < 1 || limit > NEWCOMER_DB_LIMITS.maxHistoryPage) throw new NewcomerInvalidError();
+  const noteCursor = row.noteCursor === undefined ? undefined : historyCursor(row.noteCursor);
+  const activityCursor = row.activityCursor === undefined ? undefined : historyCursor(row.activityCursor);
+  if ((row.noteCursor !== undefined && !noteCursor) || (row.activityCursor !== undefined && !activityCursor)) {
+    throw new NewcomerInvalidError();
+  }
+  return { limit, ...(noteCursor ? { noteCursor } : {}), ...(activityCursor ? { activityCursor } : {}) };
+}
+
+function historyCondition(cursor: NewcomerHistoryCursor | undefined): { sql: string; values: unknown[] } {
+  return cursor
+    ? { sql: 'AND (created_at<? OR (created_at=? AND id<?))', values: [cursor.createdAt, cursor.createdAt, cursor.id] }
+    : { sql: '', values: [] };
+}
+
 export async function getNewcomerDetail(
   db: AppDb,
   backend: SnapshotBackend,
   user: SessionUser | null,
   submissionId: string,
   requested: 'en' | 'zh',
+  history?: NewcomerHistoryInput,
 ): Promise<NewcomerDetail | null> {
   assertPrivateAccess(user);
   assertLocale(requested);
   if (!validUuid(submissionId)) throw new NewcomerInvalidError();
+  const capturedHistory = historyInput(history);
+  const notesFilter = historyCondition(capturedHistory.noteCursor);
+  const activityFilter = historyCondition(capturedHistory.activityCursor);
   const statements = [
     db.prepare(`
       SELECT submission.id,submission.name,submission.email,submission.phone,submission.locale,
@@ -804,9 +885,13 @@ export async function getNewcomerDetail(
       WHERE answer.submission_id=?2 ORDER BY field.sort,field.id LIMIT 101
     `).bind(requested, submissionId),
     db.prepare(`SELECT id,author_person_id,body,created_at FROM newcomer_notes
-      WHERE submission_id=? ORDER BY created_at,id LIMIT 5001`).bind(submissionId),
+      WHERE submission_id=? ${notesFilter.sql}
+      ORDER BY created_at DESC,id DESC LIMIT ?`)
+      .bind(submissionId, ...notesFilter.values, capturedHistory.limit + 1),
     db.prepare(`SELECT id,actor_person_id,kind,metadata_json,created_at FROM newcomer_activity
-      WHERE submission_id=? ORDER BY created_at,id LIMIT 5001`).bind(submissionId),
+      WHERE submission_id=? ${activityFilter.sql}
+      ORDER BY created_at DESC,id DESC LIMIT ?`)
+      .bind(submissionId, ...activityFilter.values, capturedHistory.limit + 1),
   ];
   try {
     const results = batchResults(await snapshot(db, backend, statements), 4);
@@ -851,8 +936,7 @@ export async function getNewcomerDetail(
       previousAnswer = [fieldSort, fieldId];
       return { fieldId, fieldLabel, value: answerValue };
     });
-    const noteRows = resultRows(results[2], 5001);
-    if (noteRows.length > NEWCOMER_DB_LIMITS.notes) throw new NewcomerLimitError();
+    const noteRows = resultRows(results[2], capturedHistory.limit + 1);
     const noteIds = new Set<string>();
     let previousNote: [string, string] | null = null;
     const notes = noteRows.map((value) => {
@@ -862,15 +946,14 @@ export async function getNewcomerDetail(
       const body = row ? normalizedText(row.body, 10_000) : null;
       const createdAt = row ? timestamp(row.created_at) : null;
       if (!id || authorPersonId === null || !body || !createdAt || noteIds.has(id)
-        || (previousNote && (createdAt < previousNote[0] || (createdAt === previousNote[0] && id <= previousNote[1])))) {
+        || (previousNote && (createdAt > previousNote[0] || (createdAt === previousNote[0] && id >= previousNote[1])))) {
         throw new NewcomerPersistenceError();
       }
       noteIds.add(id);
       previousNote = [createdAt, id];
       return { id, authorPersonId, body, createdAt };
     });
-    const activityRows = resultRows(results[3], 5001);
-    if (activityRows.length > NEWCOMER_DB_LIMITS.activity) throw new NewcomerLimitError();
+    const activityRows = resultRows(results[3], capturedHistory.limit + 1);
     const activityIds = new Set<string>();
     let previousActivity: [string, string] | null = null;
     const activity = activityRows.map((value) => {
@@ -882,15 +965,32 @@ export async function getNewcomerDetail(
       const createdAt = row ? timestamp(row.created_at) : null;
       if (!id || (row?.actor_person_id !== null && actorPersonId === null) || !kind || !metadata || !createdAt
         || activityIds.has(id)
-        || (previousActivity && (createdAt < previousActivity[0]
-          || (createdAt === previousActivity[0] && id <= previousActivity[1])))) {
+        || (previousActivity && (createdAt > previousActivity[0]
+          || (createdAt === previousActivity[0] && id >= previousActivity[1])))) {
         throw new NewcomerPersistenceError();
       }
       activityIds.add(id);
       previousActivity = [createdAt, id];
       return { id, actorPersonId, kind, metadata, createdAt };
     });
-    return { submission: { ...base, linkedPersonId, closedAt }, answers, notes, activity };
+    const noteItems = notes.slice(0, capturedHistory.limit);
+    const activityItems = activity.slice(0, capturedHistory.limit);
+    const noteLast = noteItems.at(-1);
+    const activityLast = activityItems.at(-1);
+    return {
+      submission: { ...base, linkedPersonId, closedAt },
+      answers,
+      notes: {
+        items: noteItems,
+        hasNext: notes.length > capturedHistory.limit,
+        nextCursor: noteLast ? { createdAt: noteLast.createdAt, id: noteLast.id } : null,
+      },
+      activity: {
+        items: activityItems,
+        hasNext: activity.length > capturedHistory.limit,
+        nextCursor: activityLast ? { createdAt: activityLast.createdAt, id: activityLast.id } : null,
+      },
+    };
   } catch (error) {
     if (error instanceof NewcomerLimitError || error instanceof NewcomerPersistenceError) throw error;
     throw new NewcomerPersistenceError();

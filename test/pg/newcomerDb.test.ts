@@ -6,6 +6,7 @@ import {
   createNewcomerField,
   createNewcomerStatus,
   findNewcomerDuplicateHints,
+  getNewcomerDetail,
   listNewcomerAdminConfiguration,
   updateNewcomerField,
   updateNewcomerStatus,
@@ -101,6 +102,67 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
     expect(await findNewcomerDuplicateHints(db, superAdmin, {
       email: null, phone: '+13125550103', excludeSubmissionId: null,
     })).toEqual([]);
+  });
+
+  it('traverses 5001-row note/activity histories with descending keyset pages', async () => {
+    await sql.unsafe(`
+      INSERT INTO people (id,display_name,email) VALUES (9701,'History reader','history@example.test');
+      INSERT INTO newcomer_submissions (id,name,locale,visit_date,source,status_id,created_at,updated_at)
+      VALUES ('50000000-0000-4000-8000-000000000001','History','en','2026-08-12','staff',1,
+        '2026-08-12 08:00:00','2026-08-12 08:00:00');
+      INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+      SELECT lpad(to_hex(n),8,'0') || '-0000-4000-8000-' || lpad(to_hex(n),12,'0'),
+        '50000000-0000-4000-8000-000000000001',9701,'n','2026-08-11 09:00:00'
+      FROM generate_series(1,5001) AS series(n);
+      INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+      SELECT lpad(to_hex(n+65536),8,'0') || '-0000-4000-8000-' || lpad(to_hex(n),12,'0'),
+        '50000000-0000-4000-8000-000000000001',NULL,'submission_created','{}','2026-08-11 09:00:00'
+      FROM generate_series(1,5001) AS series(n);
+    `);
+    const noteIds = new Set<string>();
+    const activityIds = new Set<string>();
+    let noteCursor: { createdAt: string; id: string } | undefined;
+    let activityCursor: { createdAt: string; id: string } | undefined;
+    let insertedLater = false;
+    do {
+      const detail = await getNewcomerDetail(
+        db, 'supabase', superAdmin, '50000000-0000-4000-8000-000000000001', 'en', {
+          limit: 100, noteCursor, activityCursor,
+        },
+      );
+      expect(detail).not.toBeNull();
+      for (const note of detail!.notes.items) {
+        expect(noteIds.has(note.id)).toBe(false);
+        noteIds.add(note.id);
+      }
+      for (const item of detail!.activity.items) {
+        expect(activityIds.has(item.id)).toBe(false);
+        activityIds.add(item.id);
+      }
+      noteCursor = detail!.notes.nextCursor ?? undefined;
+      activityCursor = detail!.activity.nextCursor ?? undefined;
+      if (!insertedLater) {
+        insertedLater = true;
+        await sql.unsafe(`
+          INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+          VALUES ('ffffffff-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',9701,
+            'new after page one','2026-08-11 09:00:00');
+          INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+          VALUES ('ffffffff-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000001',NULL,
+            'submission_created','{}','2026-08-11 09:00:00');
+        `);
+      }
+      if (!detail!.notes.hasNext && !detail!.activity.hasNext) break;
+    } while (true);
+    expect(noteIds.size).toBe(5001);
+    expect(activityIds.size).toBe(5001);
+    expect(noteIds.has('ffffffff-0000-4000-8000-000000000001')).toBe(false);
+    expect(activityIds.has('ffffffff-0000-4000-8000-000000000002')).toBe(false);
+    const refreshed = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '50000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    expect(refreshed?.notes.items[0].id).toBe('ffffffff-0000-4000-8000-000000000001');
+    expect(refreshed?.activity.items[0].id).toBe('ffffffff-0000-4000-8000-000000000002');
   });
 
   it('creates and updates statuses/fields with the same transactional results', async () => {

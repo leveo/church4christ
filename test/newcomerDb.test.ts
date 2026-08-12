@@ -653,8 +653,14 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     expect(detail).toMatchObject({
       submission: { name: 'First', statusLabel: 'New' },
       answers: [{ fieldId: 8, fieldLabel: 'Story', value: 'Private answer' }],
-      notes: [{ authorPersonId: 9703, body: 'Private note' }],
-      activity: [{ kind: 'assigned', metadata: { to_assignee_person_id: 9703 } }],
+      notes: {
+        items: [{ authorPersonId: 9703, body: 'Private note' }], hasNext: false,
+        nextCursor: { createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001' },
+      },
+      activity: {
+        items: [{ kind: 'assigned', metadata: { to_assignee_person_id: 9703 } }], hasNext: false,
+        nextCursor: { createdAt: '2026-08-12 10:02:00', id: '30000000-0000-4000-8000-000000000001' },
+      },
     });
     expect(JSON.stringify(detail)).not.toContain('worker@example.test');
     const untranslated = await getNewcomerDetail(
@@ -712,6 +718,63 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     expect(String(error)).not.toContain('PRIVATE SENTINEL');
   });
 
+  it('captures exact queue filters once before SQL and rejects hostile descriptors', async () => {
+    let getterReads = 0;
+    let prepares = 0;
+    const accessorFilters = { limit: 25 } as Record<string, unknown>;
+    Object.defineProperty(accessorFilters, 'page', {
+      enumerable: true,
+      get() { getterReads += 1; return 1; },
+    });
+    const untouchedDb = {
+      prepare() { prepares += 1; throw new Error('SQL must not be prepared'); },
+      batch() { throw new Error('batch must not run'); },
+    } as AppDb;
+    await expect(listNewcomerQueue(
+      untouchedDb, user(), 'en', accessorFilters as never, '2026-08-12',
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect({ getterReads, prepares }).toEqual({ getterReads: 0, prepares: 0 });
+
+    let proxyGets = 0;
+    const proxyFilters = new Proxy({ page: 1, limit: 25 }, {
+      get() { proxyGets += 1; return 1; },
+      ownKeys() { throw new Error('PRIVATE FILTER VALUE'); },
+    });
+    const proxyError = await listNewcomerQueue(
+      untouchedDb, user(), 'en', proxyFilters, '2026-08-12',
+    ).catch((caught: unknown) => caught);
+    expect(proxyError).toBeInstanceOf(NewcomerInvalidError);
+    expect(String(proxyError)).not.toContain('PRIVATE FILTER VALUE');
+    expect({ proxyGets, prepares }).toEqual({ proxyGets: 0, prepares: 0 });
+
+    await expect(listNewcomerQueue(
+      untouchedDb, user(), 'en', { page: 1, limit: 25, unknown: 'PRIVATE' } as never, '2026-08-12',
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect(prepares).toBe(0);
+  });
+
+  it('binds and returns only detached queue filter scalars within the fixed bind cap', async () => {
+    let bound: unknown[] = [];
+    const filters = {
+      statusId: 1, assigneePersonId: 9703, due: 'overdue' as const,
+      visitFrom: '2026-08-01', visitTo: '2026-08-31', serviceTypeId: 9701,
+      source: 'public' as const, page: 2, limit: 10,
+    };
+    const result = dbResult([]);
+    const statement = {
+      bind(...values: unknown[]) { bound = values; return this; },
+      async all() { filters.page = 99; filters.limit = 99; return result; },
+      async first() { return null; }, async run() { return result; },
+    };
+    const page = await listNewcomerQueue(
+      { prepare: () => statement, batch: async () => [] } as unknown as AppDb,
+      user(), 'en', filters, '2026-08-12',
+    );
+    expect(page).toEqual({ rows: [], page: 2, limit: 10, hasNext: false });
+    expect(bound).toHaveLength(10);
+    expect(bound.slice(-2)).toEqual([11, 10]);
+  });
+
   it.each([
     ['duplicate identity', [
       { kind_order: 1, kind: 'person_live', record_id: '9701', status_id: null },
@@ -763,14 +826,14 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       .rejects.toBeInstanceOf(NewcomerPersistenceError);
 
     await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ notes: [
-      { id: '20000000-0000-4000-8000-000000000002', author_person_id: 9701, body: 'Later', created_at: '2026-08-12 11:00:00' },
       { id: '20000000-0000-4000-8000-000000000001', author_person_id: 9701, body: 'Earlier', created_at: '2026-08-12 10:00:00' },
+      { id: '20000000-0000-4000-8000-000000000002', author_person_id: 9701, body: 'Later', created_at: '2026-08-12 11:00:00' },
     ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
       .rejects.toBeInstanceOf(NewcomerPersistenceError);
 
     await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ activity: [
-      { id: '30000000-0000-4000-8000-000000000002', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 11:00:00' },
       { id: '30000000-0000-4000-8000-000000000001', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 10:00:00' },
+      { id: '30000000-0000-4000-8000-000000000002', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 11:00:00' },
     ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
       .rejects.toBeInstanceOf(NewcomerPersistenceError);
   });
@@ -803,5 +866,230 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     await expect(getNewcomerDetail(
       env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en',
     )).rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('rejects hostile history input before SQL without invoking getters or proxies', async () => {
+    let getterReads = 0;
+    let prepares = 0;
+    const history = {} as Record<string, unknown>;
+    Object.defineProperty(history, 'limit', {
+      enumerable: true,
+      get() { getterReads += 1; return 25; },
+    });
+    const untouchedDb = {
+      prepare() { prepares += 1; throw new Error('SQL must not be prepared'); },
+      batch() { throw new Error('batch must not run'); },
+    } as AppDb;
+    await expect(getNewcomerDetail(
+      untouchedDb, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', history as never,
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect({ getterReads, prepares }).toEqual({ getterReads: 0, prepares: 0 });
+
+    let proxyGets = 0;
+    const proxyHistory = new Proxy({ limit: 25 }, {
+      get() { proxyGets += 1; return 25; },
+      ownKeys() { throw new Error('PRIVATE HISTORY VALUE'); },
+    });
+    const proxyError = await getNewcomerDetail(
+      untouchedDb, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', proxyHistory,
+    ).catch((caught: unknown) => caught);
+    expect(proxyError).toBeInstanceOf(NewcomerInvalidError);
+    expect(String(proxyError)).not.toContain('PRIVATE HISTORY VALUE');
+    expect({ proxyGets, prepares }).toEqual({ proxyGets: 0, prepares: 0 });
+
+    let cursorGetterReads = 0;
+    const cursor = { id: '20000000-0000-4000-8000-000000000001' } as Record<string, unknown>;
+    Object.defineProperty(cursor, 'createdAt', {
+      enumerable: true,
+      get() { cursorGetterReads += 1; return '2026-08-12 10:00:00'; },
+    });
+    await expect(getNewcomerDetail(
+      untouchedDb, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en',
+      { limit: 25, noteCursor: cursor as never },
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect({ cursorGetterReads, prepares }).toEqual({ cursorGetterReads: 0, prepares: 0 });
+
+    await expect(getNewcomerDetail(
+      untouchedDb, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en',
+      { limit: 101 },
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect(prepares).toBe(0);
+  });
+
+  it('paginates note and activity history by strict descending tuple without duplicates', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at) VALUES
+        ('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',9703,
+          'Second note','2026-08-12 10:01:00')`),
+      env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+        ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',9703,
+          'submission_created','{}','2026-08-12 10:02:00')`),
+    ]);
+    const first = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    expect(first?.notes).toEqual({
+      items: [expect.objectContaining({ id: '20000000-0000-4000-8000-000000000002' })],
+      hasNext: true,
+      nextCursor: { createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000002' },
+    });
+    expect(first?.activity).toEqual({
+      items: [expect.objectContaining({ id: '30000000-0000-4000-8000-000000000002' })],
+      hasNext: true,
+      nextCursor: { createdAt: '2026-08-12 10:02:00', id: '30000000-0000-4000-8000-000000000002' },
+    });
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at) VALUES
+        ('20000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001',9703,
+          'New after page one','2026-08-12 10:01:00')`),
+      env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+        ('30000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001',9703,
+          'submission_created','{}','2026-08-12 10:02:00')`),
+    ]);
+    const second = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: first?.notes.nextCursor ?? undefined,
+        activityCursor: first?.activity.nextCursor ?? undefined,
+      },
+    );
+    expect(second?.notes.items.map((item) => item.id)).toEqual(['20000000-0000-4000-8000-000000000001']);
+    expect(second?.activity.items.map((item) => item.id)).toEqual(['30000000-0000-4000-8000-000000000001']);
+    const refreshed = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    expect(refreshed?.notes.items[0].id).toBe('20000000-0000-4000-8000-000000000003');
+    expect(refreshed?.activity.items[0].id).toBe('30000000-0000-4000-8000-000000000003');
+    const stale = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: { createdAt: '2026-08-12 10:01:00', id: '20000001-0000-4000-8000-000000000000' },
+        activityCursor: { createdAt: '2026-08-12 10:02:00', id: '30000001-0000-4000-8000-000000000000' },
+      },
+    );
+    expect(stale?.notes.items[0].id).toBe('20000000-0000-4000-8000-000000000003');
+    expect(stale?.activity.items[0].id).toBe('30000000-0000-4000-8000-000000000003');
+  });
+
+  it('keeps a terminal collection cursor while the other history collection continues', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+        ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',NULL,
+          'submission_created','{}','2026-08-12 10:03:00'),
+        ('30000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001',NULL,
+          'submission_created','{}','2026-08-12 10:04:00')`),
+    ]);
+    const first = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    expect(first?.notes.hasNext).toBe(false);
+    expect(first?.notes.nextCursor).toEqual({
+      createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001',
+    });
+    expect(first?.activity.hasNext).toBe(true);
+    const second = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: first!.notes.nextCursor!,
+        activityCursor: first!.activity.nextCursor!,
+      },
+    );
+    expect(second?.notes.items).toEqual([]);
+    expect(second?.activity.items.map((item) => item.id)).toEqual(['30000000-0000-4000-8000-000000000002']);
+  });
+
+  it('uses bounded 101-row history queries and safely applies a stale tuple cursor', async () => {
+    const notes = Array.from({ length: 101 }, (_, index) => {
+      const value = 101 - index;
+      const hex = value.toString(16).padStart(8, '0');
+      return {
+        id: `${hex}-0000-4000-8000-${value.toString(16).padStart(12, '0')}`,
+        author_person_id: 9701,
+        body: 'x'.repeat(10_000),
+        created_at: '2026-08-11 09:00:00',
+      };
+    });
+    const statements: Array<{ sql: string; binds: unknown[] }> = [];
+    const results = detailSnapshot({ notes });
+    let prepared = 0;
+    const db = {
+      prepare(sql: string) {
+        const recorded = { sql, binds: [] as unknown[] };
+        statements.push(recorded);
+        prepared += 1;
+        return {
+          bind(...values: unknown[]) { recorded.binds = values; return this; },
+          async first() { return null; }, async all() { return results[0]; }, async run() { return results[0]; },
+        };
+      },
+      async batch() { return results; },
+    } as unknown as AppDb;
+    const detail = await getNewcomerDetail(
+      db, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 100,
+        noteCursor: { createdAt: '2026-08-12 12:00:00', id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+      },
+    );
+    expect(prepared).toBe(4);
+    expect(statements[2].sql).toMatch(/ORDER BY created_at DESC,id DESC LIMIT \?/);
+    expect(statements[2].binds).toEqual([
+      '10000000-0000-4000-8000-000000000001',
+      '2026-08-12 12:00:00', '2026-08-12 12:00:00', 'ffffffff-ffff-4fff-8fff-ffffffffffff', 101,
+    ]);
+    expect(statements[3].binds.at(-1)).toBe(101);
+    expect(new TextEncoder().encode(JSON.stringify(notes)).byteLength).toBeLessThan(1_048_576);
+    expect(detail?.notes.items).toHaveLength(100);
+    expect(detail?.notes.hasNext).toBe(true);
+  });
+
+  it('fails closed on accessor-backed history rows without invoking their getter', async () => {
+    let getterReads = 0;
+    const note = {
+      id: '20000000-0000-4000-8000-000000000001', author_person_id: 9701,
+      created_at: '2026-08-12 10:00:00',
+    } as Record<string, unknown>;
+    Object.defineProperty(note, 'body', {
+      enumerable: true,
+      get() { getterReads += 1; return 'PRIVATE HISTORY BODY'; },
+    });
+    const error = await getNewcomerDetail(
+      fakeReadDb(detailSnapshot({ notes: [note] })), 'd1', user(),
+      '10000000-0000-4000-8000-000000000001', 'en',
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(error)).not.toContain('PRIVATE HISTORY BODY');
+    expect(getterReads).toBe(0);
+  });
+
+  it('traverses 5001 small note/activity rows and bounds every history query to 101 rows', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<5001)
+        INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+        SELECT printf('%08x-0000-4000-8000-%012x',n,n),
+          '10000000-0000-4000-8000-000000000001',9703,'n','2026-08-11 09:00:00' FROM seq`),
+      env.DB.prepare(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<5001)
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT printf('%08x-0000-4000-8000-%012x',n+65536,n),
+          '10000000-0000-4000-8000-000000000001',NULL,'submission_created','{}','2026-08-11 09:00:00' FROM seq`),
+    ]);
+    const noteIds = new Set<string>();
+    const activityIds = new Set<string>();
+    let noteCursor: { createdAt: string; id: string } | undefined;
+    let activityCursor: { createdAt: string; id: string } | undefined;
+    do {
+      const detail = await getNewcomerDetail(
+        env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+          limit: 100, noteCursor, activityCursor,
+        },
+      );
+      expect(detail).not.toBeNull();
+      for (const note of detail!.notes.items) expect(noteIds.has(note.id)).toBe(false), noteIds.add(note.id);
+      for (const item of detail!.activity.items) expect(activityIds.has(item.id)).toBe(false), activityIds.add(item.id);
+      noteCursor = detail!.notes.nextCursor ?? undefined;
+      activityCursor = detail!.activity.nextCursor ?? undefined;
+      if (!detail!.notes.hasNext && !detail!.activity.hasNext) break;
+    } while (true);
+    expect(noteIds.size).toBe(5002);
+    expect(activityIds.size).toBe(5002);
   });
 });
