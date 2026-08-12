@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { todayInTz } from '../src/lib/dates';
+import { SERVICE_ATTENDANCE_FORM_MAX_BYTES } from '../src/lib/serviceAttendanceHttp';
 import type { SessionUser } from '../src/lib/types';
 import { POST as countPost, ALL as countAll } from '../src/pages/admin/attendance/count';
 import { POST as linksPost, ALL as linksAll } from '../src/pages/admin/attendance/checkin-links';
@@ -25,11 +26,12 @@ function user(over: Partial<SessionUser> = {}): SessionUser {
 }
 
 function poisonedContext(path: string, modules: string[], actor: SessionUser | null = user()): never {
-  const request = new Request(`https://church.example${path}`, { method: 'POST' });
-  Object.defineProperty(request, 'formData', {
-    value: () => {
-      throw new Error('request body was read');
-    },
+  const request = new Request(`https://church.example${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new ReadableStream<Uint8Array>({
+      pull() { throw new Error('request body was read'); },
+    }, { highWaterMark: 0 }),
   });
   const db = new Proxy({}, {
     get() {
@@ -44,12 +46,49 @@ function poisonedContext(path: string, modules: string[], actor: SessionUser | n
 }
 
 function context(path: string, method: 'GET' | 'POST', form?: FormData): never {
-  const request = new Request(`https://church.example${path}`, { method, body: form });
+  const body = form === undefined ? undefined : new URLSearchParams(
+    [...form.entries()].map(([name, value]) => [name, String(value)]),
+  );
+  const request = new Request(`https://church.example${path}`, { method, body });
   return {
     request,
     url: new URL(request.url),
     locals: { user: user(), modules: new Set(['attendance', 'children']), db: env.DB },
   } as never;
+}
+
+function requestContext(
+  request: Request,
+  modules: string[] = ['attendance', 'children'],
+  db: unknown = env.DB,
+): never {
+  return {
+    request,
+    url: new URL(request.url),
+    locals: { user: user(), modules: new Set(modules), db },
+  } as never;
+}
+
+function urlencodedRequest(
+  path: string,
+  body: BodyInit | null,
+  headers: Record<string, string> = {},
+): Request {
+  return new Request(`https://church.example${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+    body,
+  });
+}
+
+async function expectSafeBodyFailure(
+  response: Response,
+  status: 413 | 415,
+): Promise<void> {
+  expect(response.status).toBe(status);
+  expect(await response.text()).toBe('attendance_invalid');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
 }
 
 beforeEach(async () => {
@@ -138,20 +177,111 @@ describe('service attendance route behavior', () => {
     expect(duplicateResponse.headers.get('location')).toBe('/admin/attendance?error=attendance_invalid');
   });
 
-  it('rejects a non-form request with one fixed PII-free code', async () => {
-    const request = new Request('https://church.example/admin/attendance/count', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: 'private@example.com',
-    });
-    const response = await countPost({
-      request,
-      url: new URL(request.url),
-      locals: { user: user(), modules: new Set(['attendance']), db: env.DB },
-    } as never);
+  it('rejects non-urlencoded and multipart bodies before database access', async () => {
+    const db = new Proxy({}, { get() { throw new Error('database must not be queried'); } });
+    for (const handler of [countPost, linksPost]) {
+      for (const contentType of ['text/plain', 'multipart/form-data; boundary=private']) {
+        const request = new Request('https://church.example/admin/attendance/action', {
+          method: 'POST',
+          headers: { 'content-type': contentType },
+          body: 'private@example.com',
+        });
+        await expectSafeBodyFailure(await handler(requestContext(request, undefined, db)), 415);
+      }
+    }
+  });
+
+  it('rejects declared and streamed oversize bodies without database access', async () => {
+    const db = new Proxy({}, { get() { throw new Error('database must not be queried'); } });
+    for (const handler of [countPost, linksPost]) {
+      let pulled = false;
+      const declared = urlencodedRequest('/admin/attendance/action', new ReadableStream<Uint8Array>({
+        pull() { pulled = true; throw new Error('declared oversize body must not be read'); },
+      }, { highWaterMark: 0 }), { 'content-length': String(SERVICE_ATTENDANCE_FORM_MAX_BYTES + 1) });
+      await expectSafeBodyFailure(await handler(requestContext(declared, undefined, db)), 413);
+      expect(pulled).toBe(false);
+      expect(declared.body?.locked).toBe(false);
+
+      for (const contentLength of [undefined, '1']) {
+        let cancelled = false;
+        const headers: Record<string, string> = contentLength === undefined
+          ? {}
+          : { 'content-length': contentLength };
+        const actual = urlencodedRequest('/admin/attendance/action', new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(SERVICE_ATTENDANCE_FORM_MAX_BYTES - 3).fill(0x61));
+            controller.enqueue(new Uint8Array(4).fill(0x62));
+          },
+          cancel() { cancelled = true; },
+        }), headers);
+        await expectSafeBodyFailure(await handler(requestContext(actual, undefined, db)), 413);
+        expect(cancelled).toBe(true);
+        expect(actual.body?.locked).toBe(false);
+      }
+    }
+  });
+
+  it('accepts an exact-limit split stream and preserves URL-encoded duplicates', async () => {
+    const today = todayInTz();
+    const prefix = `service_type_id=9701&attendance_date=${today}&adult_count=42&padding=`;
+    const body = prefix + 'x'.repeat(SERVICE_ATTENDANCE_FORM_MAX_BYTES - new TextEncoder().encode(prefix).byteLength);
+    expect(new TextEncoder().encode(body)).toHaveLength(SERVICE_ATTENDANCE_FORM_MAX_BYTES);
+    const bytes = new TextEncoder().encode(body);
+    const request = urlencodedRequest('/admin/attendance/count', new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 11));
+        controller.enqueue(bytes.slice(11, 8192));
+        controller.enqueue(bytes.slice(8192));
+        controller.close();
+      },
+    }));
+    const response = await countPost(requestContext(request));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/admin/attendance?saved=count');
+    expect(request.body?.locked).toBe(false);
+
+    const duplicate = urlencodedRequest(
+      '/admin/attendance/count',
+      `service_type_id=9701&service_type_id=9999&attendance_date=${today}&adult_count=4`,
+    );
+    const duplicateResponse = await countPost(requestContext(duplicate));
+    expect(duplicateResponse.status).toBe(303);
+    expect(duplicateResponse.headers.get('location')).toBe('/admin/attendance?error=attendance_invalid');
+  });
+
+  it('maps malformed UTF-8 and body-read failures to one safe PRG without database access', async () => {
+    const db = new Proxy({}, { get() { throw new Error('database must not be queried'); } });
+    const requests = [
+      urlencodedRequest('/admin/attendance/count', new Uint8Array([0x61, 0x3d, 0xc3, 0x28])),
+      urlencodedRequest('/admin/attendance/count', new ReadableStream<Uint8Array>({
+        pull(controller) { controller.error(new Error('private@example.com body detail')); },
+      }, { highWaterMark: 0 })),
+    ];
+    for (const request of requests) {
+      const response = await countPost(requestContext(request, undefined, db));
+      expect(response.status).toBe(303);
+      expect(response.headers.get('location')).toBe('/admin/attendance?error=attendance_invalid');
+      expect(response.headers.get('location')).not.toContain('private');
+      expect(request.body?.locked).toBe(false);
+    }
+  });
+
+  it('keeps oversize status stable when cancellation rejects and releases the reader', async () => {
+    const db = new Proxy({}, { get() { throw new Error('database must not be queried'); } });
+    const request = urlencodedRequest('/admin/attendance/checkin-links', new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(SERVICE_ATTENDANCE_FORM_MAX_BYTES + 1)); },
+      cancel() { throw new Error('private cancellation detail'); },
+    }));
+    await expectSafeBodyFailure(await linksPost(requestContext(request, undefined, db)), 413);
+    expect(request.body?.locked).toBe(false);
+  });
+
+  it('does not query the database when a bounded envelope has invalid fields', async () => {
+    const db = new Proxy({}, { get() { throw new Error('database must not be queried'); } });
+    const request = urlencodedRequest('/admin/attendance/count', 'service_type_id=bad&attendance_date=bad&adult_count=bad');
+    const response = await countPost(requestContext(request, undefined, db));
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe('/admin/attendance?error=attendance_invalid');
-    expect(response.headers.get('location')).not.toContain('private');
   });
 
   it('uses the server date and exact repeated event ids, ignoring client date and actor', async () => {

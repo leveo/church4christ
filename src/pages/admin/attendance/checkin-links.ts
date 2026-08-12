@@ -8,6 +8,7 @@ import {
   replaceServiceCheckinLinksToday,
 } from '../../../lib/serviceAttendanceDb';
 import { parseServiceCheckinLinkForm } from '../../../lib/serviceAttendanceForms';
+import { readServiceAttendanceForm } from '../../../lib/serviceAttendanceHttp';
 
 export const prerender = false;
 
@@ -20,18 +21,26 @@ function redirect(code: 'saved' | 'error', value: string): Response {
   });
 }
 
+function bodyError(status: 413 | 415): Response {
+  return new Response('attendance_invalid', {
+    status,
+    headers: { ...SAFE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' },
+  });
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
   if (!locals.modules.has('attendance')) return new Response(null, { status: 404, headers: SAFE_HEADERS });
   const user = locals.user;
   if (!hasAreaAccess(user, 'attendance')) return new Response(null, { status: 403, headers: SAFE_HEADERS });
   if (!locals.modules.has('children')) return new Response(null, { status: 404, headers: SAFE_HEADERS });
 
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
+  const body = await readServiceAttendanceForm(request);
+  if (!body.ok) {
+    if (body.reason === 'unsupported_media_type') return bodyError(415);
+    if (body.reason === 'too_large') return bodyError(413);
     return redirect('error', 'attendance_invalid');
   }
+  const form = body.form;
   if (form.getAll('service_type_id').length !== 1) return redirect('error', 'attendance_invalid');
   const parsed = parseServiceCheckinLinkForm(form);
   if (!parsed.ok) return redirect('error', 'attendance_invalid');

@@ -8,6 +8,8 @@ const attendanceCopy = enCopy.slice(
   enCopy.indexOf("'admin.attendance.title'"),
   enCopy.indexOf("'admin.role.member'"),
 );
+const countRoute = readFileSync('src/pages/admin/attendance/count.ts', 'utf8');
+const linkRoute = readFileSync('src/pages/admin/attendance/checkin-links.ts', 'utf8');
 
 describe('service attendance page source boundaries', () => {
   it('guards module and area before the Admin layout and every database read', () => {
@@ -73,5 +75,20 @@ describe('service attendance page source boundaries', () => {
     }
     expect(csv).not.toMatch(/recorded_by|updated_by|person_email|member_id/i);
     expect(attendanceCopy).not.toMatch(/adult.{0,32}(?:attendee|identity|person|member|roster|name|email)/i);
+  });
+
+  it('gates both mutations before the shared bounded reader and never calls formData directly', () => {
+    for (const source of [countRoute, linkRoute]) {
+      const moduleGuard = source.indexOf("if (!locals.modules.has('attendance'))");
+      const areaGuard = source.indexOf("if (!hasAreaAccess(user, 'attendance'))");
+      const reader = source.indexOf('await readServiceAttendanceForm(request)');
+      expect(moduleGuard).toBeGreaterThan(-1);
+      expect(areaGuard).toBeGreaterThan(moduleGuard);
+      expect(reader).toBeGreaterThan(areaGuard);
+      expect(source).not.toContain('.formData()');
+    }
+    const childrenGuard = linkRoute.indexOf("if (!locals.modules.has('children'))");
+    expect(childrenGuard).toBeGreaterThan(linkRoute.indexOf("if (!hasAreaAccess(user, 'attendance'))"));
+    expect(linkRoute.indexOf('await readServiceAttendanceForm(request)')).toBeGreaterThan(childrenGuard);
   });
 });
