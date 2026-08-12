@@ -30,6 +30,7 @@ export type D1Trigger = {
   event: 'insert' | 'update' | 'delete';
   when: string | null;
   bodyGuard: string | null;
+  semanticGuard: string;
   abortMessage: string;
 };
 
@@ -195,6 +196,45 @@ function normalizeTriggerExpression(value: string): string {
   ).replace(/\s+/g, ' ').trim();
 }
 
+function canonicalTriggerExpression(value: string): string {
+  const tokens: string[] = [];
+  for (let index = 0; index < value.length;) {
+    const char = value[index];
+    if (/\s/.test(char)) { index += 1; continue; }
+    if (char === "'") {
+      const start = index;
+      for (index += 1; index < value.length;) {
+        if (value[index] === "'" && value[index + 1] === "'") index += 2;
+        else if (value[index] === "'") { index += 1; break; }
+        else index += 1;
+      }
+      if (value[index - 1] !== "'") throw new Error('unterminated trigger guard string literal');
+      tokens.push(value.slice(start, index));
+      continue;
+    }
+    const word = value.slice(index).match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0];
+    if (word) { tokens.push(word.toLowerCase()); index += word.length; continue; }
+    const number = value.slice(index).match(/^\d+(?:\.\d+)?/)?.[0];
+    if (number) { tokens.push(number); index += number.length; continue; }
+    const operator = ['<>', '>=', '<=', '::'].find((candidate) => value.startsWith(candidate, index));
+    if (operator) { tokens.push(operator); index += operator.length; continue; }
+    if ('().,;=<>+-'.includes(char)) { tokens.push(char); index += 1; continue; }
+    throw new Error(`unsupported trigger guard token at: ${value.slice(index)}`);
+  }
+  const canonical: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens.slice(index, index + 4).join(' ') === 'is not distinct from') {
+      canonical.push('is');
+      index += 3;
+    } else if (tokens[index] === '::' && tokens[index + 1] === 'text') {
+      index += 1;
+    } else {
+      canonical.push(tokens[index]);
+    }
+  }
+  return canonical.join(' ');
+}
+
 function triggerAbort(rawBody: string): Pick<D1Trigger, 'bodyGuard' | 'abortMessage'> {
   const body = rawBody.trim();
   const unconditional = body.match(
@@ -220,13 +260,23 @@ function parseTrigger(statement: string): D1Trigger {
     /^CREATE\s+TRIGGER\s+(\S+)\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+(\S+)(?:\s+FOR\s+EACH\s+ROW)?(?:\s+WHEN\s+([\s\S]+?))?\s+BEGIN\s+([\s\S]*)\s+END\s*;$/i,
   );
   if (!parsed) throw new Error(`unsupported trigger definition: ${statement}`);
+  const when = parsed[5] ? normalizeTriggerExpression(parsed[5]) : null;
+  const effect = triggerAbort(parsed[6]);
+  const conditions = [when, effect.bodyGuard]
+    .filter((condition): condition is string => condition !== null)
+    .map(canonicalTriggerExpression);
   return {
     name: identifier(parsed[1]),
     table: identifier(parsed[4]),
     timing: parsed[2].toLowerCase() as D1Trigger['timing'],
     event: parsed[3].toLowerCase() as D1Trigger['event'],
-    when: parsed[5] ? normalizeTriggerExpression(parsed[5]) : null,
-    ...triggerAbort(parsed[6]),
+    when,
+    ...effect,
+    semanticGuard: conditions.length === 0
+      ? 'true'
+      : conditions.length === 1
+        ? conditions[0]
+        : conditions.map((condition) => `( ${condition} )`).join(' and '),
   };
 }
 

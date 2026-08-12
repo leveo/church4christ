@@ -80,17 +80,93 @@ function constraintSignature(table: string, constraint: D1Constraint): string {
   return `${table}:${constraint.kind}(${constraint.columns.join(',')})${target}`;
 }
 
+function sqlTokens(value: string): string[] {
+  const tokens: string[] = [];
+  for (let index = 0; index < value.length;) {
+    const char = value[index];
+    if (/\s/.test(char)) { index += 1; continue; }
+    if (char === '-' && value[index + 1] === '-') {
+      while (index < value.length && value[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === "'") {
+      const start = index;
+      for (index += 1; index < value.length;) {
+        if (value[index] === "'" && value[index + 1] === "'") index += 2;
+        else if (value[index] === "'") { index += 1; break; }
+        else index += 1;
+      }
+      if (value[index - 1] !== "'") throw new Error('unterminated trigger string literal');
+      tokens.push(value.slice(start, index));
+      continue;
+    }
+    const word = value.slice(index).match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0];
+    if (word) { tokens.push(word.toLowerCase()); index += word.length; continue; }
+    const number = value.slice(index).match(/^\d+(?:\.\d+)?/)?.[0];
+    if (number) { tokens.push(number); index += number.length; continue; }
+    const operator = ['<>', '>=', '<=', '::'].find((candidate) => value.startsWith(candidate, index));
+    if (operator) { tokens.push(operator); index += operator.length; continue; }
+    if ('().,;=<>+-'.includes(char)) { tokens.push(char); index += 1; continue; }
+    throw new Error(`unsupported trigger token at: ${value.slice(index)}`);
+  }
+  const canonical: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens.slice(index, index + 4).join(' ') === 'is not distinct from') {
+      canonical.push('is');
+      index += 3;
+    } else if (tokens[index] === '::' && tokens[index + 1] === 'text') {
+      index += 1;
+    } else {
+      canonical.push(tokens[index]);
+    }
+  }
+  return canonical;
+}
+
+function pgTriggerEffect(source: string): { guard: string; abortMessage: string } {
+  const tokens = sqlTokens(source);
+  const conditions: string[][] = [];
+  const effects: Array<{ guard: string; abortMessage: string }> = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] === 'end' && tokens[index + 1] === 'if') {
+      if (!conditions.pop()) throw new Error('unbalanced END IF in Postgres trigger');
+      index += 1;
+      continue;
+    }
+    if (tokens[index] === 'if') {
+      const condition: string[] = [];
+      for (index += 1; index < tokens.length && tokens[index] !== 'then'; index += 1) condition.push(tokens[index]);
+      if (tokens[index] !== 'then' || condition.length === 0) throw new Error('unsupported Postgres trigger IF');
+      conditions.push(condition);
+      continue;
+    }
+    if (tokens[index] !== 'raise' || tokens[index + 1] !== 'exception') continue;
+    const message = tokens.slice(index + 2).find((token) => token.startsWith("'"));
+    if (!message) throw new Error('Postgres trigger RAISE has no literal message');
+    effects.push({
+      guard: conditions.length === 0
+        ? 'true'
+        : conditions.length === 1
+          ? conditions[0].join(' ')
+          : conditions.map((condition) => `( ${condition.join(' ')} )`).join(' and '),
+      abortMessage: message.slice(1, -1).replaceAll("''", "'"),
+    });
+  }
+  if (conditions.length !== 0) throw new Error('unterminated IF in Postgres trigger');
+  if (effects.length !== 1) throw new Error(`Postgres trigger must have exactly one abort effect, received ${effects.length}`);
+  return effects[0];
+}
+
 function pgTriggerSignature(row: Record<string, unknown>): string {
   const definition = String(row.definition).replace(/\s+/g, ' ').trim();
   const parsed = definition.match(
     /^CREATE TRIGGER (\S+) (BEFORE|AFTER) (INSERT|UPDATE|DELETE) ON public\.(\S+) FOR EACH ROW(?: WHEN \([\s\S]+\))? EXECUTE FUNCTION (\S+)\(\)$/i,
   );
   if (!parsed) throw new Error(`unsupported Postgres trigger definition: ${definition}`);
-  const messages = [...String(row.function_source).matchAll(/\bRAISE\s+EXCEPTION\s+'((?:[^']|'')*)'/gi)];
-  if (messages.length !== 1) throw new Error(`Postgres trigger ${parsed[1]} must have exactly one abort message`);
+  const effect = pgTriggerEffect(String(row.function_source));
   return [
     parsed[1].toLowerCase(), parsed[4].toLowerCase(), parsed[2].toLowerCase(), parsed[3].toLowerCase(),
-    messages[0][1].replaceAll("''", "'"),
+    effect.guard, effect.abortMessage,
   ].join(':');
 }
 
@@ -296,7 +372,7 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
     `);
     const actual = new Set(rows.map((row) => pgTriggerSignature(row)));
     const expected = new Set([...d1.triggers.values()].map((trigger) => [
-      trigger.name, trigger.table, trigger.timing, trigger.event, trigger.abortMessage,
+      trigger.name, trigger.table, trigger.timing, trigger.event, trigger.semanticGuard, trigger.abortMessage,
     ].join(':')));
     expect({
       missing: [...expected].filter((signature) => !actual.has(signature)).sort(),

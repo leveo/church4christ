@@ -150,6 +150,7 @@ describe('final D1 schema parser', () => {
         event: 'insert',
         when: 'new.fixed <> 0',
         bodyGuard: null,
+        semanticGuard: 'new . fixed <> 0',
         abortMessage: 'protected_rows_fixed',
       },
       {
@@ -159,6 +160,7 @@ describe('final D1 schema parser', () => {
         event: 'delete',
         when: null,
         bodyGuard: 'old.fixed = 1',
+        semanticGuard: 'old . fixed = 1',
         abortMessage: 'protected_rows_immutable',
       },
     ]);
@@ -178,6 +180,8 @@ describe('final D1 schema parser', () => {
       when: 'new.ends_on is null or new.ends_on > new.starts_on',
       abortMessage: 'service_attendance_link_conflict',
     });
+    expect(schema.triggers.get('service_checkin_links_no_overlap_insert')?.semanticGuard)
+      .toMatch(/^\( new \. ends_on is null or new \. ends_on > new \. starts_on \) and \( exists \(/);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')?.bodyGuard)
       .toMatch(/^exists \( select 1 from service_type_checkin_events existing where /);
   });
