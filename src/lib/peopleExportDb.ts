@@ -78,6 +78,10 @@ function canonicalStatsCtesSql(backend: DbBackend): string {
     export_memberships AS (
       SELECT hm.id, hm.display_name
       FROM household_members hm
+      LEFT JOIN households h ON h.id = hm.household_id
+      LEFT JOIN people p ON p.id = hm.person_id
+      WHERE (h.id IS NULL OR h.deleted_at IS NULL)
+        AND (hm.person_id IS NULL OR p.id IS NULL OR p.deleted_at IS NULL)
       ORDER BY hm.id
       LIMIT 5001
     ),
@@ -409,7 +413,7 @@ export async function loadCanonicalPeopleExport(
 
   const membershipByPerson = new Map<number, SafeMembership>();
   const dependents: CanonicalPeopleExportDependent[] = [];
-  const liveHouseholdsWithMembership = new Set<number>();
+  const liveHouseholdsWithExportableMembership = new Set<number>();
   for (const row of membershipsResult.results) {
     const projectionIssue = !projectionsValid(row, CANONICAL_MEMBERSHIP_FIELDS);
     if (projectionIssue) integrityIssues += 1;
@@ -423,7 +427,6 @@ export async function loadCanonicalPeopleExport(
       continue;
     }
     if (!membership.householdLive) {
-      integrityIssues += 1;
       continue;
     }
     const household = householdsById.get(membership.householdId);
@@ -431,8 +434,6 @@ export async function loadCanonicalPeopleExport(
       integrityIssues += 1;
       continue;
     }
-    liveHouseholdsWithMembership.add(household.id);
-
     if (membership.personId === null) {
       dependents.push({
         stableKey: `dependent-${membership.id}`,
@@ -445,9 +446,15 @@ export async function loadCanonicalPeopleExport(
           role: membership.role,
         },
       });
+      liveHouseholdsWithExportableMembership.add(household.id);
       continue;
     }
-    if (!membership.personExists || !membership.personLive || !peopleById.has(membership.personId)) {
+    if (!membership.personExists) {
+      integrityIssues += 1;
+      continue;
+    }
+    if (!membership.personLive) continue;
+    if (!peopleById.has(membership.personId)) {
       integrityIssues += 1;
       continue;
     }
@@ -456,10 +463,11 @@ export async function loadCanonicalPeopleExport(
       continue;
     }
     membershipByPerson.set(membership.personId, membership);
+    liveHouseholdsWithExportableMembership.add(household.id);
   }
 
   for (const householdId of householdsById.keys()) {
-    if (!liveHouseholdsWithMembership.has(householdId)) integrityIssues += 1;
+    if (!liveHouseholdsWithExportableMembership.has(householdId)) integrityIssues += 1;
   }
 
   const people: CanonicalPeopleExportPerson[] = [];

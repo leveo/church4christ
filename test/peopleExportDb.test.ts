@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { AppDb, AppDbResult, AppStatement } from '../src/lib/appDb';
+import { softDeletePerson } from '../src/lib/adminDb';
 import { appendAuditEvent } from '../src/lib/auditDb';
 import { buildCanonicalExportParts } from '../src/lib/peopleExport';
 import {
@@ -300,27 +301,31 @@ describe('loadCanonicalPeopleExport', () => {
     expect(allCsv).not.toMatch(/Deleted Person|Deleted Household|Historical Display|admin_areas/i);
   });
 
-  it('preserves an orphan real member and an empty live household as bounded repair-required structure', async () => {
+  it('excludes a soft-deleted non-primary person membership and exports the remaining household', async () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Live Primary', 'live@example.com')"),
-      env.DB.prepare("INSERT INTO people (id, display_name, email, deleted_at) VALUES (2, 'Deleted Member', 'deleted@example.com', '2026-01-01')"),
-      env.DB.prepare("INSERT INTO households (id, name) VALUES (10, 'Malformed Household')"),
-      env.DB.prepare("INSERT INTO households (id, name) VALUES (11, 'Empty Household')"),
+      env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (2, 'Deleted Member', 'deleted@example.com')"),
+      env.DB.prepare("INSERT INTO households (id, name) VALUES (10, 'Live Household')"),
       env.DB.prepare("INSERT INTO household_members (household_id, person_id, display_name, role, is_primary) VALUES (10, 1, 'Live Primary', 'adult', 1)"),
       env.DB.prepare("INSERT INTO household_members (household_id, person_id, display_name, role, is_primary) VALUES (10, 2, 'Deleted Member', 'adult', 0)"),
     ]);
+    await softDeletePerson(env.DB, 2);
 
     const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
 
-    expect(result.status).toBe('repair_required');
-    if (result.status !== 'repair_required') throw new Error('expected repair_required');
-    expect(result.counts.issues).toBeGreaterThan(0);
-    expect(Object.values(result.counts).every(Number.isSafeInteger)).toBe(true);
-    expect(JSON.stringify(result)).not.toMatch(/csv|Deleted Member|Malformed Household|deleted@example/i);
+    expect(source.integrityIssues).toBeUndefined();
+    expect(source.people).toEqual([expect.objectContaining({
+      email: 'live@example.com',
+      household: expect.objectContaining({ stableKey: 'household-10', primary: true }),
+    })]);
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') throw new Error('expected success');
+    expect(result.parts[0].csv).toContain('live@example.com');
+    expect(result.parts[0].csv).not.toMatch(/Deleted Member|deleted@example/i);
   });
 
-  it('counts every membership row attached to a soft-deleted household and returns no CSV or deleted-household PII', async () => {
+  it('ignores every membership row under a soft-deleted household', async () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Live Person', 'live@example.com')"),
       env.DB.prepare("INSERT INTO households (id, name, deleted_at) VALUES (10, 'Private Deleted Household', '2026-01-01')"),
@@ -331,17 +336,154 @@ describe('loadCanonicalPeopleExport', () => {
     const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
 
-    expect(source.integrityIssues).toBe(2);
+    expect(source.integrityIssues).toBeUndefined();
     expect(source.people).toEqual([expect.objectContaining({
       email: 'live@example.com',
       household: null,
     })]);
     expect(source.dependents).toEqual([]);
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') throw new Error('expected success');
+    expect(result.parts[0].csv).toContain('live@example.com');
+    expect(result.parts[0].csv).not.toMatch(/Private Deleted Household|Private Deleted Dependent/i);
+  });
+
+  it('requires repair when a deleted primary leaves live secondary and dependent relationships', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Deleted Primary', 'deleted-primary@example.com')"),
+      env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (2, 'Live Secondary', 'secondary@example.com')"),
+      env.DB.prepare("INSERT INTO households (id, name) VALUES (10, 'Needs Primary Household')"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (100, 10, 1, 'Deleted Primary', 'adult', 1)"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, 2, 'Live Secondary', 'adult', 0)"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (102, 10, NULL, 'Live Dependent', 'child', 0)"),
+    ]);
+    await softDeletePerson(env.DB, 1);
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBeUndefined();
+    expect(source.people).toEqual([expect.objectContaining({
+      email: 'secondary@example.com',
+      household: expect.objectContaining({ primary: false }),
+    })]);
+    expect(source.dependents).toHaveLength(1);
     expect(result).toEqual({
       status: 'repair_required',
-      counts: { people: 1, dependents: 0, households: 0, issues: 2 },
+      counts: { people: 1, dependents: 1, households: 1, issues: 1 },
     });
-    expect(JSON.stringify(result)).not.toMatch(/csv|Private Deleted Household|Private Deleted Dependent|live@example/i);
+  });
+
+  it('reports one empty-live-household issue when every residual member is soft-deleted', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people (id, display_name, email, deleted_at) VALUES (1, 'Deleted One', 'deleted-one@example.com', '2026-01-01')"),
+      env.DB.prepare("INSERT INTO people (id, display_name, email, deleted_at) VALUES (2, 'Deleted Two', 'deleted-two@example.com', '2026-01-01')"),
+      env.DB.prepare("INSERT INTO households (id, name) VALUES (10, 'Empty Live Household')"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (100, 10, 1, 'Deleted One', 'adult', 1)"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, 2, 'Deleted Two', 'adult', 0)"),
+    ]);
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source).toEqual({
+      today: EXPORT_TODAY,
+      people: [],
+      dependents: [],
+      integrityIssues: 1,
+    });
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, dependents: 0, households: 0, issues: 1 },
+    });
+  });
+
+  it('does not let a deleted household consume the membership snapshot bound', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO households (id, name, deleted_at) VALUES (10, 'Deleted Household', '2026-01-01')"),
+      env.DB.prepare(`
+        WITH RECURSIVE sequence(n) AS (
+          SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 5001
+        )
+        INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary)
+        SELECT n, 10, NULL, 'Deleted Dependent ' || n, 'child', 0 FROM sequence
+      `),
+    ]);
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBeUndefined();
+    expect(result.status).toBe('success');
+  });
+
+  it('does not let deleted-person memberships consume the membership snapshot bound', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (10000, 'Live Primary', 'live@example.com')"),
+      env.DB.prepare("INSERT INTO households (id, name) VALUES (11, 'Live Household')"),
+      env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (1, 11, 10000, 'Live Primary', 'adult', 1)"),
+      env.DB.prepare(`
+        WITH RECURSIVE sequence(n) AS (
+          SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 5000
+        )
+        INSERT INTO people (id, display_name, email, deleted_at)
+        SELECT n, 'Deleted Person ' || n, 'deleted-' || n || '@example.com', '2026-01-01'
+        FROM sequence
+      `),
+      env.DB.prepare(`
+        WITH RECURSIVE sequence(n) AS (
+          SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 5000
+        )
+        INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary)
+        SELECT 10000 + n, 11, n, 'Deleted Person ' || n, 'adult', 0 FROM sequence
+      `),
+    ]);
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBeUndefined();
+    expect(result.status).toBe('success');
+  });
+
+  it('keeps a genuinely missing person target as an orphan and empty-household repair issue', async () => {
+    await env.DB.prepare("INSERT INTO households (id, name) VALUES (10, 'Orphan Household')").run();
+    const delegate: AppDb = env.DB;
+    const db: AppDb = {
+      prepare: (sql) => delegate.prepare(sql),
+      batch: <T = unknown>(statements: AppStatement[]) => delegate.batch<T>(statements),
+      snapshotBatch: async <T = unknown>(statements: AppStatement[]) => {
+        const results = await delegate.batch<T>(statements);
+        Object.assign(results[0].results[0] as object, { memberships_count: 1 });
+        results[3] = {
+          results: [{
+            id: 100,
+            household_id: 10,
+            person_id: 999,
+            display_name: 'Missing Person',
+            display_name_valid: 1,
+            role: 'adult',
+            is_primary: 1,
+            household_exists: 1,
+            household_live: 1,
+            person_exists: 0,
+            person_live: 0,
+          } as T],
+          success: true,
+          meta: { changes: 0 },
+        };
+        return results;
+      },
+    };
+
+    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBe(2);
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, dependents: 0, households: 0, issues: 2 },
+    });
   });
 
   it('keeps equal normalized household names and Unicode ordering deterministic', async () => {
