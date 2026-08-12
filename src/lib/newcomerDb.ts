@@ -1465,6 +1465,35 @@ function casClaim(
   `).bind(mutationId, now, captured.submissionId, captured.expectedVersion);
 }
 
+function statusCasClaim(
+  db: AppDb,
+  captured: CapturedCas,
+  mutationId: string,
+  now: string,
+  statusId: number,
+) {
+  return db.prepare(`
+    UPDATE newcomer_submissions
+    SET version=version+1,last_mutation_id=CASE
+      WHEN closed_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM newcomer_statuses old_status
+          WHERE old_status.id=newcomer_submissions.status_id AND old_status.category='closed')
+        AND EXISTS (SELECT 1 FROM newcomer_statuses target_status
+          WHERE target_status.id=?5 AND target_status.active=1 AND target_status.category='closed')
+      THEN ?1 || '|' || closed_at
+      ELSE ?1
+    END,updated_at=?2
+    WHERE id=?3 AND version=?4 AND deleted_at IS NULL
+    RETURNING version
+  `).bind(mutationId, now, captured.submissionId, captured.expectedVersion, statusId);
+}
+
+function statusClaimPredicate(alias: string, parameter: string): string {
+  return `(${alias}.last_mutation_id=${parameter} OR
+    (substr(${alias}.last_mutation_id,1,37)=${parameter} || '|'
+      AND length(${alias}.last_mutation_id)=56))`;
+}
+
 const AUTHORIZED_NEWCOMER_PERSON_SQL = `
   person.active=1 AND person.deleted_at IS NULL AND (
     (person.role='admin' AND person.super_admin=1) OR
@@ -1630,12 +1659,12 @@ export async function changeNewcomerStatus(
   const [mutationId, activityId] = generated.ids;
   try {
     const statements = [
-      casClaim(db, captured, mutationId, generated.now),
+      statusCasClaim(db, captured, mutationId, generated.now, statusId),
       db.prepare(`
         UPDATE newcomer_statuses AS status SET sort=status.sort
         WHERE status.id=?1 AND status.active=1 AND EXISTS (
           SELECT 1 FROM newcomer_submissions submission
-          WHERE submission.id=?2 AND submission.last_mutation_id=?3
+          WHERE submission.id=?2 AND ${statusClaimPredicate('submission', '?3')}
         )
         RETURNING id
       `).bind(statusId, captured.submissionId, mutationId),
@@ -1645,8 +1674,14 @@ export async function changeNewcomerStatus(
           '{"from_status_id":' || CAST(submission.status_id AS TEXT)
             || ',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}',?4
         FROM newcomer_submissions submission
-        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND submission.status_id<>?3
-          AND EXISTS (SELECT 1 FROM newcomer_statuses status WHERE status.id=?3 AND status.active=1)
+        JOIN newcomer_statuses old_status ON old_status.id=submission.status_id
+        JOIN newcomer_statuses target_status ON target_status.id=?3 AND target_status.active=1
+        WHERE submission.id=?5 AND submission.status_id<>?3
+          AND ((old_status.category='closed' AND target_status.category='closed'
+              AND submission.closed_at IS NOT NULL
+              AND submission.last_mutation_id=?6 || '|' || submission.closed_at)
+            OR ((old_status.category<>'closed' OR target_status.category<>'closed')
+              AND submission.last_mutation_id=?6))
       `).bind(activityId, user.id, statusId, generated.now, captured.submissionId, mutationId),
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET
@@ -1656,13 +1691,19 @@ export async function changeNewcomerStatus(
             WHEN (SELECT category FROM newcomer_statuses WHERE id=submission.status_id)='open' THEN ?2
             ELSE submission.closed_at
           END
-        WHERE submission.id=?3 AND submission.last_mutation_id=?4 AND submission.status_id<>?1
+        WHERE submission.id=?3 AND ${statusClaimPredicate('submission', '?4')}
+          AND submission.status_id<>?1
           AND EXISTS (SELECT 1 FROM newcomer_statuses status WHERE status.id=?1 AND status.active=1)
           AND EXISTS (
             SELECT 1 FROM newcomer_statuses old_status
+            JOIN newcomer_statuses target_status ON target_status.id=?1 AND target_status.active=1
             WHERE old_status.id=submission.status_id
               AND ((old_status.category='open' AND submission.closed_at IS NULL)
                 OR (old_status.category='closed' AND submission.closed_at IS NOT NULL))
+              AND ((old_status.category='closed' AND target_status.category='closed'
+                  AND submission.last_mutation_id=?4 || '|' || submission.closed_at)
+                OR ((old_status.category<>'closed' OR target_status.category<>'closed')
+                  AND submission.last_mutation_id=?4))
           )
           AND EXISTS (
             SELECT 1 FROM newcomer_activity activity
@@ -1683,7 +1724,7 @@ export async function changeNewcomerStatus(
           JOIN newcomer_statuses status ON status.id=submission.status_id
           JOIN newcomer_activity activity ON activity.id=?5
             AND activity.submission_id=submission.id
-          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+          WHERE submission.id=?1 AND submission.version=?3
             AND submission.status_id=?4 AND status.active=1
             AND ((status.category='open' AND submission.closed_at IS NULL)
               OR (status.category='closed' AND submission.closed_at IS NOT NULL))
@@ -1697,11 +1738,13 @@ export async function changeNewcomerStatus(
                 || CAST(old_status.id AS TEXT) || ',"to_status_id":'
                 || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
                 AND old_status.id<>?4
-                AND ((status.category='open' AND submission.closed_at IS NULL)
+                AND ((status.category='open' AND submission.last_mutation_id=?2
+                    AND submission.closed_at IS NULL)
                   OR (status.category='closed' AND old_status.category='open'
-                    AND submission.closed_at=?7)
+                    AND submission.last_mutation_id=?2 AND submission.closed_at=?7)
                   OR (status.category='closed' AND old_status.category='closed'
-                    AND submission.closed_at IS NOT NULL))
+                    AND submission.last_mutation_id=?2 || '|' || submission.closed_at
+                    AND length(submission.last_mutation_id)=56))
             )
         ) OR
         NOT EXISTS (
@@ -2092,13 +2135,32 @@ export async function createNewcomerVisitor(
         captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
         activityId, user.id,
       ]),
+      db.prepare(`
+        SELECT submission.linked_person_id AS id
+        FROM newcomer_submissions submission
+        JOIN people person ON person.id=submission.linked_person_id
+        JOIN newcomer_activity activity ON activity.id=?5
+          AND activity.submission_id=submission.id
+        WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+          AND submission.email IS NOT NULL AND person.email=submission.email
+          AND person.calendar_token IS NULL AND person.active=1 AND person.deleted_at IS NULL
+          AND person.role='member' AND person.session_epoch=0 AND person.finance=0
+          AND person.super_admin=0 AND person.admin_areas='' AND person.membership_status='visitor'
+          AND activity.actor_person_id=?6 AND activity.kind='visitor_created'
+          AND activity.metadata_json='{"person_id":'
+            || CAST(submission.linked_person_id AS TEXT) || '}'
+          AND activity.created_at=?4
+      `).bind(
+        captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
+        activityId, user.id,
+      ),
     ];
     const results = batchResults(await db.batch(statements), statements.length);
     for (const result of results) resultRows(result, 101);
-    const createdRows = resultRows(results[1], 1);
-    if (createdRows.length !== 1) throw new NewcomerPersistenceError();
-    const created = plainRow(createdRows[0], ['id']);
-    const personId = created ? positiveId(created.id) : null;
+    const proofRows = resultRows(results[results.length - 1], 1);
+    if (proofRows.length !== 1) throw new NewcomerPersistenceError();
+    const proof = plainRow(proofRows[0], ['id']);
+    const personId = proof ? positiveId(proof.id) : null;
     if (personId === null) throw new NewcomerPersistenceError();
     return { version: captured.expectedVersion + 1, personId };
   } catch (error) {

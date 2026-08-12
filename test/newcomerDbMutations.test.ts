@@ -379,8 +379,14 @@ describe('newcomer CAS workflow mutations', () => {
         '63000000-0000-4000-8000-000000000014',
       ], '2026-08-12 15:00:00'),
     );
-    expect(await env.DB.prepare(`SELECT status_id,closed_at,version FROM newcomer_submissions WHERE id=?`)
-      .bind(submissionId).first()).toEqual({ status_id: 5, closed_at: '2026-08-12 14:00:00', version: 2 });
+    expect(await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?`)
+      .bind(submissionId).first()).toEqual({
+        status_id: 5,
+        closed_at: '2026-08-12 14:00:00',
+        version: 2,
+        last_mutation_id: '63000000-0000-4000-8000-000000000013|2026-08-12 14:00:00',
+      });
 
     await changeNewcomerStatus(
       env.DB,
@@ -407,6 +413,36 @@ describe('newcomer CAS workflow mutations', () => {
     }, runtime([
       '63100000-0000-4000-8000-000000000011',
       '63100000-0000-4000-8000-000000000012',
+    ], '2026-08-12 14:00:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual(before);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity')
+      .first<number>('n')).toBe(0);
+  });
+
+  it('uses a transaction carrier to reject a tampered closed-to-closed timestamp', async () => {
+    await seedSubmission();
+    await env.DB.prepare(`UPDATE newcomer_submissions
+      SET status_id=4,closed_at='2026-08-01 10:00:00' WHERE id=?`).bind(submissionId).run();
+    const before = await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first();
+    const tamperedDb: AppDb = {
+      prepare(sql: string) { return env.DB.prepare(sql); },
+      batch(statements: AppStatement[]) {
+        const injected = statements.slice();
+        injected[3] = env.DB.prepare(`UPDATE newcomer_submissions
+          SET status_id=5,closed_at='2026-08-02 11:00:00'
+          WHERE id='${submissionId}'
+            AND last_mutation_id LIKE '63200000-0000-4000-8000-000000000011%'`);
+        return env.DB.batch(injected as D1PreparedStatement[]) as never;
+      },
+    };
+
+    await expect(changeNewcomerStatus(tamperedDb, scopedUser(), {
+      submissionId, expectedVersion: 0, statusId: 5,
+    }, runtime([
+      '63200000-0000-4000-8000-000000000011',
+      '63200000-0000-4000-8000-000000000012',
     ], '2026-08-12 14:00:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
     expect(await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
       FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual(before);
@@ -638,6 +674,31 @@ describe('newcomer CAS workflow mutations', () => {
       WHERE email='mutation@example.test'`).first<number>('n')).toBe(0);
     expect(await env.DB.prepare('SELECT calendar_token FROM people WHERE id=9805')
       .first<string>('calendar_token')).toBe('67110000-0000-4000-8000-000000000011');
+  });
+
+  it('returns the final transaction proof person id even when the early INSERT result is tampered', async () => {
+    await seedSubmission();
+    const peopleAdmin = scopedUser({
+      id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
+    });
+    const tamperedResults: AppDb = {
+      prepare(sql: string) { return env.DB.prepare(sql); },
+      async batch(statements: AppStatement[]) {
+        const results = await env.DB.batch(statements as D1PreparedStatement[]);
+        results[1] = { ...results[1], results: [{ id: 9801 }] };
+        return results as never;
+      },
+    };
+    const result = await createNewcomerVisitor(tamperedResults, peopleAdmin, {
+      submissionId, expectedVersion: 0,
+    }, runtime([
+      '67120000-0000-4000-8000-000000000011',
+      '67120000-0000-4000-8000-000000000012',
+    ]));
+    const linkedPersonId = await env.DB.prepare(`SELECT linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first<number>('linked_person_id');
+    expect(result).toEqual({ version: 1, personId: linkedPersonId });
+    expect(result.personId).not.toBe(9801);
   });
 
   it('classifies phone-only visitor creation only when the current submission is still unlinked', async () => {
@@ -907,7 +968,7 @@ describe('newcomer CAS workflow mutations', () => {
         ])),
       },
       {
-        name: 'visitor', statements: 6, needsSubmission: true,
+        name: 'visitor', statements: 7, needsSubmission: true,
         invoke: (attemptDb) => createNewcomerVisitor(attemptDb, peopleAdmin, {
           submissionId, expectedVersion: 0,
         }, runtime([

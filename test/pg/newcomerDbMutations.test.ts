@@ -444,20 +444,27 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       '77000000-0000-4000-8000-000000000015',
       '77000000-0000-4000-8000-000000000016',
     ], '2026-08-12 18:12:00'));
-    let [status] = await sql.unsafe<{ status_id: number; closed_at: string | null }[]>(`
-      SELECT status_id,closed_at FROM newcomer_submissions
+    const [closedStatus] = await sql.unsafe<{
+      status_id: number; closed_at: string | null; last_mutation_id: string;
+    }[]>(`
+      SELECT status_id,closed_at,last_mutation_id FROM newcomer_submissions
       WHERE id='71000000-0000-4000-8000-000000000001'
     `);
-    expect(status).toEqual({ status_id: 5, closed_at: '2026-08-12 18:11:00' });
+    expect(closedStatus).toEqual({
+      status_id: 5,
+      closed_at: '2026-08-12 18:11:00',
+      last_mutation_id: '77000000-0000-4000-8000-000000000015|2026-08-12 18:11:00',
+    });
     await changeNewcomerStatus(db, worker, {
       submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 2, statusId: 1,
     }, runtime([
       '77000000-0000-4000-8000-000000000017',
       '77000000-0000-4000-8000-000000000018',
     ], '2026-08-12 18:13:00'));
-    [status] = await sql.unsafe(`SELECT status_id,closed_at FROM newcomer_submissions
+    const [openStatus] = await sql.unsafe<{ status_id: number; closed_at: string | null }[]>(`
+      SELECT status_id,closed_at FROM newcomer_submissions
       WHERE id='71000000-0000-4000-8000-000000000001'`);
-    expect(status).toEqual({ status_id: 1, closed_at: null });
+    expect(openStatus).toEqual({ status_id: 1, closed_at: null });
 
     await sql.unsafe(`UPDATE people SET phone='+1 (312) 555-0131' WHERE id=9903`);
     await linkNewcomerPerson(db, worker, {
@@ -535,6 +542,67 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
     expect(collisionProof).toEqual({
       version: 0, last_mutation_id: null, linked_person_id: null, people: 0,
     });
+  });
+
+  it('binds closed timestamp preservation and visitor ids to final transaction proofs', async () => {
+    await sql.unsafe(`UPDATE newcomer_submissions
+      SET status_id=4,closed_at='2026-08-12 17:00:00'
+      WHERE id='71000000-0000-4000-8000-000000000001'`);
+    const tamperedStatus: AppDb = {
+      prepare(sqlText: string) { return db.prepare(sqlText); },
+      batch(statements: AppStatement[]) {
+        const injected = statements.slice();
+        injected[3] = db.prepare(`
+          UPDATE newcomer_submissions
+          SET status_id=5,closed_at='2026-08-12 17:59:59'
+          WHERE id='71000000-0000-4000-8000-000000000001'
+            AND substr(last_mutation_id,1,36)='77100000-0000-4000-8000-000000000011'
+        `);
+        return db.batch(injected);
+      },
+    };
+    await expect(changeNewcomerStatus(tamperedStatus, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, statusId: 5,
+    }, runtime([
+      '77100000-0000-4000-8000-000000000011',
+      '77100000-0000-4000-8000-000000000012',
+    ], '2026-08-12 18:00:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [status] = await sql.unsafe<{
+      status_id: number; closed_at: string; version: number; last_mutation_id: string | null; activity: number;
+    }[]>(`
+      SELECT submission.status_id,submission.closed_at,submission.version,submission.last_mutation_id,
+        (SELECT COUNT(*)::int FROM newcomer_activity WHERE submission_id=submission.id) AS activity
+      FROM newcomer_submissions submission
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    expect(status).toEqual({
+      status_id: 4, closed_at: '2026-08-12 17:00:00', version: 0, last_mutation_id: null, activity: 0,
+    });
+
+    await sql.unsafe(`UPDATE newcomer_submissions SET status_id=1,closed_at=NULL
+      WHERE id='71000000-0000-4000-8000-000000000001'`);
+    const tamperedVisitorResults: AppDb = {
+      prepare(sqlText: string) { return db.prepare(sqlText); },
+      async batch(statements: AppStatement[]) {
+        const results = await db.batch(statements);
+        results[1] = { ...results[1], results: [{ id: 9901 }] };
+        return results as never;
+      },
+    };
+    const peopleAdmin = { ...worker, id: 9904, email: 'pg-people-admin@example.test', role: 'admin' as const,
+      isAdmin: true, adminAreas: ['newcomers', 'people'] as SessionUser['adminAreas'] };
+    const visitor = await createNewcomerVisitor(tamperedVisitorResults, peopleAdmin, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
+    }, runtime([
+      '77100000-0000-4000-8000-000000000013',
+      '77100000-0000-4000-8000-000000000014',
+    ], '2026-08-12 18:01:00'));
+    const [visitorState] = await sql.unsafe<{ linked_person_id: number; version: number }[]>(`
+      SELECT linked_person_id,version FROM newcomer_submissions
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    expect(visitor).toEqual({ version: 1, personId: visitorState.linked_person_id });
+    expect(visitor.personId).not.toBe(9901);
   });
 
   it('rolls the complete PostgreSQL snapshot back at every statement boundary for every mutation', async () => {
@@ -644,7 +712,7 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
         ])),
       },
       {
-        name: 'visitor', statements: 6, needsSubmission: true,
+        name: 'visitor', statements: 7, needsSubmission: true,
         invoke: (attemptDb) => createNewcomerVisitor(attemptDb, peopleAdmin, {
           submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
         }, runtime([
