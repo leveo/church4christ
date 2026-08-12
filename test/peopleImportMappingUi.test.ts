@@ -11,6 +11,7 @@ import {
   applyPeopleImportMappingCommit,
   applyPeopleImportMappingInspect,
   applyPeopleImportMappingPreview,
+  applyPeopleImportMappingProfile,
   beginPeopleImportMappingRequest,
   clonePeopleImportMappingDraft,
   createPeopleImportMappingDraft,
@@ -22,6 +23,7 @@ import {
   parsePeopleImportMappingPreview,
   parsePeopleImportMappingProfile,
   parsePeopleImportMappingProfiles,
+  parsePeopleImportMappingResultCode,
   peopleImportMappingUiControls,
   rejectPeopleImportMappingRequest,
   selectPeopleImportMappingFile,
@@ -176,6 +178,12 @@ describe('people import mapping browser contract parsing', () => {
       [201, { ok: true, counts: { people: '1', households: 0, dependents: 0 } }],
       [200, { ok: true, counts: { people: 1, households: 0, dependents: 0 } }],
       [500, { message: 'upstream HTML or malformed JSON snapshot' }],
+      [201, { ok: false, code: 'generic_error' }],
+      [201, { ok: true, code: 'import_failed' }],
+      [500, { ok: true, code: 'import_failed' }],
+      [500, { ok: false, code: 'import_failed', counts: { people: 1, households: 0, dependents: 0 } }],
+      [201, { ok: true, code: 'import_failed', counts: { people: 1, households: 0, dependents: 0 } }],
+      [201, { ok: true, counts: { people: 1, households: 0, dependents: 0, extra: 1 } }],
     ] as const) {
       expect(classifyPeopleImportMappingCommitResponse(status, body)).toEqual({
         ok: false,
@@ -201,6 +209,43 @@ describe('people import mapping browser contract parsing', () => {
       ok: true,
       counts: { people: 1, households: 0, dependents: 0 },
     })).toEqual({ ok: true, counts: { people: 1, households: 0, dependents: 0 } });
+  });
+
+  it('accepts each exact commit error status/code pair and rejects any mismatch', () => {
+    const pairs = {
+      multipart_required: 415, multipart_invalid: 400, missing_file: 400,
+      file_too_large: 413, file_type_invalid: 415, mapping_config_too_large: 413,
+      mapping_config_invalid: 400, mapping_source_invalid: 400, profile_name_invalid: 400,
+      profile_id_invalid: 400, mapping_profile_invalid: 400, mapping_profile_conflict: 409,
+      mapping_profile_corrupt: 500, mapping_profile_failed: 500, mapping_profile_not_found: 404,
+      validation_failed: 400, warnings_not_acknowledged: 409, import_conflict: 409,
+      import_failed: 500, generic_error: 500, forbidden: 403, not_found: 404,
+      method_not_allowed: 405,
+    } as const;
+    for (const [code, status] of Object.entries(pairs)) {
+      expect(classifyPeopleImportMappingCommitResponse(status, { ok: false, code })).toMatchObject({
+        ok: false,
+        decision: { messageKey: `admin.peopleImportMapping.result.${code}` },
+      });
+      expect(classifyPeopleImportMappingCommitResponse(status === 400 ? 409 : 400, {
+        ok: false,
+        code,
+      })).toMatchObject({
+        ok: false,
+        decision: { messageKey: 'admin.peopleImportMapping.failure.uncertainCommit', clearPreview: true },
+      });
+    }
+  });
+
+  it('recognizes non-commit errors only from valid status and failure bodies', () => {
+    expect(parsePeopleImportMappingResultCode(500, { ok: false, code: 'generic_error' })).toBe('generic_error');
+    expect(parsePeopleImportMappingResultCode(201, { ok: false, code: 'generic_error' })).toBeNull();
+    expect(parsePeopleImportMappingResultCode(500, { ok: true, code: 'generic_error' })).toBeNull();
+    expect(parsePeopleImportMappingResultCode(500, {
+      ok: false,
+      code: 'generic_error',
+      profile: profileBody.profile,
+    })).toBeNull();
   });
 });
 
@@ -286,6 +331,23 @@ describe('people import mapping revision state', () => {
     })).toEqual(edited);
   });
 
+  it('fails closed when a preview response belongs to a different profile', () => {
+    let state = selectPeopleImportMappingFile(createPeopleImportMappingUiState(), true);
+    const inspect = beginPeopleImportMappingRequest(state, 'inspect')!;
+    state = applyPeopleImportMappingInspect(inspect.state, inspect.request, inspection);
+    state = selectPeopleImportMappingProfile(state, profile);
+    const preview = beginPeopleImportMappingRequest(state, 'preview')!;
+
+    expect(preview.request.profileId).toBe(profile.id);
+    const rejected = applyPeopleImportMappingPreview(preview.state, preview.request, {
+      profile: { id: profile.id + 1, name: 'Wrong profile', version: 1 },
+      mappingIssues: [],
+      preview: { summary, rows: [], issues: [] },
+    });
+    expect(rejected).toMatchObject({ pending: null, preview: null, warningsAcknowledged: false });
+    expect(peopleImportMappingUiControls(rejected).commitDisabled).toBe(true);
+  });
+
   it('clears preview and literal acknowledgement when file, profile, or draft changes', () => {
     let state = selectPeopleImportMappingFile(createPeopleImportMappingUiState(), true);
     const inspect = beginPeopleImportMappingRequest(state, 'inspect')!;
@@ -332,6 +394,50 @@ describe('people import mapping revision state', () => {
     expect(applyPeopleImportMappingCommit(commit.state, commit.request, {
       people: 1, households: 1, dependents: 1,
     }).success).toEqual({ people: 1, households: 1, dependents: 1 });
+  });
+
+  it('locks every profile-creation input until the mutating request settles', () => {
+    let state = selectPeopleImportMappingFile(createPeopleImportMappingUiState(), true);
+    const inspect = beginPeopleImportMappingRequest(state, 'inspect')!;
+    state = applyPeopleImportMappingInspect(inspect.state, inspect.request, inspection);
+    state = editPeopleImportMappingDraft(state, createPeopleImportMappingDraft(inspection.headers!));
+    const create = beginPeopleImportMappingRequest(state, 'create')!;
+
+    expect(peopleImportMappingUiControls(create.state)).toMatchObject({
+      fileDisabled: true,
+      profileDisabled: true,
+      draftDisabled: true,
+    });
+    expect(selectPeopleImportMappingFile(create.state, true)).toEqual(create.state);
+    expect(selectPeopleImportMappingProfile(create.state, profile)).toEqual(create.state);
+    expect(editPeopleImportMappingDraft(create.state, createPeopleImportMappingDraft(['changed']))).toEqual(create.state);
+    expect(applyPeopleImportMappingProfile(create.state, create.request, profile)).toMatchObject({
+      pending: null,
+      selectedProfile: profile,
+    });
+  });
+
+  it('keeps profile and draft controls locked while inspection owns the only current file result', () => {
+    const state = selectPeopleImportMappingFile(createPeopleImportMappingUiState(), true);
+    const inspect = beginPeopleImportMappingRequest(state, 'inspect')!;
+
+    expect(peopleImportMappingUiControls(inspect.state)).toMatchObject({
+      fileDisabled: false,
+      profileDisabled: true,
+      draftDisabled: true,
+    });
+    expect(selectPeopleImportMappingProfile(inspect.state, profile)).toEqual(inspect.state);
+    expect(editPeopleImportMappingDraft(inspect.state, createPeopleImportMappingDraft(['changed']))).toEqual(inspect.state);
+    expect(selectPeopleImportMappingFile(inspect.state, true).fileRevision).toBe(state.fileRevision + 1);
+  });
+
+  it('describes an unknown profile-create result as possibly saved', () => {
+    expect(decidePeopleImportMappingFailure('create', null, true)).toEqual({
+      messageKey: 'admin.peopleImportMapping.failure.uncertainCreate',
+      clearPreview: false,
+      clearProfile: false,
+      checkPeople: false,
+    });
   });
 
   it('requires People verification and a fresh preview after uncertain/conflicting commits', () => {
@@ -404,6 +510,7 @@ describe('people import mapping page contract', () => {
     expect(mappingPageSource).not.toMatch(/form\.append\(['"](?:model|role|op)['"]/);
     expect(mappingPageSource).toContain('classifyPeopleImportMappingCommitResponse(response.status, body)');
     expect(mappingPageSource).not.toContain('parsePeopleImportMappingCommit(response.status, body)');
+    expect(mappingPageSource).toContain('preview.profile.id !== operation.request.profileId');
   });
 
   it('renders dynamic values only through safe DOM APIs without browser persistence or logging', () => {
@@ -420,6 +527,12 @@ describe('people import mapping page contract', () => {
     expect(mappingPageSource).toContain('const clientCopyKeys = [');
     expect(mappingPageSource).toContain('...PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.map');
     expect(mappingPageSource).not.toMatch(/Object\.keys\(en\)|startsWith\(['"]admin\.peopleImport/);
+  });
+
+  it('locks the profile-name and translation controls for mutating profile creation', () => {
+    expect(mappingPageSource).toContain('profileNameInput.disabled = controls.draftDisabled');
+    expect(mappingPageSource).toContain('control.disabled = controls.draftDisabled');
+    expect(mappingPageSource).toContain('admin.peopleImportMapping.failure.uncertainCreate');
   });
 
   it('resynchronizes manual translation controls after a mapping-mode edit', () => {

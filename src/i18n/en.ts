@@ -743,6 +743,7 @@ export default {
   'admin.peopleImportMapping.chooseValidFile': 'Choose and successfully inspect a source file before creating a mapping draft.',
   'admin.peopleImportMapping.failure.network': 'The server could not be reached. No confirmed result is available.',
   'admin.peopleImportMapping.failure.unexpected': 'The mapping request returned an unexpected response.',
+  'admin.peopleImportMapping.failure.uncertainCreate': 'The profile save result could not be confirmed. The profile may have been saved; refresh saved profiles before trying again.',
   'admin.peopleImportMapping.failure.uncertainCommit': 'The commit result could not be confirmed. Check People for created records, then run a fresh preview before deciding whether to retry.',
   'admin.peopleImportMapping.failure.headerDrift': 'The selected profile headers do not exactly match this file. Clone or choose a matching profile, then run a fresh preview.',
 

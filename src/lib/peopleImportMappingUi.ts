@@ -57,6 +57,31 @@ const FIELD_SET = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_FIELDS);
 const ENUM_FIELD_SET = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS);
 const MAX_PROFILE_NAME_CODE_POINTS = 80;
 const MAX_SOURCE_TEXT_CODE_POINTS = 5_000;
+const PEOPLE_IMPORT_MAPPING_ERROR_STATUS = {
+  multipart_required: 415,
+  multipart_invalid: 400,
+  missing_file: 400,
+  file_too_large: 413,
+  file_type_invalid: 415,
+  mapping_config_too_large: 413,
+  mapping_config_invalid: 400,
+  mapping_source_invalid: 400,
+  profile_name_invalid: 400,
+  profile_id_invalid: 400,
+  mapping_profile_invalid: 400,
+  mapping_profile_conflict: 409,
+  mapping_profile_corrupt: 500,
+  mapping_profile_failed: 500,
+  mapping_profile_not_found: 404,
+  validation_failed: 400,
+  warnings_not_acknowledged: 409,
+  import_conflict: 409,
+  import_failed: 500,
+  generic_error: 500,
+  forbidden: 403,
+  not_found: 404,
+  method_not_allowed: 405,
+} as const satisfies Record<PeopleImportMappingHttpResultCode, number>;
 export const PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES = [
   'file_too_large', 'invalid_utf8', 'nul_byte', 'unclosed_quote', 'illegal_quote',
   'lone_cr', 'too_many_rows', 'too_many_columns', 'cell_too_long', 'empty_file',
@@ -337,18 +362,44 @@ export function classifyPeopleImportMappingCommitResponse(
   status: number,
   value: unknown,
 ): PeopleImportMappingCommitResponse {
-  const counts = parsePeopleImportMappingCommit(status, value);
+  const counts = parseExactPeopleImportMappingCommit(status, value);
   if (counts !== null) return { ok: true, counts };
-  const code = parsePeopleImportMappingResultCode(value);
+  const code = parsePeopleImportMappingCommitErrorCode(status, value);
   return {
     ok: false,
     decision: decidePeopleImportMappingFailure('commit', code, code === null),
   };
 }
 
-export function parsePeopleImportMappingResultCode(value: unknown): PeopleImportMappingHttpResultCode | null {
-  if (!isObject(value) || typeof value.code !== 'string') return null;
-  return PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.find((code) => code === value.code) ?? null;
+function parseExactPeopleImportMappingCommit(
+  status: number,
+  value: unknown,
+): PeopleImportUiSuccessCounts | null {
+  if (
+    !isObject(value) || !exactKeys(value, ['ok', 'counts']) || value.ok !== true
+    || !isObject(value.counts) || !exactKeys(value.counts, ['people', 'households', 'dependents'])
+  ) return null;
+  return parsePeopleImportMappingCommit(status, value);
+}
+
+function parsePeopleImportMappingCommitErrorCode(
+  status: number,
+  value: unknown,
+): PeopleImportMappingHttpResultCode | null {
+  if (!isObject(value) || !exactKeys(value, ['ok', 'code']) || value.ok !== false) return null;
+  return parsePeopleImportMappingResultCode(status, value);
+}
+
+export function parsePeopleImportMappingResultCode(
+  status: number,
+  value: unknown,
+): PeopleImportMappingHttpResultCode | null {
+  if (
+    !isObject(value) || value.ok !== false || typeof value.code !== 'string'
+    || Object.hasOwn(value, 'counts') || Object.hasOwn(value, 'profile')
+  ) return null;
+  const code = PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.find((candidate) => candidate === value.code) ?? null;
+  return code !== null && PEOPLE_IMPORT_MAPPING_ERROR_STATUS[code] === status ? code : null;
 }
 
 export interface PeopleImportMappingTranslationRow {
@@ -524,6 +575,7 @@ export interface PeopleImportMappingRequest {
   fileRevision: number;
   profileRevision: number;
   draftRevision: number;
+  profileId: number | null;
 }
 
 export interface PeopleImportMappingOperation {
@@ -566,7 +618,7 @@ export function selectPeopleImportMappingFile(
   state: PeopleImportMappingUiState,
   hasFile: boolean,
 ): PeopleImportMappingUiState {
-  if (state.pending === 'commit') return state;
+  if (state.pending === 'create' || state.pending === 'commit') return state;
   return {
     ...clearReview(state),
     fileRevision: state.fileRevision + 1,
@@ -582,7 +634,7 @@ export function selectPeopleImportMappingProfile(
   state: PeopleImportMappingUiState,
   profile: PeopleImportMappingUiProfile | null,
 ): PeopleImportMappingUiState {
-  if (state.pending === 'commit') return state;
+  if (state.pending === 'inspect' || state.pending === 'create' || state.pending === 'commit') return state;
   return {
     ...clearReview(state),
     profileRevision: state.profileRevision + 1,
@@ -597,7 +649,7 @@ export function editPeopleImportMappingDraft(
   state: PeopleImportMappingUiState,
   draft: PeopleImportMappingDraft,
 ): PeopleImportMappingUiState {
-  if (state.pending === 'commit') return state;
+  if (state.pending === 'inspect' || state.pending === 'create' || state.pending === 'commit') return state;
   return {
     ...clearReview(state),
     profileRevision: state.profileRevision + (state.selectedProfile === null ? 0 : 1),
@@ -621,6 +673,8 @@ function previewHasWarnings(preview: PeopleImportMappingPreviewPayload | null): 
 
 export function peopleImportMappingUiControls(state: PeopleImportMappingUiState): PeopleImportMappingUiControls {
   const commitPending = state.pending === 'commit';
+  const mutationPending = state.pending === 'create' || commitPending;
+  const sourcePending = state.pending === 'inspect';
   const busy = state.pending !== null;
   const inspected = state.inspection?.headers !== null && state.inspection?.headers !== undefined;
   return {
@@ -630,9 +684,9 @@ export function peopleImportMappingUiControls(state: PeopleImportMappingUiState)
     commitDisabled:
       busy || previewHasErrors(state.preview)
       || (previewHasWarnings(state.preview) && state.warningsAcknowledged !== true),
-    fileDisabled: commitPending,
-    profileDisabled: commitPending,
-    draftDisabled: commitPending,
+    fileDisabled: mutationPending,
+    profileDisabled: sourcePending || mutationPending,
+    draftDisabled: sourcePending || mutationPending,
   };
 }
 
@@ -653,6 +707,7 @@ export function beginPeopleImportMappingRequest(
     fileRevision: state.fileRevision,
     profileRevision: state.profileRevision,
     draftRevision: state.draftRevision,
+    profileId: state.selectedProfile?.id ?? null,
   };
   return {
     request,
@@ -714,6 +769,9 @@ export function applyPeopleImportMappingPreview(
   preview: PeopleImportMappingPreviewPayload,
 ): PeopleImportMappingUiState {
   if (request.kind !== 'preview' || !activeRequest(state, request)) return state;
+  if (request.profileId === null || preview.profile.id !== request.profileId) {
+    return { ...state, pending: null, preview: null, warningsAcknowledged: false, success: null };
+  }
   return { ...state, pending: null, preview, warningsAcknowledged: false, success: null };
 }
 
@@ -752,6 +810,14 @@ export function decidePeopleImportMappingFailure(
   code: PeopleImportMappingHttpResultCode | null,
   uncertain: boolean,
 ): PeopleImportMappingFailureDecision {
+  if (kind === 'create' && uncertain) {
+    return {
+      messageKey: 'admin.peopleImportMapping.failure.uncertainCreate',
+      clearPreview: false,
+      clearProfile: false,
+      checkPeople: false,
+    };
+  }
   if (kind === 'commit' && uncertain) {
     return {
       messageKey: 'admin.peopleImportMapping.failure.uncertainCommit',

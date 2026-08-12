@@ -741,6 +741,7 @@ export default {
   'admin.peopleImportMapping.chooseValidFile': '请先选择并成功检查来源文件，再创建映射草稿。',
   'admin.peopleImportMapping.failure.network': '无法连接服务器，目前没有可确认的结果。',
   'admin.peopleImportMapping.failure.unexpected': '映射请求返回了异常响应。',
+  'admin.peopleImportMapping.failure.uncertainCreate': '无法确认映射档案保存结果。档案可能已保存；再次尝试前请先刷新已保存档案。',
   'admin.peopleImportMapping.failure.uncertainCommit': '无法确认提交结果。请先检查会众列表是否已创建记录，再进行全新预览，然后决定是否重试。',
   'admin.peopleImportMapping.failure.headerDrift': '所选档案表头与此文件并非完全一致。请复制或选择匹配的档案，再进行全新预览。',
 

@@ -43,6 +43,7 @@ const clientCopyKeys = [
   'admin.peopleImportMapping.chooseValidFile',
   'admin.peopleImportMapping.failure.network',
   'admin.peopleImportMapping.failure.unexpected',
+  'admin.peopleImportMapping.failure.uncertainCreate',
   'admin.peopleImportMapping.failure.uncertainCommit',
   'admin.peopleImportMapping.failure.headerDrift',
   'admin.peopleImport.issues.file',
@@ -603,6 +604,16 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
       profileSelect.disabled = controls.profileDisabled;
       profileRefresh.disabled = state.pending !== null;
       cloneProfileButton.disabled = controls.profileDisabled;
+      profileNameInput.disabled = controls.draftDisabled;
+      root.querySelectorAll<HTMLElement>(
+        '[data-add-translation], [data-translation-source], [data-translation-target], [data-remove-translation]',
+      ).forEach((control) => {
+        if (
+          control instanceof HTMLInputElement
+          || control instanceof HTMLSelectElement
+          || control instanceof HTMLButtonElement
+        ) control.disabled = controls.draftDisabled;
+      });
       saveProfileButton.disabled = controls.saveDisabled || !draftValid || profileNameInput.value.trim() === '';
       previewButton.disabled = controls.previewDisabled;
       commitButton.disabled = controls.commitDisabled;
@@ -650,7 +661,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
         const response = await fetch(PROFILES_PATH, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         const body = await readJson(response);
         const profiles = parsePeopleImportMappingProfiles(response.status, body);
-        if (profiles === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
+        if (profiles === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
         const next = applyPeopleImportMappingProfiles(state, operation.request, profiles);
         if (next === state) return;
         state = next;
@@ -675,7 +686,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
         });
         const body = await readJson(response);
         const inspection = parsePeopleImportMappingInspect(response.status, body);
-        if (inspection === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
+        if (inspection === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
         const next = applyPeopleImportMappingInspect(state, operation.request, inspection);
         if (next === state) return;
         state = next;
@@ -699,7 +710,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
         });
         const body = await readJson(response);
         const profile = parsePeopleImportMappingProfile(response.status, body);
-        if (profile === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
+        if (profile === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
         const next = applyPeopleImportMappingProfile(state, operation.request, profile);
         if (next === state) return;
         state = next;
@@ -755,7 +766,10 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
         });
         const body = await readJson(response);
         const profile = parsePeopleImportMappingProfile(response.status, body);
-        if (profile === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
+        if (profile === null) {
+          const code = parsePeopleImportMappingResultCode(response.status, body);
+          return rejectRequest(operation.request, code, code === null);
+        }
         const next = applyPeopleImportMappingProfile(state, operation.request, profile);
         if (next === state) return;
         state = next;
@@ -784,7 +798,10 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
         });
         const body = await readJson(response);
         const preview = parsePeopleImportMappingPreview(response.status, body);
-        if (preview === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
+        if (preview === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(response.status, body), false);
+        if (preview.profile.id !== operation.request.profileId) {
+          return rejectRequest(operation.request, null, false);
+        }
         const next = applyPeopleImportMappingPreview(state, operation.request, preview);
         if (next === state) return;
         state = next;
@@ -827,7 +844,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
     }
 
     fileInput.addEventListener('change', () => {
-      if (state.pending === 'commit') return;
+      if (state.pending === 'create' || state.pending === 'commit') return;
       selectedFile = fileInput.files?.item(0) ?? null;
       state = selectPeopleImportMappingFile(state, selectedFile !== null);
       translationInputs = {};

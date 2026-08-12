@@ -171,6 +171,7 @@ const PEOPLE_IMPORT_MAPPING_COPY_KEYS = [
   'admin.peopleImportMapping.chooseValidFile',
   'admin.peopleImportMapping.failure.network',
   'admin.peopleImportMapping.failure.unexpected',
+  'admin.peopleImportMapping.failure.uncertainCreate',
   'admin.peopleImportMapping.failure.uncertainCommit',
   'admin.peopleImportMapping.failure.headerDrift',
 ] as const;
@@ -377,6 +378,13 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zhGeneric).toMatch(/重新预览.*重试/);
     expect(zhGeneric).not.toMatch(/没有写入任何|未写入任何/);
     expect(zh['admin.peopleImport.result.import_failed']).toMatch(/没有写入任何|未写入任何/);
+  });
+
+  it('warns that an uncertain mapping-profile save may have succeeded', () => {
+    expect(en['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/may have been saved/i);
+    expect(en['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/refresh/i);
+    expect(zh['admin.peopleImportMapping.failure.uncertainCreate']).toMatch(/可能.*保存/);
+    expect(zh['admin.peopleImportMapping.failure.uncertainCreate']).toContain('刷新');
   });
 
   it('states that an unexpected preview failure made no database changes', () => {
