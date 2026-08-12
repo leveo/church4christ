@@ -208,6 +208,30 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['admin.nav.attendance']).toBe('崇拜出席');
   });
 
+  it('provides complete bilingual aggregate Attendance UI copy', () => {
+    const keys = [
+      'admin.attendance.title', 'admin.attendance.intro', 'admin.attendance.recordTitle',
+      'admin.attendance.service', 'admin.attendance.date', 'admin.attendance.adults',
+      'admin.attendance.children', 'admin.attendance.total', 'admin.attendance.save',
+      'admin.attendance.correct', 'admin.attendance.reportTitle', 'admin.attendance.from',
+      'admin.attendance.to', 'admin.attendance.applyWindow', 'admin.attendance.downloadCsv',
+      'admin.attendance.emptyReport', 'admin.attendance.emptyServices',
+      'admin.attendance.emptyServicesAsk', 'admin.attendance.manageServiceTypes',
+      'admin.attendance.linksTitle', 'admin.attendance.linksIntro',
+      'admin.attendance.childrenOff', 'admin.attendance.linksSave',
+      'admin.attendance.savedCount', 'admin.attendance.savedLinks',
+      'admin.attendance.notConfigured', 'admin.attendance.error',
+      'admin.dashboard.attendance',
+    ] as const;
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of keys) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
+    expect(en['admin.attendance.emptyServicesAsk']).toMatch(/super admin|Volunteer ministry/i);
+    expect(zh['admin.attendance.emptyServicesAsk']).toMatch(/超级管理员|义工事工/);
+    expect(en['admin.attendance.childrenOff']).toMatch(/historical.*remain/i);
+    expect(zh['admin.attendance.childrenOff']).toMatch(/历史.*保留/);
+  });
+
   it('provides complete bilingual Stripe test-mode operations copy', () => {
     const keys = [
       'admin.stripe.title', 'admin.stripe.testMode', 'admin.stripe.events', 'admin.stripe.requests',
