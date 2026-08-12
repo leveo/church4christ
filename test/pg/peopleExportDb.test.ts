@@ -5,6 +5,7 @@ import { buildCanonicalExportParts } from '../../src/lib/peopleExport';
 import {
   loadCanonicalPeopleExport,
   loadPastoralNotesExport,
+  PEOPLE_EXPORT_SNAPSHOT_LIMITS,
 } from '../../src/lib/peopleExportDb';
 import { buildPastoralNotesExport } from '../../src/lib/pastoralNotesExport';
 import { PgAdapter } from '../../src/lib/pgAdapter';
@@ -40,9 +41,9 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
   it('produces byte-identical canonical and notes exports from the shared cross-backend fixture', async () => {
     await seedPortableExportFixture(db);
 
-    const canonical = buildCanonicalExportParts(await loadCanonicalPeopleExport(db, EXPORT_TODAY));
+    const canonical = buildCanonicalExportParts(await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'supabase'));
     const expectedCanonical = buildCanonicalExportParts(expectedCanonicalPeopleExportSource());
-    const notes = buildPastoralNotesExport(await loadPastoralNotesExport(db));
+    const notes = buildPastoralNotesExport(await loadPastoralNotesExport(db, 'supabase'));
 
     expect(canonical).toEqual(expectedCanonical);
     expect(notes).toEqual({
@@ -111,6 +112,9 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
       '{"people":1.5,"notes":1}',
       '{"people":-1,"notes":1}',
       '{"people":1,"notes":5001}',
+      '{"people": 1,"notes":1}',
+      '{"notes":1,"people":1}',
+      '{"people":1,"people":1,"notes":1}',
     ]) {
       await expect(sql.unsafe(`
         INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
@@ -133,7 +137,7 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
       db.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, NULL, 'Private Deleted Dependent', 'child', 0)"),
     ]);
 
-    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY);
+    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'supabase');
     const result = buildCanonicalExportParts(source);
 
     expect(source.integrityIssues).toBe(2);
@@ -142,5 +146,40 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
       counts: { people: 1, dependents: 0, households: 0, issues: 2 },
     });
     expect(JSON.stringify(result)).not.toMatch(/csv|Private Deleted Household|Private Deleted Dependent|live@example/i);
+  });
+
+  it('suppresses oversized canonical and notes payloads inside the real database snapshot', async () => {
+    const privateCanonical = 'PRIVATE-PG-CANONICAL-' + 'x'.repeat(
+      PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes + 1,
+    );
+    await sql.unsafe(`
+      INSERT INTO people (id, display_name, email)
+      VALUES (1, $1, 'huge@example.com')
+    `, [privateCanonical]);
+
+    const canonicalSource = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'supabase');
+    const canonicalResult = buildCanonicalExportParts(canonicalSource);
+
+    expect(canonicalSource.people).toEqual([]);
+    expect(canonicalSource.integrityIssues).toBeGreaterThan(0);
+    expect(JSON.stringify(canonicalSource)).not.toContain('PRIVATE-PG-CANONICAL');
+    expect(canonicalResult.status).toBe('repair_required');
+
+    await sql.unsafe("UPDATE people SET display_name = 'Safe Subject' WHERE id = 1");
+    const privatePastoral = 'PRIVATE-PG-PASTORAL-' + 'x'.repeat(
+      PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes + 1,
+    );
+    await sql.unsafe(`
+      INSERT INTO person_notes (id, person_id, author_email, body, created_at)
+      VALUES (1, 1, 'historical@example.com', $1, '2026-08-11 00:00:00')
+    `, [privatePastoral]);
+
+    const notesSource = await loadPastoralNotesExport(db, 'supabase');
+    const notesResult = buildPastoralNotesExport(notesSource);
+
+    expect(notesSource.notes).toEqual([]);
+    expect(notesSource.integrityIssues).toBeGreaterThan(0);
+    expect(JSON.stringify(notesSource)).not.toContain('PRIVATE-PG-PASTORAL');
+    expect(notesResult.status).toBe('repair_required');
   });
 });

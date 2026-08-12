@@ -17,6 +17,17 @@ export interface AppStatement {
 export interface AppDb {
   prepare(sql: string): AppStatement;
   batch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]>;
+  /** Optional stronger read seam. D1's transactional batch is the fallback. */
+  snapshotBatch?<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]>;
+}
+
+export function readSnapshotBatch<T = unknown>(
+  db: AppDb,
+  statements: AppStatement[],
+): Promise<AppDbResult<T>[]> {
+  return db.snapshotBatch
+    ? db.snapshotBatch<T>(statements)
+    : db.batch<T>(statements);
 }
 
 // Compile-time proof that the real D1 binding satisfies AppDb — if a future

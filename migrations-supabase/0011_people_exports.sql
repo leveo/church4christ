@@ -19,6 +19,9 @@ CREATE TABLE audit_events (
         'people', (structural_counts_json::jsonb->>'people')::integer,
         'notes', (structural_counts_json::jsonb->>'notes')::integer
       )
+      AND structural_counts_json =
+        '{"people":' || (structural_counts_json::jsonb->>'people')
+        || ',"notes":' || (structural_counts_json::jsonb->>'notes') || '}'
     ),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

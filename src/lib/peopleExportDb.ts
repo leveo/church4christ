@@ -1,4 +1,5 @@
-import type { AppDb } from './appDb';
+import { readSnapshotBatch, type AppDb } from './appDb';
+import type { DbBackend } from './dbProvider';
 import type {
   CanonicalPeopleExportDependent,
   CanonicalPeopleExportHouseholdReference,
@@ -13,7 +14,138 @@ import { MEMBERSHIP_STATUSES, type MembershipStatus } from './validate';
 
 const EXPORT_SNAPSHOT_LIMIT = 5_001;
 
+export const PEOPLE_EXPORT_SNAPSHOT_LIMITS = {
+  maxCanonicalBytes: 8 * 1024 * 1024,
+  maxNotesBytes: 10 * 1024 * 1024,
+  maxRowsPerKind: 5_000,
+} as const;
+
 type DbRow = Record<string, unknown>;
+
+const CANONICAL_PERSON_FIELDS = [
+  'first_name',
+  'last_name',
+  'display_name',
+  'email',
+  'phone',
+  'lang',
+  'birthday',
+  'address',
+  'membership_status',
+  'joined_on',
+] as const;
+const CANONICAL_PERSON_PROJECTED_FIELDS = CANONICAL_PERSON_FIELDS.filter(
+  (field) => field !== 'lang' && field !== 'membership_status',
+);
+const CANONICAL_HOUSEHOLD_FIELDS = ['name', 'address', 'phone'] as const;
+const CANONICAL_MEMBERSHIP_FIELDS = ['display_name'] as const;
+
+function byteLengthSql(backend: DbBackend, expression: string): string {
+  return backend === 'd1'
+    ? `length(CAST(COALESCE(${expression}, '') AS BLOB))`
+    : `octet_length(COALESCE(${expression}, ''))`;
+}
+
+function rowByteSumSql(
+  backend: DbBackend,
+  alias: string,
+  fields: readonly string[],
+): string {
+  return fields.map((field) => byteLengthSql(backend, `${alias}.${field}`)).join(' + ');
+}
+
+function canonicalStatsColumnsSql(backend: DbBackend): string {
+  const peopleBytes = rowByteSumSql(backend, 'p', CANONICAL_PERSON_FIELDS);
+  const householdBytes = rowByteSumSql(backend, 'h', CANONICAL_HOUSEHOLD_FIELDS);
+  const membershipBytes = rowByteSumSql(backend, 'hm', CANONICAL_MEMBERSHIP_FIELDS);
+  return `
+    (SELECT COUNT(*) FROM people p WHERE p.deleted_at IS NULL) AS people_count,
+    (SELECT COUNT(*) FROM households h WHERE h.deleted_at IS NULL) AS households_count,
+    (SELECT COUNT(*) FROM household_members hm) AS memberships_count,
+    (
+      (SELECT COALESCE(SUM(${peopleBytes}), 0) FROM people p WHERE p.deleted_at IS NULL)
+      + (SELECT COALESCE(SUM(${householdBytes}), 0) FROM households h WHERE h.deleted_at IS NULL)
+      + (SELECT COALESCE(SUM(${membershipBytes}), 0) FROM household_members hm)
+      + (SELECT COUNT(*) * 5 FROM household_members)
+    ) AS total_bytes
+  `;
+}
+
+function notesStatsColumnsSql(backend: DbBackend): string {
+  const notesBytes = rowByteSumSql(backend, 'n', ['author_email', 'body', 'created_at']);
+  const emailBytes = byteLengthSql(backend, 'p.email');
+  return `
+    COUNT(*) AS notes_count,
+    COALESCE(SUM(${notesBytes} + ${emailBytes}), 0) AS total_bytes
+  `;
+}
+
+function canonicalStatsCte(backend: DbBackend): string {
+  return `WITH export_stats AS (SELECT ${canonicalStatsColumnsSql(backend)})`;
+}
+
+function notesStatsCte(backend: DbBackend): string {
+  return `WITH export_stats AS (
+    SELECT ${notesStatsColumnsSql(backend)}
+    FROM person_notes n
+    JOIN people p ON p.id = n.person_id
+    WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL
+  )`;
+}
+
+const CANONICAL_GATE = `
+  export_stats.total_bytes <= ?
+  AND export_stats.people_count <= 5000
+  AND export_stats.households_count <= 5000
+  AND export_stats.memberships_count <= 5000
+`;
+
+const NOTES_GATE = `export_stats.total_bytes <= ? AND export_stats.notes_count <= 5000`;
+
+function safeText(expression: string, alias: string, maxCharacters: number): string {
+  return `CASE WHEN length(${expression}) <= ${maxCharacters} THEN ${expression} ELSE NULL END AS ${alias},
+             CASE WHEN ${expression} IS NULL OR length(${expression}) <= ${maxCharacters} THEN 1 ELSE 0 END AS ${alias}_valid`;
+}
+
+interface CanonicalSnapshotStats {
+  people_count: number;
+  households_count: number;
+  memberships_count: number;
+  total_bytes: number;
+}
+
+interface NotesSnapshotStats {
+  notes_count: number;
+  total_bytes: number;
+}
+
+function nonnegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function canonicalStats(value: unknown): CanonicalSnapshotStats | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const row = value as DbRow;
+  if (
+    !nonnegativeInteger(row.people_count)
+    || !nonnegativeInteger(row.households_count)
+    || !nonnegativeInteger(row.memberships_count)
+    || !nonnegativeInteger(row.total_bytes)
+  ) return null;
+  return {
+    people_count: row.people_count,
+    households_count: row.households_count,
+    memberships_count: row.memberships_count,
+    total_bytes: row.total_bytes,
+  };
+}
+
+function notesStats(value: unknown): NotesSnapshotStats | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const row = value as DbRow;
+  if (!nonnegativeInteger(row.notes_count) || !nonnegativeInteger(row.total_bytes)) return null;
+  return { notes_count: row.notes_count, total_bytes: row.total_bytes };
+}
 
 function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
@@ -29,6 +161,10 @@ function zeroOrOne(value: unknown): value is 0 | 1 {
 
 function membershipStatus(value: unknown): value is MembershipStatus {
   return (MEMBERSHIP_STATUSES as readonly unknown[]).includes(value);
+}
+
+function projectionsValid(row: DbRow, fields: readonly string[]): boolean {
+  return fields.every((field) => row[`${field}_valid`] === 1);
 }
 
 interface SafePerson {
@@ -138,25 +274,44 @@ function safeMembership(row: DbRow): SafeMembership | null {
 export async function loadCanonicalPeopleExport(
   db: AppDb,
   today: string,
+  backend: DbBackend,
 ): Promise<CanonicalPeopleExportSource> {
-  const [peopleResult, householdsResult, membershipsResult] = await db.batch<DbRow>([
-    db.prepare(`
-      SELECT id, first_name, last_name, display_name, email, phone, active, lang,
-             birthday, address, membership_status, joined_on
+  const statsSql = canonicalStatsColumnsSql(backend);
+  const statsCte = canonicalStatsCte(backend);
+  const [statsResult, peopleResult, householdsResult, membershipsResult] = await readSnapshotBatch<DbRow>(db, [
+    db.prepare(`SELECT ${statsSql}`),
+    db.prepare(`${statsCte}
+      SELECT p.id,
+             ${safeText('p.first_name', 'first_name', 80)},
+             ${safeText('p.last_name', 'last_name', 80)},
+             ${safeText('p.display_name', 'display_name', 80)},
+             ${safeText('p.email', 'email', 320)},
+             ${safeText('p.phone', 'phone', 40)},
+             p.active, p.lang,
+             ${safeText('p.birthday', 'birthday', 10)},
+             ${safeText('p.address', 'address', 200)},
+             p.membership_status,
+             ${safeText('p.joined_on', 'joined_on', 10)}
       FROM people
-      WHERE deleted_at IS NULL
-      ORDER BY id
+      AS p CROSS JOIN export_stats
+      WHERE p.deleted_at IS NULL AND ${CANONICAL_GATE}
+      ORDER BY p.id
       LIMIT 5001
-    `),
-    db.prepare(`
-      SELECT id, name, address, phone
-      FROM households
-      WHERE deleted_at IS NULL
-      ORDER BY id
+    `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes),
+    db.prepare(`${statsCte}
+      SELECT h.id,
+             ${safeText('h.name', 'name', 80)},
+             ${safeText('h.address', 'address', 200)},
+             ${safeText('h.phone', 'phone', 40)}
+      FROM households AS h CROSS JOIN export_stats
+      WHERE h.deleted_at IS NULL AND ${CANONICAL_GATE}
+      ORDER BY h.id
       LIMIT 5001
-    `),
-    db.prepare(`
-      SELECT hm.id, hm.household_id, hm.person_id, hm.display_name, hm.role, hm.is_primary,
+    `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes),
+    db.prepare(`${statsCte}
+      SELECT hm.id, hm.household_id, hm.person_id,
+             ${safeText('hm.display_name', 'display_name', 80)},
+             hm.role, hm.is_primary,
              CASE WHEN h.id IS NULL THEN 0 ELSE 1 END AS household_exists,
              CASE WHEN h.id IS NOT NULL AND h.deleted_at IS NULL THEN 1 ELSE 0 END AS household_live,
              CASE WHEN hm.person_id IS NULL OR p.id IS NOT NULL THEN 1 ELSE 0 END AS person_exists,
@@ -164,12 +319,21 @@ export async function loadCanonicalPeopleExport(
       FROM household_members hm
       LEFT JOIN households h ON h.id = hm.household_id
       LEFT JOIN people p ON p.id = hm.person_id
+      CROSS JOIN export_stats
+      WHERE ${CANONICAL_GATE}
       ORDER BY hm.id
       LIMIT 5001
-    `),
+    `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes),
   ]);
 
-  let integrityIssues = 0;
+  const stats = canonicalStats(statsResult.results[0]);
+  let integrityIssues = stats === null ? 1 : 0;
+  if (stats !== null && (
+    stats.people_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.households_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.memberships_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.total_bytes > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes
+  )) integrityIssues += 1;
   if (
     peopleResult.results.length >= EXPORT_SNAPSHOT_LIMIT
     || householdsResult.results.length >= EXPORT_SNAPSHOT_LIMIT
@@ -178,8 +342,14 @@ export async function loadCanonicalPeopleExport(
 
   const peopleById = new Map<number, SafePerson>();
   for (const row of peopleResult.results) {
+    const projectionIssue = !projectionsValid(row, CANONICAL_PERSON_PROJECTED_FIELDS);
+    if (projectionIssue) integrityIssues += 1;
     const person = safePerson(row);
-    if (!person || peopleById.has(person.id)) {
+    if (!person) {
+      if (!projectionIssue) integrityIssues += 1;
+      continue;
+    }
+    if (peopleById.has(person.id)) {
       integrityIssues += 1;
       continue;
     }
@@ -188,8 +358,14 @@ export async function loadCanonicalPeopleExport(
 
   const householdsById = new Map<number, SafeHousehold>();
   for (const row of householdsResult.results) {
+    const projectionIssue = !projectionsValid(row, CANONICAL_HOUSEHOLD_FIELDS);
+    if (projectionIssue) integrityIssues += 1;
     const household = safeHousehold(row);
-    if (!household || householdsById.has(household.id)) {
+    if (!household) {
+      if (!projectionIssue) integrityIssues += 1;
+      continue;
+    }
+    if (householdsById.has(household.id)) {
       integrityIssues += 1;
       continue;
     }
@@ -200,9 +376,11 @@ export async function loadCanonicalPeopleExport(
   const dependents: CanonicalPeopleExportDependent[] = [];
   const liveHouseholdsWithMembership = new Set<number>();
   for (const row of membershipsResult.results) {
+    const projectionIssue = !projectionsValid(row, CANONICAL_MEMBERSHIP_FIELDS);
+    if (projectionIssue) integrityIssues += 1;
     const membership = safeMembership(row);
     if (!membership) {
-      integrityIssues += 1;
+      if (!projectionIssue) integrityIssues += 1;
       continue;
     }
     if (!membership.householdExists) {
@@ -280,7 +458,8 @@ export async function loadCanonicalPeopleExport(
 }
 
 function notesSourceRow(row: DbRow): { note: PastoralNotesExportSourceNote; valid: boolean } {
-  const valid = positiveInteger(row.note_id)
+  const valid = projectionsValid(row, ['person_email', 'author_attribution', 'body', 'created_at'])
+    && positiveInteger(row.note_id)
     && positiveInteger(row.person_id)
     && typeof row.person_email === 'string'
     && typeof row.author_attribution === 'string'
@@ -300,23 +479,41 @@ function notesSourceRow(row: DbRow): { note: PastoralNotesExportSourceNote; vali
 }
 
 /** Load only live notes for live subjects; the serializer owns final byte validation. */
-export async function loadPastoralNotesExport(db: AppDb): Promise<PastoralNotesExportSource> {
-  const [result] = await db.batch<DbRow>([
+export async function loadPastoralNotesExport(
+  db: AppDb,
+  backend: DbBackend,
+): Promise<PastoralNotesExportSource> {
+  const statsColumns = notesStatsColumnsSql(backend);
+  const statsCte = notesStatsCte(backend);
+  const [statsResult, result] = await readSnapshotBatch<DbRow>(db, [
     db.prepare(`
-      SELECT n.id AS note_id, n.person_id,
-             CASE WHEN length(p.email) <= 320 THEN p.email ELSE NULL END AS person_email,
-             CASE WHEN length(n.author_email) <= 320 THEN n.author_email ELSE NULL END AS author_attribution,
-             CASE WHEN length(n.body) <= 4000 THEN n.body ELSE NULL END AS body,
-             CASE WHEN length(n.created_at) <= 64 THEN n.created_at ELSE NULL END AS created_at
+      SELECT ${statsColumns}
       FROM person_notes n
       JOIN people p ON p.id = n.person_id
       WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL
+    `),
+    db.prepare(`${statsCte}
+      SELECT n.id AS note_id, n.person_id,
+             ${safeText('p.email', 'person_email', 320)},
+             ${safeText('n.author_email', 'author_attribution', 320)},
+             ${safeText('n.body', 'body', 4000)},
+             ${safeText('n.created_at', 'created_at', 19)}
+      FROM person_notes n
+      JOIN people p ON p.id = n.person_id
+      CROSS JOIN export_stats
+      WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL AND ${NOTES_GATE}
       ORDER BY n.id
       LIMIT 5001
-    `),
+    `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes),
   ]);
   const mapped = result.results.map(notesSourceRow);
-  const integrityIssues = mapped.filter((row) => !row.valid).length;
+  const stats = notesStats(statsResult.results[0]);
+  let integrityIssues = mapped.filter((row) => !row.valid).length;
+  if (stats === null) integrityIssues += 1;
+  else if (
+    stats.notes_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.total_bytes > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes
+  ) integrityIssues += 1;
   return {
     notes: mapped.map((row) => row.note),
     ...(integrityIssues > 0 ? { integrityIssues } : {}),

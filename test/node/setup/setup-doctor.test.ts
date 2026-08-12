@@ -33,6 +33,7 @@ const SUPABASE_MIGRATIONS = [
   '0008_page_builder.sql',
   '0009_member_portal.sql',
   '0010_stripe_webhook_events.sql',
+  '0011_people_exports.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -260,7 +261,7 @@ describe('doctor database check', () => {
       ['database.d1-migrations-unavailable', 'info'], ['database.ok', 'info'],
     ]);
     const supabase = { ...baseManifest, preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
-    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => [SUPABASE_MIGRATIONS[9], SUPABASE_MIGRATIONS[8], SUPABASE_MIGRATIONS[0], 'ignore.example', ...SUPABASE_MIGRATIONS.slice(1, 8)] });
+    const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => [SUPABASE_MIGRATIONS.at(-1)!, SUPABASE_MIGRATIONS.at(-2)!, SUPABASE_MIGRATIONS[0], 'ignore.example', ...SUPABASE_MIGRATIONS.slice(1, -2)] });
     expect(pg).toEqual([expect.objectContaining({ code: 'database.ok', severity: 'info' })]);
   });
 

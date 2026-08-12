@@ -23,30 +23,42 @@ function isBoundedCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_STRUCTURAL_COUNT;
 }
 
-function isValidInput(input: unknown): input is AppendAuditEventInput {
-  if (!isPlainRecord(input)) return false;
-  if (input.kind !== AUDIT_EVENT_KIND) return false;
-  if (!Number.isSafeInteger(input.actorPersonId) || (input.actorPersonId as number) <= 0) return false;
-  if (!isPlainRecord(input.counts)) return false;
-  const keys = Object.keys(input.counts).sort();
-  if (keys.length !== 2 || keys[0] !== 'notes' || keys[1] !== 'people') return false;
-  return isBoundedCount(input.counts.people) && isBoundedCount(input.counts.notes);
+function snapshotInput(input: unknown): AppendAuditEventInput | null {
+  if (!isPlainRecord(input)) return null;
+  const kind = input.kind;
+  const actorPersonId = input.actorPersonId;
+  const countsInput = input.counts;
+  if (kind !== AUDIT_EVENT_KIND) return null;
+  if (!Number.isSafeInteger(actorPersonId) || (actorPersonId as number) <= 0) return null;
+  if (!isPlainRecord(countsInput)) return null;
+  const keys = Object.keys(countsInput).sort();
+  if (keys.length !== 2 || keys[0] !== 'notes' || keys[1] !== 'people') return null;
+  const people = countsInput.people;
+  const notes = countsInput.notes;
+  if (!isBoundedCount(people) || !isBoundedCount(notes)) return null;
+  return {
+    kind,
+    actorPersonId: actorPersonId as number,
+    counts: { people, notes },
+  };
 }
 
 /** Append one deliberately PII-free audit record. All failures are safe and fail closed. */
 export async function appendAuditEvent(db: AppDb, input: AppendAuditEventInput): Promise<void> {
+  let captured: AppendAuditEventInput | null;
   try {
-    if (!isValidInput(input)) throw new Error('audit_event_invalid');
+    captured = snapshotInput(input);
   } catch {
     throw new Error('audit_event_invalid');
   }
+  if (captured === null) throw new Error('audit_event_invalid');
 
-  const countsJson = JSON.stringify({ people: input.counts.people, notes: input.counts.notes });
+  const countsJson = JSON.stringify(captured.counts);
   try {
     const result = await db.prepare(`
       INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
       VALUES (?, ?, ?)
-    `).bind(input.actorPersonId, input.kind, countsJson).run();
+    `).bind(captured.actorPersonId, captured.kind, countsJson).run();
     if (result.meta.changes !== 1) throw new Error('audit_event_failed');
   } catch {
     throw new Error('audit_event_failed');

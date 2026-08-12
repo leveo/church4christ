@@ -6,11 +6,13 @@ import { buildCanonicalExportParts } from '../src/lib/peopleExport';
 import {
   loadCanonicalPeopleExport,
   loadPastoralNotesExport,
+  PEOPLE_EXPORT_SNAPSHOT_LIMITS,
 } from '../src/lib/peopleExportDb';
 import {
   buildPastoralNotesExport,
   PASTORAL_NOTES_EXPORT_HEADERS,
   PASTORAL_NOTES_EXPORT_LIMITS,
+  PASTORAL_NOTES_PERSON_REF_SCOPE,
   type PastoralNotesExportResult,
   type PastoralNotesExportSource,
 } from '../src/lib/pastoralNotesExport';
@@ -61,6 +63,7 @@ class TrackedStatement implements AppStatement {
 class TrackingDb implements AppDb {
   readonly prepared: PreparedCall[] = [];
   batchCalls = 0;
+  snapshotBatchCalls = 0;
   batchSizes: number[] = [];
 
   constructor(private readonly delegate: AppDb) {}
@@ -78,6 +81,11 @@ class TrackingDb implements AppDb {
       if (!(statement instanceof TrackedStatement)) throw new Error('untracked statement');
       return statement.raw();
     }));
+  }
+
+  async snapshotBatch<T = unknown>(statements: AppStatement[]): Promise<AppDbResult<T>[]> {
+    this.snapshotBatchCalls += 1;
+    return this.batch(statements);
   }
 }
 
@@ -173,6 +181,9 @@ describe('portable export migration', () => {
       '{"people":1.5,"notes":1}',
       '{"people":-1,"notes":1}',
       '{"people":1,"notes":5001}',
+      '{"people": 1,"notes":1}',
+      '{"notes":1,"people":1}',
+      '{"people":1,"people":1,"notes":1}',
     ]) {
       await expect(env.DB.prepare(`
         INSERT INTO audit_events (actor_person_id, action_kind, structural_counts_json)
@@ -192,21 +203,50 @@ describe('portable export migration', () => {
 });
 
 describe('loadCanonicalPeopleExport', () => {
+  it('falls back to D1 transactional batch when snapshotBatch is unavailable', async () => {
+    let batchCalls = 0;
+    const delegate: AppDb = env.DB;
+    const db: AppDb = {
+      prepare: (sql) => delegate.prepare(sql),
+      batch: async <T = unknown>(statements: AppStatement[]) => {
+        batchCalls += 1;
+        return delegate.batch<T>(statements);
+      },
+    };
+
+    await expect(loadCanonicalPeopleExport(db, EXPORT_TODAY, 'd1')).resolves.toEqual({
+      today: EXPORT_TODAY,
+      people: [],
+      dependents: [],
+    });
+    expect(batchCalls).toBe(1);
+    expect(db.snapshotBatch).toBeUndefined();
+  });
+
   it('takes one fixed read-only batch and returns only live safe canonical data, including inactive people and name-only dependents', async () => {
     await seedPortableExportFixture(env.DB);
     const db = new TrackingDb(env.DB);
 
-    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY);
+    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'd1');
 
     expect(source).toEqual(expectedCanonicalPeopleExportSource());
+    expect(db.snapshotBatchCalls).toBe(1);
     expect(db.batchCalls).toBe(1);
-    expect(db.batchSizes).toEqual([3]);
-    expect(db.prepared).toHaveLength(3);
-    expect(db.prepared.every((call) => call.values.length === 0)).toBe(true);
-    expect(db.prepared.every((call) => /^\s*SELECT\b/i.test(call.sql))).toBe(true);
-    expect(db.prepared.every((call) => /LIMIT\s+5001\b/i.test(call.sql))).toBe(true);
+    expect(db.batchSizes).toEqual([4]);
+    expect(db.prepared).toHaveLength(4);
+    expect(db.prepared[0].values).toEqual([]);
+    expect(db.prepared.slice(1).every((call) => call.values.length > 0)).toBe(true);
+    expect(db.prepared.every((call) => /^\s*(?:SELECT|WITH)\b/i.test(call.sql))).toBe(true);
+    expect(db.prepared[0].sql).toMatch(/total_bytes/i);
+    expect(db.prepared[0].sql).toMatch(/length\s*\(\s*CAST\s*\(/i);
+    expect(db.prepared[0].sql).toMatch(/COALESCE\s*\(\s*p\.lang\b/i);
+    expect(db.prepared.slice(1).every((call) => /LIMIT\s+5001\b/i.test(call.sql))).toBe(true);
+    expect(db.prepared.slice(1).every((call) => /CASE\s+WHEN\s+length\s*\(/i.test(call.sql))).toBe(true);
+    expect(db.prepared.slice(1).every((call) => call.values.includes(
+      PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes,
+    ))).toBe(true);
 
-    const peopleSql = db.prepared.find((call) => /FROM\s+people\b/i.test(call.sql))?.sql ?? '';
+    const peopleSql = db.prepared.find((call) => /SELECT\s+p\.id\b/i.test(call.sql))?.sql ?? '';
     for (const forbidden of [
       'role',
       'avatar_url',
@@ -246,7 +286,7 @@ describe('loadCanonicalPeopleExport', () => {
       env.DB.prepare("INSERT INTO household_members (household_id, person_id, display_name, role, is_primary) VALUES (10, 2, 'Deleted Member', 'adult', 0)"),
     ]);
 
-    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY);
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
 
     expect(result.status).toBe('repair_required');
@@ -264,7 +304,7 @@ describe('loadCanonicalPeopleExport', () => {
       env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (101, 10, NULL, 'Private Deleted Dependent', 'child', 0)"),
     ]);
 
-    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY);
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
 
     expect(source.integrityIssues).toBe(2);
@@ -290,8 +330,8 @@ describe('loadCanonicalPeopleExport', () => {
       env.DB.prepare("INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES (10, 10, 10, 'Alpha Primary', 'adult', 1)"),
     ]);
 
-    const first = buildCanonicalExportParts(await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY));
-    const second = buildCanonicalExportParts(await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY));
+    const first = buildCanonicalExportParts(await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1'));
+    const second = buildCanonicalExportParts(await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1'));
 
     expect(first).toEqual(second);
     expect(first.status).toBe('success');
@@ -315,16 +355,58 @@ describe('loadCanonicalPeopleExport', () => {
       FROM sequence
     `).run();
 
-    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY);
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
 
-    expect(source.people).toHaveLength(5001);
+    expect(source.people).toEqual([]);
     expect(source.integrityIssues).toBeGreaterThan(0);
     expect(result).toEqual({
       status: 'repair_required',
-      counts: { people: 201, dependents: 0, households: 0, issues: 1 },
+      counts: { people: 0, dependents: 0, households: 0, issues: 1 },
     });
     expect(JSON.stringify(result)).not.toContain('csv');
+  });
+
+  it('does not return an oversized canonical database payload or materialize its corrupt text', async () => {
+    const privatePrefix = 'PRIVATE-HUGE-CANONICAL-';
+    const chunk = 'x'.repeat(900_000);
+    for (let index = 1; index <= 10; index += 1) {
+      await env.DB.prepare(`
+        INSERT INTO people (id, display_name, email, address)
+        VALUES (?, ?, ?, ?)
+      `).bind(
+        index,
+        index === 1 ? privatePrefix : `Huge Person ${index}`,
+        `huge-${index}@example.com`,
+        chunk,
+      ).run();
+    }
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.integrityIssues).toBeGreaterThan(0);
+    expect(source.people).toEqual([]);
+    expect(JSON.stringify(source)).not.toContain(privatePrefix);
+    expect(result.status).toBe('repair_required');
+    expect(JSON.stringify(result)).not.toMatch(/csv|PRIVATE-HUGE|huge@example/i);
+  });
+
+  it('marks an individually oversized nullable canonical field without returning its raw text', async () => {
+    const privateAddress = `PRIVATE-OVERSIZED-ADDRESS-${'x'.repeat(1_000)}`;
+    await env.DB.prepare(`
+      INSERT INTO people (id, display_name, email, address)
+      VALUES (1, 'Safe Person', 'safe@example.com', ?)
+    `).bind(privateAddress).run();
+
+    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const result = buildCanonicalExportParts(source);
+
+    expect(source.people).toEqual([expect.objectContaining({ address: null })]);
+    expect(source.integrityIssues).toBeGreaterThan(0);
+    expect(JSON.stringify(source)).not.toContain(privateAddress);
+    expect(result.status).toBe('repair_required');
+    expect(JSON.stringify(result)).not.toMatch(/csv|PRIVATE-OVERSIZED-ADDRESS/i);
   });
 });
 
@@ -333,17 +415,22 @@ describe('pastoral notes export', () => {
     await seedPortableExportFixture(env.DB);
     const db = new TrackingDb(env.DB);
 
-    const source = await loadPastoralNotesExport(db);
+    const source = await loadPastoralNotesExport(db, 'd1');
     const result = buildPastoralNotesExport(source);
 
+    expect(db.snapshotBatchCalls).toBe(1);
     expect(db.batchCalls).toBe(1);
-    expect(db.batchSizes).toEqual([1]);
-    expect(db.prepared).toHaveLength(1);
+    expect(db.batchSizes).toEqual([2]);
+    expect(db.prepared).toHaveLength(2);
     expect(db.prepared[0].values).toEqual([]);
-    expect(db.prepared[0].sql).toMatch(/LIMIT\s+5001\b/i);
-    expect(db.prepared[0].sql).toMatch(/n\.deleted_at\s+IS\s+NULL/i);
-    expect(db.prepared[0].sql).toMatch(/p\.deleted_at\s+IS\s+NULL/i);
-    expect(db.prepared[0].sql).not.toMatch(/\b(role|super_admin|admin_areas|session_epoch|calendar_token|avatar_url)\b/i);
+    expect(db.prepared[0].sql).toMatch(/total_bytes/i);
+    expect(db.prepared[0].sql).toMatch(/length\s*\(\s*CAST\s*\(/i);
+    expect(db.prepared[1].values).toContain(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes);
+    expect(db.prepared[1].sql).toMatch(/LIMIT\s+5001\b/i);
+    expect(db.prepared[1].sql).toMatch(/CASE\s+WHEN\s+length\s*\(/i);
+    expect(db.prepared[1].sql).toMatch(/n\.deleted_at\s+IS\s+NULL/i);
+    expect(db.prepared[1].sql).toMatch(/p\.deleted_at\s+IS\s+NULL/i);
+    expect(db.prepared[1].sql).not.toMatch(/\b(role|super_admin|admin_areas|session_epoch|calendar_token|avatar_url)\b/i);
 
     expect(result.status).toBe('success');
     if (result.status !== 'success') throw new Error('expected success');
@@ -385,6 +472,125 @@ describe('pastoral notes export', () => {
     expect(forward).toEqual(reversed);
     expect(JSON.stringify(forward)).not.toContain('authorPersonId');
     expect(JSON.stringify(forward)).not.toContain('author_person_id');
+  });
+
+  it('documents person_ref as notes-export-local email/stable-key ordering, never a database or canonical-row join key', () => {
+    expect(PASTORAL_NOTES_PERSON_REF_SCOPE).toBe('notes_export_local');
+    const result = buildPastoralNotesExport({
+      notes: [
+        {
+          stableKey: 'internal-note-2',
+          personStableKey: 'database-person-999',
+          personEmail: 'zeta@example.com',
+          authorAttribution: 'Historical text only',
+          body: 'Zeta note',
+          createdAt: '2026-08-11 10:00:00',
+        },
+        {
+          stableKey: 'internal-note-1',
+          personStableKey: 'database-person-1',
+          personEmail: 'alpha@example.com',
+          authorAttribution: 'Historical text only',
+          body: 'Alpha note',
+          createdAt: '2026-08-11 09:00:00',
+        },
+      ],
+    });
+
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') throw new Error('expected success');
+    expect(result.csv).toContain('person-1,alpha@example.com');
+    expect(result.csv).toContain('person-2,zeta@example.com');
+    expect(result.csv).not.toMatch(/database-person|internal-note/);
+  });
+
+  it('snapshots hostile root, array, and note properties exactly once before serialization', () => {
+    const counts = new Map<PropertyKey, number>();
+    const once = <T>(key: PropertyKey, value: T, hostile: T): T => {
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      return count === 1 ? value : hostile;
+    };
+    const note = {} as Record<string, unknown>;
+    for (const [key, value] of Object.entries({
+      stableKey: 'note-safe',
+      personStableKey: 'person-safe',
+      personEmail: 'safe@example.com',
+      authorAttribution: 'Safe attribution',
+      body: 'Safe body',
+      createdAt: '2026-08-11 10:00:00',
+    })) {
+      Object.defineProperty(note, key, {
+        enumerable: true,
+        get: () => once(`note.${key}`, value, 'PRIVATE SECOND READ'),
+      });
+    }
+    const rows = new Proxy([note], {
+      get(target, key, receiver) {
+        if (key === Symbol.iterator) throw new Error('array iterator must not be used');
+        if (key === 'length') return once('array.length', 1, 1000);
+        if (key === '0') return once('array.0', note, { body: 'PRIVATE SECOND ROW' });
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const input = Object.defineProperty({}, 'notes', {
+      get: () => once('root.notes', rows, [{ body: 'PRIVATE SECOND NOTES' }]),
+    });
+
+    const result = buildPastoralNotesExport(input as PastoralNotesExportSource);
+
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') throw new Error('expected success');
+    expect(result.csv).toContain('Safe attribution,Safe body');
+    expect(JSON.stringify(result)).not.toContain('PRIVATE SECOND');
+    for (const value of counts.values()) expect(value).toBe(1);
+  });
+
+  it('maps proxy and getter failures to constant numeric repair results without leaking PII', () => {
+    const privateMessage = 'private.pastoral@example.com getter failure';
+    const hostileArray = new Proxy([], {
+      get: (_target, key) => {
+        if (key === 'length') throw new Error(privateMessage);
+        return undefined;
+      },
+    });
+    const hostileNote = Object.defineProperty({}, 'body', {
+      get: () => { throw new Error(privateMessage); },
+    });
+
+    for (const input of [{ notes: hostileArray }, { notes: [hostileNote] }]) {
+      const result = buildPastoralNotesExport(input as unknown as PastoralNotesExportSource);
+      expect(result).toEqual({
+        status: 'repair_required',
+        counts: { people: 0, notes: 0, issues: 1 },
+      });
+      expect(JSON.stringify(result)).not.toContain(privateMessage);
+    }
+  });
+
+  it.each([
+    ['invalid subject email', { personEmail: 'not-an-email' }],
+    ['timestamp with timezone suffix', { createdAt: '2026-08-11T10:00:00Z' }],
+    ['timestamp with fractional seconds', { createdAt: '2026-08-11 10:00:00.123' }],
+    ['impossible timestamp', { createdAt: '2026-02-30 10:00:00' }],
+  ])('fails closed for %s', (_label, overrides) => {
+    const result = buildPastoralNotesExport({
+      notes: [{
+        stableKey: 'note-invalid',
+        personStableKey: 'person-invalid',
+        personEmail: 'valid@example.com',
+        authorAttribution: 'historical free text',
+        body: 'private body',
+        createdAt: '2026-08-11 10:00:00',
+        ...overrides,
+      }],
+    });
+
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, notes: 1, issues: 1 },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private body|not-an-email|csv/i);
   });
 
   it('orders double-digit person references by assigned ordinal rather than lexicographically', () => {
@@ -479,15 +685,39 @@ describe('pastoral notes export', () => {
       FROM sequence
     `).run();
 
-    const source = await loadPastoralNotesExport(env.DB);
+    const source = await loadPastoralNotesExport(env.DB, 'd1');
     const result = buildPastoralNotesExport(source);
 
-    expect(source.notes).toHaveLength(5001);
+    expect(source.notes).toEqual([]);
     expect(result).toEqual({
       status: 'repair_required',
-      counts: { people: 0, notes: 5001, issues: 1 },
+      counts: { people: 0, notes: 0, issues: 1 },
     });
     expect(JSON.stringify(result)).not.toContain('csv');
+  });
+
+  it('does not return an oversized notes database payload or materialize its pastoral body', async () => {
+    const privatePrefix = 'PRIVATE-HUGE-PASTORAL-';
+    await env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Subject', 'subject@example.com')")
+      .run();
+    const chunk = 'x'.repeat(900_000);
+    for (let index = 1; index <= 12; index += 1) {
+      await env.DB.prepare(`
+        INSERT INTO person_notes (id, person_id, author_email, body, created_at)
+        VALUES (?, 1, 'historical@example.com', ?, '2026-08-11 00:00:00')
+      `).bind(index, index === 1 ? `${privatePrefix}${chunk}` : chunk).run();
+    }
+
+    const source = await loadPastoralNotesExport(env.DB, 'd1');
+    const result = buildPastoralNotesExport(source);
+
+    expect(source.integrityIssues).toBeGreaterThan(0);
+    expect(source.notes).toEqual([]);
+    expect(JSON.stringify(source)).not.toContain(privatePrefix);
+    expect(result).toEqual({
+      status: 'repair_required',
+      counts: { people: 0, notes: 0, issues: 1 },
+    });
   });
 });
 
@@ -604,5 +834,40 @@ describe('appendAuditEvent', () => {
     expect(error).toMatchObject({ message: 'audit_event_invalid' });
     expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateMessage);
     expect(db.prepare).not.toHaveBeenCalled();
+  });
+
+  it('captures every hostile audit property once and serializes only the plain validated snapshot', async () => {
+    await env.DB.prepare("INSERT INTO people (id, display_name, email) VALUES (1, 'Actor', 'actor@example.com')")
+      .run();
+    const counts = new Map<string, number>();
+    const once = <T>(key: string, value: T): T => {
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      if (count > 1) throw new Error(`PRIVATE SECOND READ ${key}`);
+      return value;
+    };
+    const structuralCounts = {};
+    Object.defineProperties(structuralCounts, {
+      people: { enumerable: true, get: () => once('counts.people', 1) },
+      notes: { enumerable: true, get: () => once('counts.notes', 2) },
+    });
+    const input = {};
+    Object.defineProperties(input, {
+      kind: { enumerable: true, get: () => once('kind', 'people_notes_export_generated') },
+      actorPersonId: { enumerable: true, get: () => once('actorPersonId', 1) },
+      counts: { enumerable: true, get: () => once('counts', structuralCounts) },
+    });
+
+    await appendAuditEvent(env.DB, input as never);
+
+    expect(Object.fromEntries(counts)).toEqual({
+      kind: 1,
+      actorPersonId: 1,
+      counts: 1,
+      'counts.people': 1,
+      'counts.notes': 1,
+    });
+    expect(await env.DB.prepare('SELECT structural_counts_json FROM audit_events')
+      .first<string>('structural_counts_json')).toBe('{"people":1,"notes":2}');
   });
 });

@@ -1,4 +1,6 @@
 import { csvCell } from './csv';
+import { isValidDateStr } from './dates';
+import { isEmail } from './validate';
 
 export const PASTORAL_NOTES_EXPORT_HEADERS = [
   'person_ref',
@@ -13,6 +15,9 @@ export const PASTORAL_NOTES_EXPORT_LIMITS = {
   maxCsvBytes: 10 * 1024 * 1024,
   maxIssues: 100,
 } as const;
+
+/** person_ref is scoped to one notes CSV and cannot be joined to DB or canonical-export IDs. */
+export const PASTORAL_NOTES_PERSON_REF_SCOPE = 'notes_export_local' as const;
 
 export interface PastoralNotesExportSourceNote {
   stableKey: string;
@@ -69,53 +74,66 @@ function repair(people: number, notes: number, issues: number): PastoralNotesExp
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isSqlTimestamp(value: string): boolean {
+  const match = /^(\d{4}-\d{2}-\d{2}) ([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/.exec(value);
+  return match !== null && isValidDateStr(match[1]);
 }
 
 function snapshot(input: unknown): { notes: SnapshotNote[]; issues: number; observed: number } {
-  if (!isRecord(input) || !Array.isArray(input.notes)) return { notes: [], issues: 1, observed: 0 };
-  const observed = input.notes.length;
+  if (!isPlainRecord(input)) return { notes: [], issues: 1, observed: 0 };
+  const notesInput = input.notes;
+  const integrityIssuesInput = input.integrityIssues;
+  if (!Array.isArray(notesInput)) return { notes: [], issues: 1, observed: 0 };
+  const observed = notesInput.length;
   if (observed > PASTORAL_NOTES_EXPORT_LIMITS.maxNotes) {
     return { notes: [], issues: 1, observed };
   }
 
   const notes: SnapshotNote[] = [];
   let issues = 0;
-  if (input.integrityIssues !== undefined) {
-    if (!Number.isSafeInteger(input.integrityIssues) || (input.integrityIssues as number) < 0) issues += 1;
-    else issues += Math.min(input.integrityIssues as number, PASTORAL_NOTES_EXPORT_LIMITS.maxIssues);
+  if (integrityIssuesInput !== undefined) {
+    if (!Number.isSafeInteger(integrityIssuesInput) || (integrityIssuesInput as number) < 0) issues += 1;
+    else issues += Math.min(integrityIssuesInput as number, PASTORAL_NOTES_EXPORT_LIMITS.maxIssues);
   }
-  for (const value of input.notes) {
-    if (!isRecord(value)) {
+  for (let index = 0; index < observed; index += 1) {
+    const value = notesInput[index];
+    if (!isPlainRecord(value)) {
       issues += 1;
       continue;
     }
-    const fields = [
-      value.stableKey,
-      value.personStableKey,
-      value.personEmail,
-      value.authorAttribution,
-      value.body,
-      value.createdAt,
-    ];
+    const stableKey = value.stableKey;
+    const personStableKey = value.personStableKey;
+    const personEmail = value.personEmail;
+    const authorAttribution = value.authorAttribution;
+    const body = value.body;
+    const createdAt = value.createdAt;
+    const fields = [stableKey, personStableKey, personEmail, authorAttribution, body, createdAt];
     if (!fields.every((field) => typeof field === 'string')) {
       issues += 1;
       continue;
     }
     const note: SnapshotNote = {
-      stableKey: value.stableKey as string,
-      personStableKey: value.personStableKey as string,
-      personEmail: value.personEmail as string,
-      authorAttribution: value.authorAttribution as string,
-      body: value.body as string,
-      createdAt: value.createdAt as string,
+      stableKey: stableKey as string,
+      personStableKey: personStableKey as string,
+      personEmail: personEmail as string,
+      authorAttribution: authorAttribution as string,
+      body: body as string,
+      createdAt: createdAt as string,
     };
+    const normalizedEmail = identity(note.personEmail);
+    const normalizedTimestamp = normalized(note.createdAt.trim());
     if (
       note.stableKey.trim() === ''
       || note.personStableKey.trim() === ''
-      || identity(note.personEmail) === ''
-      || note.createdAt.trim() === ''
+      || normalizedEmail.length > 254
+      || !isEmail(normalizedEmail)
+      || !isSqlTimestamp(normalizedTimestamp)
     ) {
       issues += 1;
       continue;
