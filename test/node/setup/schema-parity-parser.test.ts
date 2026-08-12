@@ -166,12 +166,19 @@ describe('final D1 schema parser', () => {
     ]);
   });
 
-  it('models every actual D1 trigger, including guarded service-attendance bodies', () => {
+  it('models every actual D1 trigger, including guarded service-attendance and newcomer bodies', () => {
     const schema = finalSchema();
     expect([...schema.triggers.keys()]).toEqual([
       'service_checkin_links_no_overlap_insert',
       'service_checkin_links_close_only',
       'service_checkin_links_no_delete',
+      'newcomer_fields_boundary_insert',
+      'newcomer_fields_boundary_update',
+      'newcomer_fields_core_delete',
+      'newcomer_field_options_custom_insert',
+      'newcomer_field_options_custom_update',
+      'newcomer_answers_custom_insert',
+      'newcomer_answers_custom_update',
     ]);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')).toMatchObject({
       table: 'service_type_checkin_events',
@@ -184,6 +191,30 @@ describe('final D1 schema parser', () => {
       .toMatch(/^\( new \. ends_on is null or new \. ends_on > new \. starts_on \) and \( exists \(/);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')?.bodyGuard)
       .toMatch(/^exists \( select 1 from service_type_checkin_events existing where /);
+    expect(schema.triggers.get('newcomer_fields_boundary_insert')).toMatchObject({
+      table: 'newcomer_fields',
+      timing: 'before',
+      event: 'insert',
+      abortMessage: 'newcomer_field_boundary',
+    });
+    expect(schema.triggers.get('newcomer_fields_boundary_insert')?.semanticGuard)
+      .toMatch(/^not \( \( new \. id = 1 and new \. key = 'name'/);
+    expect(schema.triggers.get('newcomer_fields_boundary_update')?.semanticGuard)
+      .toBe(schema.triggers.get('newcomer_fields_boundary_insert')?.semanticGuard);
+    expect(schema.triggers.get('newcomer_fields_core_delete')).toMatchObject({
+      table: 'newcomer_fields',
+      timing: 'before',
+      event: 'delete',
+      semanticGuard: 'old . fixed = 1',
+      abortMessage: 'newcomer_field_immutable',
+    });
+    expect(schema.triggers.get('newcomer_answers_custom_insert')).toMatchObject({
+      table: 'newcomer_answers',
+      timing: 'before',
+      event: 'insert',
+      semanticGuard: 'exists ( select 1 from newcomer_fields where id = new . field_id and fixed = 1 )',
+      abortMessage: 'newcomer_answers_custom_only',
+    });
   });
 
   it('fails closed on unsupported trigger bodies and duplicate trigger names', () => {
