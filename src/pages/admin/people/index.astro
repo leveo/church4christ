@@ -47,7 +47,12 @@ const colspan = hasPeople ? 7 : 5;
     <div class="flex flex-wrap items-center justify-end gap-2">
       {
         hasPeople && canManagePeople && (
-          <a href="/admin/people/import" class={btn}>{t(lang, 'admin.peopleImport.title')}</a>
+          <>
+            <a href="/admin/people/import/map" class={btnSecondary}>
+              {t(lang, 'admin.peopleImportMapping.entry')}
+            </a>
+            <a href="/admin/people/import" class={btn}>{t(lang, 'admin.peopleImport.title')}</a>
+          </>
         )
       }
       {canManagePeople && <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>}
