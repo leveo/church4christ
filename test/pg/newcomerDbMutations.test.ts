@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { AppDb } from '../../src/lib/appDb';
+import type { AppDb, AppStatement } from '../../src/lib/appDb';
 import {
   NewcomerConflictError,
   NewcomerEmailRequiredError,
@@ -38,7 +38,22 @@ function runtime(ids: string[], now = '2026-08-12 18:00:00') {
 
 describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () => {
   const sql = hasPg ? pgClient() : (null as never);
+  const observer = hasPg ? pgClient() : (null as never);
   let db: AppDb;
+
+  async function waitForBlockedTargetMutation() {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const [state] = await observer.unsafe<{ blocked: number }[]>(`
+        SELECT COUNT(*)::int AS blocked FROM pg_stat_activity
+        WHERE datname=current_database() AND wait_event_type='Lock'
+          AND query LIKE '%UPDATE people AS person SET updated_at=person.updated_at%'
+      `);
+      if (state.blocked > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error('target mutation did not reach the PostgreSQL lock barrier');
+  }
 
   beforeAll(async () => {
     await resetSchema(sql);
@@ -71,7 +86,7 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
     `);
   });
 
-  afterAll(async () => { await sql?.end(); });
+  afterAll(async () => { await Promise.all([sql?.end(), observer?.end()]); });
 
   it('uses the same segment-safe scoped assignee grant and canonical CAS activity', async () => {
     await expect(assignNewcomer(
@@ -199,7 +214,7 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       '74000000-0000-4000-8000-000000000011',
       '74000000-0000-4000-8000-000000000012',
     ]));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForBlockedTargetMutation();
     release();
     await blocker;
     await expect(linkAttempt).rejects.toBeInstanceOf(NewcomerConflictError);
@@ -210,6 +225,37 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       WHERE id='71000000-0000-4000-8000-000000000001'
     `);
     expect(state).toEqual({ version: 0, linked_person_id: null, activities: 0 });
+
+    await sql.unsafe(`UPDATE people SET phone='+1 (312) 555-0131',deleted_at=NULL WHERE id=9903`);
+    let releaseDelete!: () => void;
+    let deleteLocked!: () => void;
+    const releaseDeletePromise = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    const deleteLockedPromise = new Promise<void>((resolve) => { deleteLocked = resolve; });
+    const deleteBlocker = sql.begin(async (tx) => {
+      await tx.unsafe(`UPDATE people SET deleted_at='2026-08-12 18:00:00' WHERE id=9903`);
+      deleteLocked();
+      await releaseDeletePromise;
+    });
+    await deleteLockedPromise;
+    const deletedLinkAttempt = linkNewcomerPerson(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, personId: 9903,
+    }, runtime([
+      '74000000-0000-4000-8000-000000000013',
+      '74000000-0000-4000-8000-000000000014',
+    ]));
+    await waitForBlockedTargetMutation();
+    releaseDelete();
+    await deleteBlocker;
+    await expect(deletedLinkAttempt).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [deletedState] = await sql.unsafe<{
+      version: number; linked_person_id: number | null; activities: number;
+    }[]>(`
+      SELECT submission.version,submission.linked_person_id,
+        (SELECT COUNT(*)::int FROM newcomer_activity WHERE submission_id=submission.id) AS activities
+      FROM newcomer_submissions submission
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    expect(deletedState).toEqual({ version: 0, linked_person_id: null, activities: 0 });
   });
 
   it('rechecks a locked assignee after a concurrent Newcomers grant revocation', async () => {
@@ -229,7 +275,7 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       '74100000-0000-4000-8000-000000000011',
       '74100000-0000-4000-8000-000000000012',
     ]));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForBlockedTargetMutation();
     release();
     await blocker;
     await expect(assignmentAttempt).rejects.toBeInstanceOf(NewcomerConflictError);
@@ -288,6 +334,10 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
           '2026-08-10','staff',1,0,'2026-08-12 09:00:00','2026-08-12 09:00:00'),
         ('76000000-0000-4000-8000-000000000002','Deleted Identity','pg-deleted@example.test',
           '+13125550142','zh','2026-08-10','staff',1,0,'2026-08-12 09:00:00','2026-08-12 09:00:00');
+      INSERT INTO newcomer_submissions
+        (id,name,email,phone,locale,visit_date,source,status_id,linked_person_id,version,created_at,updated_at)
+        VALUES ('76000000-0000-4000-8000-000000000003','Phone Linked',NULL,'+13125550143','en',
+          '2026-08-10','staff',1,9903,0,'2026-08-12 09:00:00','2026-08-12 09:00:00');
       INSERT INTO people (id,display_name,email,active,deleted_at)
         VALUES (9910,'Deleted Identity','pg-deleted@example.test',1,'2026-08-01 10:00:00');
       INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at) VALUES
@@ -303,6 +353,18 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       '76000000-0000-4000-8000-000000000011',
       '76000000-0000-4000-8000-000000000012',
     ]))).rejects.toBeInstanceOf(NewcomerEmailRequiredError);
+    await expect(createNewcomerVisitor(db, peopleAdmin, {
+      submissionId: '76000000-0000-4000-8000-000000000001', expectedVersion: 1,
+    }, runtime([
+      '76000000-0000-4000-8000-000000000015',
+      '76000000-0000-4000-8000-000000000016',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    await expect(createNewcomerVisitor(db, peopleAdmin, {
+      submissionId: '76000000-0000-4000-8000-000000000003', expectedVersion: 0,
+    }, runtime([
+      '76000000-0000-4000-8000-000000000017',
+      '76000000-0000-4000-8000-000000000018',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
     await expect(createNewcomerVisitor(db, peopleAdmin, {
       submissionId: '76000000-0000-4000-8000-000000000002', expectedVersion: 0,
     }, runtime([
@@ -321,6 +383,11 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       { version: 0, last_mutation_id: null, linked_person_id: null },
       { version: 0, last_mutation_id: null, linked_person_id: null },
     ]);
+    const [linkedPhone] = await sql.unsafe<{
+      version: number; last_mutation_id: string | null; linked_person_id: number | null;
+    }[]>(`SELECT version,last_mutation_id,linked_person_id FROM newcomer_submissions
+      WHERE id='76000000-0000-4000-8000-000000000003'`);
+    expect(linkedPhone).toEqual({ version: 0, last_mutation_id: null, linked_person_id: 9903 });
     const [deleted] = await sql.unsafe<{
       deleted_at: string; active: number; role: string; super_admin: number; admin_areas: string;
     }[]>(`SELECT deleted_at,active,role,super_admin,admin_areas FROM people WHERE id=9910`);
@@ -333,5 +400,268 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       SELECT body FROM newcomer_notes WHERE id='76000000-0000-4000-8000-000000000010'
     `);
     expect(privateNote.body).toBe('Private newcomer note');
+  });
+
+  it('matches D1 proof semantics for text limits, status state, link no-op, and same-second visitors', async () => {
+    await sql.unsafe(`
+      INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+        VALUES (8,'short_text','text',1,1,8,0);
+    `);
+    await expect(createNewcomerSubmission(db, null, 'public', {
+      name: 'PG Text Too Long', email: 'pg-text@example.test', phone: null, locale: 'en',
+      visitDate: '2026-08-11', serviceTypeId: null, contactConsent: true,
+      answers: [{ fieldId: 8, value: 'x'.repeat(501) }],
+    }, runtime([
+      '77000000-0000-4000-8000-000000000001',
+      '77000000-0000-4000-8000-000000000002',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [textResidue] = await sql.unsafe<{ count: number }[]>(`
+      SELECT COUNT(*)::int AS count FROM newcomer_submissions
+      WHERE id='77000000-0000-4000-8000-000000000001'
+    `);
+    expect(textResidue.count).toBe(0);
+    await sql.unsafe(`UPDATE newcomer_fields SET required=0 WHERE id=8`);
+
+    await sql.unsafe(`UPDATE newcomer_submissions
+      SET closed_at='2026-08-01 10:00:00' WHERE id='71000000-0000-4000-8000-000000000001'`);
+    await expect(changeNewcomerStatus(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, statusId: 4,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000011',
+      '77000000-0000-4000-8000-000000000012',
+    ], '2026-08-12 18:10:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+    await sql.unsafe(`UPDATE newcomer_submissions SET closed_at=NULL
+      WHERE id='71000000-0000-4000-8000-000000000001'`);
+    await changeNewcomerStatus(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, statusId: 4,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000013',
+      '77000000-0000-4000-8000-000000000014',
+    ], '2026-08-12 18:11:00'));
+    await changeNewcomerStatus(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 1, statusId: 5,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000015',
+      '77000000-0000-4000-8000-000000000016',
+    ], '2026-08-12 18:12:00'));
+    let [status] = await sql.unsafe<{ status_id: number; closed_at: string | null }[]>(`
+      SELECT status_id,closed_at FROM newcomer_submissions
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    expect(status).toEqual({ status_id: 5, closed_at: '2026-08-12 18:11:00' });
+    await changeNewcomerStatus(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 2, statusId: 1,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000017',
+      '77000000-0000-4000-8000-000000000018',
+    ], '2026-08-12 18:13:00'));
+    [status] = await sql.unsafe(`SELECT status_id,closed_at FROM newcomer_submissions
+      WHERE id='71000000-0000-4000-8000-000000000001'`);
+    expect(status).toEqual({ status_id: 1, closed_at: null });
+
+    await sql.unsafe(`UPDATE people SET phone='+1 (312) 555-0131' WHERE id=9903`);
+    await linkNewcomerPerson(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 3, personId: 9903,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000019',
+      '77000000-0000-4000-8000-000000000020',
+    ]));
+    const [beforeLinkRetry] = await sql.unsafe<{ version: number; last_mutation_id: string }[]>(`
+      SELECT version,last_mutation_id FROM newcomer_submissions
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    await expect(linkNewcomerPerson(db, worker, {
+      submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 4, personId: 9903,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000021',
+      '77000000-0000-4000-8000-000000000022',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [afterLinkRetry] = await sql.unsafe<{ version: number; last_mutation_id: string }[]>(`
+      SELECT version,last_mutation_id FROM newcomer_submissions
+      WHERE id='71000000-0000-4000-8000-000000000001'
+    `);
+    expect(afterLinkRetry).toEqual(beforeLinkRetry);
+
+    await sql.unsafe(`INSERT INTO newcomer_submissions
+      (id,name,email,phone,locale,visit_date,source,status_id,version,created_at,updated_at) VALUES
+      ('77000000-0000-4000-8000-000000000031','Same Second','pg-same-second@example.test',
+        '+13125550155','en','2026-08-10','staff',1,0,'2026-08-12 09:00:00','2026-08-12 09:00:00')`);
+    const peopleAdmin = { ...worker, id: 9904, email: 'pg-people-admin@example.test', role: 'admin' as const,
+      isAdmin: true, adminAreas: ['newcomers', 'people'] as SessionUser['adminAreas'] };
+    await createNewcomerVisitor(db, peopleAdmin, {
+      submissionId: '77000000-0000-4000-8000-000000000031', expectedVersion: 0,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000032',
+      '77000000-0000-4000-8000-000000000033',
+    ], '2026-08-12 18:20:00'));
+    await expect(createNewcomerVisitor(db, peopleAdmin, {
+      submissionId: '77000000-0000-4000-8000-000000000031', expectedVersion: 1,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000034',
+      '77000000-0000-4000-8000-000000000035',
+    ], '2026-08-12 18:20:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [visitorProof] = await sql.unsafe<{ version: number; people: number; activity: number; markers: number }[]>(`
+      SELECT submission.version,
+        (SELECT COUNT(*)::int FROM people WHERE email='pg-same-second@example.test') AS people,
+        (SELECT COUNT(*)::int FROM newcomer_activity WHERE submission_id=submission.id) AS activity,
+        (SELECT COUNT(*)::int FROM people WHERE calendar_token IS NOT NULL) AS markers
+      FROM newcomer_submissions submission
+      WHERE submission.id='77000000-0000-4000-8000-000000000031'
+    `);
+    expect(visitorProof).toEqual({ version: 1, people: 1, activity: 1, markers: 0 });
+
+    await sql.unsafe(`
+      UPDATE people SET calendar_token='77000000-0000-4000-8000-000000000041' WHERE id=9903;
+      INSERT INTO newcomer_submissions
+        (id,name,email,locale,visit_date,source,status_id,version,created_at,updated_at)
+      VALUES ('77000000-0000-4000-8000-000000000040','Marker Collision',
+        'pg-marker-collision@example.test','en','2026-08-10','staff',1,0,
+        '2026-08-12 09:00:00','2026-08-12 09:00:00');
+    `);
+    await expect(createNewcomerVisitor(db, peopleAdmin, {
+      submissionId: '77000000-0000-4000-8000-000000000040', expectedVersion: 0,
+    }, runtime([
+      '77000000-0000-4000-8000-000000000041',
+      '77000000-0000-4000-8000-000000000042',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    const [collisionProof] = await sql.unsafe<{
+      version: number; last_mutation_id: string | null; linked_person_id: number | null; people: number;
+    }[]>(`
+      SELECT submission.version,submission.last_mutation_id,submission.linked_person_id,
+        (SELECT COUNT(*)::int FROM people WHERE email='pg-marker-collision@example.test') AS people
+      FROM newcomer_submissions submission
+      WHERE submission.id='77000000-0000-4000-8000-000000000040'
+    `);
+    expect(collisionProof).toEqual({
+      version: 0, last_mutation_id: null, linked_person_id: null, people: 0,
+    });
+  });
+
+  it('rolls the complete PostgreSQL snapshot back at every statement boundary for every mutation', async () => {
+    const failingDb = (statementIndex: number): AppDb => ({
+      prepare(sqlText: string) { return db.prepare(sqlText); },
+      batch(statements: AppStatement[]) {
+        const injected = statements.slice();
+        injected[statementIndex] = db.prepare(`
+          INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (0,'en','forced failure')
+        `);
+        return db.batch(injected);
+      },
+    });
+    const peopleAdmin = { ...worker, id: 9904, email: 'pg-people-admin@example.test', role: 'admin' as const,
+      isAdmin: true, adminAreas: ['newcomers', 'people'] as SessionUser['adminAreas'] };
+    await sql.unsafe(`INSERT INTO newcomer_fields
+      (id,key,type,required,active,sort,fixed) VALUES (8,'fault_answer','text',1,1,8,0)`);
+    const reset = async (needsSubmission: boolean) => {
+      await sql.unsafe(`
+        TRUNCATE newcomer_activity,newcomer_notes,newcomer_answers,newcomer_submissions RESTART IDENTITY CASCADE;
+        DELETE FROM people WHERE id NOT IN (9901,9902,9903,9904);
+        UPDATE people SET phone=CASE WHEN id=9903 THEN '+1 (312) 555-0131' ELSE phone END,
+          active=1,deleted_at=NULL;
+      `);
+      if (needsSubmission) {
+        await sql.unsafe(`INSERT INTO newcomer_submissions
+          (id,name,email,phone,locale,visit_date,source,status_id,version,created_at,updated_at)
+          VALUES ('71000000-0000-4000-8000-000000000001','PG Guest','pg-guest@example.test',
+            '+13125550131','en','2026-08-10','staff',1,0,
+            '2026-08-12 09:00:00','2026-08-12 09:00:00')`);
+      }
+    };
+    const snapshot = async () => ({
+      submissions: await sql.unsafe(`SELECT id,status_id,assignee_person_id,linked_person_id,
+        next_follow_up_date,closed_at,version,last_mutation_id,updated_at
+        FROM newcomer_submissions ORDER BY id`),
+      answers: await sql.unsafe(`SELECT submission_id,field_id,value
+        FROM newcomer_answers ORDER BY submission_id,field_id`),
+      notes: await sql.unsafe(`SELECT id,submission_id,author_person_id,body,created_at
+        FROM newcomer_notes ORDER BY id`),
+      activity: await sql.unsafe(`SELECT id,submission_id,actor_person_id,kind,metadata_json,created_at
+        FROM newcomer_activity ORDER BY id`),
+      people: await sql.unsafe(`SELECT id,email,calendar_token,active,deleted_at,admin_areas
+        FROM people WHERE id>=9900 ORDER BY id`),
+    });
+    const cases: Array<{
+      name: string; statements: number; needsSubmission: boolean; invoke: (attemptDb: AppDb) => Promise<unknown>;
+    }> = [
+      {
+        name: 'create', statements: 7, needsSubmission: false,
+        invoke: (attemptDb) => createNewcomerSubmission(attemptDb, null, 'public', {
+          name: 'PG Fault Create', email: 'pg-fault@example.test', phone: null, locale: 'en',
+          visitDate: '2026-08-11', serviceTypeId: null, contactConsent: true,
+          answers: [{ fieldId: 8, value: 'Safe' }],
+        }, runtime([
+          '7d100000-0000-4000-8000-000000000001',
+          '7d100000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'assignment', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => assignNewcomer(attemptDb, worker, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
+          assigneePersonId: 9902,
+        }, runtime([
+          '7d200000-0000-4000-8000-000000000001',
+          '7d200000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'status', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => changeNewcomerStatus(attemptDb, worker, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, statusId: 4,
+        }, runtime([
+          '7d300000-0000-4000-8000-000000000001',
+          '7d300000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'follow-up', statements: 4, needsSubmission: true,
+        invoke: (attemptDb) => scheduleNewcomerFollowUp(attemptDb, worker, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
+          followUpDate: '2026-08-30',
+        }, runtime([
+          '7d400000-0000-4000-8000-000000000001',
+          '7d400000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'note', statements: 4, needsSubmission: true,
+        invoke: (attemptDb) => addNewcomerNote(attemptDb, worker, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
+          body: 'PG must roll back',
+        }, runtime([
+          '7d500000-0000-4000-8000-000000000001',
+          '7d500000-0000-4000-8000-000000000002',
+          '7d500000-0000-4000-8000-000000000003',
+        ])),
+      },
+      {
+        name: 'link', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => linkNewcomerPerson(attemptDb, worker, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0, personId: 9903,
+        }, runtime([
+          '7d600000-0000-4000-8000-000000000001',
+          '7d600000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'visitor', statements: 6, needsSubmission: true,
+        invoke: (attemptDb) => createNewcomerVisitor(attemptDb, peopleAdmin, {
+          submissionId: '71000000-0000-4000-8000-000000000001', expectedVersion: 0,
+        }, runtime([
+          '7d700000-0000-4000-8000-000000000001',
+          '7d700000-0000-4000-8000-000000000002',
+        ])),
+      },
+    ];
+    for (const candidate of cases) {
+      for (let index = 0; index < candidate.statements; index += 1) {
+        await reset(candidate.needsSubmission);
+        const before = await snapshot();
+        const error = await candidate.invoke(failingDb(index)).catch((caught: unknown) => caught);
+        expect(error, `${candidate.name} statement ${index}`).toBeInstanceOf(NewcomerConflictError);
+        expect((error as Error).message).not.toContain('pg-guest@example.test');
+        expect(await snapshot(), `${candidate.name} statement ${index}`).toEqual(before);
+      }
+    }
   });
 });
