@@ -21,6 +21,13 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
 const EXPECTED_CI_WORKFLOW_SHA256 =
   '67eacba244497232d24acde7a4fa25332d9f0ad710f01cab5a1106d1a450381f';
 
+function normalizeWorkflowSource(source: string): string {
+  return source.replaceAll('\r\n', '\n');
+}
+
+const workflowSource = readFileSync('.github/workflows/ci.yml', 'utf8');
+const workflow = normalizeWorkflowSource(workflowSource);
+
 // Any CI workflow modification must be reviewed and this hash updated deliberately.
 function validateCiWorkflow(workflow: string): void {
   expect(createHash('sha256').update(workflow.replaceAll('\r\n', '\n')).digest('hex')).toBe(
@@ -180,8 +187,6 @@ describe('test runner hardening', () => {
   });
 
   it('makes documentation and both non-skipping Postgres reports mandatory in CI', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
-
     expect(workflow).toContain('npm run docs:check');
     expect(workflow).toContain('test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts');
     expect(workflow).toContain('test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json');
@@ -192,8 +197,6 @@ describe('test runner hardening', () => {
   });
 
   it('uses the current major versions of the checkout and Node setup actions', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
-
     expect(workflow).toContain('actions/checkout@v7');
     expect(workflow).toContain('actions/setup-node@v7');
     expect(workflow).not.toContain('actions/checkout@v4');
@@ -201,7 +204,6 @@ describe('test runner hardening', () => {
   });
 
   it('uses the exact Node version that satisfies the package engine lower bound', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
     const exactVersion = readFileSync('.nvmrc', 'utf8').trim();
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
       engines: { node: string };
@@ -217,7 +219,6 @@ describe('test runner hardening', () => {
   });
 
   it('deduplicates pull request runs without cancelling main pushes', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
     const concurrencyIndex = workflow.indexOf('\nconcurrency:\n');
     const jobsIndex = workflow.indexOf('\njobs:\n');
     const cancelEvent = workflow.match(
@@ -233,26 +234,78 @@ describe('test runner hardening', () => {
   });
 
   it('limits the build-test job to thirty minutes', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
-
     expect(workflow).toContain(
       'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
     );
   });
 
   it('matches the exact reviewed CI workflow source', () => {
-    validateCiWorkflow(readFileSync('.github/workflows/ci.yml', 'utf8'));
+    validateCiWorkflow(workflow);
   });
 
   it('accepts the exact workflow source with CRLF line endings', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
-    const crlfFixture = workflow.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
+    const crlfFixture = workflow.replaceAll('\n', '\r\n');
 
     expect(() => validateCiWorkflow(crlfFixture)).not.toThrow();
   });
 
+  it.each([
+    [
+      'Setup Node multiline contract',
+      (fixture: string) =>
+        expect(fixture).toContain(
+          'uses: actions/setup-node@v7\n        with:\n          node-version-file: .nvmrc\n          cache: npm',
+        ),
+    ],
+    [
+      'workflow concurrency location',
+      (fixture: string) => expect(fixture.indexOf('\nconcurrency:\n')).toBeGreaterThan(-1),
+    ],
+    [
+      'job timeout multiline contract',
+      (fixture: string) =>
+        expect(fixture).toContain(
+          'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
+        ),
+    ],
+    [
+      'folded comment mutation',
+      (fixture: string) =>
+        expect(
+          fixture.replace(
+            `        run: >-\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+            `        run: >-\n          # disabled by folded content\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+          ),
+        ).not.toBe(fixture),
+    ],
+    [
+      'folded blank-line mutation',
+      (fixture: string) =>
+        expect(
+          fixture.replace(
+            `        run: >-\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+            `        run: >-\n\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+          ),
+        ).not.toBe(fixture),
+    ],
+    [
+      'step order mutation',
+      (fixture: string) =>
+        expect(
+          fixture.replace(
+            '      - name: Build design tokens\n        run: npm run tokens\n\n      - name: Check token contrast + no hardcoded values\n        run: npm run tokens:check',
+            '      - name: Check token contrast + no hardcoded values\n        run: npm run tokens:check\n\n      - name: Build design tokens\n        run: npm run tokens',
+          ),
+        ).not.toBe(fixture),
+    ],
+  ])('keeps %s portable with a raw CRLF workflow source', (_label, assertContract) => {
+    const rawCrlfWorkflow = workflow.replaceAll('\n', '\r\n');
+
+    assertContract(normalizeWorkflowSource(rawCrlfWorkflow));
+  });
+
   it('does not contain deployment, release, or publish commands', () => {
-    const executableSource = readFileSync('.github/workflows/ci.yml', 'utf8')
+    const executableSource = workflow
       .split('\n')
       .filter((line) => !line.trimStart().startsWith('#'))
       .join('\n');
@@ -394,7 +447,6 @@ describe('test runner hardening', () => {
       (workflow: string) => workflow.replace('        run: npm test', '        run: npm test && npm publish'),
     ],
   ])('rejects CI workflow mutation: %s', (_label, mutate) => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
     const mutated = mutate(workflow);
 
     expect(mutated).not.toBe(workflow);
