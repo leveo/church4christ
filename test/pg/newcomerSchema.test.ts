@@ -279,7 +279,7 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
       "UPDATE newcomer_statuses SET category='closed' WHERE id=1",
       "UPDATE newcomer_statuses SET category='closed' WHERE id=90",
       "DELETE FROM newcomer_statuses WHERE id=1",
-      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (1,'new','open',1,1,1) ON CONFLICT (id) DO UPDATE SET sort=EXCLUDED.sort",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (1,'new','open',1,1,1) ON CONFLICT (id) DO UPDATE SET key='renamed_new'",
       "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,1,0) ON CONFLICT (key) DO UPDATE SET id=EXCLUDED.id",
     ]) await rejects(statement);
     await sql.unsafe("UPDATE newcomer_statuses SET sort=91,active=0 WHERE id=90");
@@ -482,7 +482,7 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
         VALUES ('76200000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9861,'assigned');
     `);
 
-    await rejects('DELETE FROM newcomer_statuses WHERE id=3', PG_RESTRICT_CODES);
+    await rejects('DELETE FROM newcomer_statuses WHERE id=3', 'P0001');
     await rejects('DELETE FROM newcomer_fields WHERE id=195', PG_RESTRICT_CODES);
     await rejects('DELETE FROM people WHERE id=9863', PG_RESTRICT_CODES);
     const [retained] = await sql.unsafe<Record<string, number>[]>(`
