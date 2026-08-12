@@ -70,6 +70,9 @@ CREATE OR REPLACE FUNCTION service_checkin_links_no_overlap_insert_fn()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.ends_on IS NULL OR NEW.ends_on > NEW.starts_on THEN
+    -- Serialize the predicate read for one pair. Without this lock, two
+    -- concurrent closed-range inserts can both observe an empty snapshot.
+    PERFORM pg_advisory_xact_lock(NEW.service_type_id, NEW.checkin_event_id);
     IF EXISTS (
       SELECT 1
       FROM service_type_checkin_events existing

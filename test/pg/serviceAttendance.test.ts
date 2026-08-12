@@ -226,6 +226,43 @@ describe.skipIf(!hasPg)('service attendance schema and DB (PostgreSQL)', () => {
     `, [open.id])).rejects.toMatchObject({ code: '23514' });
   });
 
+  it('serializes concurrent direct inserts for one pair so closed ranges cannot overlap', async () => {
+    const clientA = pgClient();
+    const clientB = pgClient();
+    let inserted!: () => void;
+    let release!: () => void;
+    const firstInserted = new Promise<void>((resolve) => { inserted = resolve; });
+    const releaseFirst = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const first = clientA.begin(async (tx) => {
+        await tx.unsafe(`
+          INSERT INTO service_type_checkin_events
+            (service_type_id,checkin_event_id,starts_on,ends_on,created_by_person_id,closed_by_person_id,closed_at)
+          VALUES (10,22,'2026-08-01','2026-08-10',1,1,datetime('now'))
+        `);
+        inserted();
+        await releaseFirst;
+      });
+      await firstInserted;
+      const second = clientB.unsafe(`
+        INSERT INTO service_type_checkin_events
+          (service_type_id,checkin_event_id,starts_on,ends_on,created_by_person_id,closed_by_person_id,closed_at)
+        VALUES (10,22,'2026-08-05','2026-08-12',1,1,datetime('now'))
+      `);
+      setTimeout(release, 100);
+
+      const settled = await Promise.allSettled([first, second]);
+
+      expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(settled.filter((result) => result.status === 'rejected')).toEqual([
+        expect.objectContaining({ reason: expect.objectContaining({ code: '23505' }) }),
+      ]);
+    } finally {
+      release();
+      await Promise.all([clientA.end(), clientB.end()]);
+    }
+  });
+
   it('counts historical distinct children across inactive rooms and checked-out records', async () => {
     await sql.unsafe(`
       INSERT INTO service_type_checkin_events

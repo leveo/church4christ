@@ -4,6 +4,7 @@ import type { AppDb, AppDbResult, AppStatement } from '../src/lib/appDb';
 import {
   ServiceAttendanceConflictError,
   ServiceAttendanceInvalidError,
+  ServiceAttendancePersistenceError,
   ServiceAttendanceReportLimitError,
   getServiceCheckinLinkSnapshot,
   listServiceAttendanceReport,
@@ -64,6 +65,31 @@ describe('adult service attendance upsert', () => {
     });
   });
 
+  it('fails closed on malformed or stateful database result rows', async () => {
+    let adultReads = 0;
+    const malicious = {
+      service_type_id: 9201,
+      attendance_date: '2026-08-09',
+      get adult_count() { adultReads += 1; return adultReads === 1 ? 42 : Number.NaN; },
+      recorded_by_person_id: 9101,
+      updated_by_person_id: 9101,
+      created_at: '2026-08-09 12:00:00',
+      updated_at: '2026-08-09 12:00:00',
+    };
+    const statement: AppStatement = {
+      bind: () => statement,
+      first: async <T>() => malicious as T,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => ({ results: [], meta: { changes: 0 } }),
+    };
+    const malformedDb: AppDb = { prepare: () => statement, batch: async () => [] };
+
+    await expect(upsertServiceAttendance(malformedDb, {
+      serviceTypeId: 9201, attendanceDate: '2026-08-09', adultCount: 42,
+    }, 9101)).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
+    expect(adultReads).toBe(0);
+  });
+
   it('keeps one valid row under concurrent first writes and never accepts actor/count from data fields', async () => {
     await seedBase(9202, []);
     const results = await Promise.all([
@@ -113,6 +139,55 @@ describe('service to check-in event link replacement', () => {
       SELECT starts_on, ends_on FROM service_type_checkin_events
       WHERE service_type_id=9210 AND checkin_event_id=9312
     `).first()).toEqual({ starts_on: '2026-08-12', ends_on: '2026-08-12' });
+  });
+
+  it('rejects malformed link snapshots with bounded, single-pass row decoding', async () => {
+    let lengthReads = 0;
+    const eventRows = new Proxy([{ checkin_event_id: 9311 }], {
+      get(target, property, receiver) {
+        if (property === 'length') {
+          lengthReads += 1;
+          return lengthReads === 1 ? 1 : 101;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const results = [
+      { results: [{ revision: '0' }], meta: { changes: 0 } },
+      { results: eventRows, meta: { changes: 0 } },
+    ];
+    const statement: AppStatement = {
+      bind: () => statement,
+      first: async () => null,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => ({ results: [], meta: { changes: 0 } }),
+    };
+    const malformedDb: AppDb = {
+      prepare: () => statement,
+      batch: async <T>() => results as AppDbResult<T>[],
+    };
+
+    await expect(getServiceCheckinLinkSnapshot(malformedDb, 9210))
+      .resolves.toEqual({ revision: 0, eventIds: [9311] });
+    expect(lengthReads).toBe(1);
+  });
+
+  it('snapshots caller event ids with one bounded length read', async () => {
+    await seedBase(9212, [9321]);
+    let lengthReads = 0;
+    const eventIds = new Proxy([9321], {
+      get(target, property, receiver) {
+        if (property === 'length') {
+          lengthReads += 1;
+          return lengthReads === 1 ? 1 : 101;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    await expect(replaceServiceCheckinLinksToday(env.DB, 9212, eventIds, '2026-08-12', 9101))
+      .resolves.toMatchObject({ eventIds: [9321], changed: true });
+    expect(lengthReads).toBe(1);
   });
 
   it('maps invalid input, nonexistent FK, and same-day re-add collisions to PII-free safe errors', async () => {
@@ -201,6 +276,38 @@ describe('service-level replacement CAS', () => {
       expect.objectContaining({ reason: expect.any(ServiceAttendanceConflictError) }),
     ]);
     expect([[9333], [9334]]).toContainEqual((await getServiceCheckinLinkSnapshot(env.DB, 9221)).eventIds);
+  });
+
+  it('fails closed on malformed CAS result wrappers, metadata, or returned revisions', async () => {
+    const snapshotResults: AppDbResult<unknown>[] = [
+      { results: [{ revision: 0 }], meta: { changes: 0 } },
+      { results: [], meta: { changes: 0 } },
+    ];
+    for (const casResult of [
+      { results: [{ revision: 1 }], meta: { changes: '1' } },
+      { results: [{ revision: Number.NaN }], meta: { changes: 1 } },
+      { results: [{ revision: 2 }], meta: { changes: 1 } },
+      { results: [{ revision: 1 }], meta: {} },
+    ] as unknown as AppDbResult<unknown>[]) {
+      let batches = 0;
+      const statement: AppStatement = {
+        bind: () => statement,
+        first: async () => null,
+        all: async () => ({ results: [], meta: { changes: 0 } }),
+        run: async () => ({ results: [], meta: { changes: 0 } }),
+      };
+      const malformedDb: AppDb = {
+        prepare: () => statement,
+        batch: async <T>() => {
+          batches += 1;
+          return (batches === 1 ? snapshotResults : [casResult]) as AppDbResult<T>[];
+        },
+      };
+
+      await expect(replaceServiceCheckinLinksToday(
+        malformedDb, 9220, [], '2026-08-12', 9101,
+      )).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
+    }
   });
 });
 
@@ -311,5 +418,39 @@ describe('attendance reports and historical child counts', () => {
     await expect(listServiceAttendanceReport(limitDb, 'en', { from: '2026-08-12', to: '2026-08-12' }))
       .rejects.toBeInstanceOf(ServiceAttendanceReportLimitError);
     expect(sqlText).toMatch(/LIMIT\s+5001\b/);
+  });
+
+  it('fails closed on malformed report values and snapshots accessors once', async () => {
+    let nameReads = 0;
+    const reportRow = {
+      service_type_id: '9240',
+      get service_name() { nameReads += 1; return nameReads === 1 ? 'Public Service' : 'private@example.com'; },
+      service_sort: '1',
+      attendance_date: '2026-08-12',
+      adult_count: '1',
+      child_count: 'NaN',
+    };
+    const statement: AppStatement = {
+      bind: () => statement,
+      first: async () => null,
+      all: async <T>() => ({ results: [reportRow] as T[], meta: { changes: 0 } }),
+      run: async () => ({ results: [], meta: { changes: 0 } }),
+    };
+    const malformedDb: AppDb = { prepare: () => statement, batch: async () => [] };
+
+    await expect(listServiceAttendanceReport(
+      malformedDb, 'en', { from: '2026-08-12', to: '2026-08-12' },
+    )).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
+    expect(nameReads).toBe(0);
+
+    const oversizedChild = { ...reportRow, service_name: 'Public Service', child_count: 100001 };
+    const oversizedStatement = {
+      ...statement,
+      all: async <T>() => ({ results: [oversizedChild] as T[], meta: { changes: 0 } }),
+    };
+    await expect(listServiceAttendanceReport(
+      { prepare: () => oversizedStatement, batch: async () => [] },
+      'en', { from: '2026-08-12', to: '2026-08-12' },
+    )).rejects.toBeInstanceOf(ServiceAttendancePersistenceError);
   });
 });
