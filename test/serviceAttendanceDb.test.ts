@@ -128,7 +128,10 @@ describe('service to check-in event link replacement', () => {
       [9211, [999999], '2026-08-13', 9101],
       [9211, [9320], 'private@example.com', 9101],
     ] as const) {
-      const error = await replaceServiceCheckinLinksToday(env.DB, ...args).catch((caught: unknown) => caught);
+      const [serviceTypeId, eventIds, today, actorPersonId] = args;
+      const error = await replaceServiceCheckinLinksToday(
+        env.DB, serviceTypeId, eventIds, today, actorPersonId,
+      ).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(args[1][0] === 999999 ? ServiceAttendanceConflictError : ServiceAttendanceInvalidError);
       expect(`${String(error)} ${JSON.stringify(error)}`).not.toMatch(/private|999999|9320/i);
     }
