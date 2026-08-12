@@ -75,10 +75,46 @@ function pgIdentifierArray(value: unknown): string[] {
 function constraintSignature(table: string, constraint: D1Constraint): string {
   const target =
     constraint.kind === 'foreign'
-      ? `->${constraint.foreignTable}(${constraint.foreignColumns?.join(',') ?? ''})`
+      ? `->${constraint.foreignTable}(${constraint.foreignColumns?.join(',') ?? ''})` +
+        `[delete=${constraint.onDelete ?? 'no action'},update=${constraint.onUpdate ?? 'no action'}]`
       : '';
   return `${table}:${constraint.kind}(${constraint.columns.join(',')})${target}`;
 }
+
+function pgReferentialAction(value: unknown): NonNullable<D1Constraint['onDelete']> {
+  const actions: Record<string, NonNullable<D1Constraint['onDelete']>> = {
+    a: 'no action',
+    r: 'restrict',
+    c: 'cascade',
+    n: 'set null',
+    d: 'set default',
+  };
+  const action = actions[String(value)];
+  if (!action) throw new Error(`unsupported Postgres referential action: ${String(value)}`);
+  return action;
+}
+
+describe('foreign-key action signature', () => {
+  const base = {
+    kind: 'foreign',
+    columns: ['parent_id'],
+    foreignTable: 'parents',
+    foreignColumns: ['id'],
+    onDelete: 'cascade',
+    onUpdate: 'no action',
+  };
+
+  it('detects CASCADE changing to RESTRICT or NO ACTION', () => {
+    expect(constraintSignature('children', base as D1Constraint)).not.toBe(constraintSignature('children', {
+      ...base,
+      onDelete: 'restrict',
+    } as D1Constraint));
+    expect(constraintSignature('children', base as D1Constraint)).not.toBe(constraintSignature('children', {
+      ...base,
+      onDelete: 'no action',
+    } as D1Constraint));
+  });
+});
 
 function sqlTokens(value: string): string[] {
   const tokens: string[] = [];
@@ -444,7 +480,7 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
 
   it('matches shared primary, unique, and foreign-key constraints bidirectionally', async () => {
     const rows = await sql.unsafe(`
-      SELECT rel.relname AS table_name, con.contype,
+      SELECT rel.relname AS table_name, con.contype, con.confdeltype, con.confupdtype,
         ARRAY(
           SELECT att.attname
           FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ord)
@@ -468,15 +504,21 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
     const actual = new Set(
       rows
         .filter((row) => d1.tables.has(String(row.table_name)))
-        .map((row) =>
-          constraintSignature(String(row.table_name), {
-            kind: kinds[row.contype as keyof typeof kinds],
+        .map((row) => {
+          const kind = kinds[row.contype as keyof typeof kinds];
+          const constraint: D1Constraint = {
+            kind,
             columns: pgIdentifierArray(row.columns),
             foreignTable: row.foreign_table ? String(row.foreign_table) : undefined,
             foreignColumns:
               row.foreign_columns === null ? undefined : pgIdentifierArray(row.foreign_columns),
-          }),
-        ),
+          };
+          if (kind === 'foreign') {
+            constraint.onDelete = pgReferentialAction(row.confdeltype);
+            constraint.onUpdate = pgReferentialAction(row.confupdtype);
+          }
+          return constraintSignature(String(row.table_name), constraint);
+        }),
     );
     const expected = new Set(
       [...d1.tables].flatMap(([tableName, table]) =>

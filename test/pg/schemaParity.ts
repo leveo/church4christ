@@ -13,7 +13,11 @@ export type D1Constraint = {
   columns: string[];
   foreignTable?: string;
   foreignColumns?: string[];
+  onDelete?: D1ReferentialAction;
+  onUpdate?: D1ReferentialAction;
 };
+
+export type D1ReferentialAction = 'no action' | 'restrict' | 'cascade' | 'set null' | 'set default';
 
 export type D1Index = {
   name: string;
@@ -280,15 +284,10 @@ function parseTrigger(statement: string): D1Trigger {
   };
 }
 
-function extractTriggers(sql: string): { statements: string[]; remainder: string } {
-  const starts = [...sql.matchAll(/^\s*CREATE\s+TRIGGER\b/gim)].map((match) => match.index);
-  const ranges: Array<[number, number]> = [];
-  const statements: string[] = [];
-  for (const start of starts) {
+function triggerStatementEnd(sql: string, start: number): number {
     let quote: "'" | '"' | null = null;
     let sawBegin = false;
     let caseDepth = 0;
-    let end = -1;
     for (let index = start; index < sql.length;) {
       const char = sql[index];
       if (quote) {
@@ -321,23 +320,48 @@ function extractTriggers(sql: string): { statements: string[]; remainder: string
       }
       while (/\s/.test(sql[index] ?? '')) index += 1;
       if (sql[index] !== ';') throw new Error(`unsupported trigger definition: ${sql.slice(start, index)}`);
-      end = index + 1;
-      break;
+      return index + 1;
     }
-    if (end < 0 || !sawBegin || quote || caseDepth !== 0) {
+    if (!sawBegin || quote || caseDepth !== 0) {
       throw new Error(`unterminated trigger definition: ${sql.slice(start)}`);
     }
-    ranges.push([start, end]);
-    statements.push(sql.slice(start, end).trim());
+    throw new Error(`unterminated trigger definition: ${sql.slice(start)}`);
+}
+
+function splitSchemaSql(sql: string): string[] {
+  const statements: string[] = [];
+  for (let cursor = 0; cursor < sql.length;) {
+    while (/\s/.test(sql[cursor] ?? '')) cursor += 1;
+    if (cursor >= sql.length) break;
+    if (/^CREATE\s+TRIGGER\b/i.test(sql.slice(cursor))) {
+      const end = triggerStatementEnd(sql, cursor);
+      statements.push(sql.slice(cursor, end).trim());
+      cursor = end;
+      continue;
+    }
+
+    const start = cursor;
+    let depth = 0;
+    let quote: "'" | '"' | null = null;
+    for (; cursor < sql.length; cursor += 1) {
+      const char = sql[cursor];
+      if (quote) {
+        if (char === quote && sql[cursor + 1] === quote) cursor += 1;
+        else if (char === quote) quote = null;
+        continue;
+      }
+      if (char === "'" || char === '"') quote = char;
+      else if (char === '(') depth += 1;
+      else if (char === ')') depth -= 1;
+      else if (char === ';' && depth === 0) break;
+      if (depth < 0) throw new Error(`unbalanced schema SQL: ${sql.slice(start, cursor + 1)}`);
+    }
+    if (quote || depth !== 0) throw new Error(`unbalanced schema SQL: ${sql.slice(start)}`);
+    const statement = sql.slice(start, cursor).trim();
+    if (statement) statements.push(statement);
+    if (sql[cursor] === ';') cursor += 1;
   }
-  let remainder = '';
-  let cursor = 0;
-  for (const [start, end] of ranges) {
-    remainder += sql.slice(cursor, start);
-    cursor = end;
-  }
-  remainder += sql.slice(cursor);
-  return { statements, remainder };
+  return statements;
 }
 
 function splitSql(sql: string, delimiter: ',' | ';'): string[] {
@@ -428,6 +452,27 @@ function defaultExpression(tail: string): string | null {
   return tail.slice(start, i);
 }
 
+function referentialActions(tail: string): Pick<D1Constraint, 'onDelete' | 'onUpdate'> {
+  const actions: { onDelete: D1ReferentialAction; onUpdate: D1ReferentialAction } = {
+    onDelete: 'no action',
+    onUpdate: 'no action',
+  };
+  const seen = new Set<'delete' | 'update'>();
+  const clause = /\bON\s+(DELETE|UPDATE)\s+(NO\s+ACTION|RESTRICT|CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/gi;
+  for (const match of tail.matchAll(clause)) {
+    const event = match[1].toLowerCase() as 'delete' | 'update';
+    if (seen.has(event)) throw new Error(`duplicate ON ${event.toUpperCase()} foreign-key action`);
+    seen.add(event);
+    const action = match[2].replace(/\s+/g, ' ').toLowerCase() as D1ReferentialAction;
+    if (event === 'delete') actions.onDelete = action;
+    else actions.onUpdate = action;
+  }
+  if (/\bON\s+(?:DELETE|UPDATE)\b/i.test(tail.replace(clause, ' '))) {
+    throw new Error(`unsupported foreign-key action: ${tail}`);
+  }
+  return actions;
+}
+
 function parseColumn(entry: string): { column: D1Column; constraints: D1Constraint[] } | null {
   const match = entry.match(/^((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s+(INTEGER|TEXT|REAL|BLOB)\b([\s\S]*)$/i);
   if (!match) return null;
@@ -438,13 +483,14 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
   const constraints: D1Constraint[] = [];
   if (primary) constraints.push({ kind: 'primary', columns: [name] });
   if (/\bUNIQUE\b/i.test(tail)) constraints.push({ kind: 'unique', columns: [name] });
-  const foreign = tail.match(/\bREFERENCES\s+((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s*\(([^)]+)\)/i);
+  const foreign = tail.match(/\bREFERENCES\s+((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s*\(([^)]+)\)([\s\S]*)/i);
   if (foreign) {
     constraints.push({
       kind: 'foreign',
       columns: [name],
       foreignTable: identifier(foreign[1]),
       foreignColumns: identifiers(foreign[2]),
+      ...referentialActions(foreign[3]),
     });
   }
   return {
@@ -493,13 +539,14 @@ function parseTableConstraint(entry: string): D1Constraint | null {
   if (primary) return { kind: 'primary', columns: identifiers(primary[1]) };
   const unique = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?UNIQUE\s*\(([^)]+)\)/i);
   if (unique) return { kind: 'unique', columns: identifiers(unique[1]) };
-  const foreign = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(\S+)\s*\(([^)]+)\)/i);
+  const foreign = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(\S+)\s*\(([^)]+)\)([\s\S]*)/i);
   if (foreign) {
     return {
       kind: 'foreign',
       columns: identifiers(foreign[1]),
       foreignTable: identifier(foreign[2]),
       foreignColumns: identifiers(foreign[3]),
+      ...referentialActions(foreign[4]),
     };
   }
   return null;
@@ -507,22 +554,30 @@ function parseTableConstraint(entry: string): D1Constraint | null {
 
 export function parseFinalD1Schema(sources: string[]): D1Schema {
   const schema: D1Schema = { tables: new Map(), indexes: new Map(), triggers: new Map() };
-  // A trigger is one schema object even though its BEGIN/END body contains
-  // semicolons. Parse it before ordinary statement splitting and reject every
-  // body except the two explicit abort forms above; trigger DDL cannot silently
-  // disappear from the parity model.
-  const statements = sources.flatMap((source) => {
-    const withoutComments = stripLineComments(source);
-    const extracted = extractTriggers(withoutComments);
-    for (const statement of extracted.statements) {
-      const trigger = parseTrigger(statement);
-      if (schema.triggers.has(trigger.name)) throw new Error(`duplicate trigger: ${trigger.name}`);
-      schema.triggers.set(trigger.name, trigger);
-    }
-    return splitSql(extracted.remainder, ';');
-  });
+  // Preserve migration statement order. Trigger bodies contain semicolons, so
+  // the schema scanner treats outer BEGIN/END as one statement without moving
+  // trigger DDL ahead of intervening DROP or table rebuild statements.
+  const statements = sources.flatMap((source) => splitSchemaSql(stripLineComments(source)));
 
   for (const statement of statements) {
+    if (/^CREATE\s+TRIGGER\b/i.test(statement)) {
+      const trigger = parseTrigger(statement);
+      if (schema.triggers.has(trigger.name)) throw new Error(`duplicate trigger: ${trigger.name}`);
+      if (!schema.tables.has(trigger.table)) {
+        throw new Error(`trigger ${trigger.name} targets missing table ${trigger.table}`);
+      }
+      schema.triggers.set(trigger.name, trigger);
+      continue;
+    }
+
+    const dropTrigger = statement.match(/^DROP\s+TRIGGER(\s+IF\s+EXISTS)?\s+(\S+)$/i);
+    if (dropTrigger) {
+      const name = identifier(dropTrigger[2]);
+      if (!dropTrigger[1] && !schema.triggers.has(name)) throw new Error(`cannot drop missing trigger ${name}`);
+      schema.triggers.delete(name);
+      continue;
+    }
+
     const createTable = statement.match(
       /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(\S+)\s*\(([\s\S]*)\)(?:\s+(WITHOUT\s+ROWID))?$/i,
     );

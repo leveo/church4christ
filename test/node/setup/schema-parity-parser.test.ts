@@ -115,6 +115,8 @@ describe('final D1 schema parser', () => {
       columns: ['household_member_id'],
       foreignTable: 'household_members',
       foreignColumns: ['id'],
+      onDelete: 'no action',
+      onUpdate: 'no action',
     });
     expect(schema.indexes.get('idx_app_pending_unique')).toEqual({
       name: 'idx_app_pending_unique',
@@ -123,6 +125,37 @@ describe('final D1 schema parser', () => {
       unique: true,
       predicate: "status = 'P'",
     });
+  });
+
+  it('models inline and table-level foreign-key update/delete actions', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE parents (id INTEGER PRIMARY KEY);
+       CREATE TABLE children (
+         id INTEGER PRIMARY KEY,
+         inline_parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE ON UPDATE RESTRICT,
+         table_parent_id INTEGER,
+         FOREIGN KEY (table_parent_id) REFERENCES parents(id) ON DELETE SET NULL ON UPDATE SET DEFAULT
+       );`,
+    ]);
+
+    expect(schema.tables.get('children')?.constraints).toEqual(expect.arrayContaining([
+      {
+        kind: 'foreign',
+        columns: ['inline_parent_id'],
+        foreignTable: 'parents',
+        foreignColumns: ['id'],
+        onDelete: 'cascade',
+        onUpdate: 'restrict',
+      },
+      {
+        kind: 'foreign',
+        columns: ['table_parent_id'],
+        foreignTable: 'parents',
+        foreignColumns: ['id'],
+        onDelete: 'set null',
+        onUpdate: 'set default',
+      },
+    ]));
   });
 
   it('models trigger metadata, WHEN guards, and abort body semantics instead of stripping them', () => {
@@ -231,6 +264,23 @@ describe('final D1 schema parser', () => {
     ])).toThrow(/duplicate trigger/i);
   });
 
+  it('applies create, drop, and recreate trigger statements in migration order', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE protected_rows (id INTEGER PRIMARY KEY, fixed INTEGER NOT NULL);
+       CREATE TRIGGER protected_rows_guard BEFORE INSERT ON protected_rows
+       WHEN NEW.fixed = 1 BEGIN SELECT RAISE(ABORT, 'first_guard'); END;
+       DROP TRIGGER protected_rows_guard;
+       CREATE TRIGGER protected_rows_guard BEFORE INSERT ON protected_rows
+       WHEN NEW.fixed = 0 BEGIN SELECT RAISE(ABORT, 'replacement_guard'); END;`,
+    ]);
+
+    expect(schema.triggers.get('protected_rows_guard')).toMatchObject({
+      table: 'protected_rows',
+      semanticGuard: 'new . fixed = 0',
+      abortMessage: 'replacement_guard',
+    });
+  });
+
   it('fails closed when schema DDL contains an unsupported column type', () => {
     expect(() => parseFinalD1Schema(['CREATE TABLE example (id INTEGER PRIMARY KEY, payload JSON);'])).toThrow(
       /unsupported table entry.*payload JSON/i,
@@ -262,8 +312,12 @@ describe('final D1 schema parser', () => {
   it.each([
     'CREATE VIEW example_view AS SELECT 1',
     'ALTER INDEX idx_example RENAME TO idx_other',
-    'DROP TRIGGER example_trigger',
   ])('fails closed on unknown schema-affecting DDL: %s', (statement) => {
     expect(() => parseFinalD1Schema([`${statement};`])).toThrow(/unsupported schema DDL/i);
+  });
+
+  it('fails closed when dropping a missing trigger', () => {
+    expect(() => parseFinalD1Schema(['DROP TRIGGER example_trigger;']))
+      .toThrow(/cannot drop missing trigger example_trigger/i);
   });
 });
