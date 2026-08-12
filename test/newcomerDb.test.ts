@@ -971,7 +971,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     expect(stale?.activity.items[0].id).toBe('30000000-0000-4000-8000-000000000003');
   });
 
-  it('keeps a terminal collection cursor while the other history collection continues', async () => {
+  it('keeps a terminal note cursor while activity continues across three pages', async () => {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
         ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',NULL,
@@ -987,6 +987,52 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001',
     });
     expect(first?.activity.hasNext).toBe(true);
+    const noteCursor = { ...first!.notes.nextCursor! };
+    const activityCursor = { ...first!.activity.nextCursor! };
+    const second = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor,
+        activityCursor,
+      },
+    );
+    expect(second?.notes.items).toEqual([]);
+    expect(second?.notes.nextCursor).toEqual(noteCursor);
+    expect(second?.notes.nextCursor).not.toBe(noteCursor);
+    expect(second?.activity.items.map((item) => item.id)).toEqual(['30000000-0000-4000-8000-000000000002']);
+    noteCursor.id = '99999999-0000-4000-8000-000000000999';
+    expect(second?.notes.nextCursor).toEqual({
+      createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001',
+    });
+    const third = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: second!.notes.nextCursor!,
+        activityCursor: second!.activity.nextCursor!,
+      },
+    );
+    expect(third?.notes).toEqual({
+      items: [], hasNext: false,
+      nextCursor: { createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001' },
+    });
+    expect(third?.activity).toEqual({
+      items: [expect.objectContaining({ id: '30000000-0000-4000-8000-000000000001' })],
+      hasNext: false,
+      nextCursor: { createdAt: '2026-08-12 10:02:00', id: '30000000-0000-4000-8000-000000000001' },
+    });
+  });
+
+  it('keeps a terminal activity cursor while notes continue across three pages', async () => {
+    await env.DB.prepare(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at) VALUES
+      ('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',9703,
+        'Second note','2026-08-12 10:03:00'),
+      ('20000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001',9703,
+        'Third note','2026-08-12 10:04:00')`).run();
+    const first = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    expect(first?.notes.items.map((item) => item.id)).toEqual(['20000000-0000-4000-8000-000000000003']);
+    expect(first?.activity.hasNext).toBe(false);
     const second = await getNewcomerDetail(
       env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
         limit: 1,
@@ -994,8 +1040,55 @@ describe('newcomer queue, detail, and duplicate hints', () => {
         activityCursor: first!.activity.nextCursor!,
       },
     );
-    expect(second?.notes.items).toEqual([]);
-    expect(second?.activity.items.map((item) => item.id)).toEqual(['30000000-0000-4000-8000-000000000002']);
+    expect(second?.notes.items.map((item) => item.id)).toEqual(['20000000-0000-4000-8000-000000000002']);
+    expect(second?.activity).toEqual({
+      items: [], hasNext: false,
+      nextCursor: { createdAt: '2026-08-12 10:02:00', id: '30000000-0000-4000-8000-000000000001' },
+    });
+    const third = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: second!.notes.nextCursor!,
+        activityCursor: second!.activity.nextCursor!,
+      },
+    );
+    expect(third?.notes).toEqual({
+      items: [expect.objectContaining({ id: '20000000-0000-4000-8000-000000000001' })],
+      hasNext: false,
+      nextCursor: { createdAt: '2026-08-12 10:01:00', id: '20000000-0000-4000-8000-000000000001' },
+    });
+    expect(third?.activity).toEqual({
+      items: [], hasNext: false,
+      nextCursor: { createdAt: '2026-08-12 10:02:00', id: '30000000-0000-4000-8000-000000000001' },
+    });
+  });
+
+  it('returns null for an empty first page and preserves detached stale cursors', async () => {
+    const empty = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000002', 'en', { limit: 1 },
+    );
+    expect(empty?.notes).toEqual({ items: [], hasNext: false, nextCursor: null });
+    expect(empty?.activity).toEqual({ items: [], hasNext: false, nextCursor: null });
+
+    const noteCursor = {
+      createdAt: '2020-01-01 00:00:00', id: '40000000-0000-4000-8000-000000000001',
+    };
+    const activityCursor = {
+      createdAt: '2020-01-01 00:00:00', id: '40000000-0000-4000-8000-000000000002',
+    };
+    const stale = await getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1, noteCursor, activityCursor,
+      },
+    );
+    expect(stale?.notes).toEqual({ items: [], hasNext: false, nextCursor: noteCursor });
+    expect(stale?.activity).toEqual({ items: [], hasNext: false, nextCursor: activityCursor });
+    expect(stale?.notes.nextCursor).not.toBe(noteCursor);
+    expect(stale?.activity.nextCursor).not.toBe(activityCursor);
+    noteCursor.id = '99999999-0000-4000-8000-000000000001';
+    activityCursor.id = '99999999-0000-4000-8000-000000000002';
+    expect(stale?.notes.nextCursor?.id).toBe('40000000-0000-4000-8000-000000000001');
+    expect(stale?.activity.nextCursor?.id).toBe('40000000-0000-4000-8000-000000000002');
   });
 
   it('uses bounded 101-row history queries and safely applies a stale tuple cursor', async () => {

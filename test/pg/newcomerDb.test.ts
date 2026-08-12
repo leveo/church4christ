@@ -165,6 +165,111 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
     expect(refreshed?.activity.items[0].id).toBe('ffffffff-0000-4000-8000-000000000002');
   });
 
+  it('preserves each terminal history cursor while the other collection advances', async () => {
+    await sql.unsafe(`
+      INSERT INTO people (id,display_name,email) VALUES (9701,'History reader','history@example.test');
+      INSERT INTO newcomer_submissions (id,name,locale,visit_date,source,status_id,created_at,updated_at) VALUES
+        ('51000000-0000-4000-8000-000000000001','One note','en','2026-08-12','staff',1,
+          '2026-08-12 08:00:00','2026-08-12 08:00:00'),
+        ('51000000-0000-4000-8000-000000000002','One activity','en','2026-08-12','staff',1,
+          '2026-08-12 08:00:00','2026-08-12 08:00:00'),
+        ('51000000-0000-4000-8000-000000000003','Empty history','en','2026-08-12','staff',1,
+          '2026-08-12 08:00:00','2026-08-12 08:00:00');
+      INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at) VALUES
+        ('51100000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000001',9701,
+          'Only note','2026-08-12 10:01:00'),
+        ('51200000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000002',9701,
+          'First note','2026-08-12 10:01:00'),
+        ('51200000-0000-4000-8000-000000000002','51000000-0000-4000-8000-000000000002',9701,
+          'Second note','2026-08-12 10:03:00'),
+        ('51200000-0000-4000-8000-000000000003','51000000-0000-4000-8000-000000000002',9701,
+          'Third note','2026-08-12 10:04:00');
+      INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+        ('52100000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000001',NULL,
+          'submission_created','{}','2026-08-12 10:02:00'),
+        ('52100000-0000-4000-8000-000000000002','51000000-0000-4000-8000-000000000001',NULL,
+          'submission_created','{}','2026-08-12 10:03:00'),
+        ('52100000-0000-4000-8000-000000000003','51000000-0000-4000-8000-000000000001',NULL,
+          'submission_created','{}','2026-08-12 10:04:00'),
+        ('52200000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000002',NULL,
+          'submission_created','{}','2026-08-12 10:02:00');
+    `);
+
+    const firstNotesShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000001', 'en', { limit: 1 },
+    );
+    const noteCursor = { ...firstNotesShort!.notes.nextCursor! };
+    const activityCursor = { ...firstNotesShort!.activity.nextCursor! };
+    const secondNotesShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1, noteCursor, activityCursor,
+      },
+    );
+    expect(secondNotesShort?.notes).toEqual({ items: [], hasNext: false, nextCursor: noteCursor });
+    expect(secondNotesShort?.notes.nextCursor).not.toBe(noteCursor);
+    expect(secondNotesShort?.activity.items.map((item) => item.id))
+      .toEqual(['52100000-0000-4000-8000-000000000002']);
+    const thirdNotesShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1,
+        noteCursor: secondNotesShort!.notes.nextCursor!,
+        activityCursor: secondNotesShort!.activity.nextCursor!,
+      },
+    );
+    expect(thirdNotesShort?.notes).toEqual({ items: [], hasNext: false, nextCursor: noteCursor });
+    expect(thirdNotesShort?.activity.items.map((item) => item.id))
+      .toEqual(['52100000-0000-4000-8000-000000000001']);
+
+    const firstActivityShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000002', 'en', { limit: 1 },
+    );
+    const secondActivityShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000002', 'en', {
+        limit: 1,
+        noteCursor: firstActivityShort!.notes.nextCursor!,
+        activityCursor: firstActivityShort!.activity.nextCursor!,
+      },
+    );
+    expect(secondActivityShort?.notes.items.map((item) => item.id))
+      .toEqual(['51200000-0000-4000-8000-000000000002']);
+    expect(secondActivityShort?.activity).toEqual({
+      items: [], hasNext: false, nextCursor: firstActivityShort!.activity.nextCursor,
+    });
+    const thirdActivityShort = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000002', 'en', {
+        limit: 1,
+        noteCursor: secondActivityShort!.notes.nextCursor!,
+        activityCursor: secondActivityShort!.activity.nextCursor!,
+      },
+    );
+    expect(thirdActivityShort?.notes.items.map((item) => item.id))
+      .toEqual(['51200000-0000-4000-8000-000000000001']);
+    expect(thirdActivityShort?.activity).toEqual({
+      items: [], hasNext: false, nextCursor: firstActivityShort!.activity.nextCursor,
+    });
+
+    const empty = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000003', 'en', { limit: 1 },
+    );
+    expect(empty?.notes.nextCursor).toBeNull();
+    expect(empty?.activity.nextCursor).toBeNull();
+    const staleNoteCursor = {
+      createdAt: '2020-01-01 00:00:00', id: '53000000-0000-4000-8000-000000000001',
+    };
+    const staleActivityCursor = {
+      createdAt: '2020-01-01 00:00:00', id: '53000000-0000-4000-8000-000000000002',
+    };
+    const stale = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '51000000-0000-4000-8000-000000000001', 'en', {
+        limit: 1, noteCursor: staleNoteCursor, activityCursor: staleActivityCursor,
+      },
+    );
+    expect(stale?.notes.nextCursor).toEqual(staleNoteCursor);
+    expect(stale?.activity.nextCursor).toEqual(staleActivityCursor);
+    expect(stale?.notes.nextCursor).not.toBe(staleNoteCursor);
+    expect(stale?.activity.nextCursor).not.toBe(staleActivityCursor);
+  });
+
   it('creates and updates statuses/fields with the same transactional results', async () => {
     const statusId = await createNewcomerStatus(db, superAdmin, {
       key: 'reviewing', category: 'open', sort: 6, active: true,

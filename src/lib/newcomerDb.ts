@@ -983,12 +983,20 @@ export async function getNewcomerDetail(
       notes: {
         items: noteItems,
         hasNext: notes.length > capturedHistory.limit,
-        nextCursor: noteLast ? { createdAt: noteLast.createdAt, id: noteLast.id } : null,
+        nextCursor: noteLast
+          ? { createdAt: noteLast.createdAt, id: noteLast.id }
+          : capturedHistory.noteCursor
+            ? { createdAt: capturedHistory.noteCursor.createdAt, id: capturedHistory.noteCursor.id }
+            : null,
       },
       activity: {
         items: activityItems,
         hasNext: activity.length > capturedHistory.limit,
-        nextCursor: activityLast ? { createdAt: activityLast.createdAt, id: activityLast.id } : null,
+        nextCursor: activityLast
+          ? { createdAt: activityLast.createdAt, id: activityLast.id }
+          : capturedHistory.activityCursor
+            ? { createdAt: capturedHistory.activityCursor.createdAt, id: capturedHistory.activityCursor.id }
+            : null,
       },
     };
   } catch (error) {
