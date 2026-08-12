@@ -23,7 +23,7 @@ const EXPECTED_CI_WORKFLOW_SHA256 =
 
 // Any CI workflow modification must be reviewed and this hash updated deliberately.
 function validateCiWorkflow(workflow: string): void {
-  expect(createHash('sha256').update(workflow).digest('hex')).toBe(
+  expect(createHash('sha256').update(workflow.replaceAll('\r\n', '\n')).digest('hex')).toBe(
     EXPECTED_CI_WORKFLOW_SHA256,
   );
 }
@@ -242,6 +242,12 @@ describe('test runner hardening', () => {
 
   it('matches the exact reviewed CI workflow source', () => {
     validateCiWorkflow(readFileSync('.github/workflows/ci.yml', 'utf8'));
+  });
+
+  it('accepts the exact workflow source with CRLF line endings', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+
+    expect(() => validateCiWorkflow(workflow.replaceAll('\n', '\r\n'))).not.toThrow();
   });
 
   it('does not contain deployment, release, or publish commands', () => {
