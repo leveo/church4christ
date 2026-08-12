@@ -247,7 +247,9 @@ export function snapshotPeopleImportMappingContract(value: unknown): PeopleImpor
     for (const [field, rawTranslations] of Object.entries(snapshot.enumTranslations)) {
       if (!CONSTANT_FIELD_SET.has(field) || !isRecord(rawTranslations)) throw new TypeError('invalid mapping contract');
       const enumField = field as PeopleImportMappingEnumField;
-      if (Object.keys(rawTranslations).length < 1) throw new TypeError('invalid mapping contract');
+      if (fieldMappings[enumField] === null || Object.keys(rawTranslations).length < 1) {
+        throw new TypeError('invalid mapping contract');
+      }
       const translations = Object.create(null) as Record<string, string>;
       for (const [source, target] of Object.entries(rawTranslations)) {
         if (

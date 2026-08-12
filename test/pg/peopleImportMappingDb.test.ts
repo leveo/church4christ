@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PEOPLE_IMPORT_HEADERS, type PeopleImportHeader } from '../../src/lib/peopleImport';
 import {
   PeopleImportMappingConflictError,
+  PeopleImportMappingInvalidError,
   PeopleImportMappingStructuralError,
   createPeopleImportMapping,
   getPeopleImportMapping,
@@ -127,6 +128,18 @@ describe.skipIf(!hasPg)('people import mapping profiles (PostgreSQL)', () => {
       expected_headers_json: '["full name","email address","member kind","currently active"]',
       constants_json: '{"language":"en"}',
     });
+  });
+
+  it('shares the authoritative validator and never persists translations for constant fields', async () => {
+    const rejected = await createPeopleImportMapping(db, {
+      ...validInput('Invalid translation profile'),
+      enumTranslations: { language: { english: 'en' } },
+    }).catch((caught: unknown) => caught);
+    expect(rejected).toBeInstanceOf(PeopleImportMappingInvalidError);
+    const [{ count }] = await sql.unsafe<{ count: string }[]>(
+      'SELECT COUNT(*) AS count FROM people_import_mappings',
+    );
+    expect(Number(count)).toBe(0);
   });
 
   it('allows one of two concurrent requests into slot 100 and never exceeds the ceiling', async () => {

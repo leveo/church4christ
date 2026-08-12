@@ -45,13 +45,14 @@ function mappings(
 function config(
   sources?: Partial<Record<PeopleImportHeader, number>>,
   constants: Record<string, string> = { record_type: 'person' },
+  enumTranslations: Record<string, Record<string, string>> = {},
 ): string {
   return JSON.stringify({
     version: 999,
     expectedHeaders: ['client', 'controlled'],
     fieldMappings: mappings(sources),
     constants,
-    enumTranslations: {},
+    enumTranslations,
   });
 }
 
@@ -319,6 +320,27 @@ describe('mapping inspect and immutable profiles', () => {
       )));
       expect(response.status).toBe(400);
       expect(JSON.stringify(await response.json())).not.toContain('Ada');
+    }
+  });
+
+  it('rejects translations for null or constant fields without inserting a profile', async () => {
+    for (const mappingConfig of [
+      config(undefined, {}, { language: { english: 'en' } }),
+      config(undefined, { language: 'en' }, { language: { english: 'en' } }),
+    ]) {
+      const response = await profilesRoute.POST(context(multipartRequest(
+        '/admin/people/import/map/profiles',
+        'name,email\nAda,ada@example.com\n',
+        [['profile_name', 'Invalid translation'], ['mapping_config', mappingConfig]],
+      )));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        ok: false,
+        code: 'mapping_config_invalid',
+        issues: [{ code: 'invalid_contract', row: null, column: null, field: null }],
+      });
+      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+        .first<number>('n')).toBe(0);
     }
   });
 });

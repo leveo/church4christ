@@ -18,6 +18,7 @@ import {
   createPeopleImportMappingUiState,
   decidePeopleImportMappingFailure,
   editPeopleImportMappingDraft,
+  isValidPeopleImportMappingProfileName,
   mappingDraftConfig,
   parsePeopleImportMappingInspect,
   parsePeopleImportMappingPreview,
@@ -137,6 +138,13 @@ describe('people import mapping browser contract parsing', () => {
         enumTranslations: { record_type: { member: 'person' } },
       },
     }))?.toMatchObject({ fieldMappings: { record_type: 0 }, constants: {} });
+  });
+
+  it('validates editable profile names by Unicode code point rather than UTF-16 units', () => {
+    expect(isValidPeopleImportMappingProfileName('\u{1f600}'.repeat(80))).toBe(true);
+    expect(isValidPeopleImportMappingProfileName(` ${'\u{1f600}'.repeat(80)} `)).toBe(true);
+    expect(isValidPeopleImportMappingProfileName('\u{1f600}'.repeat(81))).toBe(false);
+    expect(isValidPeopleImportMappingProfileName('   ')).toBe(false);
   });
 
   it('parses mapping issues separately from canonical preview issues and rows', () => {
@@ -286,6 +294,12 @@ describe('people import mapping draft contract', () => {
     ])).toBeNull();
     expect(updatePeopleImportMappingDraftTranslations(draft, 'record_type', [
       { source: 'x'.repeat(5_001), target: 'person' },
+    ])).toBeNull();
+    expect(updatePeopleImportMappingDraftTranslations(draft, 'record_type', [
+      { source: '\u{1f600}'.repeat(5_000), target: 'person' },
+    ])).not.toBeNull();
+    expect(updatePeopleImportMappingDraftTranslations(draft, 'record_type', [
+      { source: '\u{1f600}'.repeat(5_001), target: 'person' },
     ])).toBeNull();
   });
 
@@ -533,6 +547,12 @@ describe('people import mapping page contract', () => {
     expect(mappingPageSource).toContain('profileNameInput.disabled = controls.draftDisabled');
     expect(mappingPageSource).toContain('control.disabled = controls.draftDisabled');
     expect(mappingPageSource).toContain('admin.peopleImportMapping.failure.uncertainCreate');
+  });
+
+  it('uses code-point validators instead of UTF-16 HTML maxlength constraints', () => {
+    expect(mappingPageSource).not.toMatch(/\bmaxlength\s*=/i);
+    expect(mappingPageSource).not.toMatch(/\.maxLength\s*=/);
+    expect(mappingPageSource).toContain('isValidPeopleImportMappingProfileName(profileNameInput.value)');
   });
 
   it('resynchronizes manual translation controls after a mapping-mode edit', () => {

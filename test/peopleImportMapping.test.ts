@@ -140,7 +140,7 @@ describe('people import mapping runtime contract', () => {
   });
 
   it('snapshots and freezes an exact v1 contract while allowing source-column reuse', () => {
-    const expectedHeaders = ['name', 'email'];
+    const expectedHeaders = ['name', 'email', 'language'];
     const fieldMappings = Object.fromEntries(PEOPLE_IMPORT_HEADERS.map((header) => [header, null])) as Record<
       (typeof PEOPLE_IMPORT_HEADERS)[number],
       number | null
@@ -148,6 +148,7 @@ describe('people import mapping runtime contract', () => {
     fieldMappings.display_name = 0;
     fieldMappings.first_name = 0;
     fieldMappings.email = 1;
+    fieldMappings.language = 2;
     const input = mappingContract(expectedHeaders, {
       fieldMappings,
       constants: { record_type: 'person' },
@@ -161,7 +162,7 @@ describe('people import mapping runtime contract', () => {
     expect(result.issues).toEqual([]);
     expect(result.contract).toEqual({
       version: 1,
-      expectedHeaders: ['name', 'email'],
+      expectedHeaders: ['name', 'email', 'language'],
       fieldMappings,
       constants: { record_type: 'person' },
       enumTranslations: { language: { english: 'en' } },
@@ -202,6 +203,15 @@ describe('people import mapping runtime contract', () => {
       };
     })()],
     ['translation outside the closed set', { ...mappingContract(['name']), enumTranslations: { email: { secret: 'x' } } }],
+    ['translation without a source mapping', {
+      ...mappingContract(['language']),
+      enumTranslations: { language: { english: 'en' } },
+    }],
+    ['translation paired with a constant', {
+      ...mappingContract(['language']),
+      constants: { language: 'en' },
+      enumTranslations: { language: { english: 'en' } },
+    }],
     ['explicit empty translation map', { ...mappingContract(['type']), enumTranslations: { record_type: {} } }],
     ['translation to a noncanonical enum', { ...mappingContract(['type']), enumTranslations: { record_type: { human: 'admin' } } }],
     ['translation to an empty target', { ...mappingContract(['active']), enumTranslations: { active: { unknown: '' } } }],

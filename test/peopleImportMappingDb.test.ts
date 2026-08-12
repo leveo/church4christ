@@ -272,6 +272,8 @@ describe('people import mapping profile persistence', () => {
       { ...validInput(), constants: { household_role: '' } },
       { ...validInput(), constants: { active: 'true' }, fieldMappings: fieldMappings({ active: 0 }) },
       { ...validInput(), enumTranslations: { email: { private: 'PRIVATE MEMBER VALUE' } } },
+      { ...validInput(), constants: {}, enumTranslations: { language: { english: 'en' } } },
+      { ...validInput(), enumTranslations: { language: { english: 'en' } } },
       { ...validInput(), enumTranslations: { record_type: { member: 'admin' } } },
       { ...validInput(), enumTranslations: { active: { no: '' } } },
       { ...validInput(), enumTranslations: { active: { ' Not Normalized ': 'true' } } },
@@ -289,6 +291,29 @@ describe('people import mapping profile persistence', () => {
     }
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
       .first<number>('n')).toBe(0);
+  });
+
+  it('rejects a translation without a source mapping before it can consume the final profile slot', async () => {
+    const rows = Array.from({ length: 99 }, (_, index) => env.DB.prepare(`
+      INSERT INTO people_import_mappings
+        (id, name, name_key, expected_headers_json, field_mappings_json,
+         constants_json, enum_translations_json, created_by_person_id)
+      VALUES (?, ?, ?, '["header"]', ?, '{}', '{}', 9800)
+    `).bind(index + 1, `Profile ${index + 1}`, `profile ${index + 1}`, JSON.stringify(fieldMappings())));
+    await env.DB.batch(rows);
+
+    const rejected = await createPeopleImportMapping(env.DB, validInput({
+      name: 'Invalid final slot',
+      enumTranslations: { language: { english: 'en' } },
+    })).catch((caught: unknown) => caught);
+    expect(rejected).toBeInstanceOf(PeopleImportMappingInvalidError);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+      .first<number>('n')).toBe(99);
+
+    const created = await createPeopleImportMapping(env.DB, validInput({ name: 'Valid final slot' }));
+    expect(created.id).toBe(100);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+      .first<number>('n')).toBe(100);
   });
 
   it('maps duplicate names and the atomic 100-profile ceiling to one safe conflict', async () => {

@@ -235,6 +235,27 @@ describe('mapping access, methods, and private inspection', () => {
 });
 
 describe('immutable mapping profiles and authoritative current bytes', () => {
+  it('rejects translations for non-source fields without persisting a profile', async () => {
+    const admin = await sessionCookie(1, 'admin@example.com');
+    const csv = sourceCsv(['name', 'email'], [['Contract Example', 'contract@example.com']]);
+    for (const config of [
+      { ...simpleMappingConfig(), constants: {}, enumTranslations: { language: { english: 'en' } } },
+      { ...simpleMappingConfig(), constants: { language: 'en' }, enumTranslations: { language: { english: 'en' } } },
+    ]) {
+      const response = await mappingUpload(PROFILES, admin, csv, {
+        profile_name: 'Rejected contract',
+        mapping_config: JSON.stringify(config),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        ok: false,
+        code: 'mapping_config_invalid',
+        issues: [{ code: 'invalid_contract', row: null, column: null, field: null }],
+      });
+      expect((await counts()).profiles).toBe(0);
+    }
+  });
+
   it('creates, lists, and gets profiles without persisting uploaded rows or sample values', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
     const privateValue = 'PRIVATE_PROFILE_ROW_7391';

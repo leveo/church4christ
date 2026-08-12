@@ -146,7 +146,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
       <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.peopleImportMapping.draftHint')}</p>
       <label class="mt-4 block max-w-xl">
         <span class="mb-1 block text-sm font-semibold">{t(lang, 'admin.peopleImportMapping.profileName')}</span>
-        <input id="mapping-profile-name" type="text" maxlength="80" class={tin} />
+        <input id="mapping-profile-name" type="text" class={tin} />
       </label>
 
       <div class="mt-5 overflow-x-auto rounded-xl border border-border">
@@ -325,6 +325,7 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
     createPeopleImportMappingUiState,
     decidePeopleImportMappingFailure,
     editPeopleImportMappingDraft,
+    isValidPeopleImportMappingProfileName,
     mappingDraftConfig,
     parsePeopleImportMappingInspect,
     parsePeopleImportMappingPreview,
@@ -511,7 +512,6 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
       wrap.dataset.translationIndex = String(index);
       const source = document.createElement('input');
       source.type = 'text';
-      source.maxLength = 5_000;
       source.className = 'rounded-lg border border-border bg-surface px-3 py-2 text-sm';
       source.placeholder = copy('admin.peopleImportMapping.translationSource');
       source.value = row.source;
@@ -614,7 +614,9 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
           || control instanceof HTMLButtonElement
         ) control.disabled = controls.draftDisabled;
       });
-      saveProfileButton.disabled = controls.saveDisabled || !draftValid || profileNameInput.value.trim() === '';
+      saveProfileButton.disabled = controls.saveDisabled
+        || !draftValid
+        || !isValidPeopleImportMappingProfileName(profileNameInput.value);
       previewButton.disabled = controls.previewDisabled;
       commitButton.disabled = controls.commitDisabled;
       warningAck.disabled = state.pending !== null;
@@ -751,7 +753,12 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
       const file = selectedFile;
       const draft = state.draft;
       const config = draft === null ? null : mappingDraftConfig(draft);
-      if (file === null || config === null || !draftValid) return;
+      if (
+        file === null
+        || config === null
+        || !draftValid
+        || !isValidPeopleImportMappingProfileName(profileNameInput.value)
+      ) return;
       const operation = beginPeopleImportMappingRequest(state, 'create');
       if (operation === null) return;
       state = operation.state;

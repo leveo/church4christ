@@ -120,6 +120,12 @@ function boundedText(value: unknown, maximumCodePoints: number): value is string
   return true;
 }
 
+export function isValidPeopleImportMappingProfileName(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().normalize('NFC');
+  return normalized !== '' && boundedText(normalized, MAX_PROFILE_NAME_CODE_POINTS);
+}
+
 function nullablePositiveInteger(value: unknown): number | null | undefined {
   if (value === null) return null;
   const parsed = safeInteger(value);
