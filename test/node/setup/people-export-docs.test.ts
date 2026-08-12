@@ -38,6 +38,8 @@ describe('portable People export documentation', () => {
     expect(people).toMatch(/actor[\s\S]{0,80}time[\s\S]{0,80}numeric counts/i);
     expect(people).toMatch(/no[^\n]*(email|note body|body)[^\n]*(audit|event)|audit[^\n]*no[^\n]*(email|note body|body)/i);
     expect(people).toMatch(/person_ref[\s\S]{0,120}(file.local|local)[\s\S]{0,120}(not|never)[\s\S]{0,80}(join key|foreign key)/i);
+    expect(people).toMatch(/person_ref[\s\S]{0,100}canonical People order[\s\S]{0,100}notes.local/i);
+    expect(people).toMatch(/D1[^\n]*three.query snapshot/i);
   });
 
   it('records migration 0011 as the forward and frozen export boundary', () => {

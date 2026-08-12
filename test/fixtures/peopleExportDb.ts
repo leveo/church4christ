@@ -84,6 +84,10 @@ export async function seedPortableExportFixture(db: AppDb): Promise<void> {
       INSERT INTO person_notes (id, person_id, author_email, body, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).bind(203, 3, 'historical@example.com', 'Deleted subject body', '2026-08-07 08:00:00'),
+    db.prepare(`
+      INSERT INTO person_notes (id, person_id, author_email, body, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(204, 4, 'standalone.author@example.com', 'Standalone follow-up', '2026-08-11 10:00:00'),
   ]);
 }
 

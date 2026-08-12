@@ -47,6 +47,16 @@ export interface CanonicalPeopleExportPerson {
   household: CanonicalPeopleExportHouseholdReference | null;
 }
 
+/** Minimal non-privileged projection required to reproduce canonical People row order. */
+export type CanonicalPersonOrderPerson = Pick<
+  CanonicalPeopleExportPerson,
+  'stableKey' | 'email' | 'household'
+>;
+
+export type CanonicalPersonOrderResult =
+  | { status: 'success'; stableKeys: string[] }
+  | { status: 'repair_required'; issues: number };
+
 export interface CanonicalPeopleExportDependent {
   stableKey: string;
   displayName: string;
@@ -181,11 +191,9 @@ function compareKeys(left: readonly string[], right: readonly string[]): number 
   return 0;
 }
 
-function personSortKey(person: CanonicalPeopleExportPerson): string[] {
-  const row = personRow(person, '');
+function personSortKey(person: CanonicalPersonOrderPerson): string[] {
   return [
     identity(person.email),
-    ...PEOPLE_IMPORT_HEADERS.map((header) => identity(row[header])),
     identity(person.stableKey),
     person.stableKey,
   ];
@@ -202,12 +210,18 @@ function dependentSortKey(dependent: CanonicalPeopleExportDependent): string[] {
   ];
 }
 
-function primaryPerson(group: HouseholdGroup): CanonicalPeopleExportPerson | undefined {
+type HouseholdOrderGroup = {
+  stableKey: string;
+  people: CanonicalPersonOrderPerson[];
+  dependents: CanonicalPeopleExportDependent[];
+};
+
+function primaryPerson(group: HouseholdOrderGroup): CanonicalPersonOrderPerson | undefined {
   return group.people.find((person) => person.household?.primary && person.household.role === 'adult');
 }
 
 function householdReferences(
-  group: HouseholdGroup,
+  group: HouseholdOrderGroup,
 ): Array<CanonicalPeopleExportHouseholdReference | CanonicalPeopleExportDependentHouseholdReference> {
   return [
     ...group.people.map((person) => person.household!),
@@ -216,7 +230,7 @@ function householdReferences(
 }
 
 function observedMetadata(
-  group: HouseholdGroup,
+  group: HouseholdOrderGroup,
   property: 'name' | 'address' | 'phone',
 ): string[] {
   return householdReferences(group)
@@ -224,7 +238,7 @@ function observedMetadata(
     .filter((value) => value !== '');
 }
 
-function canonicalHouseholdMetadata(group: HouseholdGroup): HouseholdMetadata {
+function canonicalHouseholdMetadata(group: HouseholdOrderGroup): HouseholdMetadata {
   return {
     name: observedMetadata(group, 'name')[0] ?? '',
     address: observedMetadata(group, 'address')[0] ?? '',
@@ -232,7 +246,7 @@ function canonicalHouseholdMetadata(group: HouseholdGroup): HouseholdMetadata {
   };
 }
 
-function householdSortKey(group: HouseholdGroup): string[] {
+function householdSortKey(group: HouseholdOrderGroup): string[] {
   const metadata = canonicalHouseholdMetadata(group);
   const primary = primaryPerson(group);
   return [
@@ -243,6 +257,86 @@ function householdSortKey(group: HouseholdGroup): string[] {
     identity(group.stableKey),
     group.stableKey,
   ];
+}
+
+function orderedPersonStableKeys(people: readonly CanonicalPersonOrderPerson[]): string[] {
+  const households = new Map<string, HouseholdOrderGroup>();
+  const standalone: CanonicalPersonOrderPerson[] = [];
+  for (const person of people) {
+    if (person.household === null) {
+      standalone.push(person);
+      continue;
+    }
+    const stableKey = person.household.stableKey;
+    const group = households.get(stableKey) ?? { stableKey, people: [], dependents: [] };
+    group.people.push(person);
+    households.set(stableKey, group);
+  }
+  const orderedHouseholds = [...households.values()].sort(
+    (left, right) => compareKeys(householdSortKey(left), householdSortKey(right)),
+  );
+  const orderedStandalone = [...standalone].sort(
+    (left, right) => compareKeys(personSortKey(left), personSortKey(right)),
+  );
+  return [
+    ...orderedHouseholds.flatMap((group) => [...group.people].sort(
+      (left, right) => compareKeys(personSortKey(left), personSortKey(right)),
+    )),
+    ...orderedStandalone,
+  ].map((person) => person.stableKey);
+}
+
+function snapshotOrderPerson(value: unknown): { person: CanonicalPersonOrderPerson | null; issues: number } {
+  if (!isRecord(value)) return { person: null, issues: 1 };
+  const stableKey = value.stableKey;
+  const email = value.email;
+  const householdInput = value.household;
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof email !== 'string') issues += 1;
+  let household: CanonicalPeopleExportHouseholdReference | null = null;
+  if (householdInput !== null) {
+    const captured = snapshotPersonHousehold(householdInput);
+    issues += captured.issues;
+    household = captured.value;
+  }
+  return {
+    person: issues === 0 ? {
+      stableKey: stableKey as string,
+      email: email as string,
+      household,
+    } : null,
+    issues,
+  };
+}
+
+/**
+ * Return file-local-safe stable keys in the exact People order used by canonical CSV rows.
+ * Runtime-invalid, blank, or duplicate stable keys fail closed without returning PII.
+ */
+export function canonicalPersonStableKeyOrder(input: readonly CanonicalPersonOrderPerson[]): CanonicalPersonOrderResult {
+  try {
+    if (!Array.isArray(input)) return { status: 'repair_required', issues: 1 };
+    if (input.length > PEOPLE_EXPORT_LIMITS.maxDataRows) {
+      return { status: 'repair_required', issues: 1 };
+    }
+    const people: CanonicalPersonOrderPerson[] = [];
+    let issues = 0;
+    for (let index = 0; index < input.length; index += 1) {
+      const captured = snapshotOrderPerson(input[index]);
+      issues += captured.issues;
+      if (captured.person) people.push(captured.person);
+    }
+    const keys = people.map((person) => person.stableKey);
+    issues += duplicateOccurrenceCount(keys);
+    issues += keys.filter((key) => key.trim() === '').length;
+    if (issues > 0) {
+      return { status: 'repair_required', issues: bounded(issues, PEOPLE_IMPORT_LIMITS.maxIssues) };
+    }
+    return { status: 'success', stableKeys: orderedPersonStableKeys(people) };
+  } catch {
+    return { status: 'repair_required', issues: 1 };
+  }
 }
 
 function bounded(value: number, maximum: number): number {
@@ -577,14 +671,11 @@ function serializeUnit(
 
   const key = `household-${nextHouseholdNumber}`;
   const metadata = canonicalHouseholdMetadata(unit.group);
-  const people = [...unit.group.people].sort(
-    (left, right) => compareKeys(personSortKey(left), personSortKey(right)),
-  );
   const dependents = [...unit.group.dependents].sort(
     (left, right) => compareKeys(dependentSortKey(left), dependentSortKey(right)),
   );
   const rows = [
-    ...people.map((person) => serializeRow(personRow(person, key, metadata))),
+    ...unit.group.people.map((person) => serializeRow(personRow(person, key, metadata))),
     ...dependents.map((dependent) => serializeRow(dependentRow(dependent, key, metadata))),
   ];
   return {
@@ -634,15 +725,31 @@ function buildCanonicalExportPartsFromSnapshot(
     households.set(stableKey, group);
   }
 
-  const orderedHouseholds = [...households.values()].sort(
-    (left, right) => compareKeys(householdSortKey(left), householdSortKey(right)),
-  );
-  const structuralIssues = structuralIssueCount(source, orderedHouseholds);
+  const householdGroups = [...households.values()];
+  const structuralIssues = structuralIssueCount(source, householdGroups);
   if (structuralIssues > 0) return repairRequired(source, households.size, structuralIssues);
 
-  const orderedStandalone = [...standalone].sort(
-    (left, right) => compareKeys(personSortKey(left), personSortKey(right)),
-  );
+  const orderingPeople = source.people.map((person): CanonicalPersonOrderPerson => {
+    if (person.household === null) return person;
+    const group = households.get(person.household.stableKey)!;
+    return {
+      stableKey: person.stableKey,
+      email: person.email,
+      household: { ...person.household, ...canonicalHouseholdMetadata(group) },
+    };
+  });
+  const canonicalOrder = canonicalPersonStableKeyOrder(orderingPeople);
+  if (canonicalOrder.status !== 'success') {
+    return repairRequired(source, households.size, canonicalOrder.issues);
+  }
+  const personRank = new Map(canonicalOrder.stableKeys.map((stableKey, index) => [stableKey, index]));
+  for (const group of householdGroups) {
+    group.people.sort((left, right) => personRank.get(left.stableKey)! - personRank.get(right.stableKey)!);
+  }
+  const orderedHouseholds = householdGroups.sort((left, right) =>
+    personRank.get(left.people[0].stableKey)! - personRank.get(right.people[0].stableKey)!);
+  const orderedStandalone = [...standalone].sort((left, right) =>
+    personRank.get(left.stableKey)! - personRank.get(right.stableKey)!);
   const units: ExportUnit[] = [
     ...orderedHouseholds.map((group): ExportUnit => ({ kind: 'household', group })),
     ...orderedStandalone.map((person): ExportUnit => ({ kind: 'standalone', person })),

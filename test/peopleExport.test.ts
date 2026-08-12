@@ -8,6 +8,7 @@ import {
 } from '../src/lib/peopleImport';
 import {
   buildCanonicalExportParts,
+  canonicalPersonStableKeyOrder,
   PEOPLE_EXPORT_LIMITS,
   type CanonicalPeopleExportDependent,
   type CanonicalPeopleExportDependentHouseholdReference,
@@ -196,6 +197,65 @@ const validHouseholdSource = (): CanonicalPeopleExportSource => source(
     name: 'Valid Household',
   }))],
 );
+
+describe('canonicalPersonStableKeyOrder', () => {
+  it('uses the same household-first normalized People order as canonical CSV output', () => {
+    const householdPerson = person('person-z', ' z@example.com ', {
+      household: household('house-z', { name: ' A\u0301lpha Household ' }),
+    });
+    const standalonePerson = person('person-a', 'a@example.com');
+    const people = [standalonePerson, householdPerson];
+
+    const order = canonicalPersonStableKeyOrder(people);
+    const canonical = buildCanonicalExportParts(source(people));
+
+    expect(order).toEqual({ status: 'success', stableKeys: ['person-z', 'person-a'] });
+    expect(canonical.status).toBe('success');
+    if (canonical.status !== 'success') throw new Error('expected success');
+    const parsed = parsePeopleImport(new TextEncoder().encode(canonical.parts[0].csv), { today: TODAY });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.model?.people.map((entry) => entry.email)).toEqual([
+      'z@example.com',
+      'a@example.com',
+    ]);
+  });
+
+  it('sorts members inside one household and remains stable when the input is reversed', () => {
+    const people = [
+      person('person-z', 'z@example.com', {
+        household: household('house-1', { name: 'One Household' }),
+      }),
+      person('person-a', 'a@example.com', {
+        household: household('house-1', { name: 'One Household', primary: false }),
+      }),
+    ];
+
+    expect(canonicalPersonStableKeyOrder(people)).toEqual({
+      status: 'success',
+      stableKeys: ['person-a', 'person-z'],
+    });
+    expect(canonicalPersonStableKeyOrder([...people].reverse())).toEqual({
+      status: 'success',
+      stableKeys: ['person-a', 'person-z'],
+    });
+  });
+
+  it('fails closed when stable keys are duplicate or blank', () => {
+    const duplicate = [
+      person('person-1', 'a@example.com'),
+      person('person-1', 'z@example.com'),
+    ];
+
+    expect(canonicalPersonStableKeyOrder(duplicate)).toEqual({
+      status: 'repair_required',
+      issues: 2,
+    });
+    expect(canonicalPersonStableKeyOrder([person(' ', 'private@example.com')])).toEqual({
+      status: 'repair_required',
+      issues: 1,
+    });
+  });
+});
 
 describe('buildCanonicalExportParts canonical CSV', () => {
   it('exposes an exact discriminated result shape without CSV on repair results', () => {

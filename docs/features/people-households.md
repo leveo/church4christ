@@ -152,17 +152,19 @@ person_ref,person_email,author_attribution,body,created_at
 ```
 
 The notes export includes at most 5,000 notes, all live and attached to live subjects, and
-at most 10 MiB. It uses the subject's current email for operator matching and preserves
-the historical author-attribution text even if that account changed or was removed.
-`person_ref` is a file-local label only; it is not a database foreign key or a join key
-for another export.
+at most 5,000 live People in its bounded ordering projection and 10 MiB total. It uses the
+subject's current email for operator matching and preserves the historical
+author-attribution text even if that account changed or was removed. `person_ref` follows
+canonical People order while remaining notes-local; it is a file-local label only, not a
+database foreign key or a join key for another export. Only People who actually have
+exported notes receive a reference, so their notes-local numbers have no gaps.
 There is no notes importer in this release.
 
 A successful notes POST appends one `audit_events` record with the actor, time, action kind,
 and numeric counts for people and notes. The audit event contains no email, note body,
 filename, or CSV content. If the audit append fails, the request fails closed and returns no
 CSV. The confirmation GET only renders the warning and performs neither a notes read nor an
-audit write. On D1, notes generation uses a two-query snapshot plus one audit insert;
+audit write. On D1, notes generation uses a three-query snapshot plus one audit insert;
 PostgreSQL uses the equivalent repeatable-read snapshot and audit insert.
 
 **Reaching out.** From a person's page, an admin (or a team leader, from their own leader

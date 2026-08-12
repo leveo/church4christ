@@ -1,6 +1,7 @@
 import { assertSnapshotBatchSupport, readSnapshotBatch, type AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import type {
+  CanonicalPersonOrderPerson,
   CanonicalPeopleExportDependent,
   CanonicalPeopleExportHouseholdReference,
   CanonicalPeopleExportPerson,
@@ -111,6 +112,12 @@ function canonicalStatsCtesSql(backend: DbBackend): string {
 function notesStatsCtesSql(backend: DbBackend): string {
   const notesBytes = rowByteSumSql(backend, 'n', ['author_email', 'body', 'created_at']);
   const emailBytes = byteLengthSql(backend, 'n.person_email');
+  const orderPeopleBytes = byteLengthSql(backend, 'p.email');
+  const orderMembershipBytes = rowByteSumSql(backend, 'm', [
+    'household_name',
+    'household_address',
+    'household_phone',
+  ]);
   return `
     export_notes AS (
       SELECT n.id, n.person_id, n.author_email, n.body, n.created_at,
@@ -121,10 +128,44 @@ function notesStatsCtesSql(backend: DbBackend): string {
       ORDER BY n.id
       LIMIT 5001
     ),
-    export_stats AS (
+    export_order_people AS (
+      SELECT p.id, p.email
+      FROM people p
+      WHERE p.deleted_at IS NULL
+      ORDER BY p.id
+      LIMIT 5001
+    ),
+    export_order_memberships AS (
+      SELECT hm.id, hm.person_id, hm.household_id, hm.role, hm.is_primary,
+             h.name AS household_name, h.address AS household_address,
+             h.phone AS household_phone,
+             CASE WHEN h.id IS NULL THEN 0 ELSE 1 END AS household_exists
+      FROM household_members hm
+      JOIN people p ON p.id = hm.person_id AND p.deleted_at IS NULL
+      LEFT JOIN households h ON h.id = hm.household_id
+      WHERE h.id IS NULL OR h.deleted_at IS NULL
+      ORDER BY hm.id
+      LIMIT 5001
+    ),
+    notes_stats AS (
       SELECT COUNT(*) AS notes_count,
-             COALESCE(SUM(${notesBytes} + ${emailBytes}), 0) AS total_bytes
+             COALESCE(SUM(${notesBytes} + ${emailBytes}), 0) AS notes_bytes
       FROM export_notes n
+    ),
+    order_people_stats AS (
+      SELECT COUNT(*) AS order_people_count,
+             COALESCE(SUM(${orderPeopleBytes}), 0) AS order_people_bytes
+      FROM export_order_people p
+    ),
+    order_membership_stats AS (
+      SELECT COUNT(*) AS order_memberships_count,
+             COALESCE(SUM(${orderMembershipBytes}), 0) + COUNT(*) * 12 AS order_membership_bytes
+      FROM export_order_memberships m
+    ),
+    export_stats AS (
+      SELECT notes_count, order_people_count, order_memberships_count,
+             notes_bytes + order_people_bytes + order_membership_bytes AS total_bytes
+      FROM notes_stats CROSS JOIN order_people_stats CROSS JOIN order_membership_stats
     )
   `;
 }
@@ -136,7 +177,12 @@ const CANONICAL_GATE = `
   AND export_stats.memberships_count <= 5000
 `;
 
-const NOTES_GATE = `export_stats.total_bytes <= ? AND export_stats.notes_count <= 5000`;
+const NOTES_GATE = `
+  export_stats.total_bytes <= ?
+  AND export_stats.notes_count <= 5000
+  AND export_stats.order_people_count <= 5000
+  AND export_stats.order_memberships_count <= 5000
+`;
 
 function safeText(expression: string, alias: string, maxCharacters: number): string {
   return `CASE WHEN length(${expression}) <= ${maxCharacters} THEN ${expression} ELSE NULL END AS ${alias},
@@ -152,6 +198,8 @@ interface CanonicalSnapshotStats {
 
 interface NotesSnapshotStats {
   notes_count: number;
+  order_people_count: number;
+  order_memberships_count: number;
   total_bytes: number;
 }
 
@@ -190,9 +238,21 @@ function notesStats(value: unknown): NotesSnapshotStats | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const row = value as DbRow;
   const notesCount = parseBoundedDbInteger(row.notes_count);
+  const orderPeopleCount = parseBoundedDbInteger(row.order_people_count);
+  const orderMembershipsCount = parseBoundedDbInteger(row.order_memberships_count);
   const totalBytes = parseBoundedDbInteger(row.total_bytes);
-  if (notesCount === null || totalBytes === null) return null;
-  return { notes_count: notesCount, total_bytes: totalBytes };
+  if (
+    notesCount === null
+    || orderPeopleCount === null
+    || orderMembershipsCount === null
+    || totalBytes === null
+  ) return null;
+  return {
+    notes_count: notesCount,
+    order_people_count: orderPeopleCount,
+    order_memberships_count: orderMembershipsCount,
+    total_bytes: totalBytes,
+  };
 }
 
 function positiveInteger(value: unknown): value is number {
@@ -533,16 +593,66 @@ function notesSourceRow(row: DbRow): { note: PastoralNotesExportSourceNote; vali
   };
 }
 
-/** Load only live notes for live subjects; the serializer owns final byte validation. */
+function notesOrderPersonRow(row: DbRow): {
+  personId: number | null;
+  person: CanonicalPersonOrderPerson | null;
+  valid: boolean;
+} {
+  const personId = positiveInteger(row.person_id) ? row.person_id : null;
+  const membershipAbsent = row.membership_id === null;
+  const baseValid = personId !== null
+    && projectionsValid(row, ['person_email'])
+    && typeof row.person_email === 'string';
+  if (membershipAbsent) {
+    return {
+      personId,
+      person: baseValid ? {
+        stableKey: `person-${personId}`,
+        email: row.person_email as string,
+        household: null,
+      } : null,
+      valid: baseValid,
+    };
+  }
+
+  const membershipValid = positiveInteger(row.membership_id)
+    && positiveInteger(row.household_id)
+    && row.household_exists === 1
+    && projectionsValid(row, ['household_name', 'household_address', 'household_phone'])
+    && typeof row.household_name === 'string'
+    && nullableString(row.household_address)
+    && nullableString(row.household_phone)
+    && (row.role === 'adult' || row.role === 'child')
+    && zeroOrOne(row.is_primary);
+  const valid = baseValid && membershipValid;
+  return {
+    personId,
+    person: valid ? {
+      stableKey: `person-${personId}`,
+      email: row.person_email as string,
+      household: {
+        stableKey: `household-${row.household_id as number}`,
+        name: row.household_name as string,
+        address: row.household_address as string | null,
+        phone: row.household_phone as string | null,
+        role: row.role as 'adult' | 'child',
+        primary: row.is_primary === 1,
+      },
+    } : null,
+    valid,
+  };
+}
+
+/** Load live notes plus a minimal all-live-People ordering projection in one bounded snapshot. */
 export async function loadPastoralNotesExport(
   db: AppDb,
   backend: DbBackend,
 ): Promise<PastoralNotesExportSource> {
   assertSnapshotBatchSupport(db, backend);
   const statsCtes = notesStatsCtesSql(backend);
-  const [statsResult, result] = await readSnapshotBatch<DbRow>(db, backend, [
+  const [statsResult, result, orderResult] = await readSnapshotBatch<DbRow>(db, backend, [
     db.prepare(`WITH ${statsCtes}
-      SELECT notes_count, total_bytes
+      SELECT notes_count, order_people_count, order_memberships_count, total_bytes
       FROM export_stats
     `),
     db.prepare(`WITH ${statsCtes}
@@ -557,17 +667,51 @@ export async function loadPastoralNotesExport(
       ORDER BY n.id
       LIMIT 5001
     `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes),
+    db.prepare(`WITH ${statsCtes}
+      SELECT p.id AS person_id,
+             ${safeText('p.email', 'person_email', 320)},
+             m.id AS membership_id, m.household_id, m.role, m.is_primary,
+             m.household_exists,
+             ${safeText('m.household_name', 'household_name', 80)},
+             ${safeText('m.household_address', 'household_address', 200)},
+             ${safeText('m.household_phone', 'household_phone', 40)}
+      FROM export_order_people p
+      LEFT JOIN export_order_memberships m ON m.person_id = p.id
+      CROSS JOIN export_stats
+      WHERE ${NOTES_GATE}
+      ORDER BY p.id, m.id
+      LIMIT 5001
+    `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes),
   ]);
   const mapped = result.results.map(notesSourceRow);
+  const mappedOrder = orderResult.results.map(notesOrderPersonRow);
   const stats = notesStats(statsResult.results[0]);
-  let integrityIssues = mapped.filter((row) => !row.valid).length;
+  let integrityIssues = mapped.filter((row) => !row.valid).length
+    + mappedOrder.filter((row) => !row.valid).length;
   if (stats === null) integrityIssues += 1;
   else if (
     stats.notes_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.order_people_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
+    || stats.order_memberships_count > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxRowsPerKind
     || stats.total_bytes > PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes
   ) integrityIssues += 1;
+  if (
+    result.results.length >= EXPORT_SNAPSHOT_LIMIT
+    || orderResult.results.length >= EXPORT_SNAPSHOT_LIMIT
+  ) integrityIssues += 1;
+
+  const peopleOrderById = new Map<number, CanonicalPersonOrderPerson>();
+  for (const row of mappedOrder) {
+    if (!row.valid || row.personId === null || row.person === null) continue;
+    if (peopleOrderById.has(row.personId)) {
+      integrityIssues += 1;
+      continue;
+    }
+    peopleOrderById.set(row.personId, row.person);
+  }
   return {
     notes: mapped.map((row) => row.note),
+    peopleOrder: [...peopleOrderById.values()],
     ...(integrityIssues > 0 ? { integrityIssues } : {}),
   };
 }

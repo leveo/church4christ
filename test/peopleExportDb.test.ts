@@ -248,7 +248,7 @@ describe('loadCanonicalPeopleExport', () => {
     expect(canonical).toEqual(buildCanonicalExportParts(expectedCanonicalPeopleExportSource()));
     expect(notes.status).toBe('success');
     if (notes.status !== 'success') throw new Error('expected success');
-    expect(notes.counts).toEqual({ people: 2, notes: 2 });
+    expect(notes.counts).toEqual({ people: 3, notes: 3 });
   });
 
   it.each([
@@ -697,14 +697,14 @@ describe('pastoral notes export', () => {
 
     expect(db.snapshotBatchCalls).toBe(1);
     expect(db.batchCalls).toBe(1);
-    expect(db.batchSizes).toEqual([2]);
-    expect(db.prepared).toHaveLength(2);
+    expect(db.batchSizes).toEqual([3]);
+    expect(db.prepared).toHaveLength(3);
     expect(db.prepared[0].values).toEqual([]);
     expect(db.prepared[0].sql).toMatch(/total_bytes/i);
     expect(db.prepared[0].sql).toMatch(/length\s*\(\s*CAST\s*\(/i);
     for (const call of db.prepared) {
       expect(call.sql).toMatch(/export_notes\s+AS\s*\([\s\S]*?FROM\s+person_notes\s+n[\s\S]*?ORDER\s+BY\s+n\.id[\s\S]*?LIMIT\s+5001[\s\S]*?\)/i);
-      expect(call.sql).toMatch(/export_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_notes\s+n/i);
+      expect(call.sql).toMatch(/notes_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_notes\s+n/i);
       expect(call.sql).not.toMatch(/COUNT\s*\(\s*\*\s*\)\s+FROM\s+person_notes\b/i);
     }
     expect(db.prepared[1].values).toContain(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes);
@@ -712,15 +712,28 @@ describe('pastoral notes export', () => {
     expect(db.prepared[1].sql).toMatch(/CASE\s+WHEN\s+length\s*\(/i);
     expect(db.prepared[1].sql).toMatch(/n\.deleted_at\s+IS\s+NULL/i);
     expect(db.prepared[1].sql).toMatch(/p\.deleted_at\s+IS\s+NULL/i);
-    expect(db.prepared[1].sql).not.toMatch(/\b(role|super_admin|admin_areas|session_epoch|calendar_token|avatar_url)\b/i);
+    expect(db.prepared[1].sql).not.toMatch(/\b(super_admin|admin_areas|session_epoch|calendar_token|avatar_url)\b/i);
+    expect(db.prepared[2].values).toContain(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes);
+    expect(db.prepared[2].sql).toMatch(/FROM\s+export_order_people\b/i);
+    expect(db.prepared[2].sql).toMatch(/p\.deleted_at\s+IS\s+NULL/i);
+    expect(db.prepared[2].sql).not.toMatch(/\b(?:birthday|joined_on|membership_status|first_name|last_name)\b/i);
+
+    expect(source.peopleOrder).toHaveLength(3);
+    expect(source.peopleOrder?.map((person) => person.stableKey)).toEqual([
+      'person-1',
+      'person-2',
+      'person-4',
+    ]);
+    expect(JSON.stringify(source.peopleOrder)).not.toMatch(/person-3|deleted@example/i);
 
     expect(result.status).toBe('success');
     if (result.status !== 'success') throw new Error('expected success');
-    expect(result.counts).toEqual({ people: 2, notes: 2 });
+    expect(result.counts).toEqual({ people: 3, notes: 3 });
     expect(result.csv).toBe(
       `${PASTORAL_NOTES_EXPORT_HEADERS.join(',')}\r\n`
       + `person-1,beta@example.com,'+departed.author@example.com,"Line one,\nline two",2026-08-09 08:00:00\r\n`
-      + `person-2,zeta@example.com,former.author@example.com,'=Call after service,2026-08-10 09:00:00\r\n`,
+      + `person-2,zeta@example.com,former.author@example.com,'=Call after service,2026-08-10 09:00:00\r\n`
+      + `person-3,alpha@example.com,standalone.author@example.com,Standalone follow-up,2026-08-11 10:00:00\r\n`,
     );
     expect(result.csv).not.toMatch(/Deleted note body|Deleted subject body|deleted-note-author/i);
     expect(result.csv).not.toMatch(/\b(?:200|201|202|203)\b/);
@@ -728,6 +741,7 @@ describe('pastoral notes export', () => {
 
   it('is deterministic across source order and keeps author attribution independent from resolvable people', () => {
     const source: PastoralNotesExportSource = {
+      peopleOrder: [{ stableKey: 'person-z', email: 'zeta@example.com', household: null }],
       notes: [
         {
           stableKey: 'note-z',
@@ -749,41 +763,99 @@ describe('pastoral notes export', () => {
     };
 
     const forward = buildPastoralNotesExport(source);
-    const reversed = buildPastoralNotesExport({ notes: [...source.notes].reverse() });
+    const reversed = buildPastoralNotesExport({
+      peopleOrder: [...(source.peopleOrder ?? [])].reverse(),
+      notes: [...source.notes].reverse(),
+    });
 
     expect(forward).toEqual(reversed);
     expect(JSON.stringify(forward)).not.toContain('authorPersonId');
     expect(JSON.stringify(forward)).not.toContain('author_person_id');
   });
 
-  it('documents person_ref as notes-export-local email/stable-key ordering, never a database or canonical-row join key', () => {
+  it('assigns notes-local refs by canonical household-first People order, never by notes email or database IDs', () => {
     expect(PASTORAL_NOTES_PERSON_REF_SCOPE).toBe('notes_export_local');
-    const result = buildPastoralNotesExport({
-      notes: [
-        {
-          stableKey: 'internal-note-2',
-          personStableKey: 'database-person-999',
-          personEmail: 'zeta@example.com',
-          authorAttribution: 'Historical text only',
-          body: 'Zeta note',
-          createdAt: '2026-08-11 10:00:00',
+    const peopleOrder: NonNullable<PastoralNotesExportSource['peopleOrder']> = [
+      {
+        stableKey: 'database-person-1',
+        email: 'a@example.com',
+        household: null,
+      },
+      {
+        stableKey: 'database-person-999',
+        email: 'z@example.com',
+        household: {
+          stableKey: 'database-household-500',
+          name: 'Alpha Household',
+          address: null,
+          phone: null,
+          role: 'adult',
+          primary: true,
         },
-        {
-          stableKey: 'internal-note-1',
-          personStableKey: 'database-person-1',
-          personEmail: 'alpha@example.com',
-          authorAttribution: 'Historical text only',
-          body: 'Alpha note',
-          createdAt: '2026-08-11 09:00:00',
-        },
-      ],
+      },
+    ];
+    const notes = [
+      {
+        stableKey: 'internal-note-2',
+        personStableKey: 'database-person-999',
+        personEmail: 'z@example.com',
+        authorAttribution: 'Historical text only',
+        body: 'Zeta note',
+        createdAt: '2026-08-11 10:00:00',
+      },
+      {
+        stableKey: 'internal-note-1',
+        personStableKey: 'database-person-1',
+        personEmail: 'a@example.com',
+        authorAttribution: 'Historical text only',
+        body: 'Alpha note',
+        createdAt: '2026-08-11 09:00:00',
+      },
+    ];
+    const result = buildPastoralNotesExport({ peopleOrder, notes });
+    const reversed = buildPastoralNotesExport({
+      peopleOrder: [...peopleOrder].reverse(),
+      notes: [...notes].reverse(),
     });
 
     expect(result.status).toBe('success');
     if (result.status !== 'success') throw new Error('expected success');
-    expect(result.csv).toContain('person-1,alpha@example.com');
-    expect(result.csv).toContain('person-2,zeta@example.com');
+    expect(reversed).toEqual(result);
+    expect(result.csv.split('\r\n').slice(1, -1).map((row) => row.split(',').slice(0, 2))).toEqual([
+      ['person-1', 'z@example.com'],
+      ['person-2', 'a@example.com'],
+    ]);
     expect(result.csv).not.toMatch(/database-person|internal-note/);
+  });
+
+  it('fails closed when a note subject is absent from or duplicated in canonical People ordering', () => {
+    const note = {
+      stableKey: 'note-private',
+      personStableKey: 'person-subject',
+      personEmail: 'private@example.com',
+      authorAttribution: 'Historical text',
+      body: 'Private pastoral body',
+      createdAt: '2026-08-11 09:00:00',
+    };
+    const absent = buildPastoralNotesExport({
+      peopleOrder: [{ stableKey: 'different-person', email: 'different@example.com', household: null }],
+      notes: [note],
+    });
+    const duplicate = buildPastoralNotesExport({
+      peopleOrder: [
+        { stableKey: 'person-subject', email: 'private@example.com', household: null },
+        { stableKey: 'person-subject', email: 'private@example.com', household: null },
+      ],
+      notes: [note],
+    });
+
+    for (const result of [absent, duplicate]) {
+      expect(result).toEqual({
+        status: 'repair_required',
+        counts: { people: 1, notes: 1, issues: 1 },
+      });
+      expect(JSON.stringify(result)).not.toMatch(/csv|private@example|pastoral body/i);
+    }
   });
 
   it('snapshots hostile root, array, and note properties exactly once before serialization', () => {
@@ -815,8 +887,15 @@ describe('pastoral notes export', () => {
         return Reflect.get(target, key, receiver);
       },
     });
-    const input = Object.defineProperty({}, 'notes', {
-      get: () => once('root.notes', rows, [{ body: 'PRIVATE SECOND NOTES' }]),
+    const input = Object.defineProperties({}, {
+      notes: {
+        enumerable: true,
+        get: () => once('root.notes', rows, [{ body: 'PRIVATE SECOND NOTES' }]),
+      },
+      peopleOrder: {
+        enumerable: true,
+        value: [{ stableKey: 'person-safe', email: 'safe@example.com', household: null }],
+      },
     });
 
     const result = buildPastoralNotesExport(input as PastoralNotesExportSource);
@@ -877,6 +956,11 @@ describe('pastoral notes export', () => {
 
   it('orders double-digit person references by assigned ordinal rather than lexicographically', () => {
     const result = buildPastoralNotesExport({
+      peopleOrder: Array.from({ length: 12 }, (_, index) => ({
+        stableKey: `subject-${index + 1}`,
+        email: `person-${String(index + 1).padStart(2, '0')}@example.com`,
+        household: null,
+      })).reverse(),
       notes: Array.from({ length: 12 }, (_, index) => ({
         stableKey: `note-${index + 1}`,
         personStableKey: `subject-${index + 1}`,

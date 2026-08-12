@@ -1,5 +1,9 @@
 import { csvCell } from './csv';
 import { isValidDateStr } from './dates';
+import {
+  canonicalPersonStableKeyOrder,
+  type CanonicalPersonOrderPerson,
+} from './peopleExport';
 import { isEmail } from './validate';
 
 export const PASTORAL_NOTES_EXPORT_HEADERS = [
@@ -29,6 +33,8 @@ export interface PastoralNotesExportSourceNote {
 }
 
 export interface PastoralNotesExportSource {
+  /** All live People, projected only to the fields required for canonical ordering. */
+  peopleOrder?: readonly CanonicalPersonOrderPerson[];
   notes: readonly PastoralNotesExportSourceNote[];
   /** Numeric-only loader integrity failures; any positive value suppresses CSV bytes. */
   integrityIssues?: number;
@@ -85,18 +91,84 @@ function isSqlTimestamp(value: string): boolean {
   return match !== null && isValidDateStr(match[1]);
 }
 
-function snapshot(input: unknown): { notes: SnapshotNote[]; issues: number; observed: number } {
-  if (!isPlainRecord(input)) return { notes: [], issues: 1, observed: 0 };
+function snapshotOrderHousehold(value: unknown): {
+  household: CanonicalPersonOrderPerson['household'];
+  issues: number;
+} {
+  if (value === null) return { household: null, issues: 0 };
+  if (!isPlainRecord(value)) return { household: null, issues: 1 };
+  const stableKey = value.stableKey;
+  const name = value.name;
+  const address = value.address;
+  const phone = value.phone;
+  const role = value.role;
+  const primary = value.primary;
+  let issues = 0;
+  if (typeof stableKey !== 'string') issues += 1;
+  if (typeof name !== 'string') issues += 1;
+  if (address !== null && typeof address !== 'string') issues += 1;
+  if (phone !== null && typeof phone !== 'string') issues += 1;
+  if (role !== 'adult' && role !== 'child') issues += 1;
+  if (typeof primary !== 'boolean') issues += 1;
+  return {
+    household: issues === 0 ? {
+      stableKey: stableKey as string,
+      name: name as string,
+      address: address as string | null,
+      phone: phone as string | null,
+      role: role as 'adult' | 'child',
+      primary: primary as boolean,
+    } : null,
+    issues,
+  };
+}
+
+function snapshotOrderPeople(value: unknown): { people: CanonicalPersonOrderPerson[]; issues: number } {
+  if (value === undefined) return { people: [], issues: 0 };
+  if (!Array.isArray(value) || value.length > PASTORAL_NOTES_EXPORT_LIMITS.maxNotes) {
+    return { people: [], issues: 1 };
+  }
+  const people: CanonicalPersonOrderPerson[] = [];
+  let issues = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const row = value[index];
+    if (!isPlainRecord(row)) {
+      issues += 1;
+      continue;
+    }
+    const stableKey = row.stableKey;
+    const email = row.email;
+    const household = snapshotOrderHousehold(row.household);
+    if (typeof stableKey !== 'string') issues += 1;
+    if (typeof email !== 'string') issues += 1;
+    issues += household.issues;
+    if (typeof stableKey === 'string' && typeof email === 'string' && household.issues === 0) {
+      people.push({ stableKey, email, household: household.household });
+    }
+  }
+  return { people, issues };
+}
+
+function snapshot(input: unknown): {
+  notes: SnapshotNote[];
+  peopleOrder: CanonicalPersonOrderPerson[];
+  issues: number;
+  observed: number;
+} {
+  if (!isPlainRecord(input)) return { notes: [], peopleOrder: [], issues: 1, observed: 0 };
   const notesInput = input.notes;
+  const peopleOrder = snapshotOrderPeople(input.peopleOrder);
   const integrityIssuesInput = input.integrityIssues;
-  if (!Array.isArray(notesInput)) return { notes: [], issues: 1, observed: 0 };
+  if (!Array.isArray(notesInput)) {
+    return { notes: [], peopleOrder: peopleOrder.people, issues: peopleOrder.issues + 1, observed: 0 };
+  }
   const observed = notesInput.length;
   if (observed > PASTORAL_NOTES_EXPORT_LIMITS.maxNotes) {
-    return { notes: [], issues: 1, observed };
+    return { notes: [], peopleOrder: [], issues: 1, observed };
   }
 
   const notes: SnapshotNote[] = [];
-  let issues = 0;
+  let issues = peopleOrder.issues;
   if (integrityIssuesInput !== undefined) {
     if (!Number.isSafeInteger(integrityIssuesInput) || (integrityIssuesInput as number) < 0) issues += 1;
     else issues += Math.min(integrityIssuesInput as number, PASTORAL_NOTES_EXPORT_LIMITS.maxIssues);
@@ -140,7 +212,7 @@ function snapshot(input: unknown): { notes: SnapshotNote[]; issues: number; obse
     }
     notes.push(note);
   }
-  return { notes, issues, observed };
+  return { notes, peopleOrder: peopleOrder.people, issues, observed };
 }
 
 /** Build the separately authorized pastoral-notes CSV without exposing IDs or partial bytes on failure. */
@@ -166,16 +238,26 @@ export function buildPastoralNotesExport(input: PastoralNotesExportSource): Past
       else subjectByStableKey.set(stableKey, { stableKey, email });
     }
 
-    const subjects = [...subjectByStableKey.values()].sort(
-      (left, right) => compare(left.email, right.email) || compare(identity(left.stableKey), identity(right.stableKey))
-        || compare(left.stableKey, right.stableKey),
+    const canonicalOrder = canonicalPersonStableKeyOrder(captured.peopleOrder);
+    const peopleOrderByStableKey = new Map(
+      captured.peopleOrder.map((person) => [person.stableKey, identity(person.email)]),
     );
+    if (canonicalOrder.status !== 'success') issues += 1;
+    const subjects = canonicalOrder.status === 'success'
+      ? canonicalOrder.stableKeys
+        .filter((stableKey) => subjectByStableKey.has(stableKey))
+        .map((stableKey) => subjectByStableKey.get(stableKey)!)
+      : [...subjectByStableKey.values()];
+    for (const subject of subjectByStableKey.values()) {
+      const orderEmail = peopleOrderByStableKey.get(subject.stableKey);
+      if (orderEmail === undefined || orderEmail !== subject.email) issues += 1;
+    }
     const seenEmails = new Set<string>();
     for (const subject of subjects) {
       if (seenEmails.has(subject.email)) issues += 1;
       seenEmails.add(subject.email);
     }
-    if (issues > 0) return repair(subjects.length, captured.observed, issues);
+    if (issues > 0) return repair(subjectByStableKey.size, captured.observed, issues);
 
     const subjectsWithRefs: Subject[] = subjects.map((subject, index) => ({
       ...subject,

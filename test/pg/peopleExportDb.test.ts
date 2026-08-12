@@ -50,10 +50,11 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
     expect(canonical).toEqual(expectedCanonical);
     expect(notes).toEqual({
       status: 'success',
-      counts: { people: 2, notes: 2 },
+      counts: { people: 3, notes: 3 },
       csv: 'person_ref,person_email,author_attribution,body,created_at\r\n'
         + 'person-1,beta@example.com,\'+departed.author@example.com,"Line one,\nline two",2026-08-09 08:00:00\r\n'
-        + 'person-2,zeta@example.com,former.author@example.com,\'=Call after service,2026-08-10 09:00:00\r\n',
+        + 'person-2,zeta@example.com,former.author@example.com,\'=Call after service,2026-08-10 09:00:00\r\n'
+        + 'person-3,alpha@example.com,standalone.author@example.com,Standalone follow-up,2026-08-11 10:00:00\r\n',
     });
   });
 
@@ -85,7 +86,7 @@ describe.skipIf(!hasPg)('portable people exports (Postgres)', () => {
       expect(canonical).toEqual(buildCanonicalExportParts(expectedCanonicalPeopleExportSource()));
       expect(notes.status).toBe('success');
       if (notes.status !== 'success') throw new Error('expected success');
-      expect(notes.counts).toEqual({ people: 2, notes: 2 });
+      expect(notes.counts).toEqual({ people: 3, notes: 3 });
     } finally {
       await rawSql.end();
     }
