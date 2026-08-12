@@ -130,10 +130,11 @@ describe('moduleForPath — groups module', () => {
 });
 
 describe('People import directory entry', () => {
-  it('shows the import link only behind both the people module and full people grant', () => {
+  it('shows both import workflows only behind the people module and full people grant', () => {
     expect(peopleDirectorySource).toMatch(
-      /hasPeople\s*&&\s*canManagePeople\s*&&\s*\(\s*<a href="\/admin\/people\/import"/s,
+      /hasPeople\s*&&\s*canManagePeople\s*&&\s*\(\s*<>[\s\S]*?href="\/admin\/people\/import\/map"[\s\S]*?href="\/admin\/people\/import"[\s\S]*?<\/\>[\s\S]*?\)/,
     );
+    expect(peopleDirectorySource.match(/href="\/admin\/people\/import\/map"/g)).toHaveLength(1);
     expect(peopleDirectorySource.match(/href="\/admin\/people\/import"/g)).toHaveLength(1);
   });
 });
