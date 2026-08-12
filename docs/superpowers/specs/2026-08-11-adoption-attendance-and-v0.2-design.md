@@ -101,10 +101,13 @@ and its post-merge `main` run to pass.
 
 ### Standard canonical export
 
-Admins with full People-area access can download a UTF-8 CSV whose header is byte-for-byte
-the existing 18-column import header. It contains live People, whether active or inactive,
-live households, and live name-only dependents. Soft-deleted records are excluded.
-The route is `/admin/people/export.csv`.
+Admins with full People-area access can download one or more deterministic UTF-8 CSV parts
+whose header is byte-for-byte the existing 18-column import header. Each part stays within
+the atomic import limits and a household is never split. Together the parts contain live
+People, whether active or inactive, live households, and live name-only dependents.
+Soft-deleted records are excluded. A structurally invalid or individually oversized
+household fails closed for repair rather than being synthesized or partially omitted.
+The route is `/admin/people/export.csv`, with explicit part selection when needed.
 
 The export never includes `role`, admin areas, session/token state, security
 flags, Stripe data, pastoral notes, or internal database ids. A clean re-import creates
@@ -219,13 +222,16 @@ existing household.
 There is no adult person id, adult roster, anonymous identifier, or first-time-visitor
 count in this table.
 
-`service_type_checkin_events` is an effective-dated many-to-many association
+`service_type_checkin_events` is an append/close-only effective-dated many-to-many association
 between an existing service type and existing Children's check-in events. Each link has
 a start date and optional end date, so changing today's mapping cannot rewrite which
 events belonged to a historical service. For a service/date, child count is
 `COUNT(DISTINCT household_member_id)` across links effective on that date.
 A child present in two linked rooms therefore counts once. Checkout does not erase
 attendance because the existing event/child/date row remains the source of truth.
+Once a link has become effective, its service, event, and start date cannot be edited or
+deleted through the application; replacement closes the current link and starts a new one
+today so historical counts are not rewritten.
 
 If no Children's event is linked, the UI displays "not configured" instead of zero.
 Historical child counts remain readable when Children is disabled, while association
@@ -307,6 +313,7 @@ so reminders and reports do not depend on labels. Exactly one active open status
 initial status for new submissions; the database and validation layer prevent removing
 the last valid initial status. Assignment and status are separate explicit actions:
 assigning a worker does not silently select a label whose name happens to be "Assigned."
+New, Assigned, and Contacted are open by default; Connected and Closed are closed.
 
 ### Intake
 
@@ -317,9 +324,12 @@ Administrators may add optional questions.
 Public submission requires explicit contact consent. Staff entry records whether consent
 was obtained and cannot trigger automated contact without it.
 
-The public endpoint uses bounded bodies/cells, a honeypot, per-identifier rate limits,
+The public endpoint uses bounded bodies/cells, a honeypot, database-backed keyed-hash
+per-contact and trusted-client-IP rate limits,
 generic success responses, and no raw-input logging. It creates only a newcomer
 submission. It does not create a login, magic link, household, or Person.
+The hash key is a managed secret; a missing secret fails closed without persisting plaintext
+identifiers or accepting an unprotected submission.
 
 Custom questions may be marked required, but the fixed contact/consent fields cannot be
 removed or redefined. This release does not send automated newcomer marketing or
@@ -376,7 +386,8 @@ Both adapters report stable statuses: `pass`,
 `action_required`, `manual`, and
 `not_applicable`. A check that cannot be proven never reports pass.
 
-The admin checklist covers identity/branding/locales, service times, admin grants,
+All authenticated admins may read the checklist, while only super-admin may acknowledge
+manual operational checks. The admin checklist covers identity/branding/locales, service times, admin grants,
 migration or a deliberate no-import decision, newcomer ownership, attendance/check-in
 mapping, production origin/domain/email, enabled routes/jobs, backups, and a dated
 restore-drill acknowledgement.
@@ -387,7 +398,9 @@ checklist is not a deploy button or unattended migration tool.
 
 ## Slice 8: screenshots, feature guides, and README
 
-After the user-facing slices pass built-worker E2E, capture real pages from seeded builds.
+After the user-facing slices pass built-worker E2E, capture real pages from seeded
+production builds. Authenticated captures use test-only signed sessions against isolated
+seed data rather than the development authentication bypass.
 Mockups and generated UI images do not satisfy this requirement.
 
 The committed screenshot set covers at least:
