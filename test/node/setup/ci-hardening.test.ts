@@ -17,6 +17,228 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
   return event;
 }
 
+type WorkflowStep = {
+  name: string;
+  uses?: string;
+  with?: Record<string, string>;
+  run?: string;
+  env?: Record<string, string>;
+};
+
+function indentation(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+function meaningfulLines(lines: string[]): string[] {
+  return lines.filter((line) => line.trim() && !line.trimStart().startsWith('#'));
+}
+
+function nestedBlock(lines: string[], header: string): string[] {
+  const start = lines.indexOf(header);
+  expect(start, `missing workflow source line: ${header.trim()}`).toBeGreaterThanOrEqual(0);
+  const headerIndent = indentation(header);
+  let end = start + 1;
+
+  for (; end < lines.length; end += 1) {
+    const line = lines[end];
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    if (indentation(line) <= headerIndent) break;
+  }
+  return lines.slice(start + 1, end);
+}
+
+function directMap(lines: string[], indent: number): Record<string, string | null> {
+  const result: Record<string, string | null> = {};
+  for (const line of meaningfulLines(lines)) {
+    if (indentation(line) !== indent) continue;
+    const match = line.trim().match(/^([^:]+):(?:\s(.*))?$/);
+    expect(match, `invalid workflow mapping line: ${line.trim()}`).not.toBeNull();
+    const key = match![1];
+    expect(result, `duplicate workflow key: ${key}`).not.toHaveProperty(key);
+    result[key] = match![2] ?? null;
+  }
+  return result;
+}
+
+function scalarMap(lines: string[], indent: number): Record<string, string> {
+  const entries = meaningfulLines(lines);
+  expect(entries.every((line) => indentation(line) === indent)).toBe(true);
+  const parsed = directMap(entries, indent);
+  expect(Object.values(parsed).every((value) => value !== null)).toBe(true);
+  return parsed as Record<string, string>;
+}
+
+function scalarList(lines: string[], indent: number): string[] {
+  return meaningfulLines(lines).map((line) => {
+    expect(indentation(line)).toBe(indent);
+    expect(line.trim()).toMatch(/^- .+$/);
+    return line.trim().slice(2);
+  });
+}
+
+function foldedScalar(lines: string[], header: string, indent: number): string {
+  const block = meaningfulLines(nestedBlock(lines, header));
+  expect(block.every((line) => indentation(line) === indent)).toBe(true);
+  return block.map((line) => line.trim()).join(' ');
+}
+
+function parseWorkflowSteps(lines: string[]): WorkflowStep[] {
+  const significant = meaningfulLines(lines);
+  expect(
+    significant
+      .filter((line) => indentation(line) === 6)
+      .every((line) => /^\s{6}- name: .+$/.test(line)),
+  ).toBe(true);
+  const starts = significant
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => indentation(line) === 6)
+    .map(({ index }) => index);
+
+  return starts.map((start, position) => {
+    const segment = significant.slice(start, starts[position + 1] ?? significant.length);
+    const name = segment[0].trim().slice('- name: '.length);
+    const fields = directMap(segment.slice(1), 8);
+    expect(Object.keys(fields).every((key) => ['uses', 'with', 'run', 'env'].includes(key))).toBe(
+      true,
+    );
+    const step: WorkflowStep = { name };
+
+    if (fields.uses !== undefined) {
+      expect(fields.uses).not.toBeNull();
+      step.uses = fields.uses!;
+    }
+    if (fields.with !== undefined) {
+      expect(fields.with).toBeNull();
+      step.with = scalarMap(nestedBlock(segment, '        with:'), 10);
+    }
+    if (fields.run !== undefined) {
+      expect(fields.run).not.toBeNull();
+      step.run =
+        fields.run === '>-' ? foldedScalar(segment, '        run: >-', 10) : fields.run!;
+    }
+    if (fields.env !== undefined) {
+      expect(fields.env).toBeNull();
+      step.env = scalarMap(nestedBlock(segment, '        env:'), 10);
+    }
+    return step;
+  });
+}
+
+function validateCiWorkflow(workflow: string): void {
+  const lines = workflow.split('\n');
+  expect(workflow).not.toContain('\t');
+  expect(directMap(nestedBlock(lines, 'concurrency:'), 2)).toEqual({
+    group: 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+    'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+  });
+
+  const jobs = nestedBlock(lines, 'jobs:');
+  expect(directMap(jobs, 2)).toEqual({ 'build-test': null });
+  const job = nestedBlock(jobs, '  build-test:');
+  expect(directMap(job, 4)).toEqual({
+    'runs-on': 'ubuntu-latest',
+    'timeout-minutes': '30',
+    permissions: null,
+    services: null,
+    steps: null,
+  });
+  expect(scalarMap(nestedBlock(job, '    permissions:'), 6)).toEqual({ contents: 'read' });
+
+  const services = nestedBlock(job, '    services:');
+  expect(directMap(services, 6)).toEqual({ postgres: null });
+  const postgres = nestedBlock(services, '      postgres:');
+  expect(directMap(postgres, 8)).toEqual({
+    image: 'postgres:16',
+    env: null,
+    ports: null,
+    options: '>-',
+  });
+  expect(scalarMap(nestedBlock(postgres, '        env:'), 10)).toEqual({
+    POSTGRES_USER: 'postgres',
+    POSTGRES_PASSWORD: 'postgres',
+    POSTGRES_DB: 'postgres',
+  });
+  expect(scalarList(nestedBlock(postgres, '        ports:'), 10)).toEqual(['5432:5432']);
+  expect(foldedScalar(postgres, '        options: >-', 10)).toBe(
+    '--health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5',
+  );
+
+  const steps = parseWorkflowSteps(nestedBlock(job, '    steps:'));
+  const databaseUrl = { DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/postgres' };
+  const supabaseUrl = {
+    SUPABASE_DB_URL: 'postgres://postgres:postgres@localhost:5432/postgres',
+  };
+  const expectedSteps: WorkflowStep[] = [
+    { name: 'Checkout', uses: 'actions/checkout@v7' },
+    {
+      name: 'Setup Node',
+      uses: 'actions/setup-node@v7',
+      with: { 'node-version-file': '.nvmrc', cache: 'npm' },
+    },
+    { name: 'Install dependencies', run: 'npm ci' },
+    {
+      name: 'Verify generated design artifacts',
+      run: 'test -f src/styles/tokens.generated.css && test -f src/lib/themeMeta.generated.ts',
+    },
+    { name: 'Generate Cloudflare Worker types', run: 'npx wrangler types' },
+    {
+      name: 'Prepare test reports',
+      run: `node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+    },
+    { name: 'Check generated capability documentation', run: 'npm run docs:check' },
+    {
+      name: 'Prove setup dry-run and clean D1 install',
+      run: 'npx vitest run --project node test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts',
+    },
+    {
+      name: 'Prove clean Supabase setup',
+      run: 'npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json',
+      env: databaseUrl,
+    },
+    {
+      name: 'Assert Supabase setup test did not skip',
+      run: 'node scripts/ci/assert-vitest-json.mjs .tmp/setup-pg.json 1',
+    },
+    { name: 'Build design tokens', run: 'npm run tokens' },
+    { name: 'Check token contrast + no hardcoded values', run: 'npm run tokens:check' },
+    { name: 'Run tests (node + workers projects)', run: 'npm test' },
+    { name: 'Type check', run: 'npm run check' },
+    { name: 'Build', run: 'npm run build' },
+    { name: 'Apply D1 migrations (local)', run: 'npm run db:migrate:local' },
+    { name: 'Seed demo data (local)', run: 'npm run db:seed:local' },
+    { name: 'Seed local media objects', run: 'npm run db:seed-media:local' },
+    { name: 'Smoke test', run: 'bash scripts/smoke.sh' },
+    { name: 'End-to-end tests (built worker)', run: 'npm run test:e2e' },
+    {
+      name: 'Apply Supabase migrations (Postgres)',
+      run: 'npm run db:migrate:supabase',
+      env: supabaseUrl,
+    },
+    {
+      name: 'Seed demo data (Postgres)',
+      run: 'npm run db:seed:supabase',
+      env: supabaseUrl,
+    },
+    {
+      name: 'Postgres backend tests (pg project)',
+      run: 'npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json',
+      env: databaseUrl,
+    },
+    {
+      name: 'Assert Postgres project did not skip',
+      run: 'node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1',
+    },
+    { name: 'End-to-end tests (Postgres worker)', run: 'npm run test:e2e:pg', env: databaseUrl },
+  ];
+
+  expect(steps).toEqual(expectedSteps);
+  for (const command of steps.flatMap((step) => (step.run ? [step.run] : []))) {
+    expect(command).not.toMatch(
+      /(?:^|(?:&&|\|\||;)\s*)(?:npm\s+(?:run\s+)?(?:deploy|release)\b|npm\s+publish\b|(?:npx\s+)?wrangler\s+deploy\b|gh\s+release\b)/i,
+    );
+  }
+}
+
 describe('test runner hardening', () => {
   it('does not mask missing tests or arbitrary unhandled errors', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
@@ -232,46 +454,108 @@ describe('test runner hardening', () => {
   });
 
   it('preserves permissions, Postgres, caching, and every CI run step', () => {
-    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
-    const runCommands = [
-      'npm ci',
-      'test -f src/styles/tokens.generated.css && test -f src/lib/themeMeta.generated.ts',
-      'npx wrangler types',
-      `node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
-      'npm run docs:check',
-      'npx vitest run --project node test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts',
-      'npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json',
-      'node scripts/ci/assert-vitest-json.mjs .tmp/setup-pg.json 1',
-      'npm run tokens',
-      'npm run tokens:check',
-      'npm test',
-      'npm run check',
-      'npm run build',
-      'npm run db:migrate:local',
-      'npm run db:seed:local',
-      'npm run db:seed-media:local',
-      'bash scripts/smoke.sh',
-      'npm run test:e2e',
-      'npm run db:migrate:supabase',
-      'npm run db:seed:supabase',
-      'npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json',
-      'node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1',
-      'npm run test:e2e:pg',
-    ];
-    const criticalDatabaseSteps = [
-      'Prove setup dry-run and clean D1 install',
-      'Prove clean Supabase setup',
-      'Apply D1 migrations (local)',
-      'Seed demo data (local)',
-      'Apply Supabase migrations (Postgres)',
-      'Seed demo data (Postgres)',
-    ];
+    validateCiWorkflow(readFileSync('.github/workflows/ci.yml', 'utf8'));
+  });
 
-    expect(workflow).toContain('permissions:\n      contents: read');
-    expect(workflow).toContain('services:\n      postgres:\n        image: postgres:16');
-    expect(workflow).toContain('cache: npm');
-    expect(workflow.match(/^\s+run:(?:\s|$)/gm)).toHaveLength(runCommands.length);
-    for (const command of runCommands) expect(workflow).toContain(command);
-    for (const step of criticalDatabaseSteps) expect(workflow).toContain(`- name: ${step}`);
+  it.each([
+    [
+      'write permission',
+      (workflow: string) =>
+        workflow.replace('      contents: read', '      contents: read\n      id-token: write'),
+    ],
+    [
+      'checkout fetch-depth override',
+      (workflow: string) =>
+        workflow.replace(
+          '        uses: actions/checkout@v7',
+          '        uses: actions/checkout@v7\n        with:\n          fetch-depth: 0',
+        ),
+    ],
+    [
+      'unapproved action',
+      (workflow: string) =>
+        workflow.replace(
+          '      - name: Install dependencies',
+          '      - name: Unapproved action\n        uses: example/action@v1\n\n      - name: Install dependencies',
+        ),
+    ],
+    [
+      'deployment command suffix',
+      (workflow: string) => workflow.replace('        run: npm test', '        run: npm test && npm run deploy'),
+    ],
+    [
+      'Postgres image change',
+      (workflow: string) => workflow.replace('        image: postgres:16', '        image: postgres:15'),
+    ],
+    [
+      'Postgres environment change',
+      (workflow: string) => workflow.replace('          POSTGRES_DB: postgres', '          POSTGRES_DB: app'),
+    ],
+    [
+      'Postgres port change',
+      (workflow: string) => workflow.replace('          - 5432:5432', '          - 5433:5432'),
+    ],
+    [
+      'Postgres health option change',
+      (workflow: string) => workflow.replace('          --health-interval 10s', '          --health-interval 20s'),
+    ],
+    [
+      'concurrency group change',
+      (workflow: string) => workflow.replace('  group: ci-${{ github.workflow }}-', '  group: check-${{ github.workflow }}-'),
+    ],
+    [
+      'main push cancellation',
+      (workflow: string) =>
+        workflow.replace(
+          "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+          "  cancel-in-progress: ${{ github.event_name == 'push' }}",
+        ),
+    ],
+    [
+      'job timeout change',
+      (workflow: string) => workflow.replace('    timeout-minutes: 30', '    timeout-minutes: 31'),
+    ],
+    [
+      'checkout major change',
+      (workflow: string) => workflow.replace('actions/checkout@v7', 'actions/checkout@v6'),
+    ],
+    [
+      'Setup Node extra input',
+      (workflow: string) => workflow.replace('          cache: npm', '          cache: npm\n          always-auth: true'),
+    ],
+    [
+      'step name change',
+      (workflow: string) => workflow.replace('- name: Install dependencies', '- name: Install packages'),
+    ],
+    [
+      'step order change',
+      (workflow: string) =>
+        workflow.replace(
+          '      - name: Build design tokens\n        run: npm run tokens\n\n      - name: Check token contrast + no hardcoded values\n        run: npm run tokens:check',
+          '      - name: Check token contrast + no hardcoded values\n        run: npm run tokens:check\n\n      - name: Build design tokens\n        run: npm run tokens',
+        ),
+    ],
+    [
+      'step environment change',
+      (workflow: string) =>
+        workflow.replace(
+          '          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres',
+          '          DATABASE_URL: postgres://postgres:postgres@localhost:5433/postgres',
+        ),
+    ],
+    [
+      'release command suffix',
+      (workflow: string) => workflow.replace('        run: npm test', '        run: npm test && gh release create v1'),
+    ],
+    [
+      'npm publish command suffix',
+      (workflow: string) => workflow.replace('        run: npm test', '        run: npm test && npm publish'),
+    ],
+  ])('rejects CI workflow mutation: %s', (_label, mutate) => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const mutated = mutate(workflow);
+
+    expect(mutated).not.toBe(workflow);
+    expect(() => validateCiWorkflow(mutated)).toThrow();
   });
 });
