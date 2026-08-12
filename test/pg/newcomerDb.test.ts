@@ -115,18 +115,42 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
     const fieldId = await createNewcomerField(db, superAdmin, {
       key: 'connection_path', type: 'select', required: true, active: true, sort: 8,
       labelEn: 'Connection path', labelZh: '连接方式', helpEn: null, helpZh: null,
-      options: [{ value: 'group', sort: 1, active: true, labelEn: 'Group', labelZh: '小组' }],
+      options: [
+        { value: 'group', sort: 1, active: true, labelEn: 'Group', labelZh: '小组' },
+        { value: 'serve', sort: 2, active: true, labelEn: 'Serve', labelZh: '服事' },
+      ],
     });
+    await sql.unsafe(`INSERT INTO newcomer_submissions (id,name,locale,visit_date,source)
+      VALUES ('40000000-0000-4000-8000-000000000001','Historical answer','en','2026-08-12','staff')`);
+    await sql.unsafe(`INSERT INTO newcomer_answers (submission_id,field_id,value)
+      VALUES ('40000000-0000-4000-8000-000000000001',$1,'group')`, [fieldId]);
     await updateNewcomerField(db, superAdmin, {
       id: fieldId, required: false, active: true, sort: 9,
       labelEn: 'Next step', labelZh: '下一步', helpEn: 'Choose', helpZh: null,
-      options: [{ value: 'serve', sort: 2, active: true, labelEn: 'Serve', labelZh: '服事' }],
+      options: [{ value: 'serve', sort: 3, active: true, labelEn: 'Serving', labelZh: '参与服事' }],
     });
     const [initial] = await sql.unsafe<{ id: number }[]>(`SELECT id FROM newcomer_statuses
       WHERE active=1 AND category='open' AND is_initial=1`);
     expect(Number(initial.id)).toBe(statusId);
     expect((await sql.unsafe<{ value: string }[]>(`SELECT value FROM newcomer_field_options
-      WHERE field_id=$1`, [fieldId]))[0].value).toBe('serve');
+      WHERE field_id=$1 ORDER BY value`, [fieldId])).map((row) => row.value)).toEqual(['group', 'serve']);
+    expect((await sql.unsafe<{ label: string }[]>(`SELECT label FROM newcomer_field_option_i18n
+      WHERE field_id=$1 AND value='group' AND locale='zh'`, [fieldId]))[0].label).toBe('小组');
+    expect((await sql.unsafe<{ value: string }[]>(`SELECT value FROM newcomer_answers
+      WHERE submission_id='40000000-0000-4000-8000-000000000001'`, []))[0].value).toBe('group');
+
+    await updateNewcomerField(db, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 9,
+      labelEn: 'Next step', labelZh: '下一步', helpEn: 'Choose', helpZh: null,
+      options: [{ value: 'group', sort: 4, active: false, labelEn: 'Archived group', labelZh: '已停用小组' }],
+    });
+    const [archived] = await sql.unsafe<{ active: number; label: string }[]>(`SELECT option.active,i18n.label
+      FROM newcomer_field_options option JOIN newcomer_field_option_i18n i18n
+        ON i18n.field_id=option.field_id AND i18n.value=option.value AND i18n.locale='zh'
+      WHERE option.field_id=$1 AND option.value='group'`, [fieldId]);
+    expect(archived).toEqual({ active: 0, label: '已停用小组' });
+    expect((await sql.unsafe<{ value: string }[]>(`SELECT value FROM newcomer_answers
+      WHERE submission_id='40000000-0000-4000-8000-000000000001'`, []))[0].value).toBe('group');
   });
 
   it('rolls back an invalid last-initial update without leaking database text', async () => {
@@ -194,10 +218,10 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
     }
     await sql.unsafe(`INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES ${fieldRows};
       INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES ${optionRows.join(',')}`);
-    const replacement = (prefix: string) => Array.from({ length: 100 }, (_, index) => ({
-      value: `${prefix}_${index}`, sort: index, active: true,
-      labelEn: `${prefix} ${index}`, labelZh: `${prefix} ${index}`,
-    }));
+    const addition = (prefix: string) => [{
+      value: `${prefix}_new`, sort: 100, active: true,
+      labelEn: `${prefix} new`, labelZh: `${prefix} new`,
+    }];
     const clientA = pgClient();
     const clientB = pgClient();
     let guardArrivals = 0;
@@ -212,9 +236,8 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
       begin: async (callback: (transaction: { unsafe: typeof client.unsafe }) => Promise<unknown>) => client.begin(
         async (transaction) => callback({
           unsafe: (async (query: string, parameters?: never[]) => {
-            const rows = await transaction.unsafe(query, parameters);
-            if (query.includes("SELECT 0,'en','guard'")) await atGuard();
-            return rows;
+            if (query.includes('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id')) await atGuard();
+            return transaction.unsafe(query, parameters);
           }) as typeof client.unsafe,
         }),
       ),
@@ -224,12 +247,12 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
         updateNewcomerField(new PgAdapter(barrierClient(clientA) as never), superAdmin, {
           id: 8, required: false, active: true, sort: 8,
           labelEn: 'Cap A', labelZh: '上限 A', helpEn: null, helpZh: null,
-          options: replacement('a'),
+          options: addition('a'),
         }),
         updateNewcomerField(new PgAdapter(barrierClient(clientB) as never), superAdmin, {
           id: 9, required: false, active: true, sort: 9,
           labelEn: 'Cap B', labelZh: '上限 B', helpEn: null, helpZh: null,
-          options: replacement('b'),
+          options: addition('b'),
         }),
       ]);
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);

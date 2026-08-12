@@ -1206,18 +1206,22 @@ function optionStatements(
   fieldLookup: { column: 'key' | 'id'; value: string | number },
   options: SafeOption[],
 ) {
+  const updateExisting = fieldLookup.column === 'id';
   const suffix = fieldLookup.column === 'key'
     ? { insert: 'key=?4', label: 'key=?3' }
     : { insert: "id=?4 AND fixed=0 AND type='select'", label: "id=?3 AND fixed=0 AND type='select'" };
   return options.flatMap((option) => [
     db.prepare(`INSERT INTO newcomer_field_options (field_id,value,sort,active)
       SELECT id,?1,?2,?3 FROM newcomer_fields WHERE ${suffix.insert}
+      ${updateExisting ? 'ON CONFLICT(field_id,value) DO UPDATE SET sort=excluded.sort,active=excluded.active' : ''}
       RETURNING field_id,value`).bind(option.value, option.sort, option.active ? 1 : 0, fieldLookup.value),
     db.prepare(`INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label)
       SELECT id,?1,'en',?2 FROM newcomer_fields WHERE ${suffix.label}
+      ${updateExisting ? 'ON CONFLICT(field_id,value,locale) DO UPDATE SET label=excluded.label' : ''}
       RETURNING field_id,value`).bind(option.value, option.labelEn, fieldLookup.value),
     db.prepare(`INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label)
       SELECT id,?1,'zh',?2 FROM newcomer_fields WHERE ${suffix.label}
+      ${updateExisting ? 'ON CONFLICT(field_id,value,locale) DO UPDATE SET label=excluded.label' : ''}
       RETURNING field_id,value`).bind(option.value, option.labelZh, fieldLookup.value),
   ]);
 }
@@ -1298,7 +1302,6 @@ export async function updateNewcomerField(
   const common = safeFieldCommon(row);
   if (id <= 7 && (common.required || !common.active || common.options.length !== 0)) throw new NewcomerInvalidError();
   const optionCount = common.options.length;
-  const activeOptionCount = common.options.filter((option) => option.active).length;
   try {
     const optionWrites = optionStatements(db, { column: 'id', value: id }, common.options);
     const statements = [
@@ -1310,35 +1313,38 @@ export async function updateNewcomerField(
           sort=?3
         WHERE id=?4 AND (
           (fixed=1 AND ?1=0 AND ?2=1 AND ?5=0) OR
-          (fixed=0 AND ((type='select' AND ?5>0 AND ?6>0) OR (type<>'select' AND ?5=0)))
+          (fixed=0 AND (type='select' OR (type<>'select' AND ?5=0)))
         )
         RETURNING id,type,fixed
-      `).bind(common.required ? 1 : 0, common.active ? 1 : 0, common.sort, id, optionCount, activeOptionCount),
+      `).bind(common.required ? 1 : 0, common.active ? 1 : 0, common.sort, id, optionCount),
       db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (?1,'en',?2,?3)
         ON CONFLICT(field_id,locale) DO UPDATE SET label=excluded.label,help=excluded.help RETURNING field_id`)
         .bind(id, common.labelEn, common.helpEn),
       db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (?1,'zh',?2,?3)
         ON CONFLICT(field_id,locale) DO UPDATE SET label=excluded.label,help=excluded.help RETURNING field_id`)
         .bind(id, common.labelZh, common.helpZh),
-      db.prepare(`DELETE FROM newcomer_field_option_i18n WHERE field_id=?1
-        AND EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND fixed=0)`).bind(id),
-      db.prepare(`DELETE FROM newcomer_field_options WHERE field_id=?1
-        AND EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND fixed=0)`).bind(id),
       ...optionWrites,
       db.prepare(`
         INSERT INTO newcomer_field_i18n (field_id,locale,label)
         SELECT 0,'en','guard' WHERE
           NOT EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND required=?2 AND active=?3 AND sort=?4) OR
-          (SELECT COUNT(*) FROM newcomer_field_options WHERE field_id=?1)<>?5 OR
+          (SELECT COUNT(*) FROM newcomer_field_options WHERE field_id=?1)>100 OR
+          EXISTS (SELECT 1 FROM newcomer_fields field WHERE field.id=?1 AND (
+            (field.fixed=1 AND EXISTS (SELECT 1 FROM newcomer_field_options option WHERE option.field_id=field.id)) OR
+            (field.type<>'select' AND EXISTS (SELECT 1 FROM newcomer_field_options option WHERE option.field_id=field.id)) OR
+            (field.fixed=0 AND field.type='select' AND NOT EXISTS (
+              SELECT 1 FROM newcomer_field_options option WHERE option.field_id=field.id AND option.active=1
+            ))
+          )) OR
           (SELECT COUNT(*) FROM newcomer_field_options WHERE active=1)>1000
-      `).bind(id, common.required ? 1 : 0, common.active ? 1 : 0, common.sort, optionCount),
+      `).bind(id, common.required ? 1 : 0, common.active ? 1 : 0, common.sort),
     ];
     const results = batchResults(await db.batch(statements), statements.length);
     mutationRows(results[0], 1);
     mutationRows(results[1], 1);
     mutationRows(results[2], 1);
     mutationRows(results[3], 1);
-    for (let index = 6; index < 6 + optionWrites.length; index += 1) mutationRows(results[index], 1);
+    for (let index = 4; index < 4 + optionWrites.length; index += 1) mutationRows(results[index], 1);
     if (resultRows(results[results.length - 1], 1).length !== 0) throw new NewcomerPersistenceError();
   } catch (error) {
     rethrowMutation(error);

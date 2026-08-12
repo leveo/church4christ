@@ -299,6 +299,11 @@ describe('newcomer super-admin configuration mutations', () => {
       ],
     });
     expect(fieldId).toBe(8);
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source) VALUES
+      ('40000000-0000-4000-8000-000000000001','Historical answer','en','2026-08-12','staff')`).run();
+    await env.DB.prepare(`INSERT INTO newcomer_answers (submission_id,field_id,value) VALUES
+      ('40000000-0000-4000-8000-000000000001',?,'serve')`).bind(fieldId).run();
     await updateNewcomerField(env.DB, superAdmin, {
       id: fieldId, required: false, active: true, sort: 9,
       labelEn: 'Next step', labelZh: '下一步', helpEn: null, helpZh: '请选择',
@@ -306,10 +311,46 @@ describe('newcomer super-admin configuration mutations', () => {
     });
     expect(await env.DB.prepare('SELECT key,type,required,active,sort FROM newcomer_fields WHERE id=8').first())
       .toEqual({ key: 'connection_path', type: 'select', required: 0, active: 1, sort: 9 });
-    expect((await env.DB.prepare('SELECT value,sort FROM newcomer_field_options WHERE field_id=8 ORDER BY value').all()).results)
-      .toEqual([{ value: 'group', sort: 2 }]);
+    expect((await env.DB.prepare('SELECT value,sort,active FROM newcomer_field_options WHERE field_id=8 ORDER BY value').all()).results)
+      .toEqual([{ value: 'group', sort: 2, active: 1 }, { value: 'serve', sort: 2, active: 1 }]);
+    expect(await env.DB.prepare(`SELECT label FROM newcomer_field_option_i18n
+      WHERE field_id=8 AND value='serve' AND locale='zh'`).first('label')).toBe('服事');
+    expect(await env.DB.prepare(`SELECT value FROM newcomer_answers
+      WHERE submission_id='40000000-0000-4000-8000-000000000001' AND field_id=8`).first('value')).toBe('serve');
     expect(await env.DB.prepare("SELECT help FROM newcomer_field_i18n WHERE field_id=8 AND locale='zh'").first('help'))
       .toBe('请选择');
+
+    await updateNewcomerField(env.DB, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 9,
+      labelEn: 'Next step', labelZh: '下一步', helpEn: null, helpZh: '请选择',
+      options: [{ value: 'serve', sort: 3, active: false, labelEn: 'Archived serve', labelZh: '已停用服事' }],
+    });
+    expect((await env.DB.prepare('SELECT value,sort,active FROM newcomer_field_options WHERE field_id=8 ORDER BY value').all()).results)
+      .toEqual([{ value: 'group', sort: 2, active: 1 }, { value: 'serve', sort: 3, active: 0 }]);
+    expect(await env.DB.prepare(`SELECT label FROM newcomer_field_option_i18n
+      WHERE field_id=8 AND value='serve' AND locale='zh'`).first('label')).toBe('已停用服事');
+    expect(await env.DB.prepare(`SELECT value FROM newcomer_answers
+      WHERE submission_id='40000000-0000-4000-8000-000000000001' AND field_id=8`).first('value')).toBe('serve');
+  });
+
+  it('rolls back labels and option upserts when the merged option set exceeds 100', async () => {
+    const options = Array.from({ length: 100 }, (_, index) => ({
+      value: `v_${index}`, sort: index, active: index === 0,
+      labelEn: `Value ${index}`, labelZh: `值 ${index}`,
+    }));
+    const fieldId = await createNewcomerField(env.DB, superAdmin, {
+      key: 'bounded_select', type: 'select', required: false, active: true, sort: 8,
+      labelEn: 'Bounded select', labelZh: '有界选项', helpEn: null, helpZh: null, options,
+    });
+    await expect(updateNewcomerField(env.DB, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 99,
+      labelEn: 'Must roll back', labelZh: '必须回滚', helpEn: null, helpZh: null,
+      options: [{ value: 'new_value', sort: 100, active: true, labelEn: 'New', labelZh: '新' }],
+    })).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare('SELECT sort FROM newcomer_fields WHERE id=?').bind(fieldId).first('sort')).toBe(8);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_field_options WHERE field_id=?').bind(fieldId).first('n')).toBe(100);
+    expect(await env.DB.prepare("SELECT label FROM newcomer_field_i18n WHERE field_id=? AND locale='en'")
+      .bind(fieldId).first('label')).toBe('Bounded select');
   });
 
   it('allows only labels/help/sort changes for fixed fields and rolls back invalid option replacement', async () => {
