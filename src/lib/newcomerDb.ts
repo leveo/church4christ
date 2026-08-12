@@ -1230,7 +1230,15 @@ function mutationRuntime(
   }
 }
 
-function safeValidatedIntake(value: unknown): ValidatedNewcomerIntake {
+interface CapturedValidatedAnswer extends ValidatedNewcomerAnswer {
+  bytes: number;
+}
+
+interface CapturedValidatedIntake extends Omit<ValidatedNewcomerIntake, 'answers'> {
+  answers: CapturedValidatedAnswer[];
+}
+
+function safeValidatedIntake(value: unknown): CapturedValidatedIntake {
   const row = plainRow(value, [
     'name', 'email', 'phone', 'locale', 'visitDate', 'serviceTypeId', 'contactConsent', 'answers',
   ]);
@@ -1257,7 +1265,7 @@ function safeValidatedIntake(value: unknown): ValidatedNewcomerIntake {
   if (row.serviceTypeId !== null && serviceTypeId === null) throw new NewcomerInvalidError();
   const candidates = capturedArray(row.answers, NEWCOMER_DB_LIMITS.answers);
   if (!candidates) throw new NewcomerInvalidError();
-  const answers: ValidatedNewcomerAnswer[] = [];
+  const answers: CapturedValidatedAnswer[] = [];
   let previousFieldId = 7;
   let totalBytes = 0;
   for (const candidate of candidates) {
@@ -1267,9 +1275,10 @@ function safeValidatedIntake(value: unknown): ValidatedNewcomerIntake {
     if (fieldId === null || fieldId <= previousFieldId || answerValue === null || answerValue.length === 0) {
       throw new NewcomerInvalidError();
     }
-    totalBytes += UTF8.encode(answerValue).byteLength;
+    const answerBytes = UTF8.encode(answerValue).byteLength;
+    totalBytes += answerBytes;
     if (totalBytes > 32 * 1024) throw new NewcomerInvalidError();
-    answers.push({ fieldId, value: answerValue });
+    answers.push({ fieldId, value: answerValue, bytes: answerBytes });
     previousFieldId = fieldId;
   }
   return {
@@ -1306,21 +1315,45 @@ export async function createNewcomerSubmission(
   const [submissionId, activityId] = generated.ids;
   const actorPersonId = mode === 'staff' ? user!.id : null;
   const consentAt = captured.contactConsent ? generated.now : null;
-  const answerStatements = captured.answers.map((answer) => db.prepare(`
+  try {
+    const answerStatements = captured.answers.map((answer) => db.prepare(`
     INSERT INTO newcomer_answers (submission_id,field_id,value)
     SELECT submission.id,field.id,?1
     FROM newcomer_submissions submission
     JOIN newcomer_fields field ON field.id=?2 AND field.id>7 AND field.active=1
     WHERE submission.id=?3 AND (
+      (field.type='text' AND ?4<=500) OR
+      (field.type='textarea' AND ?4<=4000) OR
       (field.type='select' AND EXISTS (
         SELECT 1 FROM newcomer_field_options option
         WHERE option.field_id=field.id AND option.value=?1 AND option.active=1
       )) OR
-      (field.type='checkbox' AND ?1 IN ('true','false')) OR
-      field.type IN ('text','textarea')
+      (field.type='checkbox' AND ?1 IN ('true','false'))
     )
-  `).bind(answer.value, answer.fieldId, submissionId));
+  `).bind(answer.value, answer.fieldId, submissionId, answer.bytes));
   const expectedAnswers = captured.answers.length;
+  const exactAnswerPredicates = captured.answers.map((_, index) => {
+    const valueParameter = 7 + index * 3;
+    const fieldParameter = valueParameter + 1;
+    const bytesParameter = valueParameter + 2;
+    return `OR NOT EXISTS (
+      SELECT 1 FROM newcomer_answers answer
+      JOIN newcomer_fields field ON field.id=answer.field_id
+      WHERE answer.submission_id=?1 AND answer.field_id=?${fieldParameter}
+        AND answer.value=?${valueParameter} AND field.id>7 AND field.active=1 AND (
+          (field.type='text' AND ?${bytesParameter}<=500) OR
+          (field.type='textarea' AND ?${bytesParameter}<=4000) OR
+          (field.type='select' AND EXISTS (
+            SELECT 1 FROM newcomer_field_options option
+            WHERE option.field_id=field.id AND option.value=answer.value AND option.active=1
+          )) OR
+          (field.type='checkbox' AND answer.value IN ('true','false'))
+        )
+    )`;
+  }).join('\n');
+  const exactAnswerValues = captured.answers.flatMap((answer) => [
+    answer.value, answer.fieldId, answer.bytes,
+  ]);
   const statements = [
     // All Task 3 field configuration writes take this same row mutex. It closes
     // the READ COMMITTED phantom window while required/active/options are rechecked.
@@ -1383,16 +1416,19 @@ export async function createNewcomerSubmission(
             WHERE option.field_id=field.id AND option.value=answer.value AND option.active=1
           )) OR
           (field.type='checkbox' AND answer.value NOT IN ('true','false')))
-      ) OR
+      )
+      ${exactAnswerPredicates} OR
       NOT EXISTS (
         SELECT 1 FROM newcomer_activity
         WHERE id=?4 AND submission_id=?1
           AND ${actorPredicate('?5')}
           AND kind='submission_created' AND metadata_json='{}' AND created_at=?6
       )
-    `, [submissionId, captured.serviceTypeId, expectedAnswers, activityId, actorPersonId, generated.now]),
-  ];
-  try {
+    `, [
+      submissionId, captured.serviceTypeId, expectedAnswers, activityId, actorPersonId, generated.now,
+      ...exactAnswerValues,
+    ]),
+    ];
     const results = batchResults(await db.batch(statements), statements.length);
     for (const result of results) resultRows(result, 101);
     return { id: submissionId, version: 0 };
@@ -1510,7 +1546,25 @@ export async function assignNewcomer(
             SELECT 1 FROM people person WHERE person.id=CAST(?1 AS INTEGER)
               AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
           ))
-      `).bind(target, captured.submissionId, mutationId),
+          AND EXISTS (
+            SELECT 1 FROM newcomer_activity activity
+            WHERE activity.id=?4 AND activity.submission_id=submission.id
+              AND activity.actor_person_id=?5 AND activity.kind='assigned'
+              AND activity.metadata_json=CASE
+                WHEN submission.assignee_person_id IS NULL
+                  THEN '{"to_assignee_person_id":'
+                    || CAST(CAST(?1 AS INTEGER) AS TEXT) || '}'
+                WHEN CAST(?1 AS INTEGER) IS NULL
+                  THEN '{"from_assignee_person_id":'
+                    || CAST(submission.assignee_person_id AS TEXT) || '}'
+                ELSE '{"from_assignee_person_id":'
+                  || CAST(submission.assignee_person_id AS TEXT)
+                  || ',"to_assignee_person_id":'
+                  || CAST(CAST(?1 AS INTEGER) AS TEXT) || '}'
+              END
+              AND activity.created_at=?6
+          )
+      `).bind(target, captured.submissionId, mutationId, activityId, user.id, generated.now),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1519,13 +1573,18 @@ export async function assignNewcomer(
             AND ((CAST(?4 AS INTEGER) IS NULL AND submission.assignee_person_id IS NULL)
               OR (CAST(?4 AS INTEGER) IS NOT NULL
                 AND submission.assignee_person_id=CAST(?4 AS INTEGER)))
+            AND (CAST(?4 AS INTEGER) IS NULL OR EXISTS (
+              SELECT 1 FROM people person
+              WHERE person.id=CAST(?4 AS INTEGER) AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
+            ))
         ) OR
         NOT EXISTS (
           SELECT 1 FROM newcomer_activity
           WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
             AND kind='assigned' AND created_at=?7 AND (
               (CAST(?4 AS INTEGER) IS NULL
-                AND metadata_json LIKE '{"from_assignee_person_id":%}') OR
+                AND metadata_json LIKE '{"from_assignee_person_id":%}'
+                AND metadata_json NOT LIKE '%,%') OR
               (CAST(?4 AS INTEGER) IS NOT NULL AND (
                 metadata_json='{"to_assignee_person_id":'
                   || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}' OR
@@ -1594,20 +1653,56 @@ export async function changeNewcomerStatus(
           status_id=?1,
           closed_at=CASE
             WHEN (SELECT category FROM newcomer_statuses WHERE id=?1)='open' THEN NULL
-            WHEN submission.closed_at IS NULL THEN ?2
+            WHEN (SELECT category FROM newcomer_statuses WHERE id=submission.status_id)='open' THEN ?2
             ELSE submission.closed_at
           END
         WHERE submission.id=?3 AND submission.last_mutation_id=?4 AND submission.status_id<>?1
           AND EXISTS (SELECT 1 FROM newcomer_statuses status WHERE status.id=?1 AND status.active=1)
-      `).bind(statusId, generated.now, captured.submissionId, mutationId),
+          AND EXISTS (
+            SELECT 1 FROM newcomer_statuses old_status
+            WHERE old_status.id=submission.status_id
+              AND ((old_status.category='open' AND submission.closed_at IS NULL)
+                OR (old_status.category='closed' AND submission.closed_at IS NOT NULL))
+          )
+          AND EXISTS (
+            SELECT 1 FROM newcomer_activity activity
+            WHERE activity.id=?5 AND activity.submission_id=submission.id
+              AND activity.actor_person_id=?6 AND activity.kind='status_changed'
+              AND activity.metadata_json='{"from_status_id":'
+                || CAST(submission.status_id AS TEXT) || ',"to_status_id":'
+                || CAST(CAST(?1 AS INTEGER) AS TEXT) || '}'
+              AND activity.created_at=?7
+          )
+      `).bind(
+        statusId, generated.now, captured.submissionId, mutationId,
+        activityId, user.id, generated.now,
+      ),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
           JOIN newcomer_statuses status ON status.id=submission.status_id
+          JOIN newcomer_activity activity ON activity.id=?5
+            AND activity.submission_id=submission.id
           WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
             AND submission.status_id=?4 AND status.active=1
             AND ((status.category='open' AND submission.closed_at IS NULL)
               OR (status.category='closed' AND submission.closed_at IS NOT NULL))
+            AND activity.actor_person_id=?6 AND activity.kind='status_changed'
+            AND activity.created_at=?7
+            AND activity.metadata_json LIKE '{"from_status_id":%,"to_status_id":'
+              || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
+            AND EXISTS (
+              SELECT 1 FROM newcomer_statuses old_status
+              WHERE activity.metadata_json='{"from_status_id":'
+                || CAST(old_status.id AS TEXT) || ',"to_status_id":'
+                || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
+                AND old_status.id<>?4
+                AND ((status.category='open' AND submission.closed_at IS NULL)
+                  OR (status.category='closed' AND old_status.category='open'
+                    AND submission.closed_at=?7)
+                  OR (status.category='closed' AND old_status.category='closed'
+                    AND submission.closed_at IS NOT NULL))
+            )
         ) OR
         NOT EXISTS (
           SELECT 1 FROM newcomer_activity
@@ -1803,6 +1898,7 @@ export async function linkNewcomerPerson(
   if (personId === null) throw new NewcomerInvalidError();
   const generated = mutationRuntime(runtime, 2);
   const [mutationId, activityId] = generated.ids;
+  const metadata = JSON.stringify({ person_id: personId });
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -1818,6 +1914,21 @@ export async function linkNewcomerPerson(
         RETURNING id
       `).bind(personId, captured.submissionId, mutationId),
       db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'person_linked',?3,?4
+        FROM newcomer_submissions submission
+        WHERE submission.id=?5 AND submission.last_mutation_id=?6
+          AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?7)
+          AND EXISTS (
+            SELECT 1 FROM people person
+            WHERE person.id=?7 AND person.active=1 AND person.deleted_at IS NULL
+              AND ${PERSON_CONTACT_MATCH_SQL}
+          )
+      `).bind(
+        activityId, user.id, metadata, generated.now,
+        captured.submissionId, mutationId, personId,
+      ),
+      db.prepare(`
         UPDATE newcomer_submissions AS submission SET linked_person_id=?1
         WHERE submission.id=?2 AND submission.last_mutation_id=?3
           AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?1)
@@ -1826,15 +1937,16 @@ export async function linkNewcomerPerson(
             WHERE person.id=?1 AND person.active=1 AND person.deleted_at IS NULL
               AND ${PERSON_CONTACT_MATCH_SQL}
           )
-      `).bind(personId, captured.submissionId, mutationId),
-      db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
-        SELECT ?1,submission.id,?2,'person_linked',
-          '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3
-        FROM newcomer_submissions submission
-        WHERE submission.id=?4 AND submission.last_mutation_id=?5
-          AND submission.linked_person_id=?6
-      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId, personId),
+          AND EXISTS (
+            SELECT 1 FROM newcomer_activity activity
+            WHERE activity.id=?4 AND activity.submission_id=submission.id
+              AND activity.actor_person_id=?5 AND activity.kind='person_linked'
+              AND activity.metadata_json=?6 AND activity.created_at=?7
+          )
+      `).bind(
+        personId, captured.submissionId, mutationId,
+        activityId, user.id, metadata, generated.now,
+      ),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1851,7 +1963,7 @@ export async function linkNewcomerPerson(
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
         captured.submissionId, mutationId, captured.expectedVersion + 1, personId,
-        activityId, user.id, JSON.stringify({ person_id: personId }), generated.now,
+        activityId, user.id, metadata, generated.now,
       ]),
     ];
     await executeMutationBatch(db, statements);
@@ -1871,7 +1983,8 @@ async function visitorEmailMissingAfterRollback(db: AppDb, captured: CapturedCas
     const result = await db.prepare(`
       SELECT CASE WHEN EXISTS (
         SELECT 1 FROM newcomer_submissions
-        WHERE id=?1 AND version=?2 AND deleted_at IS NULL AND email IS NULL
+        WHERE id=?1 AND version=?2 AND deleted_at IS NULL
+          AND email IS NULL AND linked_person_id IS NULL
       ) THEN 1 ELSE 0 END AS email_missing
     `).bind(captured.submissionId, captured.expectedVersion).first<unknown>();
     const row = plainRow(result, ['email_missing']);
@@ -1906,7 +2019,7 @@ export async function createNewcomerVisitor(
           joined_on,finance,stripe_customer_id,super_admin,admin_areas,pending_email
         )
         SELECT '','',submission.name,submission.email,submission.phone,NULL,'member',1,0,
-          NULL,submission.locale,?1,?1,NULL,NULL,NULL,'visitor',NULL,0,NULL,0,'',NULL
+          ?3,submission.locale,?1,?1,NULL,NULL,NULL,'visitor',NULL,0,NULL,0,'',NULL
         FROM newcomer_submissions submission
         WHERE submission.id=?2 AND submission.last_mutation_id=?3
           AND submission.email IS NOT NULL AND submission.linked_person_id IS NULL
@@ -1915,19 +2028,40 @@ export async function createNewcomerVisitor(
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET linked_person_id=(
           SELECT person.id FROM people person
-          WHERE person.email=submission.email AND person.deleted_at IS NULL
+          WHERE person.calendar_token=?3 AND person.email=submission.email
+            AND person.deleted_at IS NULL
         )
         WHERE submission.id=?1 AND submission.last_mutation_id=?2
           AND submission.email IS NOT NULL AND submission.linked_person_id IS NULL
-      `).bind(captured.submissionId, mutationId),
+          AND EXISTS (
+            SELECT 1 FROM people person
+            WHERE person.calendar_token=?3 AND person.email=submission.email
+              AND person.deleted_at IS NULL
+          )
+      `).bind(captured.submissionId, mutationId, mutationId),
       db.prepare(`
         INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
         SELECT ?1,submission.id,?2,'visitor_created',
           '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3
         FROM newcomer_submissions submission
+        JOIN people person ON person.id=submission.linked_person_id AND person.calendar_token=?6
         WHERE submission.id=?4 AND submission.last_mutation_id=?5
           AND submission.linked_person_id IS NOT NULL
-      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId),
+      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId, mutationId),
+      db.prepare(`
+        UPDATE people AS person SET calendar_token=NULL
+        WHERE person.calendar_token=?1 AND EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          JOIN newcomer_activity activity ON activity.submission_id=submission.id
+          WHERE submission.id=?2 AND submission.last_mutation_id=?1
+            AND submission.linked_person_id=person.id
+            AND activity.id=?3 AND activity.actor_person_id=?4
+            AND activity.kind='visitor_created'
+            AND activity.metadata_json='{"person_id":' || CAST(person.id AS TEXT) || '}'
+            AND activity.created_at=?5
+        )
+        RETURNING id
+      `).bind(mutationId, captured.submissionId, activityId, user.id, generated.now),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1952,7 +2086,8 @@ export async function createNewcomerVisitor(
               || CAST(submission.linked_person_id AS TEXT) || '}'
             AND submission.last_mutation_id=?2
         ) OR
-        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1 OR
+        EXISTS (SELECT 1 FROM people WHERE calendar_token=?2)
       `, [
         captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
         activityId, user.id,

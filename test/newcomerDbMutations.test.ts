@@ -205,6 +205,71 @@ describe('newcomer CAS workflow mutations', () => {
     expect(prepares).toBe(0);
   });
 
+  it('maps every mutation prepare failure and hostile result getter to one PII-free failed error', async () => {
+    const failedPrepare = {
+      prepare() { throw new Error('SQL leaked mutation@example.test and private note'); },
+      batch() { throw new Error('must not batch'); },
+    } as AppDb;
+    const ids = [
+      '60200000-0000-4000-8000-000000000001',
+      '60200000-0000-4000-8000-000000000002',
+      '60200000-0000-4000-8000-000000000003',
+    ];
+    const peopleAdmin = scopedUser({
+      id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
+    });
+    const calls = [
+      () => assignNewcomer(failedPrepare, scopedUser(), {
+        submissionId, expectedVersion: 0, assigneePersonId: 9802,
+      }, runtime(ids)),
+      () => changeNewcomerStatus(failedPrepare, scopedUser(), {
+        submissionId, expectedVersion: 0, statusId: 4,
+      }, runtime(ids)),
+      () => scheduleNewcomerFollowUp(failedPrepare, scopedUser(), {
+        submissionId, expectedVersion: 0, followUpDate: '2026-08-30',
+      }, runtime(ids)),
+      () => addNewcomerNote(failedPrepare, scopedUser(), {
+        submissionId, expectedVersion: 0, body: 'Private note',
+      }, runtime(ids)),
+      () => linkNewcomerPerson(failedPrepare, scopedUser(), {
+        submissionId, expectedVersion: 0, personId: 9805,
+      }, runtime(ids)),
+      () => createNewcomerVisitor(failedPrepare, peopleAdmin, {
+        submissionId, expectedVersion: 0,
+      }, runtime(ids)),
+    ];
+    for (const call of calls) {
+      const error = await call().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NewcomerPersistenceError);
+      expect((error as Error).message).toBe('Newcomer persistence failed');
+    }
+
+    let getterReads = 0;
+    const statement: AppStatement = {
+      bind() { return this; }, first: async () => null,
+      all: async () => ({ results: [], meta: { changes: 0 } }),
+      run: async () => ({ results: [], meta: { changes: 0 } }),
+    };
+    const hostileResults: AppDb = {
+      prepare() { return statement; },
+      async batch(statements) {
+        return statements.map(() => {
+          const result = { meta: { changes: 0 } } as Record<string, unknown>;
+          Object.defineProperty(result, 'results', {
+            enumerable: true,
+            get() { getterReads += 1; throw new Error('private result'); },
+          });
+          return result;
+        }) as never;
+      },
+    };
+    const error = await assignNewcomer(hostileResults, scopedUser(), {
+      submissionId, expectedVersion: 0, assigneePersonId: 9802,
+    }, runtime(ids)).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect(getterReads).toBe(0);
+  });
+
   it('assigns only a fresh active Newcomers worker and writes canonical server-actor activity', async () => {
     await seedSubmission();
     const result = await assignNewcomer(
@@ -316,6 +381,37 @@ describe('newcomer CAS workflow mutations', () => {
     );
     expect(await env.DB.prepare(`SELECT status_id,closed_at,version FROM newcomer_submissions WHERE id=?`)
       .bind(submissionId).first()).toEqual({ status_id: 5, closed_at: '2026-08-12 14:00:00', version: 2 });
+
+    await changeNewcomerStatus(
+      env.DB,
+      scopedUser(),
+      { submissionId, expectedVersion: 2, statusId: 1 },
+      runtime([
+        '63000000-0000-4000-8000-000000000015',
+        '63000000-0000-4000-8000-000000000016',
+      ], '2026-08-12 16:00:00'),
+    );
+    expect(await env.DB.prepare(`SELECT status_id,closed_at,version FROM newcomer_submissions WHERE id=?`)
+      .bind(submissionId).first()).toEqual({ status_id: 1, closed_at: null, version: 3 });
+  });
+
+  it('rejects an open-to-closed transition when the old open state has a tampered closed timestamp', async () => {
+    await seedSubmission();
+    await env.DB.prepare(`UPDATE newcomer_submissions SET closed_at='2026-08-01 10:00:00' WHERE id=?`)
+      .bind(submissionId).run();
+    const before = await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first();
+
+    await expect(changeNewcomerStatus(env.DB, scopedUser(), {
+      submissionId, expectedVersion: 0, statusId: 4,
+    }, runtime([
+      '63100000-0000-4000-8000-000000000011',
+      '63100000-0000-4000-8000-000000000012',
+    ], '2026-08-12 14:00:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT status_id,closed_at,version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual(before);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity')
+      .first<number>('n')).toBe(0);
   });
 
   it('sets and clears a follow-up date with exact canonical metadata', async () => {
@@ -407,6 +503,32 @@ describe('newcomer CAS workflow mutations', () => {
       .bind(submissionId).first()).toEqual(before);
   });
 
+  it('rolls back a same-target person link as an unaudited no-op', async () => {
+    await seedSubmission();
+    await env.DB.prepare('UPDATE newcomer_submissions SET email=NULL,phone=? WHERE id=?')
+      .bind('+13125550125', submissionId).run();
+    await linkNewcomerPerson(env.DB, scopedUser(), {
+      submissionId, expectedVersion: 0, personId: 9805,
+    }, runtime([
+      '66100000-0000-4000-8000-000000000011',
+      '66100000-0000-4000-8000-000000000012',
+    ]));
+    const before = await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first();
+
+    await expect(linkNewcomerPerson(env.DB, scopedUser(), {
+      submissionId, expectedVersion: 1, personId: 9805,
+    }, runtime([
+      '66100000-0000-4000-8000-000000000013',
+      '66100000-0000-4000-8000-000000000014',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+
+    expect(await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual(before);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_activity
+      WHERE submission_id=?`).bind(submissionId).first<number>('n')).toBe(1);
+  });
+
   it('creates an unprivileged visitor only with People authority and a current email', async () => {
     await seedSubmission();
     const peopleAdmin = scopedUser({
@@ -463,6 +585,79 @@ describe('newcomer CAS workflow mutations', () => {
     expect(await env.DB.prepare(`SELECT version,last_mutation_id FROM newcomer_submissions
       WHERE id='67000000-0000-4000-8000-000000000021'`).first())
       .toEqual({ version: 0, last_mutation_id: null });
+  });
+
+  it('rolls back a same-second visitor retry without a second person, activity, or version claim', async () => {
+    await seedSubmission();
+    const peopleAdmin = scopedUser({
+      id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
+    });
+    const first = await createNewcomerVisitor(env.DB, peopleAdmin, {
+      submissionId, expectedVersion: 0,
+    }, runtime([
+      '67100000-0000-4000-8000-000000000011',
+      '67100000-0000-4000-8000-000000000012',
+    ], '2026-08-12 17:00:00'));
+    const before = await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first();
+
+    await expect(createNewcomerVisitor(env.DB, peopleAdmin, {
+      submissionId, expectedVersion: 1,
+    }, runtime([
+      '67100000-0000-4000-8000-000000000013',
+      '67100000-0000-4000-8000-000000000014',
+    ], '2026-08-12 17:00:00'))).rejects.toBeInstanceOf(NewcomerConflictError);
+
+    expect(await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual(before);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM people
+      WHERE email='mutation@example.test'`).first<number>('n')).toBe(1);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_activity
+      WHERE submission_id=?`).bind(submissionId).first<number>('n')).toBe(1);
+    expect(before).toMatchObject({ version: 1, linked_person_id: first.personId });
+  });
+
+  it('rolls back visitor creation when its trusted mutation marker collides', async () => {
+    await seedSubmission();
+    await env.DB.prepare(`UPDATE people SET calendar_token='67110000-0000-4000-8000-000000000011'
+      WHERE id=9805`).run();
+    const peopleAdmin = scopedUser({
+      id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
+    });
+    await expect(createNewcomerVisitor(env.DB, peopleAdmin, {
+      submissionId, expectedVersion: 0,
+    }, runtime([
+      '67110000-0000-4000-8000-000000000011',
+      '67110000-0000-4000-8000-000000000012',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual({
+      version: 0, last_mutation_id: null, linked_person_id: null,
+    });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM people
+      WHERE email='mutation@example.test'`).first<number>('n')).toBe(0);
+    expect(await env.DB.prepare('SELECT calendar_token FROM people WHERE id=9805')
+      .first<string>('calendar_token')).toBe('67110000-0000-4000-8000-000000000011');
+  });
+
+  it('classifies phone-only visitor creation only when the current submission is still unlinked', async () => {
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,phone,locale,visit_date,source,status_id,linked_person_id,version,created_at,updated_at)
+      VALUES ('67200000-0000-4000-8000-000000000001','Already linked','+13125550125','en',
+        '2026-08-10','staff',1,9805,0,'2026-08-12 09:00:00','2026-08-12 09:00:00')`).run();
+    const peopleAdmin = scopedUser({
+      id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
+    });
+    await expect(createNewcomerVisitor(env.DB, peopleAdmin, {
+      submissionId: '67200000-0000-4000-8000-000000000001', expectedVersion: 0,
+    }, runtime([
+      '67200000-0000-4000-8000-000000000011',
+      '67200000-0000-4000-8000-000000000012',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
+      FROM newcomer_submissions WHERE id='67200000-0000-4000-8000-000000000001'`).first()).toEqual({
+      version: 0, last_mutation_id: null, linked_person_id: 9805,
+    });
   });
 
   it('serializes concurrent D1 claims and rolls the stale loser back without activity', async () => {
@@ -613,7 +808,7 @@ describe('newcomer CAS workflow mutations', () => {
       .bind(submissionId).first<number>('n')).toBe(1);
   });
 
-  it('rolls every earlier write back when each note or visitor batch statement fails', async () => {
+  it('rolls the complete D1 snapshot back at every statement boundary for every mutation', async () => {
     const failingDb = (statementIndex: number): AppDb => ({
       prepare(sql: string) { return env.DB.prepare(sql); },
       batch(statements: AppStatement[]) {
@@ -627,39 +822,112 @@ describe('newcomer CAS workflow mutations', () => {
     const peopleAdmin = scopedUser({
       id: 9806, role: 'admin', isAdmin: true, adminAreas: ['newcomers', 'people'],
     });
-
-    for (let index = 0; index < 4; index += 1) {
-      await seedSubmission();
-      await expect(addNewcomerNote(failingDb(index), scopedUser(), {
-        submissionId, expectedVersion: 0, body: 'Must roll back',
-      }, runtime([
-        `6d000000-0000-4000-8000-0000000000${index}1`,
-        `6d000000-0000-4000-8000-0000000000${index}2`,
-        `6d000000-0000-4000-8000-0000000000${index}3`,
-      ]))).rejects.toBeInstanceOf(NewcomerConflictError);
-      expect(await env.DB.prepare(`SELECT version,last_mutation_id FROM newcomer_submissions
-        WHERE id=?`).bind(submissionId).first()).toEqual({ version: 0, last_mutation_id: null });
-      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_notes').first<number>('n')).toBe(0);
-      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity').first<number>('n')).toBe(0);
-      await env.DB.prepare('DELETE FROM newcomer_submissions WHERE id=?').bind(submissionId).run();
-    }
-
-    for (let index = 0; index < 5; index += 1) {
-      await seedSubmission();
-      await expect(createNewcomerVisitor(failingDb(index), peopleAdmin, {
-        submissionId, expectedVersion: 0,
-      }, runtime([
-        `6e000000-0000-4000-8000-0000000000${index}1`,
-        `6e000000-0000-4000-8000-0000000000${index}2`,
-      ]))).rejects.toBeInstanceOf(NewcomerConflictError);
-      expect(await env.DB.prepare(`SELECT version,last_mutation_id,linked_person_id
-        FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual({
-        version: 0, last_mutation_id: null, linked_person_id: null,
-      });
-      expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM people
-        WHERE email='mutation@example.test'`).first<number>('n')).toBe(0);
-      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity').first<number>('n')).toBe(0);
-      await env.DB.prepare('DELETE FROM newcomer_submissions WHERE id=?').bind(submissionId).run();
+    await env.DB.prepare(`INSERT INTO newcomer_fields
+      (id,key,type,required,active,sort,fixed) VALUES (8,'fault_answer','text',1,1,8,0)`).run();
+    const reset = async (needsSubmission: boolean) => {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM newcomer_activity'),
+        env.DB.prepare('DELETE FROM newcomer_notes'),
+        env.DB.prepare('DELETE FROM newcomer_answers'),
+        env.DB.prepare('DELETE FROM newcomer_submissions'),
+        env.DB.prepare(`DELETE FROM people WHERE email='mutation@example.test'`),
+        env.DB.prepare(`UPDATE people SET phone='+1 (312) 555-0124',active=1 WHERE id=9805`),
+      ]);
+      if (needsSubmission) await seedSubmission();
+    };
+    const snapshot = async () => ({
+      submissions: (await env.DB.prepare(`SELECT id,status_id,assignee_person_id,linked_person_id,
+        next_follow_up_date,closed_at,version,last_mutation_id,updated_at
+        FROM newcomer_submissions ORDER BY id`).all()).results,
+      answers: (await env.DB.prepare(`SELECT submission_id,field_id,value
+        FROM newcomer_answers ORDER BY submission_id,field_id`).all()).results,
+      notes: (await env.DB.prepare(`SELECT id,submission_id,author_person_id,body,created_at
+        FROM newcomer_notes ORDER BY id`).all()).results,
+      activity: (await env.DB.prepare(`SELECT id,submission_id,actor_person_id,kind,metadata_json,created_at
+        FROM newcomer_activity ORDER BY id`).all()).results,
+      people: (await env.DB.prepare(`SELECT id,email,calendar_token,active,deleted_at,admin_areas
+        FROM people WHERE id>=9800 ORDER BY id`).all()).results,
+    });
+    const cases: Array<{
+      name: string; statements: number; needsSubmission: boolean; invoke: (db: AppDb) => Promise<unknown>;
+    }> = [
+      {
+        name: 'create', statements: 7, needsSubmission: false,
+        invoke: (attemptDb) => createNewcomerSubmission(attemptDb, null, 'public', intake({
+          name: 'Fault create', answers: [{ fieldId: 8, value: 'Safe' }],
+        }) as never, runtime([
+          '6d100000-0000-4000-8000-000000000001',
+          '6d100000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'assignment', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => assignNewcomer(attemptDb, scopedUser(), {
+          submissionId, expectedVersion: 0, assigneePersonId: 9802,
+        }, runtime([
+          '6d200000-0000-4000-8000-000000000001',
+          '6d200000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'status', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => changeNewcomerStatus(attemptDb, scopedUser(), {
+          submissionId, expectedVersion: 0, statusId: 4,
+        }, runtime([
+          '6d300000-0000-4000-8000-000000000001',
+          '6d300000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'follow-up', statements: 4, needsSubmission: true,
+        invoke: (attemptDb) => scheduleNewcomerFollowUp(attemptDb, scopedUser(), {
+          submissionId, expectedVersion: 0, followUpDate: '2026-08-30',
+        }, runtime([
+          '6d400000-0000-4000-8000-000000000001',
+          '6d400000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'note', statements: 4, needsSubmission: true,
+        invoke: (attemptDb) => addNewcomerNote(attemptDb, scopedUser(), {
+          submissionId, expectedVersion: 0, body: 'Must roll back',
+        }, runtime([
+          '6d500000-0000-4000-8000-000000000001',
+          '6d500000-0000-4000-8000-000000000002',
+          '6d500000-0000-4000-8000-000000000003',
+        ])),
+      },
+      {
+        name: 'link', statements: 5, needsSubmission: true,
+        invoke: (attemptDb) => linkNewcomerPerson(attemptDb, scopedUser(), {
+          submissionId, expectedVersion: 0, personId: 9805,
+        }, runtime([
+          '6d600000-0000-4000-8000-000000000001',
+          '6d600000-0000-4000-8000-000000000002',
+        ])),
+      },
+      {
+        name: 'visitor', statements: 6, needsSubmission: true,
+        invoke: (attemptDb) => createNewcomerVisitor(attemptDb, peopleAdmin, {
+          submissionId, expectedVersion: 0,
+        }, runtime([
+          '6d700000-0000-4000-8000-000000000001',
+          '6d700000-0000-4000-8000-000000000002',
+        ])),
+      },
+    ];
+    for (const candidate of cases) {
+      for (let index = 0; index < candidate.statements; index += 1) {
+        await reset(candidate.needsSubmission);
+        const before = await snapshot();
+        const error = await candidate.invoke(failingDb(index)).catch((caught: unknown) => caught);
+        expect(error, `${candidate.name} statement ${index}`).toSatisfy(
+          (caught: unknown) => caught instanceof NewcomerConflictError
+            || caught instanceof NewcomerPersistenceError,
+        );
+        expect((error as Error).message).not.toContain('mutation@example.test');
+        expect(await snapshot(), `${candidate.name} statement ${index}`).toEqual(before);
+      }
     }
   });
 
@@ -729,6 +997,38 @@ describe('newcomer CAS workflow mutations', () => {
       WHERE email='mutation@example.test'`).first<number>('n')).toBe(0);
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity').first<number>('n')).toBe(0);
   });
+
+  it('requires an unassign state change to depend on the exact old-derived single-key activity', async () => {
+    await seedSubmission('assignee_person_id=9802');
+    const tamperedDb = {
+      prepare(sql: string) { return env.DB.prepare(sql); },
+      batch(statements: AppStatement[]) {
+        const injected = statements.slice();
+        injected[2] = env.DB.prepare(`
+          INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+          SELECT '6f100000-0000-4000-8000-000000000012',id,9801,'assigned',
+            '{"from_assignee_person_id":9802,"to_assignee_person_id":9801}',
+            '2026-08-12 12:34:56'
+          FROM newcomer_submissions WHERE id='${submissionId}'
+            AND last_mutation_id='6f100000-0000-4000-8000-000000000011'
+        `);
+        return env.DB.batch(injected as D1PreparedStatement[]) as never;
+      },
+    } as AppDb;
+
+    await expect(assignNewcomer(tamperedDb, scopedUser(), {
+      submissionId, expectedVersion: 0, assigneePersonId: null,
+    }, runtime([
+      '6f100000-0000-4000-8000-000000000011',
+      '6f100000-0000-4000-8000-000000000012',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT version,last_mutation_id,assignee_person_id
+      FROM newcomer_submissions WHERE id=?`).bind(submissionId).first()).toEqual({
+      version: 0, last_mutation_id: null, assignee_person_id: 9802,
+    });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_activity')
+      .first<number>('n')).toBe(0);
+  });
 });
 
 describe('newcomer submission mutation', () => {
@@ -747,6 +1047,22 @@ describe('newcomer submission mutation', () => {
       hostile as never,
     )).rejects.toBeInstanceOf(NewcomerForbiddenError);
     expect({ prepares, reads }).toEqual({ prepares: 0, reads: 0 });
+  });
+
+  it('maps create statement preparation failures to a stable PII-free persistence error', async () => {
+    const db = {
+      prepare() { throw new Error('SQL includes guest@example.test and private answer'); },
+      batch() { throw new Error('must not batch'); },
+    } as AppDb;
+    const error = await createNewcomerSubmission(db, null, 'public', intake({
+      name: 'Prepare failure',
+    }) as never, runtime([
+      '61010000-0000-4000-8000-000000000001',
+      '61010000-0000-4000-8000-000000000002',
+    ])).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect((error as Error).message).toBe('Newcomer persistence failed');
+    expect((error as Error).message).not.toContain('guest@example.test');
   });
 
   it('atomically creates a public submission, exact answers and canonical activity without People side effects', async () => {
@@ -822,5 +1138,22 @@ describe('newcomer submission mutation', () => {
       WHERE submission_id LIKE '61100000-%'`).first<number>('n')).toBe(0);
     expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_activity
       WHERE submission_id LIKE '61100000-%'`).first<number>('n')).toBe(0);
+  });
+
+  it('rejects a custom text answer above its current 500-byte type limit without residue', async () => {
+    await env.DB.prepare(`INSERT INTO newcomer_fields
+      (id,key,type,required,active,sort,fixed) VALUES (8,'short_story','text',1,1,8,0)`).run();
+    await expect(createNewcomerSubmission(env.DB, null, 'public', intake({
+      name: 'Text too long', answers: [{ fieldId: 8, value: 'x'.repeat(501) }],
+    }) as never, runtime([
+      '61200000-0000-4000-8000-000000000001',
+      '61200000-0000-4000-8000-000000000002',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_submissions
+      WHERE id='61200000-0000-4000-8000-000000000001'`).first<number>('n')).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_answers
+      WHERE submission_id='61200000-0000-4000-8000-000000000001'`).first<number>('n')).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_activity
+      WHERE submission_id='61200000-0000-4000-8000-000000000001'`).first<number>('n')).toBe(0);
   });
 });
