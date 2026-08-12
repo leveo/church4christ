@@ -29,7 +29,7 @@ import type { PeopleImportPreflightResult } from './peopleImportDb';
 const MAPPING_CONFIG_MAX_BYTES = 48 * 1024;
 
 export const PEOPLE_IMPORT_MAPPING_MULTIPART_MAX_BYTES =
-  PEOPLE_IMPORT_MULTIPART_MAX_BYTES + MAPPING_CONFIG_MAX_BYTES;
+  PEOPLE_IMPORT_MULTIPART_MAX_BYTES;
 
 export const PEOPLE_IMPORT_MAPPING_SCALAR_FIELDS = [
   'profile_name',
@@ -66,8 +66,7 @@ export async function readPeopleImportMappingMultipart(
   if (!upload.ok) return upload;
 
   const fields: Partial<Record<PeopleImportMappingScalarField, string>> = {};
-  const selectedFields = new Set<PeopleImportMappingScalarField>(scalarFields);
-  for (const name of PEOPLE_IMPORT_MAPPING_SCALAR_FIELDS) {
+  for (const name of scalarFields) {
     const values = upload.form.getAll(name);
     if (values.length > 1 || (values.length === 1 && typeof values[0] !== 'string')) {
       return { ok: false, status: 400, code: 'multipart_invalid' };
@@ -77,7 +76,7 @@ export async function readPeopleImportMappingMultipart(
     if (name === 'mapping_config' && utf8Bytes(value) > MAPPING_CONFIG_MAX_BYTES) {
       return { ok: false, status: 413, code: 'mapping_config_too_large' };
     }
-    if (selectedFields.has(name)) fields[name] = value;
+    fields[name] = value;
   }
 
   return { ok: true, bytes: upload.bytes, fields };

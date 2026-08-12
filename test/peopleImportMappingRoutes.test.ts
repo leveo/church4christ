@@ -217,6 +217,29 @@ describe('mapping route methods and authorization', () => {
 });
 
 describe('mapping inspect and immutable profiles', () => {
+  it('ignores duplicate and oversized scalars that inspect does not authorize', async () => {
+    const response = await inspectRoute.POST(context(multipartRequest(
+      '/admin/people/import/map/inspect',
+      ' Name ,EMAIL\nAda,ada@example.com\n',
+      [
+        ['profile_name', 'first'],
+        ['profile_name', 'second'],
+        ['mapping_config', '界'.repeat(16_385)],
+        ['profile_id', '1'],
+        ['profile_id', '2'],
+      ],
+    )));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      headers: ['name', 'email'],
+      headerRowNumber: 1,
+      dataRows: 1,
+      issues: [],
+    });
+  });
+
   it('inspects only current bytes without returning source cells', async () => {
     const privateCell = 'DO-NOT-RETURN-PRIVATE-CELL';
     const response = await inspectRoute.POST(context(multipartRequest(
@@ -301,6 +324,28 @@ describe('mapping inspect and immutable profiles', () => {
 });
 
 describe('mapping preview and commit server authority', () => {
+  it('ignores duplicate and oversized config/name fields that preview does not authorize', async () => {
+    const selected = await profile();
+    const response = await previewRoute.POST(context(multipartRequest(
+      '/admin/people/import/map/preview',
+      'name,email\nAda,ada@example.com\n',
+      [
+        ['profile_id', String(selected.id)],
+        ['profile_name', 'first'],
+        ['profile_name', 'second'],
+        ['mapping_config', '界'.repeat(16_385)],
+      ],
+    )));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      profile: { id: selected.id },
+      mappingIssues: [],
+      preview: { ok: true, issues: [] },
+    });
+  });
+
   it('reloads the selected profile, ignores client model/config/role/op fields, and previews with zero writes', async () => {
     const selected = await profile({ name: 'Selected A' });
     await profile({
@@ -417,6 +462,28 @@ describe('mapping preview and commit server authority', () => {
       [['profile_id', String(warningProfile.id)], ['acknowledge_warnings', 'true']],
     )));
     expect(accepted.status).toBe(201);
+  });
+
+  it('ignores duplicate and oversized config/name fields that commit does not authorize', async () => {
+    const selected = await profile();
+    const response = await commitRoute.POST(context(multipartRequest(
+      '/admin/people/import/map/commit',
+      'name,email\nCommitted,unrelated-fields@example.com\n',
+      [
+        ['profile_id', String(selected.id)],
+        ['profile_name', 'first'],
+        ['profile_name', 'second'],
+        ['mapping_config', '界'.repeat(16_385)],
+      ],
+    )));
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({
+      ok: true,
+      counts: { people: 1, households: 0, dependents: 0 },
+    });
+    expect(await env.DB.prepare('SELECT id FROM people WHERE email = ?')
+      .bind('unrelated-fields@example.com').first()).not.toBeNull();
   });
 
   it('maps preflight and late persistence conflicts without partial writes', async () => {

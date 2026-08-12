@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PEOPLE_IMPORT_HEADERS } from '../src/lib/peopleImport';
+import { PEOPLE_IMPORT_MULTIPART_MAX_BYTES } from '../src/lib/peopleImportHttp';
 import {
   PeopleImportMappingConflictError,
   PeopleImportMappingInvalidError,
@@ -99,7 +100,28 @@ describe('mapping multipart HTTP contract', () => {
       ['mapping_config', '界'.repeat(16_385)],
     ]), ['mapping_config']);
     expect(tooLarge).toEqual({ ok: false, status: 413, code: 'mapping_config_too_large' });
-    expect(PEOPLE_IMPORT_MAPPING_MULTIPART_MAX_BYTES).toBeGreaterThan(320 * 1024);
+    expect(PEOPLE_IMPORT_MAPPING_MULTIPART_MAX_BYTES).toBe(PEOPLE_IMPORT_MULTIPART_MAX_BYTES);
+  });
+
+  it('ignores duplicate scalar fields that the caller did not authorize', async () => {
+    const result = await readPeopleImportMappingMultipart(sourceRequest(undefined, [
+      ['profile_id', '7'],
+      ['profile_name', 'first'],
+      ['profile_name', 'second'],
+      ['acknowledge_warnings', 'false'],
+      ['acknowledge_warnings', 'true'],
+    ]), ['profile_id']);
+
+    expect(result).toMatchObject({ ok: true, fields: { profile_id: '7' } });
+  });
+
+  it('ignores an over-48-KiB mapping config when that field is not authorized', async () => {
+    const result = await readPeopleImportMappingMultipart(sourceRequest(undefined, [
+      ['profile_id', '7'],
+      ['mapping_config', '界'.repeat(16_385)],
+    ]), ['profile_id']);
+
+    expect(result).toMatchObject({ ok: true, fields: { profile_id: '7' } });
   });
 
   it('does not trust a small Content-Length and releases an actually oversize stream', async () => {
@@ -112,7 +134,7 @@ describe('mapping multipart HTTP contract', () => {
       },
       body: new ReadableStream<Uint8Array>({
         pull(controller) {
-          controller.enqueue(new Uint8Array(PEOPLE_IMPORT_MAPPING_MULTIPART_MAX_BYTES + 1));
+          controller.enqueue(new Uint8Array(PEOPLE_IMPORT_MULTIPART_MAX_BYTES + 1));
         },
         cancel() {
           cancelled = true;
