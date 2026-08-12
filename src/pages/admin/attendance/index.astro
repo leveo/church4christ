@@ -48,18 +48,24 @@ try {
 
 const childrenEnabled = modules.has('children');
 let checkinEvents: CheckinEvent[] = [];
-const linkedByService = new Map<number, Set<number>>();
+let linkedByService = new Map<number, Set<number>>();
+let linkEditorReady = false;
+let linkEditorError = false;
 if (childrenEnabled && serviceTypes.length > 0) {
   try {
     const currentLinks = await listCurrentServiceCheckinLinks(Astro.locals.db);
-    checkinEvents = await listEventsAdmin(Astro.locals.db);
+    const loadedEvents = await listEventsAdmin(Astro.locals.db);
+    const loadedLinks = new Map<number, Set<number>>();
     for (const link of currentLinks) {
-      const eventIds = linkedByService.get(link.serviceTypeId) ?? new Set<number>();
+      const eventIds = loadedLinks.get(link.serviceTypeId) ?? new Set<number>();
       eventIds.add(link.eventId);
-      linkedByService.set(link.serviceTypeId, eventIds);
+      loadedLinks.set(link.serviceTypeId, eventIds);
     }
+    checkinEvents = loadedEvents;
+    linkedByService = loadedLinks;
+    linkEditorReady = true;
   } catch {
-    windowError = true;
+    linkEditorError = true;
   }
 }
 
@@ -161,7 +167,10 @@ const reportQuery = new URLSearchParams({ from: window.from, to: window.to });
     {childrenEnabled ? (
       <>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.attendance.linksIntro')}</p>
-        <div class="mt-4 grid gap-4 lg:grid-cols-2">
+        {linkEditorError ? (
+          <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.attendance.linksLoadError')}</p>
+        ) : linkEditorReady ? (
+          <div class="mt-4 grid gap-4 lg:grid-cols-2">
           {serviceTypes.map((service) => <form method="post" action="/admin/attendance/checkin-links" class="rounded-lg border border-border p-4">
             <input type="hidden" name="service_type_id" value={service.id} />
             <h3 class="font-semibold">{service.name}</h3>
@@ -173,7 +182,8 @@ const reportQuery = new URLSearchParams({ from: window.from, to: window.to });
             </div>
             <button class={`mt-4 ${btnSecondary}`} type="submit">{t(lang, 'admin.attendance.linksSave')}</button>
           </form>)}
-        </div>
+          </div>
+        ) : null}
       </>
     ) : (
       <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.attendance.childrenOff')}</p>

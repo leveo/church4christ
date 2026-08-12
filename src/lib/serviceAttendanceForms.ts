@@ -8,6 +8,18 @@ export const SERVICE_ATTENDANCE_LIMITS = {
   maxCheckinEvents: 100,
 } as const;
 
+export const ATTENDANCE_FORM_ERROR_CODES = [
+  'attendance_service_invalid',
+  'attendance_count_invalid',
+  'attendance_date_invalid',
+  'attendance_checkin_event_invalid',
+  'attendance_checkin_event_limit',
+  'attendance_window_invalid',
+  'attendance_window_limit',
+] as const;
+
+export type AttendanceFormErrorCode = typeof ATTENDANCE_FORM_ERROR_CODES[number];
+
 export interface AdultCountInput {
   serviceTypeId: number;
   attendanceDate: string;
@@ -33,7 +45,7 @@ const ERROR = {
   eventLimit: 'attendance_checkin_event_limit',
   window: 'attendance_window_invalid',
   windowLimit: 'attendance_window_limit',
-} as const;
+} as const satisfies Record<string, AttendanceFormErrorCode>;
 
 function text(form: FormData, name: string): string {
   return String(form.get(name) ?? '').trim();

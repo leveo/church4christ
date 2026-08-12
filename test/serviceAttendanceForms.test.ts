@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTENDANCE_FORM_ERROR_CODES,
   parseAdultCountForm,
   parseAttendanceWindow,
   parseServiceCheckinLinkForm,
+  type AttendanceFormErrorCode,
 } from '../src/lib/serviceAttendanceForms';
+
+const PLAN_ATTENDANCE_FORM_ERROR_CODES = [
+  'attendance_service_invalid',
+  'attendance_count_invalid',
+  'attendance_date_invalid',
+  'attendance_checkin_event_invalid',
+  'attendance_checkin_event_limit',
+  'attendance_window_invalid',
+  'attendance_window_limit',
+] as const;
+
+type PlanAttendanceFormErrorCode = typeof PLAN_ATTENDANCE_FORM_ERROR_CODES[number];
+type RegistryCodeMissingFromPlan = Exclude<AttendanceFormErrorCode, PlanAttendanceFormErrorCode>;
+type PlanCodeMissingFromRegistry = Exclude<PlanAttendanceFormErrorCode, AttendanceFormErrorCode>;
+function assertNeverType<_Value extends never>(): true { return true; }
 
 function form(entries: Record<string, string | string[]>): FormData {
   const data = new FormData();
@@ -12,6 +29,16 @@ function form(entries: Record<string, string | string[]>): FormData {
   }
   return data;
 }
+
+describe('attendance form error-code contract', () => {
+  it('is the exact unique, exhaustive plan-listed registry in stable order', () => {
+    expect(assertNeverType<RegistryCodeMissingFromPlan>()).toBe(true);
+    expect(assertNeverType<PlanCodeMissingFromRegistry>()).toBe(true);
+    expect(ATTENDANCE_FORM_ERROR_CODES).toEqual(PLAN_ATTENDANCE_FORM_ERROR_CODES);
+    expect(ATTENDANCE_FORM_ERROR_CODES).toHaveLength(7);
+    expect(new Set(ATTENDANCE_FORM_ERROR_CODES).size).toBe(7);
+  });
+});
 
 describe('parseAdultCountForm', () => {
   it('accepts both adult-count boundaries and a real strict calendar date', () => {

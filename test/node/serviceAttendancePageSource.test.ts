@@ -39,6 +39,28 @@ describe('service attendance page source boundaries', () => {
     expect(page).not.toContain('replaceServiceCheckinLinksToday');
   });
 
+  it('renders link mutation forms only after both independent link-editor reads succeed', () => {
+    const currentLinksRead = page.indexOf('await listCurrentServiceCheckinLinks(Astro.locals.db)');
+    const eventsRead = page.indexOf('await listEventsAdmin(Astro.locals.db)', currentLinksRead);
+    const readyAssignment = page.indexOf('linkEditorReady = true', eventsRead);
+    const linkReadCatch = page.indexOf('} catch {', currentLinksRead);
+    const linkSection = page.indexOf("t(lang, 'admin.attendance.linksTitle')");
+    const errorBranch = page.indexOf('linkEditorError ?', linkSection);
+    const readyBranch = page.indexOf('linkEditorReady ?', errorBranch);
+    const linkForm = page.indexOf('<form method="post" action="/admin/attendance/checkin-links"', readyBranch);
+
+    expect(currentLinksRead).toBeGreaterThan(-1);
+    expect(eventsRead).toBeGreaterThan(currentLinksRead);
+    expect(readyAssignment).toBeGreaterThan(eventsRead);
+    expect(linkReadCatch).toBeGreaterThan(readyAssignment);
+    expect(page.slice(linkReadCatch, linkSection)).toContain('linkEditorError = true');
+    expect(page.slice(linkReadCatch, linkSection)).not.toContain('windowError = true');
+    expect(errorBranch).toBeGreaterThan(linkSection);
+    expect(readyBranch).toBeGreaterThan(errorBranch);
+    expect(linkForm).toBeGreaterThan(readyBranch);
+    expect(page.slice(errorBranch, readyBranch)).toContain("t(lang, 'admin.attendance.linksLoadError')");
+  });
+
   it('offers service-type editing only behind the Serve-area gate', () => {
     expect(page).toContain("const canManageServiceTypes = hasAreaAccess(user, 'serve')");
     expect(page).toMatch(/canManageServiceTypes\s*&&\s*<a[^>]+href="\/admin\/service-types"/);

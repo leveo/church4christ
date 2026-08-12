@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import en from '../src/i18n/en';
 import zh from '../src/i18n/zh';
 import { t } from '../src/lib/i18n';
+import {
+  ATTENDANCE_FORM_ERROR_CODES,
+  type AttendanceFormErrorCode,
+} from '../src/lib/serviceAttendanceForms';
 import { PEOPLE_IMPORT_HEADERS, type PeopleImportIssueCode } from '../src/lib/peopleImport';
 import type { PeopleImportDbIssueCode } from '../src/lib/peopleImportDb';
 import {
@@ -218,7 +222,7 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
       'admin.attendance.emptyReport', 'admin.attendance.emptyServices',
       'admin.attendance.emptyServicesAsk', 'admin.attendance.manageServiceTypes',
       'admin.attendance.linksTitle', 'admin.attendance.linksIntro',
-      'admin.attendance.childrenOff', 'admin.attendance.linksSave',
+      'admin.attendance.childrenOff', 'admin.attendance.linksSave', 'admin.attendance.linksLoadError',
       'admin.attendance.savedCount', 'admin.attendance.savedLinks',
       'admin.attendance.notConfigured', 'admin.attendance.error',
       'admin.dashboard.attendance',
@@ -230,6 +234,17 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['admin.attendance.emptyServicesAsk']).toMatch(/超级管理员|义工事工/);
     expect(en['admin.attendance.childrenOff']).toMatch(/historical.*remain/i);
     expect(zh['admin.attendance.childrenOff']).toMatch(/历史.*保留/);
+  });
+
+  it('provides safe bilingual copy for every stable attendance form error code', () => {
+    const keys = ATTENDANCE_FORM_ERROR_CODES.map(
+      (code): `admin.attendance.error.${AttendanceFormErrorCode}` => `admin.attendance.error.${code}`,
+    );
+    expect(keys).toHaveLength(7);
+    expect(new Set(keys).size).toBe(7);
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of keys) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
   });
 
   it('provides complete bilingual Stripe test-mode operations copy', () => {
