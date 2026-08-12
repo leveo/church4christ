@@ -1100,8 +1100,8 @@ export async function createNewcomerStatus(
     const statements = [
       db.prepare(`
         INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
-        SELECT COALESCE(MAX(id),5)+1,?1,?2,?3,?4,0 FROM newcomer_statuses
-        HAVING COUNT(*)<100
+        SELECT CASE WHEN COUNT(*)<100 THEN COALESCE(MAX(id),5)+1 ELSE 0 END,
+          ?1,?2,?3,?4,0 FROM newcomer_statuses
         RETURNING id
       `).bind(key, category, row.sort, active ? 1 : 0),
       db.prepare(`INSERT INTO newcomer_status_i18n (status_id,locale,label)
@@ -1301,9 +1301,9 @@ export async function createNewcomerField(
       db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
       db.prepare(`
         INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
-        SELECT COALESCE(MAX(id),7)+1,?1,?2,?3,?4,?5,0 FROM newcomer_fields
-        HAVING SUM(CASE WHEN id>7 THEN 1 ELSE 0 END)<100
+        SELECT CASE WHEN SUM(CASE WHEN id>7 THEN 1 ELSE 0 END)<100
           AND (SELECT COUNT(*) FROM newcomer_field_options WHERE active=1)+?6<=1000
+          THEN COALESCE(MAX(id),7)+1 ELSE 0 END,?1,?2,?3,?4,?5,0 FROM newcomer_fields
         RETURNING id
       `).bind(key, type, common.required ? 1 : 0, common.active ? 1 : 0, common.sort, newActiveOptions),
       db.prepare(`INSERT INTO newcomer_field_i18n (field_id,locale,label,help)
@@ -1372,7 +1372,11 @@ export async function updateNewcomerField(
       db.prepare(`
         INSERT INTO newcomer_field_i18n (field_id,locale,label)
         SELECT 0,'en','guard' WHERE
-          NOT EXISTS (SELECT 1 FROM newcomer_fields WHERE id=?1 AND required=?2 AND active=?3 AND sort=?4) OR
+          NOT EXISTS (SELECT 1 FROM newcomer_fields field
+            WHERE field.id=?1 AND field.required=?2 AND field.active=?3 AND field.sort=?4 AND (
+              (field.fixed=1 AND ?2=0 AND ?3=1 AND ?5=0) OR
+              (field.fixed=0 AND (field.type='select' OR (field.type<>'select' AND ?5=0)))
+            )) OR
           (SELECT COUNT(*) FROM newcomer_field_options WHERE field_id=?1)>100 OR
           EXISTS (SELECT 1 FROM newcomer_fields field WHERE field.id=?1 AND (
             (field.fixed=1 AND EXISTS (SELECT 1 FROM newcomer_field_options option WHERE option.field_id=field.id)) OR
@@ -1382,7 +1386,7 @@ export async function updateNewcomerField(
             ))
           )) OR
           (SELECT COUNT(*) FROM newcomer_field_options WHERE active=1)>1000
-      `).bind(id, common.required ? 1 : 0, common.active ? 1 : 0, common.sort),
+      `).bind(id, common.required ? 1 : 0, common.active ? 1 : 0, common.sort, optionCount),
     ];
     const results = batchResults(await db.batch(statements), statements.length);
     mutationRows(results[0], 1);

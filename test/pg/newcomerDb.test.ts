@@ -153,6 +153,47 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
       WHERE submission_id='40000000-0000-4000-8000-000000000001'`, []))[0].value).toBe('group');
   });
 
+  it('rolls back every write when an unchanged non-select field rejects submitted options', async () => {
+    const fieldId = await createNewcomerField(db, superAdmin, {
+      key: 'plain_story', type: 'textarea', required: false, active: true, sort: 8,
+      labelEn: 'Story', labelZh: '故事', helpEn: 'Original help', helpZh: null, options: [],
+    });
+    const before = await sql.unsafe(`
+      SELECT json_build_object(
+        'field',(SELECT row_to_json(field) FROM (
+          SELECT required,active,sort,type,fixed FROM newcomer_fields WHERE id=$1
+        ) field),
+        'i18n',(SELECT json_agg(row_to_json(i18n) ORDER BY locale) FROM (
+          SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=$1
+        ) i18n),
+        'options',(SELECT COALESCE(json_agg(row_to_json(option) ORDER BY value),'[]'::json) FROM (
+          SELECT value,sort,active FROM newcomer_field_options WHERE field_id=$1
+        ) option)
+      ) AS snapshot
+    `, [fieldId]);
+    const error = await updateNewcomerField(db, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 8,
+      labelEn: 'PRIVATE CHANGED LABEL', labelZh: '私密变更', helpEn: 'PRIVATE CHANGED HELP', helpZh: null,
+      options: [{ value: 'invalid_for_textarea', sort: 1, active: true, labelEn: 'Bad', labelZh: '错误' }],
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerConflictError);
+    expect(String(error)).not.toContain('PRIVATE CHANGED');
+    const after = await sql.unsafe(`
+      SELECT json_build_object(
+        'field',(SELECT row_to_json(field) FROM (
+          SELECT required,active,sort,type,fixed FROM newcomer_fields WHERE id=$1
+        ) field),
+        'i18n',(SELECT json_agg(row_to_json(i18n) ORDER BY locale) FROM (
+          SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=$1
+        ) i18n),
+        'options',(SELECT COALESCE(json_agg(row_to_json(option) ORDER BY value),'[]'::json) FROM (
+          SELECT value,sort,active FROM newcomer_field_options WHERE field_id=$1
+        ) option)
+      ) AS snapshot
+    `, [fieldId]);
+    expect(after).toEqual(before);
+  });
+
   it('rolls back an invalid last-initial update without leaking database text', async () => {
     const error = await updateNewcomerStatus(db, superAdmin, {
       id: 1, sort: 99, active: false, initialStatusId: 4,

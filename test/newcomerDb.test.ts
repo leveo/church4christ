@@ -442,6 +442,56 @@ describe('newcomer super-admin configuration mutations', () => {
       .bind(fieldId).first('label')).toBe('Bounded select');
   });
 
+  it('rolls back every write when an unchanged non-select field rejects submitted options', async () => {
+    const fieldId = await createNewcomerField(env.DB, superAdmin, {
+      key: 'plain_story', type: 'textarea', required: false, active: true, sort: 8,
+      labelEn: 'Story', labelZh: '故事', helpEn: 'Original help', helpZh: null, options: [],
+    });
+    const before = {
+      field: await env.DB.prepare('SELECT required,active,sort,type,fixed FROM newcomer_fields WHERE id=?')
+        .bind(fieldId).first(),
+      i18n: (await env.DB.prepare('SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=? ORDER BY locale')
+        .bind(fieldId).all()).results,
+      options: (await env.DB.prepare('SELECT value,sort,active FROM newcomer_field_options WHERE field_id=? ORDER BY value')
+        .bind(fieldId).all()).results,
+    };
+    const error = await updateNewcomerField(env.DB, superAdmin, {
+      id: fieldId, required: false, active: true, sort: 8,
+      labelEn: 'PRIVATE CHANGED LABEL', labelZh: '私密变更', helpEn: 'PRIVATE CHANGED HELP', helpZh: null,
+      options: [{ value: 'invalid_for_textarea', sort: 1, active: true, labelEn: 'Bad', labelZh: '错误' }],
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerConflictError);
+    expect(String(error)).not.toContain('PRIVATE CHANGED');
+    expect({
+      field: await env.DB.prepare('SELECT required,active,sort,type,fixed FROM newcomer_fields WHERE id=?')
+        .bind(fieldId).first(),
+      i18n: (await env.DB.prepare('SELECT locale,label,help FROM newcomer_field_i18n WHERE field_id=? ORDER BY locale')
+        .bind(fieldId).all()).results,
+      options: (await env.DB.prepare('SELECT value,sort,active FROM newcomer_field_options WHERE field_id=? ORDER BY value')
+        .bind(fieldId).all()).results,
+    }).toEqual(before);
+  });
+
+  it('does not partially add missing translations when create capacity guards reject', async () => {
+    await env.DB.batch(Array.from({ length: 95 }, (_, index) => env.DB.prepare(
+      'INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (?,?,?,?,1,0)',
+    ).bind(100 + index, `full_status_${index}`, 'open', 100 + index)));
+    await expect(createNewcomerStatus(env.DB, superAdmin, {
+      key: 'full_status_94', category: 'open', sort: 194, active: true,
+      labelEn: 'Must not persist', labelZh: '不得保存',
+    })).rejects.toBeInstanceOf(Error);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_status_i18n WHERE status_id=194').first('n')).toBe(0);
+
+    await env.DB.batch(Array.from({ length: 100 }, (_, index) => env.DB.prepare(
+      'INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (?,?,\'text\',0,1,?,0)',
+    ).bind(100 + index, `full_field_${index}`, 100 + index)));
+    await expect(createNewcomerField(env.DB, superAdmin, {
+      key: 'full_field_99', type: 'text', required: false, active: true, sort: 199,
+      labelEn: 'Must not persist', labelZh: '不得保存', helpEn: null, helpZh: null, options: [],
+    })).rejects.toBeInstanceOf(Error);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_field_i18n WHERE field_id=199').first('n')).toBe(0);
+  });
+
   it('allows only labels/help/sort changes for fixed fields and rolls back invalid option replacement', async () => {
     await updateNewcomerField(env.DB, superAdmin, {
       id: 1, required: false, active: true, sort: 20,
