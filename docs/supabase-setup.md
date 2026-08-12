@@ -1,6 +1,6 @@
 # Supabase setup — Portal, Giving, and Registration (Stripe Preview/test only)
 
-Setup is capability-driven: selections among the 14 D1-compatible modules choose D1 unless
+Setup is capability-driven: selections among the 15 D1-compatible modules choose D1 unless
 you explicitly override the backend. **Member Portal**, **Giving**, and **Registration**
 require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
 Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
@@ -39,7 +39,7 @@ migration, so this guide does not promise a lossless backend switch for an exist
 ## 1. Which database should I pick?
 
 Both offer a Free plan for eligible usage. Choose Supabase to enable Member Portal, Giving,
-or Registration; the other 14 modules work on either database.
+or Registration; the other 15 modules work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -50,7 +50,7 @@ or Registration; the other 14 modules work on either database.
 | **Registration — free events** | Not available | **Implemented** |
 | **Registration — paid via Stripe** | Not available | **Preview/test-only**; live payments unavailable |
 | **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
-| **Other 14 modules** | Yes | Yes |
+| **Other 15 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
 | **Plan considerations** | Cloudflare allowances and email plan rules apply | Supabase limits, continuity needs, and Cloudflare/email plan rules all apply |
 
@@ -65,7 +65,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Member Portal, Giving, and Registration are **force-disabled on D1**, even if legacy
-settings say they are on. New setup writes explicit selected settings for all 17 modules.
+settings say they are on. New setup writes explicit selected settings for all 18 modules.
 
 ---
 

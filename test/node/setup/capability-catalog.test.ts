@@ -22,6 +22,7 @@ const EXPECTED_KEYS = [
   'groups',
   'people',
   'children',
+  'attendance',
   'page-builder',
   'portal',
   'giving',
@@ -55,9 +56,22 @@ describe('canonical capability catalog', () => {
       'page-builder',
     ]);
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toEqual(
-      EXPECTED_KEYS.slice(0, 14),
+      EXPECTED_KEYS.slice(0, 15),
     );
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toEqual(EXPECTED_KEYS);
+  });
+
+  test('keeps aggregate attendance admin-only, Children-optional, and independent from Serve', () => {
+    expect(CAPABILITIES.attendance).toMatchObject({
+      publicPrefixes: [],
+      adminPrefixes: ['/admin/attendance'],
+      uses: ['children'],
+      dependsOn: [],
+    });
+    expect(CAPABILITIES.attendance).not.toHaveProperty('requiresBackend');
+    expect(CAPABILITY_CATALOG.presets.website.modules).not.toContain('attendance');
+    expect(CAPABILITY_CATALOG.presets['website-community'].modules).toContain('attendance');
+    expect(CAPABILITY_CATALOG.presets['full-church'].modules).toContain('attendance');
   });
 
   test('requires Supabase only for portal, giving, and registration', () => {

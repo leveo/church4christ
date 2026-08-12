@@ -89,6 +89,7 @@ const ADMIN_ONLY = [
   // /admin/groups is the site-admin CRUD console, so it stays adminOnly.
   '/admin/groups',
   '/admin/children',
+  '/admin/attendance',
 ];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).

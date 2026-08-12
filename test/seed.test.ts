@@ -6,6 +6,7 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import seedSql from '../seed/dev-seed.sql?raw';
 import manifest from '../seed/media/manifest.json';
+import { listServiceAttendanceReport } from '../src/lib/serviceAttendanceDb';
 import { getSiteIdentity, getTheme } from '../src/lib/settings';
 
 // The seed file never uses ';' except to terminate statements and keeps every
@@ -77,6 +78,46 @@ describe('demo seed: plans, bulletins, sermons', () => {
       "SELECT COUNT(DISTINCT service_type_id) AS n FROM sermons WHERE status = 'published'",
     ).first<{ n: number }>();
     expect(types?.n).toBe(2);
+  });
+});
+
+describe('demo seed: aggregate service attendance', () => {
+  it('seeds adult totals without an attendee roster and derives children from real check-ins', async () => {
+    const aggregateRows = await env.DB.prepare(
+      `SELECT service_type_id, attendance_date, adult_count
+       FROM service_attendance ORDER BY attendance_date DESC, service_type_id`,
+    ).all<{ service_type_id: number; attendance_date: string; adult_count: number }>();
+    expect(aggregateRows.results).toHaveLength(8);
+    expect(new Set(aggregateRows.results.map((row) => row.service_type_id))).toEqual(new Set([1, 2]));
+    expect(aggregateRows.results.every((row) => Number.isInteger(row.adult_count) && row.adult_count > 0)).toBe(true);
+
+    const attendanceColumns = await env.DB.prepare('PRAGMA table_info(service_attendance)').all<{ name: string }>();
+    expect(attendanceColumns.results.map((column) => column.name)).toEqual([
+      'service_type_id', 'attendance_date', 'adult_count',
+      'recorded_by_person_id', 'updated_by_person_id', 'created_at', 'updated_at',
+    ]);
+
+    const anchor = await env.DB.prepare("SELECT date('now','weekday 0','-7 days') AS d").first<{ d: string }>();
+    const oldest = await env.DB.prepare("SELECT date('now','weekday 0','-28 days') AS d").first<{ d: string }>();
+    const report = await listServiceAttendanceReport(env.DB, 'en', { from: oldest!.d, to: anchor!.d });
+    const latestEnglish = report.find((row) => row.attendanceDate === anchor!.d && row.serviceTypeId === 1);
+    const latestChinese = report.find((row) => row.attendanceDate === anchor!.d && row.serviceTypeId === 2);
+    expect(latestEnglish).toMatchObject({ adultCount: 142, childCount: 2, combinedCount: 144 });
+    expect(latestChinese).toMatchObject({ adultCount: 118, childCount: null, combinedCount: null });
+  });
+
+  it('seeds one effective append-only child-event link and matching CAS state', async () => {
+    const links = await env.DB.prepare(
+      `SELECT service_type_id, checkin_event_id, starts_on, ends_on
+       FROM service_type_checkin_events ORDER BY id`,
+    ).all<{ service_type_id: number; checkin_event_id: number; starts_on: string; ends_on: string | null }>();
+    expect(links.results).toEqual([
+      expect.objectContaining({ service_type_id: 1, checkin_event_id: 1, ends_on: null }),
+    ]);
+    const state = await env.DB.prepare(
+      'SELECT service_type_id, revision, last_mutation_id FROM service_checkin_link_state ORDER BY service_type_id',
+    ).all();
+    expect(state.results).toEqual([{ service_type_id: 1, revision: 1, last_mutation_id: 'seed-attendance-link' }]);
   });
 });
 

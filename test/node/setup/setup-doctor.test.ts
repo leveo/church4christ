@@ -35,6 +35,7 @@ const SUPABASE_MIGRATIONS = [
   '0010_stripe_webhook_events.sql',
   '0011_people_exports.sql',
   '0012_people_import_mappings.sql',
+  '0013_service_attendance.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -311,6 +312,9 @@ describe('doctor database check', () => {
     ]));
     expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
+    expect(TABLES_BY_CAPABILITY.attendance).toEqual([
+      'service_attendance', 'service_type_checkin_events', 'service_checkin_link_state',
+    ]);
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);

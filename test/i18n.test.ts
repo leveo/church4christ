@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import en from '../src/i18n/en';
 import zh from '../src/i18n/zh';
 import { t } from '../src/lib/i18n';
+import {
+  ATTENDANCE_FORM_ERROR_CODES,
+  type AttendanceFormErrorCode,
+} from '../src/lib/serviceAttendanceForms';
 import { PEOPLE_IMPORT_HEADERS, type PeopleImportIssueCode } from '../src/lib/peopleImport';
 import type { PeopleImportDbIssueCode } from '../src/lib/peopleImportDb';
 import {
@@ -201,6 +205,46 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(en['site.tagline']).toBe('A church for the city');
     expect(zh['site.name']).toBe('四方基督教会');
     expect(zh['site.tagline']).toBe('城市中的教会');
+  });
+
+  it('provides the aggregate Attendance grant label in both locales', () => {
+    expect(en['admin.nav.attendance']).toBe('Service attendance');
+    expect(zh['admin.nav.attendance']).toBe('崇拜出席');
+  });
+
+  it('provides complete bilingual aggregate Attendance UI copy', () => {
+    const keys = [
+      'admin.attendance.title', 'admin.attendance.intro', 'admin.attendance.recordTitle',
+      'admin.attendance.service', 'admin.attendance.date', 'admin.attendance.adults',
+      'admin.attendance.children', 'admin.attendance.total', 'admin.attendance.save',
+      'admin.attendance.correct', 'admin.attendance.reportTitle', 'admin.attendance.from',
+      'admin.attendance.to', 'admin.attendance.applyWindow', 'admin.attendance.downloadCsv',
+      'admin.attendance.emptyReport', 'admin.attendance.emptyServices',
+      'admin.attendance.emptyServicesAsk', 'admin.attendance.manageServiceTypes',
+      'admin.attendance.linksTitle', 'admin.attendance.linksIntro',
+      'admin.attendance.childrenOff', 'admin.attendance.linksSave', 'admin.attendance.linksLoadError',
+      'admin.attendance.savedCount', 'admin.attendance.savedLinks',
+      'admin.attendance.notConfigured', 'admin.attendance.error',
+      'admin.dashboard.attendance',
+    ] as const;
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of keys) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
+    expect(en['admin.attendance.emptyServicesAsk']).toMatch(/super admin|Volunteer ministry/i);
+    expect(zh['admin.attendance.emptyServicesAsk']).toMatch(/超级管理员|义工事工/);
+    expect(en['admin.attendance.childrenOff']).toMatch(/historical.*remain/i);
+    expect(zh['admin.attendance.childrenOff']).toMatch(/历史.*保留/);
+  });
+
+  it('provides safe bilingual copy for every stable attendance form error code', () => {
+    const keys = ATTENDANCE_FORM_ERROR_CODES.map(
+      (code): `admin.attendance.error.${AttendanceFormErrorCode}` => `admin.attendance.error.${code}`,
+    );
+    expect(keys).toHaveLength(7);
+    expect(new Set(keys).size).toBe(7);
+    for (const locale of ['en', 'zh'] as const) {
+      for (const key of keys) expect(dicts[locale][key], `${locale}:${key}`).toBeTruthy();
+    }
   });
 
   it('provides complete bilingual Stripe test-mode operations copy', () => {

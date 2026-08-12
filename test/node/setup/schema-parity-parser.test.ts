@@ -76,6 +76,26 @@ describe('final D1 schema parser', () => {
     expect(schema.tables.get('managed')?.columns.get('id')?.identity).toBe(false);
   });
 
+  it('does not confuse a nullable date CHECK with a column NOT NULL constraint', () => {
+    const schema = finalSchema();
+    expect(schema.tables.get('service_type_checkin_events')?.columns.get('ends_on')).toMatchObject({
+      nullable: true,
+      type: 'text',
+    });
+  });
+
+  it('recognizes NOT NULL only at column-tail depth zero', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE checked_nullable (
+        id INTEGER PRIMARY KEY,
+        value TEXT CHECK (value IS NULL OR length(value) IS NOT NULL),
+        required TEXT NOT NULL CHECK (required IS NOT NULL)
+      );`,
+    ]);
+    expect(schema.tables.get('checked_nullable')?.columns.get('value')?.nullable).toBe(true);
+    expect(schema.tables.get('checked_nullable')?.columns.get('required')?.nullable).toBe(false);
+  });
+
   it('captures normalized keys, foreign targets, and application indexes', () => {
     const schema = finalSchema();
     const ministryI18n = schema.tables.get('ministry_i18n');

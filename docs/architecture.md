@@ -66,6 +66,12 @@ Editable content (bulletins, sermons, announcements, events, prayer sheets) is w
 with a **full-snapshot revision** in the same `db.batch`, which is what powers the
 one-click "restore an earlier version" throughout the admin area.
 
+Service Attendance follows a deliberately aggregate data boundary: it stores one adult
+count per service type and date, never an adult roster or identity. Optional child totals
+are calculated from historical Children's check-ins through date-effective links. Groups'
+per-person attendance remains a separate data model and authorization surface. See
+[`docs/features/service-attendance.md`](features/service-attendance.md).
+
 ## The database seam: D1 or Postgres
 
 Every data-access helper talks to an **`AppDb`** interface rather than to D1 directly
@@ -99,6 +105,7 @@ run on either of two databases:
 | `groups` | Groups | 小组 | Either |
 | `people` | People & Households | 会友与家庭 | Either |
 | `children` | Children Check-in | 儿童报到 | Either |
+| `attendance` | Service Attendance | 崇拜出席 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Supabase |
 | `giving` | Giving | 奉献 | Supabase |

@@ -37,9 +37,9 @@ describe('catalog-owned docs', () => {
     expect(architecture).not.toMatch(/'d1' for everything else/i);
   });
 
-  it('renders all 17 modules and exactly three Supabase requirements', () => {
-    expect(raw.order).toHaveLength(17);
-    expect(Object.keys(raw.capabilities)).toHaveLength(17);
+  it('renders all 18 modules and exactly three Supabase requirements', () => {
+    expect(raw.order).toHaveLength(18);
+    expect(Object.keys(raw.capabilities)).toHaveLength(18);
     expect(new Set(raw.order)).toEqual(new Set(Object.keys(raw.capabilities)));
     expect(
       raw.order.filter(
@@ -97,7 +97,7 @@ describe('catalog-owned docs', () => {
     for (const path of docs) {
       const text = readFileSync(path, 'utf8');
       expect(text).not.toMatch(
-        /15 modules|two modules need|everything except (online )?giving and registration/i,
+        /14 modules|two modules need|everything except (online )?giving and registration/i,
       );
       expect(text).not.toMatch(/switch later[^.\n]*(nothing is lost|without losing)/i);
     }

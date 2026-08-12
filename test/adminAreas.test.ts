@@ -41,6 +41,8 @@ describe('adminAreaForPath', () => {
     ['/admin/people/export-notes', 'people'],
     ['/admin/groups', 'groups'],
     ['/admin/groups/2', 'groups'],
+    ['/admin/attendance', 'attendance'],
+    ['/admin/attendance/report.csv', 'attendance'],
     ['/admin/giving', 'giving'],
     ['/admin/giving/reconcile', 'giving'],
     ['/admin/stripe-events', 'payment-operations'],
@@ -89,6 +91,11 @@ describe('hasAreaAccess', () => {
     expect(hasAreaAccess(makeUser({ role: 'admin', isAdmin: true, adminAreas: ['registration'] }), 'payment-operations')).toBe(false);
     expect(hasAreaAccess(makeUser({ role: 'admin', isAdmin: true, adminAreas: ['payment-operations'] }), 'payment-operations')).toBe(true);
     expect(hasAreaAccess(limited, 'payment-operations')).toBe(false);
+  });
+  it('aggregate attendance requires its own grant and does not grant Groups', () => {
+    const attendanceOnly = makeUser({ role: 'admin', isAdmin: true, adminAreas: ['attendance'] });
+    expect(hasAreaAccess(attendanceOnly, 'attendance')).toBe(true);
+    expect(hasAreaAccess(attendanceOnly, 'groups')).toBe(false);
   });
 });
 

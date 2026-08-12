@@ -23,6 +23,10 @@ or GitHub Release exists.
 - Added immutable create-only source-column mapping profiles for People CSV imports. The
   workflow detects exact header-order drift, supports explicit constants and enum
   translations, and retains configuration without source rows or samples.
+- Added aggregate Service Attendance on D1 and PostgreSQL: authorized staff can record and
+  correct adult service totals, derive optional distinct child totals from historical
+  check-ins, and download bounded identity-free CSV reports. Groups per-person attendance
+  remains separately authorized.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
 - Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
@@ -51,7 +55,10 @@ or GitHub Release exists.
 - Apply forward migration `0012_people_import_mappings.sql` before deploying saved People
   mappings. It creates the bounded `people_import_mappings` profile table on D1 and
   Supabase/PostgreSQL; profiles store headers and mapping configuration, not uploaded rows.
-- Migration files `0001` through `0012` in both `migrations/` and `migrations-supabase/` are
+- Apply forward migration `0013_service_attendance.sql` before deploying the Attendance
+  admin console. It creates `service_attendance`, `service_type_checkin_events`, and
+  `service_checkin_link_state` on both D1 and Supabase/PostgreSQL; no adult roster is stored.
+- Migration files `0001` through `0013` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.

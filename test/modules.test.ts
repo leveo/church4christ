@@ -26,7 +26,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 17 module keys in display order', () => {
+  it('has all 18 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -41,6 +41,7 @@ describe('MODULES registry', () => {
       'groups',
       'people',
       'children',
+      'attendance',
       'page-builder',
       'portal',
       'giving',
@@ -67,14 +68,20 @@ describe('MODULES registry', () => {
     }
   });
 
-  it('gifts/people softly use serve, giving softly uses people, groups softly uses people+registration, portal softly uses serve+groups; every other module has no deps', () => {
+  it('models Attendance as a soft Children integration without a Serve dependency', () => {
+    expect(MODULES.attendance.uses).toEqual(['children']);
+    expect(CAPABILITIES.attendance.dependsOn).toEqual([]);
+    expect(MODULES.attendance.requiresBackend).toBeUndefined();
+  });
+
+  it('models the remaining soft module relationships', () => {
     expect(MODULES.gifts.uses).toEqual(['serve']);
     expect(MODULES.people.uses).toEqual(['serve']);
     expect(MODULES.giving.uses).toEqual(['people']);
     expect(MODULES.groups.uses).toEqual(['people', 'registration']);
     expect(MODULES.portal.uses).toEqual(['serve', 'groups']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal') {
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance') {
         expect(MODULES[key].uses).toEqual([]);
       }
     }
@@ -201,6 +208,8 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
     ['/admin/children', 'children'],
+    ['/admin/attendance', 'attendance'],
+    ['/admin/attendance/report.csv', 'attendance'],
     ['/admin/groups', 'groups'],
     // ── children's check-in kiosk ──
     ['/kiosk', 'children'],
@@ -239,6 +248,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     expect(moduleForPath('/serve/gifts/')).toBe('gifts');
     expect(moduleForPath('/bulletin/')).toBe('bulletins');
     expect(moduleForPath('/kiosk/')).toBe('children');
+    expect(moduleForPath('/admin/attendance/')).toBe('attendance');
   });
 
   it('portal owns its /my sub-prefixes but not /my itself', () => {

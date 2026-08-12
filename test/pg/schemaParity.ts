@@ -288,12 +288,41 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
     column: {
       name,
       type,
-      nullable: !primary && !/\bNOT\s+NULL\b/i.test(tail),
+      nullable: !primary && !hasTopLevelNotNull(tail),
       defaultValue: normalizeDefault(defaultExpression(tail)),
       identity: type === 'integer' && primary,
     },
     constraints,
   };
+}
+
+function hasTopLevelNotNull(value: string): boolean {
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  let outside = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === quote && value[index + 1] === quote) index += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      outside += ' ';
+    } else if (char === '(') {
+      depth += 1;
+      outside += ' ';
+    } else if (char === ')') {
+      if (depth === 0) throw new Error(`unbalanced column constraint: ${value}`);
+      depth -= 1;
+      outside += ' ';
+    } else {
+      outside += depth === 0 ? char : ' ';
+    }
+  }
+  if (quote || depth !== 0) throw new Error(`unbalanced column constraint: ${value}`);
+  return /\bNOT\s+NULL\b/i.test(outside);
 }
 
 function parseTableConstraint(entry: string): D1Constraint | null {
@@ -315,7 +344,17 @@ function parseTableConstraint(entry: string): D1Constraint | null {
 
 export function parseFinalD1Schema(sources: string[]): D1Schema {
   const schema: D1Schema = { tables: new Map(), indexes: new Map() };
-  const statements = sources.flatMap((source) => splitSql(stripLineComments(source), ';'));
+  // Triggers can contain semicolons inside BEGIN/END, so remove each complete
+  // trigger as one recognized, non-relational schema object before statement
+  // splitting. The parity suite compares tables, constraints, and indexes; real
+  // backend suites exercise trigger behavior directly.
+  const statements = sources.flatMap((source) => splitSql(
+    stripLineComments(source).replace(
+      /^CREATE\s+TRIGGER\b[\s\S]*?^END\s*;/gim,
+      '',
+    ),
+    ';',
+  ));
 
   for (const statement of statements) {
     const createTable = statement.match(

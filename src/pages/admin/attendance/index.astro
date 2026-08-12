@@ -1,0 +1,192 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, btnSecondary, card, lab, noticeErr, noticeOk, td, th, tin } from '../../../lib/adminUi';
+import { listEventsAdmin, type CheckinEvent } from '../../../lib/checkinDb';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import {
+  listCurrentServiceCheckinLinks,
+  listServiceAttendanceReport,
+  type ServiceAttendanceReportRow,
+} from '../../../lib/serviceAttendanceDb';
+import { parseAttendanceWindow, type AttendanceWindow } from '../../../lib/serviceAttendanceForms';
+import { listServiceTypes, type ServiceTypeRow } from '../../../lib/teamDb';
+
+const modules = Astro.locals.modules;
+const SAFE_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+if (!modules.has('attendance')) return new Response(null, { status: 404, headers: SAFE_HEADERS });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'attendance')) return new Response(null, { status: 403, headers: SAFE_HEADERS });
+if (Astro.request.method !== 'GET') {
+  return new Response(null, { status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET' } });
+}
+
+const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const today = todayInTz();
+const parsedWindow = parseAttendanceWindow(Astro.url.searchParams, today);
+let window: AttendanceWindow;
+let windowError = false;
+if (parsedWindow.ok) {
+  window = parsedWindow.data;
+} else {
+  windowError = true;
+  const fallback = parseAttendanceWindow(new URLSearchParams(), today);
+  if (!fallback.ok) throw new Error('attendance_default_window_invalid');
+  window = fallback.data;
+}
+
+let serviceTypes: ServiceTypeRow[] = [];
+let report: ServiceAttendanceReportRow[] = [];
+try {
+  serviceTypes = await listServiceTypes(Astro.locals.db, lang);
+  if (!windowError) report = await listServiceAttendanceReport(Astro.locals.db, lang, window);
+} catch {
+  windowError = true;
+}
+
+const childrenEnabled = modules.has('children');
+let checkinEvents: CheckinEvent[] = [];
+let linkedByService = new Map<number, Set<number>>();
+let linkEditorReady = false;
+let linkEditorError = false;
+if (childrenEnabled && serviceTypes.length > 0) {
+  try {
+    const currentLinks = await listCurrentServiceCheckinLinks(Astro.locals.db);
+    const loadedEvents = await listEventsAdmin(Astro.locals.db);
+    const loadedLinks = new Map<number, Set<number>>();
+    for (const link of currentLinks) {
+      const eventIds = loadedLinks.get(link.serviceTypeId) ?? new Set<number>();
+      eventIds.add(link.eventId);
+      loadedLinks.set(link.serviceTypeId, eventIds);
+    }
+    checkinEvents = loadedEvents;
+    linkedByService = loadedLinks;
+    linkEditorReady = true;
+  } catch {
+    linkEditorError = true;
+  }
+}
+
+const canManageServiceTypes = modules.has('serve') && hasAreaAccess(user, 'serve');
+const saved = Astro.url.searchParams.get('saved');
+const hasError = windowError || Astro.url.searchParams.has('error');
+const reportQuery = new URLSearchParams({ from: window.from, to: window.to });
+---
+
+<Admin title={t(lang, 'admin.attendance.title')}>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.attendance.title')}</h1>
+      <p class="mt-1 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.attendance.intro')}</p>
+    </div>
+    <a class={btnSecondary} href={`/admin/attendance/report.csv?${reportQuery}`}>{t(lang, 'admin.attendance.downloadCsv')}</a>
+  </div>
+
+  {saved === 'count' && <p class={`mt-5 ${noticeOk}`}>{t(lang, 'admin.attendance.savedCount')}</p>}
+  {saved === 'links' && <p class={`mt-5 ${noticeOk}`}>{t(lang, 'admin.attendance.savedLinks')}</p>}
+  {hasError && <p class={`mt-5 ${noticeErr}`}>{t(lang, 'admin.attendance.error')}</p>}
+
+  <section class={`mt-6 ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.attendance.recordTitle')}</h2>
+    {serviceTypes.length === 0 ? (
+      <div class="mt-3 text-sm text-ink-muted">
+        <p>{t(lang, 'admin.attendance.emptyServices')}</p>
+        <p class="mt-1">{t(lang, 'admin.attendance.emptyServicesAsk')}</p>
+        {canManageServiceTypes && <a class="mt-3 inline-flex text-primary hover:underline" href="/admin/service-types">{t(lang, 'admin.attendance.manageServiceTypes')}</a>}
+      </div>
+    ) : (
+      <form method="post" action="/admin/attendance/count" class="mt-4 grid gap-4 md:grid-cols-[minmax(12rem,1fr)_12rem_10rem_auto] md:items-end">
+        <label>
+          <span class={lab}>{t(lang, 'admin.attendance.service')}</span>
+          <select class={tin} name="service_type_id" required>
+            {serviceTypes.map((service) => <option value={service.id}>{service.name}</option>)}
+          </select>
+        </label>
+        <label>
+          <span class={lab}>{t(lang, 'admin.attendance.date')}</span>
+          <input class={tin} type="date" name="attendance_date" value={today} required />
+        </label>
+        <label>
+          <span class={lab}>{t(lang, 'admin.attendance.adults')}</span>
+          <input class={tin} type="number" name="adult_count" min="0" max="100000" step="1" required />
+        </label>
+        <button class={btn} type="submit">{t(lang, 'admin.attendance.save')}</button>
+      </form>
+    )}
+  </section>
+
+  <section class={`mt-6 ${card}`}>
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.attendance.reportTitle')}</h2>
+        <p class="mt-1 text-sm text-ink-muted">{formatDate(window.from, lang)} – {formatDate(window.to, lang)}</p>
+      </div>
+      <form method="get" class="flex flex-wrap items-end gap-3">
+        <label><span class={lab}>{t(lang, 'admin.attendance.from')}</span><input class={tin} type="date" name="from" value={window.from} required /></label>
+        <label><span class={lab}>{t(lang, 'admin.attendance.to')}</span><input class={tin} type="date" name="to" value={window.to} required /></label>
+        <button class={btnSecondary} type="submit">{t(lang, 'admin.attendance.applyWindow')}</button>
+      </form>
+    </div>
+    {report.length === 0 ? (
+      <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.attendance.emptyReport')}</p>
+    ) : (
+      <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+        <table class="w-full border-collapse">
+          <thead class="bg-surface-sunken"><tr>
+            <th class={th}>{t(lang, 'admin.attendance.date')}</th>
+            <th class={th}>{t(lang, 'admin.attendance.service')}</th>
+            <th class={th}>{t(lang, 'admin.attendance.adults')}</th>
+            <th class={th}>{t(lang, 'admin.attendance.children')}</th>
+            <th class={th}>{t(lang, 'admin.attendance.total')}</th>
+            <th class={th}></th>
+          </tr></thead>
+          <tbody>{report.map((row) => <tr class="border-t border-border">
+            <td class={td}>{formatDate(row.attendanceDate, lang)}</td>
+            <td class={td}>{row.serviceName}</td>
+            <td class={td}>
+              <form method="post" action="/admin/attendance/count" class="flex min-w-48 items-center gap-2">
+                <input type="hidden" name="service_type_id" value={row.serviceTypeId} />
+                <input type="hidden" name="attendance_date" value={row.attendanceDate} />
+                <input class={tin} type="number" name="adult_count" min="0" max="100000" step="1" value={row.adultCount} aria-label={t(lang, 'admin.attendance.adults')} required />
+                <button class={btnSecondary} type="submit">{t(lang, 'admin.attendance.correct')}</button>
+              </form>
+            </td>
+            <td class={td}>{row.childCount ?? t(lang, 'admin.attendance.notConfigured')}</td>
+            <td class={td}>{row.combinedCount ?? t(lang, 'admin.attendance.notConfigured')}</td>
+            <td class={td}></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    )}
+  </section>
+
+  <section class={`mt-6 ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.attendance.linksTitle')}</h2>
+    {childrenEnabled ? (
+      <>
+        <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.attendance.linksIntro')}</p>
+        {linkEditorError ? (
+          <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.attendance.linksLoadError')}</p>
+        ) : linkEditorReady ? (
+          <div class="mt-4 grid gap-4 lg:grid-cols-2">
+          {serviceTypes.map((service) => <form method="post" action="/admin/attendance/checkin-links" class="rounded-lg border border-border p-4">
+            <input type="hidden" name="service_type_id" value={service.id} />
+            <h3 class="font-semibold">{service.name}</h3>
+            <div class="mt-3 space-y-2">
+              {checkinEvents.map((event) => <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="checkin_event_id" value={event.id} checked={linkedByService.get(service.id)?.has(event.id)} />
+                <span>{event.name}</span>
+              </label>)}
+            </div>
+            <button class={`mt-4 ${btnSecondary}`} type="submit">{t(lang, 'admin.attendance.linksSave')}</button>
+          </form>)}
+          </div>
+        ) : null}
+      </>
+    ) : (
+      <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.attendance.childrenOff')}</p>
+    )}
+  </section>
+</Admin>

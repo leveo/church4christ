@@ -560,6 +560,27 @@ INSERT INTO checkins (id, event_id, household_id, household_member_id, child_nam
   (9, 1, 1, 3, 'Ethan Chen 陈以恒', 'F8G5', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours')),
   (10, 1, 2, 8, 'Noah Lin 林诺亚', 'H4J7', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours'));
 
+-- Aggregate service attendance for the four most recent Sundays. These are
+-- totals only and never identify adult attendees. Person 1 is the fictional
+-- staff audit actor required by the schema. English worship uses the real
+-- Sunday Kids event above for derived child totals while Chinese worship is
+-- intentionally left unconfigured to demonstrate the distinct null state.
+INSERT INTO service_attendance (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id) VALUES
+  (1, date('now','weekday 0','-7 days'), 142, 1, 1),
+  (2, date('now','weekday 0','-7 days'), 118, 1, 1),
+  (1, date('now','weekday 0','-14 days'), 137, 1, 1),
+  (2, date('now','weekday 0','-14 days'), 121, 1, 1),
+  (1, date('now','weekday 0','-21 days'), 151, 1, 1),
+  (2, date('now','weekday 0','-21 days'), 126, 1, 1),
+  (1, date('now','weekday 0','-28 days'), 146, 1, 1),
+  (2, date('now','weekday 0','-28 days'), 123, 1, 1);
+
+INSERT INTO service_type_checkin_events (id, service_type_id, checkin_event_id, starts_on, created_by_person_id) VALUES
+  (1, 1, 1, date('now','weekday 0','-42 days'), 1);
+
+INSERT INTO service_checkin_link_state (service_type_id, revision, last_mutation_id) VALUES
+  (1, 1, 'seed-attendance-link');
+
 -- Kiosk token: fixed (not random) so the kiosk works immediately after a local
 -- seed. With the default `astro dev` port, open:
 --   http://localhost:4321/kiosk/devkiosk1234567890abcdef12345678
