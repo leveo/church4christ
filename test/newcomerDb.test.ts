@@ -40,6 +40,8 @@ const superAdmin = user({
   role: 'admin', isAdmin: true, isSuperAdmin: true, adminAreas: [],
 });
 
+const dbResult = (results: unknown[]) => ({ results, meta: { changes: 0 } });
+
 const configurationSnapshot = () => {
   const statuses = [
     [1, 'new', 'open', 1, 1, 1, 'New'],
@@ -55,8 +57,43 @@ const configurationSnapshot = () => {
   ].map(([id, key, type]) => ({
     id, key, type, required: 0, active: 1, sort: id, fixed: 1, label: key, help: null,
   }));
-  const result = (results: unknown[]) => ({ results, meta: { changes: 0 } });
-  return { statuses, fields, results: [result(statuses), result(fields), result([]), result([]), result([])] };
+  return { statuses, fields, results: [dbResult(statuses), dbResult(fields), dbResult([]), dbResult([]), dbResult([])] };
+};
+
+const formSnapshot = (field: Record<string, unknown>, options: unknown[] = []) => {
+  const { statuses } = configurationSnapshot();
+  return [dbResult(statuses), dbResult([field]), dbResult(options), dbResult([]), dbResult([])];
+};
+
+const queueDbRow = (overrides: Record<string, unknown> = {}) => ({
+  id: '10000000-0000-4000-8000-000000000002', name: 'Safe', email: null, phone: null,
+  locale: 'en', visit_date: '2026-08-12', service_type_id: null, service_label: null,
+  contact_consent_at: null, source: 'staff', status_id: 1, status_label: 'New',
+  assignee_person_id: null, next_follow_up_date: null, version: 0,
+  created_at: '2026-08-12 10:00:00', updated_at: '2026-08-12 11:00:00',
+  ...overrides,
+});
+
+const detailSubmissionRow = () => ({
+  ...queueDbRow({ id: '10000000-0000-4000-8000-000000000001' }),
+  linked_person_id: null,
+  closed_at: null,
+});
+
+const detailSnapshot = ({
+  answers = [], notes = [], activity = [],
+}: { answers?: unknown[]; notes?: unknown[]; activity?: unknown[] } = {}) => [
+  dbResult([detailSubmissionRow()]), dbResult(answers), dbResult(notes), dbResult(activity),
+];
+
+const fakeReadDb = (results: Array<{ results: unknown[]; meta: { changes: number } }>): AppDb => {
+  const statement = {
+    bind() { return this; },
+    first: async () => null,
+    all: async () => results[0],
+    run: async () => results[0],
+  };
+  return { prepare: () => statement, batch: async () => results } as unknown as AppDb;
 };
 
 beforeEach(async () => {
@@ -208,6 +245,58 @@ describe('newcomer read authorization', () => {
     const duplicateDb = { prepare: () => statement, batch: async () => duplicate.results } as unknown as AppDb;
     await expect(listNewcomerAdminConfiguration(duplicateDb, 'd1', superAdmin, 'en'))
       .rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('requires active custom form fields and never reads accessor/proxy-backed field values', async () => {
+    const inactiveField = {
+      id: 8, key: 'private_field', type: 'text', required: 0, active: 0, sort: 8, fixed: 0,
+      label: 'PRIVATE INACTIVE LABEL', help: null,
+    };
+    const inactiveError = await listNewcomerFormDefinition(
+      fakeReadDb(formSnapshot(inactiveField)), 'd1', 'en',
+    ).catch((caught: unknown) => caught);
+    expect(inactiveError).toBeInstanceOf(NewcomerPersistenceError);
+    expect(inactiveError).toMatchObject({ code: 'newcomer_failed' });
+    expect(String(inactiveError)).not.toContain('PRIVATE INACTIVE LABEL');
+
+    const inactiveOptionError = await listNewcomerFormDefinition(fakeReadDb(formSnapshot({
+      id: 8, key: 'private_select', type: 'select', required: 0, active: 1, sort: 8, fixed: 0,
+      label: 'Safe select', help: null,
+    }, [{ field_id: 8, value: 'private_option', sort: 1, active: 0, label: 'PRIVATE OPTION LABEL' }])), 'd1', 'en')
+      .catch((caught: unknown) => caught);
+    expect(inactiveOptionError).toMatchObject({ code: 'newcomer_failed' });
+    expect(String(inactiveOptionError)).not.toContain('PRIVATE OPTION LABEL');
+
+    let getterReads = 0;
+    const accessorField = {
+      id: 8, key: 'accessor_field', type: 'text', required: 0, active: 1, sort: 8, fixed: 0,
+      help: null,
+    } as Record<string, unknown>;
+    Object.defineProperty(accessorField, 'label', {
+      enumerable: true,
+      get() { getterReads += 1; return 'PRIVATE GETTER LABEL'; },
+    });
+    const accessorError = await listNewcomerFormDefinition(
+      fakeReadDb(formSnapshot(accessorField)), 'd1', 'en',
+    ).catch((caught: unknown) => caught);
+    expect(accessorError).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(accessorError)).not.toContain('PRIVATE GETTER LABEL');
+    expect(getterReads).toBe(0);
+
+    let proxyReads = 0;
+    const proxyField = new Proxy({
+      id: 8, key: 'proxy_field', type: 'text', required: 0, active: 1, sort: 8, fixed: 0,
+      label: 'Safe proxy label', help: null,
+    }, {
+      get() { proxyReads += 1; return 'PRIVATE PROXY VALUE'; },
+      ownKeys() { throw new Error('PRIVATE PROXY VALUE'); },
+    });
+    const proxyError = await listNewcomerFormDefinition(
+      fakeReadDb(formSnapshot(proxyField)), 'd1', 'en',
+    ).catch((caught: unknown) => caught);
+    expect(proxyError).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(proxyError)).not.toContain('PRIVATE PROXY VALUE');
+    expect(proxyReads).toBe(0);
   });
 
   it('uses kind-specific allowlists and scalar validation for activity metadata', () => {
@@ -546,6 +635,114 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     expect(await findNewcomerDuplicateHints(env.DB, user(), {
       email: null, phone: '+13125550104', excludeSubmissionId: null,
     })).toEqual([]);
+  });
+
+  it.each([
+    ['malformed sentinel row', [
+      queueDbRow(),
+      queueDbRow({ id: '10000000-0000-4000-8000-000000000001', email: 'PRIVATE SENTINEL' }),
+    ], 1],
+    ['duplicate submission identity', [
+      queueDbRow(),
+      queueDbRow({ updated_at: '2026-08-12 10:00:00' }),
+    ], 2],
+    ['ascending update time', [
+      queueDbRow({ id: '10000000-0000-4000-8000-000000000001', updated_at: '2026-08-12 10:00:00' }),
+      queueDbRow({ updated_at: '2026-08-12 11:00:00' }),
+    ], 2],
+    ['ascending id at equal update time', [
+      queueDbRow({ id: '10000000-0000-4000-8000-000000000001' }),
+      queueDbRow({ id: '10000000-0000-4000-8000-000000000002' }),
+    ], 2],
+  ])('rejects %s before slicing or returning queue rows', async (_name, rows, limit) => {
+    const error = await listNewcomerQueue(
+      fakeReadDb([dbResult(rows)]), user(), 'en', { page: 1, limit }, '2026-08-12',
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NewcomerPersistenceError);
+    expect(String(error)).not.toContain('PRIVATE SENTINEL');
+  });
+
+  it.each([
+    ['duplicate identity', [
+      { kind_order: 1, kind: 'person_live', record_id: '9701', status_id: null },
+      { kind_order: 1, kind: 'person_live', record_id: '9701', status_id: null },
+    ]],
+    ['descending record order', [
+      { kind_order: 1, kind: 'person_live', record_id: '9702', status_id: null },
+      { kind_order: 1, kind: 'person_live', record_id: '9701', status_id: null },
+    ]],
+    ['descending kind order', [
+      { kind_order: 2, kind: 'person_deleted', record_id: '9701', status_id: null },
+      { kind_order: 1, kind: 'person_live', record_id: '9702', status_id: null },
+    ]],
+  ])('rejects duplicate hints with %s', async (_name, rows) => {
+    await expect(findNewcomerDuplicateHints(fakeReadDb([dbResult(rows)]), user(), {
+      email: 'live@example.test', phone: null, excludeSubmissionId: null,
+    })).rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('allows the same duplicate record id across distinct ordered kinds', async () => {
+    await expect(findNewcomerDuplicateHints(fakeReadDb([dbResult([
+      { kind_order: 1, kind: 'person_live', record_id: '9701', status_id: null },
+      { kind_order: 2, kind: 'person_deleted', record_id: '9701', status_id: null },
+    ])]), user(), {
+      email: 'live@example.test', phone: null, excludeSubmissionId: null,
+    })).resolves.toEqual([
+      { kind: 'person_live', id: 9701 },
+      { kind: 'person_deleted', id: 9701 },
+    ]);
+  });
+
+  it('decodes answer sort keys but returns only the stable answer DTO', async () => {
+    const detail = await getNewcomerDetail(fakeReadDb(detailSnapshot({ answers: [
+      { field_id: 8, field_sort: 8, field_label: 'First field', value: 'First answer' },
+      { field_id: 9, field_sort: 9, field_label: 'Second field', value: 'Second answer' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en');
+    expect(detail?.answers).toEqual([
+      { fieldId: 8, fieldLabel: 'First field', value: 'First answer' },
+      { fieldId: 9, fieldLabel: 'Second field', value: 'Second answer' },
+    ]);
+    expect(JSON.stringify(detail?.answers)).not.toContain('field_sort');
+  });
+
+  it('rejects out-of-order answers, notes, and activity without reordering them', async () => {
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ answers: [
+      { field_id: 9, field_sort: 8, field_label: 'Second', value: 'Second' },
+      { field_id: 8, field_sort: 8, field_label: 'First', value: 'First' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ notes: [
+      { id: '20000000-0000-4000-8000-000000000002', author_person_id: 9701, body: 'Later', created_at: '2026-08-12 11:00:00' },
+      { id: '20000000-0000-4000-8000-000000000001', author_person_id: 9701, body: 'Earlier', created_at: '2026-08-12 10:00:00' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ activity: [
+      { id: '30000000-0000-4000-8000-000000000002', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 11:00:00' },
+      { id: '30000000-0000-4000-8000-000000000001', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 10:00:00' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('rejects duplicate answer, note, and activity identities', async () => {
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ answers: [
+      { field_id: 8, field_sort: 8, field_label: 'First', value: 'One' },
+      { field_id: 8, field_sort: 9, field_label: 'First', value: 'Two' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ notes: [
+      { id: '20000000-0000-4000-8000-000000000001', author_person_id: 9701, body: 'One', created_at: '2026-08-12 10:00:00' },
+      { id: '20000000-0000-4000-8000-000000000001', author_person_id: 9701, body: 'Two', created_at: '2026-08-12 11:00:00' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+
+    await expect(getNewcomerDetail(fakeReadDb(detailSnapshot({ activity: [
+      { id: '30000000-0000-4000-8000-000000000001', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 10:00:00' },
+      { id: '30000000-0000-4000-8000-000000000001', actor_person_id: null, kind: 'submission_created', metadata_json: '{}', created_at: '2026-08-12 11:00:00' },
+    ] })), 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
   });
 
   it('rejects activity metadata that does not match its activity kind', async () => {

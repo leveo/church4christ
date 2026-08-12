@@ -399,7 +399,7 @@ function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): Newcom
     }
     const core = CORE_FIELDS.get(id);
     if (activeOnly) {
-      if (core || id <= 7 || fixed) throw new NewcomerPersistenceError();
+      if (core || id <= 7 || !active || fixed) throw new NewcomerPersistenceError();
     } else if (core) {
       if (core.key !== key || core.type !== type || required || !active || !fixed) throw new NewcomerPersistenceError();
     } else if (id <= 7 || fixed) throw new NewcomerPersistenceError();
@@ -655,8 +655,20 @@ export async function listNewcomerQueue(
       LIMIT ? OFFSET ?
     `).bind(...values).all<unknown>();
     const rows = resultRows(result, filters.limit + 1);
-    const hasNext = rows.length > filters.limit;
-    return { rows: rows.slice(0, filters.limit).map(queueRow), page: filters.page, limit: filters.limit, hasNext };
+    const decodedRows = rows.map(queueRow);
+    const submissionIds = new Set<string>();
+    let previous: NewcomerQueueRow | null = null;
+    for (const row of decodedRows) {
+      if (submissionIds.has(row.id)
+        || (previous && (previous.updatedAt < row.updatedAt
+          || (previous.updatedAt === row.updatedAt && previous.id <= row.id)))) {
+        throw new NewcomerPersistenceError();
+      }
+      submissionIds.add(row.id);
+      previous = row;
+    }
+    const hasNext = decodedRows.length > filters.limit;
+    return { rows: decodedRows.slice(0, filters.limit), page: filters.page, limit: filters.limit, hasNext };
   } catch (error) {
     if (error instanceof NewcomerInvalidError || error instanceof NewcomerPersistenceError) throw error;
     throw new NewcomerPersistenceError();
@@ -784,7 +796,8 @@ export async function getNewcomerDetail(
       LIMIT 2
     `).bind(requested, submissionId),
     db.prepare(`
-      SELECT answer.field_id,COALESCE(localized.label,english.label,field.key) AS field_label,answer.value
+      SELECT answer.field_id,field.sort AS field_sort,
+             COALESCE(localized.label,english.label,field.key) AS field_label,answer.value
       FROM newcomer_answers answer JOIN newcomer_fields field ON field.id=answer.field_id
       LEFT JOIN newcomer_field_i18n localized ON localized.field_id=field.id AND localized.locale=?1
       LEFT JOIN newcomer_field_i18n english ON english.field_id=field.id AND english.locale='en'
@@ -821,13 +834,21 @@ export async function getNewcomerDetail(
     const answerRows = resultRows(results[1], 101);
     if (answerRows.length > NEWCOMER_DB_LIMITS.answers) throw new NewcomerLimitError();
     const answerFieldIds = new Set<number>();
+    let previousAnswer: [number, number] | null = null;
     const answers = answerRows.map((value) => {
-      const row = plainRow(value, ['field_id', 'field_label', 'value']);
+      const row = plainRow(value, ['field_id', 'field_sort', 'field_label', 'value']);
       const fieldId = row ? positiveId(row.field_id) : null;
+      const fieldSort = row ? integer(row.field_sort) : null;
       const fieldLabel = row ? normalizedText(row.field_label, 100) : null;
       const answerValue = row ? normalizedText(row.value, 4_000) : null;
-      if (fieldId === null || !fieldLabel || answerValue === null || answerFieldIds.has(fieldId)) throw new NewcomerPersistenceError();
+      if (fieldId === null || fieldSort === null || fieldSort < 0 || fieldSort > 100_000
+        || !fieldLabel || answerValue === null || answerFieldIds.has(fieldId)
+        || (previousAnswer && (fieldSort < previousAnswer[0]
+          || (fieldSort === previousAnswer[0] && fieldId <= previousAnswer[1])))) {
+        throw new NewcomerPersistenceError();
+      }
       answerFieldIds.add(fieldId);
+      previousAnswer = [fieldSort, fieldId];
       return { fieldId, fieldLabel, value: answerValue };
     });
     const noteRows = resultRows(results[2], 5001);
@@ -946,23 +967,47 @@ export async function findNewcomerDuplicateHints(
     ).all<unknown>();
     const rows = resultRows(result, 26);
     if (rows.length > NEWCOMER_DB_LIMITS.duplicateHints) throw new NewcomerLimitError();
-    return rows.map((value) => {
+    const decoded = rows.map((value) => {
       const row = plainRow(value, ['kind_order', 'kind', 'record_id', 'status_id']);
       const order = row ? integer(row.kind_order) : null;
+      const recordId = row && typeof row.record_id === 'string' ? row.record_id : null;
       if (order === 1 && row?.kind === 'person_live') {
-        const id = positiveTextId(row.record_id);
-        if (id !== null && row.status_id === null) return { kind: 'person_live', id };
+        const id = positiveTextId(recordId);
+        if (recordId !== null && id !== null && row.status_id === null) {
+          return { order, recordId, hint: { kind: 'person_live', id } as NewcomerDuplicateHint };
+        }
       }
       if (order === 2 && row?.kind === 'person_deleted') {
-        const id = positiveTextId(row.record_id);
-        if (id !== null && row.status_id === null) return { kind: 'person_deleted', id };
+        const id = positiveTextId(recordId);
+        if (recordId !== null && id !== null && row.status_id === null) {
+          return { order, recordId, hint: { kind: 'person_deleted', id } as NewcomerDuplicateHint };
+        }
       }
-      if (order === 3 && row?.kind === 'submission_open' && validUuid(row.record_id)) {
+      if (order === 3 && row?.kind === 'submission_open' && validUuid(recordId)) {
         const statusId = positiveId(row.status_id);
-        if (statusId !== null) return { kind: 'submission_open', id: row.record_id, statusId };
+        if (statusId !== null) {
+          return {
+            order,
+            recordId,
+            hint: { kind: 'submission_open', id: recordId, statusId } as NewcomerDuplicateHint,
+          };
+        }
       }
       throw new NewcomerPersistenceError();
     });
+    const identities = new Set<string>();
+    let previous: { order: number; recordId: string } | null = null;
+    for (const item of decoded) {
+      const identity = `${item.hint.kind}:${item.recordId}`;
+      if (identities.has(identity)
+        || (previous && (item.order < previous.order
+          || (item.order === previous.order && item.recordId <= previous.recordId)))) {
+        throw new NewcomerPersistenceError();
+      }
+      identities.add(identity);
+      previous = item;
+    }
+    return decoded.map((item) => item.hint);
   } catch (error) {
     if (error instanceof NewcomerLimitError || error instanceof NewcomerPersistenceError) throw error;
     throw new NewcomerPersistenceError();
