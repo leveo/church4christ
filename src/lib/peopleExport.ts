@@ -57,6 +57,8 @@ export interface CanonicalPeopleExportSource {
   today: string;
   people: readonly CanonicalPeopleExportPerson[];
   dependents: readonly CanonicalPeopleExportDependent[];
+  /** Numeric-only database integrity failures that cannot be represented as canonical rows. */
+  integrityIssues?: number;
 }
 
 export interface CanonicalExportPart {
@@ -450,12 +452,18 @@ function snapshotSource(
   const todayInput = value.today;
   const peopleInput = value.people;
   const dependentsInput = value.dependents;
+  const integrityIssuesInput = value.integrityIssues;
   const peopleIsArray = Array.isArray(peopleInput);
   const dependentsIsArray = Array.isArray(dependentsInput);
   const peopleLength = peopleIsArray ? peopleInput.length : 0;
   const dependentLength = dependentsIsArray ? dependentsInput.length : 0;
 
   let issues = typeof todayInput === 'string' && isValidDateStr(todayInput) ? 0 : 1;
+  let integrityIssues = 0;
+  if (integrityIssuesInput !== undefined) {
+    if (!Number.isSafeInteger(integrityIssuesInput) || (integrityIssuesInput as number) < 0) issues += 1;
+    else integrityIssues = bounded(integrityIssuesInput as number, PEOPLE_IMPORT_LIMITS.maxIssues);
+  }
   if (!peopleIsArray) issues += 1;
   if (!dependentsIsArray) issues += 1;
   if (peopleLength + dependentLength > PEOPLE_EXPORT_LIMITS.maxDataRows) {
@@ -495,7 +503,12 @@ function snapshotSource(
   }
   return {
     ok: true,
-    source: { today: todayInput as string, people, dependents },
+    source: {
+      today: todayInput as string,
+      people,
+      dependents,
+      ...(integrityIssues > 0 ? { integrityIssues } : {}),
+    },
   };
 }
 
@@ -513,7 +526,7 @@ function structuralIssueCount(
   source: CanonicalPeopleExportSource,
   groups: readonly HouseholdGroup[],
 ): number {
-  let issues = 0;
+  let issues = source.integrityIssues ?? 0;
   issues += duplicateOccurrenceCount(source.people.map((person) => identity(person.email)));
   issues += duplicateOccurrenceCount(source.people.map((person) => person.stableKey));
   issues += duplicateOccurrenceCount(source.dependents.map((dependent) => dependent.stableKey));
