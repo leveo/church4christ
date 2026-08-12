@@ -80,22 +80,28 @@ describe('loadSessionUser', () => {
     expect(leader).toMatchObject({ role: 'member', isAdmin: false, isEditor: false, lang: null });
   });
 
-  it('loads super_admin and validated admin_areas onto the session user', async () => {
+  it('loads role-filtered grants while keeping legacy non-admin area strings inert', async () => {
     await env.DB.prepare(
       `INSERT INTO people (id, first_name, last_name, display_name, email, role, super_admin, admin_areas)
-       VALUES (60, 'S', 'A', 'S A', 'sup@example.com', 'admin', 1, ''),
-              (61, 'L', 'A', 'L A', 'lim@example.com', 'admin', 0, 'groups,junk,settings,events'),
-              (62, 'E', 'D', 'E D', 'ed@example.com', 'editor', 1, 'groups')`,
+       VALUES (60, 'S', 'A', 'S A', 'sup@example.com', 'admin', 1, 'groups,newcomers'),
+              (61, 'L', 'A', 'L A', 'lim@example.com', 'admin', 0, 'groups,newcomers,newcomers,junk,settings,events'),
+              (62, 'E', 'D', 'E D', 'ed@example.com', 'editor', 1, 'groups,newcomers,newcomers,events'),
+              (63, 'M', 'W', 'M W', 'worker@example.com', 'member', 0, 'people,newcomers,settings,groups')`,
     ).run();
     const sup = await loadSessionUser(env.DB, 60, 0);
     expect(sup?.isSuperAdmin).toBe(true);
+    expect(sup?.adminAreas).toEqual(['groups', 'newcomers']);
     const lim = await loadSessionUser(env.DB, 61, 0);
     expect(lim?.isSuperAdmin).toBe(false);
-    expect(lim?.adminAreas).toEqual(['groups', 'events']); // junk + reserved filtered
-    // the flags are inert on a non-admin row
+    expect(lim?.adminAreas).toEqual(['groups', 'newcomers', 'events']); // junk + reserved filtered
+    // Only the scoped grant survives on non-admin rows. The forged super flag
+    // and every legacy area string remain inert.
     const ed = await loadSessionUser(env.DB, 62, 0);
     expect(ed?.isSuperAdmin).toBe(false);
-    expect(ed?.adminAreas).toEqual([]);
+    expect(ed?.adminAreas).toEqual(['newcomers']);
+    const member = await loadSessionUser(env.DB, 63, 0);
+    expect(member?.isSuperAdmin).toBe(false);
+    expect(member?.adminAreas).toEqual(['newcomers']);
   });
 });
 
@@ -139,5 +145,24 @@ describe('policy gate over a loaded user', () => {
     for (const p of ['/my', '/serve/plans', '/admin', '/admin/people', '/profile/9']) {
       expect(canAccess(classifyRoute(p), admin)).toBe(true);
     }
+  });
+
+  it('a loaded scoped member reaches only Newcomers within the admin namespace', async () => {
+    await env.DB.prepare("UPDATE people SET admin_areas = 'people,newcomers,groups,settings' WHERE id = 4").run();
+    const worker = await loadSessionUser(env.DB, 4, 0);
+    expect(worker).toMatchObject({ isAdmin: false, adminAreas: ['newcomers'] });
+    expect(canAccess(classifyRoute('/admin/newcomers'), worker)).toBe(true);
+    expect(canAccess(classifyRoute('/admin/newcomers/unknown'), worker)).toBe(true);
+    for (const path of ['/admin/people', '/admin/people/1', '/admin/groups', '/admin/settings', '/admin/navigation']) {
+      expect(canAccess(classifyRoute(path), worker), path).toBe(false);
+    }
+  });
+
+  it('a loaded ordinary admin still needs an explicit Newcomers grant', async () => {
+    const admin = await loadSessionUser(env.DB, 1, 0);
+    expect(canAccess(classifyRoute('/admin/newcomers'), admin)).toBe(false);
+    await env.DB.prepare("UPDATE people SET admin_areas = 'newcomers' WHERE id = 1").run();
+    const granted = await loadSessionUser(env.DB, 1, 0);
+    expect(canAccess(classifyRoute('/admin/newcomers'), granted)).toBe(true);
   });
 });

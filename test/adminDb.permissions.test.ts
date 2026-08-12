@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { savePerson, setPersonFlags, softDeletePerson } from '../src/lib/adminDb';
+import { GRANTABLE_AREAS } from '../src/lib/adminAreas';
 
 const db = env.DB;
 beforeEach(async () => {
@@ -17,24 +18,50 @@ const superCount = async () =>
   (await db.prepare(`SELECT COUNT(*) AS n FROM people WHERE role='admin' AND super_admin=1 AND active=1 AND deleted_at IS NULL`).first<{ n: number }>())!.n;
 
 describe('setPersonFlags: permission writes', () => {
-  it('writes superAdmin and validated adminAreas', async () => {
+  it('writes superAdmin and filters grants against the target member role', async () => {
     await setPersonFlags(db, 2, { superAdmin: true });
-    await setPersonFlags(db, 3, { adminAreas: ['groups', 'junk', 'settings', 'events'] });
+    await setPersonFlags(db, 3, { adminAreas: ['groups', 'newcomers', 'junk', 'settings', 'events'] });
     const two = await db.prepare(`SELECT super_admin FROM people WHERE id=2`).first<{ super_admin: number }>();
     expect(two!.super_admin).toBe(1);
     const three = await db.prepare(`SELECT admin_areas FROM people WHERE id=3`).first<{ admin_areas: string }>();
-    expect(three!.admin_areas).toBe('groups,events');
+    expect(three!.admin_areas).toBe('newcomers');
+  });
+  it('an admin target can persist every legal admin and scoped grant', async () => {
+    await setPersonFlags(db, 2, { adminAreas: [...GRANTABLE_AREAS, 'junk', 'settings'] });
+    const row = await db.prepare(`SELECT admin_areas FROM people WHERE id=2`).first<{ admin_areas: string }>();
+    expect(row?.admin_areas).toBe(GRANTABLE_AREAS.join(','));
   });
   it('leaves untouched fields alone (partial update)', async () => {
-    await setPersonFlags(db, 2, { adminAreas: ['bulletins'] });
+    await setPersonFlags(db, 2, { adminAreas: ['bulletins', 'newcomers'] });
     const row = await db.prepare(`SELECT role, super_admin FROM people WHERE id=2`).first<{ role: string; super_admin: number }>();
     expect(row).toEqual({ role: 'admin', super_admin: 0 });
   });
   it('adminAreas: [] clears existing grants', async () => {
-    await setPersonFlags(db, 3, { adminAreas: ['groups', 'events'] });
+    await setPersonFlags(db, 3, { adminAreas: ['newcomers'] });
     await setPersonFlags(db, 3, { adminAreas: [] });
     const three = await db.prepare(`SELECT admin_areas FROM people WHERE id=3`).first<{ admin_areas: string }>();
     expect(three!.admin_areas).toBe('');
+  });
+  it('same-request demotion keeps newcomers and clears every admin-only grant', async () => {
+    await db.prepare("UPDATE people SET admin_areas = 'bulletins,newcomers,groups' WHERE id = 2").run();
+    await setPersonFlags(db, 2, {
+      role: 'member',
+      adminAreas: ['bulletins', 'newcomers', 'groups'],
+    });
+    const row = await db.prepare(`SELECT role, admin_areas FROM people WHERE id=2`).first<{
+      role: string;
+      admin_areas: string;
+    }>();
+    expect(row).toEqual({ role: 'member', admin_areas: 'newcomers' });
+  });
+  it('role-only demotion also sanitizes pre-existing grants without dropping newcomers', async () => {
+    await db.prepare("UPDATE people SET admin_areas = 'bulletins,newcomers,groups' WHERE id = 2").run();
+    await setPersonFlags(db, 2, { role: 'editor' });
+    const row = await db.prepare(`SELECT role, admin_areas FROM people WHERE id=2`).first<{
+      role: string;
+      admin_areas: string;
+    }>();
+    expect(row).toEqual({ role: 'editor', admin_areas: 'newcomers' });
   });
 });
 

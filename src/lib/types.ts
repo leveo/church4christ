@@ -1,3 +1,5 @@
+import type { GrantableArea } from './adminAreas';
+
 // The authenticated request context exposed as `Astro.locals.user`. The row is
 // reloaded from `people` (+ team memberships) on every request by the middleware
 // so revocation is immediate (active=0 / deleted_at / session_epoch bump).
@@ -15,10 +17,10 @@ export type SessionUser = {
   memberTeamIds: number[];
   leaderTeamIds: number[];
   lang: 'en' | 'zh' | null;
-  // Per-admin module permissions (spec 2026-07-10): super admins see every admin
-  // area and manage other admins' grants; adminAreas holds a limited admin's
-  // granted area keys (validated against src/lib/adminAreas.ts, [] for
-  // non-admins). Loaded fresh each request, so revocation is immediate.
+  // Validated grants loaded from people.admin_areas. Admins may carry any
+  // GrantableArea; member/editor scoped staff may carry only `newcomers`.
+  // Legacy area strings are removed from non-admin sessions and cannot confer
+  // authority. Loaded fresh each request, so revocation is immediate.
   isSuperAdmin: boolean;
-  adminAreas: string[];
+  adminAreas: GrantableArea[];
 };

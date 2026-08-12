@@ -13,8 +13,9 @@
 // public church website, and a mistyped URL (/sermon, /abut) must fall through
 // to Astro's natural 404 for anonymous visitors, not bounce them to signin.
 import type { SessionUser } from './types';
+import { hasAreaAccess } from './adminAreas';
 
-export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'adminOnly';
+export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'newcomerStaff' | 'adminOnly';
 
 // Exact-match public paths (no session). Prefix families live in PUBLIC_PREFIXES.
 const PUBLIC_EXACT = new Set([
@@ -139,10 +140,10 @@ function isPublic(p: string): boolean {
 export function classifyRoute(pathname: string): RouteClass {
   const p = norm(pathname);
 
-  // /admin namespace: the finance area (giving admin) first — a finance-flagged
-  // user reaches it without full site-admin — then admin-only areas, then the
-  // console root + explicit console list, then fail closed (an unlisted /admin
-  // path is adminOnly, never weaker).
+  // /admin namespace: narrow non-admin scopes must classify before the broad
+  // admin-only fallback. Finance follows, then admin-only areas, the console
+  // root + explicit console list, and finally fail closed.
+  if (under(p, '/admin/newcomers')) return 'newcomerStaff';
   if (under(p, '/admin/giving') || under(p, '/admin/stripe-events')) return 'finance';
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
   if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
@@ -178,6 +179,8 @@ export function canAccess(cls: RouteClass, user: SessionUser | null): boolean {
       return user !== null && (user.isAdmin || user.finance === 1);
     case 'console':
       return user !== null && (user.isAdmin || user.isEditor || user.leaderTeamIds.length > 0);
+    case 'newcomerStaff':
+      return hasAreaAccess(user, 'newcomers');
     case 'adminOnly':
       return user?.isAdmin ?? false;
   }

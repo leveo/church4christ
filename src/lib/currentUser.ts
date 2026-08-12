@@ -6,7 +6,7 @@
 // getPersonTeamIds, adapted to the role model and the team_members schema
 // (which — unlike the reference stack — has no soft-delete column, so only teams.deleted_at
 // is filtered).
-import { parseAdminAreas } from './adminAreas';
+import { parseAdminAreasForRole } from './adminAreas';
 import type { AppDb } from './appDb';
 import type { SessionUser } from './types';
 
@@ -55,7 +55,7 @@ function toSessionUser(
     isAdmin: person.role === 'admin',
     isEditor: person.role === 'editor',
     isSuperAdmin: person.role === 'admin' && person.super_admin === 1,
-    adminAreas: person.role === 'admin' ? parseAdminAreas(person.admin_areas) : [],
+    adminAreas: parseAdminAreasForRole(person.admin_areas, person.role),
     finance: person.finance,
     memberTeamIds: teams.memberTeamIds,
     leaderTeamIds: teams.leaderTeamIds,
