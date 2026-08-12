@@ -76,6 +76,7 @@ export interface PeopleImportMappingTransformResult {
 }
 
 const INVALID_SNAPSHOT = Symbol('invalid mapping contract snapshot');
+const MAX_CONTRACT_CONTAINER_ENTRIES = PEOPLE_IMPORT_MAPPING_LIMITS.maxColumns;
 const CONTRACT_KEYS = ['version', 'expectedHeaders', 'fieldMappings', 'constants', 'enumTranslations'] as const;
 const CONSTANT_FIELD_SET = new Set<string>(PEOPLE_IMPORT_MAPPING_CONSTANT_FIELDS);
 const ENUM_VALUES: Record<PeopleImportMappingEnumField, ReadonlySet<string>> = {
@@ -129,9 +130,10 @@ function snapshotJson(value: unknown, depth = 0): unknown | typeof INVALID_SNAPS
     return value;
   }
   if (typeof value !== 'object') return INVALID_SNAPSHOT;
-  if (Object.getOwnPropertySymbols(value).length > 0) return INVALID_SNAPSHOT;
 
   if (Array.isArray(value)) {
+    if (value.length > MAX_CONTRACT_CONTAINER_ENTRIES) return INVALID_SNAPSHOT;
+    if (Object.getOwnPropertySymbols(value).length > 0) return INVALID_SNAPSHOT;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const expectedKeys = Array.from({ length: value.length }, (_, index) => String(index));
     const dataKeys = Object.keys(descriptors).filter((key) => key !== 'length');
@@ -149,9 +151,11 @@ function snapshotJson(value: unknown, depth = 0): unknown | typeof INVALID_SNAPS
     return copy;
   }
 
+  if (Object.getOwnPropertySymbols(value).length > 0) return INVALID_SNAPSHOT;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return INVALID_SNAPSHOT;
   const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Object.keys(descriptors).length > MAX_CONTRACT_CONTAINER_ENTRIES) return INVALID_SNAPSHOT;
   const copy: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const [key, descriptor] of Object.entries(descriptors)) {
     if (!descriptor.enumerable || !('value' in descriptor)) return INVALID_SNAPSHOT;
@@ -237,7 +241,7 @@ export function snapshotPeopleImportMappingContract(value: unknown): PeopleImpor
       if (!CONSTANT_FIELD_SET.has(field) || !isRecord(rawTranslations)) throw new TypeError('invalid mapping contract');
       const enumField = field as PeopleImportMappingEnumField;
       if (Object.keys(rawTranslations).length < 1) throw new TypeError('invalid mapping contract');
-      const translations: Record<string, string> = {};
+      const translations = Object.create(null) as Record<string, string>;
       for (const [source, target] of Object.entries(rawTranslations)) {
         if (
           source === ''
@@ -397,13 +401,13 @@ export function transformPeopleImportMapping(
         canonicalRow.push('');
         continue;
       }
-      const translated = contract.enumTranslations[enumField]?.[normalizedSource];
-      if (translated === undefined) {
+      const translations = contract.enumTranslations[enumField];
+      if (!translations || !Object.hasOwn(translations, normalizedSource)) {
         mappingIssues.add(issue('unknown_enum', rowNumber, sourceIndex + 1, field));
         canonicalRow.push('');
         continue;
       }
-      canonicalRow.push(translated);
+      canonicalRow.push(translations[normalizedSource]);
     }
     rows.push(canonicalRow);
     rowNumbers.push(rowNumber);

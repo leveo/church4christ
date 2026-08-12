@@ -127,7 +127,11 @@ function isPlainDataGraph(value: unknown, seen: Set<object>): boolean {
   seen.add(value);
   const prototype = Object.getPrototypeOf(value);
   if (Array.isArray(value)) {
-    if (prototype !== Array.prototype || Object.getOwnPropertySymbols(value).length !== 0) return false;
+    if (
+      prototype !== Array.prototype
+      || value.length > PEOPLE_IMPORT_MAPPING_PROFILE_LIMITS.maxHeaders
+      || Object.getOwnPropertySymbols(value).length !== 0
+    ) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Array.from({ length: value.length }, (_, index) => String(index));
     if (
@@ -145,7 +149,9 @@ function isPlainDataGraph(value: unknown, seen: Set<object>): boolean {
   }
   if (prototype !== Object.prototype && prototype !== null) return false;
   if (Object.getOwnPropertySymbols(value).length !== 0) return false;
-  return Object.values(Object.getOwnPropertyDescriptors(value)).every((descriptor) => (
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Object.keys(descriptors).length > PEOPLE_IMPORT_MAPPING_PROFILE_LIMITS.maxHeaders) return false;
+  return Object.values(descriptors).every((descriptor) => (
     Object.hasOwn(descriptor, 'value')
     && descriptor.get === undefined
     && descriptor.set === undefined

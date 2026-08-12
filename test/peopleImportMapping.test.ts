@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PEOPLE_IMPORT_HEADERS, validatePeopleImportRows } from '../src/lib/peopleImport';
 import {
   PEOPLE_IMPORT_MAPPING_CONSTANT_FIELDS,
@@ -229,6 +229,28 @@ describe('people import mapping runtime contract', () => {
       issues: [{ code: 'invalid_contract', row: null, column: null, field: null }],
     });
   });
+
+  it('rejects a sparse expected-header array before attempting to expand it', () => {
+    const contract = mappingContract([]);
+    contract.expectedHeaders = new Array(1_000_000_000);
+    const arrayFrom = vi.spyOn(Array, 'from').mockImplementation(() => {
+      throw new Error('must reject before expanding a sparse array');
+    });
+    let result: ReturnType<typeof snapshotPeopleImportMappingContract> | undefined;
+    let expansionAttempts = -1;
+
+    try {
+      result = snapshotPeopleImportMappingContract(contract);
+      expansionAttempts = arrayFrom.mock.calls.length;
+    } finally {
+      arrayFrom.mockRestore();
+    }
+    expect(result).toEqual({
+      contract: null,
+      issues: [{ code: 'invalid_contract', row: null, column: null, field: null }],
+    });
+    expect(expansionAttempts).toBe(0);
+  });
 });
 
 describe('people import mapping transform', () => {
@@ -330,6 +352,48 @@ describe('people import mapping transform', () => {
     ]);
     expect(JSON.stringify(result.issues)).not.toContain('person');
     expect(JSON.stringify(result.issues)).not.toContain('private-secret');
+  });
+
+  it('does not inherit constructor or __proto__ as enum translations', () => {
+    const profile = mappedContract(['type', 'name'], {
+      record_type: 0,
+      display_name: 1,
+    }, { enumTranslations: { record_type: { human: 'person' } } });
+    const result = transformPeopleImportMapping(
+      encode('type,name\nconstructor,Alice\n__proto__,Bob\n'),
+      profile,
+      { today: '2026-08-12' },
+    );
+
+    expect(result.issues).toEqual([
+      { code: 'unknown_enum', row: 2, column: 1, field: 'record_type' },
+      { code: 'unknown_enum', row: 3, column: 1, field: 'record_type' },
+    ]);
+  });
+
+  it('preserves own constructor and __proto__ enum translations', () => {
+    const translations = Object.create(null) as Record<string, string>;
+    Object.defineProperty(translations, 'constructor', {
+      value: 'person',
+      enumerable: true,
+    });
+    Object.defineProperty(translations, '__proto__', {
+      value: 'dependent',
+      enumerable: true,
+    });
+    const profile = mappedContract(['type', 'name'], {
+      record_type: 0,
+      display_name: 1,
+    }, { enumTranslations: { record_type: translations } });
+
+    const result = transformPeopleImportMapping(
+      encode('type,name\nconstructor,Alice\n__proto__,Bob\n'),
+      profile,
+      { today: '2026-08-12' },
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(result.rows?.slice(1).map((row) => row[0])).toEqual(['person', 'dependent']);
   });
 
   it('blocks ragged nonempty extra cells but ignores empty trailing cells', () => {

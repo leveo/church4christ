@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PEOPLE_IMPORT_HEADERS, type PeopleImportHeader } from '../src/lib/peopleImport';
 import {
   PEOPLE_IMPORT_MAPPING_PROFILE_LIMITS,
@@ -167,6 +167,59 @@ describe('people import mapping profile persistence', () => {
       expected_headers_json: '["full name","email address","member kind","currently active"]',
     });
     expect(JSON.stringify(raw)).not.toMatch(/sample|sourceRows|mapping-creator@example/i);
+  });
+
+  it('round-trips own constructor and __proto__ translation keys', async () => {
+    const translations = Object.create(null) as Record<string, string>;
+    Object.defineProperty(translations, 'constructor', {
+      value: 'person',
+      enumerable: true,
+    });
+    Object.defineProperty(translations, '__proto__', {
+      value: 'dependent',
+      enumerable: true,
+    });
+
+    const created = await createPeopleImportMapping(env.DB, validInput({
+      enumTranslations: { record_type: translations },
+    }));
+    const loaded = await getPeopleImportMapping(env.DB, created.id);
+
+    for (const profile of [created, loaded]) {
+      const recordType = profile?.enumTranslations.record_type;
+      expect(recordType && Object.hasOwn(recordType, 'constructor')).toBe(true);
+      expect(recordType && Object.hasOwn(recordType, '__proto__')).toBe(true);
+      expect(recordType?.constructor).toBe('person');
+      expect(recordType?.__proto__).toBe('dependent');
+    }
+    const raw = await env.DB.prepare(
+      'SELECT enum_translations_json FROM people_import_mappings WHERE id = ?',
+    ).bind(created.id).first<string>('enum_translations_json');
+    expect(raw).toBe('{"record_type":{"constructor":"person","__proto__":"dependent"}}');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+      .first<number>('n')).toBe(1);
+  });
+
+  it('rejects sparse expected headers before the DB snapshot attempts to expand them', async () => {
+    const sparseHeaders = new Array(1_000_000_000) as string[];
+    const arrayFrom = vi.spyOn(Array, 'from').mockImplementation(() => {
+      throw new Error('must reject before expanding a sparse array');
+    });
+    let error: unknown;
+    let expansionAttempts = -1;
+
+    try {
+      error = await createPeopleImportMapping(env.DB, validInput({
+        expectedHeaders: sparseHeaders,
+      })).catch((caught: unknown) => caught);
+      expansionAttempts = arrayFrom.mock.calls.length;
+    } finally {
+      arrayFrom.mockRestore();
+    }
+    expect(error).toBeInstanceOf(PeopleImportMappingInvalidError);
+    expect(expansionAttempts).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+      .first<number>('n')).toBe(0);
   });
 
   it('rejects every open or invalid contract before persistence with one PII-free error', async () => {
