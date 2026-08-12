@@ -7,10 +7,65 @@ import {
   ServiceAttendancePersistenceError,
   ServiceAttendanceReportLimitError,
   getServiceCheckinLinkSnapshot,
+  listCurrentServiceCheckinLinks,
   listServiceAttendanceReport,
   replaceServiceCheckinLinksToday,
   upsertServiceAttendance,
 } from '../src/lib/serviceAttendanceDb';
+
+describe('current service check-in link listing', () => {
+  it('reads every current link in one bounded query without initializing CAS state', async () => {
+    const sql: string[] = [];
+    let batchCalls = 0;
+    const statement: AppStatement = {
+      bind: () => statement,
+      first: async () => { throw new Error('unexpected first'); },
+      run: async () => { throw new Error('unexpected write'); },
+      all: async <T>() => ({
+        results: [
+          { service_type_id: 4, checkin_event_id: 7 },
+          { service_type_id: 4, checkin_event_id: 9 },
+          { service_type_id: 8, checkin_event_id: 3 },
+        ] as T[],
+        meta: { changes: 0 },
+      }),
+    };
+    const readOnlyDb: AppDb = {
+      prepare: (query) => { sql.push(query); return statement; },
+      batch: async () => { batchCalls += 1; return []; },
+    };
+
+    await expect(listCurrentServiceCheckinLinks(readOnlyDb)).resolves.toEqual([
+      { serviceTypeId: 4, eventId: 7 },
+      { serviceTypeId: 4, eventId: 9 },
+      { serviceTypeId: 8, eventId: 3 },
+    ]);
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toMatch(/ends_on IS NULL/i);
+    expect(sql[0]).toMatch(/ORDER BY service_type_id, checkin_event_id/i);
+    expect(sql[0]).toMatch(/LIMIT 5001/i);
+    expect(sql[0]).not.toMatch(/INSERT|UPDATE|DELETE/i);
+    expect(batchCalls).toBe(0);
+  });
+
+  it('fails closed on malformed, duplicate, or over-limit current-link rows', async () => {
+    const cases: unknown[][] = [
+      [{ service_type_id: 1, checkin_event_id: 2 }, { service_type_id: 1, checkin_event_id: 2 }],
+      [{ service_type_id: 'private@example.com', checkin_event_id: 2 }],
+      new Array(5001).fill({ service_type_id: 1, checkin_event_id: 2 }),
+    ];
+    for (const results of cases) {
+      const statement: AppStatement = {
+        bind: () => statement,
+        first: async () => null,
+        run: async () => ({ results: [], meta: { changes: 0 } }),
+        all: async <T>() => ({ results: results as T[], meta: { changes: 0 } }),
+      };
+      const db: AppDb = { prepare: () => statement, batch: async () => [] };
+      await expect(listCurrentServiceCheckinLinks(db)).rejects.toMatchObject({ code: 'attendance_failed' });
+    }
+  });
+});
 
 async function seedBase(serviceId: number, eventIds: number[], personIds = [9101, 9102]): Promise<void> {
   await env.DB.batch([

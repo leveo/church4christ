@@ -56,6 +56,11 @@ export interface ServiceCheckinLinkReplaceResult extends ServiceCheckinLinkSnaps
   changed: boolean;
 }
 
+export interface CurrentServiceCheckinLink {
+  serviceTypeId: number;
+  eventId: number;
+}
+
 export interface ServiceAttendanceReportRow {
   serviceTypeId: number;
   serviceName: string;
@@ -263,6 +268,44 @@ const OPEN_LINKS_SQL = `
   ORDER BY checkin_event_id
   LIMIT 101
 `;
+
+export async function listCurrentServiceCheckinLinks(db: AppDb): Promise<CurrentServiceCheckinLink[]> {
+  try {
+    const queryResult = await db.prepare(`
+      SELECT service_type_id, checkin_event_id
+      FROM service_type_checkin_events
+      WHERE ends_on IS NULL
+      ORDER BY service_type_id, checkin_event_id
+      LIMIT 5001
+    `).all<unknown>();
+    const results = queryResult.results;
+    if (!Array.isArray(results)) throw new ServiceAttendancePersistenceError();
+    const length = results.length;
+    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_SERVICE_ATTENDANCE_REPORT_ROWS) {
+      throw new ServiceAttendancePersistenceError();
+    }
+    const links: CurrentServiceCheckinLink[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const row = plainDataRow(results[index], ['service_type_id', 'checkin_event_id']);
+      const serviceTypeId = row ? positiveId(row.service_type_id) : null;
+      const eventId = row ? positiveId(row.checkin_event_id) : null;
+      const previous = links[index - 1];
+      if (
+        serviceTypeId === null
+        || eventId === null
+        || (previous && (
+          serviceTypeId < previous.serviceTypeId
+          || (serviceTypeId === previous.serviceTypeId && eventId <= previous.eventId)
+        ))
+      ) throw new ServiceAttendancePersistenceError();
+      links.push({ serviceTypeId, eventId });
+    }
+    return links;
+  } catch (error) {
+    if (error instanceof ServiceAttendancePersistenceError) throw error;
+    throw new ServiceAttendancePersistenceError();
+  }
+}
 
 async function readLinkSnapshot(db: AppDb, serviceTypeId: number): Promise<ServiceCheckinLinkSnapshot> {
   await db.prepare(`
