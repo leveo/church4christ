@@ -113,6 +113,34 @@ limit; otherwise reduce the file before previewing. Pricing and limits can chang
 current [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/) are
 authoritative.
 
+#### Saved source-column mappings
+
+When another system's CSV does not use the canonical 18-column layout, an admin with full
+People access can open `/admin/people/import/map`. Upload the current UTF-8 CSV, inspect its
+normalized headers and row count, then select an existing profile or draft a new mapping.
+Every canonical field must explicitly use one source column, an allowlisted constant, or an
+empty value. The six enum fields also support explicit source-token translations. Preview
+validates the current CSV without writing People data; commit reloads the saved profile,
+retransforms the current CSV, and performs a fresh database preflight.
+
+Profiles are immutable, create-only records. Exact normalized header order is part of the
+contract, so renamed, reordered, added, or missing columns report header drift and require a
+new profile or a corrected file. A profile stores only its name, expected headers, exhaustive
+field mappings, allowlisted constants, explicit enum translations, creator, and timestamp. It
+does not store upload bytes, source rows, sample values, or inferred matches. Do not put member
+data in column labels because expected headers must be retained for drift detection.
+
+The mapping source limit is 256 KiB, 200 data rows, 128 source columns, and 5,000 Unicode code
+points per cell. The multipart request envelope is capped at 320 KiB, including the file and
+bounded mapping configuration, and one installation can retain at most 100 profiles. After
+transformation, the result still has to satisfy the canonical 18-column import contract.
+
+Mapped import is the same **create-only** operation as canonical import. It does not merge,
+update, or revive People, does not attach to an existing household, and does not elevate an
+imported person beyond the safe `member` application role. Existing-email conflicts block the
+operation; same-name household warnings require explicit acknowledgement and still create a
+separate household. Commit is one atomic write and sends no email.
+
 ### Portable CSV exports for admins
 
 Admins with full People access can open `/admin/people/export` from the People directory.
@@ -204,6 +232,10 @@ leader reaches out first with a logged invite.
 - **Export audit schema:** forward migration `migrations/0011_people_exports.sql` (with
   `migrations-supabase/0011_people_exports.sql` parity) creates the PII-free
   `audit_events` table and its actor/time index.
+- **Import mapping schema:** forward migration `migrations/0012_people_import_mappings.sql`
+  (with `migrations-supabase/0012_people_import_mappings.sql` parity) creates the bounded,
+  immutable `people_import_mappings` profile table. Uploaded rows and sample values are not
+  persisted.
 - **Data libraries:** `src/lib/householdDb.ts` (create/edit, add/remove dependents, link
   real people, leave — with the one-household-per-person and adults-only rules),
   `src/lib/notesDb.ts` (pastoral notes; soft-deleted, and it does **no** authorization
@@ -223,9 +255,10 @@ leader reaches out first with a logged invite.
   `email_log` as kind `outreach`); templated via the `invite.email.*` dictionary keys.
 - **Module gating:** the pre-existing `/profile` and `/admin/people` surfaces remain core
   routes, and the board stays under the `serve` module. The exact
-  `/admin/people/import`, `/admin/people/export`, `/admin/people/export.csv`, and
-  `/admin/people/export-notes` routes belong to the `people` module. Import and standard
-  export require the full People admin area; notes export requires a super admin. Each
+  `/admin/people/import`, `/admin/people/import/map`, `/admin/people/export`,
+  `/admin/people/export.csv`, and `/admin/people/export-notes` routes belong to the `people`
+  module. Canonical or mapped import and standard export require the full People admin area;
+  notes export requires a super admin. Each
   other added panel checks
   `Astro.locals.modules.has('people')`. Turning the module off hides the depth without
   404-ing the core directory or sign-in. See [Modules](modules.md).
@@ -238,6 +271,11 @@ leader reaches out first with a logged invite.
   contract; `src/lib/peopleImportDb.ts` owns create-only preflight and atomic persistence.
   The `/admin/people/import` routes repeat People-module and full-area authorization,
   return only bounded issue metadata, and never include uploaded cell values in errors.
+- **Source-column mapping:** `src/lib/peopleImportMapping.ts` owns source inspection,
+  contract snapshots, header-drift checks, and canonical transformation;
+  `src/lib/peopleImportMappingDb.ts` owns immutable profile persistence. The
+  `/admin/people/import/map` routes treat the saved profile and current upload as authority,
+  then reuse the canonical validator, preflight, and atomic commit path.
 - **CSV export:** `src/lib/peopleExport.ts` validates and partitions the canonical export;
   `src/lib/peopleExportDb.ts` loads bounded D1/PostgreSQL snapshots;
   `src/lib/pastoralNotesExport.ts` owns the separate notes format; and

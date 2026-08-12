@@ -153,6 +153,14 @@ and limits change, so treat the current
 [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/) as
 authoritative rather than relying on this snapshot.
 
+Saved mapping profiles use forward migration `0012_people_import_mappings.sql`. Profiles
+store expected headers and mapping configuration, never uploaded source rows or sample
+values. The mapping workflow keeps the same 200-row atomic import boundary, so a D1
+deployment that needs large mapped imports must be paid-capable for the required
+per-invocation query volume. Smaller imports can fit lower limits; verify the current
+Cloudflare limits for the deployed plan instead of assuming profile storage changes the
+atomic commit cost.
+
 ## 4. Set the session secret
 
 Sessions are signed with `SESSION_SECRET`. Generate a strong random value (32+ bytes) and
