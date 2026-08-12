@@ -16,11 +16,12 @@ import { listPersonGroupActivity, type PersonGroupActivity } from '../../../lib/
 import { listRegistrationActivityForPerson, type PersonRegistration } from '../../../lib/groupRegDb';
 import { getPerson, savePerson, setPersonAvatar, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
 import {
-  grantableAreasForRole,
+  GRANTABLE_AREAS,
   hasAreaAccess,
   parseAdminAreasForRole,
   type GrantableArea,
 } from '../../../lib/adminAreas';
+import { grantCheckboxStateForRole } from '../../../lib/adminAreaUi';
 import { parsePersonForm, MEMBERSHIP_STATUSES } from '../../../lib/validate';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../../lib/mediaRef';
@@ -123,7 +124,6 @@ if (isNew && !canManagePeople) return new Response(null, { status: 403 });
 const person = id !== null ? await getPerson(db, id) : null;
 if (id !== null && !person) return new Response(null, { status: 404 });
 const personAreas = person ? parseAdminAreasForRole(person.admin_areas, person.role) : [];
-const targetGrantableAreas = person ? grantableAreasForRole(person.role) : [];
 
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 const HH_ERR: Record<string, string> = {
@@ -554,7 +554,7 @@ const summaryErrors = Object.entries(errors)
             <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
             <label class="block max-w-xs">
               <span class={lab}>{t(lang, 'admin.person.role')}</span>
-              <select name="role" class={tin}>
+              <select name="role" class={tin} data-person-role>
                 {ROLES.map((r) => (
                   <option value={r} selected={person.role === r}>{t(lang, `admin.role.${r}`)}</option>
                 ))}
@@ -579,18 +579,27 @@ const summaryErrors = Object.entries(errors)
             <fieldset class="space-y-2">
               <legend class={lab}>{t(lang, 'admin.person.areasTitle')}</legend>
               <p class="text-xs text-ink-muted">{t(lang, 'admin.person.areasHint')}</p>
-              {targetGrantableAreas.map((a) => (
-                <label class="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    name="areas"
-                    value={a}
-                    checked={personAreas.includes(a)}
-                    disabled={(a === 'giving' || a === 'registration' || a === 'payment-operations') && Astro.locals.dbBackend !== 'supabase'}
-                  />
-                  <span class="text-sm">{t(lang, AREA_LABEL_KEYS[a])}</span>
-                </label>
-              ))}
+              {GRANTABLE_AREAS.map((a) => {
+                const initialState = grantCheckboxStateForRole(person.role, a, personAreas.includes(a));
+                const backendDisabled = (a === 'giving' || a === 'registration' || a === 'payment-operations')
+                  && Astro.locals.dbBackend !== 'supabase';
+
+                return (
+                  <label class="flex items-center gap-2" hidden={initialState.hidden}>
+                    <input
+                      type="checkbox"
+                      name="areas"
+                      value={a}
+                      data-grant-area={a}
+                      data-role-disabled={initialState.roleDisabled ? 'true' : 'false'}
+                      data-backend-disabled={backendDisabled ? 'true' : 'false'}
+                      checked={initialState.checked}
+                      disabled={initialState.roleDisabled || backendDisabled}
+                    />
+                    <span class="text-sm">{t(lang, AREA_LABEL_KEYS[a])}</span>
+                  </label>
+                );
+              })}
             </fieldset>
             <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
           </form>
@@ -884,3 +893,37 @@ const summaryErrors = Object.entries(errors)
     )
   }
 </Admin>
+
+<script>
+  import { GRANTABLE_AREAS } from '../../../lib/adminAreas';
+  import { grantCheckboxStateForRole } from '../../../lib/adminAreaUi';
+
+  // Astro's Worker + browser type environment gives HTMLSelectElement a
+  // conflicting Element base, so follow the existing client-script cast pattern.
+  const roleSelect = document.querySelector('[data-person-role]') as unknown as HTMLSelectElement | null;
+  const grantCheckboxes = document.querySelectorAll<HTMLInputElement>('[data-grant-area]');
+
+  const syncGrantControls = () => {
+    if (!roleSelect) return;
+
+    const role = (['member', 'editor', 'admin'] as const).find((candidate) => candidate === roleSelect.value);
+    if (!role) return;
+
+    for (const checkbox of grantCheckboxes) {
+      const area = GRANTABLE_AREAS.find((candidate) => candidate === checkbox.dataset.grantArea);
+      if (!area) continue;
+
+      const state = grantCheckboxStateForRole(role, area, checkbox.checked);
+      const label = checkbox.closest<HTMLLabelElement>('label');
+      checkbox.checked = state.checked;
+      checkbox.dataset.roleDisabled = state.roleDisabled ? 'true' : 'false';
+      checkbox.disabled = state.roleDisabled || checkbox.dataset.backendDisabled === 'true';
+      if (label) label.hidden = state.hidden;
+    }
+  };
+
+  if (roleSelect) {
+    roleSelect.addEventListener('change', syncGrantControls);
+    syncGrantControls();
+  }
+</script>
