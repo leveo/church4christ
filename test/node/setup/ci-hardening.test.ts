@@ -90,32 +90,35 @@ function scalarList(lines: string[], indent: number): string[] {
 }
 
 function foldedScalar(lines: string[], header: string, indent: number): string {
-  const block = meaningfulLines(nestedBlock(lines, header));
+  const block = nestedBlock(lines, header).filter((line) => line.trim());
   expect(block.every((line) => indentation(line) === indent)).toBe(true);
   return block.map((line) => line.trim()).join(' ');
 }
 
 function parseWorkflowSteps(lines: string[]): WorkflowStep[] {
+  const nonEmpty = lines.filter((line) => line.trim());
   const significant = meaningfulLines(lines);
   expect(
     significant
       .filter((line) => indentation(line) === 6)
       .every((line) => /^\s{6}- name: .+$/.test(line)),
   ).toBe(true);
-  const starts = significant
+  const starts = nonEmpty
     .map((line, index) => ({ line, index }))
-    .filter(({ line }) => indentation(line) === 6)
+    .filter(
+      ({ line }) => !line.trimStart().startsWith('#') && indentation(line) === 6,
+    )
     .map(({ index }) => index);
 
   return starts.map((start, position) => {
-    const segment = significant.slice(start, starts[position + 1] ?? significant.length);
+    const segment = nonEmpty.slice(start, starts[position + 1] ?? nonEmpty.length);
     const name = segment[0].trim().slice('- name: '.length);
     const fields = directMap(segment.slice(1), 8, ['with', 'run', 'env']);
     expect(Object.keys(fields).every((key) => ['uses', 'with', 'run', 'env'].includes(key))).toBe(
       true,
     );
     let parentField: string | undefined;
-    for (const line of segment.slice(1)) {
+    for (const line of meaningfulLines(segment.slice(1))) {
       if (indentation(line) === 8) {
         parentField = line.trim().split(':', 1)[0];
         continue;
@@ -468,8 +471,6 @@ describe('test runner hardening', () => {
       'group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
     );
     expect(cancelEvent).toBe('pull_request');
-    expect('pull_request' === cancelEvent).toBe(true);
-    expect('push' === cancelEvent).toBe(false);
   });
 
   it('limits the build-test job to thirty minutes', () => {
@@ -493,6 +494,19 @@ describe('test runner hardening', () => {
 
     expect(folded).not.toBe(workflow);
     expect(() => validateCiWorkflow(folded)).not.toThrow();
+  });
+
+  it('allows comments outside block scalars and between mapping entries', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const commented = workflow
+      .replace('name: CI', '# workflow comment\nname: CI')
+      .replace(
+        '        uses: actions/checkout@v7',
+        '        # checkout mapping comment\n        uses: actions/checkout@v7',
+      );
+
+    expect(commented).not.toBe(workflow);
+    expect(() => validateCiWorkflow(commented)).not.toThrow();
   });
 
   it.each([
@@ -541,6 +555,14 @@ describe('test runner hardening', () => {
       'deployment command plain-scalar continuation',
       (workflow: string) =>
         workflow.replace('        run: npm test', '        run: npm test\n          && npm run deploy'),
+    ],
+    [
+      'folded command comment content',
+      (workflow: string) =>
+        workflow.replace(
+          `        run: >-\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+          `        run: >-\n          # disabled by folded content\n          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+        ),
     ],
     [
       'Postgres image change',
