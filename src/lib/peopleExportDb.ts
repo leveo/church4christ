@@ -1,4 +1,4 @@
-import { readSnapshotBatch, type AppDb } from './appDb';
+import { assertSnapshotBatchSupport, readSnapshotBatch, type AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import type {
   CanonicalPeopleExportDependent,
@@ -54,43 +54,75 @@ function rowByteSumSql(
   return fields.map((field) => byteLengthSql(backend, `${alias}.${field}`)).join(' + ');
 }
 
-function canonicalStatsColumnsSql(backend: DbBackend): string {
+function canonicalStatsCtesSql(backend: DbBackend): string {
   const peopleBytes = rowByteSumSql(backend, 'p', CANONICAL_PERSON_FIELDS);
   const householdBytes = rowByteSumSql(backend, 'h', CANONICAL_HOUSEHOLD_FIELDS);
-  const membershipBytes = rowByteSumSql(backend, 'hm', CANONICAL_MEMBERSHIP_FIELDS);
+  const membershipBytes = rowByteSumSql(backend, 'm', CANONICAL_MEMBERSHIP_FIELDS);
   return `
-    (SELECT COUNT(*) FROM people p WHERE p.deleted_at IS NULL) AS people_count,
-    (SELECT COUNT(*) FROM households h WHERE h.deleted_at IS NULL) AS households_count,
-    (SELECT COUNT(*) FROM household_members hm) AS memberships_count,
-    (
-      (SELECT COALESCE(SUM(${peopleBytes}), 0) FROM people p WHERE p.deleted_at IS NULL)
-      + (SELECT COALESCE(SUM(${householdBytes}), 0) FROM households h WHERE h.deleted_at IS NULL)
-      + (SELECT COALESCE(SUM(${membershipBytes}), 0) FROM household_members hm)
-      + (SELECT COUNT(*) * 5 FROM household_members)
-    ) AS total_bytes
+    export_people AS (
+      SELECT p.id, p.first_name, p.last_name, p.display_name, p.email, p.phone,
+             p.lang, p.birthday, p.address, p.membership_status, p.joined_on,
+             p.active
+      FROM people p
+      WHERE p.deleted_at IS NULL
+      ORDER BY p.id
+      LIMIT 5001
+    ),
+    export_households AS (
+      SELECT h.id, h.name, h.address, h.phone
+      FROM households h
+      WHERE h.deleted_at IS NULL
+      ORDER BY h.id
+      LIMIT 5001
+    ),
+    export_memberships AS (
+      SELECT hm.id, hm.display_name
+      FROM household_members hm
+      ORDER BY hm.id
+      LIMIT 5001
+    ),
+    people_stats AS (
+      SELECT COUNT(*) AS people_count,
+             COALESCE(SUM(${peopleBytes}), 0) AS people_bytes
+      FROM export_people p
+    ),
+    household_stats AS (
+      SELECT COUNT(*) AS households_count,
+             COALESCE(SUM(${householdBytes}), 0) AS household_bytes
+      FROM export_households h
+    ),
+    membership_stats AS (
+      SELECT COUNT(*) AS memberships_count,
+             COALESCE(SUM(${membershipBytes}), 0) + COUNT(*) * 5 AS membership_bytes
+      FROM export_memberships m
+    ),
+    export_stats AS (
+      SELECT people_count, households_count, memberships_count,
+             people_bytes + household_bytes + membership_bytes AS total_bytes
+      FROM people_stats CROSS JOIN household_stats CROSS JOIN membership_stats
+    )
   `;
 }
 
-function notesStatsColumnsSql(backend: DbBackend): string {
+function notesStatsCtesSql(backend: DbBackend): string {
   const notesBytes = rowByteSumSql(backend, 'n', ['author_email', 'body', 'created_at']);
-  const emailBytes = byteLengthSql(backend, 'p.email');
+  const emailBytes = byteLengthSql(backend, 'n.person_email');
   return `
-    COUNT(*) AS notes_count,
-    COALESCE(SUM(${notesBytes} + ${emailBytes}), 0) AS total_bytes
+    export_notes AS (
+      SELECT n.id, n.person_id, n.author_email, n.body, n.created_at,
+             p.email AS person_email
+      FROM person_notes n
+      JOIN people p ON p.id = n.person_id
+      WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL
+      ORDER BY n.id
+      LIMIT 5001
+    ),
+    export_stats AS (
+      SELECT COUNT(*) AS notes_count,
+             COALESCE(SUM(${notesBytes} + ${emailBytes}), 0) AS total_bytes
+      FROM export_notes n
+    )
   `;
-}
-
-function canonicalStatsCte(backend: DbBackend): string {
-  return `WITH export_stats AS (SELECT ${canonicalStatsColumnsSql(backend)})`;
-}
-
-function notesStatsCte(backend: DbBackend): string {
-  return `WITH export_stats AS (
-    SELECT ${notesStatsColumnsSql(backend)}
-    FROM person_notes n
-    JOIN people p ON p.id = n.person_id
-    WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL
-  )`;
 }
 
 const CANONICAL_GATE = `
@@ -276,11 +308,14 @@ export async function loadCanonicalPeopleExport(
   today: string,
   backend: DbBackend,
 ): Promise<CanonicalPeopleExportSource> {
-  const statsSql = canonicalStatsColumnsSql(backend);
-  const statsCte = canonicalStatsCte(backend);
-  const [statsResult, peopleResult, householdsResult, membershipsResult] = await readSnapshotBatch<DbRow>(db, [
-    db.prepare(`SELECT ${statsSql}`),
-    db.prepare(`${statsCte}
+  assertSnapshotBatchSupport(db, backend);
+  const statsCtes = canonicalStatsCtesSql(backend);
+  const [statsResult, peopleResult, householdsResult, membershipsResult] = await readSnapshotBatch<DbRow>(db, backend, [
+    db.prepare(`WITH ${statsCtes}
+      SELECT people_count, households_count, memberships_count, total_bytes
+      FROM export_stats
+    `),
+    db.prepare(`WITH ${statsCtes}
       SELECT p.id,
              ${safeText('p.first_name', 'first_name', 80)},
              ${safeText('p.last_name', 'last_name', 80)},
@@ -292,31 +327,31 @@ export async function loadCanonicalPeopleExport(
              ${safeText('p.address', 'address', 200)},
              p.membership_status,
              ${safeText('p.joined_on', 'joined_on', 10)}
-      FROM people
-      AS p CROSS JOIN export_stats
-      WHERE p.deleted_at IS NULL AND ${CANONICAL_GATE}
+      FROM export_people p CROSS JOIN export_stats
+      WHERE ${CANONICAL_GATE}
       ORDER BY p.id
       LIMIT 5001
     `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes),
-    db.prepare(`${statsCte}
+    db.prepare(`WITH ${statsCtes}
       SELECT h.id,
              ${safeText('h.name', 'name', 80)},
              ${safeText('h.address', 'address', 200)},
              ${safeText('h.phone', 'phone', 40)}
-      FROM households AS h CROSS JOIN export_stats
-      WHERE h.deleted_at IS NULL AND ${CANONICAL_GATE}
+      FROM export_households h CROSS JOIN export_stats
+      WHERE ${CANONICAL_GATE}
       ORDER BY h.id
       LIMIT 5001
     `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes),
-    db.prepare(`${statsCte}
+    db.prepare(`WITH ${statsCtes}
       SELECT hm.id, hm.household_id, hm.person_id,
-             ${safeText('hm.display_name', 'display_name', 80)},
+             ${safeText('m.display_name', 'display_name', 80)},
              hm.role, hm.is_primary,
              CASE WHEN h.id IS NULL THEN 0 ELSE 1 END AS household_exists,
              CASE WHEN h.id IS NOT NULL AND h.deleted_at IS NULL THEN 1 ELSE 0 END AS household_live,
              CASE WHEN hm.person_id IS NULL OR p.id IS NOT NULL THEN 1 ELSE 0 END AS person_exists,
              CASE WHEN hm.person_id IS NULL OR (p.id IS NOT NULL AND p.deleted_at IS NULL) THEN 1 ELSE 0 END AS person_live
-      FROM household_members hm
+      FROM export_memberships m
+      JOIN household_members hm ON hm.id = m.id
       LEFT JOIN households h ON h.id = hm.household_id
       LEFT JOIN people p ON p.id = hm.person_id
       CROSS JOIN export_stats
@@ -483,25 +518,22 @@ export async function loadPastoralNotesExport(
   db: AppDb,
   backend: DbBackend,
 ): Promise<PastoralNotesExportSource> {
-  const statsColumns = notesStatsColumnsSql(backend);
-  const statsCte = notesStatsCte(backend);
-  const [statsResult, result] = await readSnapshotBatch<DbRow>(db, [
-    db.prepare(`
-      SELECT ${statsColumns}
-      FROM person_notes n
-      JOIN people p ON p.id = n.person_id
-      WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL
+  assertSnapshotBatchSupport(db, backend);
+  const statsCtes = notesStatsCtesSql(backend);
+  const [statsResult, result] = await readSnapshotBatch<DbRow>(db, backend, [
+    db.prepare(`WITH ${statsCtes}
+      SELECT notes_count, total_bytes
+      FROM export_stats
     `),
-    db.prepare(`${statsCte}
+    db.prepare(`WITH ${statsCtes}
       SELECT n.id AS note_id, n.person_id,
-             ${safeText('p.email', 'person_email', 320)},
+             ${safeText('n.person_email', 'person_email', 320)},
              ${safeText('n.author_email', 'author_attribution', 320)},
              ${safeText('n.body', 'body', 4000)},
              ${safeText('n.created_at', 'created_at', 19)}
-      FROM person_notes n
-      JOIN people p ON p.id = n.person_id
+      FROM export_notes n
       CROSS JOIN export_stats
-      WHERE n.deleted_at IS NULL AND p.deleted_at IS NULL AND ${NOTES_GATE}
+      WHERE ${NOTES_GATE}
       ORDER BY n.id
       LIMIT 5001
     `).bind(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes),

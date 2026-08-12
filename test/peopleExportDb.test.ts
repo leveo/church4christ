@@ -203,6 +203,21 @@ describe('portable export migration', () => {
 });
 
 describe('loadCanonicalPeopleExport', () => {
+  it('requires a real snapshot seam for Supabase before preparing or executing reads', async () => {
+    const privateMessage = 'private.person@example.com must not escape';
+    const prepare = vi.fn(() => { throw new Error(privateMessage); });
+    const batch = vi.fn(async () => { throw new Error(privateMessage); });
+    const db = { prepare, batch } as unknown as AppDb;
+
+    const error = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'supabase')
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ message: 'export_snapshot_unavailable' });
+    expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateMessage);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(batch).not.toHaveBeenCalled();
+  });
+
   it('falls back to D1 transactional batch when snapshotBatch is unavailable', async () => {
     let batchCalls = 0;
     const delegate: AppDb = env.DB;
@@ -240,6 +255,15 @@ describe('loadCanonicalPeopleExport', () => {
     expect(db.prepared[0].sql).toMatch(/total_bytes/i);
     expect(db.prepared[0].sql).toMatch(/length\s*\(\s*CAST\s*\(/i);
     expect(db.prepared[0].sql).toMatch(/COALESCE\s*\(\s*p\.lang\b/i);
+    for (const call of db.prepared) {
+      expect(call.sql).toMatch(/export_people\s+AS\s*\([\s\S]*?FROM\s+people\s+p[\s\S]*?ORDER\s+BY\s+p\.id[\s\S]*?LIMIT\s+5001[\s\S]*?\)/i);
+      expect(call.sql).toMatch(/export_households\s+AS\s*\([\s\S]*?FROM\s+households\s+h[\s\S]*?ORDER\s+BY\s+h\.id[\s\S]*?LIMIT\s+5001[\s\S]*?\)/i);
+      expect(call.sql).toMatch(/export_memberships\s+AS\s*\([\s\S]*?FROM\s+household_members\s+hm[\s\S]*?ORDER\s+BY\s+hm\.id[\s\S]*?LIMIT\s+5001[\s\S]*?\)/i);
+      expect(call.sql).toMatch(/people_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_people\s+p/i);
+      expect(call.sql).toMatch(/household_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_households\s+h/i);
+      expect(call.sql).toMatch(/membership_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_memberships\s+m/i);
+      expect(call.sql).not.toMatch(/COUNT\s*\(\s*\*\s*\)\s+FROM\s+(?:people|households|household_members)\b/i);
+    }
     expect(db.prepared.slice(1).every((call) => /LIMIT\s+5001\b/i.test(call.sql))).toBe(true);
     expect(db.prepared.slice(1).every((call) => /CASE\s+WHEN\s+length\s*\(/i.test(call.sql))).toBe(true);
     expect(db.prepared.slice(1).every((call) => call.values.includes(
@@ -354,10 +378,24 @@ describe('loadCanonicalPeopleExport', () => {
       SELECT n, 'Bounded Person ' || n, 'bounded-' || n || '@example.com'
       FROM sequence
     `).run();
+    const privateTail = `PRIVATE-CANONICAL-TAIL-${'x'.repeat(900_000)}`;
+    for (let index = 6001; index <= 6010; index += 1) {
+      await env.DB.prepare(`
+        INSERT INTO people (id, display_name, email, address)
+        VALUES (?, ?, ?, ?)
+      `).bind(index, `Tail ${index}`, `tail-${index}@example.com`, privateTail).run();
+    }
 
-    const source = await loadCanonicalPeopleExport(env.DB, EXPORT_TODAY, 'd1');
+    const db = new TrackingDb(env.DB);
+    const source = await loadCanonicalPeopleExport(db, EXPORT_TODAY, 'd1');
     const result = buildCanonicalExportParts(source);
+    const stats = await env.DB.prepare(db.prepared[0].sql).first<{
+      people_count: number;
+      total_bytes: number;
+    }>();
 
+    expect(stats?.people_count).toBe(5001);
+    expect(stats?.total_bytes).toBeLessThan(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxCanonicalBytes);
     expect(source.people).toEqual([]);
     expect(source.integrityIssues).toBeGreaterThan(0);
     expect(result).toEqual({
@@ -411,6 +449,20 @@ describe('loadCanonicalPeopleExport', () => {
 });
 
 describe('pastoral notes export', () => {
+  it('requires a real snapshot seam for Supabase before preparing or executing note reads', async () => {
+    const privateMessage = 'private.note@example.com must not escape';
+    const prepare = vi.fn(() => { throw new Error(privateMessage); });
+    const batch = vi.fn(async () => { throw new Error(privateMessage); });
+    const db = { prepare, batch } as unknown as AppDb;
+
+    const error = await loadPastoralNotesExport(db, 'supabase').catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ message: 'export_snapshot_unavailable' });
+    expect(`${String(error)} ${JSON.stringify(error)}`).not.toContain(privateMessage);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(batch).not.toHaveBeenCalled();
+  });
+
   it('loads one bounded live-subject/live-note snapshot and emits deterministic NFC CRLF CSV with formula safety and historical author text', async () => {
     await seedPortableExportFixture(env.DB);
     const db = new TrackingDb(env.DB);
@@ -425,6 +477,11 @@ describe('pastoral notes export', () => {
     expect(db.prepared[0].values).toEqual([]);
     expect(db.prepared[0].sql).toMatch(/total_bytes/i);
     expect(db.prepared[0].sql).toMatch(/length\s*\(\s*CAST\s*\(/i);
+    for (const call of db.prepared) {
+      expect(call.sql).toMatch(/export_notes\s+AS\s*\([\s\S]*?FROM\s+person_notes\s+n[\s\S]*?ORDER\s+BY\s+n\.id[\s\S]*?LIMIT\s+5001[\s\S]*?\)/i);
+      expect(call.sql).toMatch(/export_stats\s+AS\s*\([\s\S]*?COUNT\s*\(\s*\*\s*\)[\s\S]*?SUM\s*\([\s\S]*?FROM\s+export_notes\s+n/i);
+      expect(call.sql).not.toMatch(/COUNT\s*\(\s*\*\s*\)\s+FROM\s+person_notes\b/i);
+    }
     expect(db.prepared[1].values).toContain(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes);
     expect(db.prepared[1].sql).toMatch(/LIMIT\s+5001\b/i);
     expect(db.prepared[1].sql).toMatch(/CASE\s+WHEN\s+length\s*\(/i);
@@ -684,10 +741,24 @@ describe('pastoral notes export', () => {
       SELECT n, 1, 'historical@example.com', 'Bounded note', '2026-08-11 00:00:00'
       FROM sequence
     `).run();
+    const privateTail = `PRIVATE-NOTES-TAIL-${'x'.repeat(900_000)}`;
+    for (let index = 6001; index <= 6012; index += 1) {
+      await env.DB.prepare(`
+        INSERT INTO person_notes (id, person_id, author_email, body, created_at)
+        VALUES (?, 1, 'historical@example.com', ?, '2026-08-11 00:00:00')
+      `).bind(index, privateTail).run();
+    }
 
-    const source = await loadPastoralNotesExport(env.DB, 'd1');
+    const db = new TrackingDb(env.DB);
+    const source = await loadPastoralNotesExport(db, 'd1');
     const result = buildPastoralNotesExport(source);
+    const stats = await env.DB.prepare(db.prepared[0].sql).first<{
+      notes_count: number;
+      total_bytes: number;
+    }>();
 
+    expect(stats?.notes_count).toBe(5001);
+    expect(stats?.total_bytes).toBeLessThan(PEOPLE_EXPORT_SNAPSHOT_LIMITS.maxNotesBytes);
     expect(source.notes).toEqual([]);
     expect(result).toEqual({
       status: 'repair_required',
