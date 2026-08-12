@@ -14,6 +14,12 @@ or GitHub Release exists.
 
 ### Added
 
+- Added a canonical People/Household export for admins with full People access. Downloads
+  use the exact 18-column create-only importer contract, partition households atomically
+  across bounded CSV parts, and fail closed when records require repair.
+- Added a separate super-admin-only pastoral-notes export with explicit acknowledgement,
+  bounded CSV output, and PII-free `audit_events` records containing only actor, time,
+  action kind, and numeric structural counts.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
 - Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
@@ -36,7 +42,10 @@ or GitHub Release exists.
 
 ### Upgrade notes
 
-- Migration files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+- Apply forward migration `0011_people_exports.sql` before deploying the pastoral-notes
+  export. It creates the `audit_events` table and actor/time index on D1 and
+  Supabase/PostgreSQL; audit failures suppress the sensitive CSV.
+- Migration files `0001` through `0011` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.

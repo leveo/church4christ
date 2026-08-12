@@ -113,6 +113,58 @@ limit; otherwise reduce the file before previewing. Pricing and limits can chang
 current [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/) are
 authoritative.
 
+### Portable CSV exports for admins
+
+Admins with full People access can open `/admin/people/export` from the People directory.
+The server takes a read snapshot and prepares numbered UTF-8 CSV downloads that use the
+same exact 18-field header as the importer:
+
+```csv
+record_type,display_name,email,first_name,last_name,phone,language,membership_status,birthday,joined_on,address,active,household_key,household_name,household_address,household_phone,household_role,household_primary
+```
+
+Each part is limited to 200 data rows, 100 households, and 256 KiB including the header.
+One export can contain at most 25 parts, 5,000 data rows, and about 6.25 MiB of CSV. A
+household is atomic and is never split between parts. If a single household cannot fit, a
+household has no live adult primary, or another bounded integrity or portability check
+fails, discovery reports `repair_required` and emits no partial CSV. Cells beginning with
+a spreadsheet formula prefix receive a leading apostrophe through the shared CSV safety
+encoder.
+
+The standard export contains current live records for active and inactive people, their
+live household membership, and live name-only dependents. It deliberately excludes
+pastoral notes, application roles, admin permissions, security/session data, and internal IDs.
+D1 reads it as one four-query transactional snapshot; PostgreSQL reads the same four
+projections in a repeatable-read transaction. Every download is private, `no-store`, and
+requires either full People-area permission or super-admin access.
+
+Export and import are portable, but the importer remains **create-only**. Exported email
+addresses collide with their source installation, so an exported part can be imported
+without conflicts only into a clean target (or after an operator has separately resolved
+every collision). Import does not merge, restore, or update records.
+
+Pastoral notes use a separate sensitive flow at `/admin/people/export-notes`. It is
+super-admin only, requires an explicit `EXPORT PASTORAL NOTES` acknowledgement, and emits
+the exact columns:
+
+```csv
+person_ref,person_email,author_attribution,body,created_at
+```
+
+The notes export includes at most 5,000 notes, all live and attached to live subjects, and
+at most 10 MiB. It uses the subject's current email for operator matching and preserves
+the historical author-attribution text even if that account changed or was removed.
+`person_ref` is a file-local label only; it is not a database foreign key or a join key
+for another export.
+There is no notes importer in this release.
+
+A successful notes POST appends one `audit_events` record with the actor, time, action kind,
+and numeric counts for people and notes. The audit event contains no email, note body,
+filename, or CSV content. If the audit append fails, the request fails closed and returns no
+CSV. The confirmation GET only renders the warning and performs neither a notes read nor an
+audit write. On D1, notes generation uses a two-query snapshot plus one audit insert;
+PostgreSQL uses the equivalent repeatable-read snapshot and audit insert.
+
 **Reaching out.** From a person's page, an admin (or a team leader, from their own leader
 view) can click **Invite to serve**, pick a team, and send a warm, localized email
 inviting that person to apply. Admins can invite to any team; a leader can only invite to
@@ -147,6 +199,9 @@ leader reaches out first with a logged invite.
   **name-only rows** (`household_members.person_id IS NULL`) — `people.email` stays
   `NOT NULL` because it is the auth key; partial unique indexes enforce one household per
   real person.
+- **Export audit schema:** forward migration `migrations/0011_people_exports.sql` (with
+  `migrations-supabase/0011_people_exports.sql` parity) creates the PII-free
+  `audit_events` table and its actor/time index.
 - **Data libraries:** `src/lib/householdDb.ts` (create/edit, add/remove dependents, link
   real people, leave — with the one-household-per-person and adults-only rules),
   `src/lib/notesDb.ts` (pastoral notes; soft-deleted, and it does **no** authorization
@@ -166,8 +221,10 @@ leader reaches out first with a logged invite.
   `email_log` as kind `outreach`); templated via the `invite.email.*` dictionary keys.
 - **Module gating:** the pre-existing `/profile` and `/admin/people` surfaces remain core
   routes, and the board stays under the `serve` module. The exact
-  `/admin/people/import` subtree belongs to the `people` module and requires the full
-  People admin area; each other added panel checks
+  `/admin/people/import`, `/admin/people/export`, `/admin/people/export.csv`, and
+  `/admin/people/export-notes` routes belong to the `people` module. Import and standard
+  export require the full People admin area; notes export requires a super admin. Each
+  other added panel checks
   `Astro.locals.modules.has('people')`. Turning the module off hides the depth without
   404-ing the core directory or sign-in. See [Modules](modules.md).
 - **Tests:** `test/schema.people.test.ts`, `test/householdDb.test.ts`,
@@ -179,3 +236,9 @@ leader reaches out first with a logged invite.
   contract; `src/lib/peopleImportDb.ts` owns create-only preflight and atomic persistence.
   The `/admin/people/import` routes repeat People-module and full-area authorization,
   return only bounded issue metadata, and never include uploaded cell values in errors.
+- **CSV export:** `src/lib/peopleExport.ts` validates and partitions the canonical export;
+  `src/lib/peopleExportDb.ts` loads bounded D1/PostgreSQL snapshots;
+  `src/lib/pastoralNotesExport.ts` owns the separate notes format; and
+  `src/lib/auditDb.ts` appends the deliberately PII-free audit event. Route and built-worker
+  coverage verifies module, permission, snapshot, download, privacy, and fail-closed audit
+  behavior on both database backends.
