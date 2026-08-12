@@ -56,7 +56,8 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
       DELETE FROM people WHERE id>=9700;
       UPDATE newcomer_statuses SET
         sort=CASE id WHEN 1 THEN 1 WHEN 2 THEN 2 WHEN 3 THEN 3 WHEN 4 THEN 4 ELSE 5 END,
-        active=1,is_initial=CASE id WHEN 1 THEN 1 ELSE 0 END;
+        active=1,is_initial=0;
+      UPDATE newcomer_statuses SET is_initial=1 WHERE id=1;
       UPDATE newcomer_status_i18n SET label=CASE
         WHEN locale='zh' THEN CASE status_id WHEN 1 THEN '新朋友' WHEN 2 THEN '已分配' WHEN 3 THEN '已联系' WHEN 4 THEN '已连接' ELSE '已关闭' END
         ELSE CASE status_id WHEN 1 THEN 'New' WHEN 2 THEN 'Assigned' WHEN 3 THEN 'Contacted' WHEN 4 THEN 'Connected' ELSE 'Closed' END END;
