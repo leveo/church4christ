@@ -8,6 +8,7 @@ import {
   PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
   PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
   PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES,
 } from '../../../../../lib/peopleImportMappingUi';
 import type { Locale } from '../../../../../lib/locales';
 
@@ -30,12 +31,6 @@ const peopleImportIssueCodes = [
   'household_primary_must_be_adult', 'household_metadata_conflict', 'duplicate_dependent',
   'duplicate_household_name', 'too_many_households', 'issues_truncated', 'email_exists',
   'household_name_exists',
-] as const;
-const mappingIssueCodes = [
-  'file_too_large', 'invalid_utf8', 'nul_byte', 'unclosed_quote', 'illegal_quote',
-  'lone_cr', 'too_many_rows', 'too_many_columns', 'cell_too_long', 'empty_file',
-  'empty_header', 'duplicate_header', 'header_drift', 'invalid_contract', 'extra_column',
-  'unknown_enum', 'issues_truncated',
 ] as const;
 const clientCopyKeys = [
   'admin.peopleImportMapping.profileChoose',
@@ -65,7 +60,7 @@ const clientCopyKeys = [
     ),
   ),
   ...peopleImportIssueCodes.map((code) => `admin.peopleImport.issue.${code}`),
-  ...mappingIssueCodes.map((code) => `admin.peopleImportMapping.issue.${code}`),
+  ...PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES.map((code) => `admin.peopleImportMapping.issue.${code}`),
   ...PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.map((code) => `admin.peopleImportMapping.result.${code}`),
 ];
 const enumFields = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS);
@@ -323,13 +318,13 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
     applyPeopleImportMappingProfile,
     applyPeopleImportMappingProfiles,
     beginPeopleImportMappingRequest,
+    classifyPeopleImportMappingCommitResponse,
     clonePeopleImportMappingDraft,
     createPeopleImportMappingDraft,
     createPeopleImportMappingUiState,
     decidePeopleImportMappingFailure,
     editPeopleImportMappingDraft,
     mappingDraftConfig,
-    parsePeopleImportMappingCommit,
     parsePeopleImportMappingInspect,
     parsePeopleImportMappingPreview,
     parsePeopleImportMappingProfile,
@@ -446,7 +441,13 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
       code: ReturnType<typeof parsePeopleImportMappingResultCode>,
       uncertain: boolean,
     ): void {
-      const decision = decidePeopleImportMappingFailure(request.kind, code, uncertain);
+      rejectDecision(request, decidePeopleImportMappingFailure(request.kind, code, uncertain));
+    }
+
+    function rejectDecision(
+      request: PeopleImportMappingRequest,
+      decision: ReturnType<typeof decidePeopleImportMappingFailure>,
+    ): void {
       const next = rejectPeopleImportMappingRequest(state, request, decision);
       if (next === state) return;
       state = next;
@@ -814,9 +815,9 @@ const disabled = 'disabled:cursor-not-allowed disabled:opacity-50';
           method: 'POST', body: form, credentials: 'same-origin', headers: { Accept: 'application/json' },
         });
         const body = await readJson(response);
-        const counts = parsePeopleImportMappingCommit(response.status, body);
-        if (counts === null) return rejectRequest(operation.request, parsePeopleImportMappingResultCode(body), false);
-        const next = applyPeopleImportMappingCommit(state, operation.request, counts);
+        const result = classifyPeopleImportMappingCommitResponse(response.status, body);
+        if (!result.ok) return rejectDecision(operation.request, result.decision);
+        const next = applyPeopleImportMappingCommit(state, operation.request, result.counts);
         if (next === state) return;
         state = next;
         render();

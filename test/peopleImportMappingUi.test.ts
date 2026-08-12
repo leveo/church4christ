@@ -7,6 +7,7 @@ import {
   PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
   PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
   PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+  classifyPeopleImportMappingCommitResponse,
   applyPeopleImportMappingCommit,
   applyPeopleImportMappingInspect,
   applyPeopleImportMappingPreview,
@@ -22,6 +23,7 @@ import {
   parsePeopleImportMappingProfile,
   parsePeopleImportMappingProfiles,
   peopleImportMappingUiControls,
+  rejectPeopleImportMappingRequest,
   selectPeopleImportMappingFile,
   selectPeopleImportMappingProfile,
   setPeopleImportMappingWarningAcknowledgement,
@@ -160,6 +162,45 @@ describe('people import mapping browser contract parsing', () => {
         issues: [{ severity: 'warning', code: 'household_name_exists', row: 2, field: 'household_name' }],
       },
     }))?.toMatchObject({ preview: { summary, issues: [{ severity: 'warning' }] } });
+  });
+
+  it('treats every unrecognized commit response as uncertain but preserves recognized failures', () => {
+    const uncertain = {
+      messageKey: 'admin.peopleImportMapping.failure.uncertainCommit',
+      clearPreview: true,
+      clearProfile: false,
+      checkPeople: true,
+    };
+    for (const [status, body] of [
+      [201, null],
+      [201, { ok: true, counts: { people: '1', households: 0, dependents: 0 } }],
+      [200, { ok: true, counts: { people: 1, households: 0, dependents: 0 } }],
+      [500, { message: 'upstream HTML or malformed JSON snapshot' }],
+    ] as const) {
+      expect(classifyPeopleImportMappingCommitResponse(status, body)).toEqual({
+        ok: false,
+        decision: uncertain,
+      });
+    }
+
+    for (const code of ['generic_error', 'import_failed'] as const) {
+      expect(classifyPeopleImportMappingCommitResponse(500, {
+        ok: false,
+        code,
+      })).toEqual({
+        ok: false,
+        decision: {
+          messageKey: `admin.peopleImportMapping.result.${code}`,
+          clearPreview: false,
+          clearProfile: false,
+          checkPeople: false,
+        },
+      });
+    }
+    expect(classifyPeopleImportMappingCommitResponse(201, {
+      ok: true,
+      counts: { people: 1, households: 0, dependents: 0 },
+    })).toEqual({ ok: true, counts: { people: 1, households: 0, dependents: 0 } });
   });
 });
 
@@ -311,6 +352,31 @@ describe('people import mapping revision state', () => {
       clearProfile: true,
     });
   });
+
+  it('applies an unrecognized commit response by clearing preview and literal acknowledgement', () => {
+    let state = selectPeopleImportMappingFile(createPeopleImportMappingUiState(), true);
+    const inspect = beginPeopleImportMappingRequest(state, 'inspect')!;
+    state = applyPeopleImportMappingInspect(inspect.state, inspect.request, inspection);
+    state = selectPeopleImportMappingProfile(state, profile);
+    const preview = beginPeopleImportMappingRequest(state, 'preview')!;
+    state = applyPeopleImportMappingPreview(preview.state, preview.request, {
+      profile: { id: 7, name: 'Legacy export', version: 1 }, mappingIssues: [],
+      preview: { summary, rows: [], issues: [{ severity: 'warning', code: 'x', row: null, field: null }] },
+    });
+    state = setPeopleImportMappingWarningAcknowledgement(state, true);
+    const commit = beginPeopleImportMappingRequest(state, 'commit')!;
+    const failure = classifyPeopleImportMappingCommitResponse(201, null);
+    expect(failure.ok).toBe(false);
+    if (failure.ok) throw new Error('Expected an uncertain commit response.');
+    const rejected = rejectPeopleImportMappingRequest(commit.state, commit.request, failure.decision);
+    expect(rejected).toMatchObject({
+      pending: null,
+      preview: null,
+      warningsAcknowledged: false,
+    });
+    expect(failure.decision.checkPeople).toBe(true);
+    expect(peopleImportMappingUiControls(rejected).commitDisabled).toBe(true);
+  });
 });
 
 describe('people import mapping page contract', () => {
@@ -336,6 +402,8 @@ describe('people import mapping page contract', () => {
     expect(mappingPageSource).toContain("form.append('profile_name'");
     expect(mappingPageSource).toContain("form.append('acknowledge_warnings', 'true')");
     expect(mappingPageSource).not.toMatch(/form\.append\(['"](?:model|role|op)['"]/);
+    expect(mappingPageSource).toContain('classifyPeopleImportMappingCommitResponse(response.status, body)');
+    expect(mappingPageSource).not.toContain('parsePeopleImportMappingCommit(response.status, body)');
   });
 
   it('renders dynamic values only through safe DOM APIs without browser persistence or logging', () => {

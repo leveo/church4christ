@@ -8,12 +8,13 @@ import {
   PEOPLE_IMPORT_HTTP_RESULT_CODES,
   type PeopleImportHttpResultCode,
 } from '../src/lib/peopleImportContract';
-import type { PeopleImportMappingIssueCode } from '../src/lib/peopleImportMapping';
 import { PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES } from '../src/lib/peopleImportMappingContract';
 import {
+  EVERY_PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODE_IS_LISTED,
   PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS,
   PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES,
   PEOPLE_IMPORT_MAPPING_UI_FIELDS,
+  PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES,
 } from '../src/lib/peopleImportMappingUi';
 
 const dicts = { en, zh } as const;
@@ -122,26 +123,6 @@ type MissingPeopleImportResultCode = Exclude<PeopleImportHttpResultCode, (typeof
 const everyPeopleImportIssueCodeIsListed: MissingPeopleImportIssueCode extends never ? true : never = true;
 const everyPeopleImportDbIssueCodeIsListed: MissingPeopleImportDbIssueCode extends never ? true : never = true;
 const everyPeopleImportResultCodeIsListed: MissingPeopleImportResultCode extends never ? true : never = true;
-
-const PEOPLE_IMPORT_MAPPING_ISSUE_CODES = [
-  'file_too_large',
-  'invalid_utf8',
-  'nul_byte',
-  'unclosed_quote',
-  'illegal_quote',
-  'lone_cr',
-  'too_many_rows',
-  'too_many_columns',
-  'cell_too_long',
-  'empty_file',
-  'empty_header',
-  'duplicate_header',
-  'header_drift',
-  'invalid_contract',
-  'extra_column',
-  'unknown_enum',
-  'issues_truncated',
-] as const satisfies readonly PeopleImportMappingIssueCode[];
 
 const PEOPLE_IMPORT_MAPPING_COPY_KEYS = [
   'admin.peopleImportMapping.entry',
@@ -277,7 +258,7 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     const required = [
       ...PEOPLE_IMPORT_MAPPING_COPY_KEYS,
       ...PEOPLE_IMPORT_MAPPING_UI_FIELDS.map((field) => `admin.peopleImport.field.${field}`),
-      ...PEOPLE_IMPORT_MAPPING_ISSUE_CODES.map((code) => `admin.peopleImportMapping.issue.${code}`),
+      ...PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES.map((code) => `admin.peopleImportMapping.issue.${code}`),
       ...PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES.map((code) => `admin.peopleImportMapping.result.${code}`),
       ...PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS.flatMap((field) => (
         PEOPLE_IMPORT_MAPPING_UI_ENUM_VALUES[field].map((value) => `admin.peopleImportMapping.enum.${field}.${value}`)
@@ -286,6 +267,8 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
 
     expect(PEOPLE_IMPORT_MAPPING_UI_FIELDS).toHaveLength(18);
     expect(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS).toHaveLength(6);
+    expect(EVERY_PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODE_IS_LISTED).toBe(true);
+    expect(PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES).toHaveLength(17);
     expect(PEOPLE_IMPORT_MAPPING_HTTP_RESULT_CODES).toHaveLength(23);
     for (const locale of ['en', 'zh'] as const) {
       for (const key of required) {

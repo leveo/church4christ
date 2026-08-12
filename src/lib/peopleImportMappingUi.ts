@@ -9,6 +9,7 @@ import {
   type PeopleImportUiSuccessCounts,
 } from './peopleImportUi';
 import type { PeopleImportHeader } from './peopleImport';
+import type { PeopleImportMappingIssueCode } from './peopleImportMapping';
 
 export const PEOPLE_IMPORT_MAPPING_UI_FIELDS = [
   'record_type',
@@ -56,12 +57,21 @@ const FIELD_SET = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_FIELDS);
 const ENUM_FIELD_SET = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_ENUM_FIELDS);
 const MAX_PROFILE_NAME_CODE_POINTS = 80;
 const MAX_SOURCE_TEXT_CODE_POINTS = 5_000;
-const MAPPING_ISSUE_CODES = new Set([
+export const PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES = [
   'file_too_large', 'invalid_utf8', 'nul_byte', 'unclosed_quote', 'illegal_quote',
   'lone_cr', 'too_many_rows', 'too_many_columns', 'cell_too_long', 'empty_file',
   'empty_header', 'duplicate_header', 'header_drift', 'invalid_contract',
   'extra_column', 'unknown_enum', 'issues_truncated',
-]);
+] as const satisfies readonly PeopleImportMappingIssueCode[];
+
+type MissingPeopleImportMappingUiIssueCode = Exclude<
+  PeopleImportMappingIssueCode,
+  (typeof PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES)[number]
+>;
+export const EVERY_PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODE_IS_LISTED:
+  MissingPeopleImportMappingUiIssueCode extends never ? true : never = true;
+
+const MAPPING_ISSUE_CODES = new Set<string>(PEOPLE_IMPORT_MAPPING_UI_ISSUE_CODES);
 
 type JsonObject = Record<string, unknown>;
 
@@ -317,6 +327,23 @@ export function parsePeopleImportMappingCommit(
   value: unknown,
 ): PeopleImportUiSuccessCounts | null {
   return parsePeopleImportCounts(status, value);
+}
+
+export type PeopleImportMappingCommitResponse =
+  | { ok: true; counts: PeopleImportUiSuccessCounts }
+  | { ok: false; decision: PeopleImportMappingFailureDecision };
+
+export function classifyPeopleImportMappingCommitResponse(
+  status: number,
+  value: unknown,
+): PeopleImportMappingCommitResponse {
+  const counts = parsePeopleImportMappingCommit(status, value);
+  if (counts !== null) return { ok: true, counts };
+  const code = parsePeopleImportMappingResultCode(value);
+  return {
+    ok: false,
+    decision: decidePeopleImportMappingFailure('commit', code, code === null),
+  };
 }
 
 export function parsePeopleImportMappingResultCode(value: unknown): PeopleImportMappingHttpResultCode | null {
