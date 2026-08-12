@@ -132,10 +132,17 @@ function snapshotJson(value: unknown, depth = 0): unknown | typeof INVALID_SNAPS
   if (typeof value !== 'object') return INVALID_SNAPSHOT;
 
   if (Array.isArray(value)) {
-    if (value.length > MAX_CONTRACT_CONTAINER_ENTRIES) return INVALID_SNAPSHOT;
+    const length = value.length;
+    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_CONTRACT_CONTAINER_ENTRIES) {
+      return INVALID_SNAPSHOT;
+    }
     if (Object.getOwnPropertySymbols(value).length > 0) return INVALID_SNAPSHOT;
     const descriptors = Object.getOwnPropertyDescriptors(value);
-    const expectedKeys = Array.from({ length: value.length }, (_, index) => String(index));
+    const lengthDescriptor = (descriptors as Record<string, PropertyDescriptor>)['length'];
+    if (!lengthDescriptor || !('value' in lengthDescriptor) || lengthDescriptor.value !== length) {
+      return INVALID_SNAPSHOT;
+    }
+    const expectedKeys = Array.from({ length }, (_, index) => String(index));
     const dataKeys = Object.keys(descriptors).filter((key) => key !== 'length');
     if (dataKeys.length !== expectedKeys.length || dataKeys.some((key, index) => key !== expectedKeys[index])) {
       return INVALID_SNAPSHOT;

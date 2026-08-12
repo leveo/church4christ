@@ -222,6 +222,39 @@ describe('people import mapping profile persistence', () => {
       .first<number>('n')).toBe(0);
   });
 
+  it('reads a proxied expected-header length at most once before DB snapshot rejection', async () => {
+    const sparseHeaders = new Array(1_000_000_000);
+    let lengthReads = 0;
+    const driftedHeaders = new Proxy(sparseHeaders, {
+      get: (target, property, receiver) => {
+        if (property === 'length') {
+          lengthReads += 1;
+          return lengthReads === 1 ? 0 : target.length;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const arrayFrom = vi.spyOn(Array, 'from').mockImplementation(() => {
+      throw new Error('must reject before expanding a drifted sparse array');
+    });
+    let error: unknown;
+    let expansionAttempts = -1;
+
+    try {
+      error = await createPeopleImportMapping(env.DB, validInput({
+        expectedHeaders: driftedHeaders,
+      })).catch((caught: unknown) => caught);
+      expansionAttempts = arrayFrom.mock.calls.length;
+    } finally {
+      arrayFrom.mockRestore();
+    }
+    expect(error).toBeInstanceOf(PeopleImportMappingInvalidError);
+    expect(lengthReads).toBeLessThanOrEqual(1);
+    expect(expansionAttempts).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people_import_mappings')
+      .first<number>('n')).toBe(0);
+  });
+
   it('rejects every open or invalid contract before persistence with one PII-free error', async () => {
     const invalidInputs: unknown[] = [
       { ...validInput(), privateSampleRow: 'PRIVATE SAMPLE ROW' },

@@ -127,13 +127,18 @@ function isPlainDataGraph(value: unknown, seen: Set<object>): boolean {
   seen.add(value);
   const prototype = Object.getPrototypeOf(value);
   if (Array.isArray(value)) {
+    const length = value.length;
     if (
       prototype !== Array.prototype
-      || value.length > PEOPLE_IMPORT_MAPPING_PROFILE_LIMITS.maxHeaders
+      || !Number.isSafeInteger(length)
+      || length < 0
+      || length > PEOPLE_IMPORT_MAPPING_PROFILE_LIMITS.maxHeaders
       || Object.getOwnPropertySymbols(value).length !== 0
     ) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
-    const keys = Array.from({ length: value.length }, (_, index) => String(index));
+    const lengthDescriptor = (descriptors as Record<string, PropertyDescriptor>)['length'];
+    if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || lengthDescriptor.value !== length) return false;
+    const keys = Array.from({ length }, (_, index) => String(index));
     if (
       Object.keys(descriptors).length !== keys.length + 1
       || keys.some((key) => !Object.hasOwn(descriptors, key))

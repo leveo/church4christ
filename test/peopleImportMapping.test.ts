@@ -251,6 +251,39 @@ describe('people import mapping runtime contract', () => {
     });
     expect(expansionAttempts).toBe(0);
   });
+
+  it('reads a proxied expected-header length at most once before rejecting drift', () => {
+    const contract = mappingContract([]);
+    const sparseHeaders = new Array(1_000_000_000);
+    let lengthReads = 0;
+    contract.expectedHeaders = new Proxy(sparseHeaders, {
+      get: (target, property, receiver) => {
+        if (property === 'length') {
+          lengthReads += 1;
+          return lengthReads === 1 ? 0 : target.length;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const arrayFrom = vi.spyOn(Array, 'from').mockImplementation(() => {
+      throw new Error('must reject before expanding a drifted sparse array');
+    });
+    let result: ReturnType<typeof snapshotPeopleImportMappingContract> | undefined;
+    let expansionAttempts = -1;
+
+    try {
+      result = snapshotPeopleImportMappingContract(contract);
+      expansionAttempts = arrayFrom.mock.calls.length;
+    } finally {
+      arrayFrom.mockRestore();
+    }
+    expect(result).toEqual({
+      contract: null,
+      issues: [{ code: 'invalid_contract', row: null, column: null, field: null }],
+    });
+    expect(lengthReads).toBeLessThanOrEqual(1);
+    expect(expansionAttempts).toBe(0);
+  });
 });
 
 describe('people import mapping transform', () => {
