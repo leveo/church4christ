@@ -70,8 +70,9 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
   it('matches localized configuration and minimal duplicate-hint reads', async () => {
     await sql.unsafe(`
       INSERT INTO people (id,display_name,email,phone,deleted_at) VALUES
-        (9701,'Live exact','live@example.test','+13125550101',NULL),
-        (9702,'Deleted exact','deleted@example.test','+13125550102','2026-08-01 12:00:00');
+        (9701,'Live exact','live@example.test','+1 (312) 555-0101',NULL),
+        (9702,'Deleted exact','deleted@example.test','+1.312.555.0102','2026-08-01 12:00:00'),
+        (9703,'Invalid raw','invalid-phone@example.test','+1/312/555/0103',NULL);
       INSERT INTO service_types (id,sort) VALUES (9701,1);
       INSERT INTO service_type_i18n VALUES (9701,'en','Welcome');
       INSERT INTO newcomer_fields VALUES (8,'connection_path','select',1,1,8,0);
@@ -94,6 +95,12 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
       { kind: 'person_deleted', id: 9702 },
       { kind: 'submission_open', id: '10000000-0000-4000-8000-000000000001', statusId: 1 },
     ]);
+    expect(await findNewcomerDuplicateHints(db, superAdmin, {
+      email: null, phone: '+13125550101', excludeSubmissionId: null,
+    })).toEqual([{ kind: 'person_live', id: 9701 }]);
+    expect(await findNewcomerDuplicateHints(db, superAdmin, {
+      email: null, phone: '+13125550103', excludeSubmissionId: null,
+    })).toEqual([]);
   });
 
   it('creates and updates statuses/fields with the same transactional results', async () => {

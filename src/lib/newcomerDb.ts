@@ -43,7 +43,7 @@ export const NEWCOMER_DB_LIMITS = {
   allFields: 107,
   optionsPerField: 100,
   activeOptions: 1_000,
-  allOptions: 10_700,
+  allOptions: 10_000,
   serviceTypes: 100,
   answers: 100,
   notes: 5_000,
@@ -128,10 +128,7 @@ function batchResults(value: unknown, count: number): AppDbResult<unknown>[] {
 }
 
 function integer(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isSafeInteger(value) ? value : null;
-  if (typeof value !== 'string' || value.length > 16 || !/^(?:0|-?[1-9]\d*)$/.test(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && String(parsed) === value ? parsed : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
 }
 
 function positiveId(value: unknown): number | null {
@@ -146,7 +143,25 @@ function bool(value: unknown): boolean | null {
 
 function text(value: unknown, maximum = 10_000, nullable = false): string | null {
   if (value === null && nullable) return null;
-  return typeof value === 'string' && value.length <= maximum && !value.includes('\0') ? value : null;
+  return typeof value === 'string' && UTF8.encode(value).byteLength <= maximum && !value.includes('\0') ? value : null;
+}
+
+function normalizedText(value: unknown, maximum: number, nullable = false): string | null {
+  const captured = text(value, maximum, nullable);
+  if (captured === null) return null;
+  try {
+    return captured.length > 0 && captured === captured.trim() && captured === captured.normalize('NFC')
+      ? captured
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function positiveTextId(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^[1-9]\d{0,9}$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= 2_147_483_647 ? parsed : null;
 }
 
 function timestamp(value: unknown, nullable = false): string | null {
@@ -188,6 +203,26 @@ interface ConfigurationFieldOption {
   active: boolean;
   sort: number;
 }
+
+const STATUS_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const FIELD_KEY = STATUS_KEY;
+const OPTION_VALUE = /^[a-z0-9][a-z0-9_-]{0,79}$/;
+const CORE_STATUSES = new Map<number, { key: string; category: 'open' | 'closed' }>([
+  [1, { key: 'new', category: 'open' }],
+  [2, { key: 'assigned', category: 'open' }],
+  [3, { key: 'contacted', category: 'open' }],
+  [4, { key: 'connected', category: 'closed' }],
+  [5, { key: 'closed', category: 'closed' }],
+]);
+const CORE_FIELDS = new Map<number, { key: string; type: NewcomerFieldType }>([
+  [1, { key: 'name', type: 'text' }],
+  [2, { key: 'email', type: 'text' }],
+  [3, { key: 'phone', type: 'text' }],
+  [4, { key: 'preferred_language', type: 'select' }],
+  [5, { key: 'visit_date', type: 'text' }],
+  [6, { key: 'service_type', type: 'select' }],
+  [7, { key: 'contact_consent', type: 'checkbox' }],
+]);
 
 export interface NewcomerConfigurationField {
   id: number;
@@ -235,7 +270,7 @@ function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean
   const statusWhere = activeOnly ? 'WHERE status.active=1' : '';
   const fieldWhere = activeOnly ? 'WHERE field.active=1 AND field.id>7' : '';
   const optionWhere = activeOnly ? 'WHERE option.active=1 AND field.active=1 AND field.id>7' : '';
-  const optionLimit = activeOnly ? 1_001 : 10_701;
+  const optionLimit = activeOnly ? 1_001 : 10_001;
   return [
     db.prepare(`
       SELECT status.id,status.key,status.category,status.sort,status.active,status.is_initial,
@@ -272,7 +307,7 @@ function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean
       LIMIT ${optionLimit}
     `).bind(requested),
     db.prepare(`
-      SELECT service.id,COALESCE(localized.name,english.name,'service-' || service.id) AS label
+      SELECT service.id,service.sort,COALESCE(localized.name,english.name,'service-' || service.id) AS label
       FROM service_types service
       LEFT JOIN service_type_i18n localized
         ON localized.service_type_id=service.id AND localized.locale=?
@@ -296,7 +331,7 @@ function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): Newcom
   const results = batchResults(resultsValue, 5);
   const statusRows = resultRows(results[0], 101);
   const fieldRows = resultRows(results[1], 108);
-  const optionRows = resultRows(results[2], activeOnly ? 1001 : 10_701);
+  const optionRows = resultRows(results[2], activeOnly ? 1001 : 10_001);
   const serviceRows = resultRows(results[3], 101);
   const activeOptionRows = resultRows(results[4], 1001);
   if (statusRows.length > NEWCOMER_DB_LIMITS.statuses) throw new NewcomerLimitError();
@@ -312,65 +347,119 @@ function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): Newcom
     if (!row || positiveId(row.field_id) === null) throw new NewcomerPersistenceError();
   }
 
+  const statusIds = new Set<number>();
+  const statusKeys = new Set<string>();
+  let previousStatus: [number, number] | null = null;
   const statuses: NewcomerConfigurationStatus[] = statusRows.map((value) => {
     const row = plainRow(value, ['id', 'key', 'category', 'sort', 'active', 'is_initial', 'label']);
     const id = row ? positiveId(row.id) : null;
-    const key = row ? text(row.key, 64) : null;
+    const key = row && typeof row.key === 'string' && STATUS_KEY.test(row.key) ? row.key : null;
     const sort = row ? integer(row.sort) : null;
     const active = row ? bool(row.active) : null;
     const initial = row ? bool(row.is_initial) : null;
-    const label = row ? text(row.label, 100) : null;
+    const label = row ? normalizedText(row.label, 100) : null;
     const category = row?.category === 'open' || row?.category === 'closed' ? row.category : null;
-    if (id === null || !key || sort === null || sort < 0 || active === null || initial === null || !label || !category) {
+    if (id === null || !key || sort === null || sort < 0 || sort > 100_000 || active === null || initial === null
+      || !label || !category || statusIds.has(id) || statusKeys.has(key) || (initial && (!active || category !== 'open'))) {
       throw new NewcomerPersistenceError();
     }
+    const core = CORE_STATUSES.get(id);
+    if ((core && (core.key !== key || core.category !== category)) || (!core && id <= 5)) throw new NewcomerPersistenceError();
+    const ordering: [number, number] = [sort, id];
+    if (previousStatus && (ordering[0] < previousStatus[0]
+      || (ordering[0] === previousStatus[0] && ordering[1] <= previousStatus[1]))) throw new NewcomerPersistenceError();
+    previousStatus = ordering;
+    statusIds.add(id);
+    statusKeys.add(key);
     return { id, key, category, sort, active, initial, label };
   });
   let initials = 0;
   for (const status of statuses) if (status.active && status.category === 'open' && status.initial) initials += 1;
-  if (!activeOnly && initials !== 1) throw new NewcomerPersistenceError();
+  if (initials !== 1 || (!activeOnly && [...CORE_STATUSES.keys()].some((id) => !statusIds.has(id)))) {
+    throw new NewcomerPersistenceError();
+  }
 
   const fieldsById = new Map<number, NewcomerConfigurationField>();
+  const fieldKeys = new Set<string>();
+  let previousField: [number, number] | null = null;
   const fields: NewcomerConfigurationField[] = fieldRows.map((value) => {
     const row = plainRow(value, ['id', 'key', 'type', 'required', 'active', 'sort', 'fixed', 'label', 'help']);
     const id = row ? positiveId(row.id) : null;
-    const key = row ? text(row.key, 64) : null;
+    const key = row && typeof row.key === 'string' && FIELD_KEY.test(row.key) ? row.key : null;
     const type = row && isNewcomerFieldType(row.type) ? row.type : null;
     const required = row ? bool(row.required) : null;
     const active = row ? bool(row.active) : null;
     const sort = row ? integer(row.sort) : null;
     const fixed = row ? bool(row.fixed) : null;
-    const label = row ? text(row.label, 100) : null;
-    const help = row ? text(row.help, 500, true) : null;
-    if (id === null || !key || !type || required === null || active === null || sort === null || fixed === null || !label) {
+    const label = row ? normalizedText(row.label, 100) : null;
+    const help = row ? normalizedText(row.help, 500, true) : null;
+    if (id === null || !key || !type || required === null || active === null || sort === null || sort < 0 || sort > 100_000
+      || fixed === null || !label || (row?.help !== null && help === null) || fieldsById.has(id) || fieldKeys.has(key)) {
       throw new NewcomerPersistenceError();
     }
+    const core = CORE_FIELDS.get(id);
+    if (activeOnly) {
+      if (core || id <= 7 || fixed) throw new NewcomerPersistenceError();
+    } else if (core) {
+      if (core.key !== key || core.type !== type || required || !active || !fixed) throw new NewcomerPersistenceError();
+    } else if (id <= 7 || fixed) throw new NewcomerPersistenceError();
+    const ordering: [number, number] = [sort, id];
+    if (previousField && (ordering[0] < previousField[0]
+      || (ordering[0] === previousField[0] && ordering[1] <= previousField[1]))) throw new NewcomerPersistenceError();
+    previousField = ordering;
     const field = { id, key, type, required, active, sort, fixed, label, help, options: [] };
-    if (fieldsById.has(id)) throw new NewcomerPersistenceError();
     fieldsById.set(id, field);
+    fieldKeys.add(key);
     return field;
   });
+  if (!activeOnly && [...CORE_FIELDS.keys()].some((id) => !fieldsById.has(id))) throw new NewcomerPersistenceError();
   const optionCounts = new Map<number, number>();
+  const optionKeys = new Set<string>();
+  let previousOption: [number, number, string] | null = null;
   for (const value of optionRows) {
     const row = plainRow(value, ['field_id', 'value', 'sort', 'active', 'label']);
     const fieldId = row ? positiveId(row.field_id) : null;
-    const optionValue = row ? text(row.value, 80) : null;
+    const optionValue = row && typeof row.value === 'string' && OPTION_VALUE.test(row.value) ? row.value : null;
     const sort = row ? integer(row.sort) : null;
     const active = row ? bool(row.active) : null;
-    const label = row ? text(row.label, 100) : null;
+    const label = row ? normalizedText(row.label, 100) : null;
     if (fieldId === null) throw new NewcomerPersistenceError();
     const field = fieldsById.get(fieldId);
-    if (!field || !optionValue || sort === null || active === null || !label) throw new NewcomerPersistenceError();
+    const compound = `${fieldId}:${optionValue ?? ''}`;
+    if (!field || field.fixed || field.type !== 'select' || !optionValue || sort === null || sort < 0 || sort > 100_000
+      || active === null || (activeOnly && !active) || !label || optionKeys.has(compound)) throw new NewcomerPersistenceError();
+    const ordering: [number, number, string] = [fieldId, sort, optionValue];
+    if (previousOption && (ordering[0] < previousOption[0]
+      || (ordering[0] === previousOption[0] && (ordering[1] < previousOption[1]
+        || (ordering[1] === previousOption[1] && ordering[2] <= previousOption[2]))))) throw new NewcomerPersistenceError();
+    previousOption = ordering;
+    optionKeys.add(compound);
     const count = (optionCounts.get(fieldId) ?? 0) + 1;
     if (count > NEWCOMER_DB_LIMITS.optionsPerField) throw new NewcomerLimitError();
     optionCounts.set(fieldId, count);
     field.options.push({ value: optionValue, label, active, sort });
   }
+  for (const field of fields) {
+    if (field.type === 'select' && !field.fixed && !field.options.some((option) => option.active)) {
+      throw new NewcomerPersistenceError();
+    }
+    if (field.type !== 'select' && field.options.length > 0) throw new NewcomerPersistenceError();
+  }
+  const serviceIds = new Set<number>();
+  let previousService: [number, number] | null = null;
   const serviceTypes = serviceRows.map((value) => {
-    const row = plainRow(value, ['id', 'label']);
+    const row = plainRow(value, ['id', 'sort', 'label']);
     const id = row ? positiveId(row.id) : null;
-    const label = row ? text(row.label, 1_000) : null;
-    if (id === null || !label) throw new NewcomerPersistenceError();
+    const sort = row ? integer(row.sort) : null;
+    const label = row ? normalizedText(row.label, 1_000) : null;
+    if (id === null || sort === null || sort < 0 || sort > 100_000 || !label || serviceIds.has(id)) {
+      throw new NewcomerPersistenceError();
+    }
+    const ordering: [number, number] = [sort, id];
+    if (previousService && (ordering[0] < previousService[0]
+      || (ordering[0] === previousService[0] && ordering[1] <= previousService[1]))) throw new NewcomerPersistenceError();
+    previousService = ordering;
+    serviceIds.add(id);
     return { id, label };
   });
   return { statuses, fields, serviceTypes };
@@ -417,7 +506,7 @@ export async function listNewcomerAdminConfiguration(
   user: SessionUser | null,
   requested: 'en' | 'zh',
 ): Promise<NewcomerAdminConfiguration> {
-  assertPrivateAccess(user);
+  assertSuperAdmin(user);
   assertLocale(requested);
   return readConfiguration(db, backend, requested, false);
 }
@@ -449,7 +538,7 @@ function queueRow(value: unknown): NewcomerQueueRow {
     'next_follow_up_date', 'version', 'created_at', 'updated_at',
   ]);
   const id = row && validUuid(row.id) ? row.id : null;
-  const name = row ? text(row.name, 200) : null;
+  const name = row ? normalizedText(row.name, 200) : null;
   const email = row ? text(row.email, 254, true) : null;
   const phone = row ? text(row.phone, 16, true) : null;
   const normalizedEmail = email === null ? null : normalizeNewcomerEmail(email);
@@ -457,11 +546,11 @@ function queueRow(value: unknown): NewcomerQueueRow {
   const selectedLocale = row ? locale(row.locale) : null;
   const visitDate = row && typeof row.visit_date === 'string' && isValidDateStr(row.visit_date) ? row.visit_date : null;
   const serviceTypeId = row?.service_type_id === null ? null : positiveId(row?.service_type_id);
-  const serviceLabel = row ? text(row.service_label, 1_000, true) : null;
+  const serviceLabel = row ? normalizedText(row.service_label, 1_000, true) : null;
   const consentAt = row ? timestamp(row.contact_consent_at, true) : null;
   const source = row?.source === 'public' || row?.source === 'staff' ? row.source : null;
   const statusId = row ? positiveId(row.status_id) : null;
-  const statusLabel = row ? text(row.status_label, 100) : null;
+  const statusLabel = row ? normalizedText(row.status_label, 100) : null;
   const assigneePersonId = row?.assignee_person_id === null ? null : positiveId(row?.assignee_person_id);
   const nextFollowUpDate = row?.next_follow_up_date === null
     ? null
@@ -472,7 +561,7 @@ function queueRow(value: unknown): NewcomerQueueRow {
   const updatedAt = row ? timestamp(row.updated_at) : null;
   if (
     !id || !name || !selectedLocale || !visitDate || source === null || statusId === null || !statusLabel
-    || version === null || version < 0 || !createdAt || !updatedAt
+    || version === null || version < 0 || version > 2_147_483_647 || !createdAt || !updatedAt
     || (row?.service_type_id !== null && serviceTypeId === null)
     || (serviceTypeId !== null && serviceLabel === null)
     || (serviceTypeId === null && serviceLabel !== null)
@@ -578,27 +667,91 @@ export interface NewcomerDetail {
   submission: NewcomerQueueRow & { linkedPersonId: number | null; closedAt: string | null };
   answers: Array<{ fieldId: number; fieldLabel: string; value: string }>;
   notes: Array<{ id: string; authorPersonId: number; body: string; createdAt: string }>;
-  activity: Array<{ id: string; actorPersonId: number | null; kind: string; metadata: Record<string, string | number>; createdAt: string }>;
+  activity: Array<{ id: string; actorPersonId: number | null; kind: NewcomerActivityKind; metadata: Record<string, string | number>; createdAt: string }>;
 }
 
-function activityMetadata(value: unknown): Record<string, string | number> | null {
-  if (typeof value !== 'string' || value.length > 512) return null;
+export const NEWCOMER_ACTIVITY_KINDS = [
+  'submission_created', 'assigned', 'status_changed', 'follow_up_scheduled',
+  'note_added', 'person_linked', 'visitor_created',
+] as const;
+export type NewcomerActivityKind = typeof NEWCOMER_ACTIVITY_KINDS[number];
+
+function isActivityKind(value: unknown): value is NewcomerActivityKind {
+  return value === 'submission_created' || value === 'assigned' || value === 'status_changed'
+    || value === 'follow_up_scheduled' || value === 'note_added' || value === 'person_linked'
+    || value === 'visitor_created';
+}
+
+function parsedMetadata(value: unknown): DataRow | null {
+  if (typeof value !== 'string' || UTF8.encode(value).byteLength > 512) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    const allowed = ['assignee_person_id', 'from_assignee_person_id', 'to_assignee_person_id', 'status_id', 'from_status_id', 'to_status_id', 'person_id', 'note_id', 'follow_up_date'];
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const prototype = Object.getPrototypeOf(parsed);
+    if (prototype !== Object.prototype && prototype !== null) return null;
     const descriptors = Object.getOwnPropertyDescriptors(parsed) as Record<string, PropertyDescriptor>;
-    const output: Record<string, string | number> = Object.create(null) as Record<string, string | number>;
+    const output: DataRow = Object.create(null) as DataRow;
     for (const key of Reflect.ownKeys(descriptors)) {
-      if (typeof key !== 'string' || !allowed.includes(key)) return null;
+      if (typeof key !== 'string') return null;
       const descriptor = descriptors[key];
-      if (!descriptor || !('value' in descriptor) || (typeof descriptor.value !== 'string' && typeof descriptor.value !== 'number')) return null;
+      if (!descriptor || !('value' in descriptor)) return null;
       output[key] = descriptor.value;
     }
     return output;
   } catch {
     return null;
   }
+}
+
+function exactKeys(row: DataRow, expected: readonly string[]): boolean {
+  const keys = Object.keys(row);
+  return keys.length === expected.length && expected.every((key) => keys.includes(key));
+}
+
+export function decodeNewcomerActivityMetadata(
+  kind: NewcomerActivityKind,
+  value: unknown,
+): Record<string, string | number> | null {
+  const row = parsedMetadata(value);
+  if (!row) return null;
+  const output: Record<string, string | number> = Object.create(null) as Record<string, string | number>;
+  if (kind === 'submission_created') return exactKeys(row, []) ? output : null;
+  if (kind === 'assigned') {
+    const keys = Object.keys(row);
+    if (keys.length < 1 || keys.length > 2
+      || keys.some((key) => key !== 'from_assignee_person_id' && key !== 'to_assignee_person_id')) return null;
+    for (const key of keys) {
+      const id = positiveId(row[key]);
+      if (id === null) return null;
+      output[key] = id;
+    }
+    return output;
+  }
+  if (kind === 'status_changed') {
+    if (!exactKeys(row, ['from_status_id', 'to_status_id'])) return null;
+    const from = positiveId(row.from_status_id);
+    const to = positiveId(row.to_status_id);
+    if (from === null || to === null) return null;
+    output.from_status_id = from;
+    output.to_status_id = to;
+    return output;
+  }
+  if (kind === 'follow_up_scheduled') {
+    if (exactKeys(row, [])) return output;
+    if (!exactKeys(row, ['follow_up_date']) || typeof row.follow_up_date !== 'string' || !isValidDateStr(row.follow_up_date)) return null;
+    output.follow_up_date = row.follow_up_date;
+    return output;
+  }
+  if (kind === 'note_added') {
+    if (!exactKeys(row, ['note_id']) || !validUuid(row.note_id)) return null;
+    output.note_id = row.note_id;
+    return output;
+  }
+  if (!exactKeys(row, ['person_id'])) return null;
+  const personId = positiveId(row.person_id);
+  if (personId === null) return null;
+  output.person_id = personId;
+  return output;
 }
 
 export async function getNewcomerDetail(
@@ -667,37 +820,53 @@ export async function getNewcomerDetail(
     }
     const answerRows = resultRows(results[1], 101);
     if (answerRows.length > NEWCOMER_DB_LIMITS.answers) throw new NewcomerLimitError();
+    const answerFieldIds = new Set<number>();
     const answers = answerRows.map((value) => {
       const row = plainRow(value, ['field_id', 'field_label', 'value']);
       const fieldId = row ? positiveId(row.field_id) : null;
-      const fieldLabel = row ? text(row.field_label, 100) : null;
-      const answerValue = row ? text(row.value, 4_000) : null;
-      if (fieldId === null || !fieldLabel || answerValue === null) throw new NewcomerPersistenceError();
+      const fieldLabel = row ? normalizedText(row.field_label, 100) : null;
+      const answerValue = row ? normalizedText(row.value, 4_000) : null;
+      if (fieldId === null || !fieldLabel || answerValue === null || answerFieldIds.has(fieldId)) throw new NewcomerPersistenceError();
+      answerFieldIds.add(fieldId);
       return { fieldId, fieldLabel, value: answerValue };
     });
     const noteRows = resultRows(results[2], 5001);
     if (noteRows.length > NEWCOMER_DB_LIMITS.notes) throw new NewcomerLimitError();
+    const noteIds = new Set<string>();
+    let previousNote: [string, string] | null = null;
     const notes = noteRows.map((value) => {
       const row = plainRow(value, ['id', 'author_person_id', 'body', 'created_at']);
       const id = row && validUuid(row.id) ? row.id : null;
       const authorPersonId = row ? positiveId(row.author_person_id) : null;
-      const body = row ? text(row.body, 10_000) : null;
+      const body = row ? normalizedText(row.body, 10_000) : null;
       const createdAt = row ? timestamp(row.created_at) : null;
-      if (!id || authorPersonId === null || !body || !createdAt) throw new NewcomerPersistenceError();
+      if (!id || authorPersonId === null || !body || !createdAt || noteIds.has(id)
+        || (previousNote && (createdAt < previousNote[0] || (createdAt === previousNote[0] && id <= previousNote[1])))) {
+        throw new NewcomerPersistenceError();
+      }
+      noteIds.add(id);
+      previousNote = [createdAt, id];
       return { id, authorPersonId, body, createdAt };
     });
     const activityRows = resultRows(results[3], 5001);
     if (activityRows.length > NEWCOMER_DB_LIMITS.activity) throw new NewcomerLimitError();
+    const activityIds = new Set<string>();
+    let previousActivity: [string, string] | null = null;
     const activity = activityRows.map((value) => {
       const row = plainRow(value, ['id', 'actor_person_id', 'kind', 'metadata_json', 'created_at']);
       const id = row && validUuid(row.id) ? row.id : null;
       const actorPersonId = row?.actor_person_id === null ? null : positiveId(row?.actor_person_id);
-      const kind = row ? text(row.kind, 64) : null;
-      const metadata = row ? activityMetadata(row.metadata_json) : null;
+      const kind = row && isActivityKind(row.kind) ? row.kind : null;
+      const metadata = row && kind ? decodeNewcomerActivityMetadata(kind, row.metadata_json) : null;
       const createdAt = row ? timestamp(row.created_at) : null;
-      if (!id || (row?.actor_person_id !== null && actorPersonId === null) || !kind || !metadata || !createdAt) {
+      if (!id || (row?.actor_person_id !== null && actorPersonId === null) || !kind || !metadata || !createdAt
+        || activityIds.has(id)
+        || (previousActivity && (createdAt < previousActivity[0]
+          || (createdAt === previousActivity[0] && id <= previousActivity[1])))) {
         throw new NewcomerPersistenceError();
       }
+      activityIds.add(id);
+      previousActivity = [createdAt, id];
       return { id, actorPersonId, kind, metadata, createdAt };
     });
     return { submission: { ...base, linkedPersonId, closedAt }, answers, notes, activity };
@@ -718,21 +887,29 @@ export async function findNewcomerDuplicateHints(
   input: { email: string | null; phone: string | null; excludeSubmissionId: string | null },
 ): Promise<NewcomerDuplicateHint[]> {
   assertPrivateAccess(user);
+  const inputRow = plainRow(input, ['email', 'phone', 'excludeSubmissionId']);
+  if (!inputRow || (inputRow.email !== null && typeof inputRow.email !== 'string')
+    || (inputRow.phone !== null && typeof inputRow.phone !== 'string')
+    || (inputRow.excludeSubmissionId !== null && typeof inputRow.excludeSubmissionId !== 'string')) {
+    throw new NewcomerInvalidError();
+  }
   let email: string | null = null;
   let phone: string | null = null;
-  if (input.email !== null) {
-    const normalized = normalizeNewcomerEmail(input.email);
-    if (!normalized.ok || normalized.value !== input.email) throw new NewcomerInvalidError();
+  if (inputRow.email !== null) {
+    const normalized = normalizeNewcomerEmail(inputRow.email);
+    if (!normalized.ok || normalized.value !== inputRow.email) throw new NewcomerInvalidError();
     email = normalized.value;
   }
-  if (input.phone !== null) {
-    const normalized = normalizeNewcomerPhone(input.phone);
-    if (!normalized.ok || normalized.value !== input.phone) throw new NewcomerInvalidError();
+  if (inputRow.phone !== null) {
+    const normalized = normalizeNewcomerPhone(inputRow.phone);
+    if (!normalized.ok || normalized.value !== inputRow.phone) throw new NewcomerInvalidError();
     phone = normalized.value;
   }
   if (email === null && phone === null) throw new NewcomerInvalidError();
-  if (input.excludeSubmissionId !== null && !validUuid(input.excludeSubmissionId)) throw new NewcomerInvalidError();
+  if (inputRow.excludeSubmissionId !== null && !validUuid(inputRow.excludeSubmissionId)) throw new NewcomerInvalidError();
   const binds = [email, email, phone, phone];
+  const normalizedPersonPhone = `('+' || replace(replace(replace(replace(replace(
+    substr(trim(person.phone),2),' ',''),'(',''),')',''),'-',''),'.',''))`;
   try {
     const result = await db.prepare(`
       SELECT kind_order,kind,record_id,status_id FROM (
@@ -741,14 +918,16 @@ export async function findNewcomerDuplicateHints(
         FROM people person
         WHERE person.deleted_at IS NULL
           AND ((CAST(? AS TEXT) IS NOT NULL AND person.email=?)
-            OR (CAST(? AS TEXT) IS NOT NULL AND person.phone=?))
+            OR (CAST(? AS TEXT) IS NOT NULL AND substr(trim(person.phone),1,1)='+'
+              AND ${normalizedPersonPhone}=?))
         UNION ALL
         SELECT 2 AS kind_order,'person_deleted' AS kind,CAST(person.id AS TEXT) AS record_id,
           CAST(NULL AS INTEGER) AS status_id
         FROM people person
         WHERE person.deleted_at IS NOT NULL
           AND ((CAST(? AS TEXT) IS NOT NULL AND person.email=?)
-            OR (CAST(? AS TEXT) IS NOT NULL AND person.phone=?))
+            OR (CAST(? AS TEXT) IS NOT NULL AND substr(trim(person.phone),1,1)='+'
+              AND ${normalizedPersonPhone}=?))
         UNION ALL
         SELECT 3 AS kind_order,'submission_open' AS kind,CAST(submission.id AS TEXT) AS record_id,submission.status_id
         FROM newcomer_submissions submission
@@ -762,7 +941,7 @@ export async function findNewcomerDuplicateHints(
     `).bind(
       ...binds,
       ...binds,
-      input.excludeSubmissionId, input.excludeSubmissionId,
+      inputRow.excludeSubmissionId, inputRow.excludeSubmissionId,
       ...binds,
     ).all<unknown>();
     const rows = resultRows(result, 26);
@@ -771,11 +950,11 @@ export async function findNewcomerDuplicateHints(
       const row = plainRow(value, ['kind_order', 'kind', 'record_id', 'status_id']);
       const order = row ? integer(row.kind_order) : null;
       if (order === 1 && row?.kind === 'person_live') {
-        const id = positiveId(row.record_id);
+        const id = positiveTextId(row.record_id);
         if (id !== null && row.status_id === null) return { kind: 'person_live', id };
       }
       if (order === 2 && row?.kind === 'person_deleted') {
-        const id = positiveId(row.record_id);
+        const id = positiveTextId(row.record_id);
         if (id !== null && row.status_id === null) return { kind: 'person_deleted', id };
       }
       if (order === 3 && row?.kind === 'submission_open' && validUuid(row.record_id)) {

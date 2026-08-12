@@ -9,6 +9,7 @@ import {
   NewcomerPersistenceError,
   createNewcomerField,
   createNewcomerStatus,
+  decodeNewcomerActivityMetadata,
   findNewcomerDuplicateHints,
   getNewcomerDetail,
   listNewcomerAdminConfiguration,
@@ -34,6 +35,29 @@ const user = (overrides: Partial<SessionUser> = {}): SessionUser => ({
   adminAreas: ['newcomers'],
   ...overrides,
 });
+
+const superAdmin = user({
+  role: 'admin', isAdmin: true, isSuperAdmin: true, adminAreas: [],
+});
+
+const configurationSnapshot = () => {
+  const statuses = [
+    [1, 'new', 'open', 1, 1, 1, 'New'],
+    [2, 'assigned', 'open', 2, 1, 0, 'Assigned'],
+    [3, 'contacted', 'open', 3, 1, 0, 'Contacted'],
+    [4, 'connected', 'closed', 4, 1, 0, 'Connected'],
+    [5, 'closed', 'closed', 5, 1, 0, 'Closed'],
+  ].map(([id, key, category, sort, active, is_initial, label]) => ({ id, key, category, sort, active, is_initial, label }));
+  const fields = [
+    [1, 'name', 'text'], [2, 'email', 'text'], [3, 'phone', 'text'],
+    [4, 'preferred_language', 'select'], [5, 'visit_date', 'text'],
+    [6, 'service_type', 'select'], [7, 'contact_consent', 'checkbox'],
+  ].map(([id, key, type]) => ({
+    id, key, type, required: 0, active: 1, sort: id, fixed: 1, label: key, help: null,
+  }));
+  const result = (results: unknown[]) => ({ results, meta: { changes: 0 } });
+  return { statuses, fields, results: [result(statuses), result(fields), result([]), result([]), result([])] };
+};
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -70,6 +94,17 @@ describe('newcomer read authorization', () => {
     await expect(findNewcomerDuplicateHints(forbiddenDb, denied, {
       email: 'private@example.test', phone: null, excludeSubmissionId: null,
     })).rejects.toBeInstanceOf(NewcomerForbiddenError);
+    expect(prepares).toBe(0);
+  });
+
+  it('requires super-admin for the full configuration read before preparing SQL', async () => {
+    let prepares = 0;
+    const untouchedDb = {
+      prepare() { prepares += 1; throw new Error('SQL must not be touched'); },
+      batch() { throw new Error('batch must not be touched'); },
+    } as AppDb;
+    await expect(listNewcomerAdminConfiguration(untouchedDb, 'd1', user(), 'en'))
+      .rejects.toBeInstanceOf(NewcomerForbiddenError);
     expect(prepares).toBe(0);
   });
 
@@ -110,7 +145,7 @@ describe('newcomer read authorization', () => {
       },
       batch: async () => [hostileResult, hostileResult, hostileResult, hostileResult, hostileResult],
     } as unknown as AppDb;
-    const error = await listNewcomerAdminConfiguration(fakeDb, 'd1', user(), 'en')
+    const error = await listNewcomerAdminConfiguration(fakeDb, 'd1', superAdmin, 'en')
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(NewcomerPersistenceError);
     expect(String(error)).not.toContain('must-not-read');
@@ -136,13 +171,65 @@ describe('newcomer read authorization', () => {
     expect(error).toBeInstanceOf(NewcomerPersistenceError);
     expect(String(error)).not.toContain(unsafeEmail);
   });
+
+  it('rejects coercible numeric database rows instead of normalizing adapter output', async () => {
+    const result = {
+      results: [{
+        id: '10000000-0000-4000-8000-000000000001', name: 'Safe', email: null, phone: null,
+        locale: 'en', visit_date: '2026-08-12', service_type_id: null, service_label: null,
+        contact_consent_at: null, source: 'staff', status_id: '1', status_label: 'New',
+        assignee_person_id: null, next_follow_up_date: null, version: 0,
+        created_at: '2026-08-12 10:00:00', updated_at: '2026-08-12 10:00:00',
+      }],
+      meta: { changes: 0 },
+    };
+    const statement = { bind() { return this; }, first: async () => null, all: async () => result, run: async () => result };
+    const fakeDb = { prepare: () => statement, batch: async () => [] } as unknown as AppDb;
+    await expect(listNewcomerQueue(fakeDb, user(), 'en', { page: 1, limit: 25 }, '2026-08-12'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('strictly decodes configuration relationships without coercing row values', async () => {
+    let coercions = 0;
+    const snapshot = configurationSnapshot();
+    snapshot.fields[0].type = {
+      toString() { coercions += 1; return 'text'; },
+      valueOf() { coercions += 1; return 'text'; },
+      [Symbol.toPrimitive]() { coercions += 1; return 'text'; },
+    } as never;
+    const statement = { bind() { return this; }, first: async () => null, all: async () => ({ results: [], meta: { changes: 0 } }), run: async () => ({ results: [], meta: { changes: 0 } }) };
+    const fakeDb = { prepare: () => statement, batch: async () => snapshot.results } as unknown as AppDb;
+    await expect(listNewcomerAdminConfiguration(fakeDb, 'd1', superAdmin, 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+    expect(coercions).toBe(0);
+
+    const duplicate = configurationSnapshot();
+    duplicate.statuses[1].key = 'new';
+    const duplicateDb = { prepare: () => statement, batch: async () => duplicate.results } as unknown as AppDb;
+    await expect(listNewcomerAdminConfiguration(duplicateDb, 'd1', superAdmin, 'en'))
+      .rejects.toBeInstanceOf(NewcomerPersistenceError);
+  });
+
+  it('uses kind-specific allowlists and scalar validation for activity metadata', () => {
+    expect(decodeNewcomerActivityMetadata('submission_created', '{}')).toEqual({});
+    expect(decodeNewcomerActivityMetadata('assigned', '{"from_assignee_person_id":1,"to_assignee_person_id":2}'))
+      .toEqual({ from_assignee_person_id: 1, to_assignee_person_id: 2 });
+    expect(decodeNewcomerActivityMetadata('status_changed', '{"from_status_id":1,"to_status_id":2}'))
+      .toEqual({ from_status_id: 1, to_status_id: 2 });
+    expect(decodeNewcomerActivityMetadata('follow_up_scheduled', '{"follow_up_date":"2026-08-20"}'))
+      .toEqual({ follow_up_date: '2026-08-20' });
+    expect(decodeNewcomerActivityMetadata('follow_up_scheduled', '{}')).toEqual({});
+    expect(decodeNewcomerActivityMetadata('note_added', '{"note_id":"20000000-0000-4000-8000-000000000001"}'))
+      .toEqual({ note_id: '20000000-0000-4000-8000-000000000001' });
+    expect(decodeNewcomerActivityMetadata('person_linked', '{"person_id":9701}')).toEqual({ person_id: 9701 });
+    expect(decodeNewcomerActivityMetadata('visitor_created', '{"person_id":9701}')).toEqual({ person_id: 9701 });
+    expect(decodeNewcomerActivityMetadata('assigned', '{"status_id":1}')).toBeNull();
+    expect(decodeNewcomerActivityMetadata('status_changed', '{"to_status_id":2}')).toBeNull();
+    expect(decodeNewcomerActivityMetadata('note_added', '{"note_id":"private-text"}')).toBeNull();
+  });
 });
 
 describe('newcomer super-admin configuration mutations', () => {
-  const superAdmin = user({
-    role: 'admin', isAdmin: true, isSuperAdmin: true, adminAreas: [],
-  });
-
   it('rejects coercible field types without invoking coercion or preparing SQL', async () => {
     let coercions = 0;
     let prepares = 0;
@@ -273,7 +360,7 @@ describe('newcomer localized configuration reads', () => {
         ],
       }],
     });
-    const config = await listNewcomerAdminConfiguration(env.DB, 'd1', user(), 'zh');
+    const config = await listNewcomerAdminConfiguration(env.DB, 'd1', superAdmin, 'zh');
     expect(config.statuses.find((status) => status.id === 6)).toMatchObject({
       key: 'awaiting_host', label: 'Awaiting host', category: 'open', active: true,
     });
@@ -287,7 +374,7 @@ describe('newcomer localized configuration reads', () => {
     await env.DB.batch(Array.from({ length: 96 }, (_, index) => env.DB.prepare(
       'INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (?,?,?,?,1,0)',
     ).bind(100 + index, `custom_${index}`, 'open', 100 + index)));
-    await expect(listNewcomerAdminConfiguration(env.DB, 'd1', user(), 'en'))
+    await expect(listNewcomerAdminConfiguration(env.DB, 'd1', superAdmin, 'en'))
       .rejects.toBeInstanceOf(NewcomerLimitError);
     await env.DB.batch(Array.from({ length: 96 }, (_, index) => env.DB.prepare(
       'DELETE FROM newcomer_statuses WHERE id=?',
@@ -322,7 +409,7 @@ describe('newcomer localized configuration reads', () => {
       }
     }
     await env.DB.batch(statements);
-    const config = await listNewcomerAdminConfiguration(env.DB, 'd1', user(), 'en');
+    const config = await listNewcomerAdminConfiguration(env.DB, 'd1', superAdmin, 'en');
     expect(config.fields.filter((field) => field.id >= 200)
       .reduce((count, field) => count + field.options.length, 0)).toBe(1_100);
   });
@@ -332,9 +419,10 @@ describe('newcomer queue, detail, and duplicate hints', () => {
   beforeEach(async () => {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO people (id,display_name,email,phone,deleted_at) VALUES
-        (9701,'Live exact','live@example.test','+13125550101',NULL),
-        (9702,'Deleted exact','deleted@example.test','+13125550102','2026-08-01 12:00:00'),
-        (9703,'Worker','worker@example.test',NULL,NULL)`),
+        (9701,'Live exact','live@example.test','+1 (312) 555-0101',NULL),
+        (9702,'Deleted exact','deleted@example.test','+1.312.555.0102','2026-08-01 12:00:00'),
+        (9703,'Worker','worker@example.test',NULL,NULL),
+        (9704,'Invalid raw','invalid-phone@example.test','+1/312/555/0104',NULL)`),
       env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9701,1),(9702,2)"),
       env.DB.prepare("INSERT INTO service_type_i18n VALUES (9701,'en','Welcome')"),
       env.DB.prepare("INSERT INTO newcomer_fields VALUES (8,'story','textarea',0,1,8,0)"),
@@ -356,7 +444,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       env.DB.prepare(`INSERT INTO newcomer_activity
         (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
         ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001',9703,
-          'assigned','{"assignee_person_id":9703}','2026-08-12 10:02:00')`),
+          'assigned','{"to_assignee_person_id":9703}','2026-08-12 10:02:00')`),
     ]);
   });
 
@@ -386,7 +474,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       submission: { name: 'First', statusLabel: 'New' },
       answers: [{ fieldId: 8, fieldLabel: 'Story', value: 'Private answer' }],
       notes: [{ authorPersonId: 9703, body: 'Private note' }],
-      activity: [{ kind: 'assigned', metadata: { assignee_person_id: 9703 } }],
+      activity: [{ kind: 'assigned', metadata: { to_assignee_person_id: 9703 } }],
     });
     expect(JSON.stringify(detail)).not.toContain('worker@example.test');
     const untranslated = await getNewcomerDetail(
@@ -410,5 +498,22 @@ describe('newcomer queue, detail, and duplicate hints', () => {
     const serialized = JSON.stringify(deletedAndOpen);
     expect(serialized).not.toContain('deleted@example.test');
     expect(serialized).not.toContain('Deleted exact');
+
+    expect(await findNewcomerDuplicateHints(env.DB, user(), {
+      email: null, phone: '+13125550101', excludeSubmissionId: null,
+    })).toEqual([{ kind: 'person_live', id: 9701 }]);
+    expect(await findNewcomerDuplicateHints(env.DB, user(), {
+      email: null, phone: '+13125550104', excludeSubmissionId: null,
+    })).toEqual([]);
+  });
+
+  it('rejects activity metadata that does not match its activity kind', async () => {
+    await env.DB.prepare(`INSERT INTO newcomer_activity
+      (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+      ('30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001',9703,
+        'assigned','{"status_id":1}','2026-08-12 10:03:00')`).run();
+    await expect(getNewcomerDetail(
+      env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000001', 'en',
+    )).rejects.toBeInstanceOf(NewcomerPersistenceError);
   });
 });
