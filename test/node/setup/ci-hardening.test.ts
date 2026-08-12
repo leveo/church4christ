@@ -47,15 +47,28 @@ function nestedBlock(lines: string[], header: string): string[] {
   return lines.slice(start + 1, end);
 }
 
-function directMap(lines: string[], indent: number): Record<string, string | null> {
+function directMap(
+  lines: string[],
+  indent: number,
+  nestedKeys: string[] = [],
+): Record<string, string | null> {
   const result: Record<string, string | null> = {};
+  let parentKey: string | undefined;
   for (const line of meaningfulLines(lines)) {
-    if (indentation(line) !== indent) continue;
+    expect(indentation(line)).toBeGreaterThanOrEqual(indent);
+    if (indentation(line) > indent) {
+      expect(
+        parentKey !== undefined && nestedKeys.includes(parentKey),
+        `unconsumed workflow source line: ${line.trim()}`,
+      ).toBe(true);
+      continue;
+    }
     const match = line.trim().match(/^([^:]+):(?:\s(.*))?$/);
     expect(match, `invalid workflow mapping line: ${line.trim()}`).not.toBeNull();
     const key = match![1];
     expect(result, `duplicate workflow key: ${key}`).not.toHaveProperty(key);
     result[key] = match![2] ?? null;
+    parentKey = key;
   }
   return result;
 }
@@ -97,10 +110,24 @@ function parseWorkflowSteps(lines: string[]): WorkflowStep[] {
   return starts.map((start, position) => {
     const segment = significant.slice(start, starts[position + 1] ?? significant.length);
     const name = segment[0].trim().slice('- name: '.length);
-    const fields = directMap(segment.slice(1), 8);
+    const fields = directMap(segment.slice(1), 8, ['with', 'run', 'env']);
     expect(Object.keys(fields).every((key) => ['uses', 'with', 'run', 'env'].includes(key))).toBe(
       true,
     );
+    let parentField: string | undefined;
+    for (const line of segment.slice(1)) {
+      if (indentation(line) === 8) {
+        parentField = line.trim().split(':', 1)[0];
+        continue;
+      }
+      expect(indentation(line), `unexpected workflow indentation: ${line.trim()}`).toBe(10);
+      expect(
+        parentField === 'with' ||
+          parentField === 'env' ||
+          (parentField === 'run' && fields.run === '>-'),
+        `unconsumed workflow source line: ${line.trim()}`,
+      ).toBe(true);
+    }
     const step: WorkflowStep = { name };
 
     if (fields.uses !== undefined) {
@@ -133,9 +160,9 @@ function validateCiWorkflow(workflow: string): void {
   });
 
   const jobs = nestedBlock(lines, 'jobs:');
-  expect(directMap(jobs, 2)).toEqual({ 'build-test': null });
+  expect(directMap(jobs, 2, ['build-test'])).toEqual({ 'build-test': null });
   const job = nestedBlock(jobs, '  build-test:');
-  expect(directMap(job, 4)).toEqual({
+  expect(directMap(job, 4, ['permissions', 'services', 'steps'])).toEqual({
     'runs-on': 'ubuntu-latest',
     'timeout-minutes': '30',
     permissions: null,
@@ -145,9 +172,9 @@ function validateCiWorkflow(workflow: string): void {
   expect(scalarMap(nestedBlock(job, '    permissions:'), 6)).toEqual({ contents: 'read' });
 
   const services = nestedBlock(job, '    services:');
-  expect(directMap(services, 6)).toEqual({ postgres: null });
+  expect(directMap(services, 6, ['postgres'])).toEqual({ postgres: null });
   const postgres = nestedBlock(services, '      postgres:');
-  expect(directMap(postgres, 8)).toEqual({
+  expect(directMap(postgres, 8, ['env', 'ports', 'options'])).toEqual({
     image: 'postgres:16',
     env: null,
     ports: null,
@@ -457,6 +484,17 @@ describe('test runner hardening', () => {
     validateCiWorkflow(readFileSync('.github/workflows/ci.yml', 'utf8'));
   });
 
+  it('accepts a safe folded multiline run command', () => {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+    const folded = workflow.replace(
+      `          node -e "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+      `          node -e\n          "require('node:fs').mkdirSync('.tmp', { recursive: true })"`,
+    );
+
+    expect(folded).not.toBe(workflow);
+    expect(() => validateCiWorkflow(folded)).not.toThrow();
+  });
+
   it.each([
     [
       'write permission',
@@ -472,6 +510,22 @@ describe('test runner hardening', () => {
         ),
     ],
     [
+      'rogue indented scalar line',
+      (workflow: string) =>
+        workflow.replace(
+          '        uses: actions/checkout@v7',
+          '        uses: actions/checkout@v7\n          rogue scalar',
+        ),
+    ],
+    [
+      'rogue job scalar continuation',
+      (workflow: string) =>
+        workflow.replace(
+          '    runs-on: ubuntu-latest',
+          '    runs-on: ubuntu-latest\n      rogue job scalar',
+        ),
+    ],
+    [
       'unapproved action',
       (workflow: string) =>
         workflow.replace(
@@ -482,6 +536,11 @@ describe('test runner hardening', () => {
     [
       'deployment command suffix',
       (workflow: string) => workflow.replace('        run: npm test', '        run: npm test && npm run deploy'),
+    ],
+    [
+      'deployment command plain-scalar continuation',
+      (workflow: string) =>
+        workflow.replace('        run: npm test', '        run: npm test\n          && npm run deploy'),
     ],
     [
       'Postgres image change',
