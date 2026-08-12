@@ -6,8 +6,8 @@ async function reset(): Promise<void> {
     env.DB.prepare('DELETE FROM service_attendance'),
     env.DB.prepare("INSERT OR IGNORE INTO people (id, display_name, email) VALUES (8101, 'Attendance Recorder', 'attendance-recorder@example.com')"),
     env.DB.prepare("INSERT OR IGNORE INTO people (id, display_name, email) VALUES (8102, 'Attendance Corrector', 'attendance-corrector@example.com')"),
-    env.DB.prepare('INSERT OR IGNORE INTO service_types (id, sort) VALUES (8201, 1), (8203, 3), (8204, 4), (8205, 5)'),
-    env.DB.prepare("INSERT OR IGNORE INTO checkin_events (id, name, active) VALUES (8301, 'Blue Room', 1), (8303, 'Green Room', 1), (8304, 'Gold Room', 1), (8305, 'Red Room', 1)"),
+    env.DB.prepare('INSERT OR IGNORE INTO service_types (id, sort) VALUES (8201, 1), (8203, 3), (8204, 4), (8205, 5), (8206, 6)'),
+    env.DB.prepare("INSERT OR IGNORE INTO checkin_events (id, name, active) VALUES (8301, 'Blue Room', 1), (8303, 'Green Room', 1), (8304, 'Gold Room', 1), (8305, 'Red Room', 1), (8306, 'Silver Room', 1)"),
   ]);
 }
 
@@ -165,5 +165,17 @@ describe('service attendance schema', () => {
     await expect(env.DB.prepare(`
       UPDATE service_type_checkin_events SET starts_on = '2026-08-11' WHERE id = ?
     `).bind(inserted!.id).run()).rejects.toThrow(/service_attendance_link_immutable/i);
+
+    const primaryMove = await env.DB.prepare(`
+      INSERT INTO service_type_checkin_events
+        (service_type_id, checkin_event_id, starts_on, created_by_person_id)
+      VALUES (8206, 8306, '2026-08-12', 8101) RETURNING id
+    `).first<{ id: number }>();
+    await expect(env.DB.prepare(`
+      UPDATE service_type_checkin_events
+      SET id = id + 100000, ends_on = '2026-08-12',
+          closed_by_person_id = 8102, closed_at = datetime('now')
+      WHERE id = ?
+    `).bind(primaryMove!.id).run()).rejects.toThrow(/service_attendance_link_immutable/i);
   });
 });

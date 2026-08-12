@@ -92,6 +92,7 @@ CREATE TRIGGER service_checkin_links_close_only
 BEFORE UPDATE ON service_type_checkin_events
 WHEN NOT (
   OLD.ends_on IS NULL AND NEW.ends_on IS NOT NULL AND
+  NEW.id IS OLD.id AND
   NEW.service_type_id IS OLD.service_type_id AND
   NEW.checkin_event_id IS OLD.checkin_event_id AND
   NEW.starts_on IS OLD.starts_on AND

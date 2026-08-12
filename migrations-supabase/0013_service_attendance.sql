@@ -90,6 +90,7 @@ RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT (
     OLD.ends_on IS NULL AND NEW.ends_on IS NOT NULL AND
+    NEW.id IS NOT DISTINCT FROM OLD.id AND
     NEW.service_type_id IS NOT DISTINCT FROM OLD.service_type_id AND
     NEW.checkin_event_id IS NOT DISTINCT FROM OLD.checkin_event_id AND
     NEW.starts_on IS NOT DISTINCT FROM OLD.starts_on AND
