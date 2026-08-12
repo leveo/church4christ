@@ -389,6 +389,9 @@ describe('Postgres trigger semantic parser', () => {
   });
 
   it.each([
+    ['newcomer_statuses_boundary_insert', 'INSERT', 'newcomer_statuses', "NOT ((NEW.id = 1 AND NEW.key = 'new') OR (NEW.id > 5 AND NEW.key <> 'new'))", "NOT ((NEW.id = 1 AND NEW.key = 'renamed') OR (NEW.id > 5 AND NEW.key <> 'new'))"],
+    ['newcomer_statuses_boundary_update', 'UPDATE', 'newcomer_statuses', 'NOT (NEW.id = OLD.id AND NEW.key = OLD.key AND NEW.category = OLD.category)', 'NOT (NEW.id = OLD.id AND NEW.key = OLD.key)'],
+    ['newcomer_statuses_core_delete', 'DELETE', 'newcomer_statuses', 'OLD.id <= 5', 'OLD.id < 5'],
     ['newcomer_fields_boundary_insert', 'INSERT', 'newcomer_fields', "NOT (NEW.id > 7 AND NEW.fixed = 0)", "NOT (NEW.id > 7 AND NEW.fixed = 1)"],
     ['newcomer_fields_boundary_update', 'UPDATE', 'newcomer_fields', "NOT (NEW.id > 7 AND NEW.fixed = 0)", "NOT (NEW.id > 7 AND NEW.fixed = 1)"],
     ['newcomer_fields_core_delete', 'DELETE', 'newcomer_fields', 'OLD.fixed = 1', 'OLD.fixed = 0'],

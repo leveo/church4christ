@@ -5,7 +5,11 @@
 
 CREATE TABLE newcomer_statuses (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
-  key TEXT NOT NULL UNIQUE CHECK (instr(key,char(0)) = 0 AND key IN ('new','assigned','contacted','connected','closed')),
+  key TEXT NOT NULL UNIQUE
+    CHECK (
+      instr(key,char(0)) = 0 AND length(CAST(key AS BLOB)) BETWEEN 1 AND 64 AND key = lower(trim(key)) AND
+      substr(key, 1, 1) GLOB '[a-z]' AND key NOT GLOB '*[^a-z0-9_]*'
+    ),
   category TEXT NOT NULL CHECK (instr(category,char(0)) = 0 AND category IN ('open','closed')),
   sort INTEGER NOT NULL CHECK (sort BETWEEN 0 AND 100000),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
@@ -40,6 +44,40 @@ INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES
   (3,'en','Contacted'), (3,'zh','已联系'),
   (4,'en','Connected'), (4,'zh','已连接'),
   (5,'en','Closed'),    (5,'zh','已关闭');
+
+-- The five seeded identities are application-owned. Custom statuses use IDs
+-- above the fixed range, while every status keeps its stable key and immutable
+-- open/closed category after creation. Ordering, active, and initial remain
+-- application-managed fields.
+CREATE TRIGGER newcomer_statuses_boundary_insert
+BEFORE INSERT ON newcomer_statuses
+WHEN NOT (
+  (NEW.id = 1 AND NEW.key = 'new') OR
+  (NEW.id = 2 AND NEW.key = 'assigned') OR
+  (NEW.id = 3 AND NEW.key = 'contacted') OR
+  (NEW.id = 4 AND NEW.key = 'connected') OR
+  (NEW.id = 5 AND NEW.key = 'closed') OR
+  (NEW.id > 5 AND NEW.key NOT IN ('new','assigned','contacted','connected','closed'))
+)
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_status_boundary');
+END;
+
+CREATE TRIGGER newcomer_statuses_boundary_update
+BEFORE UPDATE ON newcomer_statuses
+WHEN NOT (
+  NEW.id = OLD.id AND NEW.key = OLD.key AND NEW.category = OLD.category
+)
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_status_immutable');
+END;
+
+CREATE TRIGGER newcomer_statuses_core_delete
+BEFORE DELETE ON newcomer_statuses
+WHEN OLD.id <= 5
+BEGIN
+  SELECT RAISE(ABORT, 'newcomer_status_immutable');
+END;
 
 CREATE TABLE newcomer_fields (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),

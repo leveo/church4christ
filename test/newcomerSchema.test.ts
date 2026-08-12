@@ -201,14 +201,41 @@ describe('newcomer foundation schema (D1)', () => {
     `).run();
   });
 
-  it('rejects invalid workflow initial states, enums, booleans, ranges, and labels', async () => {
+  it('allows bounded custom statuses while preserving core identity and immutable categories', async () => {
+    await env.DB.prepare(`
+      INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
+      VALUES (90,'awaiting_host','open',90,1,0)
+    `).run();
+    expect(await env.DB.prepare("SELECT category FROM newcomer_statuses WHERE key='awaiting_host'").first('category'))
+      .toBe('open');
+
+    for (const statement of [
+      "UPDATE newcomer_statuses SET id=91 WHERE id=1",
+      "UPDATE newcomer_statuses SET key='renamed_new' WHERE id=1",
+      "UPDATE newcomer_statuses SET category='closed' WHERE id=1",
+      "UPDATE newcomer_statuses SET category='closed' WHERE id=90",
+      "DELETE FROM newcomer_statuses WHERE id=1",
+      "INSERT OR REPLACE INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (1,'new','open',1,1,1)",
+      "INSERT OR REPLACE INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,1,0)",
+    ]) await reject(statement);
+
+    await env.DB.prepare("UPDATE newcomer_statuses SET sort=91,active=0 WHERE id=90").run();
+    expect(await env.DB.prepare('SELECT sort,active FROM newcomer_statuses WHERE id=90').first())
+      .toEqual({ sort: 91, active: 0 });
+    await env.DB.prepare('DELETE FROM newcomer_statuses WHERE id=90').run();
+  });
+
+  it('rejects invalid workflow initial states, keys, enums, booleans, ranges, and labels', async () => {
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (90,'closed','closed',90,1,1)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,0,1)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (92,'assigned','open',92,1,1)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (93,'contacted','pending',93,1,0)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (94,'connected','open',-1,2,0)");
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (95,'NEW','open',95,1,0)");
-    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'other','open',96,1,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'9other','open',96,1,0)");
+    await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (97,'bad-key','open',97,1,0)");
+    await reject(`INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
+      VALUES (98,'${'a'.repeat(65)}','open',98,1,0)`);
     await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'fr','Nouveau')");
     await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'en','')");
   });

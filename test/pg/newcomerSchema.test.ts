@@ -266,6 +266,29 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     for (const statement of statements) await rejects(statement, '23503');
   });
 
+  it('allows bounded custom statuses while preserving core identity and immutable categories', async () => {
+    await sql.unsafe(`INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
+      VALUES (90,'awaiting_host','open',90,1,0)`);
+    const [stored] = await sql.unsafe<{ category: string }[]>(
+      "SELECT category FROM newcomer_statuses WHERE key='awaiting_host'",
+    );
+    expect(stored).toEqual({ category: 'open' });
+    for (const statement of [
+      "UPDATE newcomer_statuses SET id=91 WHERE id=1",
+      "UPDATE newcomer_statuses SET key='renamed_new' WHERE id=1",
+      "UPDATE newcomer_statuses SET category='closed' WHERE id=1",
+      "UPDATE newcomer_statuses SET category='closed' WHERE id=90",
+      "DELETE FROM newcomer_statuses WHERE id=1",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (1,'new','open',1,1,1) ON CONFLICT (id) DO UPDATE SET sort=EXCLUDED.sort",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (91,'new','open',91,1,0) ON CONFLICT (key) DO UPDATE SET id=EXCLUDED.id",
+    ]) await rejects(statement);
+    await sql.unsafe("UPDATE newcomer_statuses SET sort=91,active=0 WHERE id=90");
+    expect((await sql.unsafe<{ sort: number; active: number }[]>(
+      'SELECT sort,active FROM newcomer_statuses WHERE id=90',
+    ))[0]).toEqual({ sort: 91, active: 0 });
+    await sql.unsafe('DELETE FROM newcomer_statuses WHERE id=90');
+  });
+
   it('repeats workflow, field, option, and single-initial constraint behavior', async () => {
     for (const statement of [
       "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (90,'closed','closed',90,1,1)",
@@ -274,7 +297,9 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
       "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (93,'contacted','pending',93,1,0)",
       "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (94,'connected','open',-1,2,0)",
       "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (95,'NEW','open',95,1,0)",
-      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'other','open',96,1,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (96,'9other','open',96,1,0)",
+      "INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (97,'bad-key','open',97,1,0)",
+      `INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (98,'${'a'.repeat(65)}','open',98,1,0)`,
       "INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'fr','Nouveau')",
       "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (91,'bad','radio',0,1,1,0)",
       "INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (92,'BAD KEY','text',0,1,1,0)",

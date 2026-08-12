@@ -254,6 +254,9 @@ describe('final D1 schema parser', () => {
       'service_checkin_links_no_overlap_insert',
       'service_checkin_links_close_only',
       'service_checkin_links_no_delete',
+      'newcomer_statuses_boundary_insert',
+      'newcomer_statuses_boundary_update',
+      'newcomer_statuses_core_delete',
       'newcomer_fields_boundary_insert',
       'newcomer_fields_boundary_update',
       'newcomer_fields_core_delete',
@@ -291,6 +294,9 @@ describe('final D1 schema parser', () => {
     ].join(' or ')} )`;
     const customValueGuard = 'exists ( select 1 from newcomer_fields where id = new . field_id and fixed = 1 )';
     expect(newcomerGuards).toEqual({
+      newcomer_statuses_boundary_insert: `not ( ( new . id = 1 and new . key = 'new' ) or ( new . id = 2 and new . key = 'assigned' ) or ( new . id = 3 and new . key = 'contacted' ) or ( new . id = 4 and new . key = 'connected' ) or ( new . id = 5 and new . key = 'closed' ) or ( new . id > 5 and new . key not in ( 'new' , 'assigned' , 'contacted' , 'connected' , 'closed' ) ) )`,
+      newcomer_statuses_boundary_update: `not ( new . id = old . id and new . key = old . key and new . category = old . category )`,
+      newcomer_statuses_core_delete: 'old . id <= 5',
       newcomer_fields_boundary_insert: `not ( ${customField} )`,
       newcomer_fields_boundary_update: boundaryUpdate,
       newcomer_fields_core_delete: 'old . fixed = 1',
