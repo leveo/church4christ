@@ -36,7 +36,8 @@ CREATE OR REPLACE FUNCTION newcomer_valid_email(value text)
 RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
   at_position integer;
-  ascii_code integer;
+  local_part text;
+  domain_part text;
 BEGIN
   IF value IS NULL THEN RETURN true; END IF;
   IF value <> lower(trim(value)) OR octet_length(value) NOT BETWEEN 3 AND 254 THEN RETURN false; END IF;
@@ -45,10 +46,10 @@ BEGIN
      OR position('@' IN substring(value FROM at_position + 1)) <> 0 THEN
     RETURN false;
   END IF;
-  FOR ascii_code IN 1..32 LOOP
-    IF position(chr(ascii_code) IN value) <> 0 THEN RETURN false; END IF;
-  END LOOP;
-  RETURN position(chr(127) IN value) = 0;
+  local_part := substring(value FROM 1 FOR at_position - 1);
+  domain_part := substring(value FROM at_position + 1);
+  RETURN local_part ~ '^[a-z0-9!#$%&''*+/=?^_`{|}~-]+(\.[a-z0-9!#$%&''*+/=?^_`{|}~-]+)*$'
+    AND domain_part ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$';
 END;
 $$;
 
@@ -317,7 +318,7 @@ CREATE TABLE newcomer_submissions (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),
   name TEXT CHECK (name IS NULL OR (name = trim(name) AND octet_length(name) BETWEEN 1 AND 200)),
   email TEXT CHECK (newcomer_valid_email(email)),
-  phone TEXT CHECK (phone IS NULL OR (octet_length(phone) BETWEEN 8 AND 16 AND phone ~ '^\+[0-9]{7,15}$')),
+  phone TEXT CHECK (phone IS NULL OR (octet_length(phone) BETWEEN 8 AND 16 AND phone ~ '^\+[1-9][0-9]{6,14}$')),
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
   visit_date TEXT NOT NULL CHECK (newcomer_valid_date(visit_date)),
   service_type_id INTEGER REFERENCES service_types(id) ON DELETE SET NULL,

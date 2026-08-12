@@ -280,6 +280,11 @@ describe('newcomer foundation schema (D1)', () => {
     expect(row).toMatchObject({ status_id: 1, version: 0, source: 'public' });
     expect(row?.created_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     expect(row?.updated_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,email,locale,visit_date,source)
+      VALUES ('10000000-0000-4000-8000-0000000000ff','Special Visitor',
+        'visitor+tag/box@example-domain.test','en','2026-08-12','staff')`).run();
   });
 
   it('rejects malformed or unnormalized submission identifiers, contacts, dates, enums, counts, timestamps, and FKs', async () => {
@@ -308,7 +313,17 @@ describe('newcomer foundation schema (D1)', () => {
       base('10000000-0000-4000-8000-00000000001b', { email: "('a' || char(127) || '@example.test')" }),
       base('10000000-0000-4000-8000-00000000001c', { email: "'a @example.test'" }),
       base('10000000-0000-4000-8000-00000000001d', { email: "('a' || char(0) || '@example.test')" }),
+      base('10000000-0000-4000-8000-000000000020', { email: "'.a@example.test'" }),
+      base('10000000-0000-4000-8000-000000000021', { email: "'a.@example.test'" }),
+      base('10000000-0000-4000-8000-000000000022', { email: "'a..b@example.test'" }),
+      base('10000000-0000-4000-8000-000000000023', { email: "'a@localhost'" }),
+      base('10000000-0000-4000-8000-000000000024', { email: "'a@-example.test'" }),
+      base('10000000-0000-4000-8000-000000000025', { email: "'a@example-.test'" }),
+      base('10000000-0000-4000-8000-000000000026', { email: "'a@example..test'" }),
+      base('10000000-0000-4000-8000-000000000027', { email: "'a@example_test.test'" }),
+      base('10000000-0000-4000-8000-000000000028', { email: "'é@example.test'" }),
       base('10000000-0000-4000-8000-000000000004', { phone: "' +13125550100'" }),
+      base('10000000-0000-4000-8000-000000000029', { phone: "'+03125550100'" }),
       base('10000000-0000-4000-8000-000000000005', { locale: "'fr'" }),
       base('10000000-0000-4000-8000-000000000006', { visitDate: "'2026-02-30'" }),
       base('10000000-0000-4000-8000-000000000007', { visitDate: "'0000-01-01'" }),

@@ -3,6 +3,8 @@ import { isValidDateStr } from './dates';
 const UTF8 = new TextEncoder();
 const KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const OPTION = /^[a-z0-9][a-z0-9_-]{0,79}$/;
+const EMAIL_LOCAL = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+const EMAIL_DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 
 export const NEWCOMER_VALIDATION_LIMITS = {
   maxNameBytes: 200,
@@ -21,6 +23,10 @@ export const NEWCOMER_VALIDATION_LIMITS = {
 } as const;
 
 export type NewcomerFieldType = 'text' | 'textarea' | 'select' | 'checkbox';
+
+export function isNewcomerFieldType(value: unknown): value is NewcomerFieldType {
+  return value === 'text' || value === 'textarea' || value === 'select' || value === 'checkbox';
+}
 
 export interface NewcomerIntakeFieldDefinition {
   id: number;
@@ -135,10 +141,15 @@ export function normalizeNewcomerEmail(input: unknown): NewcomerNormalizationRes
     !text
     || bytes(text) < 3
     || bytes(text) > NEWCOMER_VALIDATION_LIMITS.maxEmailBytes
-    || /[\x00-\x20\x7f]/.test(text)
+    || !/^[\x21-\x7e]+$/.test(text)
   ) return { ok: false, code: 'newcomer_email_invalid' };
   const first = text.indexOf('@');
   if (first < 1 || first !== text.lastIndexOf('@') || first === text.length - 1) {
+    return { ok: false, code: 'newcomer_email_invalid' };
+  }
+  const localPart = text.slice(0, first);
+  const domainPart = text.slice(first + 1);
+  if (!EMAIL_LOCAL.test(localPart) || !EMAIL_DOMAIN.test(domainPart)) {
     return { ok: false, code: 'newcomer_email_invalid' };
   }
   return { ok: true, value: text };
@@ -151,7 +162,7 @@ export function normalizeNewcomerPhone(input: unknown): NewcomerNormalizationRes
     return { ok: false, code: 'newcomer_phone_invalid' };
   }
   const digits = text.slice(1).replaceAll(/[^0-9]/g, '');
-  if (digits.length < 7 || digits.length > 15) {
+  if (digits.length < 7 || digits.length > 15 || digits[0] === '0') {
     return { ok: false, code: 'newcomer_phone_invalid' };
   }
   return { ok: true, value: `+${digits}` };
@@ -186,7 +197,7 @@ function safeDefinition(value: unknown): SafeDefinition | null {
     const options = plainDataArray(row.options, NEWCOMER_VALIDATION_LIMITS.maxOptionsPerField);
     if (
       id === null || id <= 7 || fields.has(id) || !KEY.test(key) || keys.has(key)
-      || !['text', 'textarea', 'select', 'checkbox'].includes(String(type))
+      || !isNewcomerFieldType(type)
       || typeof row.required !== 'boolean' || !options
     ) return null;
     const capturedOptions: string[] = [];
@@ -199,8 +210,7 @@ function safeDefinition(value: unknown): SafeDefinition | null {
     if ((type === 'select') !== (capturedOptions.length > 0)) return null;
     optionCount += capturedOptions.length;
     if (optionCount > NEWCOMER_VALIDATION_LIMITS.maxOptionsTotal) return null;
-    const capturedType = type as NewcomerFieldType;
-    fields.set(id, { id, key, type: capturedType, required: row.required, options: capturedOptions });
+    fields.set(id, { id, key, type, required: row.required, options: capturedOptions });
     keys.add(key);
   }
   return { fields, serviceTypes };
@@ -233,21 +243,21 @@ export function validateNewcomerIntake(
     add('newcomer_name_invalid', 'name');
   }
 
-  const rawEmail = typeof input.email === 'string' ? normalizeText(input.email) : null;
-  const rawPhone = typeof input.phone === 'string' ? normalizeText(input.phone) : null;
+  const emailAbsent = input.email === null || input.email === undefined || input.email === '';
+  const phoneAbsent = input.phone === null || input.phone === undefined || input.phone === '';
   let email: string | null = null;
   let phone: string | null = null;
-  if (rawEmail) {
-    const normalized = normalizeNewcomerEmail(rawEmail);
+  if (!emailAbsent) {
+    const normalized = normalizeNewcomerEmail(input.email);
     if (normalized.ok) email = normalized.value;
     else add(normalized.code, 'email');
   }
-  if (rawPhone) {
-    const normalized = normalizeNewcomerPhone(rawPhone);
+  if (!phoneAbsent) {
+    const normalized = normalizeNewcomerPhone(input.phone);
     if (normalized.ok) phone = normalized.value;
     else add(normalized.code, 'phone');
   }
-  if (!rawEmail && !rawPhone) add('newcomer_contact_required', 'input');
+  if (emailAbsent && phoneAbsent) add('newcomer_contact_required', 'input');
 
   const locale = input.locale === 'en' || input.locale === 'zh' ? input.locale : null;
   if (!locale) add('newcomer_locale_invalid', 'locale');
@@ -369,8 +379,8 @@ export function parseNewcomerQueueFilters(raw: unknown): NewcomerQueueFilterResu
     output[key] = parsed;
   }
   if (input.due !== undefined && input.due !== null && input.due !== '') {
-    if (!['all', 'overdue', 'scheduled', 'none'].includes(String(input.due))) return invalid();
-    output.due = input.due as NonNullable<NewcomerQueueFilters['due']>;
+    if (input.due !== 'all' && input.due !== 'overdue' && input.due !== 'scheduled' && input.due !== 'none') return invalid();
+    output.due = input.due;
   }
   for (const key of ['visitFrom', 'visitTo'] as const) {
     if (input[key] === undefined || input[key] === null || input[key] === '') continue;

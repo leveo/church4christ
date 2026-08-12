@@ -35,10 +35,10 @@ const validRaw = () => ({
 });
 
 describe('newcomer contact normalization', () => {
-  it('normalizes NFC email and conservative international phone separators', () => {
-    expect(normalizeNewcomerEmail('  ÉXAMPLE@Example.COM  ')).toEqual({
+  it('normalizes conservative ASCII dot-atom email and international phone separators', () => {
+    expect(normalizeNewcomerEmail("  User.Name+tag/box!#$%&'*=?^_`{|}~-@Sub-Domain.Example  ")).toEqual({
       ok: true,
-      value: 'éxample@example.com',
+      value: "user.name+tag/box!#$%&'*=?^_`{|}~-@sub-domain.example",
     });
     expect(normalizeNewcomerPhone(' +1 (312) 555-0100. ')).toEqual({
       ok: true,
@@ -49,17 +49,33 @@ describe('newcomer contact normalization', () => {
   it.each([
     ['email', 'a@@example.test'],
     ['email', '@example.test'],
+    ['email', 'éxample@example.test'],
+    ['email', '.a@example.test'],
+    ['email', 'a.@example.test'],
+    ['email', 'a..b@example.test'],
+    ['email', 'a@localhost'],
+    ['email', 'a@-example.test'],
+    ['email', 'a@example-.test'],
+    ['email', 'a@example..test'],
+    ['email', 'a@example_test.test'],
     ['email', `a${String.fromCharCode(0)}@example.test`],
     ['email', `${'名'.repeat(83)}@x.test`],
     ['phone', '13125550100'],
     ['phone', '+1/312/555/0100'],
     ['phone', "+1'3125550100"],
+    ['phone', '+03125550100'],
     ['phone', '+123456'],
     ['phone', '+1234567890123456'],
   ])('rejects invalid %s without echoing its value', (kind, value) => {
     const result = kind === 'email' ? normalizeNewcomerEmail(value) : normalizeNewcomerPhone(value);
     expect(result).toEqual({ ok: false, code: `newcomer_${kind}_invalid` });
     expect(JSON.stringify(result)).not.toContain(value);
+  });
+
+  it('enforces the exact 254-byte normalized email boundary', () => {
+    expect(normalizeNewcomerEmail(`${'a'.repeat(242)}@example.com`)).toMatchObject({ ok: true });
+    expect(normalizeNewcomerEmail(`${'a'.repeat(243)}@example.com`))
+      .toEqual({ ok: false, code: 'newcomer_email_invalid' });
   });
 });
 
@@ -96,6 +112,36 @@ describe('shared newcomer intake validation', () => {
     expect(publicResult).toMatchObject({ ok: false, issues: [{ code: 'newcomer_consent_required' }] });
     const staffResult = validateNewcomerIntake('staff', { ...validRaw(), contactConsent: false }, definition());
     expect(staffResult.ok && staffResult.value.contactConsent).toBe(false);
+  });
+
+  it('reports wrong-type contacts as field-specific invalid values instead of treating them as absent', () => {
+    const result = validateNewcomerIntake('staff', {
+      ...validRaw(), email: 1234, phone: { private: 'do-not-coerce' },
+    }, definition());
+    expect(result).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        { code: 'newcomer_email_invalid', field: 'email' },
+        { code: 'newcomer_phone_invalid', field: 'phone' },
+      ]),
+    });
+    expect(JSON.stringify(result)).not.toContain('do-not-coerce');
+  });
+
+  it('never coerces definition or queue enum objects while failing closed', () => {
+    let coercions = 0;
+    const hostileEnum = {
+      toString() { coercions += 1; return 'text'; },
+      valueOf() { coercions += 1; return 'text'; },
+      [Symbol.toPrimitive]() { coercions += 1; return 'text'; },
+    };
+    const hostileDefinition = definition() as unknown as { activeServiceTypeIds: number[]; fields: Array<Record<string, unknown>> };
+    hostileDefinition.fields[0].type = hostileEnum;
+    expect(validateNewcomerIntake('public', validRaw(), hostileDefinition as never))
+      .toMatchObject({ ok: false, issues: [{ code: 'newcomer_definition_invalid' }] });
+    expect(parseNewcomerQueueFilters({ due: hostileEnum }))
+      .toEqual({ ok: false, code: 'newcomer_queue_filters_invalid' });
+    expect(coercions).toBe(0);
   });
 
   it.each([

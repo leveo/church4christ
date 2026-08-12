@@ -1,7 +1,13 @@
 import { readSnapshotBatch, type AppDb, type AppDbResult, type SnapshotBackend } from './appDb';
 import { hasAreaAccess } from './adminAreas';
 import { isValidDateStr } from './dates';
-import { normalizeNewcomerEmail, normalizeNewcomerPhone, type NewcomerFieldType, type NewcomerQueueFilters } from './newcomerValidation';
+import {
+  isNewcomerFieldType,
+  normalizeNewcomerEmail,
+  normalizeNewcomerPhone,
+  type NewcomerFieldType,
+  type NewcomerQueueFilters,
+} from './newcomerValidation';
 import type { SessionUser } from './types';
 
 const UTF8 = new TextEncoder();
@@ -329,8 +335,7 @@ function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): Newcom
     const row = plainRow(value, ['id', 'key', 'type', 'required', 'active', 'sort', 'fixed', 'label', 'help']);
     const id = row ? positiveId(row.id) : null;
     const key = row ? text(row.key, 64) : null;
-    const type = row && ['text', 'textarea', 'select', 'checkbox'].includes(String(row.type))
-      ? row.type as NewcomerFieldType : null;
+    const type = row && isNewcomerFieldType(row.type) ? row.type : null;
     const required = row ? bool(row.required) : null;
     const active = row ? bool(row.active) : null;
     const sort = row ? integer(row.sort) : null;
@@ -816,16 +821,18 @@ function mutationRows(result: unknown, expected: number): unknown[] {
 
 function databaseConflict(error: unknown): boolean {
   try {
-    const code = error !== null && typeof error === 'object'
-      ? Object.getOwnPropertyDescriptor(error, 'code')?.value
-      : null;
-    const rendered = String(error);
+    if (error === null || typeof error !== 'object') return false;
+    const descriptors = Object.getOwnPropertyDescriptors(error) as Record<string, PropertyDescriptor>;
+    const code = descriptors.code && 'value' in descriptors.code ? descriptors.code.value : null;
+    const message = descriptors.message && 'value' in descriptors.message && typeof descriptors.message.value === 'string'
+      ? descriptors.message.value
+      : '';
     return code === '23503' || code === '23505' || code === '23514'
-      || rendered.includes('SQLITE_CONSTRAINT')
-      || rendered.includes('FOREIGN KEY constraint failed')
-      || rendered.includes('UNIQUE constraint failed')
-      || rendered.includes('newcomer_status_')
-      || rendered.includes('newcomer_field_');
+      || message.includes('SQLITE_CONSTRAINT')
+      || message.includes('FOREIGN KEY constraint failed')
+      || message.includes('UNIQUE constraint failed')
+      || message.includes('newcomer_status_')
+      || message.includes('newcomer_field_');
   } catch {
     return false;
   }
@@ -1051,8 +1058,7 @@ export async function createNewcomerField(
     'key', 'type', 'required', 'active', 'sort', 'labelEn', 'labelZh', 'helpEn', 'helpZh', 'options',
   ]);
   const key = row && typeof row.key === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(row.key) ? row.key : null;
-  const type = row && ['text', 'textarea', 'select', 'checkbox'].includes(String(row.type))
-    ? row.type as NewcomerFieldType : null;
+  const type = row && isNewcomerFieldType(row.type) ? row.type : null;
   if (!row || !key || !type) throw new NewcomerInvalidError();
   const common = safeFieldCommon(row);
   if ((type === 'select') !== (common.options.length > 0) || (type === 'select' && !common.options.some((option) => option.active))) {

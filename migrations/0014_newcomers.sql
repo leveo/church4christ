@@ -218,14 +218,25 @@ CREATE TABLE newcomer_submissions (
       email = lower(trim(email)) AND length(CAST(email AS BLOB)) BETWEEN 3 AND 254 AND
       instr(email,'@') BETWEEN 2 AND length(email) - 1 AND
       instr(substr(email,instr(email,'@') + 1),'@') = 0 AND
-      instr(email,char(0)) = 0 AND
-      email NOT GLOB ('*[' || char(1) || '-' || char(32) || char(127) || ']*')
+      substr(email,1,instr(email,'@') - 1) NOT GLOB '*[^a-z0-9.!#$%&''*+/=?^_`{|}~-]*' AND
+      substr(email,1,instr(email,'@') - 1) NOT GLOB '.*' AND
+      substr(email,1,instr(email,'@') - 1) NOT GLOB '*.' AND
+      substr(email,1,instr(email,'@') - 1) NOT GLOB '*..*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*[^a-z0-9.-]*' AND
+      substr(email,instr(email,'@') + 1) GLOB '*.*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '.*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*.' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '-*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*-' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*..*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*.-*' AND
+      substr(email,instr(email,'@') + 1) NOT GLOB '*-.*'
     )
   ),
   phone TEXT CHECK (
     phone IS NULL OR (
       instr(phone,char(0)) = 0 AND length(CAST(phone AS BLOB)) BETWEEN 8 AND 16 AND substr(phone,1,1) = '+' AND
-      substr(phone,2) <> '' AND substr(phone,2) NOT GLOB '*[^0-9]*'
+      substr(phone,2,1) GLOB '[1-9]' AND substr(phone,2) NOT GLOB '*[^0-9]*'
     )
   ),
   locale TEXT NOT NULL CHECK (instr(locale,char(0)) = 0 AND locale IN ('en','zh')),

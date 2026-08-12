@@ -143,6 +143,25 @@ describe('newcomer super-admin configuration mutations', () => {
     role: 'admin', isAdmin: true, isSuperAdmin: true, adminAreas: [],
   });
 
+  it('rejects coercible field types without invoking coercion or preparing SQL', async () => {
+    let coercions = 0;
+    let prepares = 0;
+    const hostileType = {
+      toString() { coercions += 1; return 'text'; },
+      valueOf() { coercions += 1; return 'text'; },
+      [Symbol.toPrimitive]() { coercions += 1; return 'text'; },
+    };
+    const untouchedDb = {
+      prepare() { prepares += 1; throw new Error('SQL must not be touched'); },
+      batch() { throw new Error('batch must not be touched'); },
+    } as AppDb;
+    await expect(createNewcomerField(untouchedDb, superAdmin, {
+      key: 'story', type: hostileType, required: false, active: true, sort: 8,
+      labelEn: 'Story', labelZh: '故事', helpEn: null, helpZh: null, options: [],
+    } as never)).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect({ coercions, prepares }).toEqual({ coercions: 0, prepares: 0 });
+  });
+
   it('creates custom statuses and atomically switches the one active open initial', async () => {
     const createdId = await createNewcomerStatus(env.DB, superAdmin, {
       key: 'reviewing', category: 'open', sort: 6, active: true,
