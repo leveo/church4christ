@@ -7,7 +7,7 @@ This guide gets you set up and explains those rules.
 
 ## Getting set up
 
-You need [Node.js](https://nodejs.org/) 22.12.0+. Then:
+You need [Node.js](https://nodejs.org/) 22.22.1+. Then:
 
 ```bash
 git clone https://github.com/leveo/church4christ.git

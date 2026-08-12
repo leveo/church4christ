@@ -26,7 +26,7 @@ hand it this file (see the README's "Build it with an AI assistant").
 
 ## Recommended: guided setup
 
-After installing Node.js 22.12.0 or newer and running `npm ci`, run the guided installer
+After installing Node.js 22.22.1 or newer and running `npm ci`, run the guided installer
 first:
 
 ```bash
@@ -73,7 +73,7 @@ setup's module initialization and first-admin bootstrap on a new installation.
 
 You need:
 
-- **[Node.js](https://nodejs.org/) 22.12.0 or newer** and the project installed locally
+- **[Node.js](https://nodejs.org/) 22.22.1 or newer** and the project installed locally
   with `npm ci`. The Cloudflare CLI, `wrangler`, comes with it.
 - A **free Cloudflare account** — sign up at [dash.cloudflare.com](https://dash.cloudflare.com/sign-up).
 - Optionally, a **domain** you want the site to live on (for example `church.yourname.com`).
