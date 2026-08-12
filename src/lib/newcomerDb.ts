@@ -7,6 +7,8 @@ import {
   normalizeNewcomerPhone,
   type NewcomerFieldType,
   type NewcomerQueueFilters,
+  type ValidatedNewcomerAnswer,
+  type ValidatedNewcomerIntake,
 } from './newcomerValidation';
 import type { SessionUser } from './types';
 
@@ -30,6 +32,11 @@ export class NewcomerLimitError extends Error {
 export class NewcomerConflictError extends Error {
   readonly code = 'newcomer_conflict' as const;
   constructor() { super('Newcomer data conflicts with current state'); this.name = 'NewcomerConflictError'; }
+}
+
+export class NewcomerEmailRequiredError extends Error {
+  readonly code = 'newcomer_email_required' as const;
+  constructor() { super('A current email is required to create a visitor'); this.name = 'NewcomerEmailRequiredError'; }
 }
 
 export class NewcomerPersistenceError extends Error {
@@ -1180,6 +1187,794 @@ function rethrowMutation(error: unknown): never {
   ) throw error;
   if (databaseConflict(error)) throw new NewcomerConflictError();
   throw new NewcomerPersistenceError();
+}
+
+export interface NewcomerMutationRuntime {
+  now: () => string;
+  randomUUID: () => string;
+}
+
+const RUNTIME_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function defaultMutationRuntime(): NewcomerMutationRuntime {
+  return {
+    now: () => new Date().toISOString().slice(0, 19).replace('T', ' '),
+    randomUUID: () => crypto.randomUUID(),
+  };
+}
+
+function mutationRuntime(
+  candidate: NewcomerMutationRuntime | undefined,
+  idCount: number,
+): { now: string; ids: string[] } {
+  const runtime = candidate ?? defaultMutationRuntime();
+  const captured = plainRow(runtime, ['now', 'randomUUID']);
+  if (!captured || typeof captured.now !== 'function' || typeof captured.randomUUID !== 'function') {
+    throw new NewcomerPersistenceError();
+  }
+  try {
+    const nowValue: unknown = Reflect.apply(captured.now, undefined, []);
+    if (timestamp(nowValue) === null) throw new NewcomerPersistenceError();
+    const ids: string[] = [];
+    for (let index = 0; index < idCount; index += 1) {
+      const value: unknown = Reflect.apply(captured.randomUUID, undefined, []);
+      if (typeof value !== 'string' || !RUNTIME_UUID.test(value) || ids.includes(value)) {
+        throw new NewcomerPersistenceError();
+      }
+      ids.push(value);
+    }
+    return { now: nowValue as string, ids };
+  } catch (error) {
+    if (error instanceof NewcomerPersistenceError) throw error;
+    throw new NewcomerPersistenceError();
+  }
+}
+
+function safeValidatedIntake(value: unknown): ValidatedNewcomerIntake {
+  const row = plainRow(value, [
+    'name', 'email', 'phone', 'locale', 'visitDate', 'serviceTypeId', 'contactConsent', 'answers',
+  ]);
+  if (!row) throw new NewcomerInvalidError();
+  const name = typeof row.name === 'string' ? boundedSettingText(row.name, 200) : null;
+  if (!name || /[\x00-\x1f\x7f]/.test(name) || name !== row.name) throw new NewcomerInvalidError();
+  let email: string | null = null;
+  if (row.email !== null) {
+    const normalized = normalizeNewcomerEmail(row.email);
+    if (!normalized.ok || normalized.value !== row.email) throw new NewcomerInvalidError();
+    email = normalized.value;
+  }
+  let phone: string | null = null;
+  if (row.phone !== null) {
+    const normalized = normalizeNewcomerPhone(row.phone);
+    if (!normalized.ok || normalized.value !== row.phone) throw new NewcomerInvalidError();
+    phone = normalized.value;
+  }
+  if (email === null && phone === null) throw new NewcomerInvalidError();
+  if ((row.locale !== 'en' && row.locale !== 'zh')
+    || typeof row.visitDate !== 'string' || !isValidDateStr(row.visitDate)
+    || typeof row.contactConsent !== 'boolean') throw new NewcomerInvalidError();
+  const serviceTypeId = row.serviceTypeId === null ? null : positiveId(row.serviceTypeId);
+  if (row.serviceTypeId !== null && serviceTypeId === null) throw new NewcomerInvalidError();
+  const candidates = capturedArray(row.answers, NEWCOMER_DB_LIMITS.answers);
+  if (!candidates) throw new NewcomerInvalidError();
+  const answers: ValidatedNewcomerAnswer[] = [];
+  let previousFieldId = 7;
+  let totalBytes = 0;
+  for (const candidate of candidates) {
+    const answer = plainRow(candidate, ['fieldId', 'value']);
+    const fieldId = answer ? positiveId(answer.fieldId) : null;
+    const answerValue = answer ? normalizedText(answer.value, 4_000) : null;
+    if (fieldId === null || fieldId <= previousFieldId || answerValue === null || answerValue.length === 0) {
+      throw new NewcomerInvalidError();
+    }
+    totalBytes += UTF8.encode(answerValue).byteLength;
+    if (totalBytes > 32 * 1024) throw new NewcomerInvalidError();
+    answers.push({ fieldId, value: answerValue });
+    previousFieldId = fieldId;
+  }
+  return {
+    name,
+    email,
+    phone,
+    locale: row.locale,
+    visitDate: row.visitDate,
+    serviceTypeId,
+    contactConsent: row.contactConsent,
+    answers,
+  };
+}
+
+function mutationGuard(db: AppDb, predicate: string, values: unknown[]) {
+  return db.prepare(`
+    INSERT INTO newcomer_status_i18n (status_id,locale,label)
+    SELECT 0,'en','guard' WHERE ${predicate}
+  `).bind(...values);
+}
+
+export async function createNewcomerSubmission(
+  db: AppDb,
+  user: SessionUser | null,
+  mode: 'public' | 'staff',
+  input: ValidatedNewcomerIntake,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ id: string; version: 0 }> {
+  if (mode !== 'public' && mode !== 'staff') throw new NewcomerInvalidError();
+  if (mode === 'staff') assertPrivateAccess(user);
+  const captured = safeValidatedIntake(input);
+  if (mode === 'public' && !captured.contactConsent) throw new NewcomerInvalidError();
+  const generated = mutationRuntime(runtime, 2);
+  const [submissionId, activityId] = generated.ids;
+  const actorPersonId = mode === 'staff' ? user!.id : null;
+  const consentAt = captured.contactConsent ? generated.now : null;
+  const answerStatements = captured.answers.map((answer) => db.prepare(`
+    INSERT INTO newcomer_answers (submission_id,field_id,value)
+    SELECT submission.id,field.id,?1
+    FROM newcomer_submissions submission
+    JOIN newcomer_fields field ON field.id=?2 AND field.id>7 AND field.active=1
+    WHERE submission.id=?3 AND (
+      (field.type='select' AND EXISTS (
+        SELECT 1 FROM newcomer_field_options option
+        WHERE option.field_id=field.id AND option.value=?1 AND option.active=1
+      )) OR
+      (field.type='checkbox' AND ?1 IN ('true','false')) OR
+      field.type IN ('text','textarea')
+    )
+  `).bind(answer.value, answer.fieldId, submissionId));
+  const expectedAnswers = captured.answers.length;
+  const statements = [
+    // All Task 3 field configuration writes take this same row mutex. It closes
+    // the READ COMMITTED phantom window while required/active/options are rechecked.
+    db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
+    // Updating an initial status must first update the current initial row, so
+    // this lock makes selecting the initial status stable for the whole batch.
+    db.prepare(`UPDATE newcomer_statuses SET sort=sort
+      WHERE active=1 AND category='open' AND is_initial=1 RETURNING id`),
+    db.prepare(`UPDATE service_types SET sort=sort
+      WHERE id=? AND deleted_at IS NULL RETURNING id`).bind(captured.serviceTypeId),
+    db.prepare(`
+      INSERT INTO newcomer_submissions (
+        id,name,email,phone,locale,visit_date,service_type_id,contact_consent_at,source,
+        status_id,version,last_mutation_id,created_at,updated_at
+      )
+      SELECT ?1,?2,?3,?4,?5,?6,CAST(?7 AS INTEGER),?8,?9,status.id,0,NULL,?10,?10
+      FROM newcomer_statuses status
+      WHERE status.active=1 AND status.category='open' AND status.is_initial=1
+        AND (CAST(?7 AS INTEGER) IS NULL OR EXISTS (
+          SELECT 1 FROM service_types service
+          WHERE service.id=CAST(?7 AS INTEGER) AND service.deleted_at IS NULL
+        ))
+    `).bind(
+      submissionId, captured.name, captured.email, captured.phone, captured.locale,
+      captured.visitDate, captured.serviceTypeId, consentAt, mode, generated.now,
+    ),
+    ...answerStatements,
+    db.prepare(`
+      INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+      SELECT ?1,submission.id,?2,'submission_created','{}',?3
+      FROM newcomer_submissions submission WHERE submission.id=?4
+    `).bind(activityId, actorPersonId, generated.now, submissionId),
+    mutationGuard(db, `
+      NOT EXISTS (
+        SELECT 1 FROM newcomer_submissions submission
+        JOIN newcomer_statuses status ON status.id=submission.status_id
+        WHERE submission.id=?1 AND submission.deleted_at IS NULL AND submission.version=0
+          AND submission.last_mutation_id IS NULL
+          AND status.active=1 AND status.category='open' AND status.is_initial=1
+          AND (CAST(?2 AS INTEGER) IS NULL OR EXISTS (
+            SELECT 1 FROM service_types service
+            WHERE service.id=CAST(?2 AS INTEGER) AND service.deleted_at IS NULL
+          ))
+      ) OR
+      (SELECT COUNT(*) FROM newcomer_answers WHERE submission_id=?1)<>?3 OR
+      EXISTS (
+        SELECT 1 FROM newcomer_fields field
+        WHERE field.id>7 AND field.active=1 AND field.required=1
+          AND NOT EXISTS (
+            SELECT 1 FROM newcomer_answers answer
+            WHERE answer.submission_id=?1 AND answer.field_id=field.id
+          )
+      ) OR
+      EXISTS (
+        SELECT 1 FROM newcomer_answers answer
+        JOIN newcomer_fields field ON field.id=answer.field_id
+        WHERE answer.submission_id=?1 AND (field.id<=7 OR field.active<>1 OR
+          (field.type='select' AND NOT EXISTS (
+            SELECT 1 FROM newcomer_field_options option
+            WHERE option.field_id=field.id AND option.value=answer.value AND option.active=1
+          )) OR
+          (field.type='checkbox' AND answer.value NOT IN ('true','false')))
+      ) OR
+      NOT EXISTS (
+        SELECT 1 FROM newcomer_activity
+        WHERE id=?4 AND submission_id=?1
+          AND ${actorPredicate('?5')}
+          AND kind='submission_created' AND metadata_json='{}' AND created_at=?6
+      )
+    `, [submissionId, captured.serviceTypeId, expectedAnswers, activityId, actorPersonId, generated.now]),
+  ];
+  try {
+    const results = batchResults(await db.batch(statements), statements.length);
+    for (const result of results) resultRows(result, 101);
+    return { id: submissionId, version: 0 };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+interface CapturedCas {
+  submissionId: string;
+  expectedVersion: number;
+}
+
+function capturedCas(row: DataRow | null): CapturedCas {
+  const submissionId = row && validUuid(row.submissionId) ? row.submissionId : null;
+  const expectedVersion = row ? integer(row.expectedVersion) : null;
+  if (!submissionId || expectedVersion === null || expectedVersion < 0 || expectedVersion >= 2_147_483_647) {
+    throw new NewcomerInvalidError();
+  }
+  return { submissionId, expectedVersion };
+}
+
+function casClaim(
+  db: AppDb,
+  captured: CapturedCas,
+  mutationId: string,
+  now: string,
+) {
+  return db.prepare(`
+    UPDATE newcomer_submissions
+    SET version=version+1,last_mutation_id=?1,updated_at=?2
+    WHERE id=?3 AND version=?4 AND deleted_at IS NULL
+    RETURNING version
+  `).bind(mutationId, now, captured.submissionId, captured.expectedVersion);
+}
+
+const AUTHORIZED_NEWCOMER_PERSON_SQL = `
+  person.active=1 AND person.deleted_at IS NULL AND (
+    (person.role='admin' AND person.super_admin=1) OR
+    (',' || person.admin_areas || ',') LIKE '%,newcomers,%'
+  )
+`;
+
+function actorPredicate(parameter: string): string {
+  const typed = `CAST(${parameter} AS INTEGER)`;
+  return `((${typed} IS NULL AND actor_person_id IS NULL)
+    OR (${typed} IS NOT NULL AND actor_person_id=${typed}))`;
+}
+
+async function executeMutationBatch(db: AppDb, statements: ReturnType<AppDb['prepare']>[]): Promise<void> {
+  const results = batchResults(await db.batch(statements), statements.length);
+  for (const result of results) resultRows(result, 101);
+}
+
+export interface AssignNewcomerInput {
+  submissionId: string;
+  expectedVersion: number;
+  assigneePersonId: number | null;
+}
+
+export async function assignNewcomer(
+  db: AppDb,
+  user: SessionUser | null,
+  input: AssignNewcomerInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number }> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'assigneePersonId']);
+  const captured = capturedCas(row);
+  const target = row?.assigneePersonId === null ? null : positiveId(row?.assigneePersonId);
+  if (row?.assigneePersonId !== null && target === null) throw new NewcomerInvalidError();
+  const generated = mutationRuntime(runtime, 2);
+  const [mutationId, activityId] = generated.ids;
+  const changed = (parameter: string) => `(
+    (CAST(${parameter} AS INTEGER) IS NULL AND submission.assignee_person_id IS NOT NULL) OR
+    (CAST(${parameter} AS INTEGER) IS NOT NULL AND (submission.assignee_person_id IS NULL
+      OR submission.assignee_person_id<>CAST(${parameter} AS INTEGER)))
+  )`;
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        UPDATE people AS person SET updated_at=person.updated_at
+        WHERE person.id=CAST(?1 AS INTEGER) AND CAST(?1 AS INTEGER) IS NOT NULL
+          AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
+          AND EXISTS (
+            SELECT 1 FROM newcomer_submissions submission
+            WHERE submission.id=?2 AND submission.last_mutation_id=?3
+          )
+        RETURNING id
+      `).bind(target, captured.submissionId, mutationId),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'assigned',
+          CASE
+            WHEN submission.assignee_person_id IS NULL
+              THEN '{"to_assignee_person_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
+            WHEN CAST(?3 AS INTEGER) IS NULL
+              THEN '{"from_assignee_person_id":' || CAST(submission.assignee_person_id AS TEXT) || '}'
+            ELSE '{"from_assignee_person_id":' || CAST(submission.assignee_person_id AS TEXT)
+              || ',"to_assignee_person_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
+          END,
+          ?4
+        FROM newcomer_submissions submission
+        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND ${changed('?3')}
+          AND (CAST(?3 AS INTEGER) IS NULL OR EXISTS (
+            SELECT 1 FROM people person WHERE person.id=CAST(?3 AS INTEGER)
+              AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
+          ))
+      `).bind(activityId, user.id, target, generated.now, captured.submissionId, mutationId),
+      db.prepare(`
+        UPDATE newcomer_submissions AS submission SET assignee_person_id=CAST(?1 AS INTEGER)
+        WHERE submission.id=?2 AND submission.last_mutation_id=?3 AND ${changed('?1')}
+          AND (CAST(?1 AS INTEGER) IS NULL OR EXISTS (
+            SELECT 1 FROM people person WHERE person.id=CAST(?1 AS INTEGER)
+              AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
+          ))
+      `).bind(target, captured.submissionId, mutationId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2
+            AND submission.version=?3
+            AND ((CAST(?4 AS INTEGER) IS NULL AND submission.assignee_person_id IS NULL)
+              OR (CAST(?4 AS INTEGER) IS NOT NULL
+                AND submission.assignee_person_id=CAST(?4 AS INTEGER)))
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity
+          WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
+            AND kind='assigned' AND created_at=?7 AND (
+              (CAST(?4 AS INTEGER) IS NULL
+                AND metadata_json LIKE '{"from_assignee_person_id":%}') OR
+              (CAST(?4 AS INTEGER) IS NOT NULL AND (
+                metadata_json='{"to_assignee_person_id":'
+                  || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}' OR
+                (metadata_json LIKE '{"from_assignee_person_id":%,"to_assignee_person_id":'
+                  || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
+                  AND metadata_json<>'{"from_assignee_person_id":'
+                    || CAST(CAST(?4 AS INTEGER) AS TEXT) || ',"to_assignee_person_id":'
+                    || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}')
+              ))
+            )
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, target,
+        activityId, user.id, generated.now,
+      ]),
+    ];
+    await executeMutationBatch(db, statements);
+    return { version: captured.expectedVersion + 1 };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface ChangeNewcomerStatusInput {
+  submissionId: string;
+  expectedVersion: number;
+  statusId: number;
+}
+
+export async function changeNewcomerStatus(
+  db: AppDb,
+  user: SessionUser | null,
+  input: ChangeNewcomerStatusInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number }> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'statusId']);
+  const captured = capturedCas(row);
+  const statusId = positiveId(row?.statusId);
+  if (statusId === null) throw new NewcomerInvalidError();
+  const generated = mutationRuntime(runtime, 2);
+  const [mutationId, activityId] = generated.ids;
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        UPDATE newcomer_statuses AS status SET sort=status.sort
+        WHERE status.id=?1 AND status.active=1 AND EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          WHERE submission.id=?2 AND submission.last_mutation_id=?3
+        )
+        RETURNING id
+      `).bind(statusId, captured.submissionId, mutationId),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'status_changed',
+          '{"from_status_id":' || CAST(submission.status_id AS TEXT)
+            || ',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}',?4
+        FROM newcomer_submissions submission
+        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND submission.status_id<>?3
+          AND EXISTS (SELECT 1 FROM newcomer_statuses status WHERE status.id=?3 AND status.active=1)
+      `).bind(activityId, user.id, statusId, generated.now, captured.submissionId, mutationId),
+      db.prepare(`
+        UPDATE newcomer_submissions AS submission SET
+          status_id=?1,
+          closed_at=CASE
+            WHEN (SELECT category FROM newcomer_statuses WHERE id=?1)='open' THEN NULL
+            WHEN submission.closed_at IS NULL THEN ?2
+            ELSE submission.closed_at
+          END
+        WHERE submission.id=?3 AND submission.last_mutation_id=?4 AND submission.status_id<>?1
+          AND EXISTS (SELECT 1 FROM newcomer_statuses status WHERE status.id=?1 AND status.active=1)
+      `).bind(statusId, generated.now, captured.submissionId, mutationId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          JOIN newcomer_statuses status ON status.id=submission.status_id
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+            AND submission.status_id=?4 AND status.active=1
+            AND ((status.category='open' AND submission.closed_at IS NULL)
+              OR (status.category='closed' AND submission.closed_at IS NOT NULL))
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity
+          WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
+            AND kind='status_changed' AND created_at=?7
+            AND metadata_json LIKE '{"from_status_id":%,"to_status_id":'
+              || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
+            AND metadata_json<>'{"from_status_id":'
+              || CAST(CAST(?4 AS INTEGER) AS TEXT) || ',"to_status_id":'
+              || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, statusId,
+        activityId, user.id, generated.now,
+      ]),
+    ];
+    await executeMutationBatch(db, statements);
+    return { version: captured.expectedVersion + 1 };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface ScheduleNewcomerFollowUpInput {
+  submissionId: string;
+  expectedVersion: number;
+  followUpDate: string | null;
+}
+
+export async function scheduleNewcomerFollowUp(
+  db: AppDb,
+  user: SessionUser | null,
+  input: ScheduleNewcomerFollowUpInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number }> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'followUpDate']);
+  const captured = capturedCas(row);
+  const followUpDate = row?.followUpDate === null
+    ? null
+    : typeof row?.followUpDate === 'string' && isValidDateStr(row.followUpDate)
+      ? row.followUpDate : undefined;
+  if (followUpDate === undefined) throw new NewcomerInvalidError();
+  const metadata = followUpDate === null ? '{}' : JSON.stringify({ follow_up_date: followUpDate });
+  const generated = mutationRuntime(runtime, 2);
+  const [mutationId, activityId] = generated.ids;
+  const changed = (parameter: string) => `(
+    (CAST(${parameter} AS TEXT) IS NULL AND submission.next_follow_up_date IS NOT NULL) OR
+    (CAST(${parameter} AS TEXT) IS NOT NULL AND (submission.next_follow_up_date IS NULL
+      OR submission.next_follow_up_date<>CAST(${parameter} AS TEXT)))
+  )`;
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'follow_up_scheduled',?3,?4
+        FROM newcomer_submissions submission
+        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND ${changed('?7')}
+      `).bind(activityId, user.id, metadata, generated.now, captured.submissionId, mutationId, followUpDate),
+      db.prepare(`
+        UPDATE newcomer_submissions AS submission SET next_follow_up_date=CAST(?1 AS TEXT)
+        WHERE submission.id=?2 AND submission.last_mutation_id=?3 AND ${changed('?1')}
+      `).bind(followUpDate, captured.submissionId, mutationId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+            AND ((CAST(?4 AS TEXT) IS NULL AND submission.next_follow_up_date IS NULL)
+              OR (CAST(?4 AS TEXT) IS NOT NULL
+                AND submission.next_follow_up_date=CAST(?4 AS TEXT)))
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity
+          WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
+            AND kind='follow_up_scheduled' AND metadata_json=?7 AND created_at=?8
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, followUpDate,
+        activityId, user.id, metadata, generated.now,
+      ]),
+    ];
+    await executeMutationBatch(db, statements);
+    return { version: captured.expectedVersion + 1 };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface AddNewcomerNoteInput {
+  submissionId: string;
+  expectedVersion: number;
+  body: string;
+}
+
+function safeNoteBody(value: unknown): string {
+  if (typeof value !== 'string') throw new NewcomerInvalidError();
+  let body: string;
+  try { body = value.normalize('NFC').trim(); }
+  catch { throw new NewcomerInvalidError(); }
+  if (!body || UTF8.encode(body).byteLength > 10_000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(body)) {
+    throw new NewcomerInvalidError();
+  }
+  return body;
+}
+
+export async function addNewcomerNote(
+  db: AppDb,
+  user: SessionUser | null,
+  input: AddNewcomerNoteInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number; noteId: string }> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'body']);
+  const captured = capturedCas(row);
+  const body = safeNoteBody(row?.body);
+  const generated = mutationRuntime(runtime, 3);
+  const [mutationId, noteId, activityId] = generated.ids;
+  const metadata = JSON.stringify({ note_id: noteId });
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        INSERT INTO newcomer_notes (id,submission_id,author_person_id,body,created_at)
+        SELECT ?1,submission.id,?2,?3,?4
+        FROM newcomer_submissions submission
+        WHERE submission.id=?5 AND submission.last_mutation_id=?6
+      `).bind(noteId, user.id, body, generated.now, captured.submissionId, mutationId),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,note.submission_id,?2,'note_added',?3,?4
+        FROM newcomer_notes note
+        JOIN newcomer_submissions submission ON submission.id=note.submission_id
+          AND submission.last_mutation_id=?5
+        WHERE note.id=?6 AND note.submission_id=?7
+      `).bind(activityId, user.id, metadata, generated.now, mutationId, noteId, captured.submissionId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_notes note
+          WHERE note.id=?4 AND note.submission_id=?1 AND note.author_person_id=?5
+            AND note.body=?6 AND note.created_at=?7
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity
+          WHERE id=?8 AND submission_id=?1 AND ${actorPredicate('?5')}
+            AND kind='note_added' AND metadata_json=?9 AND created_at=?7
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_notes WHERE id=?4)<>1 OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?8)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, noteId, user.id,
+        body, generated.now, activityId, metadata,
+      ]),
+    ];
+    await executeMutationBatch(db, statements);
+    return { version: captured.expectedVersion + 1, noteId };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface LinkNewcomerPersonInput {
+  submissionId: string;
+  expectedVersion: number;
+  personId: number;
+}
+
+const NORMALIZED_PERSON_PHONE_SQL = `('+' || replace(replace(replace(replace(replace(
+  substr(trim(person.phone),2),' ',''),'(',''),')',''),'-',''),'.',''))`;
+
+const PERSON_CONTACT_MATCH_SQL = `(
+  (submission.email IS NOT NULL AND person.email=submission.email) OR
+  (submission.phone IS NOT NULL AND substr(trim(person.phone),1,1)='+'
+    AND ${NORMALIZED_PERSON_PHONE_SQL}=submission.phone)
+)`;
+
+export async function linkNewcomerPerson(
+  db: AppDb,
+  user: SessionUser | null,
+  input: LinkNewcomerPersonInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number }> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'personId']);
+  const captured = capturedCas(row);
+  const personId = positiveId(row?.personId);
+  if (personId === null) throw new NewcomerInvalidError();
+  const generated = mutationRuntime(runtime, 2);
+  const [mutationId, activityId] = generated.ids;
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        UPDATE people AS person SET updated_at=person.updated_at
+        WHERE person.id=?1 AND person.active=1 AND person.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM newcomer_submissions submission
+            WHERE submission.id=?2 AND submission.last_mutation_id=?3
+              AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?1)
+              AND ${PERSON_CONTACT_MATCH_SQL}
+          )
+        RETURNING id
+      `).bind(personId, captured.submissionId, mutationId),
+      db.prepare(`
+        UPDATE newcomer_submissions AS submission SET linked_person_id=?1
+        WHERE submission.id=?2 AND submission.last_mutation_id=?3
+          AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?1)
+          AND EXISTS (
+            SELECT 1 FROM people person
+            WHERE person.id=?1 AND person.active=1 AND person.deleted_at IS NULL
+              AND ${PERSON_CONTACT_MATCH_SQL}
+          )
+      `).bind(personId, captured.submissionId, mutationId),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'person_linked',
+          '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3
+        FROM newcomer_submissions submission
+        WHERE submission.id=?4 AND submission.last_mutation_id=?5
+          AND submission.linked_person_id=?6
+      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId, personId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          JOIN people person ON person.id=submission.linked_person_id
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+            AND submission.linked_person_id=?4 AND person.active=1 AND person.deleted_at IS NULL
+            AND ${PERSON_CONTACT_MATCH_SQL}
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity
+          WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
+            AND kind='person_linked' AND metadata_json=?7 AND created_at=?8
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, personId,
+        activityId, user.id, JSON.stringify({ person_id: personId }), generated.now,
+      ]),
+    ];
+    await executeMutationBatch(db, statements);
+    return { version: captured.expectedVersion + 1 };
+  } catch (error) {
+    rethrowMutation(error);
+  }
+}
+
+export interface CreateNewcomerVisitorInput {
+  submissionId: string;
+  expectedVersion: number;
+}
+
+async function visitorEmailMissingAfterRollback(db: AppDb, captured: CapturedCas): Promise<boolean> {
+  try {
+    const result = await db.prepare(`
+      SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM newcomer_submissions
+        WHERE id=?1 AND version=?2 AND deleted_at IS NULL AND email IS NULL
+      ) THEN 1 ELSE 0 END AS email_missing
+    `).bind(captured.submissionId, captured.expectedVersion).first<unknown>();
+    const row = plainRow(result, ['email_missing']);
+    const missing = row ? bool(row.email_missing) : null;
+    if (missing === null) throw new NewcomerPersistenceError();
+    return missing;
+  } catch (error) {
+    if (error instanceof NewcomerPersistenceError) throw error;
+    throw new NewcomerPersistenceError();
+  }
+}
+
+export async function createNewcomerVisitor(
+  db: AppDb,
+  user: SessionUser | null,
+  input: CreateNewcomerVisitorInput,
+  runtime?: NewcomerMutationRuntime,
+): Promise<{ version: number; personId: number }> {
+  assertPrivateAccess(user);
+  if (!hasAreaAccess(user, 'people')) throw new NewcomerForbiddenError();
+  const row = plainRow(input, ['submissionId', 'expectedVersion']);
+  const captured = capturedCas(row);
+  const generated = mutationRuntime(runtime, 2);
+  const [mutationId, activityId] = generated.ids;
+  try {
+    const statements = [
+      casClaim(db, captured, mutationId, generated.now),
+      db.prepare(`
+        INSERT INTO people (
+          first_name,last_name,display_name,email,phone,avatar_url,role,active,session_epoch,
+          calendar_token,lang,created_at,updated_at,deleted_at,birthday,address,membership_status,
+          joined_on,finance,stripe_customer_id,super_admin,admin_areas,pending_email
+        )
+        SELECT '','',submission.name,submission.email,submission.phone,NULL,'member',1,0,
+          NULL,submission.locale,?1,?1,NULL,NULL,NULL,'visitor',NULL,0,NULL,0,'',NULL
+        FROM newcomer_submissions submission
+        WHERE submission.id=?2 AND submission.last_mutation_id=?3
+          AND submission.email IS NOT NULL AND submission.linked_person_id IS NULL
+        RETURNING id
+      `).bind(generated.now, captured.submissionId, mutationId),
+      db.prepare(`
+        UPDATE newcomer_submissions AS submission SET linked_person_id=(
+          SELECT person.id FROM people person
+          WHERE person.email=submission.email AND person.deleted_at IS NULL
+        )
+        WHERE submission.id=?1 AND submission.last_mutation_id=?2
+          AND submission.email IS NOT NULL AND submission.linked_person_id IS NULL
+      `).bind(captured.submissionId, mutationId),
+      db.prepare(`
+        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        SELECT ?1,submission.id,?2,'visitor_created',
+          '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3
+        FROM newcomer_submissions submission
+        WHERE submission.id=?4 AND submission.last_mutation_id=?5
+          AND submission.linked_person_id IS NOT NULL
+      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId),
+      mutationGuard(db, `
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_submissions submission
+          JOIN people person ON person.id=submission.linked_person_id
+          WHERE submission.id=?1 AND submission.last_mutation_id=?2 AND submission.version=?3
+            AND submission.email IS NOT NULL AND person.email=submission.email
+            AND person.first_name='' AND person.last_name='' AND person.display_name=submission.name
+            AND ((submission.phone IS NULL AND person.phone IS NULL) OR person.phone=submission.phone)
+            AND person.avatar_url IS NULL AND person.role='member' AND person.active=1
+            AND person.session_epoch=0 AND person.calendar_token IS NULL AND person.lang=submission.locale
+            AND person.deleted_at IS NULL AND person.birthday IS NULL AND person.address IS NULL
+            AND person.membership_status='visitor' AND person.joined_on IS NULL AND person.finance=0
+            AND person.stripe_customer_id IS NULL AND person.super_admin=0 AND person.admin_areas=''
+            AND person.pending_email IS NULL AND person.created_at=?4 AND person.updated_at=?4
+        ) OR
+        NOT EXISTS (
+          SELECT 1 FROM newcomer_activity activity
+          JOIN newcomer_submissions submission ON submission.id=activity.submission_id
+          WHERE activity.id=?5 AND activity.submission_id=?1 AND ${actorPredicate('?6')}
+            AND activity.kind='visitor_created' AND activity.created_at=?4
+            AND activity.metadata_json='{"person_id":'
+              || CAST(submission.linked_person_id AS TEXT) || '}'
+            AND submission.last_mutation_id=?2
+        ) OR
+        (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
+      `, [
+        captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
+        activityId, user.id,
+      ]),
+    ];
+    const results = batchResults(await db.batch(statements), statements.length);
+    for (const result of results) resultRows(result, 101);
+    const createdRows = resultRows(results[1], 1);
+    if (createdRows.length !== 1) throw new NewcomerPersistenceError();
+    const created = plainRow(createdRows[0], ['id']);
+    const personId = created ? positiveId(created.id) : null;
+    if (personId === null) throw new NewcomerPersistenceError();
+    return { version: captured.expectedVersion + 1, personId };
+  } catch (error) {
+    if (error instanceof NewcomerInvalidError || error instanceof NewcomerForbiddenError
+      || error instanceof NewcomerPersistenceError) throw error;
+    if (error instanceof NewcomerConflictError || databaseConflict(error)) {
+      if (await visitorEmailMissingAfterRollback(db, captured)) throw new NewcomerEmailRequiredError();
+      throw new NewcomerConflictError();
+    }
+    throw new NewcomerPersistenceError();
+  }
 }
 
 export interface CreateNewcomerStatusInput {
