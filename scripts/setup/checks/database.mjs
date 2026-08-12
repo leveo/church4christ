@@ -25,7 +25,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'groups', 'group_members', 'group_join_requests', 'group_events', 'group_event_occurrences',
     'group_attendance', 'group_attendance_tokens',
   ]),
-  people: Object.freeze(['households', 'household_members', 'person_notes']),
+  people: Object.freeze(['households', 'household_members', 'person_notes', 'audit_events']),
   children: Object.freeze(['checkin_events', 'checkins', 'households', 'household_members']),
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
