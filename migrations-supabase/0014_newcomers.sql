@@ -3,13 +3,13 @@
 
 CREATE OR REPLACE FUNCTION newcomer_valid_uuid(value text)
 RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
-  SELECT value ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  SELECT octet_length(value) = 36 AND value ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 $$;
 
 CREATE OR REPLACE FUNCTION newcomer_valid_date(value text)
 RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
 BEGIN
-  IF value !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' OR substr(value,1,4) = '0000' THEN
+  IF octet_length(value) <> 10 OR value !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' OR substr(value,1,4) = '0000' THEN
     RETURN false;
   END IF;
   RETURN to_char(value::date, 'YYYY-MM-DD') = value;
@@ -21,7 +21,7 @@ $$;
 CREATE OR REPLACE FUNCTION newcomer_valid_timestamp(value text)
 RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
 BEGIN
-  IF value !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+  IF octet_length(value) <> 19 OR value !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
      OR substr(value,1,4) = '0000' THEN
     RETURN false;
   END IF;
@@ -39,7 +39,7 @@ DECLARE
   ascii_code integer;
 BEGIN
   IF value IS NULL THEN RETURN true; END IF;
-  IF value <> lower(trim(value)) OR length(value) NOT BETWEEN 3 AND 254 THEN RETURN false; END IF;
+  IF value <> lower(trim(value)) OR octet_length(value) NOT BETWEEN 3 AND 254 THEN RETURN false; END IF;
   at_position := position('@' IN value);
   IF at_position < 2 OR at_position >= length(value)
      OR position('@' IN substring(value FROM at_position + 1)) <> 0 THEN
@@ -63,7 +63,7 @@ DECLARE
   canonical text := '{';
   separator text := '';
 BEGIN
-  IF length(value) NOT BETWEEN 2 AND 512 THEN RETURN false; END IF;
+  IF octet_length(value) NOT BETWEEN 2 AND 512 THEN RETURN false; END IF;
   payload := value::jsonb;
   IF jsonb_typeof(payload) <> 'object' THEN RETURN false; END IF;
   FOR key_name IN SELECT jsonb_object_keys(payload) LOOP
@@ -121,7 +121,7 @@ CREATE INDEX idx_newcomer_statuses_active_sort
 CREATE TABLE newcomer_status_i18n (
   status_id INTEGER NOT NULL REFERENCES newcomer_statuses(id) ON DELETE CASCADE,
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
+  label TEXT NOT NULL CHECK (label = trim(label) AND octet_length(label) BETWEEN 1 AND 100),
   PRIMARY KEY (status_id, locale)
 );
 
@@ -140,7 +140,7 @@ INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES
 
 CREATE TABLE newcomer_fields (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
-  key TEXT NOT NULL UNIQUE CHECK (key ~ '^[a-z][a-z0-9_]{0,63}$'),
+  key TEXT NOT NULL UNIQUE CHECK (octet_length(key) BETWEEN 1 AND 64 AND key ~ '^[a-z][a-z0-9_]{0,63}$'),
   type TEXT NOT NULL CHECK (type IN ('text','textarea','select','checkbox')),
   required INTEGER NOT NULL DEFAULT 0 CHECK (required IN (0,1)),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
@@ -153,14 +153,14 @@ CREATE INDEX idx_newcomer_fields_active_sort
 CREATE TABLE newcomer_field_i18n (
   field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE CASCADE,
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
-  help TEXT CHECK (help IS NULL OR length(help) <= 500),
+  label TEXT NOT NULL CHECK (label = trim(label) AND octet_length(label) BETWEEN 1 AND 100),
+  help TEXT CHECK (help IS NULL OR octet_length(help) <= 500),
   PRIMARY KEY (field_id, locale)
 );
 
 CREATE TABLE newcomer_field_options (
   field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE CASCADE,
-  value TEXT NOT NULL CHECK (value ~ '^[a-z0-9][a-z0-9_-]{0,79}$'),
+  value TEXT NOT NULL CHECK (octet_length(value) BETWEEN 1 AND 80 AND value ~ '^[a-z0-9][a-z0-9_-]{0,79}$'),
   sort INTEGER NOT NULL DEFAULT 0 CHECK (sort BETWEEN 0 AND 100000),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   PRIMARY KEY (field_id, value)
@@ -170,9 +170,9 @@ CREATE INDEX idx_newcomer_options_field_sort
 
 CREATE TABLE newcomer_field_option_i18n (
   field_id INTEGER NOT NULL,
-  value TEXT NOT NULL,
+  value TEXT NOT NULL CHECK (octet_length(value) BETWEEN 1 AND 80),
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
+  label TEXT NOT NULL CHECK (label = trim(label) AND octet_length(label) BETWEEN 1 AND 100),
   PRIMARY KEY (field_id, value, locale),
   FOREIGN KEY (field_id, value)
     REFERENCES newcomer_field_options(field_id, value) ON DELETE CASCADE
@@ -266,20 +266,20 @@ EXECUTE FUNCTION newcomer_field_options_custom_guard();
 
 CREATE TABLE newcomer_submissions (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),
-  name TEXT CHECK (name IS NULL OR (name = trim(name) AND length(name) BETWEEN 1 AND 200)),
+  name TEXT CHECK (name IS NULL OR (name = trim(name) AND octet_length(name) BETWEEN 1 AND 200)),
   email TEXT CHECK (newcomer_valid_email(email)),
-  phone TEXT CHECK (phone IS NULL OR phone ~ '^\+[0-9]{7,15}$'),
+  phone TEXT CHECK (phone IS NULL OR (octet_length(phone) BETWEEN 8 AND 16 AND phone ~ '^\+[0-9]{7,15}$')),
   locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
   visit_date TEXT NOT NULL CHECK (newcomer_valid_date(visit_date)),
-  service_type_id INTEGER REFERENCES service_types(id),
+  service_type_id INTEGER REFERENCES service_types(id) ON DELETE SET NULL,
   contact_consent_at TEXT CHECK (contact_consent_at IS NULL OR newcomer_valid_timestamp(contact_consent_at)),
   source TEXT NOT NULL CHECK (source IN ('public','staff')),
-  status_id INTEGER NOT NULL DEFAULT 1 REFERENCES newcomer_statuses(id),
-  assignee_person_id INTEGER REFERENCES people(id),
-  linked_person_id INTEGER REFERENCES people(id),
+  status_id INTEGER NOT NULL DEFAULT 1 REFERENCES newcomer_statuses(id) ON DELETE RESTRICT,
+  assignee_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  linked_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   next_follow_up_date TEXT CHECK (next_follow_up_date IS NULL OR newcomer_valid_date(next_follow_up_date)),
   version INTEGER NOT NULL DEFAULT 0 CHECK (version BETWEEN 0 AND 2147483647),
-  last_mutation_id TEXT CHECK (last_mutation_id IS NULL OR length(last_mutation_id) BETWEEN 1 AND 64),
+  last_mutation_id TEXT CHECK (last_mutation_id IS NULL OR octet_length(last_mutation_id) BETWEEN 1 AND 64),
   closed_at TEXT CHECK (closed_at IS NULL OR newcomer_valid_timestamp(closed_at)),
   deleted_at TEXT CHECK (deleted_at IS NULL OR newcomer_valid_timestamp(deleted_at)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (newcomer_valid_timestamp(created_at)),
@@ -310,9 +310,10 @@ CREATE UNIQUE INDEX idx_newcomer_submissions_last_mutation
   WHERE last_mutation_id IS NOT NULL;
 
 CREATE TABLE newcomer_answers (
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  field_id INTEGER NOT NULL REFERENCES newcomer_fields(id),
-  value TEXT NOT NULL CHECK (length(value) <= 4000),
+  submission_id TEXT NOT NULL CHECK (octet_length(submission_id) = 36)
+    REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE RESTRICT,
+  value TEXT NOT NULL CHECK (octet_length(value) <= 4000),
   PRIMARY KEY (submission_id, field_id)
 );
 CREATE INDEX idx_newcomer_answers_field
@@ -336,9 +337,10 @@ EXECUTE FUNCTION newcomer_answers_custom_guard();
 
 CREATE TABLE newcomer_notes (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  author_person_id INTEGER NOT NULL REFERENCES people(id),
-  body TEXT NOT NULL CHECK (body = trim(body) AND length(body) BETWEEN 1 AND 10000),
+  submission_id TEXT NOT NULL CHECK (octet_length(submission_id) = 36)
+    REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  author_person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE RESTRICT,
+  body TEXT NOT NULL CHECK (body = trim(body) AND octet_length(body) BETWEEN 1 AND 10000),
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (newcomer_valid_timestamp(created_at))
 );
 CREATE INDEX idx_newcomer_notes_submission_created
@@ -346,8 +348,9 @@ CREATE INDEX idx_newcomer_notes_submission_created
 
 CREATE TABLE newcomer_activity (
   id TEXT PRIMARY KEY CHECK (newcomer_valid_uuid(id)),
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  actor_person_id INTEGER REFERENCES people(id),
+  submission_id TEXT NOT NULL CHECK (octet_length(submission_id) = 36)
+    REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  actor_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   kind TEXT NOT NULL CHECK (kind IN (
     'submission_created','assigned','status_changed','follow_up_scheduled',
     'note_added','person_linked','visitor_created'
@@ -361,7 +364,7 @@ CREATE INDEX idx_newcomer_activity_kind_created
   ON newcomer_activity(kind, created_at, id);
 
 CREATE TABLE newcomer_rate_limits (
-  bucket_hash TEXT NOT NULL CHECK (bucket_hash ~ '^[0-9a-f]{64}$'),
+  bucket_hash TEXT NOT NULL CHECK (octet_length(bucket_hash) = 64 AND bucket_hash ~ '^[0-9a-f]{64}$'),
   window_start TEXT NOT NULL CHECK (
     newcomer_valid_timestamp(window_start) AND substr(window_start,16,1) = '0' AND substr(window_start,18,2) = '00'
   ),
@@ -374,3 +377,44 @@ CREATE TABLE newcomer_rate_limits (
 );
 CREATE INDEX idx_newcomer_rate_limits_expires
   ON newcomer_rate_limits(expires_at, bucket_hash, window_start);
+
+-- Browser-facing Supabase roles receive no direct newcomer-table access.
+-- Server PostgreSQL/Hyperdrive connects as the table owner and is unaffected.
+ALTER TABLE newcomer_statuses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_status_i18n ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_field_i18n ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_field_options ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_field_option_i18n ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_answers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_activity ENABLE ROW LEVEL SECURITY;
+ALTER TABLE newcomer_rate_limits ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  client_role text;
+BEGIN
+  FOREACH client_role IN ARRAY ARRAY['anon','authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=client_role) THEN
+      EXECUTE format(
+        'REVOKE ALL ON TABLE
+          newcomer_statuses,
+          newcomer_status_i18n,
+          newcomer_fields,
+          newcomer_field_i18n,
+          newcomer_field_options,
+          newcomer_field_option_i18n,
+          newcomer_submissions,
+          newcomer_answers,
+          newcomer_notes,
+          newcomer_activity,
+          newcomer_rate_limits
+        FROM %I',
+        client_role
+      );
+    END IF;
+  END LOOP;
+END
+$$;

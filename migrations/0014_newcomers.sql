@@ -5,8 +5,8 @@
 
 CREATE TABLE newcomer_statuses (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
-  key TEXT NOT NULL UNIQUE CHECK (key IN ('new','assigned','contacted','connected','closed')),
-  category TEXT NOT NULL CHECK (category IN ('open','closed')),
+  key TEXT NOT NULL UNIQUE CHECK (instr(key,char(0)) = 0 AND key IN ('new','assigned','contacted','connected','closed')),
+  category TEXT NOT NULL CHECK (instr(category,char(0)) = 0 AND category IN ('open','closed')),
   sort INTEGER NOT NULL CHECK (sort BETWEEN 0 AND 100000),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   is_initial INTEGER NOT NULL DEFAULT 0 CHECK (is_initial IN (0,1)),
@@ -21,8 +21,10 @@ CREATE INDEX idx_newcomer_statuses_active_sort
 
 CREATE TABLE newcomer_status_i18n (
   status_id INTEGER NOT NULL REFERENCES newcomer_statuses(id) ON DELETE CASCADE,
-  locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
+  locale TEXT NOT NULL CHECK (instr(locale,char(0)) = 0 AND locale IN ('en','zh')),
+  label TEXT NOT NULL CHECK (
+    instr(label,char(0)) = 0 AND label = trim(label) AND length(CAST(label AS BLOB)) BETWEEN 1 AND 100
+  ),
   PRIMARY KEY (status_id, locale)
 ) WITHOUT ROWID;
 
@@ -43,10 +45,10 @@ CREATE TABLE newcomer_fields (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
   key TEXT NOT NULL UNIQUE
     CHECK (
-      length(key) BETWEEN 1 AND 64 AND key = lower(trim(key)) AND
+      instr(key,char(0)) = 0 AND length(CAST(key AS BLOB)) BETWEEN 1 AND 64 AND key = lower(trim(key)) AND
       substr(key, 1, 1) GLOB '[a-z]' AND key NOT GLOB '*[^a-z0-9_]*'
     ),
-  type TEXT NOT NULL CHECK (type IN ('text','textarea','select','checkbox')),
+  type TEXT NOT NULL CHECK (instr(type,char(0)) = 0 AND type IN ('text','textarea','select','checkbox')),
   required INTEGER NOT NULL DEFAULT 0 CHECK (required IN (0,1)),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   sort INTEGER NOT NULL DEFAULT 0 CHECK (sort BETWEEN 0 AND 100000),
@@ -58,9 +60,11 @@ CREATE INDEX idx_newcomer_fields_active_sort
 
 CREATE TABLE newcomer_field_i18n (
   field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE CASCADE,
-  locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
-  help TEXT CHECK (help IS NULL OR length(help) <= 500),
+  locale TEXT NOT NULL CHECK (instr(locale,char(0)) = 0 AND locale IN ('en','zh')),
+  label TEXT NOT NULL CHECK (
+    instr(label,char(0)) = 0 AND label = trim(label) AND length(CAST(label AS BLOB)) BETWEEN 1 AND 100
+  ),
+  help TEXT CHECK (help IS NULL OR (instr(help,char(0)) = 0 AND length(CAST(help AS BLOB)) <= 500)),
   PRIMARY KEY (field_id, locale)
 ) WITHOUT ROWID;
 
@@ -68,7 +72,7 @@ CREATE TABLE newcomer_field_options (
   field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE CASCADE,
   value TEXT NOT NULL
     CHECK (
-      length(value) BETWEEN 1 AND 80 AND value = lower(trim(value)) AND
+      instr(value,char(0)) = 0 AND length(CAST(value AS BLOB)) BETWEEN 1 AND 80 AND value = lower(trim(value)) AND
       substr(value, 1, 1) GLOB '[a-z0-9]' AND value NOT GLOB '*[^a-z0-9_-]*'
     ),
   sort INTEGER NOT NULL DEFAULT 0 CHECK (sort BETWEEN 0 AND 100000),
@@ -81,9 +85,11 @@ CREATE INDEX idx_newcomer_options_field_sort
 
 CREATE TABLE newcomer_field_option_i18n (
   field_id INTEGER NOT NULL,
-  value TEXT NOT NULL,
-  locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
-  label TEXT NOT NULL CHECK (label = trim(label) AND length(label) BETWEEN 1 AND 100),
+  value TEXT NOT NULL CHECK (instr(value,char(0)) = 0 AND length(CAST(value AS BLOB)) BETWEEN 1 AND 80),
+  locale TEXT NOT NULL CHECK (instr(locale,char(0)) = 0 AND locale IN ('en','zh')),
+  label TEXT NOT NULL CHECK (
+    instr(label,char(0)) = 0 AND label = trim(label) AND length(CAST(label AS BLOB)) BETWEEN 1 AND 100
+  ),
   PRIMARY KEY (field_id, value, locale),
   FOREIGN KEY (field_id, value)
     REFERENCES newcomer_field_options(field_id, value) ON DELETE CASCADE
@@ -161,15 +167,17 @@ END;
 CREATE TABLE newcomer_submissions (
   id TEXT PRIMARY KEY
     CHECK (
-      length(id) = 36 AND id = lower(id) AND
+      instr(id,char(0)) = 0 AND length(CAST(id AS BLOB)) = 36 AND id = lower(id) AND
       substr(id,9,1) = '-' AND substr(id,14,1) = '-' AND
       substr(id,19,1) = '-' AND substr(id,24,1) = '-' AND
       length(replace(id,'-','')) = 32 AND id NOT GLOB '*[^0-9a-f-]*'
     ),
-  name TEXT CHECK (name IS NULL OR (name = trim(name) AND length(name) BETWEEN 1 AND 200)),
+  name TEXT CHECK (name IS NULL OR (
+    instr(name,char(0)) = 0 AND name = trim(name) AND length(CAST(name AS BLOB)) BETWEEN 1 AND 200
+  )),
   email TEXT CHECK (
     email IS NULL OR (
-      email = lower(trim(email)) AND length(email) BETWEEN 3 AND 254 AND
+      email = lower(trim(email)) AND length(CAST(email AS BLOB)) BETWEEN 3 AND 254 AND
       instr(email,'@') BETWEEN 2 AND length(email) - 1 AND
       instr(substr(email,instr(email,'@') + 1),'@') = 0 AND
       instr(email,char(0)) = 0 AND
@@ -178,24 +186,26 @@ CREATE TABLE newcomer_submissions (
   ),
   phone TEXT CHECK (
     phone IS NULL OR (
-      length(phone) BETWEEN 8 AND 16 AND substr(phone,1,1) = '+' AND
+      instr(phone,char(0)) = 0 AND length(CAST(phone AS BLOB)) BETWEEN 8 AND 16 AND substr(phone,1,1) = '+' AND
       substr(phone,2) <> '' AND substr(phone,2) NOT GLOB '*[^0-9]*'
     )
   ),
-  locale TEXT NOT NULL CHECK (locale IN ('en','zh')),
+  locale TEXT NOT NULL CHECK (instr(locale,char(0)) = 0 AND locale IN ('en','zh')),
   visit_date TEXT NOT NULL
     CHECK (
-      length(visit_date) = 10 AND substr(visit_date,5,1) = '-' AND substr(visit_date,8,1) = '-' AND
+      instr(visit_date,char(0)) = 0 AND length(CAST(visit_date AS BLOB)) = 10 AND
+      substr(visit_date,5,1) = '-' AND substr(visit_date,8,1) = '-' AND
       substr(visit_date,1,4) BETWEEN '0001' AND '9999' AND
       substr(visit_date,6,2) BETWEEN '01' AND '12' AND substr(visit_date,9,2) BETWEEN '01' AND '31' AND
       (substr(visit_date,6,2) NOT IN ('04','06','09','11') OR substr(visit_date,9,2) <= '30') AND
       (substr(visit_date,6,2) <> '02' OR substr(visit_date,9,2) <= '29') AND
       (date(visit_date,'+0 days') = visit_date) IS TRUE
     ),
-  service_type_id INTEGER REFERENCES service_types(id),
+  service_type_id INTEGER REFERENCES service_types(id) ON DELETE SET NULL,
   contact_consent_at TEXT
     CHECK (contact_consent_at IS NULL OR (
-      length(contact_consent_at) = 19 AND substr(contact_consent_at,5,1) = '-' AND
+      instr(contact_consent_at,char(0)) = 0 AND length(CAST(contact_consent_at AS BLOB)) = 19 AND
+      substr(contact_consent_at,5,1) = '-' AND
       substr(contact_consent_at,8,1) = '-' AND substr(contact_consent_at,11,1) = ' ' AND
       substr(contact_consent_at,14,1) = ':' AND substr(contact_consent_at,17,1) = ':' AND
       substr(contact_consent_at,1,4) BETWEEN '0001' AND '9999' AND
@@ -205,13 +215,14 @@ CREATE TABLE newcomer_submissions (
       (date(substr(contact_consent_at,1,10),'+0 days') = substr(contact_consent_at,1,10)) IS TRUE AND
       (datetime(contact_consent_at,'+0 seconds') = contact_consent_at) IS TRUE
     )),
-  source TEXT NOT NULL CHECK (source IN ('public','staff')),
-  status_id INTEGER NOT NULL DEFAULT 1 REFERENCES newcomer_statuses(id),
-  assignee_person_id INTEGER REFERENCES people(id),
-  linked_person_id INTEGER REFERENCES people(id),
+  source TEXT NOT NULL CHECK (instr(source,char(0)) = 0 AND source IN ('public','staff')),
+  status_id INTEGER NOT NULL DEFAULT 1 REFERENCES newcomer_statuses(id) ON DELETE RESTRICT,
+  assignee_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  linked_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   next_follow_up_date TEXT
     CHECK (next_follow_up_date IS NULL OR (
-      length(next_follow_up_date) = 10 AND substr(next_follow_up_date,5,1) = '-' AND substr(next_follow_up_date,8,1) = '-' AND
+      instr(next_follow_up_date,char(0)) = 0 AND length(CAST(next_follow_up_date AS BLOB)) = 10 AND
+      substr(next_follow_up_date,5,1) = '-' AND substr(next_follow_up_date,8,1) = '-' AND
       substr(next_follow_up_date,1,4) BETWEEN '0001' AND '9999' AND
       substr(next_follow_up_date,6,2) BETWEEN '01' AND '12' AND substr(next_follow_up_date,9,2) BETWEEN '01' AND '31' AND
       (substr(next_follow_up_date,6,2) NOT IN ('04','06','09','11') OR substr(next_follow_up_date,9,2) <= '30') AND
@@ -219,10 +230,13 @@ CREATE TABLE newcomer_submissions (
       (date(next_follow_up_date,'+0 days') = next_follow_up_date) IS TRUE
     )),
   version INTEGER NOT NULL DEFAULT 0 CHECK (version BETWEEN 0 AND 2147483647),
-  last_mutation_id TEXT CHECK (last_mutation_id IS NULL OR length(last_mutation_id) BETWEEN 1 AND 64),
+  last_mutation_id TEXT CHECK (last_mutation_id IS NULL OR (
+    instr(last_mutation_id,char(0)) = 0 AND length(CAST(last_mutation_id AS BLOB)) BETWEEN 1 AND 64
+  )),
   closed_at TEXT
     CHECK (closed_at IS NULL OR (
-      length(closed_at) = 19 AND substr(closed_at,5,1) = '-' AND substr(closed_at,8,1) = '-' AND
+      instr(closed_at,char(0)) = 0 AND length(CAST(closed_at AS BLOB)) = 19 AND
+      substr(closed_at,5,1) = '-' AND substr(closed_at,8,1) = '-' AND
       substr(closed_at,11,1) = ' ' AND substr(closed_at,14,1) = ':' AND substr(closed_at,17,1) = ':' AND
       substr(closed_at,1,4) BETWEEN '0001' AND '9999' AND substr(closed_at,12,2) BETWEEN '00' AND '23' AND
       substr(closed_at,15,2) BETWEEN '00' AND '59' AND substr(closed_at,18,2) BETWEEN '00' AND '59' AND
@@ -231,7 +245,8 @@ CREATE TABLE newcomer_submissions (
     )),
   deleted_at TEXT
     CHECK (deleted_at IS NULL OR (
-      length(deleted_at) = 19 AND substr(deleted_at,5,1) = '-' AND substr(deleted_at,8,1) = '-' AND
+      instr(deleted_at,char(0)) = 0 AND length(CAST(deleted_at AS BLOB)) = 19 AND
+      substr(deleted_at,5,1) = '-' AND substr(deleted_at,8,1) = '-' AND
       substr(deleted_at,11,1) = ' ' AND substr(deleted_at,14,1) = ':' AND substr(deleted_at,17,1) = ':' AND
       substr(deleted_at,1,4) BETWEEN '0001' AND '9999' AND substr(deleted_at,12,2) BETWEEN '00' AND '23' AND
       substr(deleted_at,15,2) BETWEEN '00' AND '59' AND substr(deleted_at,18,2) BETWEEN '00' AND '59' AND
@@ -240,7 +255,8 @@ CREATE TABLE newcomer_submissions (
     )),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
-      length(created_at) = 19 AND substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
+      instr(created_at,char(0)) = 0 AND length(CAST(created_at AS BLOB)) = 19 AND
+      substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
@@ -249,7 +265,8 @@ CREATE TABLE newcomer_submissions (
     ),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
-      length(updated_at) = 19 AND substr(updated_at,5,1) = '-' AND substr(updated_at,8,1) = '-' AND
+      instr(updated_at,char(0)) = 0 AND length(CAST(updated_at AS BLOB)) = 19 AND
+      substr(updated_at,5,1) = '-' AND substr(updated_at,8,1) = '-' AND
       substr(updated_at,11,1) = ' ' AND substr(updated_at,14,1) = ':' AND substr(updated_at,17,1) = ':' AND
       substr(updated_at,1,4) BETWEEN '0001' AND '9999' AND substr(updated_at,12,2) BETWEEN '00' AND '23' AND
       substr(updated_at,15,2) BETWEEN '00' AND '59' AND substr(updated_at,18,2) BETWEEN '00' AND '59' AND
@@ -282,9 +299,11 @@ CREATE UNIQUE INDEX idx_newcomer_submissions_last_mutation
   WHERE last_mutation_id IS NOT NULL;
 
 CREATE TABLE newcomer_answers (
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  field_id INTEGER NOT NULL REFERENCES newcomer_fields(id),
-  value TEXT NOT NULL CHECK (length(value) <= 4000),
+  submission_id TEXT NOT NULL CHECK (
+    instr(submission_id,char(0)) = 0 AND length(CAST(submission_id AS BLOB)) = 36
+  ) REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  field_id INTEGER NOT NULL REFERENCES newcomer_fields(id) ON DELETE RESTRICT,
+  value TEXT NOT NULL CHECK (instr(value,char(0)) = 0 AND length(CAST(value AS BLOB)) <= 4000),
   PRIMARY KEY (submission_id, field_id)
 ) WITHOUT ROWID;
 CREATE INDEX idx_newcomer_answers_field
@@ -309,16 +328,21 @@ END;
 CREATE TABLE newcomer_notes (
   id TEXT PRIMARY KEY
     CHECK (
-      length(id) = 36 AND id = lower(id) AND
+      instr(id,char(0)) = 0 AND length(CAST(id AS BLOB)) = 36 AND id = lower(id) AND
       substr(id,9,1) = '-' AND substr(id,14,1) = '-' AND substr(id,19,1) = '-' AND substr(id,24,1) = '-' AND
       length(replace(id,'-','')) = 32 AND id NOT GLOB '*[^0-9a-f-]*'
     ),
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  author_person_id INTEGER NOT NULL REFERENCES people(id),
-  body TEXT NOT NULL CHECK (body = trim(body) AND length(body) BETWEEN 1 AND 10000),
+  submission_id TEXT NOT NULL CHECK (
+    instr(submission_id,char(0)) = 0 AND length(CAST(submission_id AS BLOB)) = 36
+  ) REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  author_person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE RESTRICT,
+  body TEXT NOT NULL CHECK (
+    instr(body,char(0)) = 0 AND body = trim(body) AND length(CAST(body AS BLOB)) BETWEEN 1 AND 10000
+  ),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
-      length(created_at) = 19 AND substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
+      instr(created_at,char(0)) = 0 AND length(CAST(created_at AS BLOB)) = 19 AND
+      substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
@@ -335,19 +359,21 @@ CREATE INDEX idx_newcomer_notes_submission_created
 CREATE TABLE newcomer_activity (
   id TEXT PRIMARY KEY
     CHECK (
-      length(id) = 36 AND id = lower(id) AND
+      instr(id,char(0)) = 0 AND length(CAST(id AS BLOB)) = 36 AND id = lower(id) AND
       substr(id,9,1) = '-' AND substr(id,14,1) = '-' AND substr(id,19,1) = '-' AND substr(id,24,1) = '-' AND
       length(replace(id,'-','')) = 32 AND id NOT GLOB '*[^0-9a-f-]*'
     ),
-  submission_id TEXT NOT NULL REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
-  actor_person_id INTEGER REFERENCES people(id),
-  kind TEXT NOT NULL CHECK (kind IN (
+  submission_id TEXT NOT NULL CHECK (
+    instr(submission_id,char(0)) = 0 AND length(CAST(submission_id AS BLOB)) = 36
+  ) REFERENCES newcomer_submissions(id) ON DELETE CASCADE,
+  actor_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL CHECK (instr(kind,char(0)) = 0 AND kind IN (
     'submission_created','assigned','status_changed','follow_up_scheduled',
     'note_added','person_linked','visitor_created'
   )),
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (
-      length(metadata_json) BETWEEN 2 AND 512 AND
+      instr(metadata_json,char(0)) = 0 AND length(CAST(metadata_json AS BLOB)) BETWEEN 2 AND 512 AND
       CASE WHEN json_valid(metadata_json) THEN
         json_type(metadata_json) = 'object' AND
         json_remove(
@@ -425,7 +451,8 @@ CREATE TABLE newcomer_activity (
     ),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
-      length(created_at) = 19 AND substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
+      instr(created_at,char(0)) = 0 AND length(CAST(created_at AS BLOB)) = 19 AND
+      substr(created_at,5,1) = '-' AND substr(created_at,8,1) = '-' AND
       substr(created_at,11,1) = ' ' AND substr(created_at,14,1) = ':' AND substr(created_at,17,1) = ':' AND
       substr(created_at,1,4) BETWEEN '0001' AND '9999' AND substr(created_at,12,2) BETWEEN '00' AND '23' AND
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
@@ -440,10 +467,14 @@ CREATE INDEX idx_newcomer_activity_kind_created
 
 CREATE TABLE newcomer_rate_limits (
   bucket_hash TEXT NOT NULL
-    CHECK (length(bucket_hash) = 64 AND bucket_hash = lower(bucket_hash) AND bucket_hash NOT GLOB '*[^0-9a-f]*'),
+    CHECK (
+      instr(bucket_hash,char(0)) = 0 AND length(CAST(bucket_hash AS BLOB)) = 64 AND
+      bucket_hash = lower(bucket_hash) AND bucket_hash NOT GLOB '*[^0-9a-f]*'
+    ),
   window_start TEXT NOT NULL
     CHECK (
-      length(window_start) = 19 AND substr(window_start,5,1) = '-' AND substr(window_start,8,1) = '-' AND
+      instr(window_start,char(0)) = 0 AND length(CAST(window_start AS BLOB)) = 19 AND
+      substr(window_start,5,1) = '-' AND substr(window_start,8,1) = '-' AND
       substr(window_start,11,1) = ' ' AND substr(window_start,14,1) = ':' AND substr(window_start,17,1) = ':' AND
       substr(window_start,1,4) BETWEEN '0001' AND '9999' AND substr(window_start,12,2) BETWEEN '00' AND '23' AND
       substr(window_start,15,2) BETWEEN '00' AND '59' AND substr(window_start,16,1) = '0' AND
@@ -454,7 +485,7 @@ CREATE TABLE newcomer_rate_limits (
   attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts BETWEEN 1 AND 100000),
   expires_at TEXT NOT NULL
     CHECK (
-      length(expires_at) = 19 AND
+      instr(expires_at,char(0)) = 0 AND length(CAST(expires_at AS BLOB)) = 19 AND
       (date(substr(expires_at,1,10),'+0 days') = substr(expires_at,1,10)) IS TRUE AND
       (datetime(expires_at,'+0 seconds') = expires_at) IS TRUE AND
       (expires_at = datetime(window_start,'+48 hours')) IS TRUE

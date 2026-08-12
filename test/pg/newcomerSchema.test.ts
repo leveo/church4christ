@@ -44,8 +44,18 @@ function submission(values: string): string {
 
 describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
   const sql = hasPg ? pgClient() : (null as never);
+  const createdClientRoles: string[] = [];
 
   beforeAll(async () => {
+    const existingRoles = await sql.unsafe<{ rolname: string }[]>(`
+      SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated')
+    `);
+    for (const role of ['anon', 'authenticated']) {
+      if (!existingRoles.some((row) => row.rolname === role)) {
+        await sql.unsafe(`CREATE ROLE ${role} NOLOGIN`);
+        createdClientRoles.push(role);
+      }
+    }
     await resetSchema(sql);
     execFileSync('node', ['scripts/db/migrate-supabase.mjs'], {
       env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
@@ -60,6 +70,9 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
   });
 
   afterAll(async () => {
+    for (const role of createdClientRoles.reverse()) {
+      await sql?.unsafe(`DROP ROLE ${role}`);
+    }
     await sql?.end();
   });
 
@@ -112,6 +125,38 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
       SELECT COUNT(*) AS count FROM newcomer_field_options WHERE field_id BETWEEN 1 AND 7
     `);
     expect(Number(fixedOptionCount?.count)).toBe(0);
+  });
+
+  it('enables RLS without client grants while preserving owner CRUD', async () => {
+    const security = await sql.unsafe<{ relname: string; relrowsecurity: boolean }[]>(`
+      SELECT c.relname,c.relrowsecurity
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relname LIKE 'newcomer_%' AND c.relkind='r'
+      ORDER BY c.relname
+    `);
+    expect(security).toEqual(NEWCOMER_TABLES.map((relname) => ({ relname, relrowsecurity: true })));
+
+    const grants = await sql.unsafe<{ table_name: string; grantee: string; privilege_type: string }[]>(`
+      SELECT table_name,grantee,privilege_type
+      FROM information_schema.role_table_grants
+      WHERE table_schema='public' AND table_name LIKE 'newcomer_%'
+        AND grantee IN ('anon','authenticated')
+      ORDER BY table_name,grantee,privilege_type
+    `);
+    expect(grants).toEqual([]);
+
+    const ownerHash = '9'.repeat(64);
+    await sql.unsafe(`INSERT INTO newcomer_rate_limits VALUES
+      ('${ownerHash}','2026-08-12 12:30:00',1,'2026-08-14 12:30:00')`);
+    await sql.unsafe(`UPDATE newcomer_rate_limits SET attempts=2
+      WHERE bucket_hash='${ownerHash}' AND window_start='2026-08-12 12:30:00'`);
+    const [row] = await sql.unsafe<{ attempts: number }[]>(`
+      SELECT attempts FROM newcomer_rate_limits
+      WHERE bucket_hash='${ownerHash}' AND window_start='2026-08-12 12:30:00'
+    `);
+    expect(row?.attempts).toBe(2);
+    await sql.unsafe(`DELETE FROM newcomer_rate_limits
+      WHERE bucket_hash='${ownerHash}' AND window_start='2026-08-12 12:30:00'`);
   });
 
   it('keeps core field carriers immutable and answers/options custom-only', async () => {
@@ -364,18 +409,85 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     ]) await rejects(statement);
   });
 
-  it('repeats canonical HMAC, ten-minute window, attempt range, unique bucket, and exact 48-hour expiry behavior', async () => {
+  it('repeats lowercase-hex bucket shape, window, attempt, uniqueness, and expiry behavior', async () => {
+    // HMAC provenance belongs to newcomerDb/rate-limiter Task 3; this schema
+    // only guarantees an opaque lowercase-hex storage shape with no raw suffix.
     const hash = 'a'.repeat(64);
     await sql.unsafe(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
       VALUES ('${hash}','2026-08-12 12:10:00',1,'2026-08-14 12:10:00')`);
     for (const statement of [
       `INSERT INTO newcomer_rate_limits VALUES ('${'A'.repeat(64)}','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${'b'.repeat(63)}','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`,
+      `INSERT INTO newcomer_rate_limits VALUES ('${hash}1.2.3.4','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`,
+      `INSERT INTO newcomer_rate_limits VALUES ('${hash}visitor@example.test','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${'b'.repeat(64)}','2026-08-12 12:11:00',1,'2026-08-14 12:11:00')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${'c'.repeat(64)}','2026-02-30 12:20:00',1,'2026-03-04 12:20:00')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${'d'.repeat(64)}','2026-08-12 12:20:00',0,'2026-08-14 12:20:00')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${'e'.repeat(64)}','2026-08-12 12:20:00',1,'2026-08-14 12:19:59')`,
       `INSERT INTO newcomer_rate_limits VALUES ('${hash}','2026-08-12 12:10:00',2,'2026-08-14 12:10:00')`,
     ]) await rejects(statement);
+  });
+
+  it('cascades owned rows, nulls nullable external references, and restricts required references', async () => {
+    await sql.unsafe(`INSERT INTO people (id,display_name,email) VALUES
+      (9861,'FK assignee','fk-assignee@example.test'),
+      (9862,'FK linked','fk-linked@example.test'),
+      (9863,'FK author','fk-author@example.test');
+      INSERT INTO service_types (id,sort) VALUES (9861,9861);
+      INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+        VALUES (195,'fk_lifecycle','select',0,1,195,0);
+      INSERT INTO newcomer_field_i18n VALUES (195,'en','FK lifecycle',NULL);
+      INSERT INTO newcomer_field_options VALUES (195,'keep',1,1);
+      INSERT INTO newcomer_field_option_i18n VALUES (195,'keep','en','Keep');
+      INSERT INTO newcomer_submissions
+        (id,name,locale,visit_date,service_type_id,source,status_id,assignee_person_id,linked_person_id)
+        VALUES ('76000000-0000-4000-8000-000000000001','FK lifecycle','en','2026-08-12',9861,
+          'staff',3,9861,9862);
+      INSERT INTO newcomer_answers VALUES ('76000000-0000-4000-8000-000000000001',195,'keep');
+      INSERT INTO newcomer_notes (id,submission_id,author_person_id,body)
+        VALUES ('76100000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9863,'Private');
+      INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind)
+        VALUES ('76200000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9861,'assigned');
+    `);
+
+    await rejects('DELETE FROM newcomer_statuses WHERE id=3', '23503');
+    await rejects('DELETE FROM newcomer_fields WHERE id=195', '23503');
+    await rejects('DELETE FROM people WHERE id=9863', '23503');
+
+    await sql.unsafe('DELETE FROM service_types WHERE id=9861');
+    await sql.unsafe('DELETE FROM people WHERE id=9861');
+    await sql.unsafe('DELETE FROM people WHERE id=9862');
+    const [submissionRefs] = await sql.unsafe<Record<string, number | null>[]>(`
+      SELECT service_type_id,assignee_person_id,linked_person_id
+      FROM newcomer_submissions WHERE id='76000000-0000-4000-8000-000000000001'
+    `);
+    expect(submissionRefs).toEqual({ service_type_id: null, assignee_person_id: null, linked_person_id: null });
+    const [activityRef] = await sql.unsafe<{ actor_person_id: number | null }[]>(`
+      SELECT actor_person_id FROM newcomer_activity WHERE id='76200000-0000-4000-8000-000000000001'
+    `);
+    expect(activityRef).toEqual({ actor_person_id: null });
+
+    await sql.unsafe("DELETE FROM newcomer_submissions WHERE id='76000000-0000-4000-8000-000000000001'");
+    for (const table of ['newcomer_answers', 'newcomer_notes', 'newcomer_activity']) {
+      const [{ count }] = await sql.unsafe<{ count: number }[]>(`SELECT COUNT(*) AS count FROM ${table}
+        WHERE submission_id='76000000-0000-4000-8000-000000000001'`);
+      expect(count).toBe(0);
+    }
+    const [{ count: authorCount }] = await sql.unsafe<{ count: number }[]>('SELECT COUNT(*) AS count FROM people WHERE id=9863');
+    expect(authorCount).toBe(1);
+
+    await sql.unsafe('DELETE FROM newcomer_fields WHERE id=195');
+    for (const table of ['newcomer_field_i18n', 'newcomer_field_options', 'newcomer_field_option_i18n']) {
+      const [{ count }] = await sql.unsafe<{ count: number }[]>(`SELECT COUNT(*) AS count FROM ${table} WHERE field_id=195`);
+      expect(count).toBe(0);
+    }
+  });
+
+  it('relies on PostgreSQL zero-byte rejection and enforces the same UTF-8 byte bounds', async () => {
+    await rejects(`INSERT INTO newcomer_submissions (id,name,locale,visit_date,source)
+      VALUES ('75000000-0000-4000-8000-000000000001',
+        convert_from(decode('00','hex'),'UTF8'),'en','2026-08-12','staff')`, '22021');
+    await rejects(`UPDATE newcomer_status_i18n SET label='${'名'.repeat(34)}'
+      WHERE status_id=2 AND locale='en'`);
   });
 });

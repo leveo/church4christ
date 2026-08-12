@@ -380,7 +380,9 @@ describe('newcomer foundation schema (D1)', () => {
         '{"from_status_id":1, "to_status_id":2}')`);
   });
 
-  it('stores only canonical HMAC buckets in ten-minute windows with exact 48-hour expiry', async () => {
+  it('stores only lowercase-hex bucket shapes in ten-minute windows with exact 48-hour expiry', async () => {
+    // HMAC provenance belongs to newcomerDb/rate-limiter Task 3; this schema
+    // only guarantees an opaque lowercase-hex storage shape with no raw suffix.
     const hash = 'a'.repeat(64);
     await env.DB.prepare(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
       VALUES (?,'2026-08-12 12:10:00',1,'2026-08-14 12:10:00')`).bind(hash).run();
@@ -388,6 +390,10 @@ describe('newcomer foundation schema (D1)', () => {
       VALUES ('${'A'.repeat(64)}','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`);
     await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
       VALUES ('${'b'.repeat(63)}','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`);
+    await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
+      VALUES ('${hash}1.2.3.4','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`);
+    await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
+      VALUES ('${hash}visitor@example.test','2026-08-12 12:20:00',1,'2026-08-14 12:20:00')`);
     await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
       VALUES ('${'b'.repeat(64)}','2026-08-12 12:11:00',1,'2026-08-14 12:11:00')`);
     await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
@@ -398,5 +404,124 @@ describe('newcomer foundation schema (D1)', () => {
       VALUES ('${'e'.repeat(64)}','2026-08-12 12:20:00',1,'2026-08-14 12:19:59')`);
     await reject(`INSERT INTO newcomer_rate_limits (bucket_hash,window_start,attempts,expires_at)
       VALUES ('${hash}','2026-08-12 12:10:00',2,'2026-08-14 12:10:00')`);
+  });
+
+  it('cascades owned rows, nulls nullable external references, and restricts required references', async () => {
+    await env.DB.prepare(`INSERT INTO people (id,display_name,email) VALUES
+      (9861,'FK assignee','fk-assignee@example.test'),
+      (9862,'FK linked','fk-linked@example.test'),
+      (9863,'FK author','fk-author@example.test')`).run();
+    await env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9861,9861)").run();
+    await env.DB.prepare(`INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+      VALUES (195,'fk_lifecycle','select',0,1,195,0)`).run();
+    await env.DB.prepare("INSERT INTO newcomer_field_i18n VALUES (195,'en','FK lifecycle',NULL)").run();
+    await env.DB.prepare("INSERT INTO newcomer_field_options VALUES (195,'keep',1,1)").run();
+    await env.DB.prepare("INSERT INTO newcomer_field_option_i18n VALUES (195,'keep','en','Keep')").run();
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,service_type_id,source,status_id,assignee_person_id,linked_person_id)
+      VALUES ('76000000-0000-4000-8000-000000000001','FK lifecycle','en','2026-08-12',9861,
+        'staff',3,9861,9862)`).run();
+    await env.DB.prepare("INSERT INTO newcomer_answers VALUES ('76000000-0000-4000-8000-000000000001',195,'keep')").run();
+    await env.DB.prepare(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body)
+      VALUES ('76100000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9863,'Private')`).run();
+    await env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind)
+      VALUES ('76200000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9861,'assigned')`).run();
+
+    await reject('DELETE FROM newcomer_statuses WHERE id=3');
+    await reject('DELETE FROM newcomer_fields WHERE id=195');
+    await reject('DELETE FROM people WHERE id=9863');
+
+    await env.DB.prepare('DELETE FROM service_types WHERE id=9861').run();
+    await env.DB.prepare('DELETE FROM people WHERE id=9861').run();
+    await env.DB.prepare('DELETE FROM people WHERE id=9862').run();
+    expect(await env.DB.prepare(`SELECT service_type_id,assignee_person_id,linked_person_id
+      FROM newcomer_submissions WHERE id='76000000-0000-4000-8000-000000000001'`).first())
+      .toEqual({ service_type_id: null, assignee_person_id: null, linked_person_id: null });
+    expect(await env.DB.prepare("SELECT actor_person_id FROM newcomer_activity WHERE id='76200000-0000-4000-8000-000000000001'").first())
+      .toEqual({ actor_person_id: null });
+
+    await env.DB.prepare("DELETE FROM newcomer_submissions WHERE id='76000000-0000-4000-8000-000000000001'").run();
+    for (const table of ['newcomer_answers', 'newcomer_notes', 'newcomer_activity']) {
+      expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}
+        WHERE submission_id='76000000-0000-4000-8000-000000000001'`).first<number>('n')).toBe(0);
+    }
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people WHERE id=9863').first<number>('n')).toBe(1);
+
+    await env.DB.prepare('DELETE FROM newcomer_fields WHERE id=195').run();
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_field_i18n WHERE field_id=195').first<number>('n')).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_field_options WHERE field_id=195').first<number>('n')).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_field_option_i18n WHERE field_id=195').first<number>('n')).toBe(0);
+  });
+
+  it('rejects U+0000 and actual UTF-8 byte overlimits across every newcomer TEXT carrier', async () => {
+    await env.DB.prepare("INSERT OR IGNORE INTO people (id,display_name,email) VALUES (9850,'NUL Author','nul-author@example.test')").run();
+    await env.DB.prepare(`INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
+      VALUES (181,'nul_probe_select','select',0,1,181,0)`).run();
+    await env.DB.prepare("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (181,'valid',1,1)").run();
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES ('71000000-0000-4000-8000-000000000001','NUL owner','en','2026-08-12','staff',
+        '2026-08-12 12:00:00','2026-08-12 12:00:00')`).run();
+
+    const baseSubmission = (id: string, column: string, value: string) => `INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at,${column})
+      VALUES ('${id}','NUL probe','en','2026-08-12','staff','2026-08-12 12:00:00','2026-08-12 12:00:00',${value})`;
+    const probes: Array<[string, string]> = [
+      ['status.key', "INSERT INTO newcomer_statuses VALUES (80,('new'||char(0)),'open',80,1,0)"],
+      ['status.category', "UPDATE newcomer_statuses SET category=('open'||char(0)) WHERE id=2"],
+      ['status_i18n.locale', "INSERT INTO newcomer_status_i18n VALUES (1,('en'||char(0)),'NUL')"],
+      ['status_i18n.label', "UPDATE newcomer_status_i18n SET label=('New'||char(0)||'hidden') WHERE status_id=1 AND locale='en'"],
+      ['field.key', "INSERT INTO newcomer_fields VALUES (182,('custom'||char(0)||'hidden'),'text',0,1,182,0)"],
+      ['field.type', "INSERT INTO newcomer_fields VALUES (183,'bad_type',('text'||char(0)),0,1,183,0)"],
+      ['field_i18n.locale', "INSERT INTO newcomer_field_i18n VALUES (181,('en'||char(0)),'NUL',NULL)"],
+      ['field_i18n.label', "INSERT INTO newcomer_field_i18n VALUES (181,'en',('Label'||char(0)||'hidden'),NULL)"],
+      ['field_i18n.help', `INSERT INTO newcomer_field_i18n VALUES (181,'zh','帮助',(char(0)||'${'x'.repeat(501)}'))`],
+      ['field_option.value', "INSERT INTO newcomer_field_options VALUES (181,('valid'||char(0)||'hidden'),2,1)"],
+      ['option_i18n.value', "INSERT INTO newcomer_field_option_i18n VALUES (181,('valid'||char(0)||'hidden'),'zh','NUL')"],
+      ['option_i18n.locale', "INSERT INTO newcomer_field_option_i18n VALUES (181,'valid',('en'||char(0)),'NUL')"],
+      ['option_i18n.label', "INSERT INTO newcomer_field_option_i18n VALUES (181,'valid','en',('Label'||char(0)||'hidden'))"],
+      ['submission.id', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source) VALUES (('72000000-0000-4000-8000-000000000001'||char(0)),'NUL','en','2026-08-12','staff')"],
+      ['submission.name', `INSERT INTO newcomer_submissions
+        (id,name,locale,visit_date,source,created_at,updated_at)
+        VALUES ('72000000-0000-4000-8000-000000000002',('A'||char(0)||'${'x'.repeat(200)}'),'en',
+          '2026-08-12','staff','2026-08-12 12:00:00','2026-08-12 12:00:00')`],
+      ['submission.email', baseSubmission('72000000-0000-4000-8000-000000000003', 'email', "('a'||char(0)||'@example.test')")],
+      ['submission.phone', baseSubmission('72000000-0000-4000-8000-000000000004', 'phone', "('+13125550100'||char(0))")],
+      ['submission.locale', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source) VALUES ('72000000-0000-4000-8000-000000000005','NUL',('en'||char(0)),'2026-08-12','staff')"],
+      ['submission.visit_date', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source) VALUES ('72000000-0000-4000-8000-000000000006','NUL','en',('2026-08-12'||char(0)),'staff')"],
+      ['submission.contact_consent_at', baseSubmission('72000000-0000-4000-8000-000000000007', 'contact_consent_at', "('2026-08-12 12:00:00'||char(0))")],
+      ['submission.source', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source) VALUES ('72000000-0000-4000-8000-000000000008','NUL','en','2026-08-12',('staff'||char(0)))"],
+      ['submission.next_follow_up_date', baseSubmission('72000000-0000-4000-8000-000000000009', 'next_follow_up_date', "('2026-08-13'||char(0))")],
+      ['submission.last_mutation_id', baseSubmission('72000000-0000-4000-8000-00000000000a', 'last_mutation_id', `('m'||char(0)||'${'x'.repeat(64)}')`)],
+      ['submission.closed_at', baseSubmission('72000000-0000-4000-8000-00000000000b', 'closed_at', "('2026-08-12 12:00:00'||char(0))")],
+      ['submission.deleted_at', baseSubmission('72000000-0000-4000-8000-00000000000c', 'deleted_at', "('2026-08-12 12:00:00'||char(0))")],
+      ['submission.created_at', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source,created_at) VALUES ('72000000-0000-4000-8000-00000000000d','NUL','en','2026-08-12','staff',('2026-08-12 12:00:00'||char(0)))"],
+      ['submission.updated_at', "INSERT INTO newcomer_submissions (id,name,locale,visit_date,source,updated_at) VALUES ('72000000-0000-4000-8000-00000000000e','NUL','en','2026-08-12','staff',('2026-08-12 12:00:00'||char(0)))"],
+      ['answer.submission_id', "INSERT INTO newcomer_answers VALUES (('71000000-0000-4000-8000-000000000001'||char(0)),181,'NUL')"],
+      ['answer.value', `INSERT INTO newcomer_answers VALUES ('71000000-0000-4000-8000-000000000001',181,(char(0)||'${'x'.repeat(4001)}'))`],
+      ['note.id', "INSERT INTO newcomer_notes VALUES (('73000000-0000-4000-8000-000000000001'||char(0)),'71000000-0000-4000-8000-000000000001',9850,'NUL','2026-08-12 12:00:00')"],
+      ['note.submission_id', "INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000002',('71000000-0000-4000-8000-000000000001'||char(0)),9850,'NUL','2026-08-12 12:00:00')"],
+      ['note.body', `INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000001',9850,('A'||char(0)||'${'x'.repeat(10000)}'),'2026-08-12 12:00:00')`],
+      ['note.created_at', "INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000004','71000000-0000-4000-8000-000000000001',9850,'NUL',('2026-08-12 12:00:00'||char(0)))"],
+      ['activity.id', "INSERT INTO newcomer_activity VALUES (('74000000-0000-4000-8000-000000000001'||char(0)),'71000000-0000-4000-8000-000000000001',9850,'submission_created','{}','2026-08-12 12:00:00')"],
+      ['activity.submission_id', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000002',('71000000-0000-4000-8000-000000000001'||char(0)),9850,'submission_created','{}','2026-08-12 12:00:00')"],
+      ['activity.kind', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000001',9850,('submission_created'||char(0)),'{}','2026-08-12 12:00:00')"],
+      ['activity.metadata_json', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000004','71000000-0000-4000-8000-000000000001',9850,'submission_created',('{}'||char(0)),'2026-08-12 12:00:00')"],
+      ['activity.created_at', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000005','71000000-0000-4000-8000-000000000001',9850,'submission_created','{}',('2026-08-12 12:00:00'||char(0)))"],
+      ['rate.bucket_hash', `INSERT INTO newcomer_rate_limits VALUES (('${'a'.repeat(64)}'||char(0)||'1.2.3.4'),'2026-08-12 12:10:00',1,'2026-08-14 12:10:00')`],
+      ['rate.window_start', `INSERT INTO newcomer_rate_limits VALUES ('${'b'.repeat(64)}',('2026-08-12 12:10:00'||char(0)),1,'2026-08-14 12:10:00')`],
+      ['rate.expires_at', `INSERT INTO newcomer_rate_limits VALUES ('${'c'.repeat(64)}','2026-08-12 12:10:00',1,('2026-08-14 12:10:00'||char(0)))`],
+      ['status_i18n.label UTF-8 bytes', `UPDATE newcomer_status_i18n SET label='${'名'.repeat(34)}' WHERE status_id=2 AND locale='en'`],
+    ];
+    const accepted: string[] = [];
+    for (const [name, statement] of probes) {
+      try {
+        await env.DB.prepare(statement).run();
+        accepted.push(name);
+      } catch {
+        // Rejection is the contract under test.
+      }
+    }
+    expect(accepted).toEqual([]);
   });
 });
