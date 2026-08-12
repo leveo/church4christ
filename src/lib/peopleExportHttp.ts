@@ -1,9 +1,20 @@
 import type { AppDb } from './appDb';
 import { AUDIT_EVENT_KIND, type AppendAuditEventInput } from './auditDb';
 import { hasAreaAccess } from './adminAreas';
+import { isValidDateStr } from './dates';
 import type { DbBackend } from './dbProvider';
-import type { CanonicalExportResult, CanonicalPeopleExportSource } from './peopleExport';
-import type { PastoralNotesExportResult, PastoralNotesExportSource } from './pastoralNotesExport';
+import type {
+  CanonicalExportPart,
+  CanonicalExportResult,
+  CanonicalPeopleExportSource,
+} from './peopleExport';
+import { PEOPLE_IMPORT_HEADERS, PEOPLE_IMPORT_LIMITS } from './peopleImport';
+import {
+  PASTORAL_NOTES_EXPORT_HEADERS,
+  PASTORAL_NOTES_EXPORT_LIMITS,
+  type PastoralNotesExportResult,
+  type PastoralNotesExportSource,
+} from './pastoralNotesExport';
 import type { SessionUser } from './types';
 
 export const PEOPLE_NOTES_ACKNOWLEDGEMENT =
@@ -102,7 +113,7 @@ function accessResponse(access: PeopleExportAccess): Response | null {
 }
 
 function validToday(today: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(today);
+  return isValidDateStr(today);
 }
 
 function requestedPart(request: Request): number | null {
@@ -120,8 +131,186 @@ function csvHeaders(filename: string): Headers {
   return headers;
 }
 
-function structuralCount(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0;
+const CANONICAL_HEADER = `${PEOPLE_IMPORT_HEADERS.join(',')}\r\n`;
+const NOTES_HEADER = `${PASTORAL_NOTES_EXPORT_HEADERS.join(',')}\r\n`;
+const UTF8 = new TextEncoder();
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isPlainDataGraph(value: unknown, seen: Set<object>): boolean {
+  if (value === null || typeof value !== 'object') return true;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype || Object.getOwnPropertySymbols(value).length !== 0) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const expectedKeys = Array.from({ length: value.length }, (_, index) => String(index));
+    if (
+      Object.keys(descriptors).length !== expectedKeys.length + 1
+      || !Object.hasOwn(descriptors, 'length')
+      || expectedKeys.some((key) => !Object.hasOwn(descriptors, key))
+    ) return false;
+    return expectedKeys.every((key) => {
+      const descriptor = descriptors[key];
+      return descriptor !== undefined
+        && Object.hasOwn(descriptor, 'value')
+        && !descriptor.get
+        && !descriptor.set
+        && isPlainDataGraph(descriptor.value, seen);
+    });
+  }
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  if (Object.getOwnPropertySymbols(value).length !== 0) return false;
+  return Object.values(Object.getOwnPropertyDescriptors(value)).every((descriptor) => (
+    Object.hasOwn(descriptor, 'value')
+    && !descriptor.get
+    && !descriptor.set
+    && isPlainDataGraph(descriptor.value, seen)
+  ));
+}
+
+function clonePlainData(input: unknown): unknown | null {
+  try {
+    if (!isPlainDataGraph(input, new Set())) return null;
+    // Structured clone rejects Proxy exotica even when their traps impersonate a
+    // plain object. Validation below reads only this detached, immutable-in-scope
+    // request snapshot, never the serializer-owned object again.
+    return structuredClone(input);
+  } catch {
+    return null;
+  }
+}
+
+function hasOnlyDataProperties(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const actual = Object.keys(descriptors);
+  if (actual.length !== keys.length || keys.some((key) => !Object.hasOwn(descriptors, key))) {
+    return false;
+  }
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || descriptor.get || descriptor.set) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isBoundedCount(value: unknown, maximum: number): value is number {
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= maximum;
+}
+
+function isBoundedCsv(value: unknown, header: string, maximumBytes: number): value is string {
+  return typeof value === 'string'
+    && value.startsWith(header)
+    && UTF8.encode(value).byteLength <= maximumBytes;
+}
+
+/** Snapshot one untrusted serializer result before any header, audit, JSON, or byte sink. */
+export function validateCanonicalExportResult(input: unknown): CanonicalExportResult | null {
+  try {
+    input = clonePlainData(input);
+    if (!isPlainRecord(input) || Object.getOwnPropertySymbols(input).length !== 0) return null;
+    if (input.status === 'repair_required') {
+      if (!hasOnlyDataProperties(input, ['status', 'counts'])) return null;
+      const counts = input.counts;
+      if (!isPlainRecord(counts) || Object.getOwnPropertySymbols(counts).length !== 0) return null;
+      if (!hasOnlyDataProperties(counts, ['people', 'dependents', 'households', 'issues'])) return null;
+      const people = counts.people;
+      const dependents = counts.dependents;
+      const households = counts.households;
+      const issues = counts.issues;
+      if (
+        !isBoundedCount(people, PEOPLE_IMPORT_LIMITS.maxDataRows + 1)
+        || !isBoundedCount(dependents, PEOPLE_IMPORT_LIMITS.maxDataRows + 1)
+        || !isBoundedCount(households, PEOPLE_IMPORT_LIMITS.maxHouseholds + 1)
+        || !isBoundedCount(issues, PEOPLE_IMPORT_LIMITS.maxIssues)
+      ) return null;
+      return {
+        status: 'repair_required',
+        counts: { people, dependents, households, issues },
+      };
+    }
+    if (input.status !== 'success' || !hasOnlyDataProperties(input, ['status', 'parts'])) return null;
+    const partsInput = input.parts;
+    if (
+      !Array.isArray(partsInput)
+      || Object.getPrototypeOf(partsInput) !== Array.prototype
+      || partsInput.length < 1
+      || partsInput.length > 25
+    ) return null;
+    const parts: CanonicalExportPart[] = [];
+    for (let index = 0; index < partsInput.length; index += 1) {
+      const part = partsInput[index];
+      if (!isPlainRecord(part) || Object.getOwnPropertySymbols(part).length !== 0) return null;
+      if (!hasOnlyDataProperties(part, ['number', 'rowCount', 'householdCount', 'csv'])) return null;
+      const number = part.number;
+      const rowCount = part.rowCount;
+      const householdCount = part.householdCount;
+      const csv = part.csv;
+      if (
+        number !== index + 1
+        || !isBoundedCount(rowCount, PEOPLE_IMPORT_LIMITS.maxDataRows)
+        || !isBoundedCount(householdCount, PEOPLE_IMPORT_LIMITS.maxHouseholds)
+        || !isBoundedCsv(csv, CANONICAL_HEADER, PEOPLE_IMPORT_LIMITS.maxBytes)
+      ) return null;
+      parts.push({ number, rowCount, householdCount, csv });
+    }
+    return { status: 'success', parts };
+  } catch {
+    return null;
+  }
+}
+
+/** Snapshot one untrusted sensitive serializer result before audit or CSV exposure. */
+export function validatePastoralNotesExportResult(input: unknown): PastoralNotesExportResult | null {
+  try {
+    input = clonePlainData(input);
+    if (!isPlainRecord(input) || Object.getOwnPropertySymbols(input).length !== 0) return null;
+    if (input.status === 'repair_required') {
+      if (!hasOnlyDataProperties(input, ['status', 'counts'])) return null;
+      const counts = input.counts;
+      if (!isPlainRecord(counts) || Object.getOwnPropertySymbols(counts).length !== 0) return null;
+      if (!hasOnlyDataProperties(counts, ['people', 'notes', 'issues'])) return null;
+      const people = counts.people;
+      const notes = counts.notes;
+      const issues = counts.issues;
+      if (
+        !isBoundedCount(people, PASTORAL_NOTES_EXPORT_LIMITS.maxNotes + 1)
+        || !isBoundedCount(notes, PASTORAL_NOTES_EXPORT_LIMITS.maxNotes + 1)
+        || !isBoundedCount(issues, PASTORAL_NOTES_EXPORT_LIMITS.maxIssues)
+      ) return null;
+      return { status: 'repair_required', counts: { people, notes, issues } };
+    }
+    if (input.status !== 'success' || !hasOnlyDataProperties(input, ['status', 'counts', 'csv'])) {
+      return null;
+    }
+    const counts = input.counts;
+    if (!isPlainRecord(counts) || Object.getOwnPropertySymbols(counts).length !== 0) return null;
+    if (!hasOnlyDataProperties(counts, ['people', 'notes'])) return null;
+    const people = counts.people;
+    const notes = counts.notes;
+    const csv = input.csv;
+    if (
+      !isBoundedCount(people, PASTORAL_NOTES_EXPORT_LIMITS.maxNotes)
+      || !isBoundedCount(notes, PASTORAL_NOTES_EXPORT_LIMITS.maxNotes)
+      || !isBoundedCsv(csv, NOTES_HEADER, PASTORAL_NOTES_EXPORT_LIMITS.maxCsvBytes)
+    ) return null;
+    return { status: 'success', counts: { people, notes }, csv };
+  } catch {
+    return null;
+  }
 }
 
 export async function loadPeopleExportDiscovery(
@@ -144,7 +333,8 @@ export async function loadPeopleExportDiscovery(
 
   try {
     const source = await runtime.loadCanonical(context.db, context.today, context.backend);
-    const result = runtime.buildCanonical(source);
+    const result = validateCanonicalExportResult(runtime.buildCanonical(source));
+    if (result === null) return { status: 'error' };
     if (result.status === 'repair_required') {
       return {
         status: 'repair_required',
@@ -156,16 +346,10 @@ export async function loadPeopleExportDiscovery(
         },
       };
     }
-    if (result.parts.length === 0) return { status: 'error' };
     let totalRows = 0;
     let totalHouseholds = 0;
     const parts: PeopleExportDiscoveryPart[] = [];
-    for (const [index, part] of result.parts.entries()) {
-      if (
-        part.number !== index + 1
-        || !structuralCount(part.rowCount)
-        || !structuralCount(part.householdCount)
-      ) return { status: 'error' };
+    for (const part of result.parts) {
       totalRows += part.rowCount;
       totalHouseholds += part.householdCount;
       if (!Number.isSafeInteger(totalRows) || !Number.isSafeInteger(totalHouseholds)) {
@@ -205,7 +389,8 @@ export async function handlePeopleExport(
 
   try {
     const source = await runtime.loadCanonical(context.db, context.today, context.backend);
-    const result = runtime.buildCanonical(source);
+    const result = validateCanonicalExportResult(runtime.buildCanonical(source));
+    if (result === null) return peopleExportJson(500, { ok: false, code: 'export_failed' });
     if (result.status === 'repair_required') {
       return peopleExportJson(409, {
         ok: false,
@@ -218,7 +403,7 @@ export async function handlePeopleExport(
         },
       });
     }
-    if (result.parts.length === 0 || selected > result.parts.length) {
+    if (selected > result.parts.length) {
       return peopleExportJson(400, { ok: false, code: 'invalid_part' });
     }
     const part = result.parts[selected - 1];
@@ -341,7 +526,8 @@ export async function handlePastoralNotesExport(
 
   try {
     const source = await runtime.loadNotes(context.db, context.backend);
-    const result = runtime.buildNotes(source);
+    const result = validatePastoralNotesExportResult(runtime.buildNotes(source));
+    if (result === null) return peopleExportJson(500, { ok: false, code: 'export_failed' });
     if (result.status === 'repair_required') {
       return peopleExportJson(409, {
         ok: false,

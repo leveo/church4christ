@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../src/lib/appDb';
 import type { CanonicalExportResult, CanonicalPeopleExportSource } from '../src/lib/peopleExport';
+import { PEOPLE_IMPORT_HEADERS } from '../src/lib/peopleImport';
 import {
   loadPeopleExportDiscovery,
   type StandardPeopleExportRuntime,
@@ -32,6 +33,7 @@ const source: CanonicalPeopleExportSource = {
   people: [],
   dependents: [],
 };
+const canonicalHeader = `${PEOPLE_IMPORT_HEADERS.join(',')}\r\n`;
 
 function context(over: {
   user?: SessionUser | null;
@@ -62,8 +64,8 @@ function runtime(result: CanonicalExportResult, over: Partial<StandardPeopleExpo
 const success: CanonicalExportResult = {
   status: 'success',
   parts: [
-    { number: 1, rowCount: 200, householdCount: 80, csv: 'private-one' },
-    { number: 2, rowCount: 33, householdCount: 12, csv: 'private-two' },
+    { number: 1, rowCount: 200, householdCount: 80, csv: `${canonicalHeader}private-one` },
+    { number: 2, rowCount: 33, householdCount: 12, csv: `${canonicalHeader}private-two` },
   ],
 };
 
@@ -120,7 +122,7 @@ describe('loadPeopleExportDiscovery', () => {
   it('keeps an empty directory usable as one header-only part', async () => {
     const result = await loadPeopleExportDiscovery(context(), runtime({
       status: 'success',
-      parts: [{ number: 1, rowCount: 0, householdCount: 0, csv: 'header\r\n' }],
+      parts: [{ number: 1, rowCount: 0, householdCount: 0, csv: canonicalHeader }],
     }));
     expect(result).toEqual({
       status: 'success',
@@ -150,5 +152,42 @@ describe('loadPeopleExportDiscovery', () => {
     }));
     expect(failed).toEqual({ status: 'error' });
     expect(JSON.stringify(failed)).not.toContain('private@example.com');
+  });
+
+  it('returns a generic state for malformed counts, parts, accessors, and proxy results', async () => {
+    const validPart = { number: 1, rowCount: 0, householdCount: 0, csv: canonicalHeader };
+    const invalidResults: unknown[] = [
+      { status: 'repair_required', counts: { people: -1, dependents: 0, households: 0, issues: 1 } },
+      { status: 'repair_required', counts: { people: 0, dependents: 0, households: 102, issues: 1 } },
+      { status: 'success', parts: [{ ...validPart, number: 2 }] },
+      { status: 'success', parts: [{ ...validPart, rowCount: 201 }] },
+      { status: 'success', parts: [{ ...validPart, csv: 'private@example.com\r\n' }] },
+      new Proxy(success, {}),
+    ];
+    const getterResult = { status: 'success', parts: [{ ...validPart }] };
+    Object.defineProperty(getterResult.parts[0], 'rowCount', {
+      enumerable: true,
+      get: () => 0,
+    });
+    invalidResults.push(getterResult);
+
+    for (const invalid of invalidResults) {
+      const result = await loadPeopleExportDiscovery(
+        context(),
+        runtime(invalid as never),
+      );
+      expect(result).toEqual({ status: 'error' });
+      expect(JSON.stringify(result)).not.toContain('private@example.com');
+    }
+  });
+
+  it('uses real calendar validation before touching the snapshot', async () => {
+    const loadCanonical = vi.fn(async () => source);
+    const invalidContext = { ...context(), today: '2026-02-29' };
+    await expect(loadPeopleExportDiscovery(
+      invalidContext,
+      runtime(success, { loadCanonical }),
+    )).resolves.toEqual({ status: 'error' });
+    expect(loadCanonical).not.toHaveBeenCalled();
   });
 });

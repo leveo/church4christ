@@ -228,6 +228,24 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['admin.peopleExport.standardBody']).toContain('牧养记录');
     expect(zh['admin.peopleExport.standardBody']).toMatch(/角色|权限|安全/);
     expect(zh['admin.peopleExport.standardBody']).toMatch(/多个.*分卷|多.*文件/);
+
+    expect(en['admin.peopleExport.notesBody']).toMatch(/sensitive/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/note (?:text|body)|pastoral-note text/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/email/i);
+    expect(en['admin.peopleExport.notesBody']).toMatch(/secure/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/identity/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/time/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/count/i);
+    expect(en['admin.peopleExport.notesAudit']).toMatch(/note (?:text|body).*(?:never|not).*audit|never.*note (?:text|body).*audit/i);
+
+    expect(zh['admin.peopleExport.notesBody']).toContain('敏感');
+    expect(zh['admin.peopleExport.notesBody']).toMatch(/牧养记录全文|牧养记录正文/);
+    expect(zh['admin.peopleExport.notesBody']).toContain('邮箱');
+    expect(zh['admin.peopleExport.notesBody']).toContain('安全');
+    expect(zh['admin.peopleExport.notesAudit']).toContain('身份');
+    expect(zh['admin.peopleExport.notesAudit']).toContain('时间');
+    expect(zh['admin.peopleExport.notesAudit']).toMatch(/数量|资料数量/);
+    expect(zh['admin.peopleExport.notesAudit']).toMatch(/正文.*不会.*审计|不会.*正文.*审计/);
   });
 
   it('discloses D1 Free and maximum-import atomicity limits in both locales', () => {

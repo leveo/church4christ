@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../src/lib/appDb';
-import type { CanonicalExportResult, CanonicalPeopleExportSource } from '../src/lib/peopleExport';
-import type { PastoralNotesExportResult, PastoralNotesExportSource } from '../src/lib/pastoralNotesExport';
+import {
+  type CanonicalExportResult,
+  type CanonicalPeopleExportSource,
+} from '../src/lib/peopleExport';
+import { PEOPLE_IMPORT_HEADERS, PEOPLE_IMPORT_LIMITS } from '../src/lib/peopleImport';
+import {
+  PASTORAL_NOTES_EXPORT_HEADERS,
+  PASTORAL_NOTES_EXPORT_LIMITS,
+  type PastoralNotesExportResult,
+  type PastoralNotesExportSource,
+} from '../src/lib/pastoralNotesExport';
 import {
   PEOPLE_NOTES_ACKNOWLEDGEMENT,
   PEOPLE_NOTES_FORM_MAX_BYTES,
@@ -10,6 +19,8 @@ import {
   handlePastoralNotesExport,
   handlePeopleExport,
   peopleExportJson,
+  validateCanonicalExportResult,
+  validatePastoralNotesExportResult,
   type PeopleExportRuntime,
 } from '../src/lib/peopleExportHttp';
 import type { SessionUser } from '../src/lib/types';
@@ -40,17 +51,19 @@ const superAdmin = makeUser({ isSuperAdmin: true });
 
 const source: CanonicalPeopleExportSource = { today: '2026-08-12', people: [], dependents: [] };
 const notesSource: PastoralNotesExportSource = { notes: [] };
+const canonicalHeader = `${PEOPLE_IMPORT_HEADERS.join(',')}\r\n`;
+const notesHeader = `${PASTORAL_NOTES_EXPORT_HEADERS.join(',')}\r\n`;
 const canonicalSuccess: CanonicalExportResult = {
   status: 'success',
   parts: [
-    { number: 1, rowCount: 2, householdCount: 1, csv: 'header\r\npart-one\r\n' },
-    { number: 2, rowCount: 1, householdCount: 0, csv: 'header\r\npart-two\r\n' },
+    { number: 1, rowCount: 2, householdCount: 1, csv: `${canonicalHeader}part-one\r\n` },
+    { number: 2, rowCount: 1, householdCount: 0, csv: `${canonicalHeader}part-two\r\n` },
   ],
 };
 const notesSuccess: PastoralNotesExportResult = {
   status: 'success',
   counts: { people: 1, notes: 2 },
-  csv: 'person_ref,body\r\nperson-1,private\r\n',
+  csv: `${notesHeader}person-1,private@example.com,Pastor,private,2026-08-12 09:00:00\r\n`,
 };
 
 function runtime(overrides: Partial<PeopleExportRuntime> = {}): PeopleExportRuntime {
@@ -68,6 +81,7 @@ function standardContext(url = 'https://church.example/admin/people/export.csv',
   user?: SessionUser | null;
   modules?: Set<string>;
   backend?: 'd1' | 'supabase';
+  today?: string;
 } = {}) {
   return {
     request: new Request(url),
@@ -75,7 +89,7 @@ function standardContext(url = 'https://church.example/admin/people/export.csv',
     modules: over.modules ?? new Set(['people']),
     db,
     backend: over.backend ?? 'd1',
-    today: '2026-08-12',
+    today: over.today ?? '2026-08-12',
   } as const;
 }
 
@@ -95,6 +109,7 @@ function notesContext(request = notesRequest(), over: {
   user?: SessionUser | null;
   modules?: Set<string>;
   backend?: 'd1' | 'supabase';
+  today?: string;
 } = {}) {
   return {
     request,
@@ -102,7 +117,7 @@ function notesContext(request = notesRequest(), over: {
     modules: over.modules ?? new Set(['people']),
     db,
     backend: over.backend ?? 'd1',
-    today: '2026-08-12',
+    today: over.today ?? '2026-08-12',
   } as const;
 }
 
@@ -171,7 +186,7 @@ describe('standard people export handler', () => {
     expect(response.headers.get('x-people-export-parts')).toBe('2');
     expect(response.headers.get('x-people-export-rows')).toBe('1');
     expect(response.headers.get('x-people-export-households')).toBe('0');
-    expect(await response.text()).toBe('header\r\npart-two\r\n');
+    expect(await response.text()).toBe(`${canonicalHeader}part-two\r\n`);
     expect(rt.loadCanonical).toHaveBeenCalledWith(db, '2026-08-12', 'supabase');
   });
 
@@ -213,6 +228,105 @@ describe('standard people export handler', () => {
       const body = await response.text();
       expect(body).toBe('{"ok":false,"code":"export_failed"}');
       expect(body).not.toContain('private@example.com');
+    }
+  });
+
+  it('validates the calendar date before loading data or constructing download headers', async () => {
+    for (const today of ['2026-02-29', '2026-13-01', 'not-a-date\"\r\nx-private: yes']) {
+      const loadCanonical = vi.fn(async () => source);
+      const response = await handlePeopleExport(
+        standardContext(undefined, { today }),
+        runtime({ loadCanonical }),
+      );
+      expect(response.status, today).toBe(500);
+      expect(loadCanonical, today).not.toHaveBeenCalled();
+      expect(response.headers.get('content-disposition'), today).toBeNull();
+      expect(response.headers.get('x-private'), today).toBeNull();
+      expect(await response.json()).toEqual({ ok: false, code: 'export_failed' });
+    }
+  });
+
+  it('rejects malformed canonical repair counts without reflecting values or CSV headers', async () => {
+    const invalidCounts = [
+      { people: -1, dependents: 0, households: 0, issues: 1 },
+      { people: 1.5, dependents: 0, households: 0, issues: 1 },
+      { people: Number.NaN, dependents: 0, households: 0, issues: 1 },
+      { people: Number.POSITIVE_INFINITY, dependents: 0, households: 0, issues: 1 },
+      { people: 202, dependents: 0, households: 0, issues: 1 },
+      { people: 0, dependents: 202, households: 0, issues: 1 },
+      { people: 0, dependents: 0, households: 102, issues: 1 },
+      { people: 0, dependents: 0, households: 0, issues: 101 },
+      { people: 'private@example.com', dependents: 0, households: 0, issues: 1 },
+    ];
+    for (const counts of invalidCounts) {
+      const response = await handlePeopleExport(standardContext(), runtime({
+        buildCanonical: vi.fn(() => ({ status: 'repair_required', counts }) as never),
+      }));
+      expect(response.status, JSON.stringify(counts)).toBe(500);
+      expect(response.headers.get('content-disposition')).toBeNull();
+      expect(response.headers.get('x-people-export-rows')).toBeNull();
+      expect(await response.text()).toBe('{"ok":false,"code":"export_failed"}');
+    }
+  });
+
+  it('rejects malformed canonical parts, hostile accessors, and proxies at one result boundary', async () => {
+    const tooLargeCsv = `${canonicalHeader}${'x'.repeat(PEOPLE_IMPORT_LIMITS.maxBytes)}`;
+    class PartRecord {
+      number = 1;
+      rowCount = 0;
+      householdCount = 0;
+      csv = canonicalHeader;
+    }
+    const validPart = { number: 1, rowCount: 0, householdCount: 0, csv: canonicalHeader };
+    const invalidResults: unknown[] = [
+      { status: 'success', parts: [] },
+      { status: 'success', parts: Array.from({ length: 26 }, (_, index) => ({ ...validPart, number: index + 1 })) },
+      { status: 'success', parts: [{ ...validPart, number: 2 }] },
+      { status: 'success', parts: [{ ...validPart, rowCount: -1 }] },
+      { status: 'success', parts: [{ ...validPart, rowCount: 201 }] },
+      { status: 'success', parts: [{ ...validPart, rowCount: 0.5 }] },
+      { status: 'success', parts: [{ ...validPart, rowCount: Number.NaN }] },
+      { status: 'success', parts: [{ ...validPart, householdCount: 101 }] },
+      { status: 'success', parts: [{ ...validPart, csv: 'private@example.com\r\n' }] },
+      { status: 'success', parts: [{ ...validPart, csv: tooLargeCsv }] },
+      { status: 'success', parts: [new PartRecord()] },
+      new Proxy(canonicalSuccess, {}),
+    ];
+    let getterCalls = 0;
+    const getterResult = { status: 'success', parts: [{ ...validPart }] };
+    Object.defineProperty(getterResult.parts[0], 'csv', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return getterCalls === 1 ? canonicalHeader : 'private@example.com';
+      },
+    });
+    invalidResults.push(getterResult);
+
+    for (const result of invalidResults) {
+      const response = await handlePeopleExport(standardContext(), runtime({
+        buildCanonical: vi.fn(() => result as never),
+      }));
+      expect(response.status).toBe(500);
+      expect(response.headers.get('content-disposition')).toBeNull();
+      expect(response.headers.get('x-people-export-part')).toBeNull();
+      const body = await response.text();
+      expect(body).toBe('{"ok":false,"code":"export_failed"}');
+      expect(body).not.toContain('private@example.com');
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it('returns a detached stable snapshot from the pure canonical validator', () => {
+    const input = structuredClone(canonicalSuccess);
+    const validated = validateCanonicalExportResult(input);
+    expect(validated).toEqual(canonicalSuccess);
+    expect(validated).not.toBe(input);
+    if (validated?.status === 'success') {
+      expect(validated.parts).not.toBe(input.parts);
+      expect(validated.parts[0]).not.toBe(input.parts[0]);
+      input.parts[0].rowCount = 199;
+      expect(validated.parts[0].rowCount).toBe(2);
     }
   });
 });
@@ -355,6 +469,63 @@ describe('pastoral notes export handler', () => {
     }
   });
 
+  it('releases the body reader after success, exact-limit, oversize, cancellation failure, and read failure', async () => {
+    const valid = `acknowledgement=${encodeURIComponent(PEOPLE_NOTES_ACKNOWLEDGEMENT)}`;
+    const exact = new Uint8Array(PEOPLE_NOTES_FORM_MAX_BYTES).fill(0x61);
+    const overChunks = [
+      new Uint8Array(PEOPLE_NOTES_FORM_MAX_BYTES - 3).fill(0x61),
+      new Uint8Array(4).fill(0x62),
+    ];
+    const cases: Array<{ request: Request; status: number }> = [
+      {
+        request: notesRequest('', {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(valid.slice(0, 9)));
+              controller.enqueue(new TextEncoder().encode(valid.slice(9)));
+              controller.close();
+            },
+          }),
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        }),
+        status: 200,
+      },
+      {
+        request: notesRequest('', {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) { controller.enqueue(exact); controller.close(); },
+          }),
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        }),
+        status: 400,
+      },
+      {
+        request: notesRequest('', {
+          body: new ReadableStream<Uint8Array>({
+            start(controller) { for (const chunk of overChunks) controller.enqueue(chunk); },
+            cancel() { throw new Error('private cancellation detail'); },
+          }),
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        }),
+        status: 413,
+      },
+      {
+        request: notesRequest('', {
+          body: new ReadableStream<Uint8Array>({
+            pull(controller) { controller.error(new Error('private read detail')); },
+          }, { highWaterMark: 0 }),
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        }),
+        status: 400,
+      },
+    ];
+    for (const item of cases) {
+      const response = await handlePastoralNotesExport(notesContext(item.request), runtime());
+      expect(response.status).toBe(item.status);
+      expect(item.request.body?.locked).toBe(false);
+    }
+  });
+
   it('awaits the PII-free audit before exposing notes bytes', async () => {
     const events: string[] = [];
     let releaseAudit!: () => void;
@@ -415,6 +586,113 @@ describe('pastoral notes export handler', () => {
     expect(failed.status).toBe(500);
     expect(failed.headers.get('content-type')).toBe('application/json; charset=utf-8');
     expect(await failed.text()).toBe('{"ok":false,"code":"export_failed"}');
+  });
+
+  it('validates notes results and the calendar before audit or any sensitive byte/header sink', async () => {
+    const invalidResults: unknown[] = [
+      { status: 'repair_required', counts: { people: -1, notes: 0, issues: 1 } },
+      { status: 'repair_required', counts: { people: 5002, notes: 0, issues: 1 } },
+      { status: 'repair_required', counts: { people: 0, notes: 5002, issues: 1 } },
+      { status: 'repair_required', counts: { people: 0, notes: 0, issues: 101 } },
+      { status: 'success', counts: { people: -1, notes: 0 }, csv: notesHeader },
+      { status: 'success', counts: { people: 0.5, notes: 0 }, csv: notesHeader },
+      { status: 'success', counts: { people: Number.NaN, notes: 0 }, csv: notesHeader },
+      { status: 'success', counts: { people: Number.POSITIVE_INFINITY, notes: 0 }, csv: notesHeader },
+      { status: 'success', counts: { people: 5001, notes: 0 }, csv: notesHeader },
+      { status: 'success', counts: { people: 0, notes: 5001 }, csv: notesHeader },
+      { status: 'success', counts: { people: 0, notes: 0 }, csv: 'body,private@example.com\r\n' },
+      {
+        status: 'success',
+        counts: { people: 0, notes: 0 },
+        csv: `${notesHeader}${'x'.repeat(PASTORAL_NOTES_EXPORT_LIMITS.maxCsvBytes)}`,
+      },
+      new Proxy(notesSuccess, {}),
+    ];
+    let getterCalls = 0;
+    const getterResult = { status: 'success', counts: { people: 1, notes: 2 }, csv: notesHeader };
+    Object.defineProperty(getterResult.counts, 'notes', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return getterCalls === 1 ? 2 : 'private@example.com';
+      },
+    });
+    invalidResults.push(getterResult);
+
+    for (const result of invalidResults) {
+      const appendAudit = vi.fn(async () => {});
+      const response = await handlePastoralNotesExport(notesContext(), runtime({
+        buildNotes: vi.fn(() => result as never),
+        appendAudit,
+      }));
+      expect(response.status).toBe(500);
+      expect(appendAudit).not.toHaveBeenCalled();
+      expect(response.headers.get('content-disposition')).toBeNull();
+      const body = await response.text();
+      expect(body).toBe('{"ok":false,"code":"export_failed"}');
+      expect(body).not.toContain('private@example.com');
+    }
+    expect(getterCalls).toBe(0);
+
+    const loadNotes = vi.fn(async () => notesSource);
+    const appendAudit = vi.fn(async () => {});
+    const invalidDate = await handlePastoralNotesExport(
+      notesContext(undefined, { today: '2026-02-29' }),
+      runtime({ loadNotes, appendAudit }),
+    );
+    expect(invalidDate.status).toBe(500);
+    expect(loadNotes).not.toHaveBeenCalled();
+    expect(appendAudit).not.toHaveBeenCalled();
+    expect(invalidDate.headers.get('content-disposition')).toBeNull();
+  });
+
+  it('returns a detached stable snapshot from the pure notes validator', () => {
+    const input = structuredClone(notesSuccess);
+    const validated = validatePastoralNotesExportResult(input);
+    expect(validated).toEqual(notesSuccess);
+    expect(validated).not.toBe(input);
+    if (validated?.status === 'success') {
+      expect(validated.counts).not.toBe(input.counts);
+      input.counts.notes = 99;
+      expect(validated.counts.notes).toBe(2);
+    }
+  });
+
+  it('audits every repeated and concurrent accepted notes export exactly once and awaits all audits', async () => {
+    const releases: Array<() => void> = [];
+    const appendAudit = vi.fn(() => new Promise<void>((resolve) => { releases.push(resolve); }));
+    const rt = runtime({ appendAudit });
+    let settled = 0;
+    const pending = Array.from({ length: 4 }, () => (
+      handlePastoralNotesExport(notesContext(), rt).then((response) => {
+        settled += 1;
+        return response;
+      })
+    ));
+    await vi.waitFor(() => expect(appendAudit).toHaveBeenCalledTimes(4));
+    expect(settled).toBe(0);
+    expect(releases).toHaveLength(4);
+    for (const release of releases) release();
+    const responses = await Promise.all(pending);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+    expect(appendAudit).toHaveBeenCalledTimes(4);
+  });
+
+  it('uses the validated notes snapshot when the serializer-owned result mutates during audit', async () => {
+    const mutable = structuredClone(notesSuccess);
+    const originalCsv = mutable.status === 'success' ? mutable.csv : '';
+    const response = await handlePastoralNotesExport(notesContext(), runtime({
+      buildNotes: vi.fn(() => mutable),
+      appendAudit: vi.fn(async () => {
+        if (mutable.status === 'success') {
+          mutable.counts.people = 5_000;
+          mutable.counts.notes = 5_000;
+          mutable.csv = `${notesHeader}person-1,private@example.com,Changed,changed,2026-08-12 10:00:00\r\n`;
+        }
+      }),
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(originalCsv);
   });
 
   it('rejects GET, HEAD, and OPTIONS safely after authorization without reading a body', async () => {
