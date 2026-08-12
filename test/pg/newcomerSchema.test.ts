@@ -34,6 +34,8 @@ const FIELD_ROWS = [
   [7, 'contact_consent', 'checkbox', 0, 1, 7, 1, 'Contact consent', '联系同意'],
 ];
 
+const PG_RESTRICT_CODES = ['23001', '23503'] as const;
+
 function submission(values: string): string {
   return `INSERT INTO newcomer_submissions
     (id,name,email,phone,locale,visit_date,service_type_id,contact_consent_at,source,status_id,
@@ -76,10 +78,15 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     await sql?.end();
   });
 
-  async function rejects(statement: string, code?: string): Promise<void> {
-    const expectation = expect(sql.unsafe(statement)).rejects;
-    if (code) await expectation.toMatchObject({ code });
-    else await expectation.toBeTruthy();
+  async function rejects(statement: string, code?: string | readonly string[]): Promise<void> {
+    if (!code) {
+      await expect(sql.unsafe(statement)).rejects.toBeTruthy();
+      return;
+    }
+    const expectedCodes = typeof code === 'string' ? [code] : code;
+    const error = await sql.unsafe(statement).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ code: expect.any(String) });
+    expect(expectedCodes).toContain((error as { code: string }).code);
   }
 
   it('creates the same eleven shared tables with non-identity stable catalog IDs and exact bilingual status seed', async () => {
@@ -450,9 +457,29 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
         VALUES ('76200000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9861,'assigned');
     `);
 
-    await rejects('DELETE FROM newcomer_statuses WHERE id=3', '23503');
-    await rejects('DELETE FROM newcomer_fields WHERE id=195', '23503');
-    await rejects('DELETE FROM people WHERE id=9863', '23503');
+    await rejects('DELETE FROM newcomer_statuses WHERE id=3', PG_RESTRICT_CODES);
+    await rejects('DELETE FROM newcomer_fields WHERE id=195', PG_RESTRICT_CODES);
+    await rejects('DELETE FROM people WHERE id=9863', PG_RESTRICT_CODES);
+    const [retained] = await sql.unsafe<Record<string, number>[]>(`
+      SELECT
+        (SELECT COUNT(*) FROM newcomer_statuses WHERE id=3)::integer AS status_parent,
+        (SELECT COUNT(*) FROM newcomer_submissions
+          WHERE id='76000000-0000-4000-8000-000000000001' AND status_id=3)::integer AS status_child,
+        (SELECT COUNT(*) FROM newcomer_fields WHERE id=195)::integer AS field_parent,
+        (SELECT COUNT(*) FROM newcomer_answers
+          WHERE submission_id='76000000-0000-4000-8000-000000000001' AND field_id=195)::integer AS field_child,
+        (SELECT COUNT(*) FROM people WHERE id=9863)::integer AS author_parent,
+        (SELECT COUNT(*) FROM newcomer_notes
+          WHERE id='76100000-0000-4000-8000-000000000001' AND author_person_id=9863)::integer AS author_child
+    `);
+    expect(retained).toEqual({
+      status_parent: 1,
+      status_child: 1,
+      field_parent: 1,
+      field_child: 1,
+      author_parent: 1,
+      author_child: 1,
+    });
 
     await sql.unsafe('DELETE FROM service_types WHERE id=9861');
     await sql.unsafe('DELETE FROM people WHERE id=9861');

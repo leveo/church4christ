@@ -430,6 +430,15 @@ describe('newcomer foundation schema (D1)', () => {
     await reject('DELETE FROM newcomer_statuses WHERE id=3');
     await reject('DELETE FROM newcomer_fields WHERE id=195');
     await reject('DELETE FROM people WHERE id=9863');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_statuses WHERE id=3').first<number>('n')).toBe(1);
+    expect(await env.DB.prepare("SELECT status_id FROM newcomer_submissions WHERE id='76000000-0000-4000-8000-000000000001'").first())
+      .toEqual({ status_id: 3 });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_fields WHERE id=195').first<number>('n')).toBe(1);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_answers
+      WHERE submission_id='76000000-0000-4000-8000-000000000001' AND field_id=195`).first<number>('n')).toBe(1);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people WHERE id=9863').first<number>('n')).toBe(1);
+    expect(await env.DB.prepare("SELECT author_person_id FROM newcomer_notes WHERE id='76100000-0000-4000-8000-000000000001'").first())
+      .toEqual({ author_person_id: 9863 });
 
     await env.DB.prepare('DELETE FROM service_types WHERE id=9861').run();
     await env.DB.prepare('DELETE FROM people WHERE id=9861').run();

@@ -158,6 +158,55 @@ describe('final D1 schema parser', () => {
     ]));
   });
 
+  it('ignores quoted, commented, and nested fake foreign-key actions', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE parents (id INTEGER PRIMARY KEY);
+       CREATE TABLE children (
+         id INTEGER PRIMARY KEY,
+         inline_parent_id INTEGER REFERENCES parents(id)
+           CHECK (
+             inline_parent_id <> 'ON DELETE CASCADE' AND
+             inline_parent_id <> 'it''s ON UPDATE SET NULL' AND
+             "ON DELETE SET DEFAULT" <> 'quoted identifier'
+           )
+           /* ON DELETE RESTRICT */,
+         table_parent_id INTEGER,
+         real_parent_id INTEGER REFERENCES parents(id)
+           ON DELETE CASCADE /* ON UPDATE SET NULL */ ON UPDATE RESTRICT,
+         FOREIGN KEY (table_parent_id) REFERENCES parents(id)
+           /* ON DELETE CASCADE */
+           -- ON UPDATE SET DEFAULT
+       );`,
+    ]);
+
+    expect(schema.tables.get('children')?.constraints).toEqual(expect.arrayContaining([
+      {
+        kind: 'foreign',
+        columns: ['inline_parent_id'],
+        foreignTable: 'parents',
+        foreignColumns: ['id'],
+        onDelete: 'no action',
+        onUpdate: 'no action',
+      },
+      {
+        kind: 'foreign',
+        columns: ['table_parent_id'],
+        foreignTable: 'parents',
+        foreignColumns: ['id'],
+        onDelete: 'no action',
+        onUpdate: 'no action',
+      },
+      {
+        kind: 'foreign',
+        columns: ['real_parent_id'],
+        foreignTable: 'parents',
+        foreignColumns: ['id'],
+        onDelete: 'cascade',
+        onUpdate: 'restrict',
+      },
+    ]));
+  });
+
   it('models trigger metadata, WHEN guards, and abort body semantics instead of stripping them', () => {
     const schema = parseFinalD1Schema([
       `CREATE TABLE protected_rows (id INTEGER PRIMARY KEY, fixed INTEGER NOT NULL);

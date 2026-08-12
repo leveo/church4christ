@@ -114,6 +114,22 @@ describe('foreign-key action signature', () => {
       onDelete: 'no action',
     } as D1Constraint));
   });
+
+  it('does not let quoted or commented text disguise D1 NO ACTION as PostgreSQL CASCADE', () => {
+    const schema = parseFinalD1Schema([
+      `CREATE TABLE parents (id INTEGER PRIMARY KEY);
+       CREATE TABLE children (
+         parent_id INTEGER REFERENCES parents(id)
+           CHECK (parent_id <> 'ON DELETE CASCADE')
+           /* ON DELETE CASCADE */
+       );`,
+    ]);
+    const d1Foreign = schema.tables.get('children')?.constraints.find((constraint) => constraint.kind === 'foreign');
+    expect(d1Foreign?.onDelete).toBe('no action');
+    expect(constraintSignature('children', d1Foreign as D1Constraint)).not.toBe(
+      constraintSignature('children', base as D1Constraint),
+    );
+  });
 });
 
 function sqlTokens(value: string): string[] {

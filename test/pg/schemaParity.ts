@@ -452,23 +452,84 @@ function defaultExpression(tail: string): string | null {
   return tail.slice(start, i);
 }
 
+function topLevelSqlWords(value: string, context: string): string[] {
+  const words: string[] = [];
+  let depth = 0;
+  for (let index = 0; index < value.length;) {
+    const char = value[index];
+    const next = value[index + 1];
+    if (char === "'" || char === '"') {
+      const quote = char;
+      let closed = false;
+      for (index += 1; index < value.length;) {
+        if (value[index] === quote && value[index + 1] === quote) index += 2;
+        else if (value[index] === quote) { index += 1; closed = true; break; }
+        else index += 1;
+      }
+      if (!closed) throw new Error(`unterminated quoted value in ${context}`);
+      continue;
+    }
+    if (char === '-' && next === '-') {
+      index += 2;
+      while (index < value.length && value[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      let commentDepth = 1;
+      for (index += 2; index < value.length && commentDepth > 0;) {
+        if (value[index] === '/' && value[index + 1] === '*') { commentDepth += 1; index += 2; }
+        else if (value[index] === '*' && value[index + 1] === '/') { commentDepth -= 1; index += 2; }
+        else index += 1;
+      }
+      if (commentDepth !== 0) throw new Error(`unterminated block comment in ${context}`);
+      continue;
+    }
+    if (char === '(') { depth += 1; index += 1; continue; }
+    if (char === ')') {
+      if (depth === 0) throw new Error(`unbalanced parentheses in ${context}`);
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    const word = value.slice(index).match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0];
+    if (word) {
+      if (depth === 0) words.push(word.toLowerCase());
+      index += word.length;
+      continue;
+    }
+    index += 1;
+  }
+  if (depth !== 0) throw new Error(`unbalanced parentheses in ${context}`);
+  return words;
+}
+
 function referentialActions(tail: string): Pick<D1Constraint, 'onDelete' | 'onUpdate'> {
   const actions: { onDelete: D1ReferentialAction; onUpdate: D1ReferentialAction } = {
     onDelete: 'no action',
     onUpdate: 'no action',
   };
   const seen = new Set<'delete' | 'update'>();
-  const clause = /\bON\s+(DELETE|UPDATE)\s+(NO\s+ACTION|RESTRICT|CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/gi;
-  for (const match of tail.matchAll(clause)) {
-    const event = match[1].toLowerCase() as 'delete' | 'update';
+  const words = topLevelSqlWords(tail, 'foreign-key action');
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] !== 'on' || !['delete', 'update'].includes(words[index + 1] ?? '')) continue;
+    const event = words[index + 1] as 'delete' | 'update';
     if (seen.has(event)) throw new Error(`duplicate ON ${event.toUpperCase()} foreign-key action`);
     seen.add(event);
-    const action = match[2].replace(/\s+/g, ' ').toLowerCase() as D1ReferentialAction;
+    let action: D1ReferentialAction;
+    if (['restrict', 'cascade'].includes(words[index + 2] ?? '')) {
+      action = words[index + 2] as D1ReferentialAction;
+      index += 2;
+    } else if (words[index + 2] === 'no' && words[index + 3] === 'action') {
+      action = 'no action';
+      index += 3;
+    } else if (words[index + 2] === 'set' && ['null', 'default'].includes(words[index + 3] ?? '')) {
+      action = `set ${words[index + 3]}` as D1ReferentialAction;
+      index += 3;
+    } else {
+      throw new Error(`unsupported ON ${event.toUpperCase()} foreign-key action`);
+    }
     if (event === 'delete') actions.onDelete = action;
     else actions.onUpdate = action;
-  }
-  if (/\bON\s+(?:DELETE|UPDATE)\b/i.test(tail.replace(clause, ' '))) {
-    throw new Error(`unsupported foreign-key action: ${tail}`);
   }
   return actions;
 }
@@ -506,32 +567,8 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
 }
 
 function hasTopLevelNotNull(value: string): boolean {
-  let depth = 0;
-  let quote: "'" | '"' | null = null;
-  let outside = '';
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === quote && value[index + 1] === quote) index += 1;
-      else if (char === quote) quote = null;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      outside += ' ';
-    } else if (char === '(') {
-      depth += 1;
-      outside += ' ';
-    } else if (char === ')') {
-      if (depth === 0) throw new Error(`unbalanced column constraint: ${value}`);
-      depth -= 1;
-      outside += ' ';
-    } else {
-      outside += depth === 0 ? char : ' ';
-    }
-  }
-  if (quote || depth !== 0) throw new Error(`unbalanced column constraint: ${value}`);
-  return /\bNOT\s+NULL\b/i.test(outside);
+  const words = topLevelSqlWords(value, 'column constraint');
+  return words.some((word, index) => word === 'not' && words[index + 1] === 'null');
 }
 
 function parseTableConstraint(entry: string): D1Constraint | null {
