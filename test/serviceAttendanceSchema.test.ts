@@ -53,6 +53,11 @@ describe('service attendance schema', () => {
         (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
       VALUES (8201, 'abcd-02-29', 1, 8101, 8101)
     `).run()).rejects.toThrow();
+    await expect(env.DB.prepare(`
+      INSERT INTO service_attendance
+        (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
+      VALUES (8201, '0000-01-01', 1, 8101, 8101)
+    `).run()).rejects.toThrow();
     await env.DB.prepare(`
       INSERT INTO service_attendance
         (service_type_id, attendance_date, adult_count, recorded_by_person_id, updated_by_person_id)
@@ -86,6 +91,30 @@ describe('service attendance schema', () => {
     ]));
     expect(indexes.results.find((index) => index.name === 'idx_service_checkin_links_one_open')?.sql)
       .toMatch(/UNIQUE[\s\S]*service_type_id\s*,\s*checkin_event_id[\s\S]*ends_on IS NULL/i);
+    const attendanceIndex = await env.DB.prepare(`
+      SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_service_attendance_date'
+    `).first<{ sql: string }>();
+    expect(attendanceIndex?.sql).toMatch(/attendance_date\s*,\s*service_type_id/i);
+    const stateFks = await env.DB.prepare('PRAGMA foreign_key_list(service_checkin_link_state)')
+      .all<{ table: string; from: string; to: string }>();
+    expect(stateFks.results).toContainEqual(expect.objectContaining({
+      table: 'service_types', from: 'service_type_id', to: 'id',
+    }));
+    const attendanceFks = await env.DB.prepare('PRAGMA foreign_key_list(service_attendance)')
+      .all<{ table: string; from: string; to: string }>();
+    expect(attendanceFks.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: 'service_types', from: 'service_type_id', to: 'id' }),
+      expect.objectContaining({ table: 'people', from: 'recorded_by_person_id', to: 'id' }),
+      expect.objectContaining({ table: 'people', from: 'updated_by_person_id', to: 'id' }),
+    ]));
+    const linkFks = await env.DB.prepare('PRAGMA foreign_key_list(service_type_checkin_events)')
+      .all<{ table: string; from: string; to: string }>();
+    expect(linkFks.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: 'service_types', from: 'service_type_id', to: 'id' }),
+      expect.objectContaining({ table: 'checkin_events', from: 'checkin_event_id', to: 'id' }),
+      expect.objectContaining({ table: 'people', from: 'created_by_person_id', to: 'id' }),
+      expect.objectContaining({ table: 'people', from: 'closed_by_person_id', to: 'id' }),
+    ]));
   });
 
   it('allows effective and same-day zero-length cancellation rows but rejects malformed close audit', async () => {
@@ -120,6 +149,11 @@ describe('service attendance schema', () => {
       INSERT INTO service_type_checkin_events
         (service_type_id, checkin_event_id, starts_on, created_by_person_id)
       VALUES (8203, 8303, 'abcd-02-29', 8101)
+    `).run()).rejects.toThrow();
+    await expect(env.DB.prepare(`
+      INSERT INTO service_type_checkin_events
+        (service_type_id, checkin_event_id, starts_on, created_by_person_id)
+      VALUES (8203, 8303, '0000-01-01', 8101)
     `).run()).rejects.toThrow();
     await expect(env.DB.prepare(`
       INSERT INTO service_type_checkin_events
@@ -181,6 +215,18 @@ describe('service attendance schema', () => {
         (service_type_id, checkin_event_id, starts_on, created_by_person_id)
       VALUES (8206, 8306, '2026-08-12', 8101) RETURNING id
     `).first<{ id: number }>();
+    await expect(env.DB.prepare(`
+      UPDATE service_type_checkin_events
+      SET service_type_id = 8204, ends_on = '2026-08-12',
+          closed_by_person_id = 8102, closed_at = datetime('now')
+      WHERE id = ?
+    `).bind(primaryMove!.id).run()).rejects.toThrow(/service_attendance_link_immutable/i);
+    await expect(env.DB.prepare(`
+      UPDATE service_type_checkin_events
+      SET checkin_event_id = 8304, ends_on = '2026-08-12',
+          closed_by_person_id = 8102, closed_at = datetime('now')
+      WHERE id = ?
+    `).bind(primaryMove!.id).run()).rejects.toThrow(/service_attendance_link_immutable/i);
     await expect(env.DB.prepare(`
       UPDATE service_type_checkin_events
       SET id = id + 100000, ends_on = '2026-08-12',

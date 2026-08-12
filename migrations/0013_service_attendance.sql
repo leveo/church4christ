@@ -6,6 +6,7 @@ CREATE TABLE service_attendance (
   attendance_date TEXT NOT NULL
     CHECK (
       length(attendance_date) = 10 AND substr(attendance_date, 5, 1) = '-' AND substr(attendance_date, 8, 1) = '-' AND
+      substr(attendance_date, 1, 4) BETWEEN '0001' AND '9999' AND
       substr(attendance_date, 6, 2) BETWEEN '01' AND '12' AND substr(attendance_date, 9, 2) BETWEEN '01' AND '31' AND
       (substr(attendance_date, 6, 2) NOT IN ('04','06','09','11') OR substr(attendance_date, 9, 2) <= '30') AND
       (substr(attendance_date, 6, 2) <> '02' OR substr(attendance_date, 9, 2) <= '29') AND
@@ -18,6 +19,8 @@ CREATE TABLE service_attendance (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (service_type_id, attendance_date)
 ) WITHOUT ROWID;
+CREATE INDEX idx_service_attendance_date
+  ON service_attendance(attendance_date, service_type_id);
 
 -- Append/close-only history linking a service type to one or more children's
 -- check-in events (rooms). Effective ranges are half-open [starts_on, ends_on).
@@ -29,6 +32,7 @@ CREATE TABLE service_type_checkin_events (
   starts_on TEXT NOT NULL
     CHECK (
       length(starts_on) = 10 AND substr(starts_on, 5, 1) = '-' AND substr(starts_on, 8, 1) = '-' AND
+      substr(starts_on, 1, 4) BETWEEN '0001' AND '9999' AND
       substr(starts_on, 6, 2) BETWEEN '01' AND '12' AND substr(starts_on, 9, 2) BETWEEN '01' AND '31' AND
       (substr(starts_on, 6, 2) NOT IN ('04','06','09','11') OR substr(starts_on, 9, 2) <= '30') AND
       (substr(starts_on, 6, 2) <> '02' OR substr(starts_on, 9, 2) <= '29') AND
@@ -37,6 +41,7 @@ CREATE TABLE service_type_checkin_events (
   ends_on TEXT
     CHECK (ends_on IS NULL OR (
       length(ends_on) = 10 AND substr(ends_on, 5, 1) = '-' AND substr(ends_on, 8, 1) = '-' AND
+      substr(ends_on, 1, 4) BETWEEN '0001' AND '9999' AND
       substr(ends_on, 6, 2) BETWEEN '01' AND '12' AND substr(ends_on, 9, 2) BETWEEN '01' AND '31' AND
       (substr(ends_on, 6, 2) NOT IN ('04','06','09','11') OR substr(ends_on, 9, 2) <= '30') AND
       (substr(ends_on, 6, 2) <> '02' OR substr(ends_on, 9, 2) <= '29') AND
