@@ -1238,6 +1238,11 @@ interface CapturedValidatedIntake extends Omit<ValidatedNewcomerIntake, 'answers
   answers: CapturedValidatedAnswer[];
 }
 
+export interface CreateNewcomerSubmissionOptions {
+  backend: SnapshotBackend;
+  operationId: string;
+}
+
 function safeValidatedIntake(value: unknown): CapturedValidatedIntake {
   const row = plainRow(value, [
     'name', 'email', 'phone', 'locale', 'visitDate', 'serviceTypeId', 'contactConsent', 'answers',
@@ -1300,60 +1305,59 @@ function mutationGuard(db: AppDb, predicate: string, values: unknown[]) {
   `).bind(...values);
 }
 
+function createAnswerPayloadCte(backend: SnapshotBackend, parameter: string): string {
+  return backend === 'd1'
+    ? `payload(field_id,value,bytes) AS (
+      SELECT CAST(json_extract(item.value,'$.fieldId') AS INTEGER),
+        CAST(json_extract(item.value,'$.value') AS TEXT),
+        CAST(json_extract(item.value,'$.bytes') AS INTEGER)
+      FROM json_each(${parameter}) item
+    )`
+    : `payload(field_id,value,bytes) AS (
+      SELECT CAST(item.value->>'fieldId' AS INTEGER),item.value->>'value',
+        CAST(item.value->>'bytes' AS INTEGER)
+      FROM jsonb_array_elements(CAST(CAST(${parameter} AS TEXT) AS jsonb)) AS item(value)
+    )`;
+}
+
+function createAnswerByteLength(backend: SnapshotBackend, expression: string): string {
+  return backend === 'd1'
+    ? `length(CAST(${expression} AS BLOB))`
+    : `octet_length(${expression})`;
+}
+
 export async function createNewcomerSubmission(
   db: AppDb,
   user: SessionUser | null,
   mode: 'public' | 'staff',
   input: ValidatedNewcomerIntake,
+  options: CreateNewcomerSubmissionOptions,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ id: string; version: 0 }> {
+): Promise<{ id: string; version: 0; operationId: string }> {
   if (mode !== 'public' && mode !== 'staff') throw new NewcomerInvalidError();
   if (mode === 'staff') assertPrivateAccess(user);
   const captured = safeValidatedIntake(input);
   if (mode === 'public' && !captured.contactConsent) throw new NewcomerInvalidError();
-  const generated = mutationRuntime(runtime, 2);
-  const [submissionId, activityId] = generated.ids;
+  const capturedOptions = plainRow(options, ['backend', 'operationId']);
+  const backend = capturedOptions?.backend === 'd1' || capturedOptions?.backend === 'supabase'
+    ? capturedOptions.backend : null;
+  const operationId = capturedOptions && RUNTIME_UUID.test(String(capturedOptions.operationId))
+    ? capturedOptions.operationId as string : null;
+  if (!backend || !operationId) throw new NewcomerInvalidError();
+  const generated = mutationRuntime(runtime, 1);
+  const [activityId] = generated.ids;
+  const submissionId = operationId;
   const actorPersonId = mode === 'staff' ? user!.id : null;
   const consentAt = captured.contactConsent ? generated.now : null;
+  const answerPayload = JSON.stringify(captured.answers.map((answer) => ({
+    fieldId: answer.fieldId,
+    value: answer.value,
+    bytes: answer.bytes,
+  })));
+  if (UTF8.encode(answerPayload).byteLength > 40 * 1024) throw new NewcomerInvalidError();
+  const answerPayloadCte = createAnswerPayloadCte(backend, '?1');
+  const payloadByteLength = createAnswerByteLength(backend, 'payload.value');
   try {
-    const answerStatements = captured.answers.map((answer) => db.prepare(`
-    INSERT INTO newcomer_answers (submission_id,field_id,value)
-    SELECT submission.id,field.id,?1
-    FROM newcomer_submissions submission
-    JOIN newcomer_fields field ON field.id=?2 AND field.id>7 AND field.active=1
-    WHERE submission.id=?3 AND (
-      (field.type='text' AND ?4<=500) OR
-      (field.type='textarea' AND ?4<=4000) OR
-      (field.type='select' AND EXISTS (
-        SELECT 1 FROM newcomer_field_options option
-        WHERE option.field_id=field.id AND option.value=?1 AND option.active=1
-      )) OR
-      (field.type='checkbox' AND ?1 IN ('true','false'))
-    )
-  `).bind(answer.value, answer.fieldId, submissionId, answer.bytes));
-  const expectedAnswers = captured.answers.length;
-  const exactAnswerPredicates = captured.answers.map((_, index) => {
-    const valueParameter = 7 + index * 3;
-    const fieldParameter = valueParameter + 1;
-    const bytesParameter = valueParameter + 2;
-    return `OR NOT EXISTS (
-      SELECT 1 FROM newcomer_answers answer
-      JOIN newcomer_fields field ON field.id=answer.field_id
-      WHERE answer.submission_id=?1 AND answer.field_id=?${fieldParameter}
-        AND answer.value=?${valueParameter} AND field.id>7 AND field.active=1 AND (
-          (field.type='text' AND ?${bytesParameter}<=500) OR
-          (field.type='textarea' AND ?${bytesParameter}<=4000) OR
-          (field.type='select' AND EXISTS (
-            SELECT 1 FROM newcomer_field_options option
-            WHERE option.field_id=field.id AND option.value=answer.value AND option.active=1
-          )) OR
-          (field.type='checkbox' AND answer.value IN ('true','false'))
-        )
-    )`;
-  }).join('\n');
-  const exactAnswerValues = captured.answers.flatMap((answer) => [
-    answer.value, answer.fieldId, answer.bytes,
-  ]);
   const statements = [
     // All Task 3 field configuration writes take this same row mutex. It closes
     // the READ COMMITTED phantom window while required/active/options are rechecked.
@@ -1380,58 +1384,97 @@ export async function createNewcomerSubmission(
       submissionId, captured.name, captured.email, captured.phone, captured.locale,
       captured.visitDate, captured.serviceTypeId, consentAt, mode, generated.now,
     ),
-    ...answerStatements,
+    db.prepare(`
+      WITH ${answerPayloadCte}
+      INSERT INTO newcomer_answers (submission_id,field_id,value)
+      SELECT submission.id,field.id,payload.value
+      FROM payload
+      JOIN newcomer_submissions submission ON submission.id=?2
+      JOIN newcomer_fields field ON field.id=payload.field_id AND field.id>7 AND field.active=1
+      WHERE payload.bytes=${payloadByteLength} AND (
+        (field.type='text' AND payload.bytes<=500) OR
+        (field.type='textarea' AND payload.bytes<=4000) OR
+        (field.type='select' AND EXISTS (
+          SELECT 1 FROM newcomer_field_options option
+          WHERE option.field_id=field.id AND option.value=payload.value AND option.active=1
+        )) OR
+        (field.type='checkbox' AND payload.value IN ('true','false'))
+      )
+    `).bind(answerPayload, submissionId),
     db.prepare(`
       INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
       SELECT ?1,submission.id,?2,'submission_created','{}',?3
       FROM newcomer_submissions submission WHERE submission.id=?4
     `).bind(activityId, actorPersonId, generated.now, submissionId),
-    mutationGuard(db, `
+    db.prepare(`
+      WITH ${answerPayloadCte}
+      INSERT INTO newcomer_status_i18n (status_id,locale,label)
+      SELECT 0,'en','guard' WHERE
       NOT EXISTS (
         SELECT 1 FROM newcomer_submissions submission
         JOIN newcomer_statuses status ON status.id=submission.status_id
-        WHERE submission.id=?1 AND submission.deleted_at IS NULL AND submission.version=0
+        WHERE submission.id=?2 AND submission.deleted_at IS NULL AND submission.version=0
           AND submission.last_mutation_id IS NULL
           AND status.active=1 AND status.category='open' AND status.is_initial=1
-          AND (CAST(?2 AS INTEGER) IS NULL OR EXISTS (
+          AND (CAST(?3 AS INTEGER) IS NULL OR EXISTS (
             SELECT 1 FROM service_types service
-            WHERE service.id=CAST(?2 AS INTEGER) AND service.deleted_at IS NULL
+            WHERE service.id=CAST(?3 AS INTEGER) AND service.deleted_at IS NULL
           ))
       ) OR
-      (SELECT COUNT(*) FROM newcomer_answers WHERE submission_id=?1)<>?3 OR
+      (SELECT COUNT(*) FROM payload)>100 OR
+      (SELECT COUNT(*) FROM payload)<>(SELECT COUNT(DISTINCT field_id) FROM payload) OR
+      (SELECT COUNT(*) FROM newcomer_answers WHERE submission_id=?2)
+        <>(SELECT COUNT(*) FROM payload) OR
       EXISTS (
         SELECT 1 FROM newcomer_fields field
         WHERE field.id>7 AND field.active=1 AND field.required=1
           AND NOT EXISTS (
             SELECT 1 FROM newcomer_answers answer
-            WHERE answer.submission_id=?1 AND answer.field_id=field.id
+            WHERE answer.submission_id=?2 AND answer.field_id=field.id
           )
       ) OR
       EXISTS (
-        SELECT 1 FROM newcomer_answers answer
-        JOIN newcomer_fields field ON field.id=answer.field_id
-        WHERE answer.submission_id=?1 AND (field.id<=7 OR field.active<>1 OR
-          (field.type='select' AND NOT EXISTS (
+        SELECT 1 FROM payload
+        LEFT JOIN newcomer_fields field ON field.id=payload.field_id
+        WHERE field.id IS NULL OR field.id<=7 OR field.active<>1
+          OR payload.bytes<>${payloadByteLength} OR NOT (
+          (field.type='text' AND payload.bytes<=500) OR
+          (field.type='textarea' AND payload.bytes<=4000) OR
+          (field.type='select' AND EXISTS (
             SELECT 1 FROM newcomer_field_options option
-            WHERE option.field_id=field.id AND option.value=answer.value AND option.active=1
+            WHERE option.field_id=field.id AND option.value=payload.value AND option.active=1
           )) OR
-          (field.type='checkbox' AND answer.value NOT IN ('true','false')))
-      )
-      ${exactAnswerPredicates} OR
+          (field.type='checkbox' AND payload.value IN ('true','false'))
+        )
+      ) OR
+      EXISTS (
+        SELECT 1 FROM payload WHERE NOT EXISTS (
+          SELECT 1 FROM newcomer_answers answer
+          WHERE answer.submission_id=?2 AND answer.field_id=payload.field_id
+            AND answer.value=payload.value
+        )
+      ) OR
+      EXISTS (
+        SELECT 1 FROM newcomer_answers answer
+        WHERE answer.submission_id=?2 AND NOT EXISTS (
+          SELECT 1 FROM payload WHERE payload.field_id=answer.field_id
+            AND payload.value=answer.value
+        )
+      ) OR
       NOT EXISTS (
         SELECT 1 FROM newcomer_activity
-        WHERE id=?4 AND submission_id=?1
+        WHERE id=?4 AND submission_id=?2
           AND ${actorPredicate('?5')}
           AND kind='submission_created' AND metadata_json='{}' AND created_at=?6
       )
-    `, [
-      submissionId, captured.serviceTypeId, expectedAnswers, activityId, actorPersonId, generated.now,
-      ...exactAnswerValues,
-    ]),
+    `).bind(
+      answerPayload, submissionId, captured.serviceTypeId,
+      activityId, actorPersonId, generated.now,
+    ),
     ];
     const results = batchResults(await db.batch(statements), statements.length);
     for (const result of results) resultRows(result, 101);
-    return { id: submissionId, version: 0 };
+    return { id: submissionId, version: 0, operationId };
   } catch (error) {
     rethrowMutation(error);
   }

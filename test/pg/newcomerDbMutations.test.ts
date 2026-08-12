@@ -88,6 +88,62 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
 
   afterAll(async () => { await Promise.all([sql?.end(), observer?.end()]); });
 
+  it('bulk-inserts 0 through 100 answers with a fixed PostgreSQL statement budget', async () => {
+    for (const count of [0, 31, 32, 44, 45, 100]) {
+      await sql.unsafe(`
+        TRUNCATE newcomer_activity,newcomer_answers,newcomer_submissions CASCADE;
+        DELETE FROM newcomer_fields WHERE id>7;
+      `);
+      if (count > 0) {
+        const values = Array.from({ length: count }, (_, index) =>
+          `(${index + 8},'pg_bulk_${index + 8}','checkbox',1,1,${index + 8},0)`).join(',');
+        await sql.unsafe(`INSERT INTO newcomer_fields
+          (id,key,type,required,active,sort,fixed) VALUES ${values}`);
+      }
+      const bindCounts: number[] = [];
+      let statementCount = -1;
+      const underlying = new WeakMap<AppStatement, AppStatement>();
+      const recordingDb: AppDb = {
+        prepare(sqlText: string) {
+          let statement = db.prepare(sqlText);
+          const wrapper: AppStatement = {
+            bind(...values: unknown[]) {
+              bindCounts.push(values.length);
+              statement = statement.bind(...values);
+              underlying.set(wrapper, statement);
+              return wrapper;
+            },
+            first: (column?: string) => statement.first(column),
+            all: () => statement.all(),
+            run: () => statement.run(),
+          };
+          bindCounts.push(0);
+          underlying.set(wrapper, statement);
+          return wrapper;
+        },
+        batch(statements: AppStatement[]) {
+          statementCount = statements.length;
+          return db.batch(statements.map((statement) => underlying.get(statement)!));
+        },
+      };
+      const operationId = `71300000-0000-4000-8000-${String(count).padStart(12, '0')}`;
+      const created = await createNewcomerSubmission(recordingDb, null, 'public', {
+        name: `PG Bulk ${count}`, email: `pg-bulk-${count}@example.test`, phone: null, locale: 'en',
+        visitDate: '2026-08-11', serviceTypeId: null, contactConsent: true,
+        answers: Array.from({ length: count }, (_, index) => ({ fieldId: index + 8, value: 'true' })),
+      }, { backend: 'supabase', operationId }, runtime([
+        '71300000-0000-4000-8000-100000000001',
+      ]));
+      expect(created).toEqual({ id: operationId, version: 0, operationId });
+      expect(statementCount).toBe(7);
+      expect(Math.max(...bindCounts)).toBeLessThanOrEqual(100);
+      const [answers] = await sql.unsafe<{ count: number }[]>(`
+        SELECT COUNT(*)::int AS count FROM newcomer_answers WHERE submission_id=$1
+      `, [operationId]);
+      expect(answers.count).toBe(count);
+    }
+  });
+
   it('uses the same segment-safe scoped assignee grant and canonical CAS activity', async () => {
     await expect(assignNewcomer(
       db,
@@ -127,11 +183,15 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
         visitDate: '2026-08-11', serviceTypeId: null, contactConsent: false,
         answers: [{ fieldId: 8, value: 'A safe answer' }],
       },
+      { backend: 'supabase', operationId: '72000000-0000-4000-8000-000000000001' },
       runtime([
-        '72000000-0000-4000-8000-000000000001',
         '72000000-0000-4000-8000-000000000002',
       ]),
-    )).resolves.toEqual({ id: '72000000-0000-4000-8000-000000000001', version: 0 });
+    )).resolves.toEqual({
+      id: '72000000-0000-4000-8000-000000000001',
+      version: 0,
+      operationId: '72000000-0000-4000-8000-000000000001',
+    });
     const [created] = await sql.unsafe<{ contact_consent_at: string | null; actor_person_id: number; metadata_json: string }[]>(`
       SELECT submission.contact_consent_at,activity.actor_person_id,activity.metadata_json
       FROM newcomer_submissions submission JOIN newcomer_activity activity ON activity.submission_id=submission.id
@@ -411,8 +471,9 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       name: 'PG Text Too Long', email: 'pg-text@example.test', phone: null, locale: 'en',
       visitDate: '2026-08-11', serviceTypeId: null, contactConsent: true,
       answers: [{ fieldId: 8, value: 'x'.repeat(501) }],
+    }, {
+      backend: 'supabase', operationId: '77000000-0000-4000-8000-000000000001',
     }, runtime([
-      '77000000-0000-4000-8000-000000000001',
       '77000000-0000-4000-8000-000000000002',
     ]))).rejects.toBeInstanceOf(NewcomerConflictError);
     const [textResidue] = await sql.unsafe<{ count: number }[]>(`
@@ -657,8 +718,9 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
           name: 'PG Fault Create', email: 'pg-fault@example.test', phone: null, locale: 'en',
           visitDate: '2026-08-11', serviceTypeId: null, contactConsent: true,
           answers: [{ fieldId: 8, value: 'Safe' }],
+        }, {
+          backend: 'supabase', operationId: '7d100000-0000-4000-8000-000000000001',
         }, runtime([
-          '7d100000-0000-4000-8000-000000000001',
           '7d100000-0000-4000-8000-000000000002',
         ])),
       },

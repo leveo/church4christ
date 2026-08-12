@@ -755,8 +755,8 @@ describe('newcomer CAS workflow mutations', () => {
       null,
       'public',
       intake({ name: 'Missing required answer' }) as never,
+      { backend: 'd1', operationId: '69000000-0000-4000-8000-000000000001' },
       runtime([
-        '69000000-0000-4000-8000-000000000001',
         '69000000-0000-4000-8000-000000000002',
       ]),
     )).rejects.toBeInstanceOf(NewcomerConflictError);
@@ -776,8 +776,8 @@ describe('newcomer CAS workflow mutations', () => {
       null,
       'public',
       intake({ name: 'Activity collision' }) as never,
+      { backend: 'd1', operationId: '69000000-0000-4000-8000-000000000011' },
       runtime([
-        '69000000-0000-4000-8000-000000000011',
         '69000000-0000-4000-8000-000000000012',
       ]),
     )).rejects.toBeInstanceOf(NewcomerConflictError);
@@ -916,8 +916,9 @@ describe('newcomer CAS workflow mutations', () => {
         name: 'create', statements: 7, needsSubmission: false,
         invoke: (attemptDb) => createNewcomerSubmission(attemptDb, null, 'public', intake({
           name: 'Fault create', answers: [{ fieldId: 8, value: 'Safe' }],
-        }) as never, runtime([
-          '6d100000-0000-4000-8000-000000000001',
+        }) as never, {
+          backend: 'd1', operationId: '6d100000-0000-4000-8000-000000000001',
+        }, runtime([
           '6d100000-0000-4000-8000-000000000002',
         ])),
       },
@@ -1093,6 +1094,87 @@ describe('newcomer CAS workflow mutations', () => {
 });
 
 describe('newcomer submission mutation', () => {
+  it('keeps create to seven statements and under 100 binds through 100 answers', async () => {
+    const counts = [0, 31, 32, 44, 45, 100];
+    for (const count of counts) {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM newcomer_activity'),
+        env.DB.prepare('DELETE FROM newcomer_answers'),
+        env.DB.prepare('DELETE FROM newcomer_submissions'),
+        env.DB.prepare('DELETE FROM newcomer_fields WHERE id>7'),
+      ]);
+      if (count > 0) {
+        const values = Array.from({ length: count }, (_, index) =>
+          `(${index + 8},'bulk_${index + 8}','checkbox',1,1,${index + 8},0)`).join(',');
+        await env.DB.prepare(`INSERT INTO newcomer_fields
+          (id,key,type,required,active,sort,fixed) VALUES ${values}`).run();
+      }
+      const bindCounts: number[] = [];
+      let dispatchedStatements = -1;
+      const underlying = new WeakMap<AppStatement, D1PreparedStatement>();
+      const recordingDb: AppDb = {
+        prepare(sql: string) {
+          let statement = env.DB.prepare(sql);
+          const wrapper: AppStatement = {
+            bind(...values: unknown[]) {
+              bindCounts.push(values.length);
+              statement = statement.bind(...values);
+              underlying.set(wrapper, statement);
+              return wrapper;
+            },
+            first: (column?: string) => statement.first(column),
+            all: () => statement.all() as never,
+            run: () => statement.run() as never,
+          };
+          bindCounts.push(0);
+          underlying.set(wrapper, statement);
+          return wrapper;
+        },
+        batch(statements: AppStatement[]) {
+          dispatchedStatements = statements.length;
+          return env.DB.batch(statements.map((statement) => underlying.get(statement)!)) as never;
+        },
+      };
+      const operationId = `61300000-0000-4000-8000-${String(count).padStart(12, '0')}`;
+      const result = await createNewcomerSubmission(
+        recordingDb,
+        null,
+        'public',
+        intake({
+          name: `Bulk ${count}`,
+          answers: Array.from({ length: count }, (_, index) => ({ fieldId: index + 8, value: 'true' })),
+        }) as never,
+        { backend: 'd1', operationId },
+        runtime(['61300000-0000-4000-8000-100000000001']),
+      );
+      expect(result).toEqual({ id: operationId, version: 0, operationId });
+      expect(dispatchedStatements).toBe(7);
+      expect(Math.max(...bindCounts)).toBeLessThanOrEqual(100);
+      expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_answers WHERE submission_id=?')
+        .bind(operationId).first<number>('n')).toBe(count);
+    }
+  });
+
+  it('rejects 101 create answers before preparing SQL', async () => {
+    let prepares = 0;
+    const untouched = {
+      prepare() { prepares += 1; throw new Error('must not prepare'); },
+      batch() { throw new Error('must not batch'); },
+    } as AppDb;
+    await expect(createNewcomerSubmission(
+      untouched,
+      null,
+      'public',
+      intake({
+        name: 'Too many answers',
+        answers: Array.from({ length: 101 }, (_, index) => ({ fieldId: index + 8, value: 'true' })),
+      }) as never,
+      { backend: 'd1', operationId: '61310000-0000-4000-8000-000000000001' },
+      runtime(['61310000-0000-4000-8000-000000000002']),
+    )).rejects.toBeInstanceOf(NewcomerInvalidError);
+    expect(prepares).toBe(0);
+  });
+
   it('authorizes staff before prepare and does not inspect hostile input', async () => {
     let prepares = 0;
     let reads = 0;
@@ -1106,6 +1188,7 @@ describe('newcomer submission mutation', () => {
       scopedUser({ adminAreas: [] }),
       'staff',
       hostile as never,
+      { backend: 'd1', operationId: '61000000-0000-4000-8000-000000000099' },
     )).rejects.toBeInstanceOf(NewcomerForbiddenError);
     expect({ prepares, reads }).toEqual({ prepares: 0, reads: 0 });
   });
@@ -1117,8 +1200,9 @@ describe('newcomer submission mutation', () => {
     } as AppDb;
     const error = await createNewcomerSubmission(db, null, 'public', intake({
       name: 'Prepare failure',
-    }) as never, runtime([
-      '61010000-0000-4000-8000-000000000001',
+    }) as never, {
+      backend: 'd1', operationId: '61010000-0000-4000-8000-000000000001',
+    }, runtime([
       '61010000-0000-4000-8000-000000000002',
     ])).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(NewcomerPersistenceError);
@@ -1138,12 +1222,16 @@ describe('newcomer submission mutation', () => {
       scopedUser(),
       'public',
       intake({ name: 'Guest One', serviceTypeId: 9801, answers: [{ fieldId: 8, value: 'group' }] }) as never,
+      { backend: 'd1', operationId: '61000000-0000-4000-8000-000000000001' },
       runtime([
-        '61000000-0000-4000-8000-000000000001',
         '61000000-0000-4000-8000-000000000002',
       ]),
     );
-    expect(result).toEqual({ id: '61000000-0000-4000-8000-000000000001', version: 0 });
+    expect(result).toEqual({
+      id: '61000000-0000-4000-8000-000000000001',
+      version: 0,
+      operationId: '61000000-0000-4000-8000-000000000001',
+    });
     expect(await env.DB.prepare(`SELECT name,email,phone,locale,visit_date,service_type_id,
       contact_consent_at,source,status_id,assignee_person_id,linked_person_id,version,last_mutation_id,
       created_at,updated_at FROM newcomer_submissions WHERE id=?`)
@@ -1171,8 +1259,8 @@ describe('newcomer submission mutation', () => {
       null,
       'public',
       intake({ name: `Drift ${suffix}`, ...overrides }) as never,
+      { backend: 'd1', operationId: `61100000-0000-4000-8000-0000000000${suffix}1` },
       runtime([
-        `61100000-0000-4000-8000-0000000000${suffix}1`,
         `61100000-0000-4000-8000-0000000000${suffix}2`,
       ]),
     );
@@ -1206,8 +1294,9 @@ describe('newcomer submission mutation', () => {
       (id,key,type,required,active,sort,fixed) VALUES (8,'short_story','text',1,1,8,0)`).run();
     await expect(createNewcomerSubmission(env.DB, null, 'public', intake({
       name: 'Text too long', answers: [{ fieldId: 8, value: 'x'.repeat(501) }],
-    }) as never, runtime([
-      '61200000-0000-4000-8000-000000000001',
+    }) as never, {
+      backend: 'd1', operationId: '61200000-0000-4000-8000-000000000001',
+    }, runtime([
       '61200000-0000-4000-8000-000000000002',
     ]))).rejects.toBeInstanceOf(NewcomerConflictError);
     expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM newcomer_submissions
