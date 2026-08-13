@@ -18,6 +18,7 @@ const NODE_ONLY = [
   'test/node/screenshotValidation.test.ts',
   'test/node/setup/**/*.test.ts',
   'test/node/serviceAttendancePageSource.test.ts',
+  'test/node/activityScorePageSource.test.ts',
   'test/setup/*.test.ts',
 ];
 

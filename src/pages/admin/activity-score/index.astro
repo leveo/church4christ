@@ -1,0 +1,267 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { badge, badgeActive, badgeInactive, btn, btnSecondary, card, noticeErr, noticeOk, td, th, tin, lab } from '../../../lib/adminUi';
+import { ActivityScoreConflictError, saveActivityScoreConfig } from '../../../lib/activityScoreDb';
+import { parseActivityScoreConfigForm } from '../../../lib/activityScoreForms';
+import {
+  ACTIVITY_DIMENSIONS,
+  ACTIVITY_MEMBERSHIP_STATUSES,
+  filterActivityScores,
+  type ActivityDimensionKey,
+  type ActivityMembershipStatus,
+  type ActivityScoreBand,
+} from '../../../lib/activityScoreModel';
+import { buildActivityScoreReport, type ActivityScoreReport } from '../../../lib/activityScoreService';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+const SAFE_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+const modules = Astro.locals.modules;
+if (!modules.has('activity-score')) return new Response(null, { status: 404, headers: SAFE_HEADERS });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'activity-score')) return new Response(null, { status: 403, headers: SAFE_HEADERS });
+const method = Astro.request.method;
+if (method !== 'GET' && method !== 'POST') {
+  return new Response(null, { status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET, POST' } });
+}
+
+const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const sourceModules: Record<ActivityDimensionKey, string> = {
+  group_attendance: 'groups',
+  serving: 'serve',
+  registration: 'registration',
+};
+let formError: 'invalid' | 'unavailable' | 'conflict' | 'failed' | null = null;
+
+if (method === 'POST') {
+  if (!user!.isSuperAdmin) return new Response(null, { status: 403, headers: SAFE_HEADERS });
+  try {
+    const parsed = parseActivityScoreConfigForm(await Astro.request.formData());
+    if (!parsed.ok) {
+      formError = 'invalid';
+    } else {
+      const selectedSourcesAvailable = ACTIVITY_DIMENSIONS.every((key) =>
+        !parsed.data.config.dimensions[key].enabled || modules.has(sourceModules[key]),
+      );
+      if (!selectedSourcesAvailable) {
+        formError = 'unavailable';
+      } else {
+        await saveActivityScoreConfig(Astro.locals.db, parsed.data.config, parsed.data.expectedRevision, user!.id);
+        return new Response(null, {
+          status: 303,
+          headers: { ...SAFE_HEADERS, Location: '/admin/activity-score?saved=1' },
+        });
+      }
+    }
+  } catch (error) {
+    formError = error instanceof ActivityScoreConflictError ? 'conflict' : 'failed';
+  }
+}
+
+let report: ActivityScoreReport | null = null;
+try {
+  report = await buildActivityScoreReport(Astro.locals.db, modules, todayInTz());
+} catch {
+  report = null;
+}
+
+const rawQuery = Astro.url.searchParams.get('q')?.normalize('NFKC').trim() ?? '';
+const query = rawQuery.slice(0, 100);
+const rawStatus = Astro.url.searchParams.get('status');
+const membershipStatus = rawStatus && (ACTIVITY_MEMBERSHIP_STATUSES as readonly string[]).includes(rawStatus)
+  ? rawStatus as ActivityMembershipStatus
+  : null;
+const rawBand = Astro.url.searchParams.get('band');
+const band = rawBand === 'active' || rawBand === 'watch' || rawBand === 'limited'
+  ? rawBand as ActivityScoreBand
+  : null;
+const filters = { query, membershipStatus, band };
+const visibleRows = report ? filterActivityScores(report.rows, filters).slice(0, 100) : [];
+const filteredCount = report ? filterActivityScores(report.rows, filters).length : 0;
+
+function dimensionLabel(key: ActivityDimensionKey): string {
+  if (key === 'group_attendance') return t(lang, 'admin.activityScore.dimension.group');
+  if (key === 'serving') return t(lang, 'admin.activityScore.dimension.serving');
+  return t(lang, 'admin.activityScore.dimension.registration');
+}
+function bandLabel(value: ActivityScoreBand): string {
+  if (value === 'active') return t(lang, 'admin.activityScore.band.active');
+  if (value === 'watch') return t(lang, 'admin.activityScore.band.watch');
+  return t(lang, 'admin.activityScore.band.limited');
+}
+function statusLabel(value: ActivityMembershipStatus): string {
+  if (value === 'visitor') return t(lang, 'membership.visitor');
+  if (value === 'regular') return t(lang, 'membership.regular');
+  if (value === 'member') return t(lang, 'membership.member');
+  return t(lang, 'membership.inactive');
+}
+const formMessage = formError === 'conflict'
+  ? t(lang, 'admin.activityScore.error.conflict')
+  : formError === 'unavailable'
+    ? t(lang, 'admin.activityScore.error.unavailable')
+    : formError === 'invalid'
+      ? t(lang, 'admin.activityScore.error.invalid')
+      : formError === 'failed'
+        ? t(lang, 'admin.activityScore.error.failed')
+        : null;
+---
+
+<Admin title={t(lang, 'admin.activityScore.title')}>
+  <div>
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.activityScore.title')}</h1>
+    <p class="mt-1 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.activityScore.intro')}</p>
+  </div>
+
+  {Astro.url.searchParams.get('saved') === '1' && <p class={`mt-5 ${noticeOk}`}>{t(lang, 'admin.activityScore.saved')}</p>}
+  {formMessage && <p class={`mt-5 ${noticeErr}`}>{formMessage}</p>}
+  {!report && <p class={`mt-5 ${noticeErr}`}>{t(lang, 'admin.activityScore.error.report')}</p>}
+
+  {report && report.unavailableDimensions.length > 0 && (
+    <div class={`mt-5 ${noticeErr}`}>
+      <p>{t(lang, 'admin.activityScore.warning.sources')}</p>
+      <p class="mt-1 font-semibold">{report.unavailableDimensions.map(dimensionLabel).join(', ')}</p>
+    </div>
+  )}
+
+  {report && (
+    <>
+      <section class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div class={card}>
+          <p class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.activityScore.average')}</p>
+          <p class="mt-2 text-display-lg font-bold">{report.summary.average ?? '—'}</p>
+          <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.change', { value: report.summary.change === null ? '—' : `${report.summary.change >= 0 ? '+' : ''}${report.summary.change}` })}</p>
+        </div>
+        <div class={card}>
+          <p class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.activityScore.eligible')}</p>
+          <p class="mt-2 text-display-lg font-bold">{report.summary.eligibleCount}</p>
+          <p class="mt-1 text-sm text-ink-muted">{formatDate(report.windows.current.from, lang)} – {formatDate(report.windows.current.to, lang)}</p>
+        </div>
+        {(['active', 'watch'] as const).map((value) => (
+          <div class={card}>
+            <p class="text-xs font-semibold uppercase tracking-caps text-accent">{bandLabel(value)}</p>
+            <p class="mt-2 text-display-lg font-bold">{report.summary.bands[value]}</p>
+          </div>
+        ))}
+      </section>
+
+      <section class={`mt-6 ${card}`}>
+        <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.coverage')}</h2>
+        <div class="mt-4 grid gap-3 md:grid-cols-3">
+          {report.availableDimensions.map((key) => {
+            const value = report!.summary.coverage[key]!;
+            return <div class="rounded-lg border border-border p-4">
+              <p class="font-semibold">{dimensionLabel(key)}</p>
+              <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.coverageValue', { people: value.people, eligible: value.eligible })}</p>
+            </div>;
+          })}
+        </div>
+      </section>
+
+      <section class={`mt-6 ${card}`}>
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.peopleTitle')}</h2>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.peopleCount', { shown: visibleRows.length, total: filteredCount })}</p>
+          </div>
+          <form method="get" class="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <label><span class={lab}>{t(lang, 'admin.activityScore.search')}</span><input class={tin} name="q" value={query} maxlength="100" /></label>
+            <label><span class={lab}>{t(lang, 'admin.activityScore.membership')}</span><select class={tin} name="status">
+              <option value="">{t(lang, 'admin.activityScore.any')}</option>
+              {ACTIVITY_MEMBERSHIP_STATUSES.map((value) => <option value={value} selected={membershipStatus === value}>{statusLabel(value)}</option>)}
+            </select></label>
+            <label><span class={lab}>{t(lang, 'admin.activityScore.band')}</span><select class={tin} name="band">
+              <option value="">{t(lang, 'admin.activityScore.any')}</option>
+              {(['active', 'watch', 'limited'] as const).map((value) => <option value={value} selected={band === value}>{bandLabel(value)}</option>)}
+            </select></label>
+            <button class={btnSecondary} type="submit">{t(lang, 'admin.activityScore.filter')}</button>
+          </form>
+        </div>
+
+        {report.availableDimensions.length === 0 ? (
+          <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.activityScore.noSources')}</p>
+        ) : visibleRows.length === 0 ? (
+          <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.activityScore.empty')}</p>
+        ) : (
+          <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+            <table class="w-full border-collapse">
+              <thead class="bg-surface-sunken"><tr>
+                <th class={th}>{t(lang, 'admin.activityScore.name')}</th>
+                <th class={th}>{t(lang, 'admin.activityScore.membership')}</th>
+                <th class={th}>{t(lang, 'admin.activityScore.score')}</th>
+                <th class={th}>{t(lang, 'admin.activityScore.trend')}</th>
+                {report.availableDimensions.map((key) => <th class={th}>{dimensionLabel(key)}</th>)}
+                <th class={th}>{t(lang, 'admin.activityScore.explanation')}</th>
+              </tr></thead>
+              <tbody>{visibleRows.map((row) => <tr class="border-t border-border align-top">
+                <td class={td}>{row.name}</td>
+                <td class={td}>{statusLabel(row.membershipStatus)}</td>
+                <td class={td}><span class={`${badge} ${row.band === 'active' ? badgeActive : badgeInactive}`}>{row.score} · {bandLabel(row.band)}</span></td>
+                <td class={td}>{row.trend >= 0 ? '+' : ''}{row.trend}</td>
+                {report!.availableDimensions.map((key) => <td class={td}>{row.dimensions[key]?.score ?? 0}</td>)}
+                <td class={td}>
+                  <details>
+                    <summary class="cursor-pointer font-semibold text-primary">{t(lang, 'admin.activityScore.showWork')}</summary>
+                    <ul class="mt-2 min-w-64 space-y-1 text-xs text-ink-muted">
+                      {report!.availableDimensions.map((key) => {
+                        const dimension = row.dimensions[key]!;
+                        return <li>{t(lang, 'admin.activityScore.calculation', {
+                          dimension: dimensionLabel(key),
+                          numerator: dimension.numerator,
+                          denominator: dimension.denominator,
+                          score: dimension.score,
+                          weight: dimension.weight,
+                        })}</li>;
+                      })}
+                    </ul>
+                  </details>
+                </td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {user!.isSuperAdmin && (
+        <section class={`mt-6 ${card}`}>
+          <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.configTitle')}</h2>
+          <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.configIntro')}</p>
+          <form method="post" class="mt-5 space-y-6">
+            <input type="hidden" name="action" value="save_config" />
+            <input type="hidden" name="revision" value={report.config.revision} />
+            <div class="grid gap-4 md:grid-cols-3">
+              <label><span class={lab}>{t(lang, 'admin.activityScore.window')}</span><select class={tin} name="window_days">
+                {[30, 60, 90, 180].map((days) => <option value={days} selected={report!.config.windowDays === days}>{t(lang, 'admin.activityScore.days', { days })}</option>)}
+              </select></label>
+              <label><span class={lab}>{t(lang, 'admin.activityScore.activeThreshold')}</span><input class={tin} type="number" min="1" max="100" name="active_threshold" value={report.config.activeThreshold} required /></label>
+              <label><span class={lab}>{t(lang, 'admin.activityScore.watchThreshold')}</span><input class={tin} type="number" min="0" max="99" name="watch_threshold" value={report.config.watchThreshold} required /></label>
+            </div>
+            <fieldset>
+              <legend class="font-semibold">{t(lang, 'admin.activityScore.membership')}</legend>
+              <div class="mt-3 flex flex-wrap gap-4">
+                {ACTIVITY_MEMBERSHIP_STATUSES.map((value) => <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="membership_status" value={value} checked={report!.config.includedStatuses.includes(value)} /> {statusLabel(value)}</label>)}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend class="font-semibold">{t(lang, 'admin.activityScore.dimensions')}</legend>
+              <div class="mt-3 grid gap-4 lg:grid-cols-3">
+                {ACTIVITY_DIMENSIONS.map((key) => {
+                  const setting = report!.config.dimensions[key];
+                  const sourceAvailable = modules.has(sourceModules[key]);
+                  return <div class="rounded-lg border border-border p-4">
+                    <label class="flex items-center gap-2 font-semibold"><input type="checkbox" name="dimension" value={key} checked={sourceAvailable && setting.enabled} disabled={!sourceAvailable} /> {dimensionLabel(key)}</label>
+                    {!sourceAvailable && <p class="mt-1 text-xs text-danger">{t(lang, 'admin.activityScore.sourceOff')}</p>}
+                    <label class="mt-3 block"><span class={lab}>{t(lang, 'admin.activityScore.weight')}</span><input class={tin} type="number" min="0" max="100" name={`weight_${key}`} value={sourceAvailable ? setting.weight : 0} readonly={!sourceAvailable} required /></label>
+                    {key !== 'group_attendance' && <label class="mt-3 block"><span class={lab}>{t(lang, 'admin.activityScore.target')}</span><input class={tin} type="number" min="1" max="100" name={`target_${key}`} value={setting.targetCount} required /></label>}
+                  </div>;
+                })}
+              </div>
+            </fieldset>
+            <button class={btn} type="submit">{t(lang, 'admin.activityScore.save')}</button>
+          </form>
+        </section>
+      )}
+    </>
+  )}
+</Admin>

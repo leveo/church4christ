@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseActivityScoreConfigForm } from '../src/lib/activityScoreForms';
 
-function form(overrides: Record<string, string | string[] | null> = {}): FormData {
-  const values: Record<string, string | string[]> = {
+function form(overrides: Record<string, string | readonly string[] | null> = {}): FormData {
+  const values: Record<string, string | readonly string[] | null> = {
     action: 'save_config',
     revision: '2',
     window_days: '90',
@@ -20,7 +20,7 @@ function form(overrides: Record<string, string | string[] | null> = {}): FormDat
   const data = new FormData();
   for (const [key, value] of Object.entries(values)) {
     if (value === null) continue;
-    for (const item of Array.isArray(value) ? value : [value]) data.append(key, item);
+    for (const item of typeof value === 'string' ? [value] : value) data.append(key, item);
   }
   return data;
 }
