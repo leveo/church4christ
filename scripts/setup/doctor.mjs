@@ -35,8 +35,10 @@ export async function runDoctor(context, { strict = false } = {}) {
     }
   }
   const safe = checks.map((entry) => result(
-    entry.code,
+    entry.checkId,
+    entry.status,
     entry.severity,
+    entry.code,
     redact(entry.message, context.secrets ?? []),
     redact(entry.remediation, context.secrets ?? []),
   ));
