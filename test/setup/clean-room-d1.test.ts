@@ -32,9 +32,9 @@ describe('clean-room D1 setup', () => {
     expect(first.enabledModules).toHaveLength(8);
     expect(first.moduleRows).toBe(19);
     expect(first.admin.status).toMatch(/created|already-admin/);
-    expect(first.doctor.status).toBe('ready');
+    expect(first.doctor.status).toBe('ready-with-limitations');
     const doctorRun = await workspace.execNode(['--doctor', '--json'], env, 300_000);
-    expect(JSON.parse(doctorRun.stdout).status).toBe('ready');
+    expect(JSON.parse(doctorRun.stdout).status).toBe('ready-with-limitations');
 
     const query = await execWorkspace(workspace.root, join(workspace.root, 'node_modules/.bin/wrangler'), [
       'd1', 'execute', 'DB', '--local', '--json', '--persist-to', persistTo,

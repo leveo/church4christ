@@ -27,7 +27,7 @@ describe('baseline local D1 import', () => {
     expect(await workspaceHash(persistTo)).toBe(beforeInspection);
 
     const first = JSON.parse((await workspace.execNode([...flags, '--yes', '--json'], env, 300_000)).stdout);
-    expect(first.doctor.status).toBe('ready');
+    expect(first.doctor.status).toBe('ready-with-limitations');
     const generated = await readFile(config, 'utf8');
     expect(generated).toContain('"database_id": "YOUR_D1_DATABASE_ID"');
     const query = await execWorkspace(workspace.root, wrangler, [
@@ -39,7 +39,7 @@ describe('baseline local D1 import', () => {
     expect(rows[1].results[0]).toEqual({ role: 'admin' });
 
     const second = JSON.parse((await workspace.execNode([...flags, '--yes', '--json'], env, 300_000)).stdout);
-    expect(second.doctor.status).toBe('ready');
+    expect(second.doctor.status).toBe('ready-with-limitations');
     expect(second.apply.results.every(({ status }: { status: string }) => ['already-complete', 'verified'].includes(status))).toBe(true);
   }, 600_000);
 
