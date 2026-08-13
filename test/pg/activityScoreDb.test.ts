@@ -31,6 +31,8 @@ describe.skipIf(!hasPg)('activity score DB (PostgreSQL)', () => {
         group_events, group_members, groups, roster_assignments, plan_positions,
         plans, positions, teams, ministries, service_type_i18n, service_types,
         people RESTART IDENTITY CASCADE;
+      INSERT INTO activity_score_config (id) VALUES (1)
+        ON CONFLICT (id) DO NOTHING;
       UPDATE activity_score_config SET
         window_days=90, include_visitor=0, include_regular=1, include_member=1,
         include_inactive=0, active_threshold=70, watch_threshold=40,
