@@ -498,6 +498,17 @@ CREATE TABLE newcomer_activity (
         )
       ELSE 0 END
     ),
+  operation_id TEXT UNIQUE CHECK (
+    operation_id IS NULL OR (
+      instr(operation_id,char(0)) = 0 AND length(CAST(operation_id AS BLOB)) = 36 AND
+      operation_id = lower(operation_id) AND
+      substr(operation_id,9,1) = '-' AND substr(operation_id,14,1) = '-' AND
+      substr(operation_id,19,1) = '-' AND substr(operation_id,24,1) = '-' AND
+      substr(operation_id,15,1) = '4' AND substr(operation_id,20,1) IN ('8','9','a','b') AND
+      length(replace(operation_id,'-','')) = 32 AND operation_id NOT GLOB '*[^0-9a-f-]*'
+    )
+  ),
+  result_version INTEGER CHECK (result_version IS NULL OR result_version BETWEEN 0 AND 2147483647),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (
       instr(created_at,char(0)) = 0 AND length(CAST(created_at AS BLOB)) = 19 AND
@@ -507,7 +518,8 @@ CREATE TABLE newcomer_activity (
       substr(created_at,15,2) BETWEEN '00' AND '59' AND substr(created_at,18,2) BETWEEN '00' AND '59' AND
       (date(substr(created_at,1,10),'+0 days') = substr(created_at,1,10)) IS TRUE AND
       (datetime(created_at,'+0 seconds') = created_at) IS TRUE
-    )
+    ),
+  CHECK ((operation_id IS NULL) = (result_version IS NULL))
 ) WITHOUT ROWID;
 CREATE INDEX idx_newcomer_activity_submission_created
   ON newcomer_activity(submission_id, created_at, id);

@@ -456,6 +456,44 @@ describe.skipIf(!hasPg)('newcomer foundation schema (real Postgres)', () => {
     ]) await rejects(statement);
   });
 
+  it('stores optional globally unique UUIDv4 operation receipts with bounded result versions', async () => {
+    const submissionId = '20000000-0000-4000-8000-000000000020';
+    await sql.unsafe(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES ('${submissionId}','Receipt owner','en','2026-08-12','staff',
+        '2026-08-12 12:00:00','2026-08-12 12:00:00')`);
+    await sql.unsafe(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000020','${submissionId}','submission_created',NULL,NULL)`);
+    await sql.unsafe(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000021','${submissionId}','submission_created',
+        '41000000-0000-4000-8000-000000000001',2147483647)`);
+
+    for (const [suffix, operationId, resultVersion] of [
+      ['22', 'NULL', '0'],
+      ['23', "'41000000-0000-4000-8000-000000000002'", 'NULL'],
+      ['24', "'41000000-0000-3000-8000-000000000003'", '0'],
+      ['25', "'41000000-0000-4000-7000-000000000004'", '0'],
+      ['26', "'41000000-0000-4000-8000-00000000000A'", '0'],
+      ['27', "'41000000-0000-4000-8000-000000000006'", '-1'],
+      ['28', "'41000000-0000-4000-8000-000000000007'", '2147483648'],
+    ]) {
+      await rejects(`INSERT INTO newcomer_activity
+        (id,submission_id,kind,operation_id,result_version)
+        VALUES ('40000000-0000-4000-8000-0000000000${suffix}','${submissionId}',
+          'submission_created',${operationId},${resultVersion})`);
+    }
+    await rejects(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000029','${submissionId}','submission_created',
+        '41000000-0000-4000-8000-000000000001',0)`, '23505');
+    await rejects(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-00000000002a','${submissionId}','submission_created',
+        convert_from(decode('00','hex'),'UTF8'),0)`, '22021');
+  });
+
   it('repeats lowercase-hex bucket shape, window, attempt, uniqueness, and expiry behavior', async () => {
     // HMAC provenance belongs to newcomerDb/rate-limiter Task 3; this schema
     // only guarantees an opaque lowercase-hex storage shape with no raw suffix.

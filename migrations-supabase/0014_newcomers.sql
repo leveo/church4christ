@@ -406,7 +406,15 @@ CREATE TABLE newcomer_activity (
     'note_added','person_linked','visitor_created'
   )),
   metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (newcomer_valid_activity_metadata(metadata_json)),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (newcomer_valid_timestamp(created_at))
+  operation_id TEXT UNIQUE CHECK (
+    operation_id IS NULL OR (
+      octet_length(operation_id) = 36 AND newcomer_valid_uuid(operation_id) AND
+      substr(operation_id,15,1) = '4' AND substr(operation_id,20,1) IN ('8','9','a','b')
+    )
+  ),
+  result_version INTEGER CHECK (result_version IS NULL OR result_version BETWEEN 0 AND 2147483647),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (newcomer_valid_timestamp(created_at)),
+  CHECK ((operation_id IS NULL) = (result_version IS NULL))
 );
 CREATE INDEX idx_newcomer_activity_submission_created
   ON newcomer_activity(submission_id, created_at, id);

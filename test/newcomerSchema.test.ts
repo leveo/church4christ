@@ -422,6 +422,46 @@ describe('newcomer foundation schema (D1)', () => {
         '{"from_status_id":1, "to_status_id":2}')`);
   });
 
+  it('stores optional globally unique UUIDv4 operation receipts with bounded result versions', async () => {
+    const submissionId = '20000000-0000-4000-8000-000000000020';
+    await env.DB.prepare(`INSERT INTO newcomer_submissions
+      (id,name,locale,visit_date,source,created_at,updated_at)
+      VALUES (?,'Receipt owner','en','2026-08-12','staff','2026-08-12 12:00:00','2026-08-12 12:00:00')`)
+      .bind(submissionId).run();
+
+    await env.DB.prepare(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000020',?,'submission_created',NULL,NULL)`)
+      .bind(submissionId).run();
+    await env.DB.prepare(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000021',?,'submission_created',
+        '41000000-0000-4000-8000-000000000001',2147483647)`)
+      .bind(submissionId).run();
+
+    for (const [operationId, resultVersion] of [
+      [null, 0],
+      ['41000000-0000-4000-8000-000000000002', null],
+      ['41000000-0000-3000-8000-000000000003', 0],
+      ['41000000-0000-4000-7000-000000000004', 0],
+      ['41000000-0000-4000-8000-00000000000A', 0],
+      ['41000000-0000-4000-8000-000000000005\u0000', 0],
+      ['41000000-0000-4000-8000-000000000006', -1],
+      ['41000000-0000-4000-8000-000000000007', 2147483648],
+    ] as const) {
+      await expect(env.DB.prepare(`INSERT INTO newcomer_activity
+        (id,submission_id,kind,operation_id,result_version)
+        VALUES (?,?, 'submission_created',?,?)`)
+        .bind(crypto.randomUUID(), submissionId, operationId, resultVersion).run()).rejects.toThrow();
+    }
+
+    await expect(env.DB.prepare(`INSERT INTO newcomer_activity
+      (id,submission_id,kind,operation_id,result_version)
+      VALUES ('40000000-0000-4000-8000-000000000022',?,'submission_created',
+        '41000000-0000-4000-8000-000000000001',0)`)
+      .bind(submissionId).run()).rejects.toThrow();
+  });
+
   it('stores only lowercase-hex bucket shapes in ten-minute windows with exact 48-hour expiry', async () => {
     // HMAC provenance belongs to newcomerDb/rate-limiter Task 3; this schema
     // only guarantees an opaque lowercase-hex storage shape with no raw suffix.
@@ -554,11 +594,11 @@ describe('newcomer foundation schema (D1)', () => {
       ['note.submission_id', "INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000002',('71000000-0000-4000-8000-000000000001'||char(0)),9850,'NUL','2026-08-12 12:00:00')"],
       ['note.body', `INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000001',9850,('A'||char(0)||'${'x'.repeat(10000)}'),'2026-08-12 12:00:00')`],
       ['note.created_at', "INSERT INTO newcomer_notes VALUES ('73000000-0000-4000-8000-000000000004','71000000-0000-4000-8000-000000000001',9850,'NUL',('2026-08-12 12:00:00'||char(0)))"],
-      ['activity.id', "INSERT INTO newcomer_activity VALUES (('74000000-0000-4000-8000-000000000001'||char(0)),'71000000-0000-4000-8000-000000000001',9850,'submission_created','{}','2026-08-12 12:00:00')"],
-      ['activity.submission_id', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000002',('71000000-0000-4000-8000-000000000001'||char(0)),9850,'submission_created','{}','2026-08-12 12:00:00')"],
-      ['activity.kind', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000001',9850,('submission_created'||char(0)),'{}','2026-08-12 12:00:00')"],
-      ['activity.metadata_json', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000004','71000000-0000-4000-8000-000000000001',9850,'submission_created',('{}'||char(0)),'2026-08-12 12:00:00')"],
-      ['activity.created_at', "INSERT INTO newcomer_activity VALUES ('74000000-0000-4000-8000-000000000005','71000000-0000-4000-8000-000000000001',9850,'submission_created','{}',('2026-08-12 12:00:00'||char(0)))"],
+      ['activity.id', "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES (('74000000-0000-4000-8000-000000000001'||char(0)),'71000000-0000-4000-8000-000000000001',9850,'submission_created','{}','2026-08-12 12:00:00')"],
+      ['activity.submission_id', "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES ('74000000-0000-4000-8000-000000000002',('71000000-0000-4000-8000-000000000001'||char(0)),9850,'submission_created','{}','2026-08-12 12:00:00')"],
+      ['activity.kind', "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES ('74000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000001',9850,('submission_created'||char(0)),'{}','2026-08-12 12:00:00')"],
+      ['activity.metadata_json', "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES ('74000000-0000-4000-8000-000000000004','71000000-0000-4000-8000-000000000001',9850,'submission_created',('{}'||char(0)),'2026-08-12 12:00:00')"],
+      ['activity.created_at', "INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES ('74000000-0000-4000-8000-000000000005','71000000-0000-4000-8000-000000000001',9850,'submission_created','{}',('2026-08-12 12:00:00'||char(0)))"],
       ['rate.bucket_hash', `INSERT INTO newcomer_rate_limits VALUES (('${'a'.repeat(64)}'||char(0)||'1.2.3.4'),'2026-08-12 12:10:00',1,'2026-08-14 12:10:00')`],
       ['rate.window_start', `INSERT INTO newcomer_rate_limits VALUES ('${'b'.repeat(64)}',('2026-08-12 12:10:00'||char(0)),1,'2026-08-14 12:10:00')`],
       ['rate.expires_at', `INSERT INTO newcomer_rate_limits VALUES ('${'c'.repeat(64)}','2026-08-12 12:10:00',1,('2026-08-14 12:10:00'||char(0)))`],
