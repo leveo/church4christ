@@ -3,7 +3,7 @@ import { redact } from '../redact.mjs';
 
 const FINAL_SHARED_TABLES = Object.freeze(['checkins', 'custom_pages']);
 const ALWAYS_REQUIRED_TABLES = Object.freeze([
-  'people', 'settings', 'tokens', 'media', ...FINAL_SHARED_TABLES,
+  'people', 'settings', 'tokens', 'media', 'onboarding_acknowledgements', ...FINAL_SHARED_TABLES,
 ]);
 const TABLES_BY_CAPABILITY = Object.freeze({
   bulletins: Object.freeze(['bulletins', 'bulletin_announcements', 'revisions']),

@@ -37,6 +37,7 @@ const SUPABASE_MIGRATIONS = [
   '0012_people_import_mappings.sql',
   '0013_service_attendance.sql',
   '0014_newcomers.sql',
+  '0015_onboarding.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -119,7 +120,7 @@ describe('doctor readiness model', () => {
   it('derives stable states, validates strict booleans, and deep-freezes copied results', () => {
     const input = [result('all.ok', 'info', 'ready', 'none')];
     const ready = summarizeReadiness(input);
-    expect(ready).toEqual({ schemaVersion: 1, status: 'ready', checks: input });
+    expect(ready).toEqual({ schemaVersion: 2, status: 'ready', checks: input });
     expect(Object.isFrozen(ready)).toBe(true);
     expect(Object.isFrozen(ready.checks)).toBe(true);
     expect(ready.checks).not.toBe(input);
@@ -517,11 +518,11 @@ describe('doctor composition', () => {
       checkServices: () => [],
     };
     const doctor = await runDoctor(context);
-    expect(doctor.schemaVersion).toBe(1);
+    expect(doctor.schemaVersion).toBe(2);
     expect(doctor.status).toBe('not-ready');
     expect(doctor.checks.map((entry) => entry.code)).toEqual(['manifest.exception', 'config.exception', 'database.exception']);
     expect(Object.keys(doctor)).toEqual(['schemaVersion', 'status', 'checks', 'exitCode']);
-    expect(doctor.checks.every((entry) => Object.keys(entry).sort().join('|') === 'code|message|remediation|severity')).toBe(true);
+    expect(doctor.checks.every((entry) => Object.keys(entry).sort().join('|') === 'checkId|code|message|remediation|severity|status')).toBe(true);
     expect(doctor.checks.some((entry) => entry.message.includes('database') || entry.remediation.includes('database'))).toBe(false);
   });
 });

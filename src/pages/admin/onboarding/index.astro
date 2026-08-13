@@ -1,0 +1,58 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { btn, card } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import {
+  acknowledgeOnboardingCheckForUser,
+  listOnboardingReadinessForUser,
+} from '../../../lib/onboardingDb';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user?.isAdmin) return new Response(null, { status: 403, headers: { 'cache-control': 'no-store' } });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+if (Astro.request.method === 'POST') {
+  if (!user.isSuperAdmin) return new Response(null, { status: 403, headers: { 'cache-control': 'no-store' } });
+  let form: FormData;
+  try { form = await Astro.request.formData(); } catch { return new Response(null, { status: 400 }); }
+  if ([...form.keys()].some((key) => key !== 'check_id') || typeof form.get('check_id') !== 'string') return new Response(null, { status: 400 });
+  try {
+    await acknowledgeOnboardingCheckForUser(db, user, String(form.get('check_id')));
+  } catch {
+    return new Response(null, { status: 400, headers: { 'cache-control': 'no-store' } });
+  }
+  return Astro.redirect('/admin/onboarding', 303);
+}
+
+const checks = await listOnboardingReadinessForUser(db, user, Astro.locals.modules);
+const copy = (value: { en: string; zh: string }) => value[lang];
+const statusLabel = (status: string) => t(lang, `admin.onboarding.${status === 'not_applicable' ? 'notApplicable' : status === 'action_required' ? 'actionRequired' : status}`);
+---
+
+<Admin title={t(lang, 'admin.onboarding.title')}>
+  <div data-screenshot-marker="admin-onboarding">
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.onboarding.title')}</h1>
+    <p class="mt-1 max-w-3xl text-ink-muted">{t(lang, 'admin.onboarding.intro')}</p>
+    {!user.isSuperAdmin && <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.onboarding.superOnly')}</p>}
+    <div class="mt-6 grid gap-4 lg:grid-cols-2">
+      {checks.map((check) => (
+        <section class={card} data-check-id={check.checkId}>
+          <div class="flex items-start justify-between gap-4">
+            <div><h2 class="font-display text-heading-sm font-bold">{copy(check.title)}</h2><p class="mt-1 text-sm text-ink-muted">{copy(check.description)}</p></div>
+            <span class="rounded-full border border-border px-2 py-1 text-xs font-semibold">{statusLabel(check.status)}</span>
+          </div>
+          {check.status !== 'pass' && check.status !== 'not_applicable' && <p class="mt-3 text-sm">{copy(check.remediation)}</p>}
+          <div class="mt-4 flex items-center gap-3">
+            {check.adminPath && <a class="text-sm font-semibold text-primary hover:underline" href={check.adminPath}>{copy(check.title)}</a>}
+            {user.isSuperAdmin && check.status === 'manual' && <form method="post"><input type="hidden" name="check_id" value={check.checkId} /><button class={btn} type="submit">{t(lang, 'admin.onboarding.acknowledge')}</button></form>}
+            {check.acknowledged && <span class="text-sm text-ink-muted">{t(lang, 'admin.onboarding.acknowledged')}</span>}
+          </div>
+        </section>
+      ))}
+    </div>
+  </div>
+</Admin>

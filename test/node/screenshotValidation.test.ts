@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { assertExpectedScreenshotPage, requireScreenshotOnly } from '../../scripts/lib/screenshot-validation.mjs';
+import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from '../../scripts/lib/screenshot-validation.mjs';
+import { RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
@@ -7,6 +8,7 @@ describe('screenshot page validation', () => {
   test('accepts the expected portal page', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
       body: 'Chen Family Owner My groups Upcoming events',
@@ -16,6 +18,7 @@ describe('screenshot page validation', () => {
   test('rejects a sign-in redirect', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/signin?next=%2Fen%2Fmy',
+      status: 200,
       title: 'Sign in',
       headings: ['Sign in'],
       body: 'Email me a sign-in link',
@@ -28,6 +31,7 @@ describe('screenshot page validation', () => {
       out: 'docs/images/public/signin.png',
     }, {
       url: 'http://localhost:4321/en/signin',
+      status: 200,
       title: 'Sign in',
       headings: ['Sign in'],
       body: 'Email me a sign-in link',
@@ -41,6 +45,7 @@ describe('screenshot page validation', () => {
       expectedText: 'Chen Family',
     }, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
       body: 'Chen Family Owner',
@@ -54,6 +59,7 @@ describe('screenshot page validation', () => {
       expectedText: 'Pending',
     }, {
       url: 'http://localhost:4321/en/my/prayer?tab=church',
+      status: 200,
       title: 'Prayer moderation',
       headings: ['Pending'],
       body: 'Pending prayer requests',
@@ -63,6 +69,7 @@ describe('screenshot page validation', () => {
   test('rejects a rendered 404', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 404,
       title: 'Page not found',
       headings: ['Page not found'],
       body: 'The page you requested does not exist.',
@@ -72,6 +79,7 @@ describe('screenshot page validation', () => {
   test('rejects a Simplified Chinese not-found title', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: '页面未找到',
       headings: [],
       body: 'Chen Family',
@@ -81,6 +89,7 @@ describe('screenshot page validation', () => {
   test('rejects a Traditional Chinese not-found title', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: '頁面未找到',
       headings: [],
       body: 'Chen Family',
@@ -90,6 +99,7 @@ describe('screenshot page validation', () => {
   test('allows ordinary body text containing 404', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: 'My Portal',
       headings: ['Welcome, David Chen'],
       body: 'Chen Family called extension 404 for assistance.',
@@ -99,10 +109,24 @@ describe('screenshot page validation', () => {
   test('rejects a page missing its marker', () => {
     expect(() => assertExpectedScreenshotPage(portalRow, {
       url: 'http://localhost:4321/en/my',
+      status: 200,
       title: 'My Portal',
       headings: ['Welcome'],
       body: 'No seeded household here',
     })).toThrow(/Chen Family/);
+  });
+});
+
+describe('v1 release screenshot manifest', () => {
+  test('is explicit, unique, and covers every required built page', () => {
+    expect(validateScreenshotManifest(RELEASE_SCREENSHOTS)).toBe(RELEASE_SCREENSHOTS);
+    expect(RELEASE_SCREENSHOTS).toHaveLength(10);
+  });
+
+  test('rejects main-document errors and rejection markers', () => {
+    const row = RELEASE_SCREENSHOTS[0];
+    expect(() => assertExpectedScreenshotPage(row, { url: `http://localhost:4321${row.path}`, status: 500, title: '', headings: [], body: row.expectedText })).toThrow(/HTTP 500/);
+    expect(() => assertExpectedScreenshotPage(row, { url: `http://localhost:4321${row.path}`, status: 200, title: row.expectedText, headings: [], body: 'Sign in' })).toThrow(/rejection marker/i);
   });
 });
 

@@ -69,7 +69,7 @@ suite('clean-room Supabase setup', () => {
       expect(first.enabledModules).toHaveLength(19);
       expect(first.moduleRows).toBe(19);
       expect(first.admin.status).toMatch(/created|already-admin/);
-      expect(first.doctor.status).toBe('ready');
+      expect(first.doctor.status).toBe('ready-with-limitations');
       expect(first.doctor.checks).toContainEqual(expect.objectContaining({ code: 'services.stripe-ok', severity: 'info' }));
 
       const expectedMigrations = (await readdir(join(workspace.root, 'migrations-supabase'))).filter((name) => name.endsWith('.sql')).sort();

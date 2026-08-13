@@ -2,8 +2,8 @@
 
 This runbook is for an installation that already has church data, uploaded media, and
 deployment configuration. It is intentionally separate from first-time setup. Church4Christ
-is pre-1.0: interfaces and operating requirements can change between `0.x` checkpoints, so
-review [`CHANGELOG.md`](../CHANGELOG.md) and the exact source diff before every upgrade.
+uses versioned releases, but interfaces and operating requirements may still change, so review
+[`CHANGELOG.md`](../CHANGELOG.md) and the exact source diff before every upgrade.
 
 An upgrade is an operator-reviewed deployment, not an unattended command. Keep a technical
 owner responsible for backups, staging, schema changes, secret handling, verification, and
@@ -88,6 +88,7 @@ npm run tokens:check
 npm test
 npm run check
 npm run build
+npm run release:rehearse
 ```
 
 Apply only the forward migrations for the selected staging backend. For D1, first compare the
@@ -144,6 +145,11 @@ For Supabase, provide the staging database connection in the environment when th
 needs it. Resolve every error and warning before scheduling production. Also test a restore
 from the pre-upgrade backup with the code revision that would be used for recovery.
 
+The repository rehearsal uses only baseline `b85ad362b9f879408797270929c52dab7ad39d1d`,
+a `git archive` temporary checkout, and disposable targets. It fails closed when full Git
+history is absent. PostgreSQL rehearsal requires a local test-marked URL carrying
+`c4c_rehearsal=1`; it uses a random schema and drops only that schema in `finally`.
+
 ## 4. Apply the reviewed production upgrade
 
 Choose a maintenance window appropriate to the migration and expected traffic. Pause writes
@@ -173,7 +179,7 @@ migration after it is merged into `main` or applied to a persistent, shared, or 
 installation. Before merge, applying a proposed migration only to disposable local or CI
 databases does not create a permanent freeze boundary: reset or rebuild those databases while
 the migration remains under review. Merge to `main` freezes the file even if no production
-deployment has used it. Files `0001` through `0014` in `migrations/` and
+deployment has used it. Files `0001` through `0015` in `migrations/` and
 `migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.

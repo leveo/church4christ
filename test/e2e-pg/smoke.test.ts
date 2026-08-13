@@ -95,6 +95,12 @@ describe('Postgres-backed worker: public render path', () => {
 });
 
 describe('Postgres-backed worker: admin console (exercises the shortfall query)', () => {
+  it('/admin/onboarding renders the shared checklist over Postgres', async () => {
+    const res = await get('/admin/onboarding', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.text()).toContain('data-screenshot-marker="admin-onboarding"');
+  });
   it('/admin/ministries: anon → 303 to signin', async () => {
     const res = await get('/admin/ministries');
     expect(res.status).toBe(303);

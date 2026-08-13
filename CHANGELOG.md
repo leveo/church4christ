@@ -1,16 +1,16 @@
 # Changelog
 
 This file records changes that affect churches, nonprofit operators, implementers, and
-maintainers. Church4Christ is pre-1.0, so upgrade notes are part of the change contract:
-read the relevant entries before moving an installation forward.
+maintainers. Version 1.0.0 is the initial open-source release; upgrade notes are part of the
+change contract, so read the relevant entries before moving an installation forward.
 
-The `Unreleased` section starts after baseline commit
-[`20b67f3`](https://github.com/leveo/church4christ/commit/20b67f3). Earlier development
-history is intentionally not reconstructed as releases. The `0.1.0` value in the private
-package metadata identifies the current source tree; it does not claim that a `0.1.0` tag
-or GitHub Release exists.
+Earlier development history is intentionally not reconstructed as releases. The source
+package remains private because Church4Christ is distributed from this repository rather
+than published to npm.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-08-12
 
 ### Added
 
@@ -29,9 +29,14 @@ or GitHub Release exists.
   remains separately authorized.
 - Added bilingual Newcomer follow-up on D1 and PostgreSQL: a consented public intake form,
   scoped staff queue and actions, exact-match People handoff, and super-admin configuration.
+- Added a shared bilingual launch-readiness catalog used by setup, doctor schema v2, and an
+  always-on admin checklist. Super-admin manual acknowledgements are versioned, and restore
+  drills expire after 90 days.
+- Added a fail-closed `v1.0.0` upgrade rehearsal from the immutable historical baseline for
+  forward D1 and isolated-schema PostgreSQL migrations.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
-- Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
+- Documented the maintainer-only process for creating v1.0.0 and future releases.
 
 ### Changed
 
@@ -65,7 +70,9 @@ or GitHub Release exists.
 - Apply forward migration `0014_newcomers.sql` before enabling Newcomers. It creates the
   bilingual form configuration, queue, activity, operation receipt, and hashed rate-limit
   tables on both D1 and Supabase/PostgreSQL.
-- Migration files `0001` through `0014` in both `migrations/` and `migrations-supabase/` are
+- Apply forward migration `0015_onboarding.sql` before opening the launch checklist. It
+  creates versioned manual acknowledgement storage on D1 and Supabase/PostgreSQL.
+- Migration files `0001` through `0015` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.
