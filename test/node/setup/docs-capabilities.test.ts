@@ -37,9 +37,9 @@ describe('catalog-owned docs', () => {
     expect(architecture).not.toMatch(/'d1' for everything else/i);
   });
 
-  it('renders all 18 modules and exactly three Supabase requirements', () => {
-    expect(raw.order).toHaveLength(18);
-    expect(Object.keys(raw.capabilities)).toHaveLength(18);
+  it('renders all 19 modules and exactly three Supabase requirements', () => {
+    expect(raw.order).toHaveLength(19);
+    expect(Object.keys(raw.capabilities)).toHaveLength(19);
     expect(new Set(raw.order)).toEqual(new Set(Object.keys(raw.capabilities)));
     expect(
       raw.order.filter(
@@ -153,7 +153,7 @@ describe('catalog-owned docs', () => {
     expect(supabase).not.toMatch(/default setup uses Cloudflare \*\*D1\*\*/i);
 
     const cloudflare = readFileSync('docs/cloudflare-setup.md', 'utf8');
-    expect(cloudflare).toMatch(/Supabase database URL[^.]*Stripe[^.]*backup[^.]*secrets/i);
+    expect(cloudflare).toMatch(/Supabase\s+database URLs?[^.]*Stripe[^.]*backup[^.]*secrets/i);
   });
 
   it('replacing a generated section preserves surrounding prose', () => {

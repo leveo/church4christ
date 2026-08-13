@@ -149,7 +149,7 @@ INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES
 INSERT INTO newcomer_submissions
   (id, name, email, locale, visit_date, service_type_id, contact_consent_at, source, created_at, updated_at)
 VALUES
-  ('70000000-0000-4000-8000-000000000001', 'Jamie New', 'jamie.new@example.com', 'en', date('now'), 1, datetime('now'), 'public', datetime('now'), datetime('now'));
+  ('70000000-0000-4000-8000-000000000001', 'Jamie New', 'jamie.new@example.com', 'en', date('now', 'start of day'), 1, datetime('now'), 'public', datetime('now'), datetime('now'));
 
 INSERT INTO newcomer_activity
   (id, submission_id, actor_person_id, kind, metadata_json, operation_id, result_version, created_at)
