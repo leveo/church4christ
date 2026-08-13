@@ -11,6 +11,7 @@ CREATE TABLE activity_score_config (
   active_threshold INTEGER NOT NULL DEFAULT 70 CHECK (active_threshold BETWEEN 1 AND 100),
   watch_threshold INTEGER NOT NULL DEFAULT 40 CHECK (watch_threshold BETWEEN 0 AND 99),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  last_mutation_id TEXT NOT NULL DEFAULT '' CHECK (length(last_mutation_id) <= 64),
   updated_by_person_id INTEGER REFERENCES people(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (include_visitor + include_regular + include_member + include_inactive > 0),
