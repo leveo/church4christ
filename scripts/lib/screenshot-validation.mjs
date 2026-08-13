@@ -7,6 +7,9 @@ export function requireScreenshotOnly(argv) {
 }
 
 export function assertExpectedScreenshotPage(row, snapshot) {
+  if (!Number.isInteger(snapshot.status) || snapshot.status < 200 || snapshot.status >= 400) {
+    throw new Error(`${row.out}: main document returned HTTP ${String(snapshot.status)}`);
+  }
   const actualUrl = new URL(snapshot.url);
   const expectedUrl = new URL(row.path, actualUrl.origin);
   if (actualUrl.pathname !== expectedUrl.pathname) {
@@ -27,4 +30,22 @@ export function assertExpectedScreenshotPage(row, snapshot) {
   if (row.expectedText && !text.includes(row.expectedText)) {
     throw new Error(`${row.out}: expected page marker ${JSON.stringify(row.expectedText)} was not found`);
   }
+  for (const marker of row.rejectionTexts ?? []) {
+    if (text.includes(marker)) throw new Error(`${row.out}: rejection marker ${JSON.stringify(marker)} was found`);
+  }
+}
+
+export function validateScreenshotManifest(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) throw new TypeError('screenshot manifest must be non-empty');
+  const outputs = new Set();
+  for (const row of rows) {
+    const keys = Object.keys(row).sort().join('|');
+    if (keys !== ['backend', 'expectedText', 'identity', 'locale', 'out', 'path', 'rejectionTexts', 'viewport'].sort().join('|')) throw new TypeError(`screenshot definition fields are invalid: ${row?.out ?? 'unknown'}`);
+    if (typeof row.path !== 'string' || !row.path.startsWith('/') || typeof row.out !== 'string' || !row.out.startsWith('docs/images/') || outputs.has(row.out)) throw new TypeError('screenshot path/output is invalid or duplicated');
+    outputs.add(row.out);
+    if (!['en', 'zh'].includes(row.locale) || !['d1', 'supabase', 'either'].includes(row.backend) || !['public', 'admin', 'member'].includes(row.identity)) throw new TypeError(`screenshot locale/backend/identity is invalid: ${row.out}`);
+    if (row.viewport?.width !== 1280 || row.viewport?.height !== 800) throw new TypeError(`screenshot viewport is invalid: ${row.out}`);
+    if (typeof row.expectedText !== 'string' || !row.expectedText || !Array.isArray(row.rejectionTexts) || row.rejectionTexts.length === 0 || row.rejectionTexts.some((x) => typeof x !== 'string' || !x)) throw new TypeError(`screenshot markers are invalid: ${row.out}`);
+  }
+  return rows;
 }

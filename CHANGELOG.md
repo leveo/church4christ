@@ -29,6 +29,11 @@ or GitHub Release exists.
   remains separately authorized.
 - Added bilingual Newcomer follow-up on D1 and PostgreSQL: a consented public intake form,
   scoped staff queue and actions, exact-match People handoff, and super-admin configuration.
+- Added a shared bilingual launch-readiness catalog used by setup, doctor schema v2, and an
+  always-on admin checklist. Super-admin manual acknowledgements are versioned, and restore
+  drills expire after 90 days.
+- Added a fail-closed `v1.0.0` upgrade rehearsal from the immutable historical baseline for
+  forward D1 and isolated-schema PostgreSQL migrations.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
 - Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
@@ -65,7 +70,9 @@ or GitHub Release exists.
 - Apply forward migration `0014_newcomers.sql` before enabling Newcomers. It creates the
   bilingual form configuration, queue, activity, operation receipt, and hashed rate-limit
   tables on both D1 and Supabase/PostgreSQL.
-- Migration files `0001` through `0014` in both `migrations/` and `migrations-supabase/` are
+- Apply forward migration `0015_onboarding.sql` before opening the launch checklist. It
+  creates versioned manual acknowledgement storage on D1 and Supabase/PostgreSQL.
+- Migration files `0001` through `0015` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.

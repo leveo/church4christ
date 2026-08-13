@@ -309,3 +309,7 @@ you enabled:
 - **Monitor and recover:** review Worker and email failures, verify scheduled backups, keep
   an off-site copy where appropriate, and rehearse restores before an incident.
 - **Never commit** `.dev.vars` or any secret — verify before every commit.
+Before opening a new installation to the public, visit `/admin/onboarding` as a real
+administrator and resolve the shared checklist. A super administrator acknowledges manual
+checks only after verification. Run `npm run doctor -- --strict` from the reviewed deployment
+checkout; bindings alone do not prove routes, jobs, backups, or restores.

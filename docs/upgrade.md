@@ -88,6 +88,7 @@ npm run tokens:check
 npm test
 npm run check
 npm run build
+npm run release:rehearse
 ```
 
 Apply only the forward migrations for the selected staging backend. For D1, first compare the
@@ -143,6 +144,11 @@ npm run doctor -- --strict
 For Supabase, provide the staging database connection in the environment when the doctor
 needs it. Resolve every error and warning before scheduling production. Also test a restore
 from the pre-upgrade backup with the code revision that would be used for recovery.
+
+The repository rehearsal uses only baseline `b85ad362b9f879408797270929c52dab7ad39d1d`,
+a `git archive` temporary checkout, and disposable targets. It fails closed when full Git
+history is absent. PostgreSQL rehearsal requires a local test-marked URL carrying
+`c4c_rehearsal=1`; it uses a random schema and drops only that schema in `finally`.
 
 ## 4. Apply the reviewed production upgrade
 

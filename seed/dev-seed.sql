@@ -156,6 +156,13 @@ INSERT INTO newcomer_activity
 VALUES
   ('70000000-0000-4000-8000-000000000002', '70000000-0000-4000-8000-000000000001', NULL, 'submission_created', '{}', '70000000-0000-4000-8000-000000000001', 0, datetime('now'));
 
+-- Fictional launch-checklist acknowledgements for documentation captures.
+INSERT INTO onboarding_acknowledgements
+  (check_id, actor_person_id, acknowledged_at, definition_version)
+VALUES
+  ('people-migration', 1, datetime('now'), 1),
+  ('restore-drill', 1, datetime('now'), 1);
+
 -- Plans: the next 8 Sundays (date('now','weekday 0') + 0..7 weeks) for each
 -- service type (16 total). Plan 1 and plan 9 both land on the first upcoming
 -- Sunday, the anchor the roster-carrying bulletins (7, 8) reuse verbatim.

@@ -18,6 +18,7 @@
     "screenshots": "node scripts/screenshots.mjs",
     "setup": "node scripts/setup/index.mjs",
     "doctor": "node scripts/setup/index.mjs --doctor",
+    "release:rehearse": "node scripts/release/rehearse-upgrade.mjs --d1",
     "docs:generate": "node scripts/docs/generate-capabilities.mjs",
     "docs:check": "node scripts/docs/check-capabilities.mjs",
     "test": "vitest run",

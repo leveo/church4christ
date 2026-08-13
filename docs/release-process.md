@@ -1,9 +1,8 @@
-# Pre-1.0 release process
+# v1.0.0 source release process
 
-Church4Christ currently develops before a stable `1.0` contract. Future `0.x` releases are
-maintainer-created checkpoints for operators who need a reviewed source revision and explicit
-upgrade notes. They do not make the private package publishable, promise managed upgrades, or
-remove the need to test custom implementations.
+Church4Christ `v1.0.0` is a maintainer-created source checkpoint for operators who need a
+reviewed revision and explicit upgrade notes. It does not make the private package
+publishable, promise managed upgrades, or remove the need to test custom implementations.
 
 No release is created merely because `package.json` currently says `0.1.0`. The changelog
 baseline is commit `20b67f3`; a version becomes a release only when a maintainer completes the
@@ -32,15 +31,13 @@ history by editing D1's `d1_migrations` table or Supabase/Postgres's `_migration
 
 ## Prepare the release pull request
 
-1. Choose the next semantic pre-1.0 version (`0.x.y`) based on compatibility and operator
-   impact. A breaking change can require a new `0.x.0` checkpoint while compatible fixes can
-   use `0.x.y`.
+1. Confirm that the release target is exactly `v1.0.0`.
 2. Move the reviewed `Unreleased` entries into a dated version section and create a new empty
    `Unreleased` section. Link the upgrade notes for any change requiring operator action.
 3. Update the private package metadata without creating a tag:
 
    ```bash
-   npm version 0.x.y --no-git-tag-version
+   npm version 1.0.0 --no-git-tag-version
    ```
 
    Review both `package.json` and `package-lock.json`. Keep `"private": true`; this repository
@@ -55,6 +52,7 @@ history by editing D1's `d1_migrations` table or Supabase/Postgres's `_migration
    npm test
    npm run check
    npm run build
+   npm run release:rehearse
    npm run doctor -- --strict
    ```
 
@@ -72,7 +70,7 @@ After the release-preparation pull request is merged and the exact `main` commit
 a maintainer must explicitly:
 
 1. verify that the commit contains the intended version and changelog section;
-2. create an annotated `v0.x.y` tag on that exact commit;
+2. create an annotated `v1.0.0` tag on that exact commit;
 3. push the tag without force;
 4. create the GitHub Release from the matching changelog text and link the upgrade runbook;
 5. verify the published tag and Release both resolve to the reviewed commit.

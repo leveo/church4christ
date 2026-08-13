@@ -113,11 +113,12 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/public/sermons.png)](docs/features/sermons.md) | **[Sermon archive](docs/features/sermons.md)** | Paste a YouTube link; get a searchable, fast-loading library of past messages. |
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
-| [![](docs/images/admin/person-detail.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Give everyone a profile — families, membership status, private pastoral notes, and a board that connects members to serving. |
-| [![](docs/images/groups/directory.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, join requests, routine and special events, and email-link attendance tracking. |
+| [![](docs/images/admin/people-export.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Profiles and households plus canonical create-only CSV export and reusable source-column mapping for migrations. |
+| [![](docs/images/groups/member-checklist.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, member checklist, join requests, events, and per-person email-link attendance. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
-|  | **[Service attendance](docs/features/service-attendance.md)** | Record adult service totals, derive optional child totals from check-ins, correct history, and download aggregate CSV reports without adult identities. |
-|  | **[Newcomer follow-up](docs/features/newcomers.md)** | Receive consented public cards, triage a staff queue, and hand exact matches into People without leaking notes or answers. |
+| [![](docs/images/admin/attendance-report.png)](docs/features/service-attendance.md) | **[Service attendance](docs/features/service-attendance.md)** | Record aggregate adult totals, derive optional child totals from check-ins, correct history, and download identity-free CSV reports. |
+| [![](docs/images/admin/newcomers-queue.png)](docs/features/newcomers.md) | **[Newcomer follow-up](docs/features/newcomers.md)** | Receive bilingual consented public cards, triage a scoped staff queue, and hand exact matches into People without leaking notes or answers. |
+| [![](docs/images/admin/onboarding.png)](docs/features/onboarding-readiness.md) | **[Launch readiness](docs/features/onboarding-readiness.md)** | One bilingual checklist shared by setup, doctor, and every real administrator, with super-admin acknowledgements for manual checks. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
@@ -269,7 +270,8 @@ walkthrough.
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
 migrations, records all 19 module settings, and bootstraps the first admin. It then hands
-off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness report.
+off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
+the always-on `/admin/onboarding` checklist for the same stable check identities.
 Deployment is intentionally manual: repository automation tests changes but does not
 publish them or migrate production data for you.
 
