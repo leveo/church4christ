@@ -13,6 +13,7 @@ export const NAV_SETTING_KEY = 'nav.items';
 
 export const BUILTIN_NAV: { key: string; path: string }[] = [
   { key: 'nav.visit', path: '/visit' },
+  { key: 'nav.newHere', path: '/new-here' },
   { key: 'nav.about', path: '/about' },
   { key: 'nav.sermons', path: '/sermons' },
   { key: 'nav.bulletin', path: '/bulletin' },

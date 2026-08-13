@@ -42,7 +42,12 @@ try {
   );
 
   const tables = await sql.unsafe<{ tablename: string }[]>(
-    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_migrations'",
+    `SELECT tablename FROM pg_tables
+     WHERE schemaname = 'public' AND tablename <> '_migrations'
+       AND tablename NOT IN (
+         'newcomer_statuses', 'newcomer_status_i18n', 'newcomer_fields',
+         'newcomer_field_i18n', 'newcomer_field_options', 'newcomer_field_option_i18n'
+       )`,
   );
   if (tables.length > 0) {
     const list = tables.map((t) => `"${t.tablename}"`).join(', ');

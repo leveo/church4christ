@@ -23,6 +23,7 @@ const EXPECTED_KEYS = [
   'people',
   'children',
   'attendance',
+  'newcomers',
   'page-builder',
   'portal',
   'giving',
@@ -56,9 +57,24 @@ describe('canonical capability catalog', () => {
       'page-builder',
     ]);
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toEqual(
-      EXPECTED_KEYS.slice(0, 15),
+      EXPECTED_KEYS.slice(0, 16),
     );
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toEqual(EXPECTED_KEYS);
+  });
+
+  test('registers Newcomers on both providers with People as a hard dependency', () => {
+    expect(CAPABILITY_KEYS).toHaveLength(19);
+    expect(CAPABILITY_CATALOG.presets.website.modules).toHaveLength(8);
+    expect(CAPABILITY_CATALOG.presets['website-community'].modules).toHaveLength(16);
+    expect(CAPABILITY_CATALOG.presets['full-church'].modules).toHaveLength(19);
+    expect(CAPABILITIES.newcomers).toMatchObject({
+      publicPrefixes: ['/new-here'],
+      adminPrefixes: ['/admin/newcomers'],
+      navKeys: ['nav.newHere'],
+      dependsOn: ['people'],
+      optionalServices: ['email'],
+    });
+    expect(CAPABILITIES.newcomers).not.toHaveProperty('requiresBackend');
   });
 
   test('keeps aggregate attendance admin-only, Children-optional, and independent from Serve', () => {

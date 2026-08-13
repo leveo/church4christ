@@ -1,0 +1,69 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { btn, btnSecondary, card, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import {
+  createNewcomerField, createNewcomerStatus, listNewcomerAdminConfiguration,
+  updateNewcomerField, updateNewcomerStatus, type NewcomerFieldOptionInput,
+} from '../../../lib/newcomerDb';
+import { readNewcomerUrlencodedForm } from '../../../lib/newcomerHttp';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import type { NewcomerFieldType } from '../../../lib/newcomerValidation';
+
+const modules = Astro.locals.modules;
+if (!modules.has('newcomers')) return new Response(null, { status: 404 });
+const user = Astro.locals.user;
+if (!user?.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang === 'zh' ? 'zh' : 'en';
+const allowed = ['action', 'id', 'key', 'category', 'type', 'sort', 'active', 'required', 'initial_status_id', 'label_en', 'label_zh', 'help_en', 'help_zh', 'options_json'];
+let saved = Astro.url.searchParams.get('saved') === '1';
+let error = false;
+
+function integer(value: string | undefined): number {
+  if (!/^\d+$/.test(value ?? '')) throw new Error('invalid integer');
+  return Number(value);
+}
+function options(value: string | undefined): NewcomerFieldOptionInput[] {
+  const parsed: unknown = JSON.parse(value || '[]');
+  if (!Array.isArray(parsed) || parsed.length > 100) throw new Error('invalid options');
+  return parsed.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('invalid option');
+    const row = candidate as Record<string, unknown>;
+    if (typeof row.value !== 'string' || typeof row.sort !== 'number' || typeof row.active !== 'boolean'
+      || typeof row.labelEn !== 'string' || typeof row.labelZh !== 'string') throw new Error('invalid option');
+    return { value: row.value, sort: row.sort, active: row.active, labelEn: row.labelEn, labelZh: row.labelZh };
+  });
+}
+if (Astro.request.method === 'POST') {
+  const read = await readNewcomerUrlencodedForm(Astro.request, allowed);
+  if (read.ok) {
+    const form = read.fields;
+    try {
+      if (form.action === 'create-status') await createNewcomerStatus(Astro.locals.db, user, { key: form.key ?? '', category: form.category as 'open' | 'closed', sort: integer(form.sort), active: form.active === 'true', labelEn: form.label_en ?? '', labelZh: form.label_zh ?? '' });
+      else if (form.action === 'update-status') await updateNewcomerStatus(Astro.locals.db, user, { id: integer(form.id), sort: integer(form.sort), active: form.active === 'true', initialStatusId: integer(form.initial_status_id), labelEn: form.label_en ?? '', labelZh: form.label_zh ?? '' });
+      else if (form.action === 'create-field') await createNewcomerField(Astro.locals.db, user, { key: form.key ?? '', type: form.type as NewcomerFieldType, required: form.required === 'true', active: form.active === 'true', sort: integer(form.sort), labelEn: form.label_en ?? '', labelZh: form.label_zh ?? '', helpEn: form.help_en || null, helpZh: form.help_zh || null, options: options(form.options_json) });
+      else if (form.action === 'update-field') await updateNewcomerField(Astro.locals.db, user, { id: integer(form.id), required: form.required === 'true', active: form.active === 'true', sort: integer(form.sort), labelEn: form.label_en ?? '', labelZh: form.label_zh ?? '', helpEn: form.help_en || null, helpZh: form.help_zh || null, options: options(form.options_json) });
+      else throw new Error('invalid action');
+      return Astro.redirect('/admin/newcomers/settings?saved=1', 303);
+    } catch { error = true; }
+  } else error = true;
+}
+const [english, chinese] = await Promise.all([
+  listNewcomerAdminConfiguration(Astro.locals.db, Astro.locals.dbBackend, user, 'en'),
+  listNewcomerAdminConfiguration(Astro.locals.db, Astro.locals.dbBackend, user, 'zh'),
+]);
+const zhStatus = new Map(chinese.statuses.map((row) => [row.id, row]));
+const zhField = new Map(chinese.fields.map((row) => [row.id, row]));
+const optionJson = (field: (typeof english.fields)[number]) => JSON.stringify(field.options.map((option) => ({ value: option.value, sort: option.sort, active: option.active, labelEn: option.label, labelZh: zhField.get(field.id)?.options.find((item) => item.value === option.value)?.label ?? option.label })), null, 2);
+const initialStatusId = english.statuses.find((status) => status.initial)?.id ?? 1;
+---
+<Admin title={t(lang, 'admin.newcomers.settings')}>
+  <div class="flex items-center justify-between gap-4"><h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.newcomers.settings')}</h1><a class={btnSecondary} href="/admin/newcomers">{t(lang, 'admin.newcomers.queue')}</a></div>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.newcomers.saved')}</p>}{error && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
+  <section class={`mt-6 ${card}`}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.statuses')}</h2><div class="mt-4 space-y-4">{english.statuses.map((status) => <form method="post" class="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-6"><input type="hidden" name="action" value="update-status" /><input type="hidden" name="id" value={status.id} /><label><span class={lab}>EN</span><input class={tin} name="label_en" value={status.label} required /></label><label><span class={lab}>中文</span><input class={tin} name="label_zh" value={zhStatus.get(status.id)?.label ?? status.label} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value={status.sort} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.initial')}</span><select class={tin} name="initial_status_id">{english.statuses.filter((item) => item.active && item.category === 'open').map((item) => <option value={item.id} selected={item.id === initialStatusId}>{item.label}</option>)}</select></label><label><span class={lab}>{t(lang, 'admin.newcomers.active')}</span><select class={tin} name="active"><option value="true" selected={status.active}>{t(lang, 'admin.newcomers.yes')}</option><option value="false" selected={!status.active}>{t(lang, 'admin.newcomers.no')}</option></select></label><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.save')}</button></form>)}</div>
+    <form method="post" class="mt-4 grid gap-3 rounded-lg border border-border p-3 md:grid-cols-6"><input type="hidden" name="action" value="create-status" /><input type="hidden" name="active" value="true" /><label><span class={lab}>{t(lang, 'admin.newcomers.key')}</span><input class={tin} name="key" required /></label><label><span class={lab}>EN</span><input class={tin} name="label_en" required /></label><label><span class={lab}>中文</span><input class={tin} name="label_zh" required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.category')}</span><select class={tin} name="category"><option value="open">open</option><option value="closed">closed</option></select></label><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value="100" required /></label><button class={btn} type="submit">{t(lang, 'admin.newcomers.add')}</button></form>
+  </section>
+  <section class={`mt-6 ${card}`}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.fields')}</h2><p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.newcomers.optionsHelp')}</p><div class="mt-4 space-y-4">{english.fields.map((field) => <form method="post" class="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-2"><input type="hidden" name="action" value="update-field" /><input type="hidden" name="id" value={field.id} /><label><span class={lab}>EN</span><input class={tin} name="label_en" value={field.label} required /></label><label><span class={lab}>中文</span><input class={tin} name="label_zh" value={zhField.get(field.id)?.label ?? field.label} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpEn')}</span><input class={tin} name="help_en" value={field.help ?? ''} /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpZh')}</span><input class={tin} name="help_zh" value={zhField.get(field.id)?.help ?? ''} /></label><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value={field.sort} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.required')}</span><select class={tin} name="required"><option value="false" selected={!field.required}>{t(lang, 'admin.newcomers.no')}</option><option value="true" selected={field.required}>{t(lang, 'admin.newcomers.yes')}</option></select></label><label><span class={lab}>{t(lang, 'admin.newcomers.active')}</span><select class={tin} name="active"><option value="true" selected={field.active}>{t(lang, 'admin.newcomers.yes')}</option><option value="false" selected={!field.active}>{t(lang, 'admin.newcomers.no')}</option></select></label><label class="md:col-span-2"><span class={lab}>{t(lang, 'admin.newcomers.options')}</span><textarea class={`${tin} font-mono`} rows="5" name="options_json">{optionJson(field)}</textarea></label><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.save')}</button></form>)}</div>
+    <form method="post" class="mt-4 grid gap-3 rounded-lg border border-border p-3 md:grid-cols-2"><input type="hidden" name="action" value="create-field" /><input type="hidden" name="active" value="true" /><label><span class={lab}>{t(lang, 'admin.newcomers.key')}</span><input class={tin} name="key" required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.type')}</span><select class={tin} name="type"><option value="text">text</option><option value="textarea">textarea</option><option value="select">select</option><option value="checkbox">checkbox</option></select></label><label><span class={lab}>EN</span><input class={tin} name="label_en" required /></label><label><span class={lab}>中文</span><input class={tin} name="label_zh" required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpEn')}</span><input class={tin} name="help_en" /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpZh')}</span><input class={tin} name="help_zh" /></label><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value="100" required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.required')}</span><select class={tin} name="required"><option value="false">{t(lang, 'admin.newcomers.no')}</option><option value="true">{t(lang, 'admin.newcomers.yes')}</option></select></label><label class="md:col-span-2"><span class={lab}>{t(lang, 'admin.newcomers.options')}</span><textarea class={`${tin} font-mono`} rows="5" name="options_json">[]</textarea></label><button class={btn} type="submit">{t(lang, 'admin.newcomers.add')}</button></form>
+  </section>
+</Admin>

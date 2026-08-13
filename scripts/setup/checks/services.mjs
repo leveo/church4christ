@@ -1,6 +1,6 @@
 import { result } from '../readiness.mjs';
 
-const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'backup']);
+const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'newcomerRateLimitSecret', 'backup']);
 const STRIPE_CLASSIFICATIONS = new Set(['test', 'live', 'unknown', 'missing', 'unverifiable']);
 const SUPPORTED_REQUIRED = new Set(['worker', 'r2', 'hyperdrive', 'email', 'stripe']);
 
@@ -17,7 +17,7 @@ export async function checkServices(options) {
   delete rawPresence.stripeClassification;
   delete rawPresence.stripeModeTest;
   delete rawPresence.stripeClassificationVerifiable;
-  const supplied = { d1: false, emailConfigured: false, ...rawPresence };
+  const supplied = { d1: false, emailConfigured: false, newcomerRateLimitSecret: false, ...rawPresence };
   const actualPresence = Object.keys(supplied).sort();
   if (actualPresence.join('|') !== [...PRESENCE_KEYS].sort().join('|')) throw new TypeError('services presence fields are invalid');
   for (const key of PRESENCE_KEYS) {
@@ -90,6 +90,12 @@ export async function checkServices(options) {
     } else {
       checks.push(result('services.stripe-unknown', 'error', 'Stripe credentials cannot be classified as a complete test-mode pair.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
     }
+  }
+
+  if (selected.has('newcomers')) {
+    checks.push(options.presence.newcomerRateLimitSecret
+      ? result('services.newcomer-rate-limit-secret-ok', 'info', 'The Newcomer public rate-limit secret is configured.', 'No action is required.')
+      : result('services.newcomer-rate-limit-secret', 'error', 'The Newcomer public rate-limit secret is missing.', 'Configure NEWCOMER_RATE_LIMIT_SECRET before accepting public cards.'));
   }
 
   checks.push(options.presence.backup

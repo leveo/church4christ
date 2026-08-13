@@ -1,0 +1,78 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, btnSecondary, card, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import {
+  addNewcomerNote, assignNewcomer, changeNewcomerStatus, createNewcomerVisitor,
+  findNewcomerDuplicateHints, getNewcomerDetail, linkNewcomerPerson,
+  listNewcomerStaffStatuses, scheduleNewcomerFollowUp,
+} from '../../../lib/newcomerDb';
+import { readNewcomerUrlencodedForm } from '../../../lib/newcomerHttp';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+const modules = Astro.locals.modules;
+if (!modules.has('newcomers')) return new Response(null, { status: 404 });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'newcomers')) return new Response(null, { status: 403 });
+const lang: Locale = user?.lang === 'zh' ? 'zh' : 'en';
+const id = Astro.params.id ?? '';
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return new Response(null, { status: 404 });
+let saved = false;
+let error = false;
+if (Astro.request.method === 'POST') {
+  const read = await readNewcomerUrlencodedForm(Astro.request, ['action', 'version', 'operation_id', 'assignee_person_id', 'status_id', 'follow_up_date', 'body', 'person_id']);
+  if (read.ok) {
+    const form = read.fields;
+    const expectedVersion = /^\d+$/.test(form.version ?? '') ? Number(form.version) : -1;
+    const operationId = form.operation_id ?? '';
+    try {
+      if (form.action === 'assign') await assignNewcomer(Astro.locals.db, user, { submissionId: id, expectedVersion, assigneePersonId: /^\d+$/.test(form.assignee_person_id ?? '') ? Number(form.assignee_person_id) : null, operationId });
+      else if (form.action === 'status') await changeNewcomerStatus(Astro.locals.db, user, { submissionId: id, expectedVersion, statusId: Number(form.status_id), operationId });
+      else if (form.action === 'follow-up') await scheduleNewcomerFollowUp(Astro.locals.db, user, { submissionId: id, expectedVersion, followUpDate: form.follow_up_date || null, operationId });
+      else if (form.action === 'note') await addNewcomerNote(Astro.locals.db, user, { submissionId: id, expectedVersion, body: form.body ?? '', operationId });
+      else if (form.action === 'link') await linkNewcomerPerson(Astro.locals.db, user, { submissionId: id, expectedVersion, personId: Number(form.person_id), operationId });
+      else if (form.action === 'visitor') {
+        if (!(modules.has('people') && hasAreaAccess(user, 'people'))) return new Response(null, { status: 403 });
+        await createNewcomerVisitor(Astro.locals.db, user, { submissionId: id, expectedVersion, operationId });
+      } else throw new Error('invalid action');
+      return Astro.redirect(`/admin/newcomers/${id}?saved=1`, 303);
+    } catch { error = true; }
+  } else error = true;
+}
+saved = Astro.url.searchParams.get('saved') === '1';
+let detail: NonNullable<Awaited<ReturnType<typeof getNewcomerDetail>>>;
+try {
+  const found = await getNewcomerDetail(Astro.locals.db, Astro.locals.dbBackend, user, id, lang);
+  if (!found) return new Response(null, { status: 404 });
+  detail = found;
+}
+catch { return new Response(null, { status: 404 }); }
+const s = detail.submission;
+const statuses = await listNewcomerStaffStatuses(Astro.locals.db, Astro.locals.dbBackend, user, lang);
+let hints: Awaited<ReturnType<typeof findNewcomerDuplicateHints>> = [];
+if (s.email || s.phone) {
+  try { hints = await findNewcomerDuplicateHints(Astro.locals.db, user, { email: s.email, phone: s.phone, excludeSubmissionId: id }); }
+  catch { error = true; }
+}
+const operation = () => crypto.randomUUID();
+const canCreateVisitor = modules.has('people') && hasAreaAccess(user, 'people');
+---
+<Admin title={s.name}>
+  <div class="flex items-center justify-between gap-4"><div><h1 class="font-display text-heading-md font-bold">{s.name}</h1><p class="text-ink-muted">{s.email ?? s.phone ?? '—'}</p></div><a class={btnSecondary} href="/admin/newcomers">{t(lang, 'admin.newcomers.queue')}</a></div>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.newcomers.saved')}</p>}{error && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
+  <div class="mt-6 grid gap-4 lg:grid-cols-2">
+    <section class={card}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.details')}</h2><dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"><dt>{t(lang, 'newcomers.visitDate')}</dt><dd>{s.visitDate}</dd><dt>{t(lang, 'admin.newcomers.status')}</dt><dd>{s.statusLabel}</dd><dt>{t(lang, 'newcomers.consent')}</dt><dd>{s.consent ? t(lang, 'admin.newcomers.yes') : t(lang, 'admin.newcomers.no')}</dd><dt>{t(lang, 'admin.newcomers.assignee')}</dt><dd>{s.assigneePersonId ?? '—'}</dd></dl></section>
+    <section class={card}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.duplicateHints')}</h2>{hints.length === 0 ? <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.newcomers.noDuplicates')}</p> : <ul class="mt-2 space-y-2 text-sm">{hints.map((hint) => <li>{hint.kind === 'person_live' ? <><a class="text-primary hover:underline" href={`/admin/people/${hint.id}`}>{t(lang, 'admin.newcomers.livePerson')} #{hint.id}</a><form method="post" class="ml-2 inline"><input type="hidden" name="action" value="link" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><input type="hidden" name="person_id" value={hint.id} /><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.link')}</button></form></> : hint.kind === 'person_deleted' ? `${t(lang, 'admin.newcomers.deletedPerson')} #${hint.id}` : `${t(lang, 'admin.newcomers.openSubmission')} #${hint.id}`}</li>)}</ul>}
+      {!s.email && <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.newcomers.phoneOnly')}</p>}
+      {s.email && !s.linkedPersonId && canCreateVisitor && <form method="post" class="mt-3"><input type="hidden" name="action" value="visitor" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.createVisitor')}</button></form>}
+    </section>
+  </div>
+  <section class={`mt-4 ${card}`}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.answers')}</h2>{detail.answers.length === 0 ? <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.newcomers.empty')}</p> : <dl class="mt-3 space-y-3">{detail.answers.map((answer) => <div><dt class="text-sm font-semibold">{answer.fieldLabel}</dt><dd class="whitespace-pre-wrap text-sm text-ink-muted">{answer.value}</dd></div>)}</dl>}</section>
+  <section class={`mt-4 ${card}`}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.actions')}</h2><div class="mt-3 grid gap-4 md:grid-cols-3">
+    <form method="post"><input type="hidden" name="action" value="assign" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><label><span class={lab}>{t(lang, 'admin.newcomers.assignee')}</span><input class={tin} type="number" min="1" name="assignee_person_id" value={s.assigneePersonId ?? ''} /></label><button class={`mt-2 ${btnSecondary}`} type="submit">{t(lang, 'admin.newcomers.save')}</button></form>
+    <form method="post"><input type="hidden" name="action" value="status" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><label><span class={lab}>{t(lang, 'admin.newcomers.status')}</span><select class={tin} name="status_id">{statuses.map((status) => <option value={status.id} selected={status.id === s.statusId}>{status.label}</option>)}</select></label><button class={`mt-2 ${btnSecondary}`} type="submit">{t(lang, 'admin.newcomers.save')}</button></form>
+    <form method="post"><input type="hidden" name="action" value="follow-up" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><label><span class={lab}>{t(lang, 'admin.newcomers.followUp')}</span><input class={tin} type="date" name="follow_up_date" value={s.nextFollowUpDate ?? ''} /></label><button class={`mt-2 ${btnSecondary}`} type="submit">{t(lang, 'admin.newcomers.save')}</button></form>
+  </div><form method="post" class="mt-4"><input type="hidden" name="action" value="note" /><input type="hidden" name="version" value={s.version} /><input type="hidden" name="operation_id" value={operation()} /><label><span class={lab}>{t(lang, 'admin.newcomers.note')}</span><textarea class={tin} name="body" required></textarea></label><button class={`mt-2 ${btn}`} type="submit">{t(lang, 'admin.newcomers.addNote')}</button></form></section>
+  <div class="mt-4 grid gap-4 lg:grid-cols-2"><section class={card}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.notes')}</h2><ul class="mt-3 space-y-3">{detail.notes.items.map((note) => <li class="whitespace-pre-wrap text-sm">{note.body}<div class="text-xs text-ink-muted">{note.createdAt}</div></li>)}</ul></section><section class={card}><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.newcomers.activity')}</h2><ul class="mt-3 space-y-2 text-sm">{detail.activity.items.map((item) => <li>{item.kind} · {item.createdAt}</li>)}</ul></section></div>
+</Admin>

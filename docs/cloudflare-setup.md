@@ -60,7 +60,7 @@ and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing
 launch and during operation.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
-> default for 15 modules. **Member Portal**, **Giving**, and **Registration** need Postgres,
+> default for 16 modules. **Member Portal**, **Giving**, and **Registration** need Postgres,
 > so setup selects **Supabase** when any of them is enabled. Local D1 needs no external
 > account; deployed D1 needs Cloudflare. Local Supabase needs a local or hosted Supabase
 > database; deployed Supabase needs both Cloudflare and Supabase. There is no automated
@@ -120,10 +120,10 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
    create command. Supabase removes the sample D1 block and uses the Hyperdrive id. This
    file is safe to share — it holds no passwords.
 5. **Create the tables** with the migration command for the selected database.
-6. **Set your secret sign-in key** (`SESSION_SECRET`) — one command generates and stores a
-   strong random value. In the minimum D1 path, this is the only credential setup asks you
-   to create. Supabase database URLs, Stripe credentials, and backup credentials are
-   secrets too; none of them belongs in a file you share.
+6. **Set the secret keys** (`SESSION_SECRET` and `NEWCOMER_RATE_LIMIT_SECRET`) — setup
+   generates and stores strong random values without displaying either value. Supabase
+   database URLs, Stripe credentials, and backup credentials are secrets too; none of them
+   belongs in a file you share.
 7. **For a local first try, use the terminal-only email log** (`EMAIL_DEV_LOG=1`, which
    guided Local setup writes to `.dev.vars`) to read your own sign-in link without sending
    email. A deployed test instead needs both an onboarded sender domain and a verified

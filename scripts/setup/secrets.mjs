@@ -4,7 +4,7 @@ import { open, readFile } from 'node:fs/promises';
 import { normalizeEmail } from './answers.mjs';
 import { writeAtomic } from './files.mjs';
 
-const MANAGED = new Set(['SESSION_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE']);
+const MANAGED = new Set(['SESSION_SECRET', 'NEWCOMER_RATE_LIMIT_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE']);
 const KEY = /^[A-Z][A-Z0-9_]*$/;
 const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE';
 const STRIPE_ENV_KEYS = Object.freeze([
@@ -261,6 +261,7 @@ export async function configureSecrets(options) {
     const existing = parseDevVars(content);
     const additions = [];
     if (!existing.has('SESSION_SECRET')) additions.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
+    if (!existing.has('NEWCOMER_RATE_LIMIT_SECRET')) additions.push(['NEWCOMER_RATE_LIMIT_SECRET', randomBytes(32).toString('base64url')]);
     if (!existing.has('EMAIL_DEV_LOG')) additions.push(['EMAIL_DEV_LOG', '1']);
     additions.push(['AUTH_DEV_BYPASS_EMAIL', adminEmail]);
     if (stripeSecrets) {
@@ -289,6 +290,7 @@ export async function configureSecrets(options) {
   }
   const required = [];
   if (!names.has('SESSION_SECRET')) required.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
+  if (!names.has('NEWCOMER_RATE_LIMIT_SECRET')) required.push(['NEWCOMER_RATE_LIMIT_SECRET', randomBytes(32).toString('base64url')]);
   if (stripeSecrets && !names.has('STRIPE_SECRET_KEY')) required.push(['STRIPE_SECRET_KEY', stripeSecrets.secretKey]);
   if (stripeSecrets && !names.has('STRIPE_WEBHOOK_SECRET')) required.push(['STRIPE_WEBHOOK_SECRET', stripeSecrets.webhookSecret]);
   for (const [name, value] of required) {
