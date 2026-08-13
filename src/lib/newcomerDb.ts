@@ -44,6 +44,16 @@ export class NewcomerPersistenceError extends Error {
   constructor() { super('Newcomer persistence failed'); this.name = 'NewcomerPersistenceError'; }
 }
 
+export class NewcomerOutcomeUnknownError extends Error {
+  readonly code = 'newcomer_outcome_unknown' as const;
+  readonly operationId: string;
+  constructor(operationId: string) {
+    super('Newcomer operation outcome is unknown');
+    this.name = 'NewcomerOutcomeUnknownError';
+    this.operationId = operationId;
+  }
+}
+
 export const NEWCOMER_DB_LIMITS = {
   statuses: 100,
   customFields: 100,
@@ -1206,6 +1216,7 @@ function defaultMutationRuntime(): NewcomerMutationRuntime {
 function mutationRuntime(
   candidate: NewcomerMutationRuntime | undefined,
   idCount: number,
+  forbiddenIds: readonly string[] = [],
 ): { now: string; ids: string[] } {
   const runtime = candidate ?? defaultMutationRuntime();
   const captured = plainRow(runtime, ['now', 'randomUUID']);
@@ -1213,12 +1224,17 @@ function mutationRuntime(
     throw new NewcomerPersistenceError();
   }
   try {
-    const nowValue: unknown = Reflect.apply(captured.now, undefined, []);
+    const receiver = Object.freeze(Object.assign(Object.create(null) as NewcomerMutationRuntime, {
+      now: captured.now,
+      randomUUID: captured.randomUUID,
+    }));
+    const nowValue: unknown = Reflect.apply(captured.now, receiver, []);
     if (timestamp(nowValue) === null) throw new NewcomerPersistenceError();
     const ids: string[] = [];
     for (let index = 0; index < idCount; index += 1) {
-      const value: unknown = Reflect.apply(captured.randomUUID, undefined, []);
-      if (typeof value !== 'string' || !RUNTIME_UUID.test(value) || ids.includes(value)) {
+      const value: unknown = Reflect.apply(captured.randomUUID, receiver, []);
+      if (typeof value !== 'string' || !RUNTIME_UUID.test(value)
+        || ids.includes(value) || forbiddenIds.includes(value)) {
         throw new NewcomerPersistenceError();
       }
       ids.push(value);
@@ -1241,6 +1257,24 @@ interface CapturedValidatedIntake extends Omit<ValidatedNewcomerIntake, 'answers
 export interface CreateNewcomerSubmissionOptions {
   backend: SnapshotBackend;
   operationId: string;
+}
+
+export interface NewcomerMutationResult {
+  version: number;
+  operationId: string;
+}
+
+export interface CreateNewcomerSubmissionResult extends NewcomerMutationResult {
+  id: string;
+  version: 0;
+}
+
+export interface AddNewcomerNoteResult extends NewcomerMutationResult {
+  noteId: string;
+}
+
+export interface CreateNewcomerVisitorResult extends NewcomerMutationResult {
+  personId: number;
 }
 
 function safeValidatedIntake(value: unknown): CapturedValidatedIntake {
@@ -1326,6 +1360,69 @@ function createAnswerByteLength(backend: SnapshotBackend, expression: string): s
     : `octet_length(${expression})`;
 }
 
+async function reconcileCreatedSubmission(
+  db: AppDb,
+  mode: 'public' | 'staff',
+  actorPersonId: number | null,
+  captured: CapturedValidatedIntake,
+  backend: SnapshotBackend,
+  operationId: string,
+  answerPayload: string,
+): Promise<ReconciledMutation<CreateNewcomerSubmissionResult>> {
+  const payloadCte = createAnswerPayloadCte(backend, '?1');
+  try {
+    const value = await db.prepare(`
+      WITH ${payloadCte}
+      SELECT submission.version,submission.last_mutation_id,
+        CASE WHEN submission.deleted_at IS NULL AND submission.version=0
+          AND submission.last_mutation_id IS NULL
+          AND submission.name=?3
+          AND ((CAST(?4 AS TEXT) IS NULL AND submission.email IS NULL)
+            OR submission.email=CAST(?4 AS TEXT))
+          AND ((CAST(?5 AS TEXT) IS NULL AND submission.phone IS NULL)
+            OR submission.phone=CAST(?5 AS TEXT))
+          AND submission.locale=?6 AND submission.visit_date=?7
+          AND ((CAST(?8 AS INTEGER) IS NULL AND submission.service_type_id IS NULL)
+            OR submission.service_type_id=CAST(?8 AS INTEGER))
+          AND submission.source=?9 AND submission.created_at=submission.updated_at
+          AND ((CAST(?10 AS INTEGER)=1 AND submission.contact_consent_at=submission.created_at)
+            OR (CAST(?10 AS INTEGER)=0 AND submission.contact_consent_at IS NULL))
+          AND (SELECT COUNT(*) FROM newcomer_activity activity
+            WHERE activity.submission_id=submission.id AND ${actorPredicate('?11')}
+              AND activity.kind='submission_created' AND activity.metadata_json='{}'
+              AND activity.created_at=submission.created_at)=1
+          AND (SELECT COUNT(*) FROM payload)=(
+            SELECT COUNT(*) FROM newcomer_answers answer
+            WHERE answer.submission_id=submission.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM payload WHERE NOT EXISTS (
+              SELECT 1 FROM newcomer_answers answer
+              WHERE answer.submission_id=submission.id AND answer.field_id=payload.field_id
+                AND answer.value=payload.value))
+          AND NOT EXISTS (
+            SELECT 1 FROM newcomer_answers answer
+            WHERE answer.submission_id=submission.id AND NOT EXISTS (
+              SELECT 1 FROM payload WHERE payload.field_id=answer.field_id
+                AND payload.value=answer.value))
+          THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission WHERE submission.id=?2
+    `).bind(
+      answerPayload, operationId, captured.name, captured.email, captured.phone,
+      captured.locale, captured.visitDate, captured.serviceTypeId, mode,
+      captured.contactConsent ? 1 : 0, actorPersonId,
+    ).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'proof']);
+    const version = row ? integer(row.version) : null;
+    const proof = row ? bool(row.proof) : null;
+    if (!row || version === null || proof === null) return { status: 'unknown' };
+    if (version !== 0 || row.last_mutation_id !== null || !proof) return { status: 'mismatch' };
+    return { status: 'applied', value: { id: operationId, version: 0, operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
 export async function createNewcomerSubmission(
   db: AppDb,
   user: SessionUser | null,
@@ -1333,7 +1430,7 @@ export async function createNewcomerSubmission(
   input: ValidatedNewcomerIntake,
   options: CreateNewcomerSubmissionOptions,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ id: string; version: 0; operationId: string }> {
+): Promise<CreateNewcomerSubmissionResult> {
   if (mode !== 'public' && mode !== 'staff') throw new NewcomerInvalidError();
   if (mode === 'staff') assertPrivateAccess(user);
   const captured = safeValidatedIntake(input);
@@ -1341,10 +1438,10 @@ export async function createNewcomerSubmission(
   const capturedOptions = plainRow(options, ['backend', 'operationId']);
   const backend = capturedOptions?.backend === 'd1' || capturedOptions?.backend === 'supabase'
     ? capturedOptions.backend : null;
-  const operationId = capturedOptions && RUNTIME_UUID.test(String(capturedOptions.operationId))
-    ? capturedOptions.operationId as string : null;
+  const operationId = capturedOptions && typeof capturedOptions.operationId === 'string'
+    && RUNTIME_UUID.test(capturedOptions.operationId) ? capturedOptions.operationId : null;
   if (!backend || !operationId) throw new NewcomerInvalidError();
-  const generated = mutationRuntime(runtime, 1);
+  const generated = mutationRuntime(runtime, 1, [operationId]);
   const [activityId] = generated.ids;
   const submissionId = operationId;
   const actorPersonId = mode === 'staff' ? user!.id : null;
@@ -1357,18 +1454,19 @@ export async function createNewcomerSubmission(
   if (UTF8.encode(answerPayload).byteLength > 40 * 1024) throw new NewcomerInvalidError();
   const answerPayloadCte = createAnswerPayloadCte(backend, '?1');
   const payloadByteLength = createAnswerByteLength(backend, 'payload.value');
+  let dispatched = false;
   try {
-  const statements = [
-    // All Task 3 field configuration writes take this same row mutex. It closes
-    // the READ COMMITTED phantom window while required/active/options are rechecked.
-    db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
-    // Updating an initial status must first update the current initial row, so
-    // this lock makes selecting the initial status stable for the whole batch.
-    db.prepare(`UPDATE newcomer_statuses SET sort=sort
-      WHERE active=1 AND category='open' AND is_initial=1 RETURNING id`),
-    db.prepare(`UPDATE service_types SET sort=sort
-      WHERE id=? AND deleted_at IS NULL RETURNING id`).bind(captured.serviceTypeId),
-    db.prepare(`
+    const statements = [
+      // All Task 3 field configuration writes take this same row mutex. It closes
+      // the READ COMMITTED phantom window while required/active/options are rechecked.
+      db.prepare('UPDATE newcomer_fields SET sort=sort WHERE id=1 RETURNING id'),
+      // Updating an initial status must first update the current initial row, so
+      // this lock makes selecting the initial status stable for the whole batch.
+      db.prepare(`UPDATE newcomer_statuses SET sort=sort
+        WHERE active=1 AND category='open' AND is_initial=1 RETURNING id`),
+      db.prepare(`UPDATE service_types SET sort=sort
+        WHERE id=? AND deleted_at IS NULL RETURNING id`).bind(captured.serviceTypeId),
+      db.prepare(`
       INSERT INTO newcomer_submissions (
         id,name,email,phone,locale,visit_date,service_type_id,contact_consent_at,source,
         status_id,version,last_mutation_id,created_at,updated_at
@@ -1380,11 +1478,11 @@ export async function createNewcomerSubmission(
           SELECT 1 FROM service_types service
           WHERE service.id=CAST(?7 AS INTEGER) AND service.deleted_at IS NULL
         ))
-    `).bind(
-      submissionId, captured.name, captured.email, captured.phone, captured.locale,
-      captured.visitDate, captured.serviceTypeId, consentAt, mode, generated.now,
-    ),
-    db.prepare(`
+      `).bind(
+        submissionId, captured.name, captured.email, captured.phone, captured.locale,
+        captured.visitDate, captured.serviceTypeId, consentAt, mode, generated.now,
+      ),
+      db.prepare(`
       WITH ${answerPayloadCte}
       INSERT INTO newcomer_answers (submission_id,field_id,value)
       SELECT submission.id,field.id,payload.value
@@ -1400,13 +1498,13 @@ export async function createNewcomerSubmission(
         )) OR
         (field.type='checkbox' AND payload.value IN ('true','false'))
       )
-    `).bind(answerPayload, submissionId),
-    db.prepare(`
+      `).bind(answerPayload, submissionId),
+      db.prepare(`
       INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
       SELECT ?1,submission.id,?2,'submission_created','{}',?3
       FROM newcomer_submissions submission WHERE submission.id=?4
-    `).bind(activityId, actorPersonId, generated.now, submissionId),
-    db.prepare(`
+      `).bind(activityId, actorPersonId, generated.now, submissionId),
+      db.prepare(`
       WITH ${answerPayloadCte}
       INSERT INTO newcomer_status_i18n (status_id,locale,label)
       SELECT 0,'en','guard' WHERE
@@ -1467,31 +1565,337 @@ export async function createNewcomerSubmission(
           AND ${actorPredicate('?5')}
           AND kind='submission_created' AND metadata_json='{}' AND created_at=?6
       )
-    `).bind(
-      answerPayload, submissionId, captured.serviceTypeId,
-      activityId, actorPersonId, generated.now,
-    ),
+      `).bind(
+        answerPayload, submissionId, captured.serviceTypeId,
+        activityId, actorPersonId, generated.now,
+      ),
     ];
+    dispatched = true;
     const results = batchResults(await db.batch(statements), statements.length);
     for (const result of results) resultRows(result, 101);
     return { id: submissionId, version: 0, operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileCreatedSubmission(
+      db, mode, actorPersonId, captured, backend, operationId, answerPayload,
+    );
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
 interface CapturedCas {
   submissionId: string;
   expectedVersion: number;
+  operationId: string;
 }
 
 function capturedCas(row: DataRow | null): CapturedCas {
   const submissionId = row && validUuid(row.submissionId) ? row.submissionId : null;
   const expectedVersion = row ? integer(row.expectedVersion) : null;
+  const operationId = row && typeof row.operationId === 'string' && RUNTIME_UUID.test(row.operationId)
+    ? row.operationId : null;
   if (!submissionId || expectedVersion === null || expectedVersion < 0 || expectedVersion >= 2_147_483_647) {
     throw new NewcomerInvalidError();
   }
-  return { submissionId, expectedVersion };
+  if (!operationId) throw new NewcomerInvalidError();
+  return { submissionId, expectedVersion, operationId };
+}
+
+export type NewcomerMutationReconciliation =
+  | { status: 'applied'; version: number }
+  | { status: 'not_applied' }
+  | { status: 'unknown' };
+
+function operationMatches(value: unknown, operationId: string): boolean {
+  if (value === operationId) return true;
+  if (typeof value !== 'string' || value.length !== 56
+    || value.slice(0, 37) !== `${operationId}|`) return false;
+  return timestamp(value.slice(37)) !== null;
+}
+
+export async function reconcileNewcomerMutation(
+  db: AppDb,
+  user: SessionUser | null,
+  input: { submissionId: string; operationId: string },
+): Promise<NewcomerMutationReconciliation> {
+  assertPrivateAccess(user);
+  const row = plainRow(input, ['submissionId', 'operationId']);
+  const submissionId = row && validUuid(row.submissionId) ? row.submissionId : null;
+  const operationId = row && typeof row.operationId === 'string' && RUNTIME_UUID.test(row.operationId)
+    ? row.operationId : null;
+  if (!submissionId || !operationId) throw new NewcomerInvalidError();
+  try {
+    const value = await db.prepare(`SELECT version,last_mutation_id
+      FROM newcomer_submissions WHERE id=?1 AND deleted_at IS NULL`)
+      .bind(submissionId).first<unknown>();
+    if (value === null) return { status: 'not_applied' };
+    const current = plainRow(value, ['version', 'last_mutation_id']);
+    const version = current ? integer(current.version) : null;
+    if (!current || version === null || version < 0) return { status: 'unknown' };
+    return operationMatches(current.last_mutation_id, operationId)
+      ? { status: 'applied', version }
+      : { status: 'not_applied' };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+type ReconciledMutation<T> =
+  | { status: 'applied'; value: T }
+  | { status: 'absent' }
+  | { status: 'mismatch' }
+  | { status: 'unknown' };
+
+async function reconcileAssignment(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+  target: number | null,
+): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,submission.assignee_person_id,
+        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
+          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+            AND activity.kind='assigned' AND activity.created_at=submission.updated_at AND (
+              (CAST(?3 AS INTEGER) IS NULL
+                AND substr(activity.metadata_json,1,length('{"from_assignee_person_id":'))
+                  ='{"from_assignee_person_id":'
+                AND length(activity.metadata_json)=length(replace(activity.metadata_json,',',''))
+                AND substr(activity.metadata_json,-1)='}') OR
+              (CAST(?3 AS INTEGER) IS NOT NULL AND (
+                activity.metadata_json='{"to_assignee_person_id":'
+                  || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}' OR
+                (substr(activity.metadata_json,1,length('{"from_assignee_person_id":'))
+                    ='{"from_assignee_person_id":'
+                  AND length(activity.metadata_json)<>length(replace(
+                    activity.metadata_json,',"to_assignee_person_id":',''))
+                  AND substr(activity.metadata_json,
+                    -length(',"to_assignee_person_id":'
+                      || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'))
+                    =',"to_assignee_person_id":'
+                      || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
+                  AND activity.metadata_json<>'{"from_assignee_person_id":'
+                    || CAST(CAST(?3 AS INTEGER) AS TEXT) || ',"to_assignee_person_id":'
+                    || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}')
+              )))
+        )=1 THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(captured.submissionId, user.id, target).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'assignee_person_id', 'proof']);
+    const version = row ? integer(row.version) : null;
+    const proof = row ? bool(row.proof) : null;
+    const assignee = row?.assignee_person_id === null ? null : positiveId(row?.assignee_person_id);
+    if (!row || version === null || proof === null
+      || (row.assignee_person_id !== null && assignee === null)) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    if (version !== captured.expectedVersion + 1 || assignee !== target || !proof) {
+      return { status: 'mismatch' };
+    }
+    return { status: 'applied', value: { version, operationId: captured.operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+async function reconcileStatus(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+  statusId: number,
+): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,submission.status_id,
+        submission.closed_at,status.category,
+        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
+          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+            AND activity.kind='status_changed' AND activity.created_at=submission.updated_at
+            AND substr(activity.metadata_json,1,length('{"from_status_id":'))
+              ='{"from_status_id":'
+            AND length(activity.metadata_json)<>length(replace(
+              activity.metadata_json,',"to_status_id":',''))
+            AND substr(activity.metadata_json,-length(',"to_status_id":'
+              || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'))
+              =',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
+            AND activity.metadata_json<>'{"from_status_id":'
+              || CAST(CAST(?3 AS INTEGER) AS TEXT) || ',"to_status_id":'
+              || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
+        )=1 THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      JOIN newcomer_statuses status ON status.id=submission.status_id
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(captured.submissionId, user.id, statusId).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, [
+      'version', 'last_mutation_id', 'status_id', 'closed_at', 'category', 'proof',
+    ]);
+    const version = row ? integer(row.version) : null;
+    const currentStatus = row ? positiveId(row.status_id) : null;
+    const proof = row ? bool(row.proof) : null;
+    const closedAt = row?.closed_at === null ? null : timestamp(row?.closed_at);
+    if (!row || version === null || currentStatus === null || proof === null
+      || (row.closed_at !== null && closedAt === null)
+      || (row.category !== 'open' && row.category !== 'closed')) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    if (version !== captured.expectedVersion + 1 || currentStatus !== statusId || !proof
+      || (row.category === 'open' ? closedAt !== null : closedAt === null)) return { status: 'mismatch' };
+    return { status: 'applied', value: { version, operationId: captured.operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+async function reconcileFollowUp(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+  followUpDate: string | null,
+  metadata: string,
+): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,submission.next_follow_up_date,
+        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
+          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+            AND activity.kind='follow_up_scheduled' AND activity.metadata_json=?3
+            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(captured.submissionId, user.id, metadata).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'next_follow_up_date', 'proof']);
+    const version = row ? integer(row.version) : null;
+    const proof = row ? bool(row.proof) : null;
+    const currentDate = row?.next_follow_up_date === null
+      ? null : typeof row?.next_follow_up_date === 'string' && isValidDateStr(row.next_follow_up_date)
+        ? row.next_follow_up_date : undefined;
+    if (!row || version === null || proof === null || currentDate === undefined) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    if (version !== captured.expectedVersion + 1 || currentDate !== followUpDate || !proof) {
+      return { status: 'mismatch' };
+    }
+    return { status: 'applied', value: { version, operationId: captured.operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+async function reconcileNote(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+  body: string,
+): Promise<ReconciledMutation<{ version: number; noteId: string; operationId: string }>> {
+  const metadata = JSON.stringify({ note_id: captured.operationId });
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,
+        CASE WHEN (SELECT COUNT(*) FROM newcomer_notes note
+          WHERE note.id=?3 AND note.submission_id=submission.id AND note.author_person_id=?2
+            AND note.body=?4 AND note.created_at=submission.updated_at)=1
+          AND (SELECT COUNT(*) FROM newcomer_activity activity
+          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+            AND activity.kind='note_added' AND activity.metadata_json=?5
+            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(
+      captured.submissionId, user.id, captured.operationId, body, metadata,
+    ).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'proof']);
+    const version = row ? integer(row.version) : null;
+    const proof = row ? bool(row.proof) : null;
+    if (!row || version === null || proof === null) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    if (version !== captured.expectedVersion + 1 || !proof) return { status: 'mismatch' };
+    return {
+      status: 'applied',
+      value: { version, noteId: captured.operationId, operationId: captured.operationId },
+    };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+async function reconcileLink(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+  personId: number,
+  metadata: string,
+): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,submission.linked_person_id,
+        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
+          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+            AND activity.kind='person_linked' AND activity.metadata_json=?3
+            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(captured.submissionId, user.id, metadata).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'linked_person_id', 'proof']);
+    const version = row ? integer(row.version) : null;
+    if (!row || version === null) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    const linkedPersonId = row ? positiveId(row.linked_person_id) : null;
+    const proof = row ? bool(row.proof) : null;
+    if (linkedPersonId === null || proof === null) return { status: 'unknown' };
+    if (version !== captured.expectedVersion + 1 || linkedPersonId !== personId || !proof) {
+      return { status: 'mismatch' };
+    }
+    return { status: 'applied', value: { version, operationId: captured.operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
+async function reconcileVisitor(
+  db: AppDb,
+  user: SessionUser,
+  captured: CapturedCas,
+): Promise<ReconciledMutation<{ version: number; personId: number; operationId: string }>> {
+  try {
+    const value = await db.prepare(`
+      SELECT submission.version,submission.last_mutation_id,submission.linked_person_id,
+        CASE WHEN person.id IS NOT NULL AND person.role='member' AND person.finance=0
+          AND person.super_admin=0 AND person.admin_areas='' AND person.membership_status='visitor'
+          AND person.calendar_token IS NULL
+          AND person.created_at=submission.updated_at
+          AND (SELECT COUNT(*) FROM newcomer_activity activity
+            WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
+              AND activity.kind='visitor_created'
+              AND activity.metadata_json='{"person_id":'
+                || CAST(submission.linked_person_id AS TEXT) || '}'
+              AND activity.created_at=submission.updated_at)=1
+          THEN 1 ELSE 0 END AS proof
+      FROM newcomer_submissions submission
+      LEFT JOIN people person ON person.id=submission.linked_person_id
+      WHERE submission.id=?1 AND submission.deleted_at IS NULL
+    `).bind(captured.submissionId, user.id).first<unknown>();
+    if (value === null) return { status: 'absent' };
+    const row = plainRow(value, ['version', 'last_mutation_id', 'linked_person_id', 'proof']);
+    const version = row ? integer(row.version) : null;
+    const personId = row ? positiveId(row.linked_person_id) : null;
+    const proof = row ? bool(row.proof) : null;
+    if (!row || version === null || proof === null) return { status: 'unknown' };
+    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
+    if (version !== captured.expectedVersion + 1 || personId === null || !proof) {
+      return { status: 'mismatch' };
+    }
+    return { status: 'applied', value: { version, personId, operationId: captured.operationId } };
+  } catch {
+    return { status: 'unknown' };
+  }
 }
 
 function casClaim(
@@ -1537,6 +1941,26 @@ function statusClaimPredicate(alias: string, parameter: string): string {
       AND length(${alias}.last_mutation_id)=56))`;
 }
 
+function finalizeClaim(
+  db: AppDb,
+  captured: CapturedCas,
+  claimId: string,
+  preserveStatusCarrier = false,
+) {
+  // The first CAS writes this attempt's server-only activity UUID as a
+  // transaction-local claim marker. A retry of the same caller operation ID
+  // therefore cannot satisfy any downstream write after its CAS matched zero
+  // rows. Only a fully proved attempt replaces the marker with operationId.
+  return db.prepare(`
+    UPDATE newcomer_submissions SET last_mutation_id=${preserveStatusCarrier
+      ? `CASE WHEN substr(last_mutation_id,1,37)=?1 || '|' AND length(last_mutation_id)=56
+          THEN ?2 || substr(last_mutation_id,37) ELSE ?2 END`
+      : '?2'}
+    WHERE id=?3 AND version=?4 AND ${statusClaimPredicate('newcomer_submissions', '?1')}
+    RETURNING version
+  `).bind(claimId, captured.operationId, captured.submissionId, captured.expectedVersion + 1);
+}
+
 const AUTHORIZED_NEWCOMER_PERSON_SQL = `
   person.active=1 AND person.deleted_at IS NULL AND (
     (person.role='admin' AND person.super_admin=1) OR
@@ -1559,6 +1983,7 @@ export interface AssignNewcomerInput {
   submissionId: string;
   expectedVersion: number;
   assigneePersonId: number | null;
+  operationId: string;
 }
 
 export async function assignNewcomer(
@@ -1566,19 +1991,21 @@ export async function assignNewcomer(
   user: SessionUser | null,
   input: AssignNewcomerInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number }> {
+): Promise<NewcomerMutationResult> {
   assertPrivateAccess(user);
-  const row = plainRow(input, ['submissionId', 'expectedVersion', 'assigneePersonId']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'assigneePersonId', 'operationId']);
   const captured = capturedCas(row);
   const target = row?.assigneePersonId === null ? null : positiveId(row?.assigneePersonId);
   if (row?.assigneePersonId !== null && target === null) throw new NewcomerInvalidError();
-  const generated = mutationRuntime(runtime, 2);
-  const [mutationId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
   const changed = (parameter: string) => `(
     (CAST(${parameter} AS INTEGER) IS NULL AND submission.assignee_person_id IS NOT NULL) OR
     (CAST(${parameter} AS INTEGER) IS NOT NULL AND (submission.assignee_person_id IS NULL
       OR submission.assignee_person_id<>CAST(${parameter} AS INTEGER)))
   )`;
+  let dispatched = false;
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -1637,6 +2064,7 @@ export async function assignNewcomer(
               AND activity.created_at=?6
           )
       `).bind(target, captured.submissionId, mutationId, activityId, user.id, generated.now),
+      finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1670,14 +2098,21 @@ export async function assignNewcomer(
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, target,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, target,
         activityId, user.id, generated.now,
       ]),
     ];
+    dispatched = true;
     await executeMutationBatch(db, statements);
-    return { version: captured.expectedVersion + 1 };
+    return { version: captured.expectedVersion + 1, operationId: captured.operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileAssignment(db, user, captured, target);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
@@ -1685,6 +2120,7 @@ export interface ChangeNewcomerStatusInput {
   submissionId: string;
   expectedVersion: number;
   statusId: number;
+  operationId: string;
 }
 
 export async function changeNewcomerStatus(
@@ -1692,14 +2128,16 @@ export async function changeNewcomerStatus(
   user: SessionUser | null,
   input: ChangeNewcomerStatusInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number }> {
+): Promise<NewcomerMutationResult> {
   assertPrivateAccess(user);
-  const row = plainRow(input, ['submissionId', 'expectedVersion', 'statusId']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'statusId', 'operationId']);
   const captured = capturedCas(row);
   const statusId = positiveId(row?.statusId);
   if (statusId === null) throw new NewcomerInvalidError();
-  const generated = mutationRuntime(runtime, 2);
-  const [mutationId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
+  let dispatched = false;
   try {
     const statements = [
       statusCasClaim(db, captured, mutationId, generated.now, statusId),
@@ -1761,6 +2199,7 @@ export async function changeNewcomerStatus(
         statusId, generated.now, captured.submissionId, mutationId,
         activityId, user.id, generated.now,
       ),
+      finalizeClaim(db, captured, mutationId, true),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1802,14 +2241,21 @@ export async function changeNewcomerStatus(
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, statusId,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, statusId,
         activityId, user.id, generated.now,
       ]),
     ];
+    dispatched = true;
     await executeMutationBatch(db, statements);
-    return { version: captured.expectedVersion + 1 };
+    return { version: captured.expectedVersion + 1, operationId: captured.operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileStatus(db, user, captured, statusId);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
@@ -1817,6 +2263,7 @@ export interface ScheduleNewcomerFollowUpInput {
   submissionId: string;
   expectedVersion: number;
   followUpDate: string | null;
+  operationId: string;
 }
 
 export async function scheduleNewcomerFollowUp(
@@ -1824,9 +2271,9 @@ export async function scheduleNewcomerFollowUp(
   user: SessionUser | null,
   input: ScheduleNewcomerFollowUpInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number }> {
+): Promise<NewcomerMutationResult> {
   assertPrivateAccess(user);
-  const row = plainRow(input, ['submissionId', 'expectedVersion', 'followUpDate']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'followUpDate', 'operationId']);
   const captured = capturedCas(row);
   const followUpDate = row?.followUpDate === null
     ? null
@@ -1834,13 +2281,15 @@ export async function scheduleNewcomerFollowUp(
       ? row.followUpDate : undefined;
   if (followUpDate === undefined) throw new NewcomerInvalidError();
   const metadata = followUpDate === null ? '{}' : JSON.stringify({ follow_up_date: followUpDate });
-  const generated = mutationRuntime(runtime, 2);
-  const [mutationId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
   const changed = (parameter: string) => `(
     (CAST(${parameter} AS TEXT) IS NULL AND submission.next_follow_up_date IS NOT NULL) OR
     (CAST(${parameter} AS TEXT) IS NOT NULL AND (submission.next_follow_up_date IS NULL
       OR submission.next_follow_up_date<>CAST(${parameter} AS TEXT)))
   )`;
+  let dispatched = false;
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -1854,6 +2303,7 @@ export async function scheduleNewcomerFollowUp(
         UPDATE newcomer_submissions AS submission SET next_follow_up_date=CAST(?1 AS TEXT)
         WHERE submission.id=?2 AND submission.last_mutation_id=?3 AND ${changed('?1')}
       `).bind(followUpDate, captured.submissionId, mutationId),
+      finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1869,14 +2319,21 @@ export async function scheduleNewcomerFollowUp(
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, followUpDate,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, followUpDate,
         activityId, user.id, metadata, generated.now,
       ]),
     ];
+    dispatched = true;
     await executeMutationBatch(db, statements);
-    return { version: captured.expectedVersion + 1 };
+    return { version: captured.expectedVersion + 1, operationId: captured.operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileFollowUp(db, user, captured, followUpDate, metadata);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
@@ -1884,6 +2341,7 @@ export interface AddNewcomerNoteInput {
   submissionId: string;
   expectedVersion: number;
   body: string;
+  operationId: string;
 }
 
 function safeNoteBody(value: unknown): string {
@@ -1902,14 +2360,17 @@ export async function addNewcomerNote(
   user: SessionUser | null,
   input: AddNewcomerNoteInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number; noteId: string }> {
+): Promise<AddNewcomerNoteResult> {
   assertPrivateAccess(user);
-  const row = plainRow(input, ['submissionId', 'expectedVersion', 'body']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'body', 'operationId']);
   const captured = capturedCas(row);
   const body = safeNoteBody(row?.body);
-  const generated = mutationRuntime(runtime, 3);
-  const [mutationId, noteId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
+  const noteId = captured.operationId;
   const metadata = JSON.stringify({ note_id: noteId });
+  let dispatched = false;
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -1927,6 +2388,7 @@ export async function addNewcomerNote(
           AND submission.last_mutation_id=?5
         WHERE note.id=?6 AND note.submission_id=?7
       `).bind(activityId, user.id, metadata, generated.now, mutationId, noteId, captured.submissionId),
+      finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -1945,14 +2407,21 @@ export async function addNewcomerNote(
         (SELECT COUNT(*) FROM newcomer_notes WHERE id=?4)<>1 OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?8)<>1
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, noteId, user.id,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, noteId, user.id,
         body, generated.now, activityId, metadata,
       ]),
     ];
+    dispatched = true;
     await executeMutationBatch(db, statements);
-    return { version: captured.expectedVersion + 1, noteId };
+    return { version: captured.expectedVersion + 1, noteId, operationId: captured.operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileNote(db, user, captured, body);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
@@ -1960,6 +2429,7 @@ export interface LinkNewcomerPersonInput {
   submissionId: string;
   expectedVersion: number;
   personId: number;
+  operationId: string;
 }
 
 const NORMALIZED_PERSON_PHONE_SQL = `('+' || replace(replace(replace(replace(replace(
@@ -1976,15 +2446,17 @@ export async function linkNewcomerPerson(
   user: SessionUser | null,
   input: LinkNewcomerPersonInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number }> {
+): Promise<NewcomerMutationResult> {
   assertPrivateAccess(user);
-  const row = plainRow(input, ['submissionId', 'expectedVersion', 'personId']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'personId', 'operationId']);
   const captured = capturedCas(row);
   const personId = positiveId(row?.personId);
   if (personId === null) throw new NewcomerInvalidError();
-  const generated = mutationRuntime(runtime, 2);
-  const [mutationId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
   const metadata = JSON.stringify({ person_id: personId });
+  let dispatched = false;
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -2033,6 +2505,7 @@ export async function linkNewcomerPerson(
         personId, captured.submissionId, mutationId,
         activityId, user.id, metadata, generated.now,
       ),
+      finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -2048,20 +2521,28 @@ export async function linkNewcomerPerson(
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, personId,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, personId,
         activityId, user.id, metadata, generated.now,
       ]),
     ];
+    dispatched = true;
     await executeMutationBatch(db, statements);
-    return { version: captured.expectedVersion + 1 };
+    return { version: captured.expectedVersion + 1, operationId: captured.operationId };
   } catch (error) {
-    rethrowMutation(error);
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileLink(db, user, captured, personId, metadata);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) throw new NewcomerConflictError();
+    throw new NewcomerPersistenceError();
   }
 }
 
 export interface CreateNewcomerVisitorInput {
   submissionId: string;
   expectedVersion: number;
+  operationId: string;
 }
 
 async function visitorEmailMissingAfterRollback(db: AppDb, captured: CapturedCas): Promise<boolean> {
@@ -2088,13 +2569,15 @@ export async function createNewcomerVisitor(
   user: SessionUser | null,
   input: CreateNewcomerVisitorInput,
   runtime?: NewcomerMutationRuntime,
-): Promise<{ version: number; personId: number }> {
+): Promise<CreateNewcomerVisitorResult> {
   assertPrivateAccess(user);
   if (!hasAreaAccess(user, 'people')) throw new NewcomerForbiddenError();
-  const row = plainRow(input, ['submissionId', 'expectedVersion']);
+  const row = plainRow(input, ['submissionId', 'expectedVersion', 'operationId']);
   const captured = capturedCas(row);
-  const generated = mutationRuntime(runtime, 2);
-  const [mutationId, activityId] = generated.ids;
+  const generated = mutationRuntime(runtime, 1, [captured.operationId]);
+  const [activityId] = generated.ids;
+  const mutationId = activityId;
+  let dispatched = false;
   try {
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
@@ -2148,6 +2631,7 @@ export async function createNewcomerVisitor(
         )
         RETURNING id
       `).bind(mutationId, captured.submissionId, activityId, user.id, generated.now),
+      finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
           SELECT 1 FROM newcomer_submissions submission
@@ -2173,10 +2657,10 @@ export async function createNewcomerVisitor(
             AND submission.last_mutation_id=?2
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1 OR
-        EXISTS (SELECT 1 FROM people WHERE calendar_token=?2)
+        EXISTS (SELECT 1 FROM people WHERE calendar_token=?7)
       `, [
-        captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
-        activityId, user.id,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, generated.now,
+        activityId, user.id, mutationId,
       ]),
       db.prepare(`
         SELECT submission.linked_person_id AS id
@@ -2194,10 +2678,11 @@ export async function createNewcomerVisitor(
             || CAST(submission.linked_person_id AS TEXT) || '}'
           AND activity.created_at=?4
       `).bind(
-        captured.submissionId, mutationId, captured.expectedVersion + 1, generated.now,
+        captured.submissionId, captured.operationId, captured.expectedVersion + 1, generated.now,
         activityId, user.id,
       ),
     ];
+    dispatched = true;
     const results = batchResults(await db.batch(statements), statements.length);
     for (const result of results) resultRows(result, 101);
     const proofRows = resultRows(results[results.length - 1], 1);
@@ -2205,11 +2690,14 @@ export async function createNewcomerVisitor(
     const proof = plainRow(proofRows[0], ['id']);
     const personId = proof ? positiveId(proof.id) : null;
     if (personId === null) throw new NewcomerPersistenceError();
-    return { version: captured.expectedVersion + 1, personId };
+    return { version: captured.expectedVersion + 1, personId, operationId: captured.operationId };
   } catch (error) {
-    if (error instanceof NewcomerInvalidError || error instanceof NewcomerForbiddenError
-      || error instanceof NewcomerPersistenceError) throw error;
-    if (error instanceof NewcomerConflictError || databaseConflict(error)) {
+    if (!dispatched) rethrowMutation(error);
+    const reconciled = await reconcileVisitor(db, user, captured);
+    if (reconciled.status === 'applied') return reconciled.value;
+    if (reconciled.status === 'mismatch') throw new NewcomerConflictError();
+    if (reconciled.status === 'unknown') throw new NewcomerOutcomeUnknownError(captured.operationId);
+    if (databaseConflict(error)) {
       if (await visitorEmailMissingAfterRollback(db, captured)) throw new NewcomerEmailRequiredError();
       throw new NewcomerConflictError();
     }
