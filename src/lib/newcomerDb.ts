@@ -1373,10 +1373,7 @@ async function reconcileCreatedSubmission(
   try {
     const value = await db.prepare(`
       WITH ${payloadCte}
-      SELECT submission.version,submission.last_mutation_id,
-        CASE WHEN submission.deleted_at IS NULL AND submission.version=0
-          AND submission.last_mutation_id IS NULL
-          AND submission.name=?3
+      SELECT CASE WHEN submission.name=?3
           AND ((CAST(?4 AS TEXT) IS NULL AND submission.email IS NULL)
             OR submission.email=CAST(?4 AS TEXT))
           AND ((CAST(?5 AS TEXT) IS NULL AND submission.phone IS NULL)
@@ -1384,12 +1381,13 @@ async function reconcileCreatedSubmission(
           AND submission.locale=?6 AND submission.visit_date=?7
           AND ((CAST(?8 AS INTEGER) IS NULL AND submission.service_type_id IS NULL)
             OR submission.service_type_id=CAST(?8 AS INTEGER))
-          AND submission.source=?9 AND submission.created_at=submission.updated_at
+          AND submission.source=?9
           AND ((CAST(?10 AS INTEGER)=1 AND submission.contact_consent_at=submission.created_at)
             OR (CAST(?10 AS INTEGER)=0 AND submission.contact_consent_at IS NULL))
           AND (SELECT COUNT(*) FROM newcomer_activity activity
             WHERE activity.submission_id=submission.id AND ${actorPredicate('?11')}
               AND activity.kind='submission_created' AND activity.metadata_json='{}'
+              AND activity.operation_id=?2 AND activity.result_version=0
               AND activity.created_at=submission.created_at)=1
           AND (SELECT COUNT(*) FROM payload)=(
             SELECT COUNT(*) FROM newcomer_answers answer
@@ -1412,11 +1410,10 @@ async function reconcileCreatedSubmission(
       captured.contactConsent ? 1 : 0, actorPersonId,
     ).first<unknown>();
     if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'proof']);
-    const version = row ? integer(row.version) : null;
+    const row = plainRow(value, ['proof']);
     const proof = row ? bool(row.proof) : null;
-    if (!row || version === null || proof === null) return { status: 'unknown' };
-    if (version !== 0 || row.last_mutation_id !== null || !proof) return { status: 'mismatch' };
+    if (!row || proof === null) return { status: 'unknown' };
+    if (!proof) return { status: 'mismatch' };
     return { status: 'applied', value: { id: operationId, version: 0, operationId } };
   } catch {
     return { status: 'unknown' };
@@ -1500,10 +1497,11 @@ export async function createNewcomerSubmission(
       )
       `).bind(answerPayload, submissionId),
       db.prepare(`
-      INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
-      SELECT ?1,submission.id,?2,'submission_created','{}',?3
-      FROM newcomer_submissions submission WHERE submission.id=?4
-      `).bind(activityId, actorPersonId, generated.now, submissionId),
+      INSERT INTO newcomer_activity
+        (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
+      SELECT ?1,submission.id,?2,'submission_created','{}',?3,0,?4
+      FROM newcomer_submissions submission WHERE submission.id=?5
+      `).bind(activityId, actorPersonId, operationId, generated.now, submissionId),
       db.prepare(`
       WITH ${answerPayloadCte}
       INSERT INTO newcomer_status_i18n (status_id,locale,label)
@@ -1564,10 +1562,11 @@ export async function createNewcomerSubmission(
         WHERE id=?4 AND submission_id=?2
           AND ${actorPredicate('?5')}
           AND kind='submission_created' AND metadata_json='{}' AND created_at=?6
+          AND operation_id=?7 AND result_version=0
       )
       `).bind(
         answerPayload, submissionId, captured.serviceTypeId,
-        activityId, actorPersonId, generated.now,
+        activityId, actorPersonId, generated.now, operationId,
       ),
     ];
     dispatched = true;
@@ -1610,11 +1609,50 @@ export type NewcomerMutationReconciliation =
   | { status: 'not_applied' }
   | { status: 'unknown' };
 
-function operationMatches(value: unknown, operationId: string): boolean {
-  if (value === operationId) return true;
-  if (typeof value !== 'string' || value.length !== 56
-    || value.slice(0, 37) !== `${operationId}|`) return false;
-  return timestamp(value.slice(37)) !== null;
+interface ActivityReceipt {
+  kind: NewcomerActivityKind;
+  actorPersonId: number | null;
+  metadata: Record<string, string | number>;
+  resultVersion: number;
+  createdAt: string;
+}
+
+type ActivityReceiptRead =
+  | { status: 'present'; receipt: ActivityReceipt }
+  | { status: 'absent' }
+  | { status: 'unknown' };
+
+async function readActivityReceipt(
+  db: AppDb,
+  submissionId: string,
+  operationId: string,
+): Promise<ActivityReceiptRead> {
+  try {
+    const result = await db.prepare(`
+      SELECT kind,actor_person_id,metadata_json,result_version,created_at
+      FROM newcomer_activity
+      WHERE submission_id=?1 AND operation_id=?2
+      LIMIT 2
+    `).bind(submissionId, operationId).all<unknown>();
+    const rows = resultRows(result, 2);
+    if (rows.length === 0) return { status: 'absent' };
+    if (rows.length !== 1) return { status: 'unknown' };
+    const row = plainRow(rows[0], [
+      'kind', 'actor_person_id', 'metadata_json', 'result_version', 'created_at',
+    ]);
+    const kind = row && isActivityKind(row.kind) ? row.kind : null;
+    const actorPersonId = row?.actor_person_id === null ? null : positiveId(row?.actor_person_id);
+    const resultVersion = row ? integer(row.result_version) : null;
+    const createdAt = row ? timestamp(row.created_at) : null;
+    const metadata = row && kind ? decodeNewcomerActivityMetadata(kind, row.metadata_json) : null;
+    if (!row || !kind || (row.actor_person_id !== null && actorPersonId === null)
+      || resultVersion === null || resultVersion < 0 || !createdAt || !metadata) {
+      return { status: 'unknown' };
+    }
+    return { status: 'present', receipt: { kind, actorPersonId, metadata, resultVersion, createdAt } };
+  } catch {
+    return { status: 'unknown' };
+  }
 }
 
 export async function reconcileNewcomerMutation(
@@ -1628,20 +1666,11 @@ export async function reconcileNewcomerMutation(
   const operationId = row && typeof row.operationId === 'string' && RUNTIME_UUID.test(row.operationId)
     ? row.operationId : null;
   if (!submissionId || !operationId) throw new NewcomerInvalidError();
-  try {
-    const value = await db.prepare(`SELECT version,last_mutation_id
-      FROM newcomer_submissions WHERE id=?1 AND deleted_at IS NULL`)
-      .bind(submissionId).first<unknown>();
-    if (value === null) return { status: 'not_applied' };
-    const current = plainRow(value, ['version', 'last_mutation_id']);
-    const version = current ? integer(current.version) : null;
-    if (!current || version === null || version < 0) return { status: 'unknown' };
-    return operationMatches(current.last_mutation_id, operationId)
-      ? { status: 'applied', version }
-      : { status: 'not_applied' };
-  } catch {
-    return { status: 'unknown' };
-  }
+  const receipt = await readActivityReceipt(db, submissionId, operationId);
+  if (receipt.status === 'unknown') return { status: 'unknown' };
+  return receipt.status === 'present'
+    ? { status: 'applied', version: receipt.receipt.resultVersion }
+    : { status: 'not_applied' };
 }
 
 type ReconciledMutation<T> =
@@ -1656,52 +1685,21 @@ async function reconcileAssignment(
   captured: CapturedCas,
   target: number | null,
 ): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
-  try {
-    const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,submission.assignee_person_id,
-        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
-          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-            AND activity.kind='assigned' AND activity.created_at=submission.updated_at AND (
-              (CAST(?3 AS INTEGER) IS NULL
-                AND substr(activity.metadata_json,1,length('{"from_assignee_person_id":'))
-                  ='{"from_assignee_person_id":'
-                AND length(activity.metadata_json)=length(replace(activity.metadata_json,',',''))
-                AND substr(activity.metadata_json,-1)='}') OR
-              (CAST(?3 AS INTEGER) IS NOT NULL AND (
-                activity.metadata_json='{"to_assignee_person_id":'
-                  || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}' OR
-                (substr(activity.metadata_json,1,length('{"from_assignee_person_id":'))
-                    ='{"from_assignee_person_id":'
-                  AND length(activity.metadata_json)<>length(replace(
-                    activity.metadata_json,',"to_assignee_person_id":',''))
-                  AND substr(activity.metadata_json,
-                    -length(',"to_assignee_person_id":'
-                      || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'))
-                    =',"to_assignee_person_id":'
-                      || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
-                  AND activity.metadata_json<>'{"from_assignee_person_id":'
-                    || CAST(CAST(?3 AS INTEGER) AS TEXT) || ',"to_assignee_person_id":'
-                    || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}')
-              )))
-        )=1 THEN 1 ELSE 0 END AS proof
-      FROM newcomer_submissions submission
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(captured.submissionId, user.id, target).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'assignee_person_id', 'proof']);
-    const version = row ? integer(row.version) : null;
-    const proof = row ? bool(row.proof) : null;
-    const assignee = row?.assignee_person_id === null ? null : positiveId(row?.assignee_person_id);
-    if (!row || version === null || proof === null
-      || (row.assignee_person_id !== null && assignee === null)) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    if (version !== captured.expectedVersion + 1 || assignee !== target || !proof) {
-      return { status: 'mismatch' };
-    }
-    return { status: 'applied', value: { version, operationId: captured.operationId } };
-  } catch {
-    return { status: 'unknown' };
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  const keys = Object.keys(receipt.metadata);
+  const from = receipt.metadata.from_assignee_person_id;
+  const to = receipt.metadata.to_assignee_person_id;
+  const semanticMatch = target === null
+    ? keys.length === 1 && typeof from === 'number' && to === undefined
+    : (keys.length === 1 || keys.length === 2) && to === target
+      && (from === undefined || (typeof from === 'number' && from !== target));
+  if (receipt.kind !== 'assigned' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1 || !semanticMatch) {
+    return { status: 'mismatch' };
   }
+  return { status: 'applied', value: { version: receipt.resultVersion, operationId: captured.operationId } };
 }
 
 async function reconcileStatus(
@@ -1710,46 +1708,15 @@ async function reconcileStatus(
   captured: CapturedCas,
   statusId: number,
 ): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
-  try {
-    const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,submission.status_id,
-        submission.closed_at,status.category,
-        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
-          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-            AND activity.kind='status_changed' AND activity.created_at=submission.updated_at
-            AND substr(activity.metadata_json,1,length('{"from_status_id":'))
-              ='{"from_status_id":'
-            AND length(activity.metadata_json)<>length(replace(
-              activity.metadata_json,',"to_status_id":',''))
-            AND substr(activity.metadata_json,-length(',"to_status_id":'
-              || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'))
-              =',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
-            AND activity.metadata_json<>'{"from_status_id":'
-              || CAST(CAST(?3 AS INTEGER) AS TEXT) || ',"to_status_id":'
-              || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
-        )=1 THEN 1 ELSE 0 END AS proof
-      FROM newcomer_submissions submission
-      JOIN newcomer_statuses status ON status.id=submission.status_id
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(captured.submissionId, user.id, statusId).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, [
-      'version', 'last_mutation_id', 'status_id', 'closed_at', 'category', 'proof',
-    ]);
-    const version = row ? integer(row.version) : null;
-    const currentStatus = row ? positiveId(row.status_id) : null;
-    const proof = row ? bool(row.proof) : null;
-    const closedAt = row?.closed_at === null ? null : timestamp(row?.closed_at);
-    if (!row || version === null || currentStatus === null || proof === null
-      || (row.closed_at !== null && closedAt === null)
-      || (row.category !== 'open' && row.category !== 'closed')) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    if (version !== captured.expectedVersion + 1 || currentStatus !== statusId || !proof
-      || (row.category === 'open' ? closedAt !== null : closedAt === null)) return { status: 'mismatch' };
-    return { status: 'applied', value: { version, operationId: captured.operationId } };
-  } catch {
-    return { status: 'unknown' };
-  }
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  if (receipt.kind !== 'status_changed' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1
+    || receipt.metadata.to_status_id !== statusId
+    || typeof receipt.metadata.from_status_id !== 'number'
+    || receipt.metadata.from_status_id === statusId) return { status: 'mismatch' };
+  return { status: 'applied', value: { version: receipt.resultVersion, operationId: captured.operationId } };
 }
 
 async function reconcileFollowUp(
@@ -1759,32 +1726,17 @@ async function reconcileFollowUp(
   followUpDate: string | null,
   metadata: string,
 ): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
-  try {
-    const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,submission.next_follow_up_date,
-        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
-          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-            AND activity.kind='follow_up_scheduled' AND activity.metadata_json=?3
-            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
-      FROM newcomer_submissions submission
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(captured.submissionId, user.id, metadata).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'next_follow_up_date', 'proof']);
-    const version = row ? integer(row.version) : null;
-    const proof = row ? bool(row.proof) : null;
-    const currentDate = row?.next_follow_up_date === null
-      ? null : typeof row?.next_follow_up_date === 'string' && isValidDateStr(row.next_follow_up_date)
-        ? row.next_follow_up_date : undefined;
-    if (!row || version === null || proof === null || currentDate === undefined) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    if (version !== captured.expectedVersion + 1 || currentDate !== followUpDate || !proof) {
-      return { status: 'mismatch' };
-    }
-    return { status: 'applied', value: { version, operationId: captured.operationId } };
-  } catch {
-    return { status: 'unknown' };
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  const expected = followUpDate === null ? Object.create(null) : { follow_up_date: followUpDate };
+  const semanticMatch = JSON.stringify(receipt.metadata) === JSON.stringify(expected)
+    && metadata === (followUpDate === null ? '{}' : JSON.stringify(expected));
+  if (receipt.kind !== 'follow_up_scheduled' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1 || !semanticMatch) {
+    return { status: 'mismatch' };
   }
+  return { status: 'applied', value: { version: receipt.resultVersion, operationId: captured.operationId } };
 }
 
 async function reconcileNote(
@@ -1793,33 +1745,26 @@ async function reconcileNote(
   captured: CapturedCas,
   body: string,
 ): Promise<ReconciledMutation<{ version: number; noteId: string; operationId: string }>> {
-  const metadata = JSON.stringify({ note_id: captured.operationId });
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  if (receipt.kind !== 'note_added' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1
+    || receipt.metadata.note_id !== captured.operationId) return { status: 'mismatch' };
   try {
-    const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,
-        CASE WHEN (SELECT COUNT(*) FROM newcomer_notes note
-          WHERE note.id=?3 AND note.submission_id=submission.id AND note.author_person_id=?2
-            AND note.body=?4 AND note.created_at=submission.updated_at)=1
-          AND (SELECT COUNT(*) FROM newcomer_activity activity
-          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-            AND activity.kind='note_added' AND activity.metadata_json=?5
-            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
-      FROM newcomer_submissions submission
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(
-      captured.submissionId, user.id, captured.operationId, body, metadata,
-    ).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'proof']);
-    const version = row ? integer(row.version) : null;
-    const proof = row ? bool(row.proof) : null;
-    if (!row || version === null || proof === null) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    if (version !== captured.expectedVersion + 1 || !proof) return { status: 'mismatch' };
-    return {
-      status: 'applied',
-      value: { version, noteId: captured.operationId, operationId: captured.operationId },
-    };
+    const value = await db.prepare(`SELECT author_person_id,body,created_at
+      FROM newcomer_notes WHERE id=?1 AND submission_id=?2`)
+      .bind(captured.operationId, captured.submissionId).first<unknown>();
+    if (value === null) return { status: 'mismatch' };
+    const row = plainRow(value, ['author_person_id', 'body', 'created_at']);
+    if (!row || positiveId(row.author_person_id) === null || timestamp(row.created_at) === null
+      || typeof row.body !== 'string') return { status: 'unknown' };
+    if (row.author_person_id !== user.id || row.body !== body || row.created_at !== receipt.createdAt) {
+      return { status: 'mismatch' };
+    }
+    return { status: 'applied', value: {
+      version: receipt.resultVersion, noteId: captured.operationId, operationId: captured.operationId,
+    } };
   } catch {
     return { status: 'unknown' };
   }
@@ -1832,31 +1777,14 @@ async function reconcileLink(
   personId: number,
   metadata: string,
 ): Promise<ReconciledMutation<{ version: number; operationId: string }>> {
-  try {
-    const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,submission.linked_person_id,
-        CASE WHEN (SELECT COUNT(*) FROM newcomer_activity activity
-          WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-            AND activity.kind='person_linked' AND activity.metadata_json=?3
-            AND activity.created_at=submission.updated_at)=1 THEN 1 ELSE 0 END AS proof
-      FROM newcomer_submissions submission
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(captured.submissionId, user.id, metadata).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'linked_person_id', 'proof']);
-    const version = row ? integer(row.version) : null;
-    if (!row || version === null) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    const linkedPersonId = row ? positiveId(row.linked_person_id) : null;
-    const proof = row ? bool(row.proof) : null;
-    if (linkedPersonId === null || proof === null) return { status: 'unknown' };
-    if (version !== captured.expectedVersion + 1 || linkedPersonId !== personId || !proof) {
-      return { status: 'mismatch' };
-    }
-    return { status: 'applied', value: { version, operationId: captured.operationId } };
-  } catch {
-    return { status: 'unknown' };
-  }
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  if (receipt.kind !== 'person_linked' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1
+    || receipt.metadata.person_id !== personId
+    || metadata !== JSON.stringify({ person_id: personId })) return { status: 'mismatch' };
+  return { status: 'applied', value: { version: receipt.resultVersion, operationId: captured.operationId } };
 }
 
 async function reconcileVisitor(
@@ -1864,35 +1792,39 @@ async function reconcileVisitor(
   user: SessionUser,
   captured: CapturedCas,
 ): Promise<ReconciledMutation<{ version: number; personId: number; operationId: string }>> {
+  const read = await readActivityReceipt(db, captured.submissionId, captured.operationId);
+  if (read.status !== 'present') return read.status === 'unknown' ? read : { status: 'absent' };
+  const { receipt } = read;
+  const personId = positiveId(receipt.metadata.person_id);
+  if (receipt.kind !== 'visitor_created' || receipt.actorPersonId !== user.id
+    || receipt.resultVersion !== captured.expectedVersion + 1 || personId === null) {
+    return { status: 'mismatch' };
+  }
   try {
     const value = await db.prepare(`
-      SELECT submission.version,submission.last_mutation_id,submission.linked_person_id,
-        CASE WHEN person.id IS NOT NULL AND person.role='member' AND person.finance=0
+      SELECT CASE WHEN person.id IS NOT NULL AND person.first_name='' AND person.last_name=''
+          AND person.display_name=submission.name AND person.email=submission.email
+          AND ((person.phone IS NULL AND submission.phone IS NULL) OR person.phone=submission.phone)
+          AND person.avatar_url IS NULL AND person.role='member' AND person.active=1
+          AND person.session_epoch=0 AND person.lang=submission.locale AND person.deleted_at IS NULL
+          AND person.birthday IS NULL AND person.address IS NULL
+          AND person.joined_on IS NULL AND person.stripe_customer_id IS NULL
+          AND person.pending_email IS NULL AND person.role='member' AND person.finance=0
           AND person.super_admin=0 AND person.admin_areas='' AND person.membership_status='visitor'
-          AND person.calendar_token IS NULL
-          AND person.created_at=submission.updated_at
-          AND (SELECT COUNT(*) FROM newcomer_activity activity
-            WHERE activity.submission_id=submission.id AND activity.actor_person_id=?2
-              AND activity.kind='visitor_created'
-              AND activity.metadata_json='{"person_id":'
-                || CAST(submission.linked_person_id AS TEXT) || '}'
-              AND activity.created_at=submission.updated_at)=1
+          AND person.calendar_token IS NULL AND person.created_at=?3 AND person.updated_at=?3
           THEN 1 ELSE 0 END AS proof
       FROM newcomer_submissions submission
-      LEFT JOIN people person ON person.id=submission.linked_person_id
-      WHERE submission.id=?1 AND submission.deleted_at IS NULL
-    `).bind(captured.submissionId, user.id).first<unknown>();
-    if (value === null) return { status: 'absent' };
-    const row = plainRow(value, ['version', 'last_mutation_id', 'linked_person_id', 'proof']);
-    const version = row ? integer(row.version) : null;
-    const personId = row ? positiveId(row.linked_person_id) : null;
+      LEFT JOIN people person ON person.id=?2
+      WHERE submission.id=?1
+    `).bind(captured.submissionId, personId, receipt.createdAt).first<unknown>();
+    if (value === null) return { status: 'mismatch' };
+    const row = plainRow(value, ['proof']);
     const proof = row ? bool(row.proof) : null;
-    if (!row || version === null || proof === null) return { status: 'unknown' };
-    if (!operationMatches(row.last_mutation_id, captured.operationId)) return { status: 'absent' };
-    if (version !== captured.expectedVersion + 1 || personId === null || !proof) {
-      return { status: 'mismatch' };
-    }
-    return { status: 'applied', value: { version, personId, operationId: captured.operationId } };
+    if (!row || proof === null) return { status: 'unknown' };
+    if (!proof) return { status: 'mismatch' };
+    return { status: 'applied', value: {
+      version: receipt.resultVersion, personId, operationId: captured.operationId,
+    } };
   } catch {
     return { status: 'unknown' };
   }
@@ -1950,7 +1882,9 @@ function finalizeClaim(
   // The first CAS writes this attempt's server-only activity UUID as a
   // transaction-local claim marker. A retry of the same caller operation ID
   // therefore cannot satisfy any downstream write after its CAS matched zero
-  // rows. Only a fully proved attempt replaces the marker with operationId.
+  // rows. This finalizer intentionally precedes the final transaction guard:
+  // the guard proves both the persisted caller carrier and its exact activity
+  // receipt, and a guard failure rolls this UPDATE back with the whole batch.
   return db.prepare(`
     UPDATE newcomer_submissions SET last_mutation_id=${preserveStatusCarrier
       ? `CASE WHEN substr(last_mutation_id,1,37)=?1 || '|' AND length(last_mutation_id)=56
@@ -2020,7 +1954,8 @@ export async function assignNewcomer(
         RETURNING id
       `).bind(target, captured.submissionId, mutationId),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
         SELECT ?1,submission.id,?2,'assigned',
           CASE
             WHEN submission.assignee_person_id IS NULL
@@ -2029,15 +1964,17 @@ export async function assignNewcomer(
               THEN '{"from_assignee_person_id":' || CAST(submission.assignee_person_id AS TEXT) || '}'
             ELSE '{"from_assignee_person_id":' || CAST(submission.assignee_person_id AS TEXT)
               || ',"to_assignee_person_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}'
-          END,
-          ?4
+          END,?4,?5,?6
         FROM newcomer_submissions submission
-        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND ${changed('?3')}
+        WHERE submission.id=?7 AND submission.last_mutation_id=?8 AND ${changed('?3')}
           AND (CAST(?3 AS INTEGER) IS NULL OR EXISTS (
             SELECT 1 FROM people person WHERE person.id=CAST(?3 AS INTEGER)
               AND ${AUTHORIZED_NEWCOMER_PERSON_SQL}
           ))
-      `).bind(activityId, user.id, target, generated.now, captured.submissionId, mutationId),
+      `).bind(
+        activityId, user.id, target, captured.operationId, captured.expectedVersion + 1,
+        generated.now, captured.submissionId, mutationId,
+      ),
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET assignee_person_id=CAST(?1 AS INTEGER)
         WHERE submission.id=?2 AND submission.last_mutation_id=?3 AND ${changed('?1')}
@@ -2062,8 +1999,12 @@ export async function assignNewcomer(
                   || CAST(CAST(?1 AS INTEGER) AS TEXT) || '}'
               END
               AND activity.created_at=?6
+              AND activity.operation_id=?7 AND activity.result_version=?8
           )
-      `).bind(target, captured.submissionId, mutationId, activityId, user.id, generated.now),
+      `).bind(
+        target, captured.submissionId, mutationId, activityId, user.id, generated.now,
+        captured.operationId, captured.expectedVersion + 1,
+      ),
       finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
@@ -2081,7 +2022,8 @@ export async function assignNewcomer(
         NOT EXISTS (
           SELECT 1 FROM newcomer_activity
           WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
-            AND kind='assigned' AND created_at=?7 AND (
+            AND kind='assigned' AND created_at=?7
+            AND operation_id=?8 AND result_version=?3 AND (
               (CAST(?4 AS INTEGER) IS NULL
                 AND metadata_json LIKE '{"from_assignee_person_id":%}'
                 AND metadata_json NOT LIKE '%,%') OR
@@ -2099,7 +2041,7 @@ export async function assignNewcomer(
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, target,
-        activityId, user.id, generated.now,
+        activityId, user.id, generated.now, captured.operationId,
       ]),
     ];
     dispatched = true;
@@ -2150,20 +2092,24 @@ export async function changeNewcomerStatus(
         RETURNING id
       `).bind(statusId, captured.submissionId, mutationId),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
         SELECT ?1,submission.id,?2,'status_changed',
           '{"from_status_id":' || CAST(submission.status_id AS TEXT)
-            || ',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}',?4
+            || ',"to_status_id":' || CAST(CAST(?3 AS INTEGER) AS TEXT) || '}',?4,?5,?6
         FROM newcomer_submissions submission
         JOIN newcomer_statuses old_status ON old_status.id=submission.status_id
         JOIN newcomer_statuses target_status ON target_status.id=?3 AND target_status.active=1
-        WHERE submission.id=?5 AND submission.status_id<>?3
+        WHERE submission.id=?7 AND submission.status_id<>?3
           AND ((old_status.category='closed' AND target_status.category='closed'
               AND submission.closed_at IS NOT NULL
-              AND submission.last_mutation_id=?6 || '|' || submission.closed_at)
+              AND submission.last_mutation_id=?8 || '|' || submission.closed_at)
             OR ((old_status.category<>'closed' OR target_status.category<>'closed')
-              AND submission.last_mutation_id=?6))
-      `).bind(activityId, user.id, statusId, generated.now, captured.submissionId, mutationId),
+              AND submission.last_mutation_id=?8))
+      `).bind(
+        activityId, user.id, statusId, captured.operationId, captured.expectedVersion + 1,
+        generated.now, captured.submissionId, mutationId,
+      ),
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET
           status_id=?1,
@@ -2194,10 +2140,11 @@ export async function changeNewcomerStatus(
                 || CAST(submission.status_id AS TEXT) || ',"to_status_id":'
                 || CAST(CAST(?1 AS INTEGER) AS TEXT) || '}'
               AND activity.created_at=?7
+              AND activity.operation_id=?8 AND activity.result_version=?9
           )
       `).bind(
         statusId, generated.now, captured.submissionId, mutationId,
-        activityId, user.id, generated.now,
+        activityId, user.id, generated.now, captured.operationId, captured.expectedVersion + 1,
       ),
       finalizeClaim(db, captured, mutationId, true),
       mutationGuard(db, `
@@ -2233,6 +2180,7 @@ export async function changeNewcomerStatus(
           SELECT 1 FROM newcomer_activity
           WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
             AND kind='status_changed' AND created_at=?7
+            AND operation_id=?8 AND result_version=?3
             AND metadata_json LIKE '{"from_status_id":%,"to_status_id":'
               || CAST(CAST(?4 AS INTEGER) AS TEXT) || '}'
             AND metadata_json<>'{"from_status_id":'
@@ -2242,7 +2190,7 @@ export async function changeNewcomerStatus(
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, statusId,
-        activityId, user.id, generated.now,
+        activityId, user.id, generated.now, captured.operationId,
       ]),
     ];
     dispatched = true;
@@ -2294,11 +2242,15 @@ export async function scheduleNewcomerFollowUp(
     const statements = [
       casClaim(db, captured, mutationId, generated.now),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
-        SELECT ?1,submission.id,?2,'follow_up_scheduled',?3,?4
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
+        SELECT ?1,submission.id,?2,'follow_up_scheduled',?3,?4,?5,?6
         FROM newcomer_submissions submission
-        WHERE submission.id=?5 AND submission.last_mutation_id=?6 AND ${changed('?7')}
-      `).bind(activityId, user.id, metadata, generated.now, captured.submissionId, mutationId, followUpDate),
+        WHERE submission.id=?7 AND submission.last_mutation_id=?8 AND ${changed('?9')}
+      `).bind(
+        activityId, user.id, metadata, captured.operationId, captured.expectedVersion + 1,
+        generated.now, captured.submissionId, mutationId, followUpDate,
+      ),
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET next_follow_up_date=CAST(?1 AS TEXT)
         WHERE submission.id=?2 AND submission.last_mutation_id=?3 AND ${changed('?1')}
@@ -2316,11 +2268,12 @@ export async function scheduleNewcomerFollowUp(
           SELECT 1 FROM newcomer_activity
           WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
             AND kind='follow_up_scheduled' AND metadata_json=?7 AND created_at=?8
+            AND operation_id=?9 AND result_version=?3
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, followUpDate,
-        activityId, user.id, metadata, generated.now,
+        activityId, user.id, metadata, generated.now, captured.operationId,
       ]),
     ];
     dispatched = true;
@@ -2381,13 +2334,17 @@ export async function addNewcomerNote(
         WHERE submission.id=?5 AND submission.last_mutation_id=?6
       `).bind(noteId, user.id, body, generated.now, captured.submissionId, mutationId),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
-        SELECT ?1,note.submission_id,?2,'note_added',?3,?4
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
+        SELECT ?1,note.submission_id,?2,'note_added',?3,?4,?5,?6
         FROM newcomer_notes note
         JOIN newcomer_submissions submission ON submission.id=note.submission_id
-          AND submission.last_mutation_id=?5
-        WHERE note.id=?6 AND note.submission_id=?7
-      `).bind(activityId, user.id, metadata, generated.now, mutationId, noteId, captured.submissionId),
+          AND submission.last_mutation_id=?7
+        WHERE note.id=?8 AND note.submission_id=?9
+      `).bind(
+        activityId, user.id, metadata, captured.operationId, captured.expectedVersion + 1,
+        generated.now, mutationId, noteId, captured.submissionId,
+      ),
       finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
@@ -2403,12 +2360,13 @@ export async function addNewcomerNote(
           SELECT 1 FROM newcomer_activity
           WHERE id=?8 AND submission_id=?1 AND ${actorPredicate('?5')}
             AND kind='note_added' AND metadata_json=?9 AND created_at=?7
+            AND operation_id=?10 AND result_version=?3
         ) OR
         (SELECT COUNT(*) FROM newcomer_notes WHERE id=?4)<>1 OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?8)<>1
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, noteId, user.id,
-        body, generated.now, activityId, metadata,
+        body, generated.now, activityId, metadata, captured.operationId,
       ]),
     ];
     dispatched = true;
@@ -2472,19 +2430,20 @@ export async function linkNewcomerPerson(
         RETURNING id
       `).bind(personId, captured.submissionId, mutationId),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
-        SELECT ?1,submission.id,?2,'person_linked',?3,?4
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
+        SELECT ?1,submission.id,?2,'person_linked',?3,?4,?5,?6
         FROM newcomer_submissions submission
-        WHERE submission.id=?5 AND submission.last_mutation_id=?6
-          AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?7)
+        WHERE submission.id=?7 AND submission.last_mutation_id=?8
+          AND (submission.linked_person_id IS NULL OR submission.linked_person_id<>?9)
           AND EXISTS (
             SELECT 1 FROM people person
-            WHERE person.id=?7 AND person.active=1 AND person.deleted_at IS NULL
+            WHERE person.id=?9 AND person.active=1 AND person.deleted_at IS NULL
               AND ${PERSON_CONTACT_MATCH_SQL}
           )
       `).bind(
-        activityId, user.id, metadata, generated.now,
-        captured.submissionId, mutationId, personId,
+        activityId, user.id, metadata, captured.operationId, captured.expectedVersion + 1,
+        generated.now, captured.submissionId, mutationId, personId,
       ),
       db.prepare(`
         UPDATE newcomer_submissions AS submission SET linked_person_id=?1
@@ -2500,10 +2459,12 @@ export async function linkNewcomerPerson(
             WHERE activity.id=?4 AND activity.submission_id=submission.id
               AND activity.actor_person_id=?5 AND activity.kind='person_linked'
               AND activity.metadata_json=?6 AND activity.created_at=?7
+              AND activity.operation_id=?8 AND activity.result_version=?9
           )
       `).bind(
         personId, captured.submissionId, mutationId,
         activityId, user.id, metadata, generated.now,
+        captured.operationId, captured.expectedVersion + 1,
       ),
       finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
@@ -2518,11 +2479,12 @@ export async function linkNewcomerPerson(
           SELECT 1 FROM newcomer_activity
           WHERE id=?5 AND submission_id=?1 AND ${actorPredicate('?6')}
             AND kind='person_linked' AND metadata_json=?7 AND created_at=?8
+            AND operation_id=?9 AND result_version=?3
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, personId,
-        activityId, user.id, metadata, generated.now,
+        activityId, user.id, metadata, generated.now, captured.operationId,
       ]),
     ];
     dispatched = true;
@@ -2609,14 +2571,18 @@ export async function createNewcomerVisitor(
           )
       `).bind(captured.submissionId, mutationId, mutationId),
       db.prepare(`
-        INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind,metadata_json,created_at)
+        INSERT INTO newcomer_activity
+          (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
         SELECT ?1,submission.id,?2,'visitor_created',
-          '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3
+          '{"person_id":' || CAST(submission.linked_person_id AS TEXT) || '}',?3,?4,?5
         FROM newcomer_submissions submission
-        JOIN people person ON person.id=submission.linked_person_id AND person.calendar_token=?6
-        WHERE submission.id=?4 AND submission.last_mutation_id=?5
+        JOIN people person ON person.id=submission.linked_person_id AND person.calendar_token=?8
+        WHERE submission.id=?6 AND submission.last_mutation_id=?7
           AND submission.linked_person_id IS NOT NULL
-      `).bind(activityId, user.id, generated.now, captured.submissionId, mutationId, mutationId),
+      `).bind(
+        activityId, user.id, captured.operationId, captured.expectedVersion + 1,
+        generated.now, captured.submissionId, mutationId, mutationId,
+      ),
       db.prepare(`
         UPDATE people AS person SET calendar_token=NULL
         WHERE person.calendar_token=?1 AND EXISTS (
@@ -2628,9 +2594,13 @@ export async function createNewcomerVisitor(
             AND activity.kind='visitor_created'
             AND activity.metadata_json='{"person_id":' || CAST(person.id AS TEXT) || '}'
             AND activity.created_at=?5
+            AND activity.operation_id=?6 AND activity.result_version=?7
         )
         RETURNING id
-      `).bind(mutationId, captured.submissionId, activityId, user.id, generated.now),
+      `).bind(
+        mutationId, captured.submissionId, activityId, user.id, generated.now,
+        captured.operationId, captured.expectedVersion + 1,
+      ),
       finalizeClaim(db, captured, mutationId),
       mutationGuard(db, `
         NOT EXISTS (
@@ -2654,13 +2624,14 @@ export async function createNewcomerVisitor(
             AND activity.kind='visitor_created' AND activity.created_at=?4
             AND activity.metadata_json='{"person_id":'
               || CAST(submission.linked_person_id AS TEXT) || '}'
+            AND activity.operation_id=?8 AND activity.result_version=?3
             AND submission.last_mutation_id=?2
         ) OR
         (SELECT COUNT(*) FROM newcomer_activity WHERE id=?5)<>1 OR
         EXISTS (SELECT 1 FROM people WHERE calendar_token=?7)
       `, [
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, generated.now,
-        activityId, user.id, mutationId,
+        activityId, user.id, mutationId, captured.operationId,
       ]),
       db.prepare(`
         SELECT submission.linked_person_id AS id
@@ -2677,9 +2648,10 @@ export async function createNewcomerVisitor(
           AND activity.metadata_json='{"person_id":'
             || CAST(submission.linked_person_id AS TEXT) || '}'
           AND activity.created_at=?4
+          AND activity.operation_id=?7 AND activity.result_version=?3
       `).bind(
         captured.submissionId, captured.operationId, captured.expectedVersion + 1, generated.now,
-        activityId, user.id,
+        activityId, user.id, captured.operationId,
       ),
     ];
     dispatched = true;

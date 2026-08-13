@@ -104,6 +104,26 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
     })).toEqual([]);
   });
 
+  it('does not expose persisted operation receipt fields in detail activity DTOs', async () => {
+    await sql.unsafe(`
+      INSERT INTO people (id,display_name,email) VALUES (9701,'Receipt reader','receipt-reader@example.test');
+      INSERT INTO newcomer_submissions (id,name,locale,visit_date,source,status_id)
+      VALUES ('10000000-0000-4000-8000-000000000011','Receipt detail','en','2026-08-12','staff',1);
+      INSERT INTO newcomer_activity
+        (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at)
+      VALUES ('30000000-0000-4000-8000-000000000011','10000000-0000-4000-8000-000000000011',9701,
+        'assigned','{"to_assignee_person_id":9701}','30100000-0000-4000-8000-000000000011',1,
+        '2026-08-12 10:02:00');
+    `);
+    const detail = await getNewcomerDetail(
+      db, 'supabase', superAdmin, '10000000-0000-4000-8000-000000000011', 'en',
+    );
+    expect(Object.keys(detail!.activity.items[0])).toEqual([
+      'id', 'actorPersonId', 'kind', 'metadata', 'createdAt',
+    ]);
+    expect(JSON.stringify(detail)).not.toContain('30100000-0000-4000-8000-000000000011');
+  });
+
   it('traverses 5001-row note/activity histories with descending keyset pages', async () => {
     await sql.unsafe(`
       INSERT INTO people (id,display_name,email) VALUES (9701,'History reader','history@example.test');

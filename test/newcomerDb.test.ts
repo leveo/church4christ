@@ -622,9 +622,10 @@ describe('newcomer queue, detail, and duplicate hints', () => {
         ('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001',9703,
           'Private note','2026-08-12 10:01:00')`),
       env.DB.prepare(`INSERT INTO newcomer_activity
-        (id,submission_id,actor_person_id,kind,metadata_json,created_at) VALUES
+        (id,submission_id,actor_person_id,kind,metadata_json,operation_id,result_version,created_at) VALUES
         ('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001',9703,
-          'assigned','{"to_assignee_person_id":9703}','2026-08-12 10:02:00')`),
+          'assigned','{"to_assignee_person_id":9703}','30100000-0000-4000-8000-000000000001',1,
+          '2026-08-12 10:02:00')`),
     ]);
   });
 
@@ -663,6 +664,10 @@ describe('newcomer queue, detail, and duplicate hints', () => {
       },
     });
     expect(JSON.stringify(detail)).not.toContain('worker@example.test');
+    expect(JSON.stringify(detail)).not.toContain('30100000-0000-4000-8000-000000000001');
+    expect(Object.keys(detail!.activity.items[0])).toEqual([
+      'id', 'actorPersonId', 'kind', 'metadata', 'createdAt',
+    ]);
     const untranslated = await getNewcomerDetail(
       env.DB, 'd1', user(), '10000000-0000-4000-8000-000000000002', 'zh',
     );

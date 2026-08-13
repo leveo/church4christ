@@ -10,6 +10,7 @@ import {
   createNewcomerSubmission,
   createNewcomerVisitor,
   linkNewcomerPerson,
+  reconcileNewcomerMutation,
   scheduleNewcomerFollowUp,
 } from '../../src/lib/newcomerDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
@@ -120,6 +121,191 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
       followUpDate: '2026-08-31', operationId: followOperationId,
     }, runtime(['71210000-0000-4000-8000-000000000002'])))
       .resolves.toEqual({ version: 2, operationId: followOperationId });
+  });
+
+  it('reconciles an operation receipt after a later operation overwrites the submission carrier', async () => {
+    const submissionId = '71000000-0000-4000-8000-000000000001';
+    const operationId = '71211000-0000-4000-8000-000000000001';
+    const input = { submissionId, expectedVersion: 0, assigneePersonId: 9902, operationId };
+    await expect(assignNewcomer(db, worker, input, runtime([
+      '71211000-0000-4000-8000-000000000002',
+    ]))).resolves.toEqual({ version: 1, operationId });
+    await scheduleNewcomerFollowUp(db, worker, {
+      submissionId, expectedVersion: 1, followUpDate: '2026-08-31',
+      operationId: '71211000-0000-4000-8000-000000000003',
+    }, runtime(['71211000-0000-4000-8000-000000000004']));
+
+    await expect(reconcileNewcomerMutation(db, worker, { submissionId, operationId }))
+      .resolves.toEqual({ status: 'applied', version: 1 });
+    await expect(assignNewcomer(db, worker, input, runtime([
+      '71211000-0000-4000-8000-000000000005',
+    ]))).resolves.toEqual({ version: 1, operationId });
+    await expect(assignNewcomer(db, worker, { ...input, assigneePersonId: 9903 }, runtime([
+      '71211000-0000-4000-8000-000000000006',
+    ]))).rejects.toBeInstanceOf(NewcomerConflictError);
+  });
+
+  it('recovers A from its receipt when B commits before A observes a post-commit transport failure', async () => {
+    const submissionId = '71000000-0000-4000-8000-000000000001';
+    const operationId = '71212000-0000-4000-8000-000000000001';
+    let injected = false;
+    const commitAThenBThenReject: AppDb = {
+      prepare(sqlText: string) { return db.prepare(sqlText); },
+      async batch<T = unknown>(statements: AppStatement[]) {
+        const results = await db.batch<T>(statements);
+        if (!injected) {
+          injected = true;
+          await scheduleNewcomerFollowUp(db, worker, {
+            submissionId, expectedVersion: 1, followUpDate: '2026-09-01',
+            operationId: '71212000-0000-4000-8000-000000000003',
+          }, runtime(['71212000-0000-4000-8000-000000000004']));
+          throw new Error('transport failed after A and B committed');
+        }
+        return results;
+      },
+    };
+
+    await expect(assignNewcomer(commitAThenBThenReject, worker, {
+      submissionId, expectedVersion: 0, assigneePersonId: 9902, operationId,
+    }, runtime(['71212000-0000-4000-8000-000000000002'])))
+      .resolves.toEqual({ version: 1, operationId });
+    const [state] = await sql.unsafe<{ version: number; follow_up: string }[]>(`
+      SELECT version,next_follow_up_date AS follow_up FROM newcomer_submissions WHERE id=$1
+    `, [submissionId]);
+    expect(state).toEqual({ version: 2, follow_up: '2026-09-01' });
+  });
+
+  it('replays every historical action receipt after later operations change current workflow state', async () => {
+    const submissionId = '71000000-0000-4000-8000-000000000001';
+    const reset = async () => {
+      await sql.unsafe(`
+        TRUNCATE newcomer_activity,newcomer_notes,newcomer_answers,newcomer_submissions CASCADE;
+        DELETE FROM people WHERE email='pg-guest@example.test';
+        UPDATE people SET phone=NULL WHERE id IN (9902,9903);
+        INSERT INTO newcomer_submissions
+          (id,name,email,phone,locale,visit_date,source,status_id,version,created_at,updated_at)
+        VALUES ('${submissionId}','PG Guest','pg-guest@example.test','+13125550131','en',
+          '2026-08-10','staff',1,0,'2026-08-12 09:00:00','2026-08-12 09:00:00');
+      `);
+    };
+
+    await reset();
+    const assignment = { submissionId, expectedVersion: 0, assigneePersonId: 9902,
+      operationId: '71310000-0000-4000-8000-000000000001' };
+    const assignmentResult = await assignNewcomer(db, worker, assignment,
+      runtime(['71310000-0000-4000-8000-000000000002']));
+    await assignNewcomer(db, worker, {
+      submissionId, expectedVersion: 1, assigneePersonId: null,
+      operationId: '71310000-0000-4000-8000-000000000003',
+    }, runtime(['71310000-0000-4000-8000-000000000004']));
+    await expect(assignNewcomer(db, worker, assignment,
+      runtime(['71310000-0000-4000-8000-000000000005']))).resolves.toEqual(assignmentResult);
+    await expect(assignNewcomer(db, worker, { ...assignment, assigneePersonId: null },
+      runtime(['71310000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+
+    await reset();
+    const status = { submissionId, expectedVersion: 0, statusId: 4,
+      operationId: '71320000-0000-4000-8000-000000000001' };
+    const statusResult = await changeNewcomerStatus(db, worker, status,
+      runtime(['71320000-0000-4000-8000-000000000002']));
+    await changeNewcomerStatus(db, worker, {
+      submissionId, expectedVersion: 1, statusId: 5,
+      operationId: '71320000-0000-4000-8000-000000000003',
+    }, runtime(['71320000-0000-4000-8000-000000000004']));
+    await expect(changeNewcomerStatus(db, worker, status,
+      runtime(['71320000-0000-4000-8000-000000000005']))).resolves.toEqual(statusResult);
+    await expect(changeNewcomerStatus(db, worker, { ...status, statusId: 5 },
+      runtime(['71320000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+
+    await reset();
+    const follow = { submissionId, expectedVersion: 0, followUpDate: '2026-08-31',
+      operationId: '71330000-0000-4000-8000-000000000001' };
+    const followResult = await scheduleNewcomerFollowUp(db, worker, follow,
+      runtime(['71330000-0000-4000-8000-000000000002']));
+    await scheduleNewcomerFollowUp(db, worker, {
+      submissionId, expectedVersion: 1, followUpDate: null,
+      operationId: '71330000-0000-4000-8000-000000000003',
+    }, runtime(['71330000-0000-4000-8000-000000000004']));
+    await expect(scheduleNewcomerFollowUp(db, worker, follow,
+      runtime(['71330000-0000-4000-8000-000000000005']))).resolves.toEqual(followResult);
+    await expect(scheduleNewcomerFollowUp(db, worker, { ...follow, followUpDate: null },
+      runtime(['71330000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+
+    await reset();
+    const note = { submissionId, expectedVersion: 0, body: 'PG historical note',
+      operationId: '71340000-0000-4000-8000-000000000001' };
+    const noteResult = await addNewcomerNote(db, worker, note,
+      runtime(['71340000-0000-4000-8000-000000000002']));
+    await scheduleNewcomerFollowUp(db, worker, {
+      submissionId, expectedVersion: 1, followUpDate: '2026-09-02',
+      operationId: '71340000-0000-4000-8000-000000000003',
+    }, runtime(['71340000-0000-4000-8000-000000000004']));
+    await expect(addNewcomerNote(db, worker, note,
+      runtime(['71340000-0000-4000-8000-000000000005']))).resolves.toEqual(noteResult);
+    await expect(addNewcomerNote(db, worker, { ...note, body: 'Different PG note' },
+      runtime(['71340000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+
+    await reset();
+    await sql.unsafe("UPDATE people SET phone='+1 (312) 555-0131' WHERE id IN (9902,9903)");
+    const link = { submissionId, expectedVersion: 0, personId: 9903,
+      operationId: '71350000-0000-4000-8000-000000000001' };
+    const linkResult = await linkNewcomerPerson(db, worker, link,
+      runtime(['71350000-0000-4000-8000-000000000002']));
+    await linkNewcomerPerson(db, worker, {
+      submissionId, expectedVersion: 1, personId: 9902,
+      operationId: '71350000-0000-4000-8000-000000000003',
+    }, runtime(['71350000-0000-4000-8000-000000000004']));
+    await expect(linkNewcomerPerson(db, worker, link,
+      runtime(['71350000-0000-4000-8000-000000000005']))).resolves.toEqual(linkResult);
+    await expect(linkNewcomerPerson(db, worker, { ...link, personId: 9902 },
+      runtime(['71350000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+
+    await reset();
+    const peopleAdmin = { ...worker, id: 9904, role: 'admin' as const, isAdmin: true,
+      adminAreas: ['newcomers', 'people'] as SessionUser['adminAreas'] };
+    const visitor = { submissionId, expectedVersion: 0,
+      operationId: '71360000-0000-4000-8000-000000000001' };
+    const visitorResult = await createNewcomerVisitor(db, peopleAdmin, visitor,
+      runtime(['71360000-0000-4000-8000-000000000002']));
+    await sql.unsafe("UPDATE people SET phone='+1 (312) 555-0131' WHERE id=9903");
+    await linkNewcomerPerson(db, worker, {
+      submissionId, expectedVersion: 1, personId: 9903,
+      operationId: '71360000-0000-4000-8000-000000000003',
+    }, runtime(['71360000-0000-4000-8000-000000000004']));
+    await expect(createNewcomerVisitor(db, peopleAdmin, visitor,
+      runtime(['71360000-0000-4000-8000-000000000005']))).resolves.toEqual(visitorResult);
+    await expect(scheduleNewcomerFollowUp(db, worker, {
+      submissionId, expectedVersion: 2, followUpDate: '2026-09-03', operationId: visitor.operationId,
+    }, runtime(['71360000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
+  });
+
+  it('reconciles an immutable create receipt after a later PostgreSQL workflow change', async () => {
+    const operationId = '71370000-0000-4000-8000-000000000001';
+    const input = {
+      name: 'PG historical create', email: 'pg-historical-create@example.test', phone: null,
+      locale: 'en' as const, visitDate: '2026-08-11', serviceTypeId: null,
+      contactConsent: true, answers: [],
+    };
+    const created = await createNewcomerSubmission(db, null, 'public', input, {
+      backend: 'supabase', operationId,
+    }, runtime(['71370000-0000-4000-8000-000000000002']));
+    await changeNewcomerStatus(db, worker, {
+      submissionId: operationId, expectedVersion: 0, statusId: 2,
+      operationId: '71370000-0000-4000-8000-000000000003',
+    }, runtime(['71370000-0000-4000-8000-000000000004']));
+    await expect(createNewcomerSubmission(db, null, 'public', input, {
+      backend: 'supabase', operationId,
+    }, runtime(['71370000-0000-4000-8000-000000000005']))).resolves.toEqual(created);
+    await expect(createNewcomerSubmission(db, null, 'public', { ...input, name: 'Different create' }, {
+      backend: 'supabase', operationId,
+    }, runtime(['71370000-0000-4000-8000-000000000006'])))
+      .rejects.toBeInstanceOf(NewcomerConflictError);
   });
 
   it('makes concurrent same-operation creates converge to one exact PostgreSQL outcome', async () => {
@@ -741,7 +927,8 @@ describe.skipIf(!hasPg)('newcomer mutation parity and races (PostgreSQL)', () =>
         FROM newcomer_answers ORDER BY submission_id,field_id`),
       notes: await sql.unsafe(`SELECT id,submission_id,author_person_id,body,created_at
         FROM newcomer_notes ORDER BY id`),
-      activity: await sql.unsafe(`SELECT id,submission_id,actor_person_id,kind,metadata_json,created_at
+      activity: await sql.unsafe(`SELECT id,submission_id,actor_person_id,kind,metadata_json,
+        operation_id,result_version,created_at
         FROM newcomer_activity ORDER BY id`),
       people: await sql.unsafe(`SELECT id,email,calendar_token,active,deleted_at,admin_areas
         FROM people WHERE id>=9900 ORDER BY id`),
