@@ -26,7 +26,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 18 module keys in display order', () => {
+  it('has all 19 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -42,6 +42,7 @@ describe('MODULES registry', () => {
       'people',
       'children',
       'attendance',
+      'activity-score',
       'page-builder',
       'portal',
       'giving',
@@ -80,8 +81,9 @@ describe('MODULES registry', () => {
     expect(MODULES.giving.uses).toEqual(['people']);
     expect(MODULES.groups.uses).toEqual(['people', 'registration']);
     expect(MODULES.portal.uses).toEqual(['serve', 'groups']);
+    expect(MODULES['activity-score'].uses).toEqual(['groups', 'serve', 'registration']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance') {
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance' && key !== 'activity-score') {
         expect(MODULES[key].uses).toEqual([]);
       }
     }
@@ -210,6 +212,8 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/children', 'children'],
     ['/admin/attendance', 'attendance'],
     ['/admin/attendance/report.csv', 'attendance'],
+    ['/admin/activity-score', 'activity-score'],
+    ['/admin/activity-score/member/7', 'activity-score'],
     ['/admin/groups', 'groups'],
     // ── children's check-in kiosk ──
     ['/kiosk', 'children'],
@@ -249,6 +253,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     expect(moduleForPath('/bulletin/')).toBe('bulletins');
     expect(moduleForPath('/kiosk/')).toBe('children');
     expect(moduleForPath('/admin/attendance/')).toBe('attendance');
+    expect(moduleForPath('/admin/activity-score/')).toBe('activity-score');
   });
 
   it('portal owns its /my sub-prefixes but not /my itself', () => {

@@ -90,6 +90,7 @@ const ADMIN_ONLY = [
   '/admin/groups',
   '/admin/children',
   '/admin/attendance',
+  '/admin/activity-score',
 ];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).

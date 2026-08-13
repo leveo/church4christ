@@ -23,6 +23,7 @@ const EXPECTED_KEYS = [
   'people',
   'children',
   'attendance',
+  'activity-score',
   'page-builder',
   'portal',
   'giving',
@@ -56,7 +57,7 @@ describe('canonical capability catalog', () => {
       'page-builder',
     ]);
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toEqual(
-      EXPECTED_KEYS.slice(0, 15),
+      EXPECTED_KEYS.slice(0, 16),
     );
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toEqual(EXPECTED_KEYS);
   });
@@ -72,6 +73,19 @@ describe('canonical capability catalog', () => {
     expect(CAPABILITY_CATALOG.presets.website.modules).not.toContain('attendance');
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toContain('attendance');
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toContain('attendance');
+  });
+
+  test('makes Activity Score portable, People-dependent, and source-optional', () => {
+    expect(CAPABILITIES['activity-score']).toMatchObject({
+      publicPrefixes: [],
+      adminPrefixes: ['/admin/activity-score'],
+      uses: ['groups', 'serve', 'registration'],
+      dependsOn: ['people'],
+    });
+    expect(CAPABILITIES['activity-score']).not.toHaveProperty('requiresBackend');
+    expect(CAPABILITY_CATALOG.presets.website.modules).not.toContain('activity-score');
+    expect(CAPABILITY_CATALOG.presets['website-community'].modules).toContain('activity-score');
+    expect(CAPABILITY_CATALOG.presets['full-church'].modules).toContain('activity-score');
   });
 
   test('requires Supabase only for portal, giving, and registration', () => {
