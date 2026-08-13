@@ -167,7 +167,7 @@ backends. Apply it before enabling the `attendance` module or deploying
 link-state tables. See [`features/service-attendance.md`](./features/service-attendance.md)
 for the privacy, access, and report limits.
 
-Activity Score uses forward migration `0014_activity_score.sql` on both backends. Apply it
+Activity Score uses forward migration `0015_activity_score.sql` on both backends. Apply it
 before enabling `activity-score` or deploying `/admin/activity-score`; it stores the
 church-wide model while scores remain live calculations. See
 [`features/activity-score.md`](./features/activity-score.md).

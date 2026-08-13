@@ -12,7 +12,7 @@
 
 ## File map
 
-- Create `migrations/0014_activity_score.sql` and `migrations-supabase/0014_activity_score.sql`: portable configuration schema and defaults.
+- Create `migrations/0015_activity_score.sql` and `migrations-supabase/0015_activity_score.sql`: portable configuration schema and defaults.
 - Create `src/lib/activityScoreModel.ts`: strict types and pure scoring/filtering logic.
 - Create `src/lib/activityScoreDb.ts`: configuration persistence, eligible People, and activity evidence queries.
 - Create `src/lib/activityScoreService.ts`: windows, module availability, live report, coverage, and bounds.
@@ -27,8 +27,8 @@
 
 **Files:**
 - Create: `test/activityScoreSchema.test.ts`
-- Create: `migrations/0014_activity_score.sql`
-- Create: `migrations-supabase/0014_activity_score.sql`
+- Create: `migrations/0015_activity_score.sql`
+- Create: `migrations-supabase/0015_activity_score.sql`
 - Modify: `test/pg/schemaParity.ts`
 
 - [ ] **Step 1: Write the failing D1 schema tests**
@@ -69,7 +69,7 @@ Expected: both files pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/0014_activity_score.sql migrations-supabase/0014_activity_score.sql test/activityScoreSchema.test.ts test/pg/schemaParity.ts
+git add migrations/0015_activity_score.sql migrations-supabase/0015_activity_score.sql test/activityScoreSchema.test.ts test/pg/schemaParity.ts
 git commit -m "feat: add activity score schema"
 ```
 

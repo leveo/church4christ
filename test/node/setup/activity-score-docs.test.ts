@@ -28,15 +28,15 @@ describe('activity score documentation', () => {
     expect(feature).toMatch(/super admin[\s\S]{0,100}(edit|configuration)/i);
     expect(feature).toMatch(/Activity Score[^\n]*grant/i);
     expect(permissions).toMatch(/activity.score/i);
-    expect(permissions).toMatch(/15 grantable keys/i);
+    expect(permissions).toMatch(/16 grantable keys/i);
   });
 
-  it('records migration 0014 and the expanded capability counts', () => {
-    expect(feature).toMatch(/migrations\/0014_activity_score\.sql/);
-    expect(feature).toMatch(/migrations-supabase\/0014_activity_score\.sql/);
-    expect(upgrade).toContain('0014_activity_score.sql');
-    expect(release).toMatch(/Files .*0001.* through\s+.*0014/);
-    expect(changelog).toMatch(/Migration files .*0001.* through .*0014/);
+  it('records migration 0015 and the expanded capability counts', () => {
+    expect(feature).toMatch(/migrations\/0015_activity_score\.sql/);
+    expect(feature).toMatch(/migrations-supabase\/0015_activity_score\.sql/);
+    expect(upgrade).toContain('0015_activity_score.sql');
+    expect(release).toMatch(/Files .*0001.* through\s+.*0015/);
+    expect(changelog).toMatch(/Migration files .*0001.* through .*0015/);
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
     expect(modules).toMatch(/The 19 modules/);
     expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?16/);

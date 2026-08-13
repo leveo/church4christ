@@ -48,7 +48,7 @@ describe('aggregate service attendance documentation', () => {
     expect(attendance).toMatch(/without[^\n]*grant[^\n]*403/i);
     expect(attendance).toMatch(/attendance-only[^\n]*cannot[^\n]*service types/i);
     expect(attendance).toMatch(/super.admin[\s\S]{0,100}Serve admin[\s\S]{0,100}service types/i);
-    expect(permissions).toMatch(/15 grantable keys/i);
+    expect(permissions).toMatch(/16 grantable keys/i);
     expect(permissions).toMatch(/`attendance`/);
     expect(groups).toMatch(/Attendance[^\n]*grant[^\n]*(does not|never)[^\n]*(group|per.person)/i);
     expect(groups).toMatch(/Groups[^\n]*grant[\s\S]{0,180}(active group admin|group's active admin)[\s\S]{0,120}super.admin/i);
@@ -59,8 +59,8 @@ describe('aggregate service attendance documentation', () => {
     expect(attendance).toMatch(/migrations-supabase\/0013_service_attendance\.sql/);
     expect(deploy).toMatch(/0013_service_attendance\.sql/);
     expect(upgrade).toMatch(/Migration `0013_service_attendance\.sql`/);
-    expect(release).toMatch(/Files `0001` through\s+`0014`/);
-    expect(changelog).toMatch(/Migration files `0001` through `0014`/);
+    expect(release).toMatch(/Files `0001` through\s+`0015`/);
+    expect(changelog).toMatch(/Migration files `0001` through `0015`/);
     expect(changelog).toMatch(/aggregate service attendance/i);
 
     expect(readme).toMatch(/Service attendance[^\n]*docs\/features\/service-attendance\.md/i);

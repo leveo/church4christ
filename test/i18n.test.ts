@@ -212,6 +212,13 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(zh['admin.nav.attendance']).toBe('崇拜出席');
   });
 
+  it('provides bilingual scoped Newcomers grant copy without implying admin elevation', () => {
+    expect(en['admin.areas.newcomers']).toBe('Newcomer follow-up');
+    expect(zh['admin.areas.newcomers']).toBe('新朋友跟进');
+    expect(en['admin.person.areasHint']).toMatch(/without making.*admin/i);
+    expect(zh['admin.person.areasHint']).toMatch(/无需.*管理员/);
+  });
+
   it('provides complete bilingual aggregate Attendance UI copy', () => {
     const keys = [
       'admin.attendance.title', 'admin.attendance.intro', 'admin.attendance.recordTitle',

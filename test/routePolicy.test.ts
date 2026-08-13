@@ -68,6 +68,10 @@ describe('classifyRoute', () => {
     ['/admin/giving', 'finance'],
     ['/admin/giving/funds', 'finance'],
     ['/admin/stripe-events', 'finance'],
+    // ── scoped Newcomers staff (classified before broad /admin) ──
+    ['/admin/newcomers', 'newcomerStaff'],
+    ['/admin/newcomers/42', 'newcomerStaff'],
+    ['/admin/newcomers/settings', 'newcomerStaff'],
     // ── authed ──
     ['/my', 'authed'],
     ['/my/blockouts', 'authed'],
@@ -130,6 +134,7 @@ describe('classifyRoute', () => {
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],
+    ['/admin/newcomersish', 'adminOnly'],
     ['/my/xyz', 'authed'],
     ['/settings/xyz', 'authed'],
     ['/serve/xyz', 'team'],
@@ -149,6 +154,7 @@ describe('classifyRoute', () => {
     expect(classifyRoute('/serve/')).toBe('public');
     expect(classifyRoute('/serve/plans/')).toBe('team');
     expect(classifyRoute('/admin/')).toBe('console');
+    expect(classifyRoute('/admin/newcomers/')).toBe('newcomerStaff');
     expect(classifyRoute('/profile/')).toBe('authed');
   });
 
@@ -168,6 +174,12 @@ describe('classifyRoute', () => {
     expect(classifyRoute('/admin/people')).toBe('adminOnly');
     // an unlisted /admin sub-path fails closed to the strictest tier
     expect(classifyRoute('/admin/whatever')).toBe('adminOnly');
+  });
+
+  it('the /admin/newcomers subtree keeps its scoped class without prefix lookalikes', () => {
+    expect(classifyRoute('/admin/newcomers')).toBe('newcomerStaff');
+    expect(classifyRoute('/admin/newcomers/unknown/deep')).toBe('newcomerStaff');
+    expect(classifyRoute('/admin/newcomersish')).toBe('adminOnly');
   });
 
   it('namespace fallbacks are segment-aware: lookalike prefixes stay public', () => {
@@ -203,6 +215,10 @@ describe('canAccess', () => {
   const leader = makeUser({ memberTeamIds: [3], leaderTeamIds: [3] });
   const editor = makeUser({ role: 'editor', isEditor: true });
   const admin = makeUser({ role: 'admin', isAdmin: true });
+  const scopedMember = makeUser({ adminAreas: ['newcomers'] });
+  const scopedEditor = makeUser({ role: 'editor', isEditor: true, adminAreas: ['newcomers'] });
+  const scopedAdmin = makeUser({ role: 'admin', isAdmin: true, adminAreas: ['newcomers'] });
+  const superAdmin = makeUser({ role: 'admin', isAdmin: true, isSuperAdmin: true });
   const financeUser = makeUser({ finance: 1 });
 
   it('public: everyone, including anonymous', () => {
@@ -246,5 +262,34 @@ describe('canAccess', () => {
     expect(canAccess('finance', editor)).toBe(false); // an editor is NOT finance
     expect(canAccess('finance', financeUser)).toBe(true); // finance flag, non-admin
     expect(canAccess('finance', admin)).toBe(true);
+  });
+
+  it('newcomerStaff: requires super-admin or an explicit scoped grant across roles', () => {
+    for (const denied of [anon, member, editor, leader, financeUser, admin]) {
+      expect(canAccess('newcomerStaff', denied)).toBe(false);
+    }
+    for (const allowed of [scopedMember, scopedEditor, scopedAdmin, superAdmin]) {
+      expect(canAccess('newcomerStaff', allowed)).toBe(true);
+    }
+  });
+
+  it('a scoped member is not upgraded into any unrelated admin surface', () => {
+    for (const path of [
+      '/admin/people',
+      '/admin/people/7',
+      '/admin/people/7/household',
+      '/admin/people/7/pastoral-notes',
+      '/admin/groups',
+      '/admin/settings',
+      '/admin/settings/security',
+      '/admin/security',
+      '/admin/navigation',
+      '/admin/teams',
+      '/admin/reports',
+      '/admin/children',
+    ]) {
+      expect(canAccess(classifyRoute(path), scopedMember), path).toBe(false);
+    }
+    expect(scopedMember.isAdmin).toBe(false);
   });
 });

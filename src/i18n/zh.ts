@@ -695,6 +695,7 @@ export default {
   'admin.areas.people': '会员管理',
   'admin.areas.paymentOperations': '支付操作',
   'admin.areas.serve': '义工事工',
+  'admin.areas.newcomers': '新朋友跟进',
 
   'admin.people.title': '会众',
   'admin.people.new': '新增会众',
@@ -981,8 +982,8 @@ export default {
   'admin.person.activeLabel': '启用',
   'admin.person.flagsTitle': '权限与状态',
   'admin.person.superAdmin': '总管理员',
-  'admin.person.areasTitle': '模块权限',
-  'admin.person.areasHint': '祷告墙和会员名录对所有管理员始终开放。',
+  'admin.person.areasTitle': '区域权限',
+  'admin.person.areasHint': '新朋友跟进权限无需将对方设为管理员即可授予。祷告墙和会员名录仍对所有管理员开放。',
   'admin.person.lastSuperErr': '必须保留至少一位总管理员。',
   'admin.person.save': '保存',
   'admin.person.updateFlags': '更新权限',

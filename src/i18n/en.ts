@@ -697,6 +697,7 @@ export default {
   'admin.areas.people': 'Member management',
   'admin.areas.paymentOperations': 'Payment operations',
   'admin.areas.serve': 'Volunteer ministry',
+  'admin.areas.newcomers': 'Newcomer follow-up',
 
   'admin.people.title': 'People',
   'admin.people.new': 'New person',
@@ -983,8 +984,8 @@ export default {
   'admin.person.activeLabel': 'Active',
   'admin.person.flagsTitle': 'Access & status',
   'admin.person.superAdmin': 'Super admin',
-  'admin.person.areasTitle': 'Module access',
-  'admin.person.areasHint': 'Prayer wall and the member directory are always available to every admin.',
+  'admin.person.areasTitle': 'Area access',
+  'admin.person.areasHint': 'Newcomer follow-up can be granted without making someone an admin. Prayer wall and the member directory remain available to every admin.',
   'admin.person.lastSuperErr': 'At least one super admin must remain.',
   'admin.person.save': 'Save',
   'admin.person.updateFlags': 'Update flags',

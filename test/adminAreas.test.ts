@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { adminAreaForPath, hasAreaAccess, parseAdminAreas, GRANTABLE_AREAS } from '../src/lib/adminAreas';
+import {
+  adminAreaForPath,
+  grantableAreasForRole,
+  hasAreaAccess,
+  parseAdminAreas,
+  parseAdminAreasForRole,
+  ALWAYS_AREAS,
+  GRANTABLE_AREAS,
+  SCOPED_STAFF_AREAS,
+} from '../src/lib/adminAreas';
 import type { SessionUser } from '../src/lib/types';
 
 const makeUser = (over: Partial<SessionUser> = {}): SessionUser => ({
@@ -26,6 +35,10 @@ describe('adminAreaForPath', () => {
     ['/admin/revisions/announcement/5', 'events'],
     ['/admin/revisions/event/6', 'events'],
     ['/admin/prayer-wall', 'prayer-wall'],
+    ['/admin/newcomers', 'newcomers'],
+    ['/admin/newcomers/', 'newcomers'],
+    ['/admin/newcomers/42', 'newcomers'],
+    ['/admin/newcomers/settings/unknown', 'newcomers'],
     ['/admin/people', 'people-basic'],
     ['/admin/people/3', 'people-basic'],
     ['/admin/people/import', 'people'],
@@ -80,6 +93,7 @@ describe('hasAreaAccess', () => {
   it('super admin passes every area including settings', () => {
     expect(hasAreaAccess(superA, 'settings')).toBe(true);
     expect(hasAreaAccess(superA, 'giving')).toBe(true);
+    expect(hasAreaAccess(superA, 'newcomers')).toBe(true);
   });
   it('limited admin: granted + always-on areas only; settings never grantable', () => {
     expect(hasAreaAccess(limited, 'groups')).toBe(true);
@@ -105,6 +119,28 @@ describe('hasAreaAccess', () => {
     expect(hasAreaAccess(scoreOnly, 'groups')).toBe(false);
     expect(hasAreaAccess(scoreOnly, 'serve')).toBe(false);
   });
+  it('newcomers is the only area whose explicit grant works for scoped non-admin staff', () => {
+    const scopedMember = makeUser({ adminAreas: ['newcomers', 'groups', 'people'] });
+    const scopedEditor = makeUser({ role: 'editor', isEditor: true, adminAreas: ['newcomers', 'events'] });
+    expect(hasAreaAccess(scopedMember, 'newcomers')).toBe(true);
+    expect(hasAreaAccess(scopedEditor, 'newcomers')).toBe(true);
+    const everyNonScopedArea = [
+      ...GRANTABLE_AREAS.filter((area) => area !== 'newcomers'),
+      ...ALWAYS_AREAS,
+      'settings' as const,
+    ];
+    for (const legacy of everyNonScopedArea) {
+      expect(hasAreaAccess(scopedMember, legacy), legacy).toBe(false);
+      expect(hasAreaAccess(scopedEditor, legacy), legacy).toBe(false);
+    }
+  });
+  it('an ordinary admin needs an explicit newcomers grant', () => {
+    expect(hasAreaAccess(makeUser({ role: 'admin', isAdmin: true }), 'newcomers')).toBe(false);
+    expect(hasAreaAccess(
+      makeUser({ role: 'admin', isAdmin: true, adminAreas: ['newcomers'] }),
+      'newcomers',
+    )).toBe(true);
+  });
 });
 
 describe('parseAdminAreas', () => {
@@ -116,5 +152,25 @@ describe('parseAdminAreas', () => {
   });
   it('accepts every grantable key', () => {
     expect(parseAdminAreas(GRANTABLE_AREAS.join(','))).toEqual([...GRANTABLE_AREAS]);
+  });
+  it('parses hostile CSV while retaining one valid scoped grant', () => {
+    expect(parseAdminAreas(' groups, newcomers,newcomers,settings,people-basic,unknown, newcomers '))
+      .toEqual(['groups', 'newcomers']);
+  });
+});
+
+describe('role-aware grants', () => {
+  it('exposes only the narrow scoped area for member and editor targets', () => {
+    expect(SCOPED_STAFF_AREAS).toEqual(['newcomers']);
+    expect(grantableAreasForRole('member')).toEqual(['newcomers']);
+    expect(grantableAreasForRole('editor')).toEqual(['newcomers']);
+    expect(grantableAreasForRole('admin')).toEqual(GRANTABLE_AREAS);
+  });
+
+  it('keeps all legal grants for admins but only newcomers for non-admins', () => {
+    const hostile = 'groups,newcomers,events,newcomers,settings,junk';
+    expect(parseAdminAreasForRole(GRANTABLE_AREAS.join(','), 'admin')).toEqual(GRANTABLE_AREAS);
+    expect(parseAdminAreasForRole(hostile, 'member')).toEqual(['newcomers']);
+    expect(parseAdminAreasForRole(hostile, 'editor')).toEqual(['newcomers']);
   });
 });

@@ -61,10 +61,10 @@ or GitHub Release exists.
 - Apply forward migration `0013_service_attendance.sql` before deploying the Attendance
   admin console. It creates `service_attendance`, `service_type_checkin_events`, and
   `service_checkin_link_state` on both D1 and Supabase/PostgreSQL; no adult roster is stored.
-- Apply forward migration `0014_activity_score.sql` before enabling Activity Score. It creates
+- Apply forward migration `0015_activity_score.sql` before enabling Activity Score. It creates
   the singleton scoring configuration and dimension rows on both D1 and
   Supabase/PostgreSQL; calculated member scores are not stored.
-- Migration files `0001` through `0014` in both `migrations/` and `migrations-supabase/` are
+- Migration files `0001` through `0015` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.
