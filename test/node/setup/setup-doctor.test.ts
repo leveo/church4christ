@@ -38,6 +38,7 @@ const SUPABASE_MIGRATIONS = [
   '0013_service_attendance.sql',
   '0014_newcomers.sql',
   '0015_onboarding.sql',
+  '0016_activity_score.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

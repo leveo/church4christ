@@ -72,6 +72,11 @@ are calculated from historical Children's check-ins through date-effective links
 per-person attendance remains a separate data model and authorization surface. See
 [`docs/features/service-attendance.md`](features/service-attendance.md).
 
+Activity Score computes explainable member and church-wide results live from bounded,
+person-linked evidence. It stores only one scoring configuration, never calculated score
+snapshots, and excludes sensitive or non-attributable sources. See
+[`docs/features/activity-score.md`](features/activity-score.md).
+
 ## The database seam: D1 or Postgres
 
 Every data-access helper talks to an **`AppDb`** interface rather than to D1 directly
@@ -107,6 +112,7 @@ run on either of two databases:
 | `children` | Children Check-in | 儿童报到 | Either |
 | `attendance` | Service Attendance | 崇拜出席 | Either |
 | `newcomers` | Newcomer Follow-up | 新朋友跟进 | Either |
+| `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Supabase |
 | `giving` | Giving | 奉献 | Supabase |

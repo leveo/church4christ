@@ -10,6 +10,18 @@ than published to npm.
 
 ## [Unreleased]
 
+### Added
+
+- Added an optional Activity Score module on D1 and PostgreSQL with configurable group
+  attendance, confirmed serving, and registration-engagement dimensions; explainable member
+  calculations; source coverage; comparison trends; and a church-wide summary.
+
+### Upgrade notes
+
+- Apply forward migration `0016_activity_score.sql` before enabling Activity Score. It creates
+  the singleton scoring configuration and dimension rows on both D1 and
+  Supabase/PostgreSQL; calculated member scores are not stored.
+
 ## [1.0.0] - 2026-08-12
 
 ### Added

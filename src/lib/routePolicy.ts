@@ -91,6 +91,7 @@ const ADMIN_ONLY = [
   '/admin/groups',
   '/admin/children',
   '/admin/attendance',
+  '/admin/activity-score',
   '/admin/onboarding',
 ];
 

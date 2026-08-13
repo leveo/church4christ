@@ -56,6 +56,8 @@ describe('adminAreaForPath', () => {
     ['/admin/groups/2', 'groups'],
     ['/admin/attendance', 'attendance'],
     ['/admin/attendance/report.csv', 'attendance'],
+    ['/admin/activity-score', 'activity-score'],
+    ['/admin/activity-score/member/7', 'activity-score'],
     ['/admin/giving', 'giving'],
     ['/admin/giving/reconcile', 'giving'],
     ['/admin/stripe-events', 'payment-operations'],
@@ -119,6 +121,12 @@ describe('hasAreaAccess', () => {
     const attendanceOnly = makeUser({ role: 'admin', isAdmin: true, adminAreas: ['attendance'] });
     expect(hasAreaAccess(attendanceOnly, 'attendance')).toBe(true);
     expect(hasAreaAccess(attendanceOnly, 'groups')).toBe(false);
+  });
+  it('Activity Score requires its own grant and does not grant source modules', () => {
+    const scoreOnly = makeUser({ role: 'admin', isAdmin: true, adminAreas: ['activity-score'] });
+    expect(hasAreaAccess(scoreOnly, 'activity-score')).toBe(true);
+    expect(hasAreaAccess(scoreOnly, 'groups')).toBe(false);
+    expect(hasAreaAccess(scoreOnly, 'serve')).toBe(false);
   });
   it('newcomers is the only area whose explicit grant works for scoped non-admin staff', () => {
     const scopedMember = makeUser({ adminAreas: ['newcomers', 'groups', 'people'] });

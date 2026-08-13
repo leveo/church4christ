@@ -33,8 +33,8 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 16 D1-compatible
-modules), Full Church (all 19), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (all 17 D1-compatible
+modules), Full Church (all 20), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:
@@ -166,6 +166,11 @@ backends. Apply it before enabling the `attendance` module or deploying
 `/admin/attendance`; it creates the adult aggregate, effective Children-event links, and
 link-state tables. See [`features/service-attendance.md`](./features/service-attendance.md)
 for the privacy, access, and report limits.
+
+Activity Score uses forward migration `0016_activity_score.sql` on both backends. Apply it
+before enabling `activity-score` or deploying `/admin/activity-score`; it stores the
+church-wide model while scores remain live calculations. See
+[`features/activity-score.md`](./features/activity-score.md).
 
 ## 4. Set the session secret
 
