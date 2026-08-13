@@ -131,6 +131,7 @@ describe('classifyRoute', () => {
     ['/admin/attendance/report.csv', 'adminOnly'],
     ['/admin/activity-score', 'adminOnly'],
     ['/admin/activity-score/member/7', 'adminOnly'],
+    ['/admin/onboarding', 'adminOnly'],
     // ── unknown paths: namespace-scoped fail-closed hybrid ──
     // Protected namespaces fail closed at their tier…
     ['/admin/xyz', 'adminOnly'],

@@ -42,15 +42,17 @@ describe('/admin/navigation (admin session)', () => {
     const cookie = await sessionCookie(1, 'admin@example.com');
     const before = await navItems();
     expect(before[0]).toEqual({ type: 'builtin', key: 'nav.visit' });
-    expect(before[1]).toEqual({ type: 'builtin', key: 'nav.about' });
+    expect(before[1]).toEqual({ type: 'builtin', key: 'nav.newHere' });
+    expect(before[2]).toEqual({ type: 'builtin', key: 'nav.about' });
 
-    const res = await post('/admin/navigation', new URLSearchParams({ action: 'up', idx: '1' }).toString(), { cookie });
+    const res = await post('/admin/navigation', new URLSearchParams({ action: 'up', idx: '2' }).toString(), { cookie });
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toContain('/admin/navigation?saved=1');
 
     const after = await navItems();
-    expect(after[0]).toEqual({ type: 'builtin', key: 'nav.about' });
-    expect(after[1]).toEqual({ type: 'builtin', key: 'nav.visit' });
+    expect(after[0]).toEqual({ type: 'builtin', key: 'nav.visit' });
+    expect(after[1]).toEqual({ type: 'builtin', key: 'nav.about' });
+    expect(after[2]).toEqual({ type: 'builtin', key: 'nav.newHere' });
     expect(after.length).toBe(before.length);
   });
 

@@ -33,8 +33,8 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 16 D1-compatible
-modules), Full Church (all 19), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (all 17 D1-compatible
+modules), Full Church (all 20), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:
@@ -167,7 +167,7 @@ backends. Apply it before enabling the `attendance` module or deploying
 link-state tables. See [`features/service-attendance.md`](./features/service-attendance.md)
 for the privacy, access, and report limits.
 
-Activity Score uses forward migration `0015_activity_score.sql` on both backends. Apply it
+Activity Score uses forward migration `0016_activity_score.sql` on both backends. Apply it
 before enabling `activity-score` or deploying `/admin/activity-score`; it stores the
 church-wide model while scores remain live calculations. See
 [`features/activity-score.md`](./features/activity-score.md).
@@ -183,6 +183,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 # Store it (paste the value when prompted):
 npx wrangler secret put SESSION_SECRET
+npx wrangler secret put NEWCOMER_RATE_LIMIT_SECRET
 ```
 
 Rotate this secret if it is ever exposed; changing it signs everyone out. See
@@ -313,3 +314,7 @@ you enabled:
 - **Monitor and recover:** review Worker and email failures, verify scheduled backups, keep
   an off-site copy where appropriate, and rehearse restores before an incident.
 - **Never commit** `.dev.vars` or any secret — verify before every commit.
+Before opening a new installation to the public, visit `/admin/onboarding` as a real
+administrator and resolve the shared checklist. A super administrator acknowledges manual
+checks only after verification. Run `npm run doctor -- --strict` from the reviewed deployment
+checkout; bindings alone do not prove routes, jobs, backups, or restores.

@@ -1,0 +1,52 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, btnSecondary, card, lab, noticeErr, td, th, tin } from '../../../lib/adminUi';
+import { listNewcomerQueue } from '../../../lib/newcomerDb';
+import { parseNewcomerQueueFilters } from '../../../lib/newcomerValidation';
+import { todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+const modules = Astro.locals.modules;
+if (!modules.has('newcomers')) return new Response(null, { status: 404 });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'newcomers')) return new Response(null, { status: 403 });
+if (Astro.request.method !== 'GET') return new Response(null, { status: 405, headers: { Allow: 'GET' } });
+const lang: Locale = user?.lang === 'zh' ? 'zh' : 'en';
+const keys = ['statusId', 'assigneePersonId', 'due', 'visitFrom', 'visitTo', 'serviceTypeId', 'source', 'page', 'limit'] as const;
+const duplicate = keys.some((key) => Astro.url.searchParams.getAll(key).length > 1);
+const raw = Object.fromEntries(keys.map((key) => [key, Astro.url.searchParams.get(key) ?? undefined]));
+const parsed = duplicate ? { ok: false as const } : parseNewcomerQueueFilters(raw);
+let failed = !parsed.ok;
+let page = { rows: [], page: 1, limit: 25, hasNext: false } as Awaited<ReturnType<typeof listNewcomerQueue>>;
+if (parsed.ok) {
+  try { page = await listNewcomerQueue(Astro.locals.db, user, lang, parsed.value, todayInTz()); }
+  catch { failed = true; }
+}
+const query = (nextPage: number) => {
+  const params = new URLSearchParams(Astro.url.searchParams);
+  params.set('page', String(nextPage));
+  return params.toString();
+};
+---
+<Admin title={t(lang, 'admin.newcomers.title')}>
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.newcomers.title')}</h1>
+    <div class="flex gap-2">{user?.isSuperAdmin && <a class={btnSecondary} href="/admin/newcomers/settings">{t(lang, 'admin.newcomers.settings')}</a>}<a class={btn} href="/admin/newcomers/new">{t(lang, 'admin.newcomers.add')}</a></div>
+  </div>
+  <form method="get" class={`mt-6 grid gap-3 md:grid-cols-4 ${card}`}>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.status')}</span><input class={tin} type="number" min="1" name="statusId" value={Astro.url.searchParams.get('statusId') ?? ''} /></label>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.assignee')}</span><input class={tin} type="number" min="1" name="assigneePersonId" value={Astro.url.searchParams.get('assigneePersonId') ?? ''} /></label>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.due')}</span><select class={tin} name="due"><option value="all">{t(lang, 'admin.newcomers.all')}</option><option value="overdue">{t(lang, 'admin.newcomers.overdue')}</option><option value="scheduled">{t(lang, 'admin.newcomers.scheduled')}</option><option value="none">{t(lang, 'admin.newcomers.none')}</option></select></label>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.source')}</span><select class={tin} name="source"><option value="">{t(lang, 'admin.newcomers.all')}</option><option value="public">{t(lang, 'admin.newcomers.public')}</option><option value="staff">{t(lang, 'admin.newcomers.staff')}</option></select></label>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.visitFrom')}</span><input class={tin} type="date" name="visitFrom" value={Astro.url.searchParams.get('visitFrom') ?? ''} /></label>
+    <label><span class={lab}>{t(lang, 'admin.newcomers.visitTo')}</span><input class={tin} type="date" name="visitTo" value={Astro.url.searchParams.get('visitTo') ?? ''} /></label>
+    <div class="flex items-end"><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.filter')}</button></div>
+  </form>
+  {failed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
+  <div class="mt-6 overflow-x-auto rounded-xl border border-border"><table class="w-full border-collapse"><thead class="bg-surface-sunken"><tr><th class={th}>{t(lang, 'newcomers.name')}</th><th class={th}>{t(lang, 'admin.newcomers.status')}</th><th class={th}>{t(lang, 'newcomers.visitDate')}</th><th class={th}>{t(lang, 'admin.newcomers.followUp')}</th><th class={th}>{t(lang, 'admin.newcomers.source')}</th></tr></thead><tbody>
+    {page.rows.length === 0 ? <tr><td class={td} colspan="5">{t(lang, 'admin.newcomers.empty')}</td></tr> : page.rows.map((row) => <tr class="border-t border-border"><td class={td}><a class="font-medium text-primary hover:underline" href={`/admin/newcomers/${row.id}`}>{row.name}</a><div class="text-sm text-ink-muted">{row.email ?? row.phone ?? '—'}</div></td><td class={td}>{row.statusLabel}</td><td class={td}>{row.visitDate}</td><td class={td}>{row.nextFollowUpDate ?? '—'}</td><td class={td}>{row.source}</td></tr>)}
+  </tbody></table></div>
+  <div class="mt-4 flex justify-between">{page.page > 1 ? <a class={btnSecondary} href={`?${query(page.page - 1)}`}>{t(lang, 'admin.newcomers.previous')}</a> : <span></span>}{page.hasNext && <a class={btnSecondary} href={`?${query(page.page + 1)}`}>{t(lang, 'admin.newcomers.next')}</a>}</div>
+</Admin>

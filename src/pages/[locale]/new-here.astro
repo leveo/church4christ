@@ -1,0 +1,125 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { btn, lab, tin } from '../../lib/adminUi';
+import { createNewcomerSubmission, listNewcomerFormDefinition } from '../../lib/newcomerDb';
+import { consumeNewcomerPublicRateLimit, readNewcomerUrlencodedForm } from '../../lib/newcomerHttp';
+import { validateNewcomerIntake } from '../../lib/newcomerValidation';
+import { todayInTz } from '../../lib/dates';
+import { t } from '../../lib/i18n';
+import { parseLocale } from '../../lib/locales';
+
+type RateEnv = { NEWCOMER_RATE_LIMIT_SECRET?: string };
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) return Astro.rewrite('/404');
+const modules = Astro.locals.modules;
+if (!modules.has('newcomers')) return new Response(null, { status: 404 });
+Astro.response.headers.set('Cache-Control', 'no-store');
+Astro.response.headers.set('Pragma', 'no-cache');
+
+const definition = await listNewcomerFormDefinition(Astro.locals.db, Astro.locals.dbBackend, locale);
+const fieldName = (id: number) => `answer_${id}`;
+const allowed = [
+  'website', 'name', 'email', 'phone', 'visit_date', 'service_type_id', 'contact_consent',
+  ...definition.fields.map((field) => fieldName(field.id)),
+];
+let sent = false;
+let unavailable = false;
+if (Astro.request.method === 'POST') {
+  const secret = (env as unknown as RateEnv).NEWCOMER_RATE_LIMIT_SECRET;
+  if (!secret) {
+    unavailable = true;
+    Astro.response.status = 503;
+  } else {
+    const read = await readNewcomerUrlencodedForm(Astro.request, allowed);
+    if (read.ok) {
+      const form = read.fields;
+      if (!form.website) {
+        const answers: Array<{ fieldId: number; value: string | boolean }> = [];
+        for (const field of definition.fields) {
+          const value = form[fieldName(field.id)];
+          if (field.type === 'checkbox') answers.push({ fieldId: field.id, value: value === 'true' });
+          else if (value !== undefined && value !== '') answers.push({ fieldId: field.id, value });
+        }
+        const parsed = validateNewcomerIntake('public', {
+          name: form.name ?? '', email: form.email ?? '', phone: form.phone ?? '', locale,
+          visitDate: form.visit_date ?? '',
+          serviceTypeId: /^\d+$/.test(form.service_type_id ?? '') ? Number(form.service_type_id) : null,
+          contactConsent: form.contact_consent === 'true', answers,
+        }, {
+          activeServiceTypeIds: definition.activeServiceTypeIds,
+          fields: definition.fields.map((field) => ({
+            id: field.id, key: field.key, type: field.type, required: field.required,
+            options: field.options.map((option) => option.value),
+          })),
+        });
+        if (parsed.ok) {
+          const rate = await consumeNewcomerPublicRateLimit(Astro.locals.db, {
+            backend: Astro.locals.dbBackend, secret,
+            email: parsed.value.email, phone: parsed.value.phone,
+            cfConnectingIp: Astro.request.headers.get('CF-Connecting-IP'),
+          });
+          if (rate.ok) {
+            try {
+              const operationId = crypto.randomUUID();
+              await createNewcomerSubmission(Astro.locals.db, null, 'public', parsed.value, {
+                backend: Astro.locals.dbBackend, operationId,
+              });
+            } catch { /* public response remains deliberately generic */ }
+          } else if (rate.reason === 'unavailable') {
+            unavailable = true;
+            Astro.response.status = 503;
+          }
+        }
+      }
+      sent = !unavailable;
+    } else {
+      sent = true;
+    }
+  }
+}
+const today = todayInTz();
+---
+
+<Base title={t(locale, 'newcomers.public.title')} locale={locale} noindex>
+  <section class="container-narrow py-16">
+    {unavailable ? (
+      <div class="rounded-lg border border-border bg-surface-raised p-6">
+        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'newcomers.public.unavailableTitle')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'newcomers.public.unavailableBody')}</p>
+      </div>
+    ) : sent ? (
+      <div class="rounded-lg border border-border bg-surface-raised p-6">
+        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'newcomers.public.thanksTitle')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'newcomers.public.thanksBody')}</p>
+      </div>
+    ) : (
+      <>
+        <h1 class="font-display text-heading-md font-bold">{t(locale, 'newcomers.public.title')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'newcomers.public.intro')}</p>
+        <form method="post" class="mt-6 space-y-4">
+          <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
+            <label>Website<input name="website" tabindex="-1" autocomplete="off" /></label>
+          </div>
+          <label class="block"><span class={lab}>{t(locale, 'newcomers.name')}</span><input class={tin} name="name" required autocomplete="name" /></label>
+          <label class="block"><span class={lab}>{t(locale, 'newcomers.email')}</span><input class={tin} type="email" name="email" autocomplete="email" /></label>
+          <label class="block"><span class={lab}>{t(locale, 'newcomers.phone')}</span><input class={tin} type="tel" name="phone" autocomplete="tel" /></label>
+          <p class="text-sm text-ink-muted">{t(locale, 'newcomers.contactHelp')}</p>
+          <label class="block"><span class={lab}>{t(locale, 'newcomers.visitDate')}</span><input class={tin} type="date" name="visit_date" value={today} required /></label>
+          <label class="block"><span class={lab}>{t(locale, 'newcomers.service')}</span><select class={tin} name="service_type_id"><option value="">{t(locale, 'newcomers.none')}</option>{definition.activeServiceTypeIds.map((id) => <option value={id}>{id}</option>)}</select></label>
+          {definition.fields.map((field) => field.type === 'textarea' ? (
+            <label class="block"><span class={lab}>{field.label}</span><textarea class={tin} name={fieldName(field.id)} required={field.required}></textarea>{field.help && <span class="mt-1 block text-sm text-ink-muted">{field.help}</span>}</label>
+          ) : field.type === 'select' ? (
+            <label class="block"><span class={lab}>{field.label}</span><select class={tin} name={fieldName(field.id)} required={field.required}><option value="">{t(locale, 'newcomers.none')}</option>{field.options.map((option) => <option value={option.value}>{option.label}</option>)}</select></label>
+          ) : field.type === 'checkbox' ? (
+            <label class="flex items-center gap-2"><input type="checkbox" name={fieldName(field.id)} value="true" required={field.required} /><span>{field.label}</span></label>
+          ) : (
+            <label class="block"><span class={lab}>{field.label}</span><input class={tin} name={fieldName(field.id)} required={field.required} /></label>
+          ))}
+          <label class="flex items-start gap-2"><input class="mt-1" type="checkbox" name="contact_consent" value="true" required /><span>{t(locale, 'newcomers.public.consent')}</span></label>
+          <button class={`${btn} w-full justify-center`} type="submit">{t(locale, 'newcomers.public.submit')}</button>
+        </form>
+      </>
+    )}
+  </section>
+</Base>

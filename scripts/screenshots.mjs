@@ -69,10 +69,10 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { assertExpectedScreenshotPage, requireScreenshotOnly } from './lib/screenshot-validation.mjs';
+import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from './lib/screenshot-validation.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VIEWPORT = { width: 1280, height: 800 };
@@ -105,7 +105,21 @@ const MIN_BYTES = 20 * 1024;
 //            the resulting navigation before continuing. Used for the one shot
 //            that needs to show a *real* server response (the kiosk pickup
 //            code), which only exists after an actual check-in POST.
+export const RELEASE_SCREENSHOTS = validateScreenshotManifest([
+  { path: '/admin/people/export', out: 'docs/images/admin/people-export.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Export people and households', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/admin/people/import/map', out: 'docs/images/admin/people-import-mapping.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Map and import a source CSV', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/admin/attendance', out: 'docs/images/admin/attendance-entry.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Record attendance', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/admin/attendance', out: 'docs/images/admin/attendance-report.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Attendance report', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/en/new-here', out: 'docs/images/public/new-here-en.png', locale: 'en', backend: 'either', identity: 'public', viewport: VIEWPORT, expectedText: 'New here?', rejectionTexts: ['Service unavailable', 'Page not found'] },
+  { path: '/zh/new-here', out: 'docs/images/public/new-here-zh.png', locale: 'zh', backend: 'either', identity: 'public', viewport: VIEWPORT, expectedText: '第一次来吗？', rejectionTexts: ['服务暂时不可用', '页面未找到'] },
+  { path: '/admin/newcomers', out: 'docs/images/admin/newcomers-queue.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Newcomer follow-up', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/admin/newcomers/70000000-0000-4000-8000-000000000001', out: 'docs/images/admin/newcomer-detail.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Jamie New', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/admin/onboarding', out: 'docs/images/admin/onboarding.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Launch checklist', rejectionTexts: ['Sign in', '403', 'Page not found'] },
+  { path: '/en/groups/1/manage', out: 'docs/images/groups/member-checklist.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Members', rejectionTexts: ['Sign in', '404', 'Page not found'] },
+]);
+
 const PAGES = [
+  ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
   { path: '/zh/', out: 'docs/images/public/home-zh.png' },
@@ -267,11 +281,11 @@ async function connect(wsUrl) {
       pending.set(id, { resolve, reject });
       ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
-  const onceEvent = (method, sessionId, timeoutMs) =>
+  const onceEvent = (method, sessionId, timeoutMs, predicate = () => true) =>
     new Promise((resolve, reject) => {
       const timer = setTimeout(() => { eventHandlers.delete(h); reject(new Error(`timeout waiting for ${method}`)); }, timeoutMs);
       const h = (msg) => {
-        if (msg.method === method && (!sessionId || msg.sessionId === sessionId)) {
+        if (msg.method === method && (!sessionId || msg.sessionId === sessionId) && predicate(msg.params)) {
           clearTimeout(timer); eventHandlers.delete(h); resolve(msg.params);
         }
       };
@@ -298,6 +312,7 @@ async function capture(cdp, base, row) {
 
   try {
     await send('Page.enable', {}, sessionId);
+    await send('Network.enable', {}, sessionId);
     await send('Runtime.enable', {}, sessionId);
     await send('Emulation.setDeviceMetricsOverride',
       { width: VIEWPORT.width, height: VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -309,9 +324,12 @@ async function capture(cdp, base, row) {
       { source: `try{ ${hantExpr} localStorage.removeItem('c4c-mode'); }catch(e){}` }, sessionId);
 
     const url = new URL(row.path, base).href;
+    const mainDocument = onceEvent('Network.responseReceived', sessionId, 20000,
+      (params) => params.type === 'Document' && new URL(params.response.url).pathname === new URL(url).pathname);
     const loaded = onceEvent('Page.loadEventFired', sessionId, 20000).catch(() => {});
     await send('Page.navigate', { url }, sessionId);
     await loaded;
+    const mainResponse = await mainDocument;
 
     // A scripted form submission: check every box matching `checkAll`, then
     // submit the form and wait for the real server-rendered response page
@@ -373,7 +391,7 @@ async function capture(cdp, base, row) {
     }
 
     const { result: pageState } = await send('Runtime.evaluate', {
-      expression: `({url:location.href,title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||''})`,
+      expression: `({url:location.href,status:${Number(mainResponse.response.status)},title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||''})`,
       returnByValue: true,
     }, sessionId);
     assertExpectedScreenshotPage(row, pageState.value);
@@ -443,4 +461,6 @@ async function main() {
   console.log(`\nAll ${pages.length} captures passed (1280x800, >20KB).`);
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((err) => { console.error(err); process.exit(1); });
+}

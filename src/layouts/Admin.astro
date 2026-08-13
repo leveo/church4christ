@@ -79,6 +79,7 @@ const hasPaymentOperations = paymentOperationsEnabled(modules);
 // their role-based rows (their `show` booleans), so non-admins pass areaOn.
 const areaOn = (a?: AdminAreaKey) => !a || !user?.isAdmin || hasAreaAccess(user, a);
 const isSuper = !!user?.isSuperAdmin;
+const isNewcomerStaff = hasAreaAccess(user, 'newcomers');
 
 type NavItem = { label: string; href: string; module?: ModuleKey; area?: AdminAreaKey };
 type NavSection = {
@@ -130,6 +131,8 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.children'), href: '/admin/children', show: isAdmin, module: 'children', area: 'children' },
   { label: t(lang, 'admin.nav.attendance'), href: '/admin/attendance', show: isAdmin, module: 'attendance', area: 'attendance' },
   { label: t(lang, 'admin.nav.activityScore'), href: '/admin/activity-score', show: isAdmin, module: 'activity-score', area: 'activity-score' },
+  { label: t(lang, 'admin.nav.newcomers'), href: '/admin/newcomers', show: isNewcomerStaff, module: 'newcomers', area: 'newcomers' },
+  { label: t(lang, 'admin.nav.onboarding'), href: '/admin/onboarding', show: isAdmin, area: 'onboarding' },
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving', area: 'giving' },
   {
     label: t(lang, 'admin.stripe.title'),

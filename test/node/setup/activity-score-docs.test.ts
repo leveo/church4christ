@@ -31,15 +31,15 @@ describe('activity score documentation', () => {
     expect(permissions).toMatch(/16 grantable keys/i);
   });
 
-  it('records migration 0015 and the expanded capability counts', () => {
-    expect(feature).toMatch(/migrations\/0015_activity_score\.sql/);
-    expect(feature).toMatch(/migrations-supabase\/0015_activity_score\.sql/);
-    expect(upgrade).toContain('0015_activity_score.sql');
-    expect(release).toMatch(/Files .*0001.* through\s+.*0015/);
-    expect(changelog).toMatch(/Migration files .*0001.* through .*0015/);
+  it('records migration 0016 and the expanded capability counts', () => {
+    expect(feature).toMatch(/migrations\/0016_activity_score\.sql/);
+    expect(feature).toMatch(/migrations-supabase\/0016_activity_score\.sql/);
+    expect(upgrade).toContain('0016_activity_score.sql');
+    expect(release).toMatch(/Files .*0001.* through\s+.*0016/);
+    expect(changelog).toContain('0016_activity_score.sql');
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
-    expect(modules).toMatch(/The 19 modules/);
-    expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?16/);
-    expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?19/);
+    expect(modules).toMatch(/The 20 modules/);
+    expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?17/);
+    expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?20/);
   });
 });

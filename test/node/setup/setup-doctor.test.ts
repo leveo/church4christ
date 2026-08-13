@@ -37,7 +37,8 @@ const SUPABASE_MIGRATIONS = [
   '0012_people_import_mappings.sql',
   '0013_service_attendance.sql',
   '0014_newcomers.sql',
-  '0015_activity_score.sql',
+  '0015_onboarding.sql',
+  '0016_activity_score.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -120,7 +121,7 @@ describe('doctor readiness model', () => {
   it('derives stable states, validates strict booleans, and deep-freezes copied results', () => {
     const input = [result('all.ok', 'info', 'ready', 'none')];
     const ready = summarizeReadiness(input);
-    expect(ready).toEqual({ schemaVersion: 1, status: 'ready', checks: input });
+    expect(ready).toEqual({ schemaVersion: 2, status: 'ready', checks: input });
     expect(Object.isFrozen(ready)).toBe(true);
     expect(Object.isFrozen(ready.checks)).toBe(true);
     expect(ready.checks).not.toBe(input);
@@ -317,6 +318,9 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.attendance).toEqual([
       'service_attendance', 'service_type_checkin_events', 'service_checkin_link_state',
     ]);
+    expect(TABLES_BY_CAPABILITY.newcomers).toEqual(expect.arrayContaining([
+      'newcomer_submissions', 'newcomer_activity', 'newcomer_rate_limits',
+    ]));
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);
@@ -441,11 +445,11 @@ describe('doctor capability services check', () => {
   it('reports required R2, email by mode, exact Stripe states, and optional backup', async () => {
     const full = { ...baseManifest, mode: 'deploy', preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } } as const;
     const absent = await checkServices({ catalog, manifest: full, presence: { worker: false, r2: false, hyperdrive: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
-    expect(absent.map((entry) => entry.code)).toEqual(['services.worker', 'services.r2', 'services.hyperdrive', 'services.email', 'services.stripe-absent', 'services.backup-absent']);
+    expect(absent.map((entry) => entry.code)).toEqual(['services.worker', 'services.r2', 'services.hyperdrive', 'services.email', 'services.stripe-absent', 'services.newcomer-rate-limit-secret', 'services.backup-absent']);
     expect(absent.find((entry) => entry.code === 'services.stripe-absent')?.message).toMatch(/free registration.*offline giving/i);
     const partial = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: false, backup: true } });
     expect(partial.map((entry) => [entry.code, entry.severity])).toEqual([
-      ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.backup-ok', 'info'],
+      ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.newcomer-rate-limit-secret', 'error'], ['services.backup-ok', 'info'],
     ]);
     const complete = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
     expect(complete.find((entry) => entry.code === 'services.stripe-unverifiable')?.severity).toBe('warning');
@@ -515,11 +519,11 @@ describe('doctor composition', () => {
       checkServices: () => [],
     };
     const doctor = await runDoctor(context);
-    expect(doctor.schemaVersion).toBe(1);
+    expect(doctor.schemaVersion).toBe(2);
     expect(doctor.status).toBe('not-ready');
     expect(doctor.checks.map((entry) => entry.code)).toEqual(['manifest.exception', 'config.exception', 'database.exception']);
     expect(Object.keys(doctor)).toEqual(['schemaVersion', 'status', 'checks', 'exitCode']);
-    expect(doctor.checks.every((entry) => Object.keys(entry).sort().join('|') === 'code|message|remediation|severity')).toBe(true);
+    expect(doctor.checks.every((entry) => Object.keys(entry).sort().join('|') === 'checkId|code|message|remediation|severity|status')).toBe(true);
     expect(doctor.checks.some((entry) => entry.message.includes('database') || entry.remediation.includes('database'))).toBe(false);
   });
 });

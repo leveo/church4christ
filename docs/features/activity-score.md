@@ -56,8 +56,8 @@ query failure, or population-limit breach fails closed and shows no partial memb
 
 ## Upgrade and implementation notes
 
-Apply `migrations/0015_activity_score.sql` for D1 or
-`migrations-supabase/0015_activity_score.sql` for Supabase/PostgreSQL before enabling the
+Apply `migrations/0016_activity_score.sql` for D1 or
+`migrations-supabase/0016_activity_score.sql` for Supabase/PostgreSQL before enabling the
 module. The migration creates a singleton `activity_score_config` row and exactly three
 `activity_score_dimensions` rows. Calculated person scores are not stored; the report computes
 them live from the selected model and bounded evidence queries.

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "categories": ["foundation", "people", "operations"],
+  "checks": [
+    {
+      "id": "identity", "category": "foundation", "severity": "error",
+      "selectors": { "capabilities": [], "services": [] }, "surfaces": ["cli", "admin"],
+      "title": { "en": "Church identity", "zh": "教会资料" },
+      "description": { "en": "Confirm the installation manifest and public church identity.", "zh": "确认安装清单与公开教会资料。" },
+      "remediation": { "en": "Complete setup and review identity settings.", "zh": "完成设置并检查教会资料。" },
+      "adminPath": "/admin/settings", "manualVersion": 1,
+      "legacyCodes": ["manifest.missing", "manifest.invalid", "manifest.ok", "manifest.exception"]
+    },
+    {
+      "id": "locales", "category": "foundation", "severity": "warning",
+      "selectors": { "capabilities": [], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "English and Chinese copy", "zh": "中英文内容" },
+      "description": { "en": "Review public copy in both supported locales.", "zh": "检查两个支持语言的公开内容。" },
+      "remediation": { "en": "Review English and Chinese settings and pages.", "zh": "检查中英文设置与页面。" },
+      "adminPath": "/admin/settings", "manualVersion": 1, "legacyCodes": []
+    },
+    {
+      "id": "service-times", "category": "foundation", "severity": "warning",
+      "selectors": { "capabilities": [], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "Service times", "zh": "聚会时间" },
+      "description": { "en": "Confirm service times are current in both locales.", "zh": "确认中英文聚会时间均为最新。" },
+      "remediation": { "en": "Update service times in Settings.", "zh": "在设置中更新聚会时间。" },
+      "adminPath": "/admin/settings", "manualVersion": 1, "legacyCodes": []
+    },
+    {
+      "id": "admin-grants", "category": "people", "severity": "warning",
+      "selectors": { "capabilities": ["people"], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "Staff grants", "zh": "同工权限" },
+      "description": { "en": "Review limited-admin and scoped-staff access.", "zh": "检查受限管理员与同工权限。" },
+      "remediation": { "en": "Review role and area grants in People.", "zh": "在会众管理中检查角色与区域权限。" },
+      "adminPath": "/admin/people", "manualVersion": 1,
+      "legacyCodes": ["database.admin", "database.modules"]
+    },
+    {
+      "id": "people-migration", "category": "people", "severity": "warning",
+      "selectors": { "capabilities": ["people"], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "People migration decision", "zh": "会众迁移决定" },
+      "description": { "en": "Record whether People data was imported or intentionally starts empty.", "zh": "记录会众资料已导入或决定从空白开始。" },
+      "remediation": { "en": "Complete import or acknowledge the no-import decision.", "zh": "完成导入或确认不导入的决定。" },
+      "adminPath": "/admin/people/import", "manualVersion": 1, "legacyCodes": []
+    },
+    {
+      "id": "newcomer-owner", "category": "people", "severity": "warning",
+      "selectors": { "capabilities": ["newcomers"], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "Newcomer owner", "zh": "新朋友负责人" },
+      "description": { "en": "Assign responsibility for the newcomer queue.", "zh": "指定新朋友队列负责人。" },
+      "remediation": { "en": "Choose an owner and review the queue workflow.", "zh": "选择负责人并检查队列流程。" },
+      "adminPath": "/admin/newcomers", "manualVersion": 1,
+      "legacyCodes": ["services.newcomer-rate-limit-secret", "services.newcomer-rate-limit-secret-ok"]
+    },
+    {
+      "id": "attendance-checkin-mapping", "category": "people", "severity": "warning",
+      "selectors": { "capabilities": ["attendance", "children"], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "Attendance and check-in mapping", "zh": "出席与签到对应" },
+      "description": { "en": "Confirm service attendance maps to check-in events.", "zh": "确认聚会出席与签到活动对应。" },
+      "remediation": { "en": "Review service types and check-in links.", "zh": "检查聚会类型与签到关联。" },
+      "adminPath": "/admin/attendance", "manualVersion": 1, "legacyCodes": []
+    },
+    {
+      "id": "origin-domain-email", "category": "operations", "severity": "warning",
+      "selectors": { "capabilities": [], "services": ["worker", "email", "r2", "hyperdrive", "stripe"] }, "surfaces": ["cli", "admin"],
+      "title": { "en": "Origin, domain, and delivery", "zh": "网址、网域与邮件发送" },
+      "description": { "en": "Verify runtime bindings and production delivery outside the application.", "zh": "在应用外验证运行绑定与正式发送。" },
+      "remediation": { "en": "Verify the domain, bindings, email, storage, and payment test mode.", "zh": "验证网域、绑定、邮件、存储与付款测试模式。" },
+      "adminPath": null, "manualVersion": 1,
+      "legacyCodes": ["services.worker", "services.worker-ok", "services.r2", "services.r2-ok", "services.d1", "services.d1-ok", "services.hyperdrive", "services.hyperdrive-ok", "services.email", "services.email-dev", "services.email-ok", "services.email-unverified", "services.stripe-absent", "services.stripe-partial", "services.stripe-mode", "services.stripe-live", "services.stripe-unknown", "services.stripe-unverifiable", "services.stripe-ok", "services.required-unsupported", "services.exception"]
+    },
+    {
+      "id": "routes-jobs", "category": "operations", "severity": "warning",
+      "selectors": { "capabilities": [], "services": ["worker", "cron"] }, "surfaces": ["cli", "admin"],
+      "title": { "en": "Routes and scheduled jobs", "zh": "路由与定时任务" },
+      "description": { "en": "Configuration does not prove routes or jobs ran successfully.", "zh": "配置本身不能证明路由或定时任务成功运行。" },
+      "remediation": { "en": "Exercise public routes and verify every scheduled job.", "zh": "实际访问公开路由并验证每项定时任务。" },
+      "adminPath": null, "manualVersion": 1,
+      "legacyCodes": ["config.invalid", "config.generated-marker", "config.placeholder", "config.backend", "config.binding", "config.stripe-mode", "config.render", "config.drift", "config.worker-crons", "config.hyperdrive-env-deprecated", "config.ok", "config.exception"]
+    },
+    {
+      "id": "database-schema", "category": "operations", "severity": "error",
+      "selectors": { "capabilities": [], "services": ["d1", "hyperdrive"] }, "surfaces": ["cli", "admin"],
+      "title": { "en": "Database schema", "zh": "数据库结构" },
+      "description": { "en": "Verify connectivity, migrations, and required tables.", "zh": "验证连接、迁移与必要数据表。" },
+      "remediation": { "en": "Apply forward migrations and rerun doctor.", "zh": "应用向前迁移后重新运行 doctor。" },
+      "adminPath": null, "manualVersion": null,
+      "legacyCodes": ["database.connectivity", "database.exception", "database.tables", "database.migrations", "database.d1-migrations-unavailable", "database.ok"]
+    },
+    {
+      "id": "backups", "category": "operations", "severity": "warning",
+      "selectors": { "capabilities": [], "services": ["backup"] }, "surfaces": ["cli", "admin"],
+      "title": { "en": "Backups", "zh": "备份" },
+      "description": { "en": "Configured credentials do not prove a usable backup exists.", "zh": "已配置凭据不能证明存在可用备份。" },
+      "remediation": { "en": "Run a backup and verify its protected destination.", "zh": "执行备份并验证受保护的存放位置。" },
+      "adminPath": null, "manualVersion": 1,
+      "legacyCodes": ["services.backup-absent", "services.backup-ok"]
+    },
+    {
+      "id": "restore-drill", "category": "operations", "severity": "warning",
+      "selectors": { "capabilities": [], "services": ["backup"] }, "surfaces": ["admin"],
+      "title": { "en": "Restore drill", "zh": "恢复演练" },
+      "description": { "en": "A restore drill must be repeated every 90 days.", "zh": "恢复演练必须每 90 天重复一次。" },
+      "remediation": { "en": "Restore a backup in isolation, verify it, then acknowledge this check.", "zh": "在隔离环境恢复并验证备份，然后确认此检查。" },
+      "adminPath": null, "manualVersion": 1, "legacyCodes": []
+    }
+  ]
+}

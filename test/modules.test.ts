@@ -26,7 +26,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 19 module keys in display order', () => {
+  it('has all 20 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -42,6 +42,7 @@ describe('MODULES registry', () => {
       'people',
       'children',
       'attendance',
+      'newcomers',
       'activity-score',
       'page-builder',
       'portal',

@@ -111,6 +111,7 @@ run on either of two databases:
 | `people` | People & Households | 会友与家庭 | Either |
 | `children` | Children Check-in | 儿童报到 | Either |
 | `attendance` | Service Attendance | 崇拜出席 | Either |
+| `newcomers` | Newcomer Follow-up | 新朋友跟进 | Either |
 | `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Supabase |

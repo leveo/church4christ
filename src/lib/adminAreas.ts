@@ -39,9 +39,9 @@ export type ScopedStaffArea = (typeof SCOPED_STAFF_AREAS)[number];
 // (which also covers /admin/navigation) is never grantable — super only.
 export const GRANTABLE_AREAS = [...ADMIN_GRANTABLE_AREAS, ...SCOPED_STAFF_AREAS] as const;
 export type GrantableArea = (typeof GRANTABLE_AREAS)[number];
-export type AdminAreaKey = GrantableArea | 'prayer-wall' | 'people-basic' | 'settings';
+export type AdminAreaKey = GrantableArea | 'prayer-wall' | 'people-basic' | 'onboarding' | 'settings';
 
-export const ALWAYS_AREAS: readonly AdminAreaKey[] = ['prayer-wall', 'people-basic'];
+export const ALWAYS_AREAS: readonly AdminAreaKey[] = ['prayer-wall', 'people-basic', 'onboarding'];
 
 // Admin route prefix -> owning area. Longest prefix wins (so the per-entity
 // revision editors map to their content area, not a generic revisions bucket).
@@ -74,6 +74,7 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   ['/admin/children', 'children'],
   ['/admin/attendance', 'attendance'],
   ['/admin/activity-score', 'activity-score'],
+  ['/admin/onboarding', 'onboarding'],
   ['/admin/stripe-events', 'payment-operations'],
   ['/admin/giving', 'giving'],
   ['/admin/registration', 'registration'],

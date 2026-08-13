@@ -10,6 +10,7 @@
   // provider (there is no send_email binding here) so the devlog path is tested.
   "vars": {
     "SESSION_SECRET": "test-secret-at-least-32-characters-long",
+    "NEWCOMER_RATE_LIMIT_SECRET": "test-newcomer-rate-limit-secret-at-least-32-characters",
     "EMAIL_DEV_LOG": "1",
     "APP_ORIGIN": "http://localhost"
   },

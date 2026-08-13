@@ -101,6 +101,15 @@ describe('hasAreaAccess', () => {
     expect(hasAreaAccess(limited, 'prayer-wall')).toBe(true);
     expect(hasAreaAccess(limited, 'people-basic')).toBe(true);
     expect(hasAreaAccess(limited, 'settings')).toBe(false);
+    expect(hasAreaAccess(limited, 'onboarding')).toBe(true);
+  });
+
+  it('keeps onboarding always-on and non-grantable for real admins only', () => {
+    expect(ALWAYS_AREAS).toContain('onboarding');
+    expect(GRANTABLE_AREAS).not.toContain('onboarding' as never);
+    expect(adminAreaForPath('/admin/onboarding')).toBe('onboarding');
+    expect(hasAreaAccess(makeUser(), 'onboarding')).toBe(false);
+    expect(hasAreaAccess(makeUser({ role: 'editor', isEditor: true }), 'onboarding')).toBe(false);
   });
   it('payment operations requires its dedicated grant', () => {
     expect(hasAreaAccess(makeUser({ role: 'admin', isAdmin: true, adminAreas: ['giving'] }), 'payment-operations')).toBe(false);

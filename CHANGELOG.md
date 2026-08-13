@@ -1,16 +1,28 @@
 # Changelog
 
 This file records changes that affect churches, nonprofit operators, implementers, and
-maintainers. Church4Christ is pre-1.0, so upgrade notes are part of the change contract:
-read the relevant entries before moving an installation forward.
+maintainers. Version 1.0.0 is the initial open-source release; upgrade notes are part of the
+change contract, so read the relevant entries before moving an installation forward.
 
-The `Unreleased` section starts after baseline commit
-[`20b67f3`](https://github.com/leveo/church4christ/commit/20b67f3). Earlier development
-history is intentionally not reconstructed as releases. The `0.1.0` value in the private
-package metadata identifies the current source tree; it does not claim that a `0.1.0` tag
-or GitHub Release exists.
+Earlier development history is intentionally not reconstructed as releases. The source
+package remains private because Church4Christ is distributed from this repository rather
+than published to npm.
 
 ## [Unreleased]
+
+### Added
+
+- Added an optional Activity Score module on D1 and PostgreSQL with configurable group
+  attendance, confirmed serving, and registration-engagement dimensions; explainable member
+  calculations; source coverage; comparison trends; and a church-wide summary.
+
+### Upgrade notes
+
+- Apply forward migration `0016_activity_score.sql` before enabling Activity Score. It creates
+  the singleton scoring configuration and dimension rows on both D1 and
+  Supabase/PostgreSQL; calculated member scores are not stored.
+
+## [1.0.0] - 2026-08-12
 
 ### Added
 
@@ -27,12 +39,16 @@ or GitHub Release exists.
   correct adult service totals, derive optional distinct child totals from historical
   check-ins, and download bounded identity-free CSV reports. Groups per-person attendance
   remains separately authorized.
-- Added an optional Activity Score module on D1 and PostgreSQL with configurable group
-  attendance, confirmed serving, and registration-engagement dimensions; explainable member
-  calculations; source coverage; comparison trends; and a church-wide summary.
+- Added bilingual Newcomer follow-up on D1 and PostgreSQL: a consented public intake form,
+  scoped staff queue and actions, exact-match People handoff, and super-admin configuration.
+- Added a shared bilingual launch-readiness catalog used by setup, doctor schema v2, and an
+  always-on admin checklist. Super-admin manual acknowledgements are versioned, and restore
+  drills expire after 90 days.
+- Added a fail-closed `v1.0.0` upgrade rehearsal from the immutable historical baseline for
+  forward D1 and isolated-schema PostgreSQL migrations.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
-- Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
+- Documented the maintainer-only process for creating v1.0.0 and future releases.
 
 ### Changed
 
@@ -49,6 +65,8 @@ or GitHub Release exists.
   repository and keep connection URLs and passwords out of `pg_dump` arguments.
 - Staging and production upgrade steps require operators to verify the exact non-secret D1 or
   Supabase/Postgres target identifiers before migration.
+- Newcomer public rate limits store only keyed hashes and counters, ignore forwarded client
+  headers, and fail without writing when the managed rate-limit secret is unavailable.
 
 ### Upgrade notes
 
@@ -61,9 +79,11 @@ or GitHub Release exists.
 - Apply forward migration `0013_service_attendance.sql` before deploying the Attendance
   admin console. It creates `service_attendance`, `service_type_checkin_events`, and
   `service_checkin_link_state` on both D1 and Supabase/PostgreSQL; no adult roster is stored.
-- Apply forward migration `0015_activity_score.sql` before enabling Activity Score. It creates
-  the singleton scoring configuration and dimension rows on both D1 and
-  Supabase/PostgreSQL; calculated member scores are not stored.
+- Apply forward migration `0014_newcomers.sql` before enabling Newcomers. It creates the
+  bilingual form configuration, queue, activity, operation receipt, and hashed rate-limit
+  tables on both D1 and Supabase/PostgreSQL.
+- Apply forward migration `0015_onboarding.sql` before opening the launch checklist. It
+  creates versioned manual acknowledgement storage on D1 and Supabase/PostgreSQL.
 - Migration files `0001` through `0015` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.

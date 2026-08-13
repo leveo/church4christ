@@ -3,7 +3,7 @@ import { redact } from '../redact.mjs';
 
 const FINAL_SHARED_TABLES = Object.freeze(['checkins', 'custom_pages']);
 const ALWAYS_REQUIRED_TABLES = Object.freeze([
-  'people', 'settings', 'tokens', 'media', ...FINAL_SHARED_TABLES,
+  'people', 'settings', 'tokens', 'media', 'onboarding_acknowledgements', ...FINAL_SHARED_TABLES,
 ]);
 const TABLES_BY_CAPABILITY = Object.freeze({
   bulletins: Object.freeze(['bulletins', 'bulletin_announcements', 'revisions']),
@@ -33,6 +33,11 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'service_attendance', 'service_type_checkin_events', 'service_checkin_link_state',
   ]),
   'activity-score': Object.freeze(['activity_score_config', 'activity_score_dimensions']),
+  newcomers: Object.freeze([
+    'newcomer_statuses', 'newcomer_status_i18n', 'newcomer_fields', 'newcomer_field_i18n',
+    'newcomer_field_options', 'newcomer_field_option_i18n', 'newcomer_submissions',
+    'newcomer_answers', 'newcomer_notes', 'newcomer_activity', 'newcomer_rate_limits',
+  ]),
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
     'group_members', 'group_files',
