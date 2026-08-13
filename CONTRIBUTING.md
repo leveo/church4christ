@@ -68,7 +68,7 @@ Once a migration is merged into `main` or applied to a persistent, shared, or de
 installation, never edit, rename, delete, or reorder it. Before merge, a disposable local or
 CI database may be reset and rebuilt while its proposed migration remains under review; that
 does not establish a permanent freeze boundary. Merge to `main` does. The current `main`
-baseline files `0001` through `0010` in both `migrations/` and `migrations-supabase/` are
+baseline files `0001` through `0015` in both `migrations/` and `migrations-supabase/` are
 already frozen. Add a new numbered forward migration for every correction. Do not manually
 rewrite D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table to make histories
 look aligned. See [`docs/upgrade.md`](docs/upgrade.md) and

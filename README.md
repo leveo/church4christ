@@ -9,7 +9,7 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-Church4Christ is **pre-1.0** software, not a turnkey managed service. Local evaluation
+Church4Christ **1.0.0 is the initial open-source release**, not a turnkey managed service. Local evaluation
 is free, and some deployments can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
 configuration and usage. See [Deployment profiles and costs](#deployment-profiles-and-costs)
@@ -53,7 +53,7 @@ rights.
 moving to another hosting stack is possible source work, not a supported one-click path.
 There is also no automated D1-to-Supabase content migration. The built-in pages are shaped
 by themes, while drag-and-drop editing applies only to custom pages. The project is
-pre-1.0, so adopters should expect implementation work and evolving interfaces.
+versioned, but adopters should still expect implementation work and carefully reviewed upgrades.
 
 Operating the project also means maintaining it. Your technical owner remains responsible
 for dependency updates, security review and configuration, monitoring, backups and restore
@@ -280,7 +280,7 @@ imports resources and bootstraps a reviewed installation. It is not an unattende
 upgrade for a site that already holds church data. Existing operators should start with the
 [upgrade runbook](docs/upgrade.md), back up the database, R2 media, configuration, and secrets
 inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELOG.md) before
-applying forward migrations. Maintainers preparing a future pre-1.0 checkpoint should follow
+applying forward migrations. Maintainers preparing a release should follow
 the [release process](docs/release-process.md).
 
 **Choosing your database.** The 16 D1-compatible modules exclude **Member Portal**,

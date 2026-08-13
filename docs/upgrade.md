@@ -2,8 +2,8 @@
 
 This runbook is for an installation that already has church data, uploaded media, and
 deployment configuration. It is intentionally separate from first-time setup. Church4Christ
-is pre-1.0: interfaces and operating requirements can change between `0.x` checkpoints, so
-review [`CHANGELOG.md`](../CHANGELOG.md) and the exact source diff before every upgrade.
+uses versioned releases, but interfaces and operating requirements may still change, so review
+[`CHANGELOG.md`](../CHANGELOG.md) and the exact source diff before every upgrade.
 
 An upgrade is an operator-reviewed deployment, not an unattended command. Keep a technical
 owner responsible for backups, staging, schema changes, secret handling, verification, and
@@ -179,7 +179,7 @@ migration after it is merged into `main` or applied to a persistent, shared, or 
 installation. Before merge, applying a proposed migration only to disposable local or CI
 databases does not create a permanent freeze boundary: reset or rebuild those databases while
 the migration remains under review. Merge to `main` freezes the file even if no production
-deployment has used it. Files `0001` through `0014` in `migrations/` and
+deployment has used it. Files `0001` through `0015` in `migrations/` and
 `migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.

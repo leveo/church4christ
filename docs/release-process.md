@@ -4,7 +4,7 @@ Church4Christ `v1.0.0` is a maintainer-created source checkpoint for operators w
 reviewed revision and explicit upgrade notes. It does not make the private package
 publishable, promise managed upgrades, or remove the need to test custom implementations.
 
-No release is created merely because `package.json` currently says `0.1.0`. The changelog
+No release is created merely because `package.json` currently says `1.0.0`. The changelog
 baseline is commit `20b67f3`; a version becomes a release only when a maintainer completes the
 process below and deliberately creates an immutable tag and corresponding GitHub Release.
 
@@ -25,7 +25,7 @@ a persistent, shared, or deployed installation; waiting for a tag or GitHub Rele
 late. Before merge, a proposed migration applied only to disposable local or CI databases may
 still change after those databases are reset or rebuilt. Merge to `main` establishes the
 permanent boundary even when no deployed installation has applied it. Files `0001` through
-`0014` in both `migrations/` and `migrations-supabase/` are the frozen current `main` baseline.
+`0015` in both `migrations/` and `migrations-supabase/` are the frozen current `main` baseline.
 Create a new, numbered, forward migration for every correction. Never manufacture migration
 history by editing D1's `d1_migrations` table or Supabase/Postgres's `_migrations` table.
 
@@ -77,7 +77,7 @@ a maintainer must explicitly:
 
 Tags and published release notes are immutable records. Never move, replace, or force-push a
 release tag, and never silently rewrite released migration history or artifacts. Correct an
-error with a new commit and, when needed, a new pre-1.0 checkpoint.
+error with a new commit and, when needed, a new versioned release.
 
 There is intentionally no repository automation that versions, tags, publishes, deploys, or
 migrates production on merge. Those are explicit maintainer and operator decisions.

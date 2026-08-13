@@ -29,9 +29,9 @@ describe('create-only People mapping documentation', () => {
     expect(deploy).toMatch(/mapping profiles[\s\S]{0,420}D1[\s\S]{0,100}(paid|Workers Paid)/i);
     expect(deploy).toMatch(/0012_people_import_mappings\.sql/i);
     expect(upgrade).toMatch(/0012_people_import_mappings\.sql/i);
-    expect(upgrade).toMatch(/Files `0001` through `0014`/);
-    expect(release).toMatch(/Files `0001` through\s+`0014`/);
-    expect(changelog).toMatch(/Migration files `0001` through `0014`/);
+    expect(upgrade).toMatch(/Files `0001` through `0015`/);
+    expect(release).toMatch(/Files `0001` through\s+`0015`/);
+    expect(changelog).toMatch(/Migration files `0001` through `0015`/);
     expect(changelog).toMatch(/create-only[^\n]*mapping/i);
     expect(changelog).toMatch(/people_import_mappings/i);
   });
