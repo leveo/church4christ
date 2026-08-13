@@ -117,6 +117,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/groups/directory.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, join requests, routine and special events, and email-link attendance tracking. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
 |  | **[Service attendance](docs/features/service-attendance.md)** | Record adult service totals, derive optional child totals from check-ins, correct history, and download aggregate CSV reports without adult identities. |
+|  | **[Activity score](docs/features/activity-score.md)** | Combine selected person-linked activities into explainable member scores and a church-wide engagement summary. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
@@ -128,7 +129,7 @@ Every feature has its own plain-English guide. Start with any of these:
 **Pick your modules.** Most optional domain capabilities are **modules** you can switch
 off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
 and more. New installations write every module setting explicitly from the setup selection;
-the Full Church demo selects all 18. On older installations only, missing module rows retain
+the Full Church demo selects all 19. On older installations only, missing module rows retain
 the legacy default-on behavior. A church that wants only service times and sermons can hide
 the rest in a click: the module's pages, links, and emails disappear together, and nothing
 is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -150,6 +151,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `people` | People & Households | 会友与家庭 | Either |
 | `children` | Children Check-in | 儿童报到 | Either |
 | `attendance` | Service Attendance | 崇拜出席 | Either |
+| `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Supabase |
 | `giving` | Giving | 奉献 | Supabase |
@@ -218,8 +220,8 @@ right in your terminal**. Paste it into the browser and you are in. (For quicker
 testing, setup writes that same address as `AUTH_DEV_BYPASS_EMAIL` in `.dev.vars`, which
 signs you in automatically. Remove that line to test the real sign-in flow.)
 
-Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 15
-D1-compatible modules), and **Full Church** (all 18 modules). Portal, Giving, and
+Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 16
+D1-compatible modules), and **Full Church** (all 19 modules). Portal, Giving, and
 Registration select Supabase automatically; D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
@@ -245,9 +247,9 @@ pricing pages before deployment.
 | Profile | Included scope | Cost and readiness notes |
 |---|---|---|
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
-| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 15 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
+| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 16 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
-| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 18 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
+| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 19 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
 
 Provider free allowances can be useful for evaluation or modest deployments, but they are
 not a promise that a production service will remain free. Budget for technical ownership,
@@ -266,7 +268,7 @@ walkthrough.
 
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
-migrations, records all 18 module settings, and bootstraps the first admin. It then hands
+migrations, records all 19 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` whenever you want a readiness report.
 Deployment is intentionally manual: repository automation tests changes but does not
 publish them or migrate production data for you.
@@ -279,7 +281,7 @@ inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELO
 applying forward migrations. Maintainers preparing a future pre-1.0 checkpoint should follow
 the [release process](docs/release-process.md).
 
-**Choosing your database.** The 15 D1-compatible modules exclude **Member Portal**,
+**Choosing your database.** The 16 D1-compatible modules exclude **Member Portal**,
 **Giving**, and **Registration**, which require Postgres. Account requirements follow the
 mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
 Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase

@@ -16,8 +16,8 @@ There are two kinds of admin now:
   and the member directory (names, contact info, and basic profiles) — and a super admin
   grants them access to whichever other parts of the site they actually need to help with:
   bulletins, sermons, prayer sheets, testimonies, pages, news & events, member management,
-  groups, children's check-in, service attendance, giving, registration, payment operations,
-  or volunteer ministry.
+  groups, children's check-in, service attendance, activity score, giving, registration,
+  payment operations, or volunteer ministry.
 
 Existing churches don't lose anything when this feature arrives: every admin account you
 already had becomes a **super admin** automatically, so nobody is locked out. From there,
@@ -68,6 +68,11 @@ CSV report. It never opens Groups' per-person attendance sheets or person histor
 attendance-only admin also cannot edit service types; that remains a Serve grant or
 super-admin responsibility. See [Service attendance](service-attendance.md).
 
+**The activity-score example.** The **Activity Score** grant opens the explainable member
+activity report and church-wide summary. A limited admin with the grant can view scores and
+their bounded calculation evidence, but only a super admin can edit the church-wide scoring
+model. See [Activity score](activity-score.md).
+
 **What can't be granted.** **Settings** and **Navigation** always stay super-admin-only —
 they control things like the church's modules, theme, and site structure, which are
 decisions for whoever is running the whole admin area, not something to hand out piecemeal.
@@ -92,9 +97,9 @@ not whether the module exists.
   `super_admin = 1` for every row with `role = 'admin'` at the time it runs, so upgrading an
   existing install never drops access.
 - **Area registry:** `src/lib/adminAreas.ts` is the pure, tested source of truth.
-  `GRANTABLE_AREAS` lists the 14 grantable keys: `bulletins`, `sermons`, `prayer-sheets`,
+  `GRANTABLE_AREAS` lists the 15 grantable keys: `bulletins`, `sermons`, `prayer-sheets`,
   `testimonies`, `pages`, `events`, `people`, `groups`, `children`, `giving`, `registration`,
-  `attendance`, `payment-operations`, and `serve`.
+  `attendance`, `activity-score`, `payment-operations`, and `serve`.
   `AdminAreaKey` extends that with three keys that are never grantable: `prayer-wall` and
   `people-basic` (in `ALWAYS_AREAS` — free for every admin) and `settings` (covers both
   `/admin/settings` and `/admin/navigation`; `hasAreaAccess` hard-fails it for anyone who

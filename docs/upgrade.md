@@ -173,7 +173,7 @@ migration after it is merged into `main` or applied to a persistent, shared, or 
 installation. Before merge, applying a proposed migration only to disposable local or CI
 databases does not create a permanent freeze boundary: reset or rebuild those databases while
 the migration remains under review. Merge to `main` freezes the file even if no production
-deployment has used it. Files `0001` through `0013` in `migrations/` and
+deployment has used it. Files `0001` through `0014` in `migrations/` and
 `migrations-supabase/` are the frozen current `main` baseline. In particular, do not rewrite
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.
@@ -194,6 +194,12 @@ both providers. Apply it before deploying `/admin/attendance` or enabling the `a
 module. The migration adds adult aggregates plus append/close Children-event links; it does
 not create an adult roster. A code rollback does not remove those rows. Back up and verify
 the schema on staging, and do not rewrite `0013` after this frozen boundary.
+
+Migration `0014_activity_score.sql` creates the Activity Score model tables on both
+providers. Apply it before deploying `/admin/activity-score` or enabling the
+`activity-score` module. The migration stores configuration only; member and church-wide
+scores are calculated live. A code rollback does not remove the model, and operators must
+not rewrite `0014` after this frozen boundary.
 
 ## 5. Recovery boundaries
 

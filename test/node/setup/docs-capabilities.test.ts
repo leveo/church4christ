@@ -37,9 +37,9 @@ describe('catalog-owned docs', () => {
     expect(architecture).not.toMatch(/'d1' for everything else/i);
   });
 
-  it('renders all 18 modules and exactly three Supabase requirements', () => {
-    expect(raw.order).toHaveLength(18);
-    expect(Object.keys(raw.capabilities)).toHaveLength(18);
+  it('renders all 19 modules and exactly three Supabase requirements', () => {
+    expect(raw.order).toHaveLength(19);
+    expect(Object.keys(raw.capabilities)).toHaveLength(19);
     expect(new Set(raw.order)).toEqual(new Set(Object.keys(raw.capabilities)));
     expect(
       raw.order.filter(

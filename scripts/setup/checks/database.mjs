@@ -32,6 +32,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   attendance: Object.freeze([
     'service_attendance', 'service_type_checkin_events', 'service_checkin_link_state',
   ]),
+  'activity-score': Object.freeze(['activity_score_config', 'activity_score_dimensions']),
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
     'group_members', 'group_files',
