@@ -36,6 +36,7 @@ const SUPABASE_MIGRATIONS = [
   '0011_people_exports.sql',
   '0012_people_import_mappings.sql',
   '0013_service_attendance.sql',
+  '0014_newcomers.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

@@ -18,7 +18,7 @@ import type {
   EventInput,
 } from './validate';
 import { LOCALES, type Locale } from './locales';
-import { parseAdminAreas } from './adminAreas';
+import { parseAdminAreasForRole } from './adminAreas';
 
 type Role = PersonInput['role'];
 
@@ -48,7 +48,7 @@ export interface AdminPersonRow extends PersonListRow {
   joined_on: string | null;
   finance: number; // finance-team flag (giving admin access); D1 raw 0/1
   super_admin: number; // D1 raw 0/1 — feeds the flags form's super-admin checkbox
-  admin_areas: string | null; // CSV grant list — parsed via parseAdminAreas for the areas fieldset
+  admin_areas: string | null; // CSV carrier — role-filtered before the areas fieldset or session use
 }
 
 /** Directory filters (people module). serving/household are tri-state: undefined
@@ -306,8 +306,9 @@ const KEEPS_A_SUPER_ADMIN = `(super_admin = 0 OR role != 'admin' OR active = 0 O
  * person's next request — the middleware reloads the row and its `active = 1`
  * check rejects an inactive session. `finance` grants the giving-admin
  * (finance) route class; `superAdmin` grants full access + grant management;
- * `adminAreas` is the per-admin module grant list, validated through
- * parseAdminAreas (unknown/duplicate entries dropped) and stored as CSV.
+ * `adminAreas` is the shared grant carrier, validated against the target's
+ * resulting role before storage: admins may hold every legal grant, while
+ * member/editor rows retain only the narrowly scoped Newcomers grant.
  * Refuses (throws `Error('last_super_admin')`) any change that would leave
  * zero active super admins — see isLastSuperAdmin.
  */
@@ -340,9 +341,24 @@ export async function setPersonFlags(
     sets.push('super_admin = ?');
     binds.push(flags.superAdmin ? 1 : 0);
   }
-  if (flags.adminAreas !== undefined) {
+
+  // Filter grants against the RESULTING target role, never the actor or the
+  // pre-update role. A role-only demotion also sanitizes stored legacy grants,
+  // preserving Newcomers while preventing later accidental reactivation.
+  let roleForAreas = flags.role;
+  let areasCsv = flags.adminAreas?.join(',');
+  const sanitizeDemotion = flags.role !== undefined && flags.role !== 'admin' && flags.adminAreas === undefined;
+  if ((areasCsv !== undefined && roleForAreas === undefined) || sanitizeDemotion) {
+    const target = await db
+      .prepare(`SELECT role, admin_areas FROM people WHERE id = ? AND deleted_at IS NULL`)
+      .bind(id)
+      .first<{ role: Role; admin_areas: string }>();
+    roleForAreas ??= target?.role;
+    if (sanitizeDemotion) areasCsv = target?.admin_areas ?? '';
+  }
+  if (areasCsv !== undefined && roleForAreas !== undefined) {
     sets.push('admin_areas = ?');
-    binds.push(parseAdminAreas(flags.adminAreas.join(',')).join(','));
+    binds.push(parseAdminAreasForRole(areasCsv, roleForAreas).join(','));
   }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");

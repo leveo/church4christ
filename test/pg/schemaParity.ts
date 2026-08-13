@@ -13,7 +13,11 @@ export type D1Constraint = {
   columns: string[];
   foreignTable?: string;
   foreignColumns?: string[];
+  onDelete?: D1ReferentialAction;
+  onUpdate?: D1ReferentialAction;
 };
+
+export type D1ReferentialAction = 'no action' | 'restrict' | 'cascade' | 'set null' | 'set default';
 
 export type D1Index = {
   name: string;
@@ -23,9 +27,21 @@ export type D1Index = {
   predicate: string | null;
 };
 
+export type D1Trigger = {
+  name: string;
+  table: string;
+  timing: 'before' | 'after';
+  event: 'insert' | 'update' | 'delete';
+  when: string | null;
+  bodyGuard: string | null;
+  semanticGuard: string;
+  abortMessage: string;
+};
+
 export type D1Schema = {
   tables: Map<string, { columns: Map<string, D1Column>; constraints: D1Constraint[] }>;
   indexes: Map<string, D1Index>;
+  triggers: Map<string, D1Trigger>;
 };
 
 export function discoverD1MigrationFiles(directory = 'migrations'): string[] {
@@ -177,6 +193,177 @@ function stripLineComments(sql: string): string {
   return result;
 }
 
+function normalizeTriggerExpression(value: string): string {
+  return mapOutsideSqlQuotes(
+    value.trim(),
+    (segment) => segment.replace(/\s+/g, ' ').toLowerCase(),
+  ).replace(/\s+/g, ' ').trim();
+}
+
+function canonicalTriggerExpression(value: string): string {
+  const tokens: string[] = [];
+  for (let index = 0; index < value.length;) {
+    const char = value[index];
+    if (/\s/.test(char)) { index += 1; continue; }
+    if (char === "'") {
+      const start = index;
+      for (index += 1; index < value.length;) {
+        if (value[index] === "'" && value[index + 1] === "'") index += 2;
+        else if (value[index] === "'") { index += 1; break; }
+        else index += 1;
+      }
+      if (value[index - 1] !== "'") throw new Error('unterminated trigger guard string literal');
+      tokens.push(value.slice(start, index));
+      continue;
+    }
+    const word = value.slice(index).match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0];
+    if (word) { tokens.push(word.toLowerCase()); index += word.length; continue; }
+    const number = value.slice(index).match(/^\d+(?:\.\d+)?/)?.[0];
+    if (number) { tokens.push(number); index += number.length; continue; }
+    const operator = ['<>', '>=', '<=', '::'].find((candidate) => value.startsWith(candidate, index));
+    if (operator) { tokens.push(operator); index += operator.length; continue; }
+    if ('().,;=<>+-'.includes(char)) { tokens.push(char); index += 1; continue; }
+    throw new Error(`unsupported trigger guard token at: ${value.slice(index)}`);
+  }
+  const canonical: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens.slice(index, index + 4).join(' ') === 'is not distinct from') {
+      canonical.push('is');
+      index += 3;
+    } else if (tokens[index] === '::' && tokens[index + 1] === 'text') {
+      index += 1;
+    } else {
+      canonical.push(tokens[index]);
+    }
+  }
+  return canonical.join(' ');
+}
+
+function triggerAbort(rawBody: string): Pick<D1Trigger, 'bodyGuard' | 'abortMessage'> {
+  const body = rawBody.trim();
+  const unconditional = body.match(
+    /^SELECT\s+RAISE\s*\(\s*ABORT\s*,\s*'((?:[^']|'')*)'\s*\)\s*;?$/i,
+  );
+  if (unconditional) {
+    return { bodyGuard: null, abortMessage: unconditional[1].replaceAll("''", "'") };
+  }
+  const guarded = body.match(
+    /^SELECT\s+CASE\s+WHEN\s+([\s\S]+?)\s+THEN\s+RAISE\s*\(\s*ABORT\s*,\s*'((?:[^']|'')*)'\s*\)\s+END\s*;?$/i,
+  );
+  if (guarded) {
+    return {
+      bodyGuard: normalizeTriggerExpression(guarded[1]),
+      abortMessage: guarded[2].replaceAll("''", "'"),
+    };
+  }
+  throw new Error(`unsupported trigger body: ${body}`);
+}
+
+function parseTrigger(statement: string): D1Trigger {
+  const parsed = statement.match(
+    /^CREATE\s+TRIGGER\s+(\S+)\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+(\S+)(?:\s+FOR\s+EACH\s+ROW)?(?:\s+WHEN\s+([\s\S]+?))?\s+BEGIN\s+([\s\S]*)\s+END\s*;$/i,
+  );
+  if (!parsed) throw new Error(`unsupported trigger definition: ${statement}`);
+  const when = parsed[5] ? normalizeTriggerExpression(parsed[5]) : null;
+  const effect = triggerAbort(parsed[6]);
+  const conditions = [when, effect.bodyGuard]
+    .filter((condition): condition is string => condition !== null)
+    .map(canonicalTriggerExpression);
+  return {
+    name: identifier(parsed[1]),
+    table: identifier(parsed[4]),
+    timing: parsed[2].toLowerCase() as D1Trigger['timing'],
+    event: parsed[3].toLowerCase() as D1Trigger['event'],
+    when,
+    ...effect,
+    semanticGuard: conditions.length === 0
+      ? 'true'
+      : conditions.length === 1
+        ? conditions[0]
+        : conditions.map((condition) => `( ${condition} )`).join(' and '),
+  };
+}
+
+function triggerStatementEnd(sql: string, start: number): number {
+    let quote: "'" | '"' | null = null;
+    let sawBegin = false;
+    let caseDepth = 0;
+    for (let index = start; index < sql.length;) {
+      const char = sql[index];
+      if (quote) {
+        if (char === quote && sql[index + 1] === quote) index += 2;
+        else if (char === quote) { quote = null; index += 1; }
+        else index += 1;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        index += 1;
+        continue;
+      }
+      const token = sql.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0];
+      if (!token) { index += 1; continue; }
+      const keyword = token.toLowerCase();
+      index += token.length;
+      if (!sawBegin) {
+        if (keyword === 'begin') sawBegin = true;
+        continue;
+      }
+      if (keyword === 'case') {
+        caseDepth += 1;
+        continue;
+      }
+      if (keyword !== 'end') continue;
+      if (caseDepth > 0) {
+        caseDepth -= 1;
+        continue;
+      }
+      while (/\s/.test(sql[index] ?? '')) index += 1;
+      if (sql[index] !== ';') throw new Error(`unsupported trigger definition: ${sql.slice(start, index)}`);
+      return index + 1;
+    }
+    if (!sawBegin || quote || caseDepth !== 0) {
+      throw new Error(`unterminated trigger definition: ${sql.slice(start)}`);
+    }
+    throw new Error(`unterminated trigger definition: ${sql.slice(start)}`);
+}
+
+function splitSchemaSql(sql: string): string[] {
+  const statements: string[] = [];
+  for (let cursor = 0; cursor < sql.length;) {
+    while (/\s/.test(sql[cursor] ?? '')) cursor += 1;
+    if (cursor >= sql.length) break;
+    if (/^CREATE\s+TRIGGER\b/i.test(sql.slice(cursor))) {
+      const end = triggerStatementEnd(sql, cursor);
+      statements.push(sql.slice(cursor, end).trim());
+      cursor = end;
+      continue;
+    }
+
+    const start = cursor;
+    let depth = 0;
+    let quote: "'" | '"' | null = null;
+    for (; cursor < sql.length; cursor += 1) {
+      const char = sql[cursor];
+      if (quote) {
+        if (char === quote && sql[cursor + 1] === quote) cursor += 1;
+        else if (char === quote) quote = null;
+        continue;
+      }
+      if (char === "'" || char === '"') quote = char;
+      else if (char === '(') depth += 1;
+      else if (char === ')') depth -= 1;
+      else if (char === ';' && depth === 0) break;
+      if (depth < 0) throw new Error(`unbalanced schema SQL: ${sql.slice(start, cursor + 1)}`);
+    }
+    if (quote || depth !== 0) throw new Error(`unbalanced schema SQL: ${sql.slice(start)}`);
+    const statement = sql.slice(start, cursor).trim();
+    if (statement) statements.push(statement);
+    if (sql[cursor] === ';') cursor += 1;
+  }
+  return statements;
+}
+
 function splitSql(sql: string, delimiter: ',' | ';'): string[] {
   const parts: string[] = [];
   let current = '';
@@ -265,6 +452,88 @@ function defaultExpression(tail: string): string | null {
   return tail.slice(start, i);
 }
 
+function topLevelSqlWords(value: string, context: string): string[] {
+  const words: string[] = [];
+  let depth = 0;
+  for (let index = 0; index < value.length;) {
+    const char = value[index];
+    const next = value[index + 1];
+    if (char === "'" || char === '"') {
+      const quote = char;
+      let closed = false;
+      for (index += 1; index < value.length;) {
+        if (value[index] === quote && value[index + 1] === quote) index += 2;
+        else if (value[index] === quote) { index += 1; closed = true; break; }
+        else index += 1;
+      }
+      if (!closed) throw new Error(`unterminated quoted value in ${context}`);
+      continue;
+    }
+    if (char === '-' && next === '-') {
+      index += 2;
+      while (index < value.length && value[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      let commentDepth = 1;
+      for (index += 2; index < value.length && commentDepth > 0;) {
+        if (value[index] === '/' && value[index + 1] === '*') { commentDepth += 1; index += 2; }
+        else if (value[index] === '*' && value[index + 1] === '/') { commentDepth -= 1; index += 2; }
+        else index += 1;
+      }
+      if (commentDepth !== 0) throw new Error(`unterminated block comment in ${context}`);
+      continue;
+    }
+    if (char === '(') { depth += 1; index += 1; continue; }
+    if (char === ')') {
+      if (depth === 0) throw new Error(`unbalanced parentheses in ${context}`);
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    const word = value.slice(index).match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0];
+    if (word) {
+      if (depth === 0) words.push(word.toLowerCase());
+      index += word.length;
+      continue;
+    }
+    index += 1;
+  }
+  if (depth !== 0) throw new Error(`unbalanced parentheses in ${context}`);
+  return words;
+}
+
+function referentialActions(tail: string): Pick<D1Constraint, 'onDelete' | 'onUpdate'> {
+  const actions: { onDelete: D1ReferentialAction; onUpdate: D1ReferentialAction } = {
+    onDelete: 'no action',
+    onUpdate: 'no action',
+  };
+  const seen = new Set<'delete' | 'update'>();
+  const words = topLevelSqlWords(tail, 'foreign-key action');
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] !== 'on' || !['delete', 'update'].includes(words[index + 1] ?? '')) continue;
+    const event = words[index + 1] as 'delete' | 'update';
+    if (seen.has(event)) throw new Error(`duplicate ON ${event.toUpperCase()} foreign-key action`);
+    seen.add(event);
+    let action: D1ReferentialAction;
+    if (['restrict', 'cascade'].includes(words[index + 2] ?? '')) {
+      action = words[index + 2] as D1ReferentialAction;
+      index += 2;
+    } else if (words[index + 2] === 'no' && words[index + 3] === 'action') {
+      action = 'no action';
+      index += 3;
+    } else if (words[index + 2] === 'set' && ['null', 'default'].includes(words[index + 3] ?? '')) {
+      action = `set ${words[index + 3]}` as D1ReferentialAction;
+      index += 3;
+    } else {
+      throw new Error(`unsupported ON ${event.toUpperCase()} foreign-key action`);
+    }
+    if (event === 'delete') actions.onDelete = action;
+    else actions.onUpdate = action;
+  }
+  return actions;
+}
+
 function parseColumn(entry: string): { column: D1Column; constraints: D1Constraint[] } | null {
   const match = entry.match(/^((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s+(INTEGER|TEXT|REAL|BLOB)\b([\s\S]*)$/i);
   if (!match) return null;
@@ -275,13 +544,14 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
   const constraints: D1Constraint[] = [];
   if (primary) constraints.push({ kind: 'primary', columns: [name] });
   if (/\bUNIQUE\b/i.test(tail)) constraints.push({ kind: 'unique', columns: [name] });
-  const foreign = tail.match(/\bREFERENCES\s+((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s*\(([^)]+)\)/i);
+  const foreign = tail.match(/\bREFERENCES\s+((?:"(?:[^"]|"")+")|[A-Za-z_]\w*)\s*\(([^)]+)\)([\s\S]*)/i);
   if (foreign) {
     constraints.push({
       kind: 'foreign',
       columns: [name],
       foreignTable: identifier(foreign[1]),
       foreignColumns: identifiers(foreign[2]),
+      ...referentialActions(foreign[3]),
     });
   }
   return {
@@ -297,32 +567,8 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
 }
 
 function hasTopLevelNotNull(value: string): boolean {
-  let depth = 0;
-  let quote: "'" | '"' | null = null;
-  let outside = '';
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === quote && value[index + 1] === quote) index += 1;
-      else if (char === quote) quote = null;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      outside += ' ';
-    } else if (char === '(') {
-      depth += 1;
-      outside += ' ';
-    } else if (char === ')') {
-      if (depth === 0) throw new Error(`unbalanced column constraint: ${value}`);
-      depth -= 1;
-      outside += ' ';
-    } else {
-      outside += depth === 0 ? char : ' ';
-    }
-  }
-  if (quote || depth !== 0) throw new Error(`unbalanced column constraint: ${value}`);
-  return /\bNOT\s+NULL\b/i.test(outside);
+  const words = topLevelSqlWords(value, 'column constraint');
+  return words.some((word, index) => word === 'not' && words[index + 1] === 'null');
 }
 
 function parseTableConstraint(entry: string): D1Constraint | null {
@@ -330,33 +576,45 @@ function parseTableConstraint(entry: string): D1Constraint | null {
   if (primary) return { kind: 'primary', columns: identifiers(primary[1]) };
   const unique = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?UNIQUE\s*\(([^)]+)\)/i);
   if (unique) return { kind: 'unique', columns: identifiers(unique[1]) };
-  const foreign = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(\S+)\s*\(([^)]+)\)/i);
+  const foreign = entry.match(/^(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(\S+)\s*\(([^)]+)\)([\s\S]*)/i);
   if (foreign) {
     return {
       kind: 'foreign',
       columns: identifiers(foreign[1]),
       foreignTable: identifier(foreign[2]),
       foreignColumns: identifiers(foreign[3]),
+      ...referentialActions(foreign[4]),
     };
   }
   return null;
 }
 
 export function parseFinalD1Schema(sources: string[]): D1Schema {
-  const schema: D1Schema = { tables: new Map(), indexes: new Map() };
-  // Triggers can contain semicolons inside BEGIN/END, so remove each complete
-  // trigger as one recognized, non-relational schema object before statement
-  // splitting. The parity suite compares tables, constraints, and indexes; real
-  // backend suites exercise trigger behavior directly.
-  const statements = sources.flatMap((source) => splitSql(
-    stripLineComments(source).replace(
-      /^CREATE\s+TRIGGER\b[\s\S]*?^END\s*;/gim,
-      '',
-    ),
-    ';',
-  ));
+  const schema: D1Schema = { tables: new Map(), indexes: new Map(), triggers: new Map() };
+  // Preserve migration statement order. Trigger bodies contain semicolons, so
+  // the schema scanner treats outer BEGIN/END as one statement without moving
+  // trigger DDL ahead of intervening DROP or table rebuild statements.
+  const statements = sources.flatMap((source) => splitSchemaSql(stripLineComments(source)));
 
   for (const statement of statements) {
+    if (/^CREATE\s+TRIGGER\b/i.test(statement)) {
+      const trigger = parseTrigger(statement);
+      if (schema.triggers.has(trigger.name)) throw new Error(`duplicate trigger: ${trigger.name}`);
+      if (!schema.tables.has(trigger.table)) {
+        throw new Error(`trigger ${trigger.name} targets missing table ${trigger.table}`);
+      }
+      schema.triggers.set(trigger.name, trigger);
+      continue;
+    }
+
+    const dropTrigger = statement.match(/^DROP\s+TRIGGER(\s+IF\s+EXISTS)?\s+(\S+)$/i);
+    if (dropTrigger) {
+      const name = identifier(dropTrigger[2]);
+      if (!dropTrigger[1] && !schema.triggers.has(name)) throw new Error(`cannot drop missing trigger ${name}`);
+      schema.triggers.delete(name);
+      continue;
+    }
+
     const createTable = statement.match(
       /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(\S+)\s*\(([\s\S]*)\)(?:\s+(WITHOUT\s+ROWID))?$/i,
     );
@@ -401,6 +659,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       for (const [name, index] of schema.indexes) {
         if (index.table === tableName) schema.indexes.delete(name);
       }
+      for (const [name, trigger] of schema.triggers) {
+        if (trigger.table === tableName) schema.triggers.delete(name);
+      }
       continue;
     }
 
@@ -414,6 +675,9 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       schema.tables.set(to, table);
       for (const index of schema.indexes.values()) {
         if (index.table === from) index.table = to;
+      }
+      for (const trigger of schema.triggers.values()) {
+        if (trigger.table === from) trigger.table = to;
       }
       continue;
     }
@@ -448,6 +712,11 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
     // analysis so a future migration cannot silently disappear from the model.
     if (/^(?:CREATE|ALTER|DROP)\b/i.test(statement)) {
       throw new Error(`unsupported schema DDL: ${statement}`);
+    }
+  }
+  for (const trigger of schema.triggers.values()) {
+    if (!schema.tables.has(trigger.table)) {
+      throw new Error(`trigger ${trigger.name} targets missing table ${trigger.table}`);
     }
   }
   return schema;
