@@ -77,6 +77,7 @@ const db = Astro.locals.db;
 const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 const hasPeople = Astro.locals.modules.has('people');
 const hasGiving = Astro.locals.modules.has('giving');
+const hasRegistration = Astro.locals.modules.has('registration');
 const hasPaymentOperations = paymentOperationsEnabled(Astro.locals.modules);
 // Group activity (memberships/attendance + registrations) is its own module
 // gate, independent of the people module.
@@ -111,6 +112,12 @@ const AREA_LABEL_KEYS: Record<GrantableArea, string> = {
   serve: 'admin.areas.serve',
   newcomers: 'admin.areas.newcomers',
 };
+const availableGrantAreas = GRANTABLE_AREAS.filter((area) => {
+  if (area === 'giving') return hasGiving;
+  if (area === 'registration') return hasRegistration;
+  if (area === 'payment-operations') return hasPaymentOperations;
+  return true;
+});
 
 const rawId = Astro.params.id ?? '';
 const isNew = rawId === 'new';
@@ -579,7 +586,7 @@ const summaryErrors = Object.entries(errors)
             <fieldset class="space-y-2">
               <legend class={lab}>{t(lang, 'admin.person.areasTitle')}</legend>
               <p class="text-xs text-ink-muted">{t(lang, 'admin.person.areasHint')}</p>
-              {GRANTABLE_AREAS.map((a) => {
+              {availableGrantAreas.map((a) => {
                 const initialState = grantCheckboxStateForRole(person.role, a, personAreas.includes(a));
                 const backendDisabled = (a === 'giving' || a === 'registration' || a === 'payment-operations')
                   && Astro.locals.dbBackend !== 'supabase';

@@ -15,7 +15,7 @@ describe('Newcomers scoped grant management source boundaries', () => {
 
   it('derives checkbox areas from the target role so non-admin targets expose only scoped grants', () => {
     expect(peoplePageSource).toContain('parseAdminAreasForRole(person.admin_areas, person.role)');
-    expect(peoplePageSource).toContain('GRANTABLE_AREAS.map((a) =>');
+    expect(peoplePageSource).toContain('availableGrantAreas.map((a) =>');
     expect(peoplePageSource).toContain('grantCheckboxStateForRole(person.role, a, personAreas.includes(a))');
     expect(peoplePageSource).toContain('data-grant-area={a}');
     expect(peoplePageSource).toContain('data-role-disabled={initialState.roleDisabled ? \'true\' : \'false\'}');
@@ -30,6 +30,14 @@ describe('Newcomers scoped grant management source boundaries', () => {
     expect(peoplePageSource).toContain('checkbox.disabled = state.roleDisabled || checkbox.dataset.backendDisabled === \'true\'');
     expect(peoplePageSource).toContain('label.hidden = state.hidden');
     expect(peoplePageSource).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|set:html/);
+  });
+
+  it('does not render payment grant labels when their modules are disabled', () => {
+    expect(peoplePageSource).toContain('const availableGrantAreas = GRANTABLE_AREAS.filter((area) =>');
+    expect(peoplePageSource).toContain("if (area === 'giving') return hasGiving;");
+    expect(peoplePageSource).toContain("if (area === 'registration') return hasRegistration;");
+    expect(peoplePageSource).toContain("if (area === 'payment-operations') return hasPaymentOperations;");
+    expect(peoplePageSource).toContain('availableGrantAreas.map((a) =>');
   });
 
   it('renders Newcomers only as a grant checkbox and exposes no unregistered route entry', () => {
