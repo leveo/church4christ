@@ -30,7 +30,7 @@ describe('clean-room D1 setup', () => {
     const first = JSON.parse(firstRun.stdout);
     expect(first).toMatchObject({ schemaVersion: 1, kind: 'setup-result', backend: 'd1' });
     expect(first.enabledModules).toHaveLength(8);
-    expect(first.moduleRows).toBe(18);
+    expect(first.moduleRows).toBe(19);
     expect(first.admin.status).toMatch(/created|already-admin/);
     expect(first.doctor.status).toBe('ready');
     const doctorRun = await workspace.execNode(['--doctor', '--json'], env, 300_000);
@@ -42,7 +42,7 @@ describe('clean-room D1 setup', () => {
       "SELECT COUNT(*) AS module_rows, SUM(CASE WHEN value='1' THEN 1 ELSE 0 END) AS enabled FROM settings WHERE key LIKE 'module.%'; SELECT lower(email) AS email, role, active, deleted_at FROM people WHERE lower(email)='owner@clean.invalid'; SELECT value AS site_name FROM settings WHERE key='site.name.en'; SELECT r2_key FROM media ORDER BY id LIMIT 1;",
     ]);
     const resultSets = JSON.parse(query.stdout);
-    expect(resultSets[0].results[0]).toMatchObject({ module_rows: 18, enabled: 8 });
+    expect(resultSets[0].results[0]).toMatchObject({ module_rows: 19, enabled: 8 });
     expect(resultSets[1].results[0]).toMatchObject({ email: 'owner@clean.invalid', role: 'admin', active: 1, deleted_at: null });
     expect(resultSets[2].results[0]).toEqual({ site_name: 'Clean Church' });
     const mediaKey = resultSets[3].results[0].r2_key;
