@@ -1,0 +1,65 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, btnSecondary, lab, noticeErr, tin } from '../../../lib/adminUi';
+import { createNewcomerSubmission, listNewcomerFormDefinition } from '../../../lib/newcomerDb';
+import { readNewcomerUrlencodedForm } from '../../../lib/newcomerHttp';
+import { validateNewcomerIntake } from '../../../lib/newcomerValidation';
+import { todayInTz } from '../../../lib/dates';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+const modules = Astro.locals.modules;
+if (!modules.has('newcomers')) return new Response(null, { status: 404 });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'newcomers')) return new Response(null, { status: 403 });
+const lang: Locale = user?.lang === 'zh' ? 'zh' : 'en';
+const definition = await listNewcomerFormDefinition(Astro.locals.db, Astro.locals.dbBackend, lang);
+const fieldName = (id: number) => `answer_${id}`;
+const allowed = ['name', 'email', 'phone', 'locale', 'visit_date', 'service_type_id', 'contact_consent', ...definition.fields.map((field) => fieldName(field.id))];
+let error = false;
+if (Astro.request.method === 'POST') {
+  const read = await readNewcomerUrlencodedForm(Astro.request, allowed);
+  if (read.ok) {
+    const form = read.fields;
+    const answers: Array<{ fieldId: number; value: string | boolean }> = [];
+    for (const field of definition.fields) {
+      const value = form[fieldName(field.id)];
+      if (field.type === 'checkbox') answers.push({ fieldId: field.id, value: value === 'true' });
+      else if (value !== undefined && value !== '') answers.push({ fieldId: field.id, value });
+    }
+    const parsed = validateNewcomerIntake('staff', {
+      name: form.name ?? '', email: form.email ?? '', phone: form.phone ?? '',
+      locale: form.locale ?? lang, visitDate: form.visit_date ?? '',
+      serviceTypeId: /^\d+$/.test(form.service_type_id ?? '') ? Number(form.service_type_id) : null,
+      contactConsent: form.contact_consent === 'true', answers,
+    }, { activeServiceTypeIds: definition.activeServiceTypeIds, fields: definition.fields.map((field) => ({
+      id: field.id, key: field.key, type: field.type, required: field.required,
+      options: field.options.map((option) => option.value),
+    })) });
+    if (parsed.ok) {
+      try {
+        const operationId = crypto.randomUUID();
+        const created = await createNewcomerSubmission(Astro.locals.db, user, 'staff', parsed.value, { backend: Astro.locals.dbBackend, operationId });
+        return Astro.redirect(`/admin/newcomers/${created.id}`, 303);
+      } catch { error = true; }
+    } else error = true;
+  } else error = true;
+}
+const today = todayInTz();
+---
+<Admin title={t(lang, 'admin.newcomers.newTitle')}>
+  <div class="flex items-center justify-between gap-4"><h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.newcomers.newTitle')}</h1><a class={btnSecondary} href="/admin/newcomers">{t(lang, 'admin.newcomers.queue')}</a></div>
+  {error && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
+  <form method="post" class="mt-6 space-y-4">
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.name')}</span><input class={tin} name="name" required /></label>
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.email')}</span><input class={tin} type="email" name="email" /></label>
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.phone')}</span><input class={tin} type="tel" name="phone" /></label>
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.language')}</span><select class={tin} name="locale"><option value="en" selected={lang === 'en'}>English</option><option value="zh" selected={lang === 'zh'}>中文</option></select></label>
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.visitDate')}</span><input class={tin} type="date" name="visit_date" value={today} required /></label>
+    <label class="block"><span class={lab}>{t(lang, 'newcomers.service')}</span><select class={tin} name="service_type_id"><option value="">{t(lang, 'newcomers.none')}</option>{definition.activeServiceTypeIds.map((id) => <option value={id}>{id}</option>)}</select></label>
+    {definition.fields.map((field) => field.type === 'textarea' ? <label class="block"><span class={lab}>{field.label}</span><textarea class={tin} name={fieldName(field.id)} required={field.required}></textarea></label> : field.type === 'select' ? <label class="block"><span class={lab}>{field.label}</span><select class={tin} name={fieldName(field.id)} required={field.required}><option value="">{t(lang, 'newcomers.none')}</option>{field.options.map((option) => <option value={option.value}>{option.label}</option>)}</select></label> : field.type === 'checkbox' ? <label class="flex items-center gap-2"><input type="checkbox" name={fieldName(field.id)} value="true" required={field.required} /><span>{field.label}</span></label> : <label class="block"><span class={lab}>{field.label}</span><input class={tin} name={fieldName(field.id)} required={field.required} /></label>)}
+    <label class="flex items-center gap-2"><input type="checkbox" name="contact_consent" value="true" /><span>{t(lang, 'newcomers.staffConsent')}</span></label>
+    <button class={btn} type="submit">{t(lang, 'admin.newcomers.save')}</button>
+  </form>
+</Admin>

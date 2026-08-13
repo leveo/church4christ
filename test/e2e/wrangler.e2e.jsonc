@@ -12,6 +12,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "SESSION_SECRET": "e2e-test-secret-at-least-32-characters-long",
+    "NEWCOMER_RATE_LIMIT_SECRET": "e2e-newcomer-rate-limit-secret-at-least-32-characters",
     "APP_ORIGIN": "https://church.example",
     "EMAIL_DEV_LOG": "1",
     "EMAIL_FROM": "serve@church.example"

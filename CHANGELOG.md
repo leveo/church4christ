@@ -27,6 +27,8 @@ or GitHub Release exists.
   correct adult service totals, derive optional distinct child totals from historical
   check-ins, and download bounded identity-free CSV reports. Groups per-person attendance
   remains separately authorized.
+- Added bilingual Newcomer follow-up on D1 and PostgreSQL: a consented public intake form,
+  scoped staff queue and actions, exact-match People handoff, and super-admin configuration.
 - Added operator runbooks for reviewing, staging, backing up, applying, verifying, and
   recovering from future upgrades.
 - Documented the maintainer-only process for creating future pre-1.0 release checkpoints.
@@ -46,6 +48,8 @@ or GitHub Release exists.
   repository and keep connection URLs and passwords out of `pg_dump` arguments.
 - Staging and production upgrade steps require operators to verify the exact non-secret D1 or
   Supabase/Postgres target identifiers before migration.
+- Newcomer public rate limits store only keyed hashes and counters, ignore forwarded client
+  headers, and fail without writing when the managed rate-limit secret is unavailable.
 
 ### Upgrade notes
 
@@ -58,7 +62,10 @@ or GitHub Release exists.
 - Apply forward migration `0013_service_attendance.sql` before deploying the Attendance
   admin console. It creates `service_attendance`, `service_type_checkin_events`, and
   `service_checkin_link_state` on both D1 and Supabase/PostgreSQL; no adult roster is stored.
-- Migration files `0001` through `0013` in both `migrations/` and `migrations-supabase/` are
+- Apply forward migration `0014_newcomers.sql` before enabling Newcomers. It creates the
+  bilingual form configuration, queue, activity, operation receipt, and hashed rate-limit
+  tables on both D1 and Supabase/PostgreSQL.
+- Migration files `0001` through `0014` in both `migrations/` and `migrations-supabase/` are
   the frozen `main` baseline. Disposable local/CI databases do not freeze a proposed migration
   before merge, but merge to `main` or use by a persistent/shared/deployed installation does.
   Corrections after that boundary must use a new numbered forward migration.

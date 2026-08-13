@@ -276,6 +276,9 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
   };
   const stripeSecretKey = manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_SECRET_KEY') : localStripe.secretKey;
   const stripeWebhookSecret = manifest?.mode === 'deploy' ? remoteSecrets.has('STRIPE_WEBHOOK_SECRET') : localStripe.webhookSecret;
+  const newcomerRateLimitSecret = manifest?.mode === 'deploy'
+    ? remoteSecrets.has('NEWCOMER_RATE_LIMIT_SECRET')
+    : localSecrets.has('NEWCOMER_RATE_LIMIT_SECRET');
   return {
     worker: live.worker,
     r2: live.r2,
@@ -286,6 +289,7 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
     emailDevLog: manifest?.mode === 'local' && probeOptions.localSecretsValid === true,
     stripeSecretKey,
     stripeWebhookSecret,
+    newcomerRateLimitSecret,
     stripeClassification: manifest?.mode === 'deploy'
       ? (stripeSecretKey || stripeWebhookSecret ? 'unverifiable' : 'missing')
       : localStripe.classification,
@@ -418,12 +422,13 @@ async function applyDefaultSetup(plan, options, catalog) {
     'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath, stripeSecrets: activePlan.backend === 'supabase' ? options.secretContext?.stripeSecrets : null }), async ({ plan: activePlan }) => {
       if (activePlan.mode === 'deploy') {
         const names = await listDeploySecrets({ runner, wranglerBin, configPath });
-        return names.has('SESSION_SECRET') && (!options.secretContext?.stripeSecrets ||
+        return names.has('SESSION_SECRET') && names.has('NEWCOMER_RATE_LIMIT_SECRET') && (!options.secretContext?.stripeSecrets ||
           (names.has('STRIPE_SECRET_KEY') && names.has('STRIPE_WEBHOOK_SECRET')));
       }
       const baseReady = await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
+      const newcomerReady = (await readLocalSecretNames(resolve(root, '.dev.vars'))).includes('NEWCOMER_RATE_LIMIT_SECRET');
       if ((await readLocalStripeModeOverride(resolve(root, '.dev.vars'))).present) return false;
-      if (!baseReady || !options.secretContext?.stripeSecrets) return baseReady;
+      if (!baseReady || !newcomerReady || !options.secretContext?.stripeSecrets) return baseReady && newcomerReady;
       return (await readLocalStripeClassification(resolve(root, '.dev.vars'))).classification === 'test';
     }),
     ...providerSteps,

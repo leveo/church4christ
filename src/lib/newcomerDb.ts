@@ -551,6 +551,17 @@ export async function listNewcomerAdminConfiguration(
   return readConfiguration(db, backend, requested, false);
 }
 
+export async function listNewcomerStaffStatuses(
+  db: AppDb,
+  backend: SnapshotBackend,
+  user: SessionUser | null,
+  requested: 'en' | 'zh',
+): Promise<NewcomerConfigurationStatus[]> {
+  assertPrivateAccess(user);
+  assertLocale(requested);
+  return (await readConfiguration(db, backend, requested, true)).statuses;
+}
+
 export interface NewcomerQueueRow {
   id: string;
   name: string;

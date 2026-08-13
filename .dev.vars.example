@@ -4,6 +4,10 @@
 # production uses `npx wrangler secret put SESSION_SECRET`.
 SESSION_SECRET=dev-only-secret-change-me
 
+# HMAC key for public Newcomer rate-limit buckets. Never place the value in
+# wrangler.jsonc or logs; production uses `npx wrangler secret put`.
+NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
+
 # When set, outgoing mail (including magic links) is logged to the console
 # instead of sent. Leave on for local development.
 EMAIL_DEV_LOG=1

@@ -33,8 +33,8 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 15 D1-compatible
-modules), Full Church (all 18), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (all 16 D1-compatible
+modules), Full Church (all 19), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:
@@ -178,6 +178,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 # Store it (paste the value when prompted):
 npx wrangler secret put SESSION_SECRET
+npx wrangler secret put NEWCOMER_RATE_LIMIT_SECRET
 ```
 
 Rotate this secret if it is ever exposed; changing it signs everyone out. See

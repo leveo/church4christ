@@ -458,6 +458,7 @@ describe('setup secrets', () => {
     const result = await configureSecrets({ mode: 'local', adminEmail: ' Admin@Example.COM ', path });
     const text = await readFile(path, 'utf8');
     expect(text).toContain('OTHER=value'); expect(text).toContain(`SESSION_SECRET=${existingSecret}`);
+    expect(text).toMatch(/^NEWCOMER_RATE_LIMIT_SECRET=[A-Za-z0-9_-]{43}$/m);
     expect(text).toContain('AUTH_DEV_BYPASS_EMAIL=admin@example.com');
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(result)).not.toContain(existingSecret);
@@ -528,6 +529,8 @@ describe('setup secrets', () => {
     expect(calls[0][1]).toEqual(['secret', 'list', '--format', 'json', '--config', 'wrangler.jsonc']);
     expect(calls[1][1]).toEqual(['secret', 'put', 'SESSION_SECRET', '--config', 'wrangler.jsonc']);
     expect(calls[1][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
+    expect(calls[2][1]).toEqual(['secret', 'put', 'NEWCOMER_RATE_LIMIT_SECRET', '--config', 'wrangler.jsonc']);
+    expect(calls[2][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
     expect(JSON.stringify(result)).not.toContain(calls[1][2].input.trim());
   });
 
@@ -535,7 +538,7 @@ describe('setup secrets', () => {
     const calls: any[] = [];
     const runner = { run: async (...args: any[]) => {
       calls.push(args);
-      return { stdout: calls.length === 1 ? '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"STRIPE_SECRET_KEY","type":"secret_text"}]' : '', stderr: '', exitCode: 0 };
+      return { stdout: calls.length === 1 ? '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"NEWCOMER_RATE_LIMIT_SECRET","type":"secret_text"},{"name":"STRIPE_SECRET_KEY","type":"secret_text"}]' : '', stderr: '', exitCode: 0 };
     } };
     const oldKey = process.env.STRIPE_SECRET_KEY; const oldWebhook = process.env.STRIPE_WEBHOOK_SECRET; const oldMode = process.env.STRIPE_MODE;
     process.env.STRIPE_SECRET_KEY = 'sk_live_ambient_forbidden'; process.env.STRIPE_WEBHOOK_SECRET = 'whsec_ambient_forbidden'; process.env.STRIPE_MODE = 'live';
@@ -570,7 +573,7 @@ describe('setup secrets', () => {
     expect(calls[0][2]).toMatchObject({ allowNonzero: true });
     expect(calls[0][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
     expect(calls[1][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     const denied = { run: async () => ({ stdout: '', stderr: 'Authentication error [code: 10000]', exitCode: 1 }) };
     await expect(configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner: denied, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' })).rejects.toThrow(/secret list failed/i);
     for (const nearMiss of [
