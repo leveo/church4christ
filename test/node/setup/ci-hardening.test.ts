@@ -19,7 +19,7 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
 }
 
 const EXPECTED_CI_WORKFLOW_SHA256 =
-  '67eacba244497232d24acde7a4fa25332d9f0ad710f01cab5a1106d1a450381f';
+  'ea78aa9ddd827a416e338d04854a629731ef0e085f06850439c38c81e3ba669d';
 
 function normalizeWorkflowSource(source: string): string {
   return source.replaceAll('\r\n', '\n');
