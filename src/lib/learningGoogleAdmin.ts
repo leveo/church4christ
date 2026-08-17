@@ -281,14 +281,18 @@ export async function disconnectGoogleClassroomConnection(
     readonly connectionId: number;
     readonly expectedRevision: number;
     readonly actorPersonId: number;
+    readonly clientId: string;
+    readonly clientSecret: string;
     readonly keyRing: LearningCredentialKeyRing;
     readonly fetcher: AdminFetcher;
+    readonly nowEpochMs: number;
   },
 ): Promise<LearningConnectionRecord> {
   let input: Record<string, unknown>;
   try {
     input = learningValidation.exactRecord(rawInput, [
       'connectionId', 'expectedRevision', 'actorPersonId', 'keyRing', 'fetcher',
+      'clientId', 'clientSecret', 'nowEpochMs',
     ]);
   } catch { return invalid(); }
   const connectionId = integer(input.connectionId);
@@ -302,10 +306,52 @@ export async function disconnectGoogleClassroomConnection(
     || connection.revision !== expectedRevision
     || connection.status === 'disabled'
   ) throw new LearningConnectionConflictError();
+  const adminEnvironment = environment({
+    connectionId,
+    clientId: input.clientId as string,
+    clientSecret: input.clientSecret as string,
+    keyRing: input.keyRing as LearningCredentialKeyRing,
+    fetcher: input.fetcher as AdminFetcher,
+    nowEpochMs: input.nowEpochMs as number,
+  });
+  const access = await activeAccessToken(db, adminEnvironment);
+  if (access.revision !== expectedRevision) throw new LearningConnectionConflictError();
+  const registrationResult = await db.prepare(`SELECT registration_id FROM learning_google_registrations
+    WHERE connection_id=?1 ORDER BY external_course_id,feed_type LIMIT 2001`)
+    .bind(connectionId).all<Record<string, unknown>>();
+  if (
+    !registrationResult || !Array.isArray(registrationResult.results)
+    || registrationResult.results.length > 2_000
+  ) invalid();
+  const registrationIds = registrationResult.results.map((row) => externalId(row.registration_id));
+  const cleanupController = new AbortController();
+  const cleanupTimer = setTimeout(() => cleanupController.abort(), 25_000);
+  let cursor = 0;
+  try {
+    const workers = Array.from({ length: Math.min(8, registrationIds.length) }, async () => {
+      while (cursor < registrationIds.length) {
+        const registrationId = registrationIds[cursor];
+        cursor += 1;
+        await deleteGoogleClassroomRegistration({
+          accessToken: access.accessToken,
+          registrationId,
+          fetcher: adminEnvironment.fetcher,
+          signal: cleanupController.signal,
+        });
+      }
+    });
+    await Promise.all(workers);
+  } catch (error) {
+    cleanupController.abort();
+    throw error;
+  } finally {
+    clearTimeout(cleanupTimer);
+  }
   const loaded = await loadGoogleCredential(db, {
     connectionId,
     keyRing: input.keyRing as LearningCredentialKeyRing,
   });
+  if (loaded.revision !== expectedRevision) throw new LearningConnectionConflictError();
   await revokeGoogleRefreshToken({
     refreshToken: loaded.credential.refreshToken,
     fetcher: input.fetcher as AdminFetcher,

@@ -94,10 +94,23 @@ const defaultDeps: LearningConnectionActionDeps = {
   disconnectGoogleConnection: async (db, input) => {
     const vars = env as unknown as {
       LEARNING_CREDENTIAL_KEYS?: string;
+      GOOGLE_CLASSROOM_CLIENT_ID?: string;
+      GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
     };
-    if (typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string') throw new LearningCredentialConfigError();
+    if (
+      typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+      || typeof vars.GOOGLE_CLASSROOM_CLIENT_ID !== 'string'
+      || typeof vars.GOOGLE_CLASSROOM_CLIENT_SECRET !== 'string'
+    ) throw new LearningCredentialConfigError();
     const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
-    return disconnectGoogleClassroomConnection(db, { ...input, keyRing, fetcher: fetch });
+    return disconnectGoogleClassroomConnection(db, {
+      ...input,
+      clientId: vars.GOOGLE_CLASSROOM_CLIENT_ID,
+      clientSecret: vars.GOOGLE_CLASSROOM_CLIENT_SECRET,
+      keyRing,
+      fetcher: fetch,
+      nowEpochMs: Date.now(),
+    });
   },
   loadConnection: getLearningConnection,
   checkHealth: async (db, input) => {

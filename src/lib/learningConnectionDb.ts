@@ -259,6 +259,10 @@ export async function disconnectLearningConnection(
         operation_marker=?1,revision=revision+1,updated_by_person_id=?2,updated_at=datetime('now')
         WHERE id=?3 AND revision=?4 AND deleted_at IS NULL AND operation_marker IS NULL`)
         .bind(marker, actor, connectionId, expectedRevision),
+      db.prepare(`DELETE FROM learning_google_registrations WHERE connection_id=?1 AND EXISTS (
+        SELECT 1 FROM learning_provider_connections
+        WHERE id=?1 AND revision=?2 AND operation_marker=?3
+      )`).bind(connectionId, claimedRevision, marker),
       db.prepare(`DELETE FROM learning_provider_credentials WHERE connection_id=?1 AND EXISTS (
         SELECT 1 FROM learning_provider_connections
         WHERE id=?1 AND revision=?2 AND operation_marker=?3
@@ -269,8 +273,8 @@ export async function disconnectLearningConnection(
         WHERE id=?2 AND revision=?3 AND operation_marker=?4 ${RETURNING}`)
         .bind(actor, connectionId, claimedRevision, marker),
     ]);
-    if (!Array.isArray(results) || results.length !== 3) failed();
-    const disconnected = returnedConnection(results[2]);
+    if (!Array.isArray(results) || results.length !== 4) failed();
+    const disconnected = returnedConnection(results[3]);
     if (!disconnected) throw new LearningConnectionConflictError();
     return disconnected;
   } catch (error) {
