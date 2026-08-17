@@ -39,8 +39,11 @@ const copy = lang === 'zh' ? {
   health: '检查状态',
   reconnect: '重新连接',
   disconnect: '断开连接',
+  authorizeGoogle: '授权 Google Classroom',
   googleNote: 'Google 授权将在 OAuth 设置步骤中完成。',
   saved: '连接设置已保存。',
+  googleConnected: 'Google Classroom 已安全连接。',
+  googleAuthorizationFailed: 'Google 授权未完成；请重新开始授权流程。',
   error: '连接设置未能保存；请刷新后重试。',
 } : {
   providers: 'Learning provider connections',
@@ -55,8 +58,11 @@ const copy = lang === 'zh' ? {
   health: 'Check status',
   reconnect: 'Reconnect',
   disconnect: 'Disconnect',
+  authorizeGoogle: 'Authorize Google Classroom',
   googleNote: 'Google authorization is completed in the OAuth setup step.',
   saved: 'Connection settings were saved.',
+  googleConnected: 'Google Classroom was connected securely.',
+  googleAuthorizationFailed: 'Google authorization was not completed. Start the authorization flow again.',
   error: 'Connection settings could not be saved. Refresh and try again.',
 };
 type ConnectionErrorCode =
@@ -64,6 +70,7 @@ type ConnectionErrorCode =
   | 'connection_invalid'
   | 'credentials_unavailable'
   | 'connection_failed'
+  | 'google_authorization_failed'
   | LearningErrorCode;
 const statusLabels: Record<LearningConnectionStatus, string> = lang === 'zh' ? {
   pending: '等待授权', active: '正常', error: '需要处理', disabled: '已断开',
@@ -75,6 +82,7 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
   connection_invalid: '连接设置无效。',
   credentials_unavailable: '学习平台凭据暂时不可用。',
   connection_failed: '连接设置未能安全保存；请刷新后重试。',
+  google_authorization_failed: copy.googleAuthorizationFailed,
   invalid_request: '学习平台拒绝了状态检查请求。',
   authentication_required: '学习平台需要重新授权。',
   permission_denied: '学习平台账号没有所需权限。',
@@ -93,6 +101,7 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
   connection_invalid: 'The connection settings are invalid.',
   credentials_unavailable: 'Learning provider credentials are temporarily unavailable.',
   connection_failed: 'The connection settings could not be saved safely. Refresh and try again.',
+  google_authorization_failed: copy.googleAuthorizationFailed,
   invalid_request: 'The Learning provider rejected the health-check request.',
   authentication_required: 'The Learning provider must be authorized again.',
   permission_denied: 'The Learning provider account lacks the required permission.',
@@ -109,13 +118,15 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
 };
 const savedCodes = new Set([
   'connection_created', 'connection_updated', 'connection_reconnected',
-  'connection_disconnected', 'health_checked',
+  'connection_disconnected', 'health_checked', 'google_connected',
 ]);
 const queryEntries = [...Astro.url.searchParams.entries()];
 let banner: { readonly tone: 'success' | 'danger'; readonly text: string } | null = null;
 if (queryEntries.length === 1) {
   const [name, value] = queryEntries[0];
-  if (name === 'saved' && savedCodes.has(value)) banner = { tone: 'success', text: copy.saved };
+  if (name === 'saved' && savedCodes.has(value)) {
+    banner = { tone: 'success', text: value === 'google_connected' ? copy.googleConnected : copy.saved };
+  }
   if (name === 'error' && Object.hasOwn(errorMessages, value)) {
     banner = { tone: 'danger', text: errorMessages[value as ConnectionErrorCode] };
   }
@@ -163,6 +174,13 @@ if (queryEntries.length === 1) {
                 <button class={btnSecondary} type="submit">{copy.update}</button>
               </form>
               <div class="flex flex-wrap gap-3">
+                {connection.provider === 'google_classroom' && (
+                  <form method="post" action="/admin/learning/google/start">
+                    <input type="hidden" name="connection_id" value={connection.connectionId} />
+                    <input type="hidden" name="revision" value={connection.revision} />
+                    <button class={btn} type="submit">{copy.authorizeGoogle}</button>
+                  </form>
+                )}
                 <form method="post" action="/admin/learning/connections">
                   <input type="hidden" name="action" value="health_check" />
                   <input type="hidden" name="connection_id" value={connection.connectionId} />

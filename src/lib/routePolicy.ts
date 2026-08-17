@@ -31,6 +31,7 @@ const PUBLIC_EXACT = new Set([
   '/serve/testimonies',
   '/signin',
   '/api/prayer-request',
+  '/api/learning/google/pubsub',
   '/healthz',
   '/404',
 ]);

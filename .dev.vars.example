@@ -15,6 +15,20 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # `npx wrangler secret put LEARNING_CREDENTIAL_KEYS`.
 # LEARNING_CREDENTIAL_KEYS=
 
+# Google OAuth web-server credentials. Keep both value-free in source control;
+# production uses the two commands below. The callback URI is the canonical
+# APP_ORIGIN plus /admin/learning/google/callback.
+# `npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_ID`
+# GOOGLE_CLASSROOM_CLIENT_ID=
+# `npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_SECRET`
+# GOOGLE_CLASSROOM_CLIENT_SECRET=
+
+# Pub/Sub push identity/routing allowlists. These are identifiers rather than
+# credentials, but remain unset in the tracked example so each deployment must
+# explicitly bind its own service account and subscription.
+# GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL=
+# GOOGLE_PUBSUB_SUBSCRIPTION_NAME=
+
 # When set, outgoing mail (including magic links) is logged to the console
 # instead of sent. Leave on for local development.
 EMAIL_DEV_LOG=1

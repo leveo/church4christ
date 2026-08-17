@@ -17,6 +17,9 @@ export function hasSameOriginProvenance(request: Request): boolean {
  */
 export function hasValidMutationProvenance(request: Request): boolean {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return true;
-  if (request.method === 'POST' && new URL(request.url).pathname === '/api/stripe/webhook') return true;
+  if (request.method === 'POST' && [
+    '/api/stripe/webhook',
+    '/api/learning/google/pubsub',
+  ].includes(new URL(request.url).pathname)) return true;
   return hasSameOriginProvenance(request);
 }

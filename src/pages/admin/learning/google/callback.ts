@@ -1,0 +1,159 @@
+import type { APIRoute } from 'astro';
+import { env } from 'cloudflare:workers';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import type { AppDb } from '../../../../lib/appDb';
+import {
+  claimGoogleOAuthState,
+  completeGoogleOAuthState,
+  exchangeGoogleAuthorizationCode,
+  type ClaimedGoogleOAuthState,
+  type GoogleCredential,
+} from '../../../../lib/learningGoogleAuth';
+import {
+  importLearningCredentialKeyRing,
+  type LearningCredentialKeyRing,
+} from '../../../../lib/learningCredentials';
+import { SESSION_COOKIE } from '../../../../lib/session';
+
+export const prerender = false;
+
+const SAFE_HEADERS = Object.freeze({
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+});
+
+interface GoogleOAuthCallbackDeps {
+  readonly appOrigin: string | undefined | (() => string | undefined);
+  readonly clientId: string | undefined | (() => string | undefined);
+  readonly clientSecret: string | undefined | (() => string | undefined);
+  readonly keySecret: string | undefined | (() => string | undefined);
+  readonly importKeyRing: (secret: string) => Promise<unknown>;
+  readonly claimState: (db: AppDb, input: {
+    readonly state: string;
+    readonly sessionBinding: string;
+    readonly actorPersonId: number;
+    readonly redirectUri: string;
+    readonly keyRing: unknown;
+    readonly nowEpochMs: number;
+  }) => Promise<ClaimedGoogleOAuthState>;
+  readonly exchangeCode: (input: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly redirectUri: string;
+    readonly fetcher: typeof fetch;
+    readonly signal: AbortSignal;
+    readonly nowEpochMs: number;
+  }) => Promise<GoogleCredential>;
+  readonly completeState: (db: AppDb, input: {
+    readonly claim: ClaimedGoogleOAuthState;
+    readonly credential: GoogleCredential;
+    readonly keyRing: unknown;
+    readonly nowEpochMs: number;
+  }) => Promise<unknown>;
+  readonly now: () => number;
+}
+
+type GoogleOAuthEnv = {
+  APP_ORIGIN?: string;
+  GOOGLE_CLASSROOM_CLIENT_ID?: string;
+  GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+  LEARNING_CREDENTIAL_KEYS?: string;
+};
+const defaultVars = env as unknown as GoogleOAuthEnv;
+const defaultDeps: GoogleOAuthCallbackDeps = {
+  appOrigin: () => defaultVars.APP_ORIGIN,
+  clientId: () => defaultVars.GOOGLE_CLASSROOM_CLIENT_ID,
+  clientSecret: () => defaultVars.GOOGLE_CLASSROOM_CLIENT_SECRET,
+  keySecret: () => defaultVars.LEARNING_CREDENTIAL_KEYS,
+  importKeyRing: importLearningCredentialKeyRing,
+  claimState: (db, input) => claimGoogleOAuthState(db, {
+    ...input, keyRing: input.keyRing as LearningCredentialKeyRing,
+  }),
+  exchangeCode: exchangeGoogleAuthorizationCode,
+  completeState: (db, input) => completeGoogleOAuthState(db, {
+    ...input, keyRing: input.keyRing as LearningCredentialKeyRing,
+  }),
+  now: Date.now,
+};
+
+function value(source: string | undefined | (() => string | undefined)): string {
+  const result = typeof source === 'function' ? source() : source;
+  if (typeof result !== 'string' || result.length < 1) throw new Error('config');
+  return result;
+}
+
+function redirect(kind: 'saved' | 'error', code: string): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { ...SAFE_HEADERS, Location: `/admin/learning?${kind}=${code}` },
+  });
+}
+
+function callbackQuery(url: URL): { code: string; state: string } {
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 2
+    || entries[0]?.[0] === entries[1]?.[0]
+    || !entries.every(([key]) => key === 'code' || key === 'state')
+  ) throw new Error('query');
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  if (
+    code === null || code.length < 1 || code.length > 2_048 || !/^[\x21-\x7e]+$/u.test(code)
+    || state === null || !/^[A-Za-z0-9_-]{43,128}$/u.test(state)
+  ) throw new Error('query');
+  return { code, state };
+}
+
+export function createGoogleOAuthCallbackHandler(
+  dependencies: GoogleOAuthCallbackDeps = defaultDeps,
+): APIRoute {
+  return async ({ request, locals, cookies }) => {
+    if (!locals.modules.has('learning')) return new Response(null, { status: 404, headers: SAFE_HEADERS });
+    const user = locals.user;
+    if (!hasAreaAccess(user, 'learning')) return new Response(null, { status: 403, headers: SAFE_HEADERS });
+    if (request.method !== 'GET') return new Response(null, {
+      status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET' },
+    });
+    let query: { code: string; state: string };
+    try { query = callbackQuery(new URL(request.url)); } catch { return redirect('error', 'google_authorization_failed'); }
+    try {
+      const sessionBinding = cookies.get(SESSION_COOKIE)?.value;
+      if (typeof sessionBinding !== 'string' || sessionBinding.length < 1 || sessionBinding.length > 4_096) throw new Error('session');
+      const appOrigin = value(dependencies.appOrigin);
+      if (new URL(appOrigin).origin !== appOrigin) throw new Error('origin');
+      const redirectUri = `${appOrigin}/admin/learning/google/callback`;
+      const keyRing = await dependencies.importKeyRing(value(dependencies.keySecret));
+      const nowEpochMs = dependencies.now();
+      const claim = await dependencies.claimState(locals.db, {
+        state: query.state,
+        sessionBinding,
+        actorPersonId: user!.id,
+        redirectUri,
+        keyRing,
+        nowEpochMs,
+      });
+      const credential = await dependencies.exchangeCode({
+        clientId: value(dependencies.clientId),
+        clientSecret: value(dependencies.clientSecret),
+        code: query.code,
+        codeVerifier: claim.codeVerifier,
+        redirectUri,
+        fetcher: fetch,
+        signal: request.signal,
+        nowEpochMs,
+      });
+      await dependencies.completeState(locals.db, { claim, credential, keyRing, nowEpochMs: dependencies.now() });
+      return redirect('saved', 'google_connected');
+    } catch {
+      return redirect('error', 'google_authorization_failed');
+    }
+  };
+}
+
+export const GET: APIRoute = createGoogleOAuthCallbackHandler();
+export const ALL: APIRoute = async () => new Response(null, {
+  status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET' },
+});

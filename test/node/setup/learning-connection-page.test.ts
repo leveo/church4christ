@@ -6,6 +6,9 @@ describe('Learning connection administration page', () => {
     const page = readFileSync('src/pages/admin/learning/index.astro', 'utf8');
     expect(page).toContain('listLearningConnections');
     expect(page).toContain('action="/admin/learning/connections"');
+    expect(page).toContain('action="/admin/learning/google/start"');
+    expect(page).toContain("'google_connected'");
+    expect(page).toContain('google_authorization_failed');
     for (const action of ['create', 'update', 'health_check', 'reconnect', 'disconnect']) {
       expect(page).toContain(`value="${action}"`);
     }

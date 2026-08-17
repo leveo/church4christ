@@ -20,6 +20,9 @@ const GOOGLE_AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/a
 const GOOGLE_CALLBACK_PATH = '/admin/learning/google/callback';
 const MAX_ACCESS_TOKEN_BYTES = 2_048;
 const MAX_REFRESH_TOKEN_BYTES = 512;
+const MAX_GOOGLE_TOKEN_RESPONSE_BYTES = 65_536;
+const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
+const GOOGLE_REVOCATION_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 
 export class LearningGoogleAuthError extends Error {
   readonly code = 'learning_google_auth_invalid' as const;
@@ -260,6 +263,169 @@ export function decodeGoogleCredential(value: Uint8Array): GoogleCredential {
     if (error instanceof LearningGoogleAuthError) throw error;
     return invalid();
   }
+}
+
+type GoogleAuthFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+function authSignal(value: unknown): AbortSignal {
+  if (!(value instanceof AbortSignal) || value.aborted) invalid();
+  return value as AbortSignal;
+}
+
+function authFetcher(value: unknown): GoogleAuthFetcher {
+  if (typeof value !== 'function') invalid();
+  return value as GoogleAuthFetcher;
+}
+
+function clientSecret(value: unknown): string {
+  return asciiToken(value, 512);
+}
+
+async function postGoogleAuth(
+  url: string,
+  body: URLSearchParams,
+  fetcher: GoogleAuthFetcher,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (url !== GOOGLE_TOKEN_ENDPOINT && url !== GOOGLE_REVOCATION_ENDPOINT) invalid();
+  let response: Response;
+  try {
+    response = await fetcher(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal,
+    });
+  } catch { return invalid(); }
+  if (!(response instanceof Response)) invalid();
+  return response;
+}
+
+async function boundedGoogleTokenJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  if (!response.ok || response.body === null) {
+    try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
+    invalid();
+  }
+  const body = response.body ?? invalid();
+  const rawLength = response.headers.get('Content-Length');
+  let expectedLength: number | null = null;
+  if (rawLength !== null) {
+    if (!/^(?:0|[1-9]\d*)$/u.test(rawLength)) invalid();
+    expectedLength = Number(rawLength);
+    if (!Number.isSafeInteger(expectedLength) || expectedLength > MAX_GOOGLE_TOKEN_RESPONSE_BYTES) {
+      try { void body.cancel().catch(() => undefined); } catch { /* best effort */ }
+      invalid();
+    }
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    if (signal.aborted) {
+      try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+      invalid();
+    }
+    let part: ReadableStreamReadResult<Uint8Array>;
+    try { part = await reader.read(); } catch { return invalid(); }
+    if (part.done) break;
+    if (!(part.value instanceof Uint8Array)) invalid();
+    length += part.value.byteLength;
+    if (length > MAX_GOOGLE_TOKEN_RESPONSE_BYTES) {
+      try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+      invalid();
+    }
+    chunks.push(part.value);
+  }
+  if (expectedLength !== null && expectedLength !== length) invalid();
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+  } catch { return invalid(); }
+}
+
+export async function exchangeGoogleAuthorizationCode(rawInput: {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly code: string;
+  readonly codeVerifier: string;
+  readonly redirectUri: string;
+  readonly fetcher: GoogleAuthFetcher;
+  readonly signal: AbortSignal;
+  readonly nowEpochMs: number;
+}): Promise<GoogleCredential> {
+  const input = exactRecord(rawInput, [
+    'clientId', 'clientSecret', 'code', 'codeVerifier', 'redirectUri', 'fetcher', 'signal', 'nowEpochMs',
+  ]);
+  const id = clientId(input.clientId);
+  const secret = clientSecret(input.clientSecret);
+  const code = asciiToken(input.code, 2_048);
+  const verifier = asciiToken(input.codeVerifier, 128);
+  if (!/^[A-Za-z0-9_-]{43,128}$/u.test(verifier)) invalid();
+  const redirect = redirectUri(input.redirectUri);
+  const fetcher = authFetcher(input.fetcher);
+  const signal = authSignal(input.signal);
+  const nowEpochMs = epoch(input.nowEpochMs);
+  const body = new URLSearchParams({
+    client_id: id,
+    client_secret: secret,
+    code,
+    code_verifier: verifier,
+    grant_type: 'authorization_code',
+    redirect_uri: redirect,
+  });
+  const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, body, fetcher, signal);
+  return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, signal), {
+    nowEpochMs, requireRefreshToken: true, retainedRefreshToken: null,
+  });
+}
+
+export async function refreshGoogleAccessToken(rawInput: {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly refreshToken: string;
+  readonly fetcher: GoogleAuthFetcher;
+  readonly signal: AbortSignal;
+  readonly nowEpochMs: number;
+}): Promise<GoogleCredential> {
+  const input = exactRecord(rawInput, [
+    'clientId', 'clientSecret', 'refreshToken', 'fetcher', 'signal', 'nowEpochMs',
+  ]);
+  const id = clientId(input.clientId);
+  const secret = clientSecret(input.clientSecret);
+  const retainedRefreshToken = asciiToken(input.refreshToken, MAX_REFRESH_TOKEN_BYTES);
+  const fetcher = authFetcher(input.fetcher);
+  const signal = authSignal(input.signal);
+  const nowEpochMs = epoch(input.nowEpochMs);
+  const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, new URLSearchParams({
+    client_id: id,
+    client_secret: secret,
+    grant_type: 'refresh_token',
+    refresh_token: retainedRefreshToken,
+  }), fetcher, signal);
+  return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, signal), {
+    nowEpochMs, requireRefreshToken: false, retainedRefreshToken,
+  });
+}
+
+export async function revokeGoogleRefreshToken(rawInput: {
+  readonly refreshToken: string;
+  readonly fetcher: GoogleAuthFetcher;
+  readonly signal: AbortSignal;
+}): Promise<void> {
+  const input = exactRecord(rawInput, ['refreshToken', 'fetcher', 'signal']);
+  const refreshToken = asciiToken(input.refreshToken, MAX_REFRESH_TOKEN_BYTES);
+  const fetcher = authFetcher(input.fetcher);
+  const signal = authSignal(input.signal);
+  const response = await postGoogleAuth(
+    GOOGLE_REVOCATION_ENDPOINT, new URLSearchParams({ token: refreshToken }), fetcher, signal,
+  );
+  try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
+  if (!response.ok) invalid();
 }
 
 function databaseInteger(value: unknown, minimum = 1): number {
