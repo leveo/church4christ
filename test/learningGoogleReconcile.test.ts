@@ -118,4 +118,54 @@ describe('Google notification authoritative single-course reconciliation', () =>
     })).rejects.toThrow('learning_google_reconcile_failed');
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it('reserves JWKS, refresh, and course requests inside the 50-subrequest Worker ceiling', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/courses/course-1') return new Response(JSON.stringify({
+        id: 'course-1', name: 'Genesis 1', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/course-1',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+      if (url.pathname.endsWith('/teachers')) {
+        return new Response(JSON.stringify({
+          nextPageToken: `teacher-page-${fetcher.mock.calls.length}`,
+        }));
+      }
+      throw new Error(`unexpected ${url.pathname}`);
+    });
+    await expect(reconcileGoogleClassroomCourse(env.DB as AppDb, {
+      connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, now: () => NOW, signal: new AbortController().signal,
+    })).rejects.toThrow('learning_google_reconcile_failed');
+    // One JWKS fetch, one possible OAuth refresh, and the course GET are
+    // reserved outside the bounded provider-page loop: 47 + 3 = 50.
+    expect(fetcher).toHaveBeenCalledTimes(48);
+  });
+
+  it('leaves five seconds for webhook receipt finalization inside the provider 30-second cap', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    let current = NOW;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/courses/course-1') return new Response(JSON.stringify({
+        id: 'course-1', name: 'Genesis 1', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/course-1',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+      if (url.pathname.endsWith('/teachers')) {
+        current = NOW + 25_000;
+        return new Response('{}');
+      }
+      throw new Error(`unexpected ${url.pathname}`);
+    });
+    await expect(reconcileGoogleClassroomCourse(env.DB as AppDb, {
+      connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, now: () => current, signal: new AbortController().signal,
+    })).rejects.toThrow('learning_google_reconcile_failed');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
