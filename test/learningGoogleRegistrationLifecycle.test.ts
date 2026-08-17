@@ -64,7 +64,7 @@ function providerCourse(): Record<string, unknown> {
   };
 }
 
-function registrationFetcher(prefix: string) {
+function registrationFetcher(prefix: string, expectedTopic = TOPIC) {
   let created = 0;
   const deleted: string[] = [];
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -72,7 +72,7 @@ function registrationFetcher(prefix: string) {
     if (url.pathname === '/v1/courses/course-1') return new Response(JSON.stringify(providerCourse()));
     if (url.pathname === '/v1/registrations' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, Record<string, unknown>>;
-      expect(body.cloudPubsubTopic).toEqual({ topicName: TOPIC });
+      expect(body.cloudPubsubTopic).toEqual({ topicName: expectedTopic });
       expect(['COURSE_ROSTER_CHANGES', 'COURSE_WORK_CHANGES']).toContain(body.feed?.feedType);
       created += 1;
       return new Response(JSON.stringify({
@@ -347,13 +347,67 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
 
   it('does not renew an otherwise-due registration from a previous topic binding', async () => {
     const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
-    const fetcher = vi.fn();
+    const replacementTopic = 'projects/church-project/topics/replacement';
+    const requests = registrationFetcher('retargeted', replacementTopic);
     await expect(renewGoogleClassroomRegistrations(env.DB as AppDb, {
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
-      keyRing, fetcher, nowEpochMs: NOW,
-      topicName: 'projects/church-project/topics/replacement',
+      keyRing, fetcher: requests.fetcher, nowEpochMs: NOW,
+      topicName: replacementTopic,
       signal: new AbortController().signal,
-    })).resolves.toEqual({ selected: 0, renewed: 0, conflicted: 0, failed: 0 });
-    expect(fetcher).not.toHaveBeenCalled();
+    })).resolves.toEqual({ selected: 2, renewed: 2, conflicted: 0, failed: 0 });
+    expect(await env.DB.prepare(`SELECT topic_name FROM learning_google_registrations
+      WHERE connection_id=27602 ORDER BY feed_type`).all()).toMatchObject({
+      results: [{ topic_name: replacementTopic }, { topic_name: replacementTopic }],
+    });
+  });
+
+  it('recovers registrations that have already expired instead of dropping them from renewal', async () => {
+    await env.DB.prepare(`UPDATE learning_google_registrations
+      SET expiry_time='2026-08-17T11:59:59.000Z' WHERE connection_id=27602`).run();
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const requests = registrationFetcher('recovered');
+    await expect(renewGoogleClassroomRegistrations(env.DB as AppDb, {
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher: requests.fetcher, nowEpochMs: NOW, topicName: TOPIC,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({ selected: 2, renewed: 2, conflicted: 0, failed: 0 });
+  });
+
+  it('drains twelve feeds per hourly pass within the D1 query and bind budgets', async () => {
+    for (let course = 2; course <= 6; course += 1) {
+      await env.DB.prepare(`INSERT INTO learning_courses
+        (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+        VALUES(27603,27602,'google_classroom',?1,?2,?3)`)
+        .bind(`course-${course}`, `Course ${course}`, `https://classroom.google.com/c/course-${course}`).run();
+      await env.DB.prepare(`INSERT INTO learning_google_registrations
+        (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+        (27602,?1,'COURSE_ROSTER_CHANGES',?2,?4,'2026-08-18T12:00:00.000Z'),
+        (27602,?1,'COURSE_WORK_CHANGES',?3,?4,'2026-08-18T12:00:00.000Z')`)
+        .bind(`course-${course}`, `old-${course}-roster`, `old-${course}-work`, TOPIC).run();
+    }
+    let queries = 0;
+    let maxBinds = 0;
+    const wrapped: AppDb = {
+      prepare(sql: string): AppStatement {
+        queries += 1;
+        const statement = (env.DB as AppDb).prepare(sql);
+        return {
+          bind(...values: unknown[]) { maxBinds = Math.max(maxBinds, values.length); return statement.bind(...values); },
+          first: <T>(column?: string) => statement.first<T>(column),
+          all: <T>() => statement.all<T>(),
+          run: <T>() => statement.run<T>(),
+        };
+      },
+      batch: <T>(statements: AppStatement[]) => (env.DB as AppDb).batch<T>(statements),
+    };
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const requests = registrationFetcher('capacity');
+    await expect(renewGoogleClassroomRegistrations(wrapped, {
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher: requests.fetcher, nowEpochMs: NOW, topicName: TOPIC,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({ selected: 12, renewed: 12, conflicted: 0, failed: 0 });
+    expect(queries).toBeLessThanOrEqual(50);
+    expect(maxBinds).toBeLessThanOrEqual(100);
   });
 });
