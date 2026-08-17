@@ -111,7 +111,7 @@ function freePlanBudgetDb(): { readonly db: AppDb; readonly metrics: D1BudgetMet
     },
     async first<T = unknown>(column?: string) {
       charge(1);
-      return inner.first<T>(column);
+      return column === undefined ? inner.first<T>() : inner.first<T>(column);
     },
     async all<T = unknown>() {
       charge(1);
