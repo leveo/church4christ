@@ -239,10 +239,7 @@ describe('Google Classroom provider adapter', () => {
             },
           },
           {
-            gradeHistory: {
-              pointsEarned: 8.5, maxPoints: 10, gradeTimestamp: '2026-08-17T10:45:00.000Z',
-              actorUserId: 'teacher-1', gradeChangeType: 'ASSIGNED_GRADE_POINTS_EARNED_CHANGE',
-            },
+            // Google preserves a filtered-out gradeHistory union slot as an exact empty object.
           },
           {
             stateHistory: {
@@ -279,9 +276,10 @@ describe('Google Classroom provider adapter', () => {
         },
       },
       { stateHistory: { state: 'TURNED_IN', stateTimestamp: '2026-08-17T10:00:00.000Z', answer: 'private' } },
-      { gradeHistory: { pointsEarned: Number.POSITIVE_INFINITY, maxPoints: 10,
+      { gradeHistory: { pointsEarned: 8, maxPoints: 10,
         gradeTimestamp: '2026-08-17T10:30:00.000Z', actorUserId: 'teacher-1',
         gradeChangeType: 'ASSIGNED_GRADE_POINTS_EARNED_CHANGE' } },
+      { unexpectedHistory: {} },
     ];
     for (const submissionHistory of malformedHistories) {
       await expect(invokeLearningProvider(provider(async () => json({ studentSubmissions: [{
