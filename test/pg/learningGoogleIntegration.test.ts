@@ -208,9 +208,9 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
       clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
     };
     await expect(checkGoogleClassroomConnectionHealth(dbA, input))
-      .resolves.toEqual({ ok: true, errorCode: null });
+      .resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 2 });
     await expect(checkGoogleClassroomConnectionHealth(dbA, input))
-      .resolves.toEqual({ ok: true, errorCode: null });
+      .resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 2 });
     await expect(loadGoogleCredentialForAdmin(dbA, { connectionId: 27532, keyRing: ring }))
       .resolves.toMatchObject({
         revision: 2, status: 'error',

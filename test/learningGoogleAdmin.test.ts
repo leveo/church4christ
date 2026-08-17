@@ -113,7 +113,7 @@ describe('Google Classroom admin authoritative course selection', () => {
     await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, {
       connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
       clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
-    })).resolves.toEqual({ ok: true, errorCode: null });
+    })).resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 1 });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -130,7 +130,7 @@ describe('Google Classroom admin authoritative course selection', () => {
     await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, {
       connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
       clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
-    })).resolves.toEqual({ ok: true, errorCode: null });
+    })).resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 1 });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -170,9 +170,9 @@ describe('Google Classroom admin authoritative course selection', () => {
       clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
     };
     await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, input))
-      .resolves.toEqual({ ok: true, errorCode: null });
+      .resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 2 });
     await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, input))
-      .resolves.toEqual({ ok: true, errorCode: null });
+      .resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 2 });
     const stored = await loadGoogleCredentialForAdmin(env.DB as AppDb, {
       connectionId: 27302, keyRing: ring,
     });
@@ -229,7 +229,8 @@ describe('Google Classroom admin authoritative course selection', () => {
       checkGoogleClassroomConnectionHealth(env.DB as AppDb, input),
       checkGoogleClassroomConnectionHealth(env.DB as AppDb, input),
     ])).resolves.toEqual([
-      { ok: true, errorCode: null }, { ok: true, errorCode: null },
+      { ok: true, errorCode: null, connectionRevision: 2 },
+      { ok: true, errorCode: null, connectionRevision: 2 },
     ]);
     const stored = await loadGoogleCredentialForAdmin(env.DB as AppDb, {
       connectionId: 27302, keyRing: ring,

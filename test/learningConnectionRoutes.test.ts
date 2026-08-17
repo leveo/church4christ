@@ -52,8 +52,8 @@ const deps = () => ({
     provider: 'canvas' as const, baseUrl: 'https://canvas.test', revision: 0, status: 'active' as const,
   })),
   checkHealth: vi.fn(async (): Promise<
-    { readonly ok: true; readonly errorCode: null }
-    | { readonly ok: false; readonly errorCode: 'provider_unavailable' }
+    { readonly ok: true; readonly errorCode: null; readonly connectionRevision?: number | null }
+    | { readonly ok: false; readonly errorCode: 'provider_unavailable'; readonly connectionRevision?: number | null }
   > => ({ ok: true, errorCode: null })),
   updateHealth: vi.fn(async () => ({ connectionId: 401 })),
 });
@@ -203,6 +203,26 @@ describe('Learning connection action HTTP boundary', () => {
     } as never);
     expect(injected.checkHealth).toHaveBeenCalledTimes(1);
     expect(response.headers.get('location')).toBe('/admin/learning?error=connection_conflict');
+  });
+
+  it('persists health against the exact revision produced by an encrypted credential rotation', async () => {
+    const injected = deps();
+    injected.checkHealth.mockResolvedValue({
+      ok: true, errorCode: null, connectionRevision: 1,
+    });
+    const handler = createLearningConnectionActionHandler(injected);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=health_check&connection_id=401&revision=0&provider=canvas&status=active',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(response.headers.get('location')).toBe('/admin/learning?saved=health_checked');
+    expect(injected.updateHealth).toHaveBeenCalledWith({}, expect.objectContaining({
+      connectionId: 401, expectedRevision: 1, expectedProvider: 'canvas', expectedStatus: 'active',
+    }));
   });
 
   it('persists a failed health result but redirects to an allowlisted non-success error', async () => {
