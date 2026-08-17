@@ -12,16 +12,17 @@ import {
   linkLearningIdentity,
   listLearningEnrollmentsForPerson,
   mapLearningCourse,
+  recoverExpiredLearningSync,
   startLearningSync,
 } from '../../src/lib/learningDb';
-import { learningSyntheticEnrollmentId } from '../../src/lib/learningModel';
+import { LearningProviderError, learningSyntheticEnrollmentId } from '../../src/lib/learningModel';
 import type { LearningCourse } from '../../src/lib/learningModel';
 import {
   readAndNormalizeLearningPage,
   type LearningProvider,
   type LearningProviderPage,
 } from '../../src/lib/learningProvider';
-import { synchronizeLearningCourse } from '../../src/lib/learningSync';
+import { LearningSynchronizationError, synchronizeLearningCourse } from '../../src/lib/learningSync';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
@@ -491,6 +492,29 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       .toEqual({ count: run.status === 'succeeded' ? 1 : 0 });
   });
 
+  it('makes concurrent PostgreSQL expired-lease terminal recovery idempotent', async () => {
+    const mapped = await mappedCourse();
+    const expired = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LATER,
+    });
+    const outcomes = await Promise.allSettled([
+      recoverExpiredLearningSync(db, expired, { finishedAt: AFTER, errorCode: 'timeout' }),
+      recoverExpiredLearningSync(db, expired, { finishedAt: AFTER, errorCode: 'rate_limited' }),
+    ]);
+    expect(outcomes).toEqual([
+      expect.objectContaining({ status: 'fulfilled' }),
+      expect.objectContaining({ status: 'fulfilled' }),
+    ]);
+    const run = (await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs
+      WHERE id=${expired.runId}`))[0];
+    expect(run.status).toBe('failed');
+    expect(['timeout', 'rate_limited']).toContain(run.error_code);
+    expect((await sql.unsafe(`SELECT operation_marker,operation_expires_at
+      FROM learning_provider_connections WHERE id=801`))[0])
+      .toEqual({ operation_marker: null, operation_expires_at: null });
+  });
+
   it('rolls back on a PostgreSQL admin identity race between preflight and commit', async () => {
     const mapped = await mappedCourse();
     await linkLearningIdentity(db, {
@@ -549,5 +573,52 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs ORDER BY id DESC LIMIT 1`))[0])
       .toEqual({ status: 'cancelled', error_code: null });
     expect(JSON.stringify(await sql.unsafe(`SELECT * FROM learning_sync_runs`))).not.toContain('next-secret');
+  });
+
+  it.each([
+    { scenario: 'deadline', expectedCode: 'timeout', expectedStatus: 'failed', expectedDbCode: 'timeout' },
+    { scenario: 'cancellation', expectedCode: 'cancelled', expectedStatus: 'cancelled', expectedDbCode: null },
+    { scenario: 'provider metadata', expectedCode: 'rate_limited', expectedStatus: 'failed', expectedDbCode: 'rate_limited' },
+  ] as const)('recovers an expired PostgreSQL lease without replacing $scenario classification', async ({
+    scenario, expectedCode, expectedStatus, expectedDbCode,
+  }) => {
+    const mapped = await mappedCourse();
+    const controller = new AbortController();
+    const startedAt = Date.parse(NOW);
+    const deadline = startedAt + 1_000;
+    let clock = startedAt;
+    const providerError = scenario === 'provider metadata' ? new LearningProviderError({
+      code: 'rate_limited', provider: 'canvas', httpStatus: 429, retryAfterSeconds: 23,
+    }) : undefined;
+    const baseProvider = orchestrationProvider();
+    const provider: LearningProvider = {
+      ...baseProvider,
+      async syncCourse() {
+        clock = deadline + 1;
+        if (scenario === 'cancellation') controller.abort();
+        if (providerError) throw providerError;
+        return course();
+      },
+    };
+    const sync = synchronizeLearningCourse(db, {
+      provider, urlPolicy: POLICY, connectionId: 801, providerKind: 'canvas',
+      courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
+      operation: {
+        ...pgOperation(controller.signal), deadlineAt: new Date(deadline).toISOString(),
+      },
+      now: () => clock, resolvePerson: async () => null,
+    });
+    const error = await sync.catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(LearningSynchronizationError);
+    expect(error).toMatchObject({
+      code: expectedCode, provider: 'canvas',
+      httpStatus: scenario === 'provider metadata' ? 429 : null,
+      retryAfterSeconds: scenario === 'provider metadata' ? 23 : null,
+    });
+    expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs`))[0])
+      .toEqual({ status: expectedStatus, error_code: expectedDbCode });
+    expect((await sql.unsafe(`SELECT operation_marker,operation_expires_at
+      FROM learning_provider_connections WHERE id=801`))[0])
+      .toEqual({ operation_marker: null, operation_expires_at: null });
   });
 });

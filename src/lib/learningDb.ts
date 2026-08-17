@@ -1141,6 +1141,80 @@ export async function failLearningSync(
   }
 }
 
+/**
+ * Terminalize only a lease whose deadline has already elapsed. This path never
+ * owns a snapshot generation; it can claim only the still-running expired run.
+ */
+export async function recoverExpiredLearningSync(
+  db: AppDb,
+  rawLease: LearningSyncLease,
+  rawInput: { readonly finishedAt: string; readonly errorCode: LearningErrorCode },
+): Promise<void> {
+  const own = lease(rawLease);
+  const input = exact(rawInput, ['finishedAt', 'errorCode']);
+  const finishedAt = timestamp(input.finishedAt);
+  if (Date.parse(finishedAt) < Date.parse(own.leaseExpiresAt)) invalid();
+  const safeCode = errorCode(input.errorCode);
+  const finalizationMarker = crypto.randomUUID();
+  try {
+    const results = await db.batch([
+      db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
+        WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
+          AND lease_marker=?5 AND lease_expires_at<=?6 AND finalization_marker IS NULL
+          AND EXISTS (SELECT 1 FROM learning_provider_connections c
+            WHERE c.id=?3 AND c.provider=?7 AND c.operation_marker=?5
+              AND c.operation_expires_at IS NOT NULL AND c.operation_expires_at<=?6)
+        RETURNING id AS run_id`).bind(
+          finalizationMarker, own.runId, own.connectionId, own.courseId,
+          own.marker, finishedAt, own.provider,
+        ),
+      db.prepare(`UPDATE learning_sync_runs
+        SET status=CASE WHEN ?1='cancelled' THEN 'cancelled' ELSE 'failed' END,
+          finished_at=?2,error_code=CASE WHEN ?1='cancelled' THEN NULL ELSE ?1 END
+        WHERE id=?3 AND connection_id=?4 AND course_id=?5 AND status='running'
+          AND lease_marker=?6 AND lease_expires_at<=?2 AND finalization_marker=?7
+        RETURNING id AS run_id`).bind(
+          safeCode, finishedAt, own.runId, own.connectionId, own.courseId,
+          own.marker, finalizationMarker,
+        ),
+      db.prepare(`UPDATE learning_provider_connections
+        SET operation_marker=NULL,operation_expires_at=NULL,
+          status=CASE WHEN ?1='authentication_required' THEN 'error' ELSE status END,
+          last_error_code=?1,updated_at=?2
+        WHERE id=?3 AND provider=?4 AND operation_marker=?5
+          AND operation_expires_at IS NOT NULL AND operation_expires_at<=?2
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?6 AND r.finalization_marker=?7 AND r.status IN ('failed','cancelled'))
+        RETURNING id AS connection_id`).bind(
+          safeCode, finishedAt, own.connectionId, own.provider, own.marker,
+          own.runId, finalizationMarker,
+        ),
+      db.prepare(`UPDATE learning_provider_connections SET revision=-1
+        WHERE id=?1 AND provider=?2 AND operation_marker=?3
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?4 AND r.finalization_marker=?5
+              AND r.status IN ('failed','cancelled'))`).bind(
+          own.connectionId, own.provider, own.marker, own.runId, finalizationMarker,
+        ),
+    ]);
+    if (!Array.isArray(results) || results.length !== 4) persistenceFailure();
+    if (oneRow(results[0]) && oneRow(results[1]) && oneRow(results[2])) return;
+    const observed = await db.prepare(`SELECT status FROM learning_sync_runs
+      WHERE id=?1 AND connection_id=?2 AND course_id=?3 AND lease_marker=?4`)
+      .bind(own.runId, own.connectionId, own.courseId, own.marker)
+      .first<Record<string, unknown>>();
+    if (observed && (
+      observed.status === 'succeeded' || observed.status === 'failed' || observed.status === 'cancelled'
+    )) {
+      return;
+    }
+    throw new LearningSyncConflictError();
+  } catch (error) {
+    if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
+    throw new LearningPersistenceError();
+  }
+}
+
 export interface LearningSyncRunRecord {
   readonly runId: number;
   readonly connectionId: number;

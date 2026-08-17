@@ -12,6 +12,7 @@ import {
   linkLearningIdentity,
   listLearningEnrollmentsForPerson,
   mapLearningCourse,
+  recoverExpiredLearningSync,
   startLearningSync,
 } from '../src/lib/learningDb';
 import { learningSyntheticEnrollmentId } from '../src/lib/learningModel';
@@ -459,6 +460,28 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
       finishedAt: '2026-08-17T12:17:00.000Z', errorCode: 'cancelled',
     });
     expect(await getLearningSyncRun(env.DB, replacement.runId)).toMatchObject({ status: 'cancelled', errorCode: null });
+  });
+
+  it('makes concurrent expired-lease terminal recovery idempotent without overwriting the winner', async () => {
+    const { mapped } = await seed();
+    const expired = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LATER,
+    });
+    const outcomes = await Promise.allSettled([
+      recoverExpiredLearningSync(env.DB, expired, { finishedAt: AFTER, errorCode: 'timeout' }),
+      recoverExpiredLearningSync(env.DB, expired, { finishedAt: AFTER, errorCode: 'rate_limited' }),
+    ]);
+    expect(outcomes).toEqual([
+      expect.objectContaining({ status: 'fulfilled' }),
+      expect.objectContaining({ status: 'fulfilled' }),
+    ]);
+    expect(await getLearningSyncRun(env.DB, expired.runId)).toMatchObject({
+      status: 'failed', errorCode: expect.stringMatching(/^(?:timeout|rate_limited)$/),
+    });
+    expect(await env.DB.prepare(`SELECT operation_marker,operation_expires_at
+      FROM learning_provider_connections WHERE id=701`).first())
+      .toEqual({ operation_marker: null, operation_expires_at: null });
   });
 
   it('rolls back a generation when an admin disables its exact identity after preflight', async () => {

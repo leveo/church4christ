@@ -6,6 +6,7 @@ import {
   LearningSyncConflictError,
   completeLearningCourseSync,
   failLearningSync,
+  recoverExpiredLearningSync,
   startLearningSync,
   type LearningSyncCompletion,
   type LearningSyncLease,
@@ -450,10 +451,16 @@ export async function synchronizeLearningCourse(
   } catch (error) {
     const safe = classify(error, providerKind);
     if (ownLease !== null) {
+      let finishedAt = ownLease.leaseExpiresAt;
       try {
-        await failLearningSync(db, ownLease, {
-          finishedAt: new Date(safeNow(now, providerKind)).toISOString(), errorCode: safe.code,
-        });
+        finishedAt = new Date(safeNow(now, providerKind)).toISOString();
+      } catch { /* preserve the original classified failure and use the bounded lease deadline */ }
+      try {
+        if (Date.parse(finishedAt) >= Date.parse(ownLease.leaseExpiresAt)) {
+          await recoverExpiredLearningSync(db, ownLease, { finishedAt, errorCode: safe.code });
+        } else {
+          await failLearningSync(db, ownLease, { finishedAt, errorCode: safe.code });
+        }
       } catch {
         throw new LearningSynchronizationError('provider_unavailable', providerKind);
       }

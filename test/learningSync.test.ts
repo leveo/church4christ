@@ -284,6 +284,46 @@ describe('Learning provider orchestration', () => {
     expect(calls).toBe(1);
   });
 
+  it.each([
+    { scenario: 'deadline', expectedCode: 'timeout', expectedStatus: 'failed', expectedDbCode: 'timeout' },
+    { scenario: 'cancellation', expectedCode: 'cancelled', expectedStatus: 'cancelled', expectedDbCode: null },
+    { scenario: 'provider metadata', expectedCode: 'rate_limited', expectedStatus: 'failed', expectedDbCode: 'rate_limited' },
+  ] as const)('recovers an expired lease without replacing $scenario classification', async ({
+    scenario, expectedCode, expectedStatus, expectedDbCode,
+  }) => {
+    const mapped = await seed();
+    const controller = new AbortController();
+    const deadline = NOW_EPOCH + 1_000;
+    let clock = NOW_EPOCH;
+    const providerError = scenario === 'provider metadata' ? new LearningProviderError({
+      code: 'rate_limited', provider: 'canvas', httpStatus: 429, retryAfterSeconds: 23,
+    }) : undefined;
+    const sync = synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({
+        providerError,
+        onSyncCourse: () => {
+          clock = deadline + 1;
+          if (scenario === 'cancellation') controller.abort();
+        },
+      }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual',
+      operation: {
+        ...operation(20, controller.signal), deadlineAt: new Date(deadline).toISOString(),
+      },
+      now: () => clock, resolvePerson: async () => ({ personId: 9012 }),
+    });
+    await expect(sync).rejects.toMatchObject({
+      code: expectedCode, provider: 'canvas',
+      httpStatus: scenario === 'provider metadata' ? 429 : null,
+      retryAfterSeconds: scenario === 'provider metadata' ? 23 : null,
+    });
+    const run = await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs`).first();
+    expect(run).toEqual({ status: expectedStatus, error_code: expectedDbCode });
+    expect(await env.DB.prepare(`SELECT operation_marker,operation_expires_at FROM learning_provider_connections
+      WHERE id=901`).first()).toEqual({ operation_marker: null, operation_expires_at: null });
+  });
+
   it('rejects database connection URL-policy drift before any provider work or sync run', async () => {
     const mapped = await seed();
     let providerCalls = 0;
