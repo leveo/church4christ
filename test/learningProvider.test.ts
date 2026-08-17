@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import * as learningModelModule from '../src/lib/learningModel';
 import * as learningProviderModule from '../src/lib/learningProvider';
 import {
   LEARNING_ERROR_CODES,
@@ -13,9 +14,11 @@ import {
   normalizeLearningCourse,
   normalizeLearningProviderEnrollment,
   normalizeLearningResource,
+  type LearningActivity,
   type LearningCourse,
   type LearningLaunchContract,
   type LearningProviderEnrollment,
+  type LearningProviderSubmission,
   type LearningResource,
 } from '../src/lib/learningModel';
 import {
@@ -35,9 +38,9 @@ import {
   type LearningBuildLaunchRequest,
   type LearningHealthRequest,
   type LearningListCoursesRequest,
-  type LearningMeasuredPayload,
   type LearningOperationContext,
   type LearningPageAccumulator,
+  type LearningProviderPage,
   type LearningProvider,
   type LearningSyncActivitiesRequest,
   type LearningSyncCourseRequest,
@@ -57,7 +60,11 @@ const URL_POLICY = {
 
 const NOW = Date.parse('2026-08-17T11:00:00Z');
 
-type RuntimeMeasuredPayload = { readonly payload: unknown; readonly byteCount: number };
+type RuntimeMeasurement = { readonly byteCount: number };
+type RuntimeNormalizedResponse<T> = {
+  readonly value: T;
+  readonly measurement: RuntimeMeasurement;
+};
 type RuntimePage<T extends object> = {
   readonly items: readonly T[];
   readonly requestPageToken: string | null;
@@ -79,17 +86,18 @@ type RuntimeAccumulator<T extends object> = {
     readonly items: readonly T[];
     readonly complete: 0 | 1;
   };
-  accept(payload: RuntimeMeasuredPayload, now: number): RuntimeAccumulator<T>;
+  accept(page: RuntimePage<T>, now: number): RuntimeAccumulator<T>;
 };
 
 const providerApi = learningProviderModule as unknown as {
-  readLearningJsonResponse(
+  readAndNormalizeLearningResponse<T>(
     response: Response,
     operation: LearningOperationContext,
+    exactNormalizer: (value: unknown) => T,
     now: () => number,
-  ): Promise<RuntimeMeasuredPayload>;
+  ): Promise<RuntimeNormalizedResponse<T>>;
   normalizeLearningPage<T extends object>(
-    payload: RuntimeMeasuredPayload,
+    response: RuntimeNormalizedResponse<unknown>,
     contract: { normalizeItem(value: unknown): T; subjectKey(value: T): string },
   ): RuntimePage<T>;
   createLearningPageAccumulator<T extends object>(
@@ -97,6 +105,12 @@ const providerApi = learningProviderModule as unknown as {
     contract: { normalizeItem(value: unknown): T; uniquenessKeys(value: T): readonly string[] },
   ): RuntimeAccumulator<T>;
   invokeLearningProvider(provider: LearningProvider, invocation: Record<string, unknown>): Promise<unknown>;
+};
+
+const submissionApi = learningModelModule as unknown as {
+  normalizeLearningProviderSubmission(value: unknown): LearningProviderSubmission;
+  learningProviderSubmissionSubjectKey(value: LearningProviderSubmission): string;
+  learningProviderSubmissionUniquenessKeys(value: LearningProviderSubmission): readonly string[];
 };
 
 function course(externalCourseId: string, displayName = externalCourseId): Record<string, unknown> {
@@ -140,6 +154,27 @@ function providerEnrollment(externalUserId: string, role = 'student'): Record<st
     }),
     role,
     state: 'active',
+  };
+}
+
+function providerSubmission(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const provider = (overrides.provider ?? 'canvas') as 'canvas' | 'google_classroom';
+  const externalCourseId = String(overrides.externalCourseId ?? 'course-42');
+  const externalUserId = String(overrides.externalUserId ?? 'user-12');
+  return {
+    connectionId: provider === 'canvas' ? 7 : 8,
+    provider,
+    externalCourseId,
+    externalActivityId: 'activity-3',
+    externalUserId,
+    externalEnrollmentId: learningSyntheticEnrollmentId({ provider, externalCourseId, externalUserId }),
+    status: 'submitted',
+    late: 0,
+    attemptNumber: 1,
+    submittedAt: '2026-08-16T15:40:00Z',
+    returnedAt: null,
+    providerUpdatedAt: '2026-08-16T15:40:05Z',
+    ...overrides,
   };
 }
 
@@ -201,21 +236,56 @@ async function expectProviderReject(
 
 const COURSE_PAGE = Object.freeze({
   normalizeItem: (value: unknown) => normalizeLearningCourse(value, URL_POLICY),
-  subjectKey: learningCourseSubjectKey,
+  subjectKey: (value: LearningCourse) => learningCourseSubjectKey(value),
 });
 const COURSE_SEQUENCE = Object.freeze({
   normalizeItem: (value: unknown) => normalizeLearningCourse(value, URL_POLICY),
   uniquenessKeys: learningCourseUniquenessKeys,
+});
+const PROVIDER_ENROLLMENT_PAGE = Object.freeze({
+  normalizeItem: normalizeLearningProviderEnrollment,
+  subjectKey: (value: LearningProviderEnrollment) => JSON.stringify([
+    value.provider, value.connectionId, value.externalCourseId, value.externalEnrollmentId,
+  ]),
+});
+const RESOURCE_PAGE = Object.freeze({
+  normalizeItem: (value: unknown) => normalizeLearningResource(value, URL_POLICY),
+  subjectKey: (value: LearningResource) => JSON.stringify([
+    value.provider, value.connectionId, value.externalCourseId,
+    value.externalActivityId, value.externalResourceId,
+  ]),
+});
+const PROVIDER_SUBMISSION_PAGE = Object.freeze({
+  normalizeItem: submissionApi.normalizeLearningProviderSubmission,
+  subjectKey: submissionApi.learningProviderSubmissionSubjectKey,
+});
+const PROVIDER_SUBMISSION_SEQUENCE = Object.freeze({
+  normalizeItem: submissionApi.normalizeLearningProviderSubmission,
+  uniquenessKeys: submissionApi.learningProviderSubmissionUniquenessKeys,
 });
 
 async function measured(
   body: unknown,
   operation = normalizedOperation(),
   headers?: HeadersInit,
-): Promise<RuntimeMeasuredPayload> {
-  return providerApi.readLearningJsonResponse(
-    new Response(JSON.stringify(body), { headers }), operation, () => NOW,
+): Promise<RuntimeNormalizedResponse<unknown>> {
+  return providerApi.readAndNormalizeLearningResponse(
+    new Response(JSON.stringify(body), { headers }),
+    operation,
+    (value) => {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid');
+      return { ...(value as Record<string, unknown>) };
+    },
+    () => NOW,
   );
+}
+
+async function normalizedPage<T extends object>(
+  body: unknown,
+  contract: { normalizeItem(value: unknown): T; subjectKey(value: T): string },
+  operation = normalizedOperation(),
+): Promise<RuntimePage<T>> {
+  return providerApi.normalizeLearningPage(await measured(body, operation), contract);
 }
 
 function chunkedResponse(
@@ -233,6 +303,11 @@ function chunkedResponse(
 }
 
 describe('bounded page requests and measured response bodies', () => {
+  it('does not export a raw parsed provider-body boundary', () => {
+    expect('readLearningJsonResponse' in learningProviderModule).toBe(false);
+    expect('LearningMeasuredPayload' in learningProviderModule).toBe(false);
+  });
+
   it('normalizes explicit page bounds and rejects unsafe tokens', () => {
     expect(normalizeLearningPageRequest({ pageSize: 100, pageNumber: 100, pageToken: ' next ' }))
       .toEqual({ pageSize: 100, pageNumber: 100, pageToken: 'next' });
@@ -245,36 +320,50 @@ describe('bounded page requests and measured response bodies', () => {
     ]) expectInvalid(() => normalizeLearningPageRequest(input));
   });
 
-  it('measures exact streamed UTF-8 bytes, validates Content-Length, and freezes the payload', async () => {
-    const body = pageBody([course('a')]);
-    const text = JSON.stringify(body);
+  it('measures exact streamed UTF-8 bytes and exposes only the frozen normalized value', async () => {
+    const secret = 'raw-token-must-disappear';
+    const text = JSON.stringify({ rawToken: secret, safeId: 'course-a' });
     const byteCount = new TextEncoder().encode(text).byteLength;
-    const payload = await providerApi.readLearningJsonResponse(
+    const result = await providerApi.readAndNormalizeLearningResponse(
       new Response(text, { headers: { 'Content-Length': String(byteCount) } }),
       normalizedOperation({ maxRawBytes: byteCount }),
+      (value) => ({ safeId: (value as { safeId: string }).safeId }),
       () => NOW,
     );
-    expect(payload.byteCount).toBe(byteCount);
-    expect(payload.payload).toEqual(body);
-    expect(Object.isFrozen(payload)).toBe(true);
-    expect(Object.isFrozen(payload.payload)).toBe(true);
+    expect(result.measurement.byteCount).toBe(byteCount);
+    expect(result.value).toEqual({ safeId: 'course-a' });
+    expect(result).not.toHaveProperty('payload');
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.value)).toBe(true);
+    expect(Object.isFrozen(result.measurement)).toBe(true);
+  });
+
+  it('rejects identity/raw normalizers and sanitizes their provider body', async () => {
+    const secret = 'secret-grade-and-answer';
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
+      new Response(JSON.stringify({ grade: secret, answer: secret })),
+      normalizedOperation(),
+      (value) => value,
+      () => NOW,
+    ), 'malformed_response', secret);
   });
 
   it('rejects lying Content-Length and invalid JSON without leaking raw bodies', async () => {
     const body = '{"access_token":"secret-not-json"';
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
       new Response(body, { headers: { 'Content-Length': String(body.length - 1) } }),
-      normalizedOperation(), () => NOW,
+      normalizedOperation(), () => ({ ok: true }), () => NOW,
     ), 'malformed_response', 'secret-not-json');
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
-      new Response(body), normalizedOperation(), () => NOW,
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
+      new Response(body), normalizedOperation(), () => ({ ok: true }), () => NOW,
     ), 'malformed_response', 'secret-not-json');
   });
 
   it('rejects invalid UTF-8 before JSON parsing', async () => {
     const response = new Response(new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xc3, 0x28, 0x7d]));
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
-      response, normalizedOperation(), () => NOW,
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
+      response, normalizedOperation(), () => ({ ok: true }), () => NOW,
     ), 'malformed_response');
   });
 
@@ -286,8 +375,8 @@ describe('bounded page requests and measured response bodies', () => {
       encoder.encode('"secret-overflow-payload"'.repeat(20)),
       encoder.encode(']}'),
     ], () => { cancelled = true; }, { 'Content-Length': '1' });
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
-      response, normalizedOperation({ maxRawBytes: 32 }), () => NOW,
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
+      response, normalizedOperation({ maxRawBytes: 32 }), () => ({ ok: true }), () => NOW,
     ), 'response_too_large', 'secret-overflow-payload');
     expect(cancelled).toBe(true);
   });
@@ -299,8 +388,8 @@ describe('bounded page requests and measured response bodies', () => {
       () => { cancelled = true; },
       { 'Content-Length': '33' },
     );
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
-      response, normalizedOperation({ maxRawBytes: 32 }), () => NOW,
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
+      response, normalizedOperation({ maxRawBytes: 32 }), () => ({ ok: true }), () => NOW,
     ), 'response_too_large');
     expect(cancelled).toBe(true);
   });
@@ -310,16 +399,16 @@ describe('bounded page requests and measured response bodies', () => {
     const controller = new AbortController();
     controller.abort();
     let abortCancelled = false;
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
       chunkedResponse([encoder.encode('{"secret":"abort"}')], () => { abortCancelled = true; }),
-      normalizedOperation({ signal: controller.signal }), () => NOW,
+      normalizedOperation({ signal: controller.signal }), () => ({ ok: true }), () => NOW,
     ), 'cancelled', 'abort');
     expect(abortCancelled).toBe(true);
 
     let deadlineCancelled = false;
-    await expectProviderReject(() => providerApi.readLearningJsonResponse(
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningResponse(
       chunkedResponse([encoder.encode('{"secret":"deadline"}')], () => { deadlineCancelled = true; }),
-      normalizedOperation(), () => Date.parse('2026-08-17T12:00:00Z'),
+      normalizedOperation(), () => ({ ok: true }), () => Date.parse('2026-08-17T12:00:00Z'),
     ), 'timeout', 'deadline');
     expect(deadlineCancelled).toBe(true);
   });
@@ -330,7 +419,7 @@ describe('sanitized page and contract normalization', () => {
     const payload = await measured(pageBody([course('z'), course('a'), course('z')], 1, null, 'next'));
     const page = providerApi.normalizeLearningPage(payload, COURSE_PAGE);
     expect(page.items.map((item) => item.externalCourseId)).toEqual(['a', 'z']);
-    expect(page.responseBytes).toBe(payload.byteCount);
+    expect(page.responseBytes).toBe(payload.measurement.byteCount);
     expect(Object.isFrozen(page.items[0])).toBe(true);
     const conflicting = await measured(pageBody([course('same', 'First'), course('same', 'Second')]));
     expectInvalid(() => providerApi.normalizeLearningPage(conflicting, COURSE_PAGE));
@@ -353,12 +442,14 @@ describe('sanitized page and contract normalization', () => {
     expectSafeInvalid(() => providerApi.normalizeLearningPage(extraField, COURSE_PAGE), 'secret');
   });
 
-  it('rejects forged measured payloads and opaque page-byte under-reporting', () => {
+  it('rejects forged normalized responses and opaque page-byte under-reporting', () => {
     for (const forged of [
-      { payload: pageBody([course('a')]), byteCount: 1 },
-      Object.freeze({ payload: pageBody([course('a')]), byteCount: 1 }),
+      { value: pageBody([course('a')]), measurement: { byteCount: 1 } },
+      Object.freeze({ value: pageBody([course('a')]), measurement: Object.freeze({ byteCount: 1 }) }),
       new Proxy({}, { ownKeys() { throw new Error('secret-measured-proxy'); } }),
-    ]) expectSafeInvalid(() => providerApi.normalizeLearningPage(forged as RuntimeMeasuredPayload, COURSE_PAGE), 'secret');
+    ]) expectSafeInvalid(() => providerApi.normalizeLearningPage(
+      forged as RuntimeNormalizedResponse<unknown>, COURSE_PAGE,
+    ), 'secret');
   });
 
   it('retrieves contract callbacks through data descriptors without invoking hostile getters', () => {
@@ -425,8 +516,12 @@ describe('opaque page accumulators', () => {
     const operation = normalizedOperation({ maxPages: 2, maxItems: 2 });
     const initial = providerApi.createLearningPageAccumulator<LearningCourse>(operation, COURSE_SEQUENCE);
     expect(initial.view).toMatchObject({ pageCount: 0, itemCount: 0, complete: 0 });
-    const first = initial.accept(await measured(pageBody([course('b')], 1, null, 'next'), operation), NOW);
-    const final = first.accept(await measured(pageBody([course('a')], 2, 'next', null), operation), NOW);
+    const first = initial.accept(
+      await normalizedPage(pageBody([course('b')], 1, null, 'next'), COURSE_PAGE, operation), NOW,
+    );
+    const final = first.accept(
+      await normalizedPage(pageBody([course('a')], 2, 'next', null), COURSE_PAGE, operation), NOW,
+    );
     expect(final.view.items.map((item) => item.externalCourseId)).toEqual(['a', 'b']);
     expect(final.view.itemCount).toBe(final.view.items.length);
     expect(final.view.seenUniquenessKeys.length).toBe(2);
@@ -471,9 +566,15 @@ describe('opaque page accumulators', () => {
     };
     const operation = normalizedOperation({ maxPages: 3, maxItems: 3 });
     const initial = providerApi.createLearningPageAccumulator<LearningCourse>(operation, contract);
-    const first = initial.accept(await measured(pageBody([course('a')], 1, null, 'next-2'), operation), NOW);
-    const second = first.accept(await measured(pageBody([course('b')], 2, 'next-2', 'next-3'), operation), NOW);
-    const final = second.accept(await measured(pageBody([course('c')], 3, 'next-3', null), operation), NOW);
+    const first = initial.accept(
+      await normalizedPage(pageBody([course('a')], 1, null, 'next-2'), COURSE_PAGE, operation), NOW,
+    );
+    const second = first.accept(
+      await normalizedPage(pageBody([course('b')], 2, 'next-2', 'next-3'), COURSE_PAGE, operation), NOW,
+    );
+    const final = second.accept(
+      await normalizedPage(pageBody([course('c')], 3, 'next-3', null), COURSE_PAGE, operation), NOW,
+    );
     expect(final.view.itemCount).toBe(3);
     expect(normalizeCalls).toBe(3);
   });
@@ -481,14 +582,29 @@ describe('opaque page accumulators', () => {
   it('enforces exact scope, unique keys, token progression, and branded inputs', async () => {
     const operation = normalizedOperation({ maxPages: 2, maxItems: 2 });
     const initial = providerApi.createLearningPageAccumulator<LearningCourse>(operation, COURSE_SEQUENCE);
-    const first = initial.accept(await measured(pageBody([course('a')], 1, null, 'next'), operation), NOW);
-    expectInvalid(() => first.accept({} as RuntimeMeasuredPayload, NOW));
-    expectInvalid(() => first.accept({ payload: pageBody([course('b')], 2, 'next', null), byteCount: 1 }, NOW));
-    const repeated = await measured(pageBody([course('b')], 2, 'next', 'next'), operation);
+    const first = initial.accept(
+      await normalizedPage(pageBody([course('a')], 1, null, 'next'), COURSE_PAGE, operation), NOW,
+    );
+    expectInvalid(() => first.accept({} as RuntimePage<LearningCourse>, NOW));
+    expectInvalid(() => first.accept({
+      items: [], requestPageToken: 'next', nextPageToken: null, pageNumber: 2, responseBytes: 1,
+    }, NOW));
+    const repeated = await normalizedPage(
+      pageBody([course('b')], 2, 'next', 'next'), COURSE_PAGE, operation,
+    );
     expectInvalid(() => first.accept(repeated, NOW));
-    const outOfScope = await measured(pageBody([{ ...course('b'), connectionId: 8 }], 2, 'next', null), operation);
+    const outOfScope = await normalizedPage(
+      pageBody([{ ...course('b'), connectionId: 8 }], 2, 'next', null),
+      {
+        normalizeItem: (value) => normalizeLearningCourse(value, { ...URL_POLICY, connectionId: 8 }),
+        subjectKey: (value: LearningCourse) => learningCourseSubjectKey(value),
+      },
+      operation,
+    );
     expectInvalid(() => first.accept(outOfScope, NOW));
-    const duplicate = await measured(pageBody([course('a')], 2, 'next', null), operation);
+    const duplicate = await normalizedPage(
+      pageBody([course('a')], 2, 'next', null), COURSE_PAGE, operation,
+    );
     expectInvalid(() => first.accept(duplicate, NOW));
   });
 
@@ -505,52 +621,76 @@ describe('opaque page accumulators', () => {
       normalizeItem: normalizeLearningProviderEnrollment,
       uniquenessKeys: learningProviderEnrollmentUniquenessKeys,
     });
-    const firstPayload = await measured(
-      pageBody([providerEnrollment('user-a')], 1, null, 'next'), operation,
+    const firstPayload = await normalizedPage(
+      pageBody([providerEnrollment('user-a')], 1, null, 'next'), PROVIDER_ENROLLMENT_PAGE, operation,
     );
     const first = providerApi.createLearningPageAccumulator<LearningProviderEnrollment>(operation, contract)
       .accept(firstPayload, NOW);
-    const duplicate = await measured(
-      pageBody([providerEnrollment('user-a')], 2, 'next', null), operation,
+    const duplicate = await normalizedPage(
+      pageBody([providerEnrollment('user-a')], 2, 'next', null), PROVIDER_ENROLLMENT_PAGE, operation,
     );
     expectInvalid(() => first.accept(duplicate, NOW));
 
-    const sameSyntheticId = {
-      ...providerEnrollment('user-b'),
-      externalEnrollmentId: learningSyntheticEnrollmentId({
-        provider: 'google_classroom', externalCourseId: 'google-course-1', externalUserId: 'user-a',
-      }),
-    };
-    const conflicting = await measured(pageBody([sameSyntheticId], 2, 'next', null), operation);
-    expectInvalid(() => first.accept(conflicting, NOW));
+  });
+
+  it('sequences pre-resolution submissions with exact activity scope and stable deduplication', async () => {
+    const operation = normalizedOperation({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: 'activity-3', externalEnrollmentId: null,
+      },
+      maxPages: 2,
+      maxItems: 2,
+    });
+    const initial = providerApi.createLearningPageAccumulator<LearningProviderSubmission>(
+      operation, PROVIDER_SUBMISSION_SEQUENCE,
+    );
+    const first = initial.accept(await normalizedPage(
+      pageBody([providerSubmission()], 1, null, 'next'), PROVIDER_SUBMISSION_PAGE, operation,
+    ), NOW);
+    expect(first.view.items[0]).not.toHaveProperty('personId');
+    expect(first.view.seenUniquenessKeys).toHaveLength(2);
+    const duplicate = await normalizedPage(
+      pageBody([providerSubmission()], 2, 'next', null), PROVIDER_SUBMISSION_PAGE, operation,
+    );
+    expectInvalid(() => first.accept(duplicate, NOW));
+
+    const wrongActivity = await normalizedPage(pageBody([providerSubmission({
+      externalActivityId: 'other-activity',
+    })], 2, 'next', null), PROVIDER_SUBMISSION_PAGE, operation);
+    expectInvalid(() => first.accept(wrongActivity, NOW));
   });
 
   it('rejects non-monotonic pages and repeated or cyclic pagination tokens', async () => {
     const operation = normalizedOperation({ maxPages: 3, maxItems: 3 });
     const initial = providerApi.createLearningPageAccumulator<LearningCourse>(operation, COURSE_SEQUENCE);
-    const nonMonotonic = await measured(pageBody([course('a')], 2), operation);
+    const nonMonotonic = await normalizedPage(pageBody([course('a')], 2), COURSE_PAGE, operation);
     expectInvalid(() => initial.accept(nonMonotonic, NOW));
-    const first = initial.accept(await measured(pageBody([course('a')], 1, null, 'token-a'), operation), NOW);
-    const wrong = await measured(pageBody([course('b')], 2, 'wrong-token', null), operation);
+    const first = initial.accept(
+      await normalizedPage(pageBody([course('a')], 1, null, 'token-a'), COURSE_PAGE, operation), NOW,
+    );
+    const wrong = await normalizedPage(pageBody([course('b')], 2, 'wrong-token', null), COURSE_PAGE, operation);
     expectInvalid(() => first.accept(wrong, NOW));
-    const repeated = await measured(pageBody([course('b')], 2, 'token-a', 'token-a'), operation);
+    const repeated = await normalizedPage(
+      pageBody([course('b')], 2, 'token-a', 'token-a'), COURSE_PAGE, operation,
+    );
     expectInvalid(() => first.accept(repeated, NOW));
     const second = first.accept(
-      await measured(pageBody([course('b')], 2, 'token-a', 'token-b'), operation), NOW,
+      await normalizedPage(pageBody([course('b')], 2, 'token-a', 'token-b'), COURSE_PAGE, operation), NOW,
     );
-    const cyclic = await measured(pageBody([course('c')], 3, 'token-b', 'token-a'), operation);
+    const cyclic = await normalizedPage(pageBody([course('c')], 3, 'token-b', 'token-a'), COURSE_PAGE, operation);
     expectInvalid(() => second.accept(cyclic, NOW));
   });
 
   it('bounds measured raw and normalized item bytes independently', async () => {
     const generous = normalizedOperation({ maxPages: 1, maxItems: 1 });
-    const payload = await measured(pageBody([course('a')]), generous);
+    const payload = await normalizedPage(pageBody([course('a')]), COURSE_PAGE, generous);
     const baseline = providerApi.createLearningPageAccumulator<LearningCourse>(generous, COURSE_SEQUENCE)
       .accept(payload, NOW).view;
-    expect(baseline.rawResponseBytes).toBe(payload.byteCount);
+    expect(baseline.rawResponseBytes).toBe(payload.responseBytes);
 
     const rawOverflow = normalizedOperation({
-      maxPages: 1, maxItems: 1, maxRawBytes: payload.byteCount - 1,
+      maxPages: 1, maxItems: 1, maxRawBytes: payload.responseBytes - 1,
     });
     expectInvalid(() => providerApi.createLearningPageAccumulator<LearningCourse>(rawOverflow, COURSE_SEQUENCE)
       .accept(payload, NOW));
@@ -563,14 +703,14 @@ describe('opaque page accumulators', () => {
 
   it('rejects incomplete pages that exactly exhaust every terminal capacity', async () => {
     const generous = normalizedOperation({ maxPages: 2, maxItems: 2 });
-    const payload = await measured(pageBody([course('a')], 1, null, 'more'), generous);
-    const completePayload = await measured(pageBody([course('a')]), generous);
+    const payload = await normalizedPage(pageBody([course('a')], 1, null, 'more'), COURSE_PAGE, generous);
+    const completePayload = await normalizedPage(pageBody([course('a')]), COURSE_PAGE, generous);
     const baseline = providerApi.createLearningPageAccumulator<LearningCourse>(generous, COURSE_SEQUENCE)
       .accept(completePayload, NOW).view;
     const limits = [
       { maxPages: 1 },
       { maxItems: 1 },
-      { maxRawBytes: payload.byteCount },
+      { maxRawBytes: payload.responseBytes },
       { maxNormalizedBytes: baseline.normalizedItemBytes },
       { maxUniqueKeyBytes: baseline.uniquenessKeyBytes },
     ];
@@ -585,18 +725,20 @@ describe('opaque page accumulators', () => {
     const normalized = normalizeLearningCourse(course('a'), URL_POLICY);
     const keyBytes = new TextEncoder().encode(learningCourseUniquenessKeys(normalized)[0]).byteLength;
     const exactOperation = normalizedOperation({ maxPages: 1, maxItems: 1, maxUniqueKeyBytes: keyBytes });
-    const exactPayload = await measured(pageBody([course('a')]), exactOperation);
+    const exactPayload = await normalizedPage(pageBody([course('a')]), COURSE_PAGE, exactOperation);
     const exact = providerApi.createLearningPageAccumulator<LearningCourse>(exactOperation, COURSE_SEQUENCE)
       .accept(exactPayload, NOW);
     expect(exact.view.uniquenessKeyBytes).toBe(keyBytes);
 
     const overflowOperation = normalizedOperation({ maxUniqueKeyBytes: keyBytes - 1 });
-    const overflowPayload = await measured(pageBody([course('a')]), overflowOperation);
+    const overflowPayload = await normalizedPage(pageBody([course('a')]), COURSE_PAGE, overflowOperation);
     expectInvalid(() => providerApi.createLearningPageAccumulator<LearningCourse>(overflowOperation, COURSE_SEQUENCE)
       .accept(overflowPayload, NOW));
 
     const terminalOperation = normalizedOperation({ maxPages: 1, maxItems: 1, maxUniqueKeyBytes: keyBytes });
-    const incomplete = await measured(pageBody([course('a')], 1, null, 'more'), terminalOperation);
+    const incomplete = await normalizedPage(
+      pageBody([course('a')], 1, null, 'more'), COURSE_PAGE, terminalOperation,
+    );
     expectInvalid(() => providerApi.createLearningPageAccumulator<LearningCourse>(terminalOperation, COURSE_SEQUENCE)
       .accept(incomplete, NOW));
   });
@@ -608,11 +750,11 @@ describe('opaque page accumulators', () => {
         externalActivityId: 'activity-3', externalEnrollmentId: null,
       },
     });
-    const payload = await measured(pageBody([{
+    const payload = await normalizedPage(pageBody([{
       ...resource('youtube'), kind: 'youtube',
       launchUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
       youtubeVideoId: 'dQw4w9WgXcQ',
-    }]), operation);
+    }]), RESOURCE_PAGE, operation);
     const accumulator = providerApi.createLearningPageAccumulator<LearningResource>(operation, {
       normalizeItem: (value) => normalizeLearningResource(value, URL_POLICY),
       uniquenessKeys: learningResourceUniquenessKeys,
@@ -624,7 +766,7 @@ describe('opaque page accumulators', () => {
     const cancelledOperation = normalizedOperation({ signal: controller.signal });
     const cancelled = providerApi.createLearningPageAccumulator(cancelledOperation, COURSE_SEQUENCE);
     controller.abort();
-    expectInvalid(() => cancelled.accept(payload, NOW));
+    expectInvalid(() => cancelled.accept(payload as unknown as RuntimePage<LearningCourse>, NOW));
   });
 });
 
@@ -857,22 +999,64 @@ describe('provider invocation boundary', () => {
     }), 'timeout');
   });
 
-  it('requires branded measured page results and exact item normalizers', async () => {
+  it('requires strict branded provider-neutral pages and exact item normalizers', async () => {
     const request = {
       subject,
       page: { pageSize: 50, pageNumber: 1, pageToken: null },
       operation: operationInput(),
     };
     const operation = normalizedOperation();
-    const payload = await measured(pageBody([course('course-42')]), operation);
+    const providerPage = await normalizedPage(pageBody([course('course-42')]), COURSE_PAGE, operation);
     const page = await providerApi.invokeLearningProvider(mockProvider({
-      async listCourses() { return payload as LearningMeasuredPayload; },
+      async listCourses() { return providerPage as LearningProviderPage<LearningCourse>; },
     }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }) as RuntimePage<LearningCourse>;
     expect(page.items[0].externalCourseId).toBe('course-42');
-    expect(page.responseBytes).toBe(payload.byteCount);
+    expect(page.responseBytes).toBe(providerPage.responseBytes);
     await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
-      async listCourses() { return { payload: pageBody([course('course-42')]), byteCount: 1 } as LearningMeasuredPayload; },
+      async listCourses() {
+        return {
+          items: [course('course-42')], requestPageToken: null,
+          nextPageToken: null, pageNumber: 1, responseBytes: 1,
+        } as unknown as LearningProviderPage<LearningCourse>;
+      },
     }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }), 'malformed_response');
+  });
+
+  it('revalidates pre-resolution submission pages without local People fields', async () => {
+    const operation = normalizedOperation({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: 'activity-3', externalEnrollmentId: null,
+      },
+    });
+    const request = {
+      subject: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: 'activity-3', externalEnrollmentId: null,
+      },
+      page: { pageSize: 50, pageNumber: 1, pageToken: null },
+      operation,
+    };
+    const providerPage = await normalizedPage(
+      pageBody([providerSubmission()]), PROVIDER_SUBMISSION_PAGE, operation,
+    );
+    const result = await providerApi.invokeLearningProvider(mockProvider({
+      async syncSubmissions() {
+        return providerPage as LearningProviderPage<LearningProviderSubmission>;
+      },
+    }), { method: 'syncSubmissions', request, now: () => NOW }) as RuntimePage<LearningProviderSubmission>;
+    expect(result.items[0]).not.toHaveProperty('personId');
+    expect(result.items[0]).not.toHaveProperty('enrollmentId');
+
+    const unsafe = await measured(pageBody([{ ...providerSubmission(), grade: 'secret-grade' }]), operation);
+    await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      async syncSubmissions() {
+        return providerApi.normalizeLearningPage(unsafe, {
+          normalizeItem: (value) => value as LearningProviderSubmission,
+          subjectKey: () => 'forged',
+        }) as LearningProviderPage<LearningProviderSubmission>;
+      },
+    }), { method: 'syncSubmissions', request, now: () => NOW }), 'malformed_response', 'secret-grade');
   });
 });
 
@@ -989,8 +1173,18 @@ describe('provider-neutral interface implementability', () => {
   it('supports representative Google and Canvas adapter implementations', () => {
     expect(googleProvider.provider).toBe('google_classroom');
     expect(canvasProvider.provider).toBe('canvas');
+    expectTypeOf<Awaited<ReturnType<LearningProvider['listCourses']>>>()
+      .toEqualTypeOf<LearningProviderPage<LearningCourse>>();
     expectTypeOf<ReturnType<LearningProvider['syncEnrollments']>>()
-      .toEqualTypeOf<Promise<LearningMeasuredPayload>>();
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningProviderEnrollment>>>();
+    expectTypeOf<ReturnType<LearningProvider['syncActivities']>>()
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningActivity>>>();
+    expectTypeOf<ReturnType<LearningProvider['syncResources']>>()
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningResource>>>();
+    expectTypeOf<ReturnType<LearningProvider['syncSubmissions']>>()
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningProviderSubmission>>>();
+    type PaginatedResult = Awaited<ReturnType<LearningProvider['syncSubmissions']>>;
+    expectTypeOf<'payload' extends keyof PaginatedResult ? true : false>().toEqualTypeOf<false>();
     expectTypeOf<LearningProviderEnrollment>().toMatchTypeOf<{
       provider: 'google_classroom' | 'canvas';
       connectionId: number;
@@ -1010,5 +1204,29 @@ describe('provider-neutral interface implementability', () => {
     expectTypeOf<Parameters<LearningProvider['syncSubmissions']>[0]>().toEqualTypeOf<LearningSyncSubmissionsRequest>();
     expectTypeOf<Parameters<LearningProvider['buildLaunchUrl']>[0]>().toEqualTypeOf<LearningBuildLaunchRequest>();
     expectTypeOf<Awaited<ReturnType<LearningProvider['buildLaunchUrl']>>>().toEqualTypeOf<LearningLaunchContract>();
+  });
+
+  it('executes representative submission adapters without any local identity data', async () => {
+    const googleOperation = normalizedOperation({
+      scope: {
+        provider: 'google_classroom', connectionId: 8, externalCourseId: 'google-course-1',
+        externalActivityId: 'coursework-9', externalEnrollmentId: null,
+      },
+    });
+    const googlePage = await normalizedPage(pageBody([providerSubmission({
+      provider: 'google_classroom', connectionId: 8, externalCourseId: 'google-course-1',
+      externalActivityId: 'coursework-9', externalUserId: 'google-user-7',
+      externalEnrollmentId: learningSyntheticEnrollmentId({
+        provider: 'google_classroom', externalCourseId: 'google-course-1', externalUserId: 'google-user-7',
+      }),
+    })]), PROVIDER_SUBMISSION_PAGE, googleOperation);
+    const runnableGoogle: LearningProvider = {
+      ...googleProvider,
+      async syncSubmissions() { return googlePage as LearningProviderPage<LearningProviderSubmission>; },
+    };
+    const returned = await runnableGoogle.syncSubmissions({} as LearningSyncSubmissionsRequest);
+    expect(returned.items[0]).not.toHaveProperty('personId');
+    expect(returned.items[0]).not.toHaveProperty('identityLinkId');
+    expect(JSON.stringify(returned)).not.toContain('rawPayload');
   });
 });

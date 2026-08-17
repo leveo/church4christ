@@ -9,6 +9,7 @@ import {
   LEARNING_ENROLLMENT_STATES,
   LEARNING_EVENT_TYPES,
   LEARNING_IDENTITY_STATUSES,
+  LEARNING_LIMITS,
   LEARNING_PROVIDERS,
   LEARNING_RESOURCE_KINDS,
   LEARNING_SUBMISSION_STATES,
@@ -174,6 +175,29 @@ function validSubmission(overrides: Record<string, unknown> = {}): Record<string
   };
 }
 
+function validProviderSubmission(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const provider = (overrides.provider ?? 'canvas') as 'canvas' | 'google_classroom';
+  const externalCourseId = String(overrides.externalCourseId ?? 'course-42');
+  const externalUserId = String(overrides.externalUserId ?? 'user-12');
+  return {
+    connectionId: provider === 'canvas' ? 7 : 8,
+    provider,
+    externalCourseId,
+    externalActivityId: 'activity-3',
+    externalUserId,
+    externalEnrollmentId: modelApi.learningSyntheticEnrollmentId({
+      provider, externalCourseId, externalUserId,
+    }),
+    status: 'submitted',
+    late: 0,
+    attemptNumber: 1,
+    submittedAt: '2026-08-16T15:40:00.123456789Z',
+    returnedAt: null,
+    providerUpdatedAt: '2026-08-16T15:40:05.123456789Z',
+    ...overrides,
+  };
+}
+
 function validEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'event-local-1',
@@ -210,6 +234,9 @@ const modelApi = learningModelModule as unknown as {
   learningSyntheticEnrollmentId(value: unknown): string;
   normalizeLearningProviderEnrollment(value: unknown): Record<string, unknown>;
   learningProviderEnrollmentUniquenessKeys(value: unknown): readonly string[];
+  normalizeLearningProviderSubmission(value: unknown): Record<string, unknown>;
+  learningProviderSubmissionSubjectKey(value: unknown): string;
+  learningProviderSubmissionUniquenessKeys(value: unknown): readonly string[];
 };
 
 describe('Learning model allowlists', () => {
@@ -891,6 +918,37 @@ describe('provider roster enrollment DTOs', () => {
     expect(modelApi.learningProviderEnrollmentUniquenessKeys(forward)).toHaveLength(2);
   });
 
+  it('selects one coherent Canvas enrollment tuple by state before role across permutations', () => {
+    const inactiveTeacher = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'TeacherEnrollment', state: 'inactive',
+    };
+    const activeObserver = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'ObserverEnrollment', state: 'active',
+    };
+    const invitedStudent = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'StudentEnrollment', state: 'invited',
+    };
+    const permutations = [
+      [inactiveTeacher, activeObserver, invitedStudent],
+      [inactiveTeacher, invitedStudent, activeObserver],
+      [activeObserver, inactiveTeacher, invitedStudent],
+      [activeObserver, invitedStudent, inactiveTeacher],
+      [invitedStudent, inactiveTeacher, activeObserver],
+      [invitedStudent, activeObserver, inactiveTeacher],
+    ];
+    const results = permutations.map((records) => modelApi.aggregateCanvasEnrollmentRecords(records));
+    expect(results.every((result) => result.role === 'observer' && result.state === 'active')).toBe(true);
+    expect(new Set(results.map((result) => result.externalEnrollmentId))).toHaveLength(1);
+
+    expect(modelApi.aggregateCanvasEnrollmentRecords([
+      { ...inactiveTeacher, type: 'ObserverEnrollment', state: 'active' },
+      { ...inactiveTeacher, type: 'TeacherEnrollment', state: 'active' },
+    ])).toMatchObject({ role: 'teacher', state: 'active' });
+  });
+
   it('rejects unknown roster mappings and cross-scope Canvas aggregation', () => {
     for (const input of [
       { provider: 'google_classroom', connectionId: 8, externalCourseId: 'c', externalUserId: 'u', role: 'OWNER', state: 'ACTIVE' },
@@ -907,5 +965,65 @@ describe('provider roster enrollment DTOs', () => {
       provider: 'canvas', connectionId: 7, externalCourseId: 'course-a', externalUserId: 'user-1',
       externalEnrollmentId: 'synthetic', role: 'student', state: 'active', personId: 12,
     }));
+  });
+});
+
+describe('pre-resolution provider submission DTOs', () => {
+  it('normalizes representative Google Classroom and Canvas submissions without local People data', () => {
+    const canvas = modelApi.normalizeLearningProviderSubmission(validProviderSubmission());
+    const google = modelApi.normalizeLearningProviderSubmission(validProviderSubmission({
+      provider: 'google_classroom', connectionId: 8, externalCourseId: 'google-course-1',
+      externalUserId: 'google-user-7', externalActivityId: 'coursework-9',
+      externalEnrollmentId: modelApi.learningSyntheticEnrollmentId({
+        provider: 'google_classroom', externalCourseId: 'google-course-1', externalUserId: 'google-user-7',
+      }),
+      status: 'returned', returnedAt: '2026-08-16T16:00:00.000000001Z',
+    }));
+    expect(canvas).toMatchObject({ provider: 'canvas', status: 'submitted', attemptNumber: 1 });
+    expect(google).toMatchObject({ provider: 'google_classroom', status: 'returned' });
+    for (const result of [canvas, google]) {
+      expect(result).not.toHaveProperty('personId');
+      expect(result).not.toHaveProperty('identityLinkId');
+      expect(result).not.toHaveProperty('enrollmentId');
+      expect(Object.isFrozen(result)).toBe(true);
+    }
+  });
+
+  it('enforces synthetic subjects, exact fields, state coherence, and attempt boundaries', () => {
+    expect(modelApi.normalizeLearningProviderSubmission(validProviderSubmission({ attemptNumber: 0 })))
+      .toMatchObject({ attemptNumber: 0 });
+    expect(modelApi.normalizeLearningProviderSubmission(validProviderSubmission({
+      attemptNumber: LEARNING_LIMITS.maxSubmissionAttempts,
+    }))).toMatchObject({ attemptNumber: LEARNING_LIMITS.maxSubmissionAttempts });
+    for (const overrides of [
+      { externalEnrollmentId: 'attacker-controlled' },
+      { attemptNumber: -1 },
+      { attemptNumber: LEARNING_LIMITS.maxSubmissionAttempts + 1 },
+      { late: 2 },
+      { status: 'graded' },
+      { status: 'not_submitted', submittedAt: '2026-08-16T15:40:00Z' },
+      { status: 'submitted', submittedAt: null },
+      { status: 'returned', returnedAt: null },
+      { providerUpdatedAt: 'not-a-time' },
+      { personId: 12 },
+      { identityLinkId: 21 },
+      { enrollmentId: 31 },
+      { grade: 'A+' },
+      { content: 'secret-answer' },
+      { rawPayload: 'secret-provider-body' },
+    ]) expectInvalid(() => modelApi.normalizeLearningProviderSubmission(
+      validProviderSubmission(overrides),
+    ));
+  });
+
+  it('binds provider/course/activity scope and every later-reconciliation uniqueness dimension', () => {
+    const normalized = modelApi.normalizeLearningProviderSubmission(validProviderSubmission());
+    const externalEnrollmentId = normalized.externalEnrollmentId as string;
+    expect(modelApi.learningProviderSubmissionSubjectKey(normalized))
+      .toBe(JSON.stringify(['canvas', 7, 'course-42', 'activity-3', externalEnrollmentId]));
+    expect(modelApi.learningProviderSubmissionUniquenessKeys(normalized)).toEqual([
+      JSON.stringify(['canvas', 7, 'course-42', 'activity-3', 'external_enrollment', externalEnrollmentId]),
+      JSON.stringify(['canvas', 7, 'course-42', 'activity-3', 'external_user', 'user-12']),
+    ]);
   });
 });

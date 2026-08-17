@@ -174,6 +174,21 @@ export interface LearningProviderEnrollment extends LearningCourseSubject, Learn
   readonly state: LearningEnrollmentState;
 }
 
+/**
+ * Provider submission data before persistence resolves the external identity
+ * and synthetic enrollment to local Person/enrollment rows and builds a
+ * LearningSubmissionSnapshot.
+ */
+export interface LearningProviderSubmission extends LearningActivitySubject, LearningIdentitySubject {
+  readonly externalEnrollmentId: string;
+  readonly status: LearningSubmissionState;
+  readonly late: LearningIntegerBoolean;
+  readonly attemptNumber: number;
+  readonly submittedAt: string | null;
+  readonly returnedAt: string | null;
+  readonly providerUpdatedAt: string | null;
+}
+
 export interface GoogleClassroomRosterRecord extends LearningCourseSubject, LearningIdentitySubject {
   readonly role: 'STUDENT' | 'TEACHER';
   readonly state: 'ACTIVE' | 'INVITED' | 'COMPLETED' | 'INACTIVE';
@@ -840,7 +855,10 @@ function canvasState(value: unknown): LearningEnrollmentState {
 
 /**
  * Canvas may return several enrollment types for one user/course. Aggregation
- * uses teacher > student > observer and active > invited > completed > inactive.
+ * selects one source tuple using active > invited > completed > inactive,
+ * then teacher > student > observer within that state, then raw type and raw
+ * state code-unit order as stable tie-breakers. Role and state always come
+ * from the same selected source record.
  * The synthetic id depends only on provider/course/user, never input order/role.
  */
 export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProviderEnrollment {
@@ -849,8 +867,12 @@ export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProvid
   let connectionId = 0;
   let externalCourseId = '';
   let externalUserId = '';
-  let selectedRole: LearningEnrollmentRole = 'observer';
-  let selectedState: LearningEnrollmentState = 'inactive';
+  let selected: {
+    readonly role: LearningEnrollmentRole;
+    readonly state: LearningEnrollmentState;
+    readonly type: CanvasEnrollmentRecord['type'];
+    readonly rawState: CanvasEnrollmentRecord['state'];
+  } | null = null;
   for (let index = 0; index < records.length; index += 1) {
     const row = exactRecord(records[index], [
       'connectionId', 'provider', 'externalCourseId', 'externalUserId', 'type', 'state',
@@ -868,11 +890,27 @@ export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProvid
       || currentCourseId !== externalCourseId
       || currentUserId !== externalUserId
     ) invalid();
-    const role = canvasRole(row.type);
-    const state = canvasState(row.state);
-    if (CANVAS_ROLE_PRECEDENCE[role] > CANVAS_ROLE_PRECEDENCE[selectedRole]) selectedRole = role;
-    if (CANVAS_STATE_PRECEDENCE[state] > CANVAS_STATE_PRECEDENCE[selectedState]) selectedState = state;
+    const type = oneOf(row.type, [
+      'StudentEnrollment', 'TeacherEnrollment', 'TaEnrollment',
+      'DesignerEnrollment', 'ObserverEnrollment',
+    ] as const);
+    const role = canvasRole(type);
+    const rawState = oneOf(row.state, [
+      'active', 'invited', 'creation_pending', 'completed', 'inactive',
+    ] as const);
+    const state = canvasState(rawState);
+    if (
+      selected === null
+      || CANVAS_STATE_PRECEDENCE[state] > CANVAS_STATE_PRECEDENCE[selected.state]
+      || (CANVAS_STATE_PRECEDENCE[state] === CANVAS_STATE_PRECEDENCE[selected.state]
+        && CANVAS_ROLE_PRECEDENCE[role] > CANVAS_ROLE_PRECEDENCE[selected.role])
+      || (state === selected.state && role === selected.role && (
+        type < selected.type
+        || (type === selected.type && rawState < selected.rawState)
+      ))
+    ) selected = { role, state, type, rawState };
   }
+  if (selected === null) invalid();
   return normalizeLearningProviderEnrollment({
     connectionId,
     provider: 'canvas',
@@ -881,8 +919,8 @@ export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProvid
     externalEnrollmentId: learningSyntheticEnrollmentId({
       provider: 'canvas', externalCourseId, externalUserId,
     }),
-    role: selectedRole,
-    state: selectedState,
+    role: selected.role,
+    state: selected.state,
   });
 }
 
@@ -958,6 +996,42 @@ export function normalizeLearningResource(value: unknown, rawPolicy: unknown): L
     youtubeVideoId,
     mimeType,
     sizeBytes,
+    providerUpdatedAt: nullableTimestamp(row.providerUpdatedAt),
+  });
+}
+
+export function normalizeLearningProviderSubmission(value: unknown): LearningProviderSubmission {
+  const row = exactRecord(value, [
+    'connectionId', 'provider', 'externalCourseId', 'externalActivityId',
+    'externalUserId', 'externalEnrollmentId', 'status', 'late', 'attemptNumber',
+    'submittedAt', 'returnedAt', 'providerUpdatedAt',
+  ]);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const externalCourseId = externalId(row.externalCourseId);
+  const externalUserId = externalId(row.externalUserId);
+  const externalEnrollmentId = externalId(row.externalEnrollmentId);
+  if (externalEnrollmentId !== learningSyntheticEnrollmentId({
+    provider, externalCourseId, externalUserId,
+  })) invalid();
+  const status = oneOf(row.status, LEARNING_SUBMISSION_STATES);
+  const submittedAt = nullableTimestamp(row.submittedAt);
+  const returnedAt = nullableTimestamp(row.returnedAt);
+  if (status === 'not_submitted' && (submittedAt !== null || returnedAt !== null)) invalid();
+  if ((status === 'submitted' || status === 'returned') && submittedAt === null) invalid();
+  if (status === 'returned' && returnedAt === null) invalid();
+  if (returnedAt !== null && submittedAt === null) invalid();
+  return frozen({
+    connectionId: integer(row.connectionId, 1),
+    provider,
+    externalCourseId,
+    externalActivityId: externalId(row.externalActivityId),
+    externalUserId,
+    externalEnrollmentId,
+    status,
+    late: integer(row.late, 0, 1) as LearningIntegerBoolean,
+    attemptNumber: integer(row.attemptNumber, 0, LEARNING_LIMITS.maxSubmissionAttempts),
+    submittedAt,
+    returnedAt,
     providerUpdatedAt: nullableTimestamp(row.providerUpdatedAt),
   });
 }
@@ -1090,6 +1164,16 @@ export function learningSubmissionSubjectKey(submission: LearningSubmissionSnaps
   ]);
 }
 
+export function learningProviderSubmissionSubjectKey(submission: LearningProviderSubmission): string {
+  return JSON.stringify([
+    submission.provider,
+    submission.connectionId,
+    submission.externalCourseId,
+    submission.externalActivityId,
+    submission.externalEnrollmentId,
+  ]);
+}
+
 function frozenKeys(...keys: string[]): readonly string[] {
   return Object.freeze(keys);
 }
@@ -1156,6 +1240,29 @@ export function learningResourceUniquenessKeys(resource: LearningResource): read
 
 export function learningSubmissionUniquenessKeys(submission: LearningSubmissionSnapshot): readonly string[] {
   return frozenKeys(learningSubmissionSubjectKey(submission));
+}
+
+export function learningProviderSubmissionUniquenessKeys(
+  submission: LearningProviderSubmission,
+): readonly string[] {
+  return frozenKeys(
+    JSON.stringify([
+      submission.provider,
+      submission.connectionId,
+      submission.externalCourseId,
+      submission.externalActivityId,
+      'external_enrollment',
+      submission.externalEnrollmentId,
+    ]),
+    JSON.stringify([
+      submission.provider,
+      submission.connectionId,
+      submission.externalCourseId,
+      submission.externalActivityId,
+      'external_user',
+      submission.externalUserId,
+    ]),
+  );
 }
 
 export function learningActivityEventDeduplicationKey(event: LearningActivityEvent): string {

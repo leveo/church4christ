@@ -10,9 +10,9 @@ import {
   normalizeLearningCourse,
   normalizeLearningLaunchContract,
   normalizeLearningProviderEnrollment,
+  normalizeLearningProviderSubmission,
   normalizeLearningProviderErrorMetadata,
   normalizeLearningResource,
-  normalizeLearningSubmissionSnapshot,
   type LearningActivity,
   type LearningActivitySubject,
   type LearningCourse,
@@ -24,14 +24,15 @@ import {
   type LearningProviderErrorMetadata,
   type LearningProviderEnrollment,
   type LearningProviderKind,
+  type LearningProviderSubmission,
   type LearningProviderSubject,
   type LearningResource,
-  type LearningSubmissionSnapshot,
   type LearningSyncStatus,
   type LearningSyncTrigger,
 } from './learningModel';
 
-const MEASURED_PAYLOAD_BRAND: unique symbol = Symbol('LearningMeasuredPayload');
+const BYTE_MEASUREMENT_BRAND: unique symbol = Symbol('LearningByteMeasurement');
+const NORMALIZED_RESPONSE_BRAND: unique symbol = Symbol('LearningNormalizedResponse');
 const NORMALIZED_PAGE_BRAND: unique symbol = Symbol('LearningProviderPage');
 
 export interface LearningPageRequest {
@@ -41,7 +42,7 @@ export interface LearningPageRequest {
 }
 
 export interface LearningProviderPage<T extends object> {
-  readonly [NORMALIZED_PAGE_BRAND]: true;
+  readonly [NORMALIZED_PAGE_BRAND]: LearningByteMeasurement;
   readonly items: readonly T[];
   readonly requestPageToken: string | null;
   readonly nextPageToken: string | null;
@@ -49,11 +50,17 @@ export interface LearningProviderPage<T extends object> {
   readonly responseBytes: number;
 }
 
-/** Created only by readLearningJsonResponse after actual streamed bytes are counted. */
-export interface LearningMeasuredPayload {
-  readonly [MEASURED_PAYLOAD_BRAND]: true;
-  readonly payload: unknown;
+/** Opaque proof created only after actual response bytes are streamed and counted. */
+export interface LearningByteMeasurement {
+  readonly [BYTE_MEASUREMENT_BRAND]: true;
   readonly byteCount: number;
+}
+
+/** Contains only trusted normalized data; the parsed provider body is never exposed. */
+export interface LearningNormalizedResponse<T> {
+  readonly [NORMALIZED_RESPONSE_BRAND]: true;
+  readonly value: T;
+  readonly measurement: LearningByteMeasurement;
 }
 
 export interface LearningPageContract<T extends object> {
@@ -102,7 +109,7 @@ export interface LearningPageAccumulatorView<T extends object> {
 
 export interface LearningPageAccumulator<T extends object> {
   readonly view: LearningPageAccumulatorView<T>;
-  accept(payload: LearningMeasuredPayload, currentTimeEpochMs: number): LearningPageAccumulator<T>;
+  accept(page: LearningProviderPage<T>, currentTimeEpochMs: number): LearningPageAccumulator<T>;
 }
 
 export interface LearningPageSequenceContract<T extends object> {
@@ -191,12 +198,12 @@ export interface LearningProviderNotification extends LearningProviderSubject {
 export interface LearningProvider {
   readonly provider: LearningProviderKind;
   healthCheck(request: LearningHealthRequest): Promise<LearningProviderHealth>;
-  listCourses(request: LearningListCoursesRequest): Promise<LearningMeasuredPayload>;
+  listCourses(request: LearningListCoursesRequest): Promise<LearningProviderPage<LearningCourse>>;
   syncCourse(request: LearningSyncCourseRequest): Promise<LearningCourse>;
-  syncEnrollments(request: LearningSyncEnrollmentsRequest): Promise<LearningMeasuredPayload>;
-  syncActivities(request: LearningSyncActivitiesRequest): Promise<LearningMeasuredPayload>;
-  syncResources(request: LearningSyncResourcesRequest): Promise<LearningMeasuredPayload>;
-  syncSubmissions(request: LearningSyncSubmissionsRequest): Promise<LearningMeasuredPayload>;
+  syncEnrollments(request: LearningSyncEnrollmentsRequest): Promise<LearningProviderPage<LearningProviderEnrollment>>;
+  syncActivities(request: LearningSyncActivitiesRequest): Promise<LearningProviderPage<LearningActivity>>;
+  syncResources(request: LearningSyncResourcesRequest): Promise<LearningProviderPage<LearningResource>>;
+  syncSubmissions(request: LearningSyncSubmissionsRequest): Promise<LearningProviderPage<LearningProviderSubmission>>;
   buildLaunchUrl(request: LearningBuildLaunchRequest): Promise<LearningLaunchContract>;
   normalizeNotification(input: unknown): Promise<LearningProviderNotification | null>;
 }
@@ -300,7 +307,30 @@ function contractCallbacks(
   }
 }
 
-function measuredPayload(value: unknown): LearningMeasuredPayload {
+function byteMeasurement(value: unknown): LearningByteMeasurement {
+  try {
+    if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+      learningValidation.invalid();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== 2
+      || !keys.includes(BYTE_MEASUREMENT_BRAND)
+      || !keys.includes('byteCount')
+      || descriptors[BYTE_MEASUREMENT_BRAND]?.value !== true
+      || !descriptors.byteCount
+      || !('value' in descriptors.byteCount)
+      || !Object.isFrozen(value)
+    ) learningValidation.invalid();
+    learningValidation.integer(descriptors.byteCount.value, 0, LEARNING_LIMITS.maxSyncBytes);
+    return value as LearningByteMeasurement;
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
+function normalizedResponse<T>(value: unknown): LearningNormalizedResponse<T> {
   try {
     if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
       learningValidation.invalid();
@@ -309,41 +339,87 @@ function measuredPayload(value: unknown): LearningMeasuredPayload {
     const keys = Reflect.ownKeys(descriptors);
     if (
       keys.length !== 3
-      || !keys.includes(MEASURED_PAYLOAD_BRAND)
-      || !keys.includes('payload')
-      || !keys.includes('byteCount')
-      || descriptors[MEASURED_PAYLOAD_BRAND]?.value !== true
-      || !descriptors.payload
-      || !('value' in descriptors.payload)
-      || !descriptors.byteCount
-      || !('value' in descriptors.byteCount)
+      || !keys.includes(NORMALIZED_RESPONSE_BRAND)
+      || !keys.includes('value')
+      || !keys.includes('measurement')
+      || descriptors[NORMALIZED_RESPONSE_BRAND]?.value !== true
+      || !descriptors.value
+      || !('value' in descriptors.value)
+      || !descriptors.measurement
+      || !('value' in descriptors.measurement)
       || !Object.isFrozen(value)
     ) learningValidation.invalid();
-    learningValidation.integer(descriptors.byteCount.value, 0, LEARNING_LIMITS.maxSyncBytes);
-    return value as LearningMeasuredPayload;
+    byteMeasurement(descriptors.measurement.value);
+    return value as LearningNormalizedResponse<T>;
   } catch {
     return learningValidation.invalid();
   }
 }
 
-function brandedPage<T extends object>(value: Omit<LearningProviderPage<T>, typeof NORMALIZED_PAGE_BRAND>): LearningProviderPage<T> {
+function brandedPage<T extends object>(
+  value: Omit<LearningProviderPage<T>, typeof NORMALIZED_PAGE_BRAND>,
+  measurement: LearningByteMeasurement,
+): LearningProviderPage<T> {
   const result = { ...value } as LearningProviderPage<T>;
-  Object.defineProperty(result, NORMALIZED_PAGE_BRAND, { value: true });
+  Object.defineProperty(result, NORMALIZED_PAGE_BRAND, { value: measurement });
   return Object.freeze(result);
 }
 
-export function normalizeLearningPage<T extends object>(
+function revalidateLearningPage<T extends object>(
   value: unknown,
   contract: LearningPageContract<T>,
 ): LearningProviderPage<T> {
+  try {
+    if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+      learningValidation.invalid();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== 6
+      || !keys.includes(NORMALIZED_PAGE_BRAND)
+      || !descriptors[NORMALIZED_PAGE_BRAND]
+      || !('value' in descriptors[NORMALIZED_PAGE_BRAND])
+      || !Object.isFrozen(value)
+    ) learningValidation.invalid();
+    const measurement = byteMeasurement(descriptors[NORMALIZED_PAGE_BRAND].value);
+    const stringKeys = ['items', 'requestPageToken', 'nextPageToken', 'pageNumber', 'responseBytes'] as const;
+    const row: Record<(typeof stringKeys)[number], unknown> = Object.create(null) as Record<
+      (typeof stringKeys)[number], unknown
+    >;
+    for (let index = 0; index < stringKeys.length; index += 1) {
+      const key = stringKeys[index];
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor)) learningValidation.invalid();
+      row[key] = descriptor.value;
+    }
+    if (row.responseBytes !== measurement.byteCount) learningValidation.invalid();
+    const response = makeNormalizedResponse({
+      items: row.items,
+      requestPageToken: row.requestPageToken,
+      nextPageToken: row.nextPageToken,
+      pageNumber: row.pageNumber,
+    }, measurement);
+    return normalizeLearningPage(response, contract);
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
+export function normalizeLearningPage<T extends object>(
+  value: LearningNormalizedResponse<unknown>,
+  contract: LearningPageContract<T>,
+): LearningProviderPage<T> {
   const callbacks = contractCallbacks(contract, ['normalizeItem', 'subjectKey']);
-  const measured = measuredPayload(value);
-  const row = learningValidation.exactRecord(measured.payload, [
+  const response = normalizedResponse<unknown>(value);
+  const row = learningValidation.exactRecord(response.value, [
     'items', 'requestPageToken', 'nextPageToken', 'pageNumber',
   ]);
   const itemInputs = learningValidation.dataArray(row.items, LEARNING_LIMITS.maxPageItems);
   const pageNumber = learningValidation.integer(row.pageNumber, 1, LEARNING_LIMITS.maxPages);
-  const responseBytes = learningValidation.integer(measured.byteCount, 0, LEARNING_LIMITS.maxPageBytes);
+  const responseBytes = learningValidation.integer(
+    response.measurement.byteCount, 0, LEARNING_LIMITS.maxPageBytes,
+  );
   const byKey = new Map<string, { item: T; json: string }>();
   for (let index = 0; index < itemInputs.length; index += 1) {
     const rawItem = itemInputs[index];
@@ -381,7 +457,7 @@ export function normalizeLearningPage<T extends object>(
     nextPageToken: token(row.nextPageToken),
     pageNumber,
     responseBytes,
-  });
+  }, response.measurement);
 }
 
 function nullableExternalId(value: unknown): string | null {
@@ -790,10 +866,10 @@ function makeAccumulator<T extends object>(
   const view = accumulatorView(state);
   return Object.freeze({
     view,
-    accept(payload: LearningMeasuredPayload, currentTimeEpochMs: number): LearningPageAccumulator<T> {
+    accept(rawPage: LearningProviderPage<T>, currentTimeEpochMs: number): LearningPageAccumulator<T> {
       const context = normalizeLearningOperationContext(state.context, currentTimeEpochMs);
       if (state.complete === 1 || isCancelled(context.signal)) learningValidation.invalid();
-      const page = normalizeLearningPage(payload, {
+      const page = revalidateLearningPage(rawPage, {
         normalizeItem,
         subjectKey(item) {
           return safeUniquenessKeys(item, uniquenessKeys)[0];
@@ -944,29 +1020,39 @@ async function guardedRead(
   });
 }
 
-function makeMeasuredPayload(payload: unknown, byteCount: number): LearningMeasuredPayload {
+function makeByteMeasurement(value: unknown): LearningByteMeasurement {
   const result = {
-    payload: cloneAndFreeze(payload),
-    byteCount,
-  } as LearningMeasuredPayload;
-  Object.defineProperty(result, MEASURED_PAYLOAD_BRAND, { value: true });
+    byteCount: learningValidation.integer(value, 0, LEARNING_LIMITS.maxSyncBytes),
+  } as LearningByteMeasurement;
+  Object.defineProperty(result, BYTE_MEASUREMENT_BRAND, { value: true });
+  return Object.freeze(result);
+}
+
+function makeNormalizedResponse<T>(
+  value: T,
+  measurement: LearningByteMeasurement,
+): LearningNormalizedResponse<T> {
+  const result = { value, measurement } as LearningNormalizedResponse<T>;
+  Object.defineProperty(result, NORMALIZED_RESPONSE_BRAND, { value: true });
   return Object.freeze(result);
 }
 
 /**
- * Measures a supplied response stream before parsing JSON. It performs no
- * fetch and is the only constructor for the opaque measured-payload brand.
+ * Streams and measures a supplied response before parsing JSON, then
+ * immediately replaces the parsed provider body with exact normalized data.
+ * It performs no fetch and never returns the parsed provider body.
  */
-export async function readLearningJsonResponse(
+export async function readAndNormalizeLearningResponse<T extends object>(
   response: Response,
   rawOperation: LearningOperationContext,
+  exactNormalizer: (value: unknown) => T,
   now: () => number,
-): Promise<LearningMeasuredPayload> {
+): Promise<LearningNormalizedResponse<T>> {
   let operation: LearningOperationContext;
   let provider: LearningProviderKind = 'canvas';
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
-    if (typeof now !== 'function') learningValidation.invalid();
+    if (typeof exactNormalizer !== 'function' || typeof now !== 'function') learningValidation.invalid();
     const initialNow = now();
     const rawOperationRow = learningValidation.dataRecord(rawOperation);
     const rawScope = learningValidation.dataRecord(rawOperationRow.scope);
@@ -1039,7 +1125,15 @@ export async function readLearningJsonResponse(
     } catch {
       throw providerFailure('malformed_response', provider);
     }
-    return makeMeasuredPayload(parsed, byteCount);
+    let normalized: T;
+    try {
+      normalized = exactNormalizer(parsed);
+      if (normalized === parsed) learningValidation.invalid();
+      normalized = cloneAndFreeze(learningValidation.dataRecord(normalized)) as T;
+    } catch {
+      throw providerFailure('malformed_response', provider);
+    }
+    return makeNormalizedResponse(normalized, makeByteMeasurement(byteCount));
   } catch (error) {
     if (error instanceof LearningProviderError) throw error;
     throw providerFailure('malformed_response', provider);
@@ -1215,28 +1309,28 @@ export async function invokeLearningProvider(
     }
 
     let page: LearningProviderPage<LearningCourse | LearningProviderEnrollment | LearningActivity
-      | LearningResource | LearningSubmissionSnapshot>;
+      | LearningResource | LearningProviderSubmission>;
     if (method === 'listCourses') {
-      page = normalizeLearningPage(rawResult, {
+      page = revalidateLearningPage(rawResult, {
         normalizeItem: (value) => normalizeLearningCourse(value, invocation.urlPolicy),
         subjectKey: (value) => JSON.stringify([value.provider, value.connectionId, value.externalCourseId]),
       });
     } else if (method === 'syncEnrollments') {
-      page = normalizeLearningPage(rawResult, {
+      page = revalidateLearningPage(rawResult, {
         normalizeItem: normalizeLearningProviderEnrollment,
         subjectKey: (value) => JSON.stringify([
           value.provider, value.connectionId, value.externalCourseId, value.externalEnrollmentId,
         ]),
       });
     } else if (method === 'syncActivities') {
-      page = normalizeLearningPage(rawResult, {
+      page = revalidateLearningPage(rawResult, {
         normalizeItem: (value) => normalizeLearningActivity(value, invocation.urlPolicy),
         subjectKey: (value) => JSON.stringify([
           value.provider, value.connectionId, value.externalCourseId, value.externalActivityId,
         ]),
       });
     } else if (method === 'syncResources') {
-      page = normalizeLearningPage(rawResult, {
+      page = revalidateLearningPage(rawResult, {
         normalizeItem: (value) => normalizeLearningResource(value, invocation.urlPolicy),
         subjectKey: (value) => JSON.stringify([
           value.provider, value.connectionId, value.externalCourseId,
@@ -1244,8 +1338,8 @@ export async function invokeLearningProvider(
         ]),
       });
     } else {
-      page = normalizeLearningPage(rawResult, {
-        normalizeItem: normalizeLearningSubmissionSnapshot,
+      page = revalidateLearningPage(rawResult, {
+        normalizeItem: normalizeLearningProviderSubmission,
         subjectKey: (value) => JSON.stringify([
           value.provider, value.connectionId, value.externalCourseId,
           value.externalActivityId, value.externalEnrollmentId,
