@@ -264,6 +264,8 @@ describe('final D1 schema parser', () => {
       'newcomer_field_options_custom_update',
       'newcomer_answers_custom_insert',
       'newcomer_answers_custom_update',
+      'learning_activity_events_no_update',
+      'learning_activity_events_no_delete',
     ]);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')).toMatchObject({
       table: 'service_type_checkin_events',
@@ -305,6 +307,19 @@ describe('final D1 schema parser', () => {
       newcomer_answers_custom_insert: customValueGuard,
       newcomer_answers_custom_update: customValueGuard,
     });
+    expect(schema.triggers.get('learning_activity_events_no_update')).toMatchObject({
+      table: 'learning_activity_events',
+      timing: 'before',
+      semanticGuard: 'true',
+      abortMessage: 'learning_event_append_only',
+    });
+    expect(schema.triggers.get('learning_activity_events_no_delete')).toMatchObject({
+      table: 'learning_activity_events',
+      timing: 'before',
+      abortMessage: 'learning_event_append_only',
+    });
+    expect(schema.triggers.get('learning_activity_events_no_delete')?.semanticGuard)
+      .toMatch(/exists \( select 1 from people.*and exists \( select 1 from learning_courses/);
   });
 
   it('fails closed on unsupported trigger bodies and duplicate trigger names', () => {
