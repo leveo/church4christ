@@ -208,6 +208,20 @@ describe('portable Learning schema (D1)', () => {
     }
   });
 
+  it('rejects correctly sized TEXT ciphertext instead of relying on SQLite length alone', async () => {
+    const graph = await seedGraph(210);
+    await reject(`INSERT INTO learning_provider_credentials
+      (connection_id, ciphertext, nonce, algorithm, key_version)
+      VALUES (${graph.connectionId}, '0123456789abcdef', zeroblob(12), 'AES-256-GCM', 1)`);
+  });
+
+  it('rejects correctly sized TEXT nonces instead of relying on SQLite length alone', async () => {
+    const graph = await seedGraph(211);
+    await reject(`INSERT INTO learning_provider_credentials
+      (connection_id, ciphertext, nonce, algorithm, key_version)
+      VALUES (${graph.connectionId}, zeroblob(16), '0123456789ab', 'AES-256-GCM', 1)`);
+  });
+
   it('normalizes identities, enrollments, activities, and resources with exact bounded enums', async () => {
     const graph = await seedGraph(300);
     await env.DB.prepare(`INSERT INTO learning_resources

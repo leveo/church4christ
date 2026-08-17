@@ -64,8 +64,10 @@ CREATE INDEX idx_learning_connections_active_sync
 CREATE TABLE learning_provider_credentials (
   connection_id INTEGER PRIMARY KEY
     REFERENCES learning_provider_connections(id) ON DELETE CASCADE,
-  ciphertext BLOB NOT NULL CHECK (length(ciphertext) BETWEEN 16 AND 16384),
-  nonce BLOB NOT NULL CHECK (length(nonce) BETWEEN 12 AND 32),
+  ciphertext BLOB NOT NULL
+    CHECK (typeof(ciphertext) = 'blob' AND length(ciphertext) BETWEEN 16 AND 16384),
+  nonce BLOB NOT NULL
+    CHECK (typeof(nonce) = 'blob' AND length(nonce) BETWEEN 12 AND 32),
   algorithm TEXT NOT NULL
     CHECK (instr(algorithm,char(0)) = 0 AND algorithm = 'AES-256-GCM'),
   key_version INTEGER NOT NULL CHECK (key_version BETWEEN 1 AND 2147483647),
