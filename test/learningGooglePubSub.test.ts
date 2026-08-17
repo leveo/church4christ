@@ -69,6 +69,7 @@ describe('Google Pub/Sub push authentication and envelope', () => {
     const delivery = parseGooglePubSubPushBody({
       rawBody: message({
         collection: 'courses.courseWork.studentSubmissions',
+        eventType: 'CREATED',
         resourceId: { courseId: 'course-1', courseWorkId: 'quiz-1', id: 'submission-1' },
       }),
       expectedSubscriptionName: 'projects/church-project/subscriptions/classroom',
@@ -86,7 +87,8 @@ describe('Google Pub/Sub push authentication and envelope', () => {
 
   it('accepts the documented wrapped aliases and optional delivery metadata without retaining it', () => {
     const data = btoa(JSON.stringify({
-      collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+      collection: 'courses.courseWork', eventType: 'UPDATED',
+      resourceId: { courseId: 'course-1', id: 'work-1' },
     }));
     const delivery = parseGooglePubSubPushBody({
       rawBody: new TextEncoder().encode(JSON.stringify({
@@ -107,7 +109,8 @@ describe('Google Pub/Sub push authentication and envelope', () => {
 
   it('accepts a snake-only wrapped alias variant and rejects alias conflicts or unbounded delivery metadata', () => {
     const data = btoa(JSON.stringify({
-      collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+      collection: 'courses.courseWork', eventType: 'DELETED',
+      resourceId: { courseId: 'course-1', id: 'work-1' },
     }));
     const envelope = (overrides: Record<string, unknown>, outer: Record<string, unknown> = {}) =>
       new TextEncoder().encode(JSON.stringify({
@@ -137,15 +140,28 @@ describe('Google Pub/Sub push authentication and envelope', () => {
   });
 
   it('rejects wrong subscriptions, unknown fields, malformed base64/JSON, collection-resource mismatch, and oversized bodies', () => {
-    const validData = { collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' } };
+    const validData = {
+      collection: 'courses.courseWork', eventType: 'CREATED',
+      resourceId: { courseId: 'course-1', id: 'work-1' },
+    };
     const inputs = [
       { rawBody: message(validData), expectedSubscriptionName: 'projects/other/subscriptions/classroom' },
       { rawBody: message(validData, { surprise: true }), expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
+      { rawBody: message({ collection: 'courses.courseWork',
+        resourceId: { courseId: 'course-1', id: 'work-1' } }),
+        expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
       { rawBody: new TextEncoder().encode(JSON.stringify({
         message: { attributes: { registrationId: 'registration-1' }, data: '*not-base64*', messageId: 'message-1' },
         subscription: 'projects/church-project/subscriptions/classroom',
       })), expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
-      { rawBody: message({ collection: 'courses.students', resourceId: { courseId: 'course-1', id: 'not-user' } }),
+      { rawBody: message({ collection: 'courses.students', eventType: 'CREATED',
+        resourceId: { courseId: 'course-1', id: 'not-user' } }),
+        expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
+      { rawBody: message({ collection: 'courses.courseWork', eventType: 'created',
+        resourceId: { courseId: 'course-1', id: 'work-1' } }),
+        expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
+      { rawBody: message({ collection: 'courses.courseWork', eventType: 'CREATED', providerBody: 'private',
+        resourceId: { courseId: 'course-1', id: 'work-1' } }),
         expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
       { rawBody: new Uint8Array(65_537), expectedSubscriptionName: 'projects/church-project/subscriptions/classroom' },
     ];

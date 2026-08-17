@@ -20,7 +20,8 @@ function body(): string {
     message: {
       attributes: { registrationId: 'registration-1' },
       data: btoa(JSON.stringify({
-        collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+        collection: 'courses.courseWork', eventType: 'CREATED',
+        resourceId: { courseId: 'course-1', id: 'work-1' },
       })),
       messageId: 'message-1', publishTime: '2026-08-17T11:59:59.000Z',
     },
@@ -34,7 +35,8 @@ function documentedWrappedBody(): string {
     message: {
       attributes: { registrationId: 'registration-1' },
       data: btoa(JSON.stringify({
-        collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+        collection: 'courses.courseWork', eventType: 'CREATED',
+        resourceId: { courseId: 'course-1', id: 'work-1' },
       })),
       messageId: 'message-1',
       message_id: 'message-1',
