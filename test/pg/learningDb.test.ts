@@ -314,6 +314,18 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     await sql.unsafe(`UPDATE learning_enrollments SET state='invited' WHERE course_id=$1`, [mapped.courseId]);
     expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 })).toEqual([]);
     await sql.unsafe(`UPDATE learning_enrollments SET state='active' WHERE course_id=$1`, [mapped.courseId]);
+    await sql.unsafe(`UPDATE learning_programs SET status='archived'
+      WHERE id=(SELECT program_id FROM learning_courses WHERE id=$1)`, [mapped.courseId]);
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 })).toEqual([]);
+    await sql.unsafe(`UPDATE learning_programs SET status='active'
+      WHERE id=(SELECT program_id FROM learning_courses WHERE id=$1)`, [mapped.courseId]);
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 }))
+      .toHaveLength(1);
+    await sql.unsafe(`UPDATE learning_programs SET status='archived',deleted_at=$2
+      WHERE id=(SELECT program_id FROM learning_courses WHERE id=$1)`, [mapped.courseId, NOW]);
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 })).toEqual([]);
+    await sql.unsafe(`UPDATE learning_programs SET status='active',deleted_at=NULL
+      WHERE id=(SELECT program_id FROM learning_courses WHERE id=$1)`, [mapped.courseId]);
     const removalAt = '2026-08-17T12:20:00.000Z';
     const removalLease = await startLearningSync(db, {
       connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',

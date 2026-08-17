@@ -1374,9 +1374,11 @@ export async function listLearningEnrollmentsForPerson(
       FROM learning_enrollments e JOIN learning_identity_links i
         ON i.id=e.identity_link_id AND i.connection_id=e.connection_id
       JOIN learning_courses c ON c.id=e.course_id AND c.connection_id=e.connection_id
+      JOIN learning_programs lp ON lp.id=c.program_id
       JOIN learning_provider_connections pc ON pc.id=c.connection_id AND pc.provider=c.provider
       WHERE e.course_id=?1 AND i.person_id=?2 AND i.status='active'
         AND e.state='active' AND c.deleted_at IS NULL AND c.lifecycle_state='active'
+        AND lp.status='active' AND lp.deleted_at IS NULL
         AND pc.status='active' AND pc.deleted_at IS NULL
       ORDER BY e.id LIMIT 100`).bind(courseId, personId).all();
     return Object.freeze(resultRows(result, 100).map((row) => {

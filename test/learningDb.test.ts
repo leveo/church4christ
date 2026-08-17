@@ -318,6 +318,16 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     await env.DB.prepare(`UPDATE learning_courses SET lifecycle_state='active' WHERE id=?`).bind(mapped.courseId).run();
     await env.DB.prepare(`UPDATE learning_provider_connections SET status='error' WHERE id=701`).run();
     expect(await listLearningEnrollmentsForPerson(env.DB, { courseId: mapped.courseId, personId: 7012 })).toEqual([]);
+    await env.DB.prepare(`UPDATE learning_provider_connections SET status='active' WHERE id=701`).run();
+    await env.DB.prepare(`UPDATE learning_programs SET status='archived'
+      WHERE id=?`).bind(mapped.programId).run();
+    expect(await listLearningEnrollmentsForPerson(env.DB, { courseId: mapped.courseId, personId: 7012 })).toEqual([]);
+    await env.DB.prepare(`UPDATE learning_programs SET status='active' WHERE id=?`).bind(mapped.programId).run();
+    expect(await listLearningEnrollmentsForPerson(env.DB, { courseId: mapped.courseId, personId: 7012 }))
+      .toHaveLength(1);
+    await env.DB.prepare(`UPDATE learning_programs SET status='archived',deleted_at=?
+      WHERE id=?`).bind(NOW, mapped.programId).run();
+    expect(await listLearningEnrollmentsForPerson(env.DB, { courseId: mapped.courseId, personId: 7012 })).toEqual([]);
   });
 
   it('emits stable submitted and returned transitions and reports only actual per-run differences', async () => {
