@@ -13,7 +13,10 @@ import {
   loadGoogleCredentialForAdmin,
   loadGoogleCredentialForCleanup,
 } from '../../src/lib/learningGoogleAuth';
-import { recoverGoogleClassroomCleanup } from '../../src/lib/learningGoogleCleanup';
+import {
+  listGoogleClassroomCleanupConnectionIds,
+  recoverGoogleClassroomCleanup,
+} from '../../src/lib/learningGoogleCleanup';
 import { renewGoogleClassroomRegistrations } from '../../src/lib/learningGoogleRegistrationLifecycle';
 import {
   acceptGooglePubSubDelivery,
@@ -248,6 +251,59 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
       WHERE connection_id=27512 AND external_course_id='pg-archived-course'`)).toEqual([{ count: 0 }]);
     expect(await sqlA.unsafe(`SELECT COUNT(*)::int AS count FROM learning_google_registrations
       WHERE connection_id=27512`)).toEqual([{ count: 0 }]);
+  });
+
+  it('rotates Postgres cleanup fairly after one connection keeps failing remotely', async () => {
+    await sqlA.unsafe(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id) VALUES
+      (27562,'google_classroom','PG stuck cleanup',NULL,'active',1,27501),
+      (27572,'google_classroom','PG next cleanup',NULL,'active',1,27501)`);
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    for (const [connectionId, prefix] of [[27562, 'pg-stuck'], [27572, 'pg-next']] as const) {
+      const envelope = await encryptLearningCredential(ring, {
+        provider: 'google_classroom', connectionId,
+        plaintext: encodeGoogleCredential({
+          version: 1, accessToken: `${prefix}-access`, refreshToken: `${prefix}-refresh`,
+          accessTokenExpiresAt: '2026-08-17T13:00:00.000Z',
+          refreshTokenExpiresAt: '2026-09-17T12:00:00.000Z',
+          grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+        }), expiresAt: '2026-09-17T12:00:00.000Z',
+      });
+      await dbA.prepare(`INSERT INTO learning_provider_credentials
+        (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+        VALUES(?1,?2,?3,?4,?5,?6,?7)`).bind(
+        connectionId, envelope.ciphertext, envelope.nonce, envelope.algorithm,
+        envelope.keyVersion, envelope.envelopeVersion, envelope.expiresAt,
+      ).run();
+    }
+    await sqlA.unsafe(`INSERT INTO learning_google_cleanup_tasks
+      (connection_id,task_type,registration_id,created_at) VALUES
+      (27562,'registration','pg-fair-stuck','2026-08-17T11:00:00.000Z'),
+      (27572,'registration','pg-fair-next','2026-08-17T11:00:00.000Z')`);
+    const attempts: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const registrationId = decodeURIComponent(new URL(String(input)).pathname.slice('/v1/registrations/'.length));
+      attempts.push(registrationId);
+      return new Response(null, { status: registrationId === 'pg-fair-stuck' ? 503 : 200 });
+    });
+    expect(await listGoogleClassroomCleanupConnectionIds(dbA, 1)).toEqual([27562]);
+    await expect(recoverGoogleClassroomCleanup(dbA, {
+      connectionId: 27562, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+    }, { now: () => NOW })).resolves.toMatchObject({ selected: 1, cleaned: 0, pending: 1 });
+    expect(await listGoogleClassroomCleanupConnectionIds(dbA, 1)).toEqual([27572]);
+    await expect(recoverGoogleClassroomCleanup(dbA, {
+      connectionId: 27572, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+    }, { now: () => NOW })).resolves.toMatchObject({ selected: 1, cleaned: 1, pending: 0 });
+    expect(attempts).toEqual(['pg-fair-stuck', 'pg-fair-next']);
+    expect(await sqlA.unsafe(`SELECT attempt_count,last_attempt_at FROM learning_google_cleanup_tasks
+      WHERE registration_id='pg-fair-stuck'`)).toEqual([{
+      attempt_count: 1, last_attempt_at: '2026-08-17T12:00:00.000Z',
+    }]);
+    await sqlA.unsafe(`DELETE FROM learning_provider_connections WHERE id IN (27562,27572)`);
   });
 
   it('has one exact-revision mapping winner with two feeds and cleans the losing registrations', async () => {

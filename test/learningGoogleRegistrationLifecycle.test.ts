@@ -39,7 +39,7 @@ const KEY_SECRET = JSON.stringify({
 
 async function seedGraph(): Promise<Awaited<ReturnType<typeof importLearningCredentialKeyRing>>> {
   await env.DB.prepare('DELETE FROM learning_courses WHERE connection_id=27602').run();
-  await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id=27602').run();
+  await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id IN (27602,27612)').run();
   await env.DB.prepare('DELETE FROM learning_programs WHERE id IN (27603,27604)').run();
   await env.DB.prepare('DELETE FROM people WHERE id=27601').run();
   await env.DB.prepare("INSERT INTO people(id,display_name,email) VALUES(27601,'Lifecycle Admin','lifecycle@example.test')").run();
@@ -606,6 +606,55 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     expect(queries + 2).toBeLessThanOrEqual(50);
     expect(maxBinds).toBeLessThanOrEqual(100);
     expect(8 * 2 * 24 * 7).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it('rotates cleanup fairly across connections after a persistent remote failure', async () => {
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    await env.DB.prepare(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id)
+      VALUES(27612,'google_classroom','Second cleanup',NULL,'active',1,27601)`).run();
+    const secondEnvelope = await encryptLearningCredential(keyRing, {
+      provider: 'google_classroom', connectionId: 27612,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'second-access', refreshToken: 'second-refresh',
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z',
+        refreshTokenExpiresAt: '2026-09-17T12:00:00.000Z',
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: '2026-09-17T12:00:00.000Z',
+    });
+    await env.DB.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27612,?1,?2,?3,?4,?5,?6)`).bind(
+      secondEnvelope.ciphertext, secondEnvelope.nonce, secondEnvelope.algorithm,
+      secondEnvelope.keyVersion, secondEnvelope.envelopeVersion, secondEnvelope.expiresAt,
+    ).run();
+    await env.DB.prepare(`INSERT INTO learning_google_cleanup_tasks
+      (connection_id,task_type,registration_id,created_at) VALUES
+      (27602,'registration','fair-stuck','2026-08-17T11:00:00.000Z'),
+      (27612,'registration','fair-next','2026-08-17T11:00:00.000Z')`).run();
+    const attempts: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const registrationId = decodeURIComponent(new URL(String(input)).pathname.slice('/v1/registrations/'.length));
+      attempts.push(registrationId);
+      return new Response(null, { status: registrationId === 'fair-stuck' ? 503 : 200 });
+    });
+    expect(await listGoogleClassroomCleanupConnectionIds(env.DB as AppDb, 1)).toEqual([27602]);
+    await expect(recoverGoogleClassroomCleanup(env.DB as AppDb, {
+      connectionId: 27602, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing, fetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+    }, { now: () => NOW })).resolves.toMatchObject({ selected: 1, cleaned: 0, pending: 1 });
+    expect(await env.DB.prepare(`SELECT attempt_count,last_attempt_at FROM learning_google_cleanup_tasks
+      WHERE registration_id='fair-stuck'`).first()).toEqual({
+      attempt_count: 1, last_attempt_at: '2026-08-17T12:00:00.000Z',
+    });
+    expect(await listGoogleClassroomCleanupConnectionIds(env.DB as AppDb, 1)).toEqual([27612]);
+    await expect(recoverGoogleClassroomCleanup(env.DB as AppDb, {
+      connectionId: 27612, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing, fetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+    }, { now: () => NOW })).resolves.toMatchObject({ selected: 1, cleaned: 1, pending: 0 });
+    expect(attempts).toEqual(['fair-stuck', 'fair-next']);
   });
 
   it('reserves cleanup fairly while renewing expired, due, and topic-mismatched feeds within complete cron budgets', async () => {
