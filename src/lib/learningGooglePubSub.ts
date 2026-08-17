@@ -348,7 +348,9 @@ export function parseGooglePubSubPushBody(rawInput: {
   if (!hasCamelTime && !hasSnakeTime) invalid();
   if (hasCamelTime && hasSnakeTime && message.publishTime !== message.publish_time) invalid();
   const publishedAt = timestamp(hasCamelTime ? message.publishTime : message.publish_time);
-  const classroom = exact(strictBase64Json(message.data), ['collection', 'resourceId']);
+  const classroom = exact(strictBase64Json(message.data), ['collection', 'eventType', 'resourceId']);
+  const eventType = bounded(classroom.eventType, 1, 64);
+  if (!/^[A-Z][A-Z0-9_]{0,63}$/u.test(eventType)) invalid();
   const normalized = normalizeResourceId(classroom.collection, classroom.resourceId);
   return Object.freeze({
     subscriptionName: actualSubscription,
