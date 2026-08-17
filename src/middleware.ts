@@ -1,6 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
-import { DEFAULT_LOCALE, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
+import { DEFAULT_LOCALE, parseLocale, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
 import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
@@ -39,8 +39,31 @@ function forbidden(locale: string): Response {
   return res;
 }
 
+/**
+ * Reject a non-canonical locale on the private Learning course shell before
+ * opening the database or reading a session. Use the request URL's raw pathname
+ * so percent-encoded locale aliases cannot normalize into a supported locale.
+ */
+function hasInvalidLearningCourseLocale(rawPathname: string): boolean {
+  const match = rawPathname.match(/^\/([^/]+)\/learn\/[^/]+\/?$/);
+  return match !== null && parseLocale(match[1]) === null;
+}
+
+function opaqueNotFound(): Response {
+  const res = new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  });
+  applySecurityHeaders(res.headers);
+  return res;
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
+
+  if (hasInvalidLearningCourseLocale(new URL(context.request.url).pathname)) {
+    return opaqueNotFound();
+  }
 
   // Bare root: content-negotiate a locale and 302 to its localized home. The
   // redirect carries the security headers too, so no response leaves unhardened.

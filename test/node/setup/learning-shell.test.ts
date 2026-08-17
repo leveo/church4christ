@@ -107,6 +107,9 @@ describe('Learning capability shell', () => {
     expect(middleware.indexOf('const mod = moduleForPath(rest)')).toBeLessThan(
       middleware.indexOf('verifySession(vars.SESSION_SECRET'),
     );
+    expect(middleware.indexOf('if (hasInvalidLearningCourseLocale(')).toBeLessThan(
+      middleware.indexOf('openDb(env as unknown as DbEnv)'),
+    );
 
     const learnerIndex = read('src/pages/[locale]/learn/index.astro');
     const course = read('src/pages/[locale]/learn/[courseId].astro');
@@ -120,10 +123,12 @@ describe('Learning capability shell', () => {
     expect(learnerIndex).toContain("t(locale, 'learning.emptyTitle')");
     expect(learnerIndex).toContain("t(locale, 'learning.emptyBody')");
 
+    const courseLocale = course.indexOf("parseLocale(Astro.params.locale ?? '')");
     const courseModule = course.indexOf("if (!modules.has('learning'))");
     const courseUser = course.indexOf('if (!user)');
-    const nonEnrolled = course.indexOf('status: 404', courseUser);
-    expect(courseModule).toBeGreaterThan(-1);
+    const nonEnrolled = course.indexOf('return notFound();', courseUser);
+    expect(courseLocale).toBeGreaterThan(-1);
+    expect(courseModule).toBeGreaterThan(courseLocale);
     expect(courseUser).toBeGreaterThan(courseModule);
     expect(nonEnrolled).toBeGreaterThan(courseUser);
 

@@ -1,15 +1,24 @@
 ---
 // The course shell fails non-disclosing while enrollment-scoped persistence is
 // not present. Task 9 replaces this response with a person-scoped SQL lookup.
+import { parseLocale } from '../../../lib/locales';
+
 export const prerender = false;
 
+const notFound = () => new Response('Not Found', {
+  status: 404,
+  headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+});
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) return notFound();
 const modules = Astro.locals.modules;
 if (!modules.has('learning')) {
-  return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+  return notFound();
 }
 const user = Astro.locals.user;
 if (!user) {
   return new Response(null, { status: 401, headers: { 'cache-control': 'no-store' } });
 }
-return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+return notFound();
 ---
