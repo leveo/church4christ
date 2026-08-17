@@ -151,10 +151,9 @@ async function activeAccessToken(
   readonly revision: number;
   readonly refreshTokenExpiresAt: string | null;
 }> {
-  const connection = await getLearningConnection(db, input.connectionId, { includeDeleted: false });
+  const connection = (await getLearningConnection(db, input.connectionId, { includeDeleted: false })) ?? invalid();
   if (
-    !connection
-    || connection.provider !== 'google_classroom'
+    connection.provider !== 'google_classroom'
     || (connection.status !== 'active' && (!allowError || connection.status !== 'error'))
   ) invalid();
   const connectionStatus = connection.status;
@@ -356,8 +355,8 @@ export async function disconnectGoogleClassroomConnection(
     limit: 8,
   });
   if (cleanup.pending > 0) invalid();
-  const disconnected = await getLearningConnection(db, connectionId, { includeDeleted: true });
-  if (!disconnected || disconnected.status !== 'disabled' || disconnected.revision !== expectedRevision + 1) invalid();
+  const disconnected = (await getLearningConnection(db, connectionId, { includeDeleted: true })) ?? invalid();
+  if (disconnected.status !== 'disabled' || disconnected.revision !== expectedRevision + 1) invalid();
   return disconnected;
 }
 

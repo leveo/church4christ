@@ -52,16 +52,18 @@ function uuid(): string {
 }
 
 function rows(result: AppDbResult<unknown> | undefined, maximum: number): Record<string, unknown>[] {
-  if (!result || !Array.isArray(result.results) || result.results.length > maximum) invalid();
-  return result.results.map((value) => {
+  const safeResult = result ?? invalid();
+  if (!Array.isArray(safeResult.results) || safeResult.results.length > maximum) invalid();
+  return safeResult.results.map((value) => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid();
     return value as Record<string, unknown>;
   });
 }
 
 function changes(result: AppDbResult<unknown> | undefined): number {
-  if (!result || !result.meta || !Number.isInteger(result.meta.changes) || result.meta.changes < 0) invalid();
-  return result.meta.changes;
+  const safeResult = result ?? invalid();
+  if (!safeResult.meta || !Number.isInteger(safeResult.meta.changes) || safeResult.meta.changes < 0) invalid();
+  return safeResult.meta.changes;
 }
 
 export interface GoogleCleanupDrainSummary {

@@ -89,8 +89,8 @@ describe('production Google Classroom registration renewal pass', () => {
     const keyRing = { currentVersion: 1, keys: new Map() } as never;
     const importKeyRing = vi.fn(async () => keyRing);
     const renew = vi.fn();
-    const listCleanupConnectionIds = vi.fn(async () => [27302] as const);
-    const recoverCleanup = vi.fn(async () => ({
+    const listCleanupConnectionIds = vi.fn(async (_db: AppDb, _limit: number) => [27302] as const);
+    const recoverCleanup = vi.fn(async (_db: AppDb, _input: unknown) => ({
       selected: 4, cleaned: 4, pending: 0, finalizedDisconnect: false,
     }));
     const fetcher = vi.fn();

@@ -908,8 +908,7 @@ export async function loadGoogleCredentialForAdmin(
     const credential = decodeGoogleCredential(plaintext);
     const envelope = envelopeFromRow(row, '');
     if (credential.refreshTokenExpiresAt !== envelope.expiresAt) invalid();
-    if (row.status !== 'active' && row.status !== 'error') invalid();
-    const status: 'active' | 'error' = row.status;
+    const status = learningValidation.oneOf(row.status, ['active', 'error'] as const);
     return Object.freeze({
       connectionId,
       revision: databaseInteger(row.revision),
@@ -946,8 +945,7 @@ export async function loadGoogleCredentialForCleanup(
     const credential = decodeGoogleCredential(plaintext);
     const envelope = envelopeFromRow(row, '');
     if (credential.refreshTokenExpiresAt !== envelope.expiresAt) invalid();
-    if (row.status !== 'active' && row.status !== 'error' && row.status !== 'disabled') invalid();
-    const status: 'active' | 'error' | 'disabled' = row.status;
+    const status = learningValidation.oneOf(row.status, ['active', 'error', 'disabled'] as const);
     return Object.freeze({ connectionId, revision: databaseInteger(row.revision), status, credential });
   } catch (error) {
     if (error instanceof LearningGoogleAuthError) throw error;
