@@ -100,8 +100,12 @@ describe('production Google Classroom registration renewal pass', () => {
     })).resolves.toEqual({
       status: 'completed', summary: { selected: 0, renewed: 0, conflicted: 0, failed: 0 },
     });
-    expect(listCleanupConnectionIds).toHaveBeenCalledWith(env.DB, 1);
-    expect(recoverCleanup).toHaveBeenCalledWith(env.DB, {
+    expect(listCleanupConnectionIds).toHaveBeenCalledTimes(1);
+    expect(listCleanupConnectionIds.mock.calls[0]?.[0] === env.DB).toBe(true);
+    expect(listCleanupConnectionIds.mock.calls[0]?.[1]).toBe(1);
+    expect(recoverCleanup).toHaveBeenCalledTimes(1);
+    expect(recoverCleanup.mock.calls[0]?.[0] === env.DB).toBe(true);
+    expect(recoverCleanup.mock.calls[0]?.[1]).toEqual({
       connectionId: 27302,
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing, fetcher, nowEpochMs: Date.parse('2026-08-17T12:00:00.000Z'),
