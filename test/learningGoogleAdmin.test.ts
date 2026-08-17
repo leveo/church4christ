@@ -117,7 +117,7 @@ describe('Google Classroom admin authoritative course selection', () => {
       const url = new URL(String(input));
       if (url.origin === 'https://classroom.googleapis.com') {
         expect(init?.method).toBe('DELETE');
-        expect(new Headers(init.headers).get('authorization')).toBe('Bearer private-access');
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer private-access');
         expect(['/v1/registrations/disconnect-roster', '/v1/registrations/disconnect-work']).toContain(url.pathname);
         return new Response(null, { status: 200 });
       }

@@ -45,7 +45,9 @@ describe('production Google Classroom registration renewal pass', () => {
   it('imports the server key ring and runs one bounded, no-backoff renewal drain', async () => {
     const keyRing = { currentVersion: 1, keys: new Map() } as never;
     const importKeyRing = vi.fn(async () => keyRing);
-    const renew = vi.fn(async () => ({ selected: 2, renewed: 1, conflicted: 1, failed: 0 }));
+    const renew = vi.fn(async (..._args: [AppDb, unknown]) => (
+      { selected: 2, renewed: 1, conflicted: 1, failed: 0 }
+    ));
     const fetcher = vi.fn();
     await expect(runGoogleClassroomRegistrationRenewalPass(COMPLETE_ENV, env.DB as AppDb, {
       fetcher, now: () => Date.parse('2026-08-17T12:00:00.000Z'), importKeyRing, renew,
