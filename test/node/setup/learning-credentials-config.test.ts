@@ -17,6 +17,27 @@ describe('Learning credential secret declaration', () => {
       expect(example).not.toMatch(new RegExp(`^${name}=.+$`, 'm'));
       expect(example).toContain(`wrangler secret put ${name}`);
     }
+    for (const name of [
+      'GOOGLE_CLASSROOM_PUBSUB_TOPIC',
+      'GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL',
+      'GOOGLE_PUBSUB_SUBSCRIPTION_NAME',
+    ]) {
+      expect(config).toContain(`// "${name}"`);
+      expect(template).toContain(`// "${name}"`);
+      expect(example).toContain(`# ${name}=`);
+      expect(example).not.toMatch(new RegExp(`^${name}=.+$`, 'm'));
+    }
+    const requiredSecrets = config.slice(config.indexOf('"secrets"'), config.indexOf('"triggers"'));
+    expect(requiredSecrets).not.toMatch(/GOOGLE_(?:CLASSROOM_PUBSUB_TOPIC|PUBSUB_)/u);
     expect(example).toContain('AES-256-GCM');
+  });
+
+  it('wires the bounded Classroom renewal pass into the existing hourly Worker lifecycle', () => {
+    const worker = readFileSync('src/worker.ts', 'utf8');
+    expect(worker).toContain("case ATTENDANCE_CRON:");
+    expect(worker).toContain('runGoogleClassroomRegistrationRenewalPass');
+    expect(worker).toContain('Promise.all([');
+    expect(worker).toContain(']).finally(end)');
+    expect(worker).not.toMatch(/learningGoogle[^\n]*(?:retry|backoff|setTimeout)/iu);
   });
 });
