@@ -126,7 +126,6 @@ async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allo
     ? await loadCanvasCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
     : await loadCanvasCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
   if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs + REFRESH_SKEW_MS) {
-    if (connection.status === 'error') invalid();
     const credential = await refreshCanvasAccessToken({
       baseUrl: loaded.baseUrl,
       clientId: input.clientId,
@@ -140,13 +139,18 @@ async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allo
       const rotated = await rotateCanvasCredential(db, {
         connectionId: input.connectionId, expectedRevision: loaded.revision,
         credential, keyRing: input.keyRing, nowEpochMs: input.nowEpochMs,
+        allowErrorStatus: connection.status === 'error',
       });
       loaded = Object.freeze({ ...loaded, revision: rotated.revision, credential });
     } catch (error) {
       if (!(error instanceof LearningCanvasAuthConflictError)) throw error;
-      loaded = await loadCanvasCredential(db, {
-        connectionId: input.connectionId, keyRing: input.keyRing,
-      });
+      loaded = allowError
+        ? await loadCanvasCredentialForAdmin(db, {
+          connectionId: input.connectionId, keyRing: input.keyRing,
+        })
+        : await loadCanvasCredential(db, {
+          connectionId: input.connectionId, keyRing: input.keyRing,
+        });
       if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs) invalid();
     }
   }

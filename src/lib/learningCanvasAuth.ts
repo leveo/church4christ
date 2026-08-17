@@ -793,6 +793,7 @@ export async function rotateCanvasCredential(
     readonly credential: CanvasCredential;
     readonly keyRing: LearningCredentialKeyRing;
     readonly nowEpochMs: number;
+    readonly allowErrorStatus?: boolean;
   },
 ): Promise<{ readonly connectionId: number; readonly revision: number }> {
   const connectionId = dbInteger(rawInput.connectionId);
@@ -804,14 +805,16 @@ export async function rotateCanvasCredential(
   });
   const marker = uuid();
   const nextRevision = expectedRevision + 1;
+  const allowErrorStatus = rawInput.allowErrorStatus === true ? 1 : 0;
   try {
     const results = await db.batch([
       db.prepare(`UPDATE learning_provider_connections SET
         operation_marker=?1,operation_expires_at=?2,revision=revision+1,updated_at=datetime('now')
-        WHERE id=?3 AND provider='canvas' AND status='active' AND deleted_at IS NULL
+        WHERE id=?3 AND provider='canvas'
+          AND (status='active' OR (?5=1 AND status='error')) AND deleted_at IS NULL
           AND revision=?4 AND operation_marker IS NULL`)
         .bind(marker, new Date(epoch(rawInput.nowEpochMs) + CANVAS_OAUTH_STATE_TTL_MS).toISOString(),
-          connectionId, expectedRevision),
+          connectionId, expectedRevision, allowErrorStatus),
       db.prepare(`UPDATE learning_provider_credentials SET
         ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,
         expires_at=NULL,updated_at=datetime('now')
