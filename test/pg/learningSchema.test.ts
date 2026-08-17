@@ -7,6 +7,9 @@ const LEARNING_TABLES = [
   'learning_activity_events',
   'learning_courses',
   'learning_enrollments',
+  'learning_google_notification_receipts',
+  'learning_google_oauth_states',
+  'learning_google_registrations',
   'learning_identity_links',
   'learning_programs',
   'learning_provider_connections',
@@ -102,7 +105,7 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     await sql?.end();
   });
 
-  it('keeps all eleven tables server-only while preserving owner CRUD', async () => {
+  it('keeps all fourteen tables server-only while preserving owner CRUD', async () => {
     const rls = await sql.unsafe<{ relname: string; relrowsecurity: boolean }[]>(`
       SELECT c.relname,c.relrowsecurity
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -123,7 +126,11 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
       try {
         await sql.unsafe(`SET ROLE ${role}`);
         await rejects('SELECT * FROM learning_programs', '42501');
+        await rejects('SELECT * FROM learning_google_oauth_states', '42501');
         await rejects("INSERT INTO learning_programs (slug,display_name) VALUES ('browser','Browser')", '42501');
+        await rejects(`INSERT INTO learning_google_notification_receipts
+          (subscription_name,message_id,registration_id,external_course_id,collection_name,received_at)
+          VALUES ('projects/p/subscriptions/s','m','r','c','courses.students','2026-08-17T12:00:00Z')`, '42501');
       } finally {
         await sql.unsafe('RESET ROLE');
       }
@@ -135,6 +142,53 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
       'SELECT display_name FROM learning_programs WHERE id=990001',
     ))[0]?.display_name).toBe('Owner updated');
     await sql.unsafe('DELETE FROM learning_programs WHERE id=990001');
+  });
+
+  it('keeps Google OAuth envelopes binary and registration/receipt metadata bounded', async () => {
+    const graph = await seedGraph(698, 'assignment', 'google_classroom');
+    const columnTypes = await sql.unsafe<{ table_name: string; column_name: string; data_type: string }[]>(`
+      SELECT table_name,column_name,data_type FROM information_schema.columns
+      WHERE table_schema='public' AND (
+        (table_name='learning_google_oauth_states' AND column_name IN
+          ('state_hash','session_hash','verifier_ciphertext','verifier_nonce')) OR
+        (table_name='learning_google_registrations' AND column_name='expiry_time') OR
+        (table_name='learning_google_notification_receipts' AND column_name='message_id')
+      ) ORDER BY table_name,column_name
+    `);
+    expect(columnTypes).toEqual([
+      { table_name: 'learning_google_notification_receipts', column_name: 'message_id', data_type: 'text' },
+      { table_name: 'learning_google_oauth_states', column_name: 'session_hash', data_type: 'bytea' },
+      { table_name: 'learning_google_oauth_states', column_name: 'state_hash', data_type: 'bytea' },
+      { table_name: 'learning_google_oauth_states', column_name: 'verifier_ciphertext', data_type: 'bytea' },
+      { table_name: 'learning_google_oauth_states', column_name: 'verifier_nonce', data_type: 'bytea' },
+      { table_name: 'learning_google_registrations', column_name: 'expiry_time', data_type: 'text' },
+    ]);
+    await rejects(`INSERT INTO learning_google_oauth_states
+      (connection_id,state_hash,session_hash,actor_person_id,connection_revision,redirect_uri,
+       verifier_ciphertext,verifier_nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES (${graph.connectionId},decode(repeat('00',31),'hex'),decode(repeat('00',32),'hex'),
+        ${graph.personId},1,'https://church.example.test/admin/learning/google/callback',
+        decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),'AES-256-GCM',1,2,
+        '2026-08-17T12:10:00.000Z')`, '23514');
+    await sql.unsafe(`INSERT INTO learning_google_oauth_states
+      (connection_id,state_hash,session_hash,actor_person_id,connection_revision,redirect_uri,
+       verifier_ciphertext,verifier_nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES (${graph.connectionId},decode(repeat('00',32),'hex'),decode(repeat('11',32),'hex'),
+        ${graph.personId},1,'https://church.example.test/admin/learning/google/callback',
+        decode(repeat('22',32),'hex'),decode(repeat('33',12),'hex'),'AES-256-GCM',1,2,
+        '2026-08-17T12:10:00.000Z')`);
+    await sql.unsafe(`INSERT INTO learning_google_registrations
+      (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time)
+      VALUES (${graph.connectionId},'course-698','COURSE_WORK_CHANGES','registration-698',
+        'projects/church/topics/classroom','2026-08-24T12:00:00.000Z')`);
+    await sql.unsafe(`INSERT INTO learning_google_notification_receipts
+      (subscription_name,message_id,registration_id,external_course_id,collection_name,received_at)
+      VALUES ('projects/church/subscriptions/classroom','message-698','registration-698',
+        'course-698','courses.courseWork','2026-08-17T12:00:00.000Z')`);
+    await rejects(`INSERT INTO learning_google_notification_receipts
+      (subscription_name,message_id,registration_id,external_course_id,collection_name,received_at)
+      VALUES ('projects/church/subscriptions/classroom','message-698','registration-698',
+        'course-698','courses.courseWork','2026-08-17T12:00:01.000Z')`, '23505');
   });
 
   it('persists bounded Learning lease, policy proof, and one-winner finalization markers', async () => {
