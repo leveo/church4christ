@@ -21,6 +21,8 @@ describe('Learning connection administration page', () => {
 
   it('renders Canvas course mapping without provider credentials or student work', () => {
     const page = readFileSync('src/pages/admin/learning/canvas/courses.astro', 'utf8');
+    expect(page).toContain("import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi'");
+    expect(page).not.toMatch(/\bsel\b/u);
     expect(page).toContain('listCanvasCourseOptions');
     expect(page).toContain('action="/admin/learning/canvas/map-course"');
     for (const name of [
