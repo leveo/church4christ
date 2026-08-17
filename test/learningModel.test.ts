@@ -16,12 +16,18 @@ import {
   LearningValidationError,
   learningActivityEventDeduplicationKey,
   learningActivitySubjectKey,
+  learningActivityUniquenessKeys,
   learningCourseSubjectKey,
+  learningCourseUniquenessKeys,
   learningEnrollmentSubjectKey,
+  learningEnrollmentUniquenessKeys,
   learningIdentitySubjectKey,
+  learningIdentityUniquenessKeys,
   learningProviderSubjectKey,
   learningResourceSubjectKey,
+  learningResourceUniquenessKeys,
   learningSubmissionSubjectKey,
+  learningSubmissionUniquenessKeys,
   normalizeCanvasBaseUrl,
   normalizeLearningActivity,
   normalizeLearningActivityEvent,
@@ -42,28 +48,18 @@ const URL_POLICY = {
   provider: 'canvas',
   connectionId: 7,
   baseUrl: 'https://canvas.church.test',
-  allowedOrigins: [
-    'https://canvas.church.test',
-    'https://files.church.test',
-    'https://www.youtube.com',
-    'https://youtube.com',
-    'https://m.youtube.com',
-    'https://youtu.be',
-  ],
+  providerLaunchOrigins: ['https://canvas.church.test'],
+  providerFileOrigins: ['https://files.church.test'],
+  externalLinkOrigins: ['https://links.example.test', 'https://drive.google.com'],
 } as const;
 
 const GOOGLE_URL_POLICY = {
   provider: 'google_classroom',
   connectionId: 8,
   baseUrl: null,
-  allowedOrigins: [
-    'https://classroom.google.com',
-    'https://drive.google.com',
-    'https://www.youtube.com',
-    'https://youtube.com',
-    'https://m.youtube.com',
-    'https://youtu.be',
-  ],
+  providerLaunchOrigins: ['https://classroom.google.com'],
+  providerFileOrigins: ['https://drive.google.com', 'https://files.googleusercontent.com'],
+  externalLinkOrigins: ['https://links.example.test', 'https://drive.google.com'],
 } as const;
 
 function validConnection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -373,10 +369,82 @@ describe('connection, strings, numbers, and timestamps', () => {
 });
 
 describe('URL policy', () => {
+  it('keeps provider launch, provider-file, external-link, and YouTube roles separate', () => {
+    expectInvalid(() => normalizeLearningCourse(validCourse({
+      launchUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    }), URL_POLICY));
+    expectInvalid(() => normalizeLearningActivity(validActivity({
+      launchUrl: 'https://files.church.test/activities/3',
+    }), URL_POLICY));
+    expectInvalid(() => normalizeLearningResource(validResource({
+      launchUrl: 'https://links.example.test/files/5',
+    }), URL_POLICY));
+    expectInvalid(() => normalizeLearningResource(validResource({
+      kind: 'link',
+      launchUrl: 'https://files.church.test/files/5',
+      youtubeVideoId: null,
+      mimeType: null,
+      sizeBytes: null,
+    }), URL_POLICY));
+    expect(normalizeLearningResource(validResource({
+      kind: 'link',
+      launchUrl: 'https://drive.google.com/open?id=external-study-guide',
+      youtubeVideoId: null,
+      mimeType: null,
+      sizeBytes: null,
+    }), URL_POLICY).launchUrl).toBe('https://drive.google.com/open?id=external-study-guide');
+    expect(normalizeLearningResource(validResource({
+      kind: 'youtube',
+      launchUrl: 'https://youtu.be/dQw4w9WgXcQ?t=42',
+      youtubeVideoId: 'dQw4w9WgXcQ',
+      mimeType: null,
+      sizeBytes: null,
+    }), URL_POLICY).launchUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+
+    expect(normalizeLearningCourse({
+      ...validCourse(), provider: 'google_classroom', connectionId: 8,
+      launchUrl: 'https://classroom.google.com/c/course-42',
+    }, GOOGLE_URL_POLICY).launchUrl).toBe('https://classroom.google.com/c/course-42');
+    expectInvalid(() => normalizeLearningCourse({
+      ...validCourse(), provider: 'google_classroom', connectionId: 8,
+      launchUrl: 'https://drive.google.com/drive/folders/course-42',
+    }, GOOGLE_URL_POLICY));
+  });
+
+  it('requires a stable course and nullable activity subject in launch contracts', () => {
+    const expectedCourse = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalActivityId: null,
+    } as const;
+    expectInvalid(() => normalizeLearningLaunchContract({
+      provider: 'canvas',
+      connectionId: 7,
+      externalActivityId: null,
+      url: 'https://canvas.church.test/courses/42',
+    }, URL_POLICY, expectedCourse));
+    expectInvalid(() => normalizeLearningLaunchContract({
+      ...expectedCourse,
+      url: 'https://canvas.church.test/courses/42',
+    }, URL_POLICY, { ...expectedCourse, externalCourseId: 'course-other' }));
+    expectInvalid(() => normalizeLearningLaunchContract({
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+      url: 'https://canvas.church.test/courses/42',
+    }, URL_POLICY, expectedCourse));
+    const activity = normalizeLearningLaunchContract({
+      ...expectedCourse,
+      externalActivityId: 'activity-3',
+      url: 'https://canvas.church.test/courses/42/activities/3',
+    }, URL_POLICY, { ...expectedCourse, externalActivityId: 'activity-3' });
+    expect(activity).toMatchObject({
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalActivityId: 'activity-3',
+    });
+    expect(Object.isFrozen(activity)).toBe(true);
+  });
+
   it('normalizes exact allowlisted HTTPS launch origins and retains bounded queries', () => {
     expect(normalizeLearningLaunchUrl(
       'https://canvas.church.test/courses/42/assignments/7?module_item=9&view=full',
       URL_POLICY,
+      'provider_launch',
     )).toBe('https://canvas.church.test/courses/42/assignments/7?module_item=9&view=full');
   });
 
@@ -397,14 +465,16 @@ describe('URL policy', () => {
       'https://canvas.church.test/courses/%0d%0aSet-Cookie:x',
       'https://canvas.church.test/courses/%zz',
     ];
-    for (const url of invalid) expectInvalid(() => normalizeLearningLaunchUrl(url, URL_POLICY));
+    for (const url of invalid) expectInvalid(() => normalizeLearningLaunchUrl(url, URL_POLICY, 'provider_launch'));
   });
 
   it('keeps persisted URLs HTTPS-only and isolates local HTTP in a non-persisted contract', () => {
     const httpCanvasPolicy = {
       ...URL_POLICY,
       baseUrl: 'http://localhost:3000',
-      allowedOrigins: ['http://localhost:3000'],
+      providerLaunchOrigins: ['http://localhost:3000'],
+      providerFileOrigins: ['http://localhost:3000'],
+      externalLinkOrigins: ['http://localhost:3000'],
     } as const;
     expectInvalid(() => normalizeLearningConnection(validConnection({
       baseUrl: 'http://localhost:3000',
@@ -447,7 +517,9 @@ describe('URL policy', () => {
     const google = normalizeLearningConnectionUrlPolicy(GOOGLE_URL_POLICY);
     expect(canvas).toEqual(URL_POLICY);
     expect(Object.isFrozen(canvas)).toBe(true);
-    expect(Object.isFrozen(canvas.allowedOrigins)).toBe(true);
+    expect(Object.isFrozen(canvas.providerLaunchOrigins)).toBe(true);
+    expect(Object.isFrozen(canvas.providerFileOrigins)).toBe(true);
+    expect(Object.isFrozen(canvas.externalLinkOrigins)).toBe(true);
 
     expectInvalid(() => normalizeLearningCourse(validCourse(), google));
     expectInvalid(() => normalizeLearningCourse({
@@ -463,32 +535,39 @@ describe('URL policy', () => {
     }), URL_POLICY));
     expectInvalid(() => normalizeLearningConnectionUrlPolicy({
       ...URL_POLICY,
-      allowedOrigins: ['https://canvas.church.test', 'https://classroom.google.com'],
+      providerLaunchOrigins: ['https://canvas.church.test', 'https://classroom.google.com'],
     }));
     expectInvalid(() => normalizeLearningConnectionUrlPolicy({
       ...URL_POLICY,
-      allowedOrigins: ['https://canvas.church.test', 'https://drive.google.com'],
+      externalLinkOrigins: ['https://www.youtube-nocookie.com'],
     }));
     expectInvalid(() => normalizeLearningConnectionUrlPolicy({
       ...URL_POLICY,
       baseUrl: 'https://canvas.church.test:444',
-      allowedOrigins: ['https://canvas.church.test:444'],
+      providerLaunchOrigins: ['https://canvas.church.test:444'],
     }));
 
+    const expectedCourse = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalActivityId: null,
+    } as const;
     const launch = normalizeLearningLaunchContract({
-      provider: 'canvas', connectionId: 7,
+      ...expectedCourse,
       url: 'https://canvas.church.test/courses/42?module_item=7',
-    }, canvas);
+    }, canvas, expectedCourse);
     expect(launch).toEqual({
-      provider: 'canvas', connectionId: 7,
+      ...expectedCourse,
       url: 'https://canvas.church.test/courses/42?module_item=7',
       origin: 'https://canvas.church.test',
     });
     expect(Object.isFrozen(launch)).toBe(true);
     expectInvalid(() => normalizeLearningLaunchContract({
       provider: 'google_classroom', connectionId: 8,
+      externalCourseId: 'course-42', externalActivityId: null,
       url: 'https://classroom.google.com/c/42',
-    }, canvas));
+    }, canvas, {
+      provider: 'google_classroom', connectionId: 8,
+      externalCourseId: 'course-42', externalActivityId: null,
+    }));
   });
 });
 
@@ -507,7 +586,9 @@ describe('well-formed Unicode', () => {
       ).toThrow(LearningValidationError);
     }
     expectInvalid(() => normalizeLearningCourse(validCourse({ externalCourseId: `id\ud800` }), URL_POLICY));
-    expectInvalid(() => normalizeLearningLaunchUrl('https://canvas.church.test/courses/\ud800', URL_POLICY));
+    expectInvalid(() => normalizeLearningLaunchUrl(
+      'https://canvas.church.test/courses/\ud800', URL_POLICY, 'provider_launch',
+    ));
   });
 
   it('accepts valid surrogate pairs and counts their four UTF-8 bytes at boundaries', () => {
@@ -625,5 +706,36 @@ describe('provider-neutral normalized records', () => {
       .toBe('["canvas",7,"provider-event-1"]');
     expect(learningCourseSubjectKey(normalizeLearningCourse(validCourse({ externalCourseId: 'a:b' }), URL_POLICY)))
       .not.toBe(learningCourseSubjectKey(normalizeLearningCourse(validCourse({ externalCourseId: 'a' }), URL_POLICY)));
+  });
+
+  it('exports deterministic migration uniqueness keys for every synchronized entity', () => {
+    const course = normalizeLearningCourse(validCourse(), URL_POLICY);
+    const identity = normalizeLearningIdentity(validIdentity());
+    const enrollment = normalizeLearningEnrollment(validEnrollment());
+    const activity = normalizeLearningActivity(validActivity(), URL_POLICY);
+    const resource = normalizeLearningResource(validResource(), URL_POLICY);
+    const submission = normalizeLearningSubmissionSnapshot(validSubmission());
+
+    expect(learningCourseUniquenessKeys(course)).toEqual([learningCourseSubjectKey(course)]);
+    expect(learningActivityUniquenessKeys(activity)).toEqual([learningActivitySubjectKey(activity)]);
+    expect(learningResourceUniquenessKeys(resource)).toEqual([learningResourceSubjectKey(resource)]);
+    expect(learningSubmissionUniquenessKeys(submission)).toEqual([learningSubmissionSubjectKey(submission)]);
+    expect(learningIdentityUniquenessKeys(identity)).toEqual([
+      '["canvas",7,"external_user","user-12"]',
+      '["canvas",7,"person",12]',
+    ]);
+    expect(learningEnrollmentUniquenessKeys(enrollment)).toEqual([
+      '["canvas",7,"course-42","external_enrollment","enrollment-9"]',
+      '["canvas",7,"course-42","identity_link_external_user","user-12"]',
+      '["canvas",7,"course-42","identity_link_person",12]',
+    ]);
+    for (const keys of [
+      learningCourseUniquenessKeys(course),
+      learningIdentityUniquenessKeys(identity),
+      learningEnrollmentUniquenessKeys(enrollment),
+      learningActivityUniquenessKeys(activity),
+      learningResourceUniquenessKeys(resource),
+      learningSubmissionUniquenessKeys(submission),
+    ]) expect(Object.isFrozen(keys)).toBe(true);
   });
 });

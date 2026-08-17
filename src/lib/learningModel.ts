@@ -96,10 +96,21 @@ export type LearningIntegerBoolean = 0 | 1;
 
 export interface LearningConnectionUrlPolicy extends LearningProviderSubject {
   readonly baseUrl: string | null;
-  readonly allowedOrigins: readonly string[];
+  readonly providerLaunchOrigins: readonly string[];
+  readonly providerFileOrigins: readonly string[];
+  readonly externalLinkOrigins: readonly string[];
 }
 
-export interface LearningLaunchContract extends LearningProviderSubject {
+export const LEARNING_URL_ROLES = Object.freeze([
+  'provider_launch', 'provider_file', 'external_link',
+] as const);
+export type LearningUrlRole = (typeof LEARNING_URL_ROLES)[number];
+
+export interface LearningLaunchSubject extends LearningCourseSubject {
+  readonly externalActivityId: string | null;
+}
+
+export interface LearningLaunchContract extends LearningLaunchSubject {
   readonly url: string;
   readonly origin: string;
 }
@@ -445,41 +456,52 @@ function youtubeOrigin(hostname: string): boolean {
   return hostname === 'youtube.com'
     || hostname === 'www.youtube.com'
     || hostname === 'm.youtube.com'
-    || hostname === 'youtu.be';
+    || hostname === 'youtu.be'
+    || hostname === 'youtube-nocookie.com'
+    || hostname === 'www.youtube-nocookie.com';
 }
 
-function googleProviderOrigin(hostname: string): boolean {
-  return hostname === 'classroom.google.com'
-    || hostname === 'drive.google.com'
-    || hostname === 'docs.google.com'
-    || hostname.endsWith('.googleusercontent.com')
-    || youtubeOrigin(hostname);
+function normalizedOriginList(value: unknown, allowYouTube = false): readonly string[] {
+  const rawOrigins = dataArray(value, 100);
+  const seen = new Set<string>();
+  const origins: string[] = [];
+  for (let index = 0; index < rawOrigins.length; index += 1) {
+    const origin = normalizedHttpsOrigin(rawOrigins[index]);
+    if (seen.has(origin) || (!allowYouTube && youtubeOrigin(new URL(origin).hostname.toLowerCase()))) invalid();
+    seen.add(origin);
+    origins[index] = origin;
+  }
+  return Object.freeze(origins);
 }
 
 export function normalizeLearningConnectionUrlPolicy(value: unknown): LearningConnectionUrlPolicy {
-  const row = exactRecord(value, ['provider', 'connectionId', 'baseUrl', 'allowedOrigins']);
+  const row = exactRecord(value, [
+    'provider', 'connectionId', 'baseUrl',
+    'providerLaunchOrigins', 'providerFileOrigins', 'externalLinkOrigins',
+  ]);
   const provider = oneOf(row.provider, LEARNING_PROVIDERS);
   const connectionId = integer(row.connectionId, 1);
   const baseUrl = provider === 'canvas'
     ? normalizeCanvasBaseUrl(row.baseUrl)
     : row.baseUrl === null ? null : invalid();
-  const rawOrigins = dataArray(row.allowedOrigins, 100);
-  if (rawOrigins.length < 1) invalid();
-  const seen = new Set<string>();
-  const allowedOrigins: string[] = [];
-  for (let index = 0; index < rawOrigins.length; index += 1) {
-    const origin = normalizedHttpsOrigin(rawOrigins[index]);
-    if (seen.has(origin)) invalid();
-    const hostname = new URL(origin).hostname.toLowerCase();
-    if (
-      (provider === 'google_classroom' && !googleProviderOrigin(hostname))
-      || (provider === 'canvas' && googleProviderOrigin(hostname) && !youtubeOrigin(hostname))
-    ) invalid();
-    seen.add(origin);
-    allowedOrigins[index] = origin;
-  }
-  if (baseUrl !== null && !seen.has(baseUrl)) invalid();
-  return frozen({ provider, connectionId, baseUrl, allowedOrigins: Object.freeze(allowedOrigins) });
+  const providerLaunchOrigins = normalizedOriginList(row.providerLaunchOrigins);
+  const providerFileOrigins = normalizedOriginList(row.providerFileOrigins);
+  const externalLinkOrigins = normalizedOriginList(row.externalLinkOrigins);
+  if (providerLaunchOrigins.length < 1) invalid();
+  if (
+    (provider === 'canvas'
+      && (providerLaunchOrigins.length !== 1 || providerLaunchOrigins[0] !== baseUrl))
+    || (provider === 'google_classroom'
+      && providerLaunchOrigins.some((origin) => new URL(origin).hostname.toLowerCase() !== 'classroom.google.com'))
+  ) invalid();
+  return frozen({
+    provider,
+    connectionId,
+    baseUrl,
+    providerLaunchOrigins,
+    providerFileOrigins,
+    externalLinkOrigins,
+  });
 }
 
 function matchingPolicySubject(
@@ -490,10 +512,18 @@ function matchingPolicySubject(
   if (provider !== policy.provider || connectionId !== policy.connectionId) invalid();
 }
 
-export function normalizeLearningLaunchUrl(value: unknown, rawPolicy: unknown): string {
+export function normalizeLearningLaunchUrl(
+  value: unknown,
+  rawPolicy: unknown,
+  rawRole: unknown,
+): string {
   const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  const role = oneOf(rawRole, LEARNING_URL_ROLES);
   const { url } = parsedUrl(value);
-  if (url.protocol !== 'https:' || !policy.allowedOrigins.includes(url.origin)) invalid();
+  const allowedOrigins = role === 'provider_launch'
+    ? policy.providerLaunchOrigins
+    : role === 'provider_file' ? policy.providerFileOrigins : policy.externalLinkOrigins;
+  if (url.protocol !== 'https:' || !allowedOrigins.includes(url.origin)) invalid();
   const normalized = url.toString();
   if (utf8.encode(normalized).byteLength > LEARNING_LIMITS.urlBytes) invalid();
   return normalized;
@@ -524,14 +554,40 @@ export function normalizeLearningDevelopmentEndpoint(value: unknown): LearningDe
 export function normalizeLearningLaunchContract(
   value: unknown,
   rawPolicy: unknown,
+  rawExpectedSubject: unknown,
 ): LearningLaunchContract {
-  const row = exactRecord(value, ['provider', 'connectionId', 'url']);
+  const row = exactRecord(value, [
+    'provider', 'connectionId', 'externalCourseId', 'externalActivityId', 'url',
+  ]);
   const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
-  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
-  const connectionId = integer(row.connectionId, 1);
-  matchingPolicySubject(provider, connectionId, policy);
-  const url = normalizeLearningLaunchUrl(row.url, policy);
-  return frozen({ provider, connectionId, url, origin: new URL(url).origin });
+  const subject = normalizeLearningLaunchSubject({
+    provider: row.provider,
+    connectionId: row.connectionId,
+    externalCourseId: row.externalCourseId,
+    externalActivityId: row.externalActivityId,
+  });
+  const expectedSubject = normalizeLearningLaunchSubject(rawExpectedSubject);
+  matchingPolicySubject(subject.provider, subject.connectionId, policy);
+  if (
+    subject.provider !== expectedSubject.provider
+    || subject.connectionId !== expectedSubject.connectionId
+    || subject.externalCourseId !== expectedSubject.externalCourseId
+    || subject.externalActivityId !== expectedSubject.externalActivityId
+  ) invalid();
+  const url = normalizeLearningLaunchUrl(row.url, policy, 'provider_launch');
+  return frozen({ ...subject, url, origin: new URL(url).origin });
+}
+
+export function normalizeLearningLaunchSubject(value: unknown): LearningLaunchSubject {
+  const row = exactRecord(value, [
+    'provider', 'connectionId', 'externalCourseId', 'externalActivityId',
+  ]);
+  return frozen({
+    provider: oneOf(row.provider, LEARNING_PROVIDERS),
+    connectionId: integer(row.connectionId, 1),
+    externalCourseId: externalId(row.externalCourseId),
+    externalActivityId: row.externalActivityId === null ? null : externalId(row.externalActivityId),
+  });
 }
 
 function youtubeId(value: unknown): string {
@@ -613,7 +669,7 @@ export function normalizeLearningCourse(value: unknown, rawPolicy: unknown): Lea
     provider,
     externalCourseId: externalId(row.externalCourseId),
     displayName: boundedString(row.displayName, 1, LEARNING_LIMITS.courseDisplayNameBytes),
-    launchUrl: normalizeLearningLaunchUrl(row.launchUrl, policy),
+    launchUrl: normalizeLearningLaunchUrl(row.launchUrl, policy, 'provider_launch'),
     lifecycleState: oneOf(row.lifecycleState, LEARNING_COURSE_LIFECYCLE_STATES),
     providerUpdatedAt: nullableTimestamp(row.providerUpdatedAt),
     lastSyncedAt: nullableTimestamp(row.lastSyncedAt),
@@ -667,7 +723,7 @@ export function normalizeLearningActivity(value: unknown, rawPolicy: unknown): L
     title: boundedString(row.title, 1, LEARNING_LIMITS.titleBytes),
     kind: oneOf(row.kind, LEARNING_ACTIVITY_KINDS),
     lifecycleState: oneOf(row.lifecycleState, LEARNING_ACTIVITY_LIFECYCLE_STATES),
-    launchUrl: normalizeLearningLaunchUrl(row.launchUrl, policy),
+    launchUrl: normalizeLearningLaunchUrl(row.launchUrl, policy, 'provider_launch'),
     dueAt: nullableTimestamp(row.dueAt),
     publishedAt: nullableTimestamp(row.publishedAt),
     providerUpdatedAt: nullableTimestamp(row.providerUpdatedAt),
@@ -685,22 +741,26 @@ export function normalizeLearningResource(value: unknown, rawPolicy: unknown): L
   const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
   matchingPolicySubject(provider, connectionId, policy);
   const kind = oneOf(row.kind, LEARNING_RESOURCE_KINDS);
-  const launchUrl = normalizeLearningLaunchUrl(row.launchUrl, policy);
+  let launchUrl: string;
   let youtubeVideoId: string | null;
   let mimeType: string | null;
   let sizeBytes: number | null;
   if (kind === 'youtube') {
     youtubeVideoId = youtubeId(row.youtubeVideoId);
-    if (normalizeYouTube(launchUrl).videoId !== youtubeVideoId || row.mimeType !== null || row.sizeBytes !== null) invalid();
+    const youtube = normalizeYouTube(row.launchUrl);
+    if (youtube.videoId !== youtubeVideoId || row.mimeType !== null || row.sizeBytes !== null) invalid();
+    launchUrl = youtube.embedUrl;
     mimeType = null;
     sizeBytes = null;
   } else if (kind === 'provider_file') {
     if (row.youtubeVideoId !== null) invalid();
+    launchUrl = normalizeLearningLaunchUrl(row.launchUrl, policy, 'provider_file');
     youtubeVideoId = null;
     mimeType = nullableBoundedString(row.mimeType, LEARNING_LIMITS.mimeTypeBytes);
     sizeBytes = nullableInteger(row.sizeBytes, 0);
   } else {
     if (row.youtubeVideoId !== null || row.mimeType !== null || row.sizeBytes !== null) invalid();
+    launchUrl = normalizeLearningLaunchUrl(row.launchUrl, policy, 'external_link');
     youtubeVideoId = null;
     mimeType = null;
     sizeBytes = null;
@@ -838,6 +898,59 @@ export function learningSubmissionSubjectKey(submission: LearningSubmissionSnaps
     submission.externalActivityId,
     submission.externalEnrollmentId,
   ]);
+}
+
+function frozenKeys(...keys: string[]): readonly string[] {
+  return Object.freeze(keys);
+}
+
+export function learningCourseUniquenessKeys(course: LearningCourse): readonly string[] {
+  return frozenKeys(learningCourseSubjectKey(course));
+}
+
+export function learningIdentityUniquenessKeys(identity: LearningIdentity): readonly string[] {
+  return frozenKeys(
+    JSON.stringify([identity.provider, identity.connectionId, 'external_user', identity.externalUserId]),
+    JSON.stringify([identity.provider, identity.connectionId, 'person', identity.personId]),
+  );
+}
+
+export function learningEnrollmentUniquenessKeys(enrollment: LearningEnrollment): readonly string[] {
+  return frozenKeys(
+    JSON.stringify([
+      enrollment.provider,
+      enrollment.connectionId,
+      enrollment.externalCourseId,
+      'external_enrollment',
+      enrollment.externalEnrollmentId,
+    ]),
+    JSON.stringify([
+      enrollment.provider,
+      enrollment.connectionId,
+      enrollment.externalCourseId,
+      'identity_link_external_user',
+      enrollment.externalUserId,
+    ]),
+    JSON.stringify([
+      enrollment.provider,
+      enrollment.connectionId,
+      enrollment.externalCourseId,
+      'identity_link_person',
+      enrollment.personId,
+    ]),
+  );
+}
+
+export function learningActivityUniquenessKeys(activity: LearningActivity): readonly string[] {
+  return frozenKeys(learningActivitySubjectKey(activity));
+}
+
+export function learningResourceUniquenessKeys(resource: LearningResource): readonly string[] {
+  return frozenKeys(learningResourceSubjectKey(resource));
+}
+
+export function learningSubmissionUniquenessKeys(submission: LearningSubmissionSnapshot): readonly string[] {
+  return frozenKeys(learningSubmissionSubjectKey(submission));
 }
 
 export function learningActivityEventDeduplicationKey(event: LearningActivityEvent): string {

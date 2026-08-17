@@ -5,10 +5,16 @@ import {
   LearningProviderError,
   LearningValidationError,
   learningCourseSubjectKey,
+  learningCourseUniquenessKeys,
+  learningEnrollmentUniquenessKeys,
+  learningIdentityUniquenessKeys,
   learningResourceSubjectKey,
   learningSubmissionSubjectKey,
+  learningSubmissionUniquenessKeys,
   normalizeLearningConnectionUrlPolicy,
   normalizeLearningCourse,
+  normalizeLearningEnrollment,
+  normalizeLearningIdentity,
   normalizeLearningResource,
   normalizeLearningSubmissionSnapshot,
   type LearningLaunchContract,
@@ -22,16 +28,35 @@ import {
   normalizeLearningOperationContext,
   normalizeLearningProviderError,
   normalizeLearningSyncResult,
+  LEARNING_MAX_OPERATION_DURATION_MS,
+  normalizeLearningBuildLaunchRequest,
+  normalizeLearningHealthRequest,
+  normalizeLearningListCoursesRequest,
+  normalizeLearningSyncActivitiesRequest,
+  normalizeLearningSyncCourseRequest,
+  normalizeLearningSyncEnrollmentsRequest,
+  normalizeLearningSyncResourcesRequest,
+  normalizeLearningSyncSubmissionsRequest,
+  type LearningBuildLaunchRequest,
+  type LearningHealthRequest,
+  type LearningListCoursesRequest,
   type LearningOperationContext,
   type LearningProvider,
   type LearningProviderPage,
+  type LearningSyncActivitiesRequest,
+  type LearningSyncCourseRequest,
+  type LearningSyncEnrollmentsRequest,
+  type LearningSyncResourcesRequest,
+  type LearningSyncSubmissionsRequest,
 } from '../src/lib/learningProvider';
 
 const URL_POLICY = {
   provider: 'canvas',
   connectionId: 7,
   baseUrl: 'https://canvas.church.test',
-  allowedOrigins: ['https://canvas.church.test'],
+  providerLaunchOrigins: ['https://canvas.church.test'],
+  providerFileOrigins: ['https://files.church.test'],
+  externalLinkOrigins: ['https://links.example.test'],
 } as const;
 
 function course(externalCourseId: string, displayName = externalCourseId): Record<string, unknown> {
@@ -58,7 +83,7 @@ function resource(externalResourceId: string, title = externalResourceId): Recor
     externalResourceId,
     title,
     kind: 'link',
-    launchUrl: `https://canvas.church.test/resources/${encodeURIComponent(externalResourceId)}`,
+    launchUrl: `https://links.example.test/resources/${encodeURIComponent(externalResourceId)}`,
     youtubeVideoId: null,
     mimeType: null,
     sizeBytes: null,
@@ -127,14 +152,34 @@ function operationInput(overrides: Record<string, unknown> = {}): Record<string,
       externalActivityId: null,
       externalEnrollmentId: null,
     },
+    startedAt: '2026-08-17T11:00:00Z',
     deadlineAt: '2026-08-17T12:00:00Z',
     maxPages: 3,
     maxItems: 4,
-    maxBytes: 300,
+    maxRawBytes: 300,
+    maxNormalizedBytes: 4_000,
     signal: new AbortController().signal,
     ...overrides,
   };
 }
+
+const NOW = Date.parse('2026-08-17T11:00:00Z');
+const COURSE_SEQUENCE = Object.freeze({
+  normalizeItem: normalizeCourse,
+  uniquenessKeys: learningCourseUniquenessKeys,
+});
+const IDENTITY_SEQUENCE = Object.freeze({
+  normalizeItem: normalizeLearningIdentity,
+  uniquenessKeys: learningIdentityUniquenessKeys,
+});
+const ENROLLMENT_SEQUENCE = Object.freeze({
+  normalizeItem: normalizeLearningEnrollment,
+  uniquenessKeys: learningEnrollmentUniquenessKeys,
+});
+const SUBMISSION_SEQUENCE = Object.freeze({
+  normalizeItem: normalizeSubmission,
+  uniquenessKeys: learningSubmissionUniquenessKeys,
+});
 
 describe('bounded page requests', () => {
   it('normalizes explicit page size, number, and bounded opaque token', () => {
@@ -393,7 +438,7 @@ describe('hostile collection safety', () => {
       const origins = testCase.make(secret, touched);
       expectSafeInvalid(() => normalizeLearningConnectionUrlPolicy({
         ...URL_POLICY,
-        allowedOrigins: origins,
+        externalLinkOrigins: origins,
       }), secret);
       expect(touched.value).toBe(false);
     });
@@ -401,184 +446,412 @@ describe('hostile collection safety', () => {
 });
 
 describe('cross-page scope, progression, and cumulative budgets', () => {
-  it('accepts a monotonic in-scope sequence exactly at item/page/byte limits', () => {
-    const context = normalizeLearningOperationContext(operationInput({
-      maxPages: 2, maxItems: 2, maxBytes: 200,
-    }));
+  const normalizeOperation = (overrides: Record<string, unknown> = {}) =>
+    normalizeLearningOperationContext(operationInput(overrides), NOW);
+
+  it('re-normalizes forged incoming and existing entity values before accepting them', () => {
+    const context = normalizeOperation();
     const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
-    const firstPage = normalizeLearningPage(page([course('b')], 1, null, 'next-2', 100), {
-      normalizeItem: normalizeCourse,
-      subjectKey: learningCourseSubjectKey,
-    });
-    const afterFirst = acceptLearningPageSequence(
-      initial, firstPage, { subjectKey: learningCourseSubjectKey }, context,
-      Date.parse('2026-08-17T11:59:59.999Z'),
+    for (const [carrierName, carrier] of [
+      ['rawPayload', 'secret-provider-raw-payload'],
+      ['grade', 'secret-grade'],
+      ['unknownField', 'secret-unknown'],
+    ] as const) {
+      const rawForgedPage = page([
+        { ...course('forged'), [carrierName]: carrier },
+      ], 1, null, null, 1) as unknown as LearningProviderPage<ReturnType<typeof normalizeCourse>>;
+      expectSafeInvalid(() => acceptLearningPageSequence(
+        initial, rawForgedPage, COURSE_SEQUENCE, context, NOW,
+      ), carrier);
+    }
+    const missingFieldPage = page([
+      { ...course('missing'), displayName: undefined },
+    ], 1, null, null, 1) as unknown as LearningProviderPage<ReturnType<typeof normalizeCourse>>;
+    expectSafeInvalid(() => acceptLearningPageSequence(
+      initial, missingFieldPage, COURSE_SEQUENCE, context, NOW,
+    ));
+
+    const first = acceptLearningPageSequence(
+      initial, page([course('first')], 1, null, 'next-2'), COURSE_SEQUENCE, context, NOW,
     );
-    const secondPage = normalizeLearningPage(page([course('a')], 2, 'next-2', null, 100), {
-      normalizeItem: normalizeCourse,
-      subjectKey: learningCourseSubjectKey,
+    for (const forgedExisting of [
+      { ...first, items: [{ ...first.items[0], rawPayload: 'state-secret' }] },
+      { ...first, items: [{ ...first.items[0], grade: 'state-grade-secret' }] },
+      { ...first, items: [{ connectionId: 7, provider: 'canvas' }] },
+    ]) expectSafeInvalid(() => acceptLearningPageSequence(
+      forgedExisting as unknown as typeof first,
+      page([course('second')], 2, 'next-2', null),
+      COURSE_SEQUENCE,
+      context,
+      NOW,
+    ), 'state-secret');
+  });
+
+  it('validates forged state counters, tokens, normalized bytes, and uniqueness keys', () => {
+    const context = normalizeOperation();
+    const first = acceptLearningPageSequence(
+      createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context),
+      page([course('first')], 1, null, 'next-2', 100), COURSE_SEQUENCE, context, NOW,
+    );
+    const forgedStates = [
+      { ...first, pageCount: 0 },
+      { ...first, itemCount: 2 },
+      { ...first, rawResponseBytes: 99 },
+      { ...first, normalizedItemBytes: first.normalizedItemBytes + 1 },
+      { ...first, seenUniquenessKeys: [] },
+      { ...first, seenPageTokens: [] },
+      { ...first, expectedPageToken: 'not-the-last-seen-token' },
+      { ...first, complete: 1 },
+      { ...first, items: [] },
+    ];
+    for (const forged of forgedStates) expectInvalid(() => acceptLearningPageSequence(
+      forged as typeof first,
+      page([course('second')], 2, 'next-2', null),
+      COURSE_SEQUENCE,
+      context,
+      NOW,
+    ));
+  });
+
+  it('deduplicates identities on external-user and person uniqueness within and across pages', () => {
+    const context = normalizeOperation();
+    const initial = createLearningPageSequence<ReturnType<typeof normalizeLearningIdentity>>(context);
+    expectInvalid(() => acceptLearningPageSequence(initial, page([
+      { connectionId: 7, provider: 'canvas', personId: 12, externalUserId: 'user-a', status: 'active' },
+      { connectionId: 7, provider: 'canvas', personId: 12, externalUserId: 'user-b', status: 'active' },
+    ]), IDENTITY_SEQUENCE, context, NOW));
+
+    const first = acceptLearningPageSequence(initial, page([
+      { connectionId: 7, provider: 'canvas', personId: 12, externalUserId: 'same-user', status: 'active' },
+    ], 1, null, 'next-2'), IDENTITY_SEQUENCE, context, NOW);
+    expectInvalid(() => acceptLearningPageSequence(first, page([
+      { connectionId: 7, provider: 'canvas', personId: 13, externalUserId: 'same-user', status: 'active' },
+    ], 2, 'next-2', null), IDENTITY_SEQUENCE, context, NOW));
+  });
+
+  it('deduplicates enrollments on external-enrollment and resolved identity-link uniqueness', () => {
+    const context = normalizeOperation({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: null, externalEnrollmentId: null,
+      },
     });
+    const initial = createLearningPageSequence<ReturnType<typeof normalizeLearningEnrollment>>(context);
+    const enrollment = (externalEnrollmentId: string, personId: number, externalUserId: string) => ({
+      connectionId: 7, provider: 'canvas', externalCourseId: 'course-42', personId,
+      externalUserId, externalEnrollmentId, role: 'student', state: 'active', lastSyncedAt: null,
+    });
+    expectInvalid(() => acceptLearningPageSequence(initial, page([
+      enrollment('enrollment-a', 12, 'user-12'),
+      enrollment('enrollment-b', 12, 'user-12'),
+    ]), ENROLLMENT_SEQUENCE, context, NOW));
+    expectInvalid(() => acceptLearningPageSequence(initial, page([
+      enrollment('enrollment-a', 12, 'user-a'),
+      enrollment('enrollment-b', 12, 'user-b'),
+    ]), ENROLLMENT_SEQUENCE, context, NOW));
+    expectInvalid(() => acceptLearningPageSequence(initial, page([
+      enrollment('enrollment-a', 12, 'same-user'),
+      enrollment('enrollment-b', 13, 'same-user'),
+    ]), ENROLLMENT_SEQUENCE, context, NOW));
+    const first = acceptLearningPageSequence(
+      initial, page([enrollment('same-enrollment', 12, 'user-12')], 1, null, 'next-2'),
+      ENROLLMENT_SEQUENCE, context, NOW,
+    );
+    expectInvalid(() => acceptLearningPageSequence(
+      first, page([enrollment('same-enrollment', 13, 'user-13')], 2, 'next-2', null),
+      ENROLLMENT_SEQUENCE, context, NOW,
+    ));
+  });
+
+  it('requires ordinary nonempty uniqueness-key arrays and never leaks hostile failures', () => {
+    const context = normalizeOperation();
+    const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
+    expectInvalid(() => acceptLearningPageSequence(
+      initial, page([course('a')]), { normalizeItem: normalizeCourse, uniquenessKeys: () => [] }, context, NOW,
+    ));
+    const secret = 'secret-uniqueness-reflection';
+    expectSafeInvalid(() => acceptLearningPageSequence(initial, page([course('a')]), {
+      normalizeItem: normalizeCourse,
+      uniquenessKeys() {
+        return new Proxy(['key'], { ownKeys() { throw new Error(secret); } });
+      },
+    }, context, NOW), secret);
+  });
+
+  it('accepts a deterministic monotonic sequence and freezes independent byte counters', () => {
+    const context = normalizeOperation({ maxPages: 2, maxItems: 2, maxRawBytes: 200 });
+    const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
+    const afterFirst = acceptLearningPageSequence(
+      initial, page([course('b')], 1, null, 'next-2', 100), COURSE_SEQUENCE, context, NOW,
+    );
     const complete = acceptLearningPageSequence(
-      afterFirst, secondPage, { subjectKey: learningCourseSubjectKey }, context,
-      Date.parse('2026-08-17T11:59:59.999Z'),
+      afterFirst, page([course('a')], 2, 'next-2', null, 100), COURSE_SEQUENCE, context, NOW,
     );
     expect(complete).toMatchObject({
-      pageCount: 2, itemCount: 2, responseBytes: 200,
+      pageCount: 2, itemCount: 2, rawResponseBytes: 200,
       expectedPageToken: null, complete: 1,
     });
+    expect(complete.normalizedItemBytes).toBeGreaterThan(200);
     expect(complete.items.map((item) => item.externalCourseId)).toEqual(['a', 'b']);
     expect(Object.isFrozen(complete)).toBe(true);
     expect(Object.isFrozen(complete.items)).toBe(true);
-    expect(Object.isFrozen(complete.seenEntityKeys)).toBe(true);
+    expect(Object.isFrozen(complete.seenUniquenessKeys)).toBe(true);
     expect(Object.isFrozen(complete.seenPageTokens)).toBe(true);
   });
 
-  it('rejects out-of-scope records and cross-page duplicate entity keys', () => {
-    const context = normalizeLearningOperationContext(operationInput());
+  it('rejects out-of-scope new and forged existing records', () => {
+    const context = normalizeOperation();
     const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
     const wrongPolicy = { ...URL_POLICY, connectionId: 8 } as const;
-    const outOfScope = normalizeLearningPage(page([{ ...course('wrong'), connectionId: 8 }]), {
-      normalizeItem: (value) => normalizeLearningCourse(value, wrongPolicy),
-      subjectKey: learningCourseSubjectKey,
-    });
     expectInvalid(() => acceptLearningPageSequence(
-      initial, outOfScope, { subjectKey: learningCourseSubjectKey }, context,
-      Date.parse('2026-08-17T11:00:00Z'),
+      initial, page([{ ...course('wrong'), connectionId: 8 }]), {
+        normalizeItem: (value) => normalizeLearningCourse(value, wrongPolicy),
+        uniquenessKeys: learningCourseUniquenessKeys,
+      }, context, NOW,
     ));
-
-    const first = acceptLearningPageSequence(initial, normalizeLearningPage(
-      page([course('same')], 1, null, 'next-2'),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z'));
+    const first = acceptLearningPageSequence(
+      initial, page([course('first')], 1, null, 'next-2'), COURSE_SEQUENCE, context, NOW,
+    );
     const wrongExistingItem = normalizeLearningCourse({
-      ...course('forged-existing'), connectionId: 8,
+      ...course('wrong-existing'), connectionId: 8,
     }, wrongPolicy);
     expectInvalid(() => acceptLearningPageSequence({
       ...first,
       items: [wrongExistingItem],
-      seenEntityKeys: [learningCourseSubjectKey(wrongExistingItem)],
-    }, normalizeLearningPage(
-      page([course('b')], 2, 'next-2', null),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
-    expectInvalid(() => acceptLearningPageSequence(first, normalizeLearningPage(
-      page([course('same')], 2, 'next-2', null),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
+      seenUniquenessKeys: learningCourseUniquenessKeys(wrongExistingItem),
+    }, page([course('second')], 2, 'next-2', null), COURSE_SEQUENCE, context, NOW));
   });
 
-  it('binds nested course/activity/enrollment scope for submission pages', () => {
-    const context = normalizeLearningOperationContext(operationInput({
+  it('binds nested course, activity, and enrollment scope for submissions', () => {
+    const context = normalizeOperation({
       scope: {
-        provider: 'canvas',
-        connectionId: 7,
-        externalCourseId: 'course-42',
-        externalActivityId: 'activity-3',
-        externalEnrollmentId: 'enrollment-9',
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: 'activity-3', externalEnrollmentId: 'enrollment-9',
       },
-    }));
+    });
     const initial = createLearningPageSequence<ReturnType<typeof normalizeSubmission>>(context);
-    const accepted = acceptLearningPageSequence(initial, normalizeLearningPage(
-      page([submission()]),
-      { normalizeItem: normalizeSubmission, subjectKey: learningSubmissionSubjectKey },
-    ), { subjectKey: learningSubmissionSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z'));
-    expect(accepted.complete).toBe(1);
-
-    expectInvalid(() => acceptLearningPageSequence(initial, normalizeLearningPage(
-      page([submission({ externalEnrollmentId: 'enrollment-other' })]),
-      { normalizeItem: normalizeSubmission, subjectKey: learningSubmissionSubjectKey },
-    ), { subjectKey: learningSubmissionSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
+    expect(acceptLearningPageSequence(
+      initial, page([submission()]), SUBMISSION_SEQUENCE, context, NOW,
+    ).complete).toBe(1);
+    expectInvalid(() => acceptLearningPageSequence(
+      initial, page([submission({ externalEnrollmentId: 'enrollment-other' })]),
+      SUBMISSION_SEQUENCE, context, NOW,
+    ));
   });
 
   it('rejects non-monotonic pages and repeated or cyclic pagination tokens', () => {
-    const context = normalizeLearningOperationContext(operationInput());
+    const context = normalizeOperation();
     const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
-    expectInvalid(() => acceptLearningPageSequence(initial, normalizeLearningPage(
-      page([course('a')], 2, null, null),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
-
-    const first = acceptLearningPageSequence(initial, normalizeLearningPage(
-      page([course('a')], 1, null, 'token-a'),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z'));
-    expectInvalid(() => acceptLearningPageSequence(first, normalizeLearningPage(
-      page([course('b')], 2, 'wrong-token', null),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
-    expectInvalid(() => acceptLearningPageSequence(first, normalizeLearningPage(
-      page([course('b')], 2, 'token-a', 'token-a'),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
-    const second = acceptLearningPageSequence(first, normalizeLearningPage(
-      page([course('b')], 2, 'token-a', 'token-b'),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z'));
-    expectInvalid(() => acceptLearningPageSequence(second, normalizeLearningPage(
-      page([course('c')], 3, 'token-b', 'token-a'),
-      { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-    ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
+    expectInvalid(() => acceptLearningPageSequence(
+      initial, page([course('a')], 2), COURSE_SEQUENCE, context, NOW,
+    ));
+    const first = acceptLearningPageSequence(
+      initial, page([course('a')], 1, null, 'token-a'), COURSE_SEQUENCE, context, NOW,
+    );
+    expectInvalid(() => acceptLearningPageSequence(
+      first, page([course('b')], 2, 'wrong-token'), COURSE_SEQUENCE, context, NOW,
+    ));
+    expectInvalid(() => acceptLearningPageSequence(
+      first, page([course('b')], 2, 'token-a', 'token-a'), COURSE_SEQUENCE, context, NOW,
+    ));
+    const second = acceptLearningPageSequence(
+      first, page([course('b')], 2, 'token-a', 'token-b'), COURSE_SEQUENCE, context, NOW,
+    );
+    expectInvalid(() => acceptLearningPageSequence(
+      second, page([course('c')], 3, 'token-b', 'token-a'), COURSE_SEQUENCE, context, NOW,
+    ));
   });
 
-  it('rejects cumulative page, item, and byte off-by-one overflow', () => {
-    const limits = [
-      { maxPages: 1, maxItems: 4, maxBytes: 300, firstItems: [course('a')], secondItems: [course('b')], firstBytes: 100, secondBytes: 100 },
-      { maxPages: 3, maxItems: 1, maxBytes: 300, firstItems: [course('a')], secondItems: [course('b')], firstBytes: 100, secondBytes: 100 },
-      { maxPages: 3, maxItems: 4, maxBytes: 199, firstItems: [course('a')], secondItems: [course('b')], firstBytes: 100, secondBytes: 100 },
+  it('bounds raw and normalized bytes independently even when raw bytes are underreported', () => {
+    const normalized = normalizeCourse(course('a'));
+    const sorted = Object.fromEntries(Object.entries(normalized).sort(([left], [right]) => left.localeCompare(right)));
+    const normalizedBytes = new TextEncoder().encode(JSON.stringify(sorted)).byteLength;
+    const exactContext = normalizeOperation({
+      maxPages: 1, maxItems: 1, maxRawBytes: 100, maxNormalizedBytes: normalizedBytes,
+    });
+    const final = acceptLearningPageSequence(
+      createLearningPageSequence<ReturnType<typeof normalizeCourse>>(exactContext),
+      page([course('a')], 1, null, null, 100), COURSE_SEQUENCE, exactContext, NOW,
+    );
+    expect(final).toMatchObject({ rawResponseBytes: 100, normalizedItemBytes: normalizedBytes, complete: 1 });
+
+    const normalizedOverflow = normalizeOperation({ maxNormalizedBytes: normalizedBytes - 1 });
+    expectInvalid(() => acceptLearningPageSequence(
+      createLearningPageSequence<ReturnType<typeof normalizeCourse>>(normalizedOverflow),
+      page([course('a')], 1, null, null, 0), COURSE_SEQUENCE, normalizedOverflow, NOW,
+    ));
+    const rawOverflow = normalizeOperation({ maxRawBytes: 99 });
+    expectInvalid(() => acceptLearningPageSequence(
+      createLearningPageSequence<ReturnType<typeof normalizeCourse>>(rawOverflow),
+      page([course('a')], 1, null, null, 100), COURSE_SEQUENCE, rawOverflow, NOW,
+    ));
+  });
+
+  it('rejects incomplete pages that exactly exhaust any terminal capacity', () => {
+    const normalized = normalizeCourse(course('a'));
+    const sorted = Object.fromEntries(Object.entries(normalized).sort(([left], [right]) => left.localeCompare(right)));
+    const normalizedBytes = new TextEncoder().encode(JSON.stringify(sorted)).byteLength;
+    const cases = [
+      { maxPages: 1 },
+      { maxItems: 1 },
+      { maxRawBytes: 100 },
+      { maxNormalizedBytes: normalizedBytes },
     ];
-    for (const limit of limits) {
-      const context = normalizeLearningOperationContext(operationInput({
-        maxPages: limit.maxPages,
-        maxItems: limit.maxItems,
-        maxBytes: limit.maxBytes,
-      }));
-      const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
-      const first = acceptLearningPageSequence(initial, normalizeLearningPage(
-        page(limit.firstItems, 1, null, 'next-2', limit.firstBytes),
-        { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-      ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z'));
-      expectInvalid(() => acceptLearningPageSequence(first, normalizeLearningPage(
-        page(limit.secondItems, 2, 'next-2', null, limit.secondBytes),
-        { normalizeItem: normalizeCourse, subjectKey: learningCourseSubjectKey },
-      ), { subjectKey: learningCourseSubjectKey }, context, Date.parse('2026-08-17T11:00:00Z')));
+    for (const limits of cases) {
+      const context = normalizeOperation(limits);
+      expectInvalid(() => acceptLearningPageSequence(
+        createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context),
+        page([course('a')], 1, null, 'requires-another-page', 100),
+        COURSE_SEQUENCE,
+        context,
+        NOW,
+      ));
     }
   });
 
-  it('rejects deadline expiry before page acceptance and observes cancellation', () => {
+  it('caps operation duration and rejects past, future-started, reversed, and expired contexts', () => {
+    expect(LEARNING_MAX_OPERATION_DURATION_MS).toBe(3_600_000);
+    const exact = normalizeLearningOperationContext(operationInput({
+      deadlineAt: new Date(NOW + LEARNING_MAX_OPERATION_DURATION_MS).toISOString(),
+    }), NOW);
+    expect(Object.isFrozen(exact)).toBe(true);
+    expect(Object.isFrozen(exact.scope)).toBe(true);
+    for (const overrides of [
+      { deadlineAt: new Date(NOW + LEARNING_MAX_OPERATION_DURATION_MS + 1).toISOString() },
+      { startedAt: new Date(NOW + 1).toISOString() },
+      { deadlineAt: new Date(NOW).toISOString() },
+      { startedAt: new Date(NOW + 10).toISOString(), deadlineAt: new Date(NOW + 5).toISOString() },
+      { deadlineAt: 'not-a-time' },
+    ]) expectInvalid(() => normalizeLearningOperationContext(operationInput(overrides), NOW));
+  });
+
+  it('rejects deadline expiry before page normalization and observes cancellation', () => {
     const deadline = Date.parse('2026-08-17T12:00:00Z');
     const controller = new AbortController();
-    const context = normalizeLearningOperationContext(operationInput({ signal: controller.signal }));
+    const context = normalizeLearningOperationContext(operationInput({ signal: controller.signal }), NOW);
     const initial = createLearningPageSequence<ReturnType<typeof normalizeCourse>>(context);
-    const firstPage = normalizeLearningPage(page([course('a')]), {
-      normalizeItem: normalizeCourse,
-      subjectKey: learningCourseSubjectKey,
-    });
     expect(acceptLearningPageSequence(
-      initial, firstPage, { subjectKey: learningCourseSubjectKey }, context, deadline - 1,
+      initial, page([course('a')]), COURSE_SEQUENCE, context, deadline - 1,
     ).pageCount).toBe(1);
     expectInvalid(() => acceptLearningPageSequence(
-      initial, firstPage, { subjectKey: learningCourseSubjectKey }, context, deadline,
+      initial, page([course('a')]), COURSE_SEQUENCE, context, deadline,
     ));
     controller.abort();
     expectInvalid(() => acceptLearningPageSequence(
-      initial, firstPage, { subjectKey: learningCourseSubjectKey }, context, deadline - 1,
+      initial, page([course('a')]), COURSE_SEQUENCE, context, deadline - 1,
     ));
   });
 
-  it('normalizes exact operation budget bounds and rejects malformed contexts', () => {
-    const normalized = normalizeLearningOperationContext(operationInput({
+  it('normalizes independent budget bounds and rejects malformed contexts', () => {
+    const normalized = normalizeOperation({
       maxPages: LEARNING_LIMITS.maxPages,
       maxItems: LEARNING_LIMITS.maxSyncItems,
-      maxBytes: LEARNING_LIMITS.maxSyncBytes,
-    }));
+      maxRawBytes: LEARNING_LIMITS.maxSyncBytes,
+      maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes,
+    });
     expect(Object.isFrozen(normalized)).toBe(true);
-    expect(Object.isFrozen(normalized.scope)).toBe(true);
     for (const overrides of [
       { maxPages: 0 }, { maxPages: LEARNING_LIMITS.maxPages + 1 },
       { maxItems: 0 }, { maxItems: LEARNING_LIMITS.maxSyncItems + 1 },
-      { maxBytes: 0 }, { maxBytes: LEARNING_LIMITS.maxSyncBytes + 1 },
-      { signal: {} }, { deadlineAt: 'not-a-time' },
-    ]) expectInvalid(() => normalizeLearningOperationContext(operationInput(overrides)));
+      { maxRawBytes: 0 }, { maxRawBytes: LEARNING_LIMITS.maxSyncBytes + 1 },
+      { maxNormalizedBytes: 0 }, { maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes + 1 },
+      { signal: {} },
+    ]) expectInvalid(() => normalizeLearningOperationContext(operationInput(overrides), NOW));
+  });
+});
+
+describe('provider operation request scope binding', () => {
+  const providerSubject = { provider: 'canvas', connectionId: 7 } as const;
+  const courseSubject = { ...providerSubject, externalCourseId: 'course-42' } as const;
+  const activitySubject = { ...courseSubject, externalActivityId: 'activity-3' } as const;
+  const submissionSubject = { ...activitySubject, externalEnrollmentId: 'enrollment-9' } as const;
+  const pageRequest = { pageSize: 50, pageNumber: 1, pageToken: null } as const;
+  const operationFor = (
+    externalCourseId: string | null,
+    externalActivityId: string | null,
+    externalEnrollmentId: string | null,
+  ) => operationInput({
+    scope: { ...providerSubject, externalCourseId, externalActivityId, externalEnrollmentId },
+  });
+
+  it('normalizes every exact provider request category and keeps cancellation in the request', () => {
+    const requests = [
+      normalizeLearningHealthRequest({
+        subject: providerSubject, operation: operationFor(null, null, null),
+      }, NOW),
+      normalizeLearningListCoursesRequest({
+        subject: providerSubject, page: pageRequest, operation: operationFor(null, null, null),
+      }, NOW),
+      normalizeLearningSyncCourseRequest({
+        subject: courseSubject, operation: operationFor('course-42', null, null),
+      }, NOW),
+      normalizeLearningSyncEnrollmentsRequest({
+        subject: courseSubject, page: pageRequest, operation: operationFor('course-42', null, null),
+      }, NOW),
+      normalizeLearningSyncActivitiesRequest({
+        subject: courseSubject, page: pageRequest, operation: operationFor('course-42', null, null),
+      }, NOW),
+      normalizeLearningSyncResourcesRequest({
+        subject: activitySubject, page: pageRequest, operation: operationFor('course-42', 'activity-3', null),
+      }, NOW),
+      normalizeLearningSyncSubmissionsRequest({
+        subject: submissionSubject,
+        page: pageRequest,
+        operation: operationFor('course-42', 'activity-3', 'enrollment-9'),
+      }, NOW),
+      normalizeLearningBuildLaunchRequest({
+        subject: activitySubject, operation: operationFor('course-42', 'activity-3', null),
+      }, NOW),
+    ];
+    for (const request of requests) {
+      expect(Object.isFrozen(request)).toBe(true);
+      expect(request.operation.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it('rejects provider, course, activity, and enrollment scope mismatches for every operation', () => {
+    const cases: Array<[(value: unknown, now: number) => unknown, Record<string, unknown>]> = [
+      [normalizeLearningHealthRequest, {
+        subject: providerSubject,
+        operation: operationInput({
+          scope: {
+            ...providerSubject, connectionId: 8,
+            externalCourseId: null, externalActivityId: null, externalEnrollmentId: null,
+          },
+        }),
+      }],
+      [normalizeLearningListCoursesRequest, {
+        subject: providerSubject,
+        page: pageRequest,
+        operation: operationInput({
+          scope: {
+            provider: 'google_classroom', connectionId: 7,
+            externalCourseId: null, externalActivityId: null, externalEnrollmentId: null,
+          },
+        }),
+      }],
+      [normalizeLearningSyncCourseRequest, {
+        subject: courseSubject, operation: operationFor('course-other', null, null),
+      }],
+      [normalizeLearningSyncEnrollmentsRequest, {
+        subject: courseSubject, page: pageRequest, operation: operationFor('course-other', null, null),
+      }],
+      [normalizeLearningSyncActivitiesRequest, {
+        subject: courseSubject, page: pageRequest, operation: operationFor('course-other', null, null),
+      }],
+      [normalizeLearningSyncResourcesRequest, {
+        subject: activitySubject, page: pageRequest, operation: operationFor('course-42', 'activity-other', null),
+      }],
+      [normalizeLearningSyncSubmissionsRequest, {
+        subject: submissionSubject,
+        page: pageRequest,
+        operation: operationFor('course-42', 'activity-3', 'enrollment-other'),
+      }],
+      [normalizeLearningBuildLaunchRequest, {
+        subject: activitySubject, operation: operationFor('course-42', 'activity-other', null),
+      }],
+    ];
+    for (const [normalize, input] of cases) expectInvalid(() => normalize(input, NOW));
   });
 });
 
@@ -694,11 +967,19 @@ describe('provider-neutral interface', () => {
       .toEqualTypeOf<Promise<LearningProviderPage<LearningResource>>>();
     expectTypeOf<Awaited<ReturnType<LearningProvider['buildLaunchUrl']>>>()
       .toEqualTypeOf<LearningLaunchContract>();
-    expectTypeOf<Parameters<LearningProvider['healthCheck']>[1]>()
-      .toEqualTypeOf<LearningOperationContext>();
-    expectTypeOf<Parameters<LearningProvider['listCourses']>[2]>()
-      .toEqualTypeOf<LearningOperationContext>();
-    expectTypeOf<Parameters<LearningProvider['syncResources']>[2]>()
-      .toEqualTypeOf<LearningOperationContext>();
+    expectTypeOf<Parameters<LearningProvider['healthCheck']>[0]>().toEqualTypeOf<LearningHealthRequest>();
+    expectTypeOf<Parameters<LearningProvider['listCourses']>[0]>().toEqualTypeOf<LearningListCoursesRequest>();
+    expectTypeOf<Parameters<LearningProvider['syncCourse']>[0]>().toEqualTypeOf<LearningSyncCourseRequest>();
+    expectTypeOf<Parameters<LearningProvider['syncEnrollments']>[0]>()
+      .toEqualTypeOf<LearningSyncEnrollmentsRequest>();
+    expectTypeOf<Parameters<LearningProvider['syncActivities']>[0]>()
+      .toEqualTypeOf<LearningSyncActivitiesRequest>();
+    expectTypeOf<Parameters<LearningProvider['syncResources']>[0]>()
+      .toEqualTypeOf<LearningSyncResourcesRequest>();
+    expectTypeOf<Parameters<LearningProvider['syncSubmissions']>[0]>()
+      .toEqualTypeOf<LearningSyncSubmissionsRequest>();
+    expectTypeOf<Parameters<LearningProvider['buildLaunchUrl']>[0]>()
+      .toEqualTypeOf<LearningBuildLaunchRequest>();
+    expectTypeOf<LearningHealthRequest['operation']>().toEqualTypeOf<LearningOperationContext>();
   });
 });
