@@ -201,7 +201,14 @@ export interface CanvasEnrollmentRecord extends LearningCourseSubject, LearningI
     | 'TaEnrollment'
     | 'DesignerEnrollment'
     | 'ObserverEnrollment';
-  readonly state: 'active' | 'invited' | 'creation_pending' | 'completed' | 'inactive';
+  readonly state:
+    | 'active'
+    | 'invited'
+    | 'creation_pending'
+    | 'completed'
+    | 'inactive'
+    | 'deleted'
+    | 'rejected';
 }
 
 export interface LearningActivity extends LearningActivitySubject {
@@ -848,9 +855,11 @@ function canvasRole(value: unknown): LearningEnrollmentRole {
 
 function canvasState(value: unknown): LearningEnrollmentState {
   const state = oneOf(value, [
-    'active', 'invited', 'creation_pending', 'completed', 'inactive',
+    'active', 'invited', 'creation_pending', 'completed', 'inactive', 'deleted', 'rejected',
   ] as const);
-  return state === 'creation_pending' ? 'invited' : state;
+  if (state === 'creation_pending') return 'invited';
+  if (state === 'deleted' || state === 'rejected') return 'inactive';
+  return state;
 }
 
 /**
@@ -896,7 +905,7 @@ export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProvid
     ] as const);
     const role = canvasRole(type);
     const rawState = oneOf(row.state, [
-      'active', 'invited', 'creation_pending', 'completed', 'inactive',
+      'active', 'invited', 'creation_pending', 'completed', 'inactive', 'deleted', 'rejected',
     ] as const);
     const state = canvasState(rawState);
     if (

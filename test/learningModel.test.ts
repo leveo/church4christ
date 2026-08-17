@@ -949,6 +949,33 @@ describe('provider roster enrollment DTOs', () => {
     ])).toMatchObject({ role: 'teacher', state: 'active' });
   });
 
+  it('maps Canvas deleted/rejected workflows to inactive with coherent deterministic precedence', () => {
+    const deletedTeacher = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'TeacherEnrollment', state: 'deleted',
+    };
+    const rejectedStudent = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'StudentEnrollment', state: 'rejected',
+    };
+    const activeObserver = {
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12',
+      type: 'ObserverEnrollment', state: 'active',
+    };
+    expect(modelApi.aggregateCanvasEnrollmentRecords([deletedTeacher]))
+      .toMatchObject({ role: 'teacher', state: 'inactive' });
+    expect(modelApi.aggregateCanvasEnrollmentRecords([rejectedStudent]))
+      .toMatchObject({ role: 'student', state: 'inactive' });
+    expect(modelApi.aggregateCanvasEnrollmentRecords([deletedTeacher, rejectedStudent]))
+      .toMatchObject({ role: 'teacher', state: 'inactive' });
+    for (const records of [
+      [deletedTeacher, activeObserver, rejectedStudent],
+      [rejectedStudent, deletedTeacher, activeObserver],
+      [activeObserver, rejectedStudent, deletedTeacher],
+    ]) expect(modelApi.aggregateCanvasEnrollmentRecords(records))
+      .toMatchObject({ role: 'observer', state: 'active' });
+  });
+
   it('rejects unknown roster mappings and cross-scope Canvas aggregation', () => {
     for (const input of [
       { provider: 'google_classroom', connectionId: 8, externalCourseId: 'c', externalUserId: 'u', role: 'OWNER', state: 'ACTIVE' },

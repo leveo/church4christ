@@ -38,13 +38,18 @@ import {
   normalizeLearningSyncResult,
   normalizeLearningSyncSubmissionsRequest,
   readAndNormalizeLearningPage,
+  invokeLearningProvider,
   type LearningBuildLaunchRequest,
   type LearningHealthRequest,
   type LearningListCoursesRequest,
+  type LearningNormalizeNotificationRequest,
   type LearningOperationContext,
   type LearningPageAccumulator,
   type LearningProviderPage,
   type LearningProvider,
+  type LearningProviderHealth,
+  type LearningProviderInvocation,
+  type LearningProviderNotification,
   type LearningSyncActivitiesRequest,
   type LearningSyncCourseRequest,
   type LearningSyncEnrollmentsRequest,
@@ -336,7 +341,26 @@ function chunkedResponse(
       index += 1;
     },
     cancel() { onCancel(); },
-  }), { headers });
+  }, { highWaterMark: 0 }), { headers });
+}
+
+function descriptorCopiedPage<T extends object>(
+  source: RuntimePage<T>,
+  replacementItems: readonly T[],
+): RuntimePage<T> {
+  const target = Object.create(Object.getPrototypeOf(source)) as object;
+  const stringDescriptors = Object.getOwnPropertyDescriptors(source);
+  expect(Object.keys(stringDescriptors)).toContain('items');
+  const keys = Reflect.ownKeys(source);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    const descriptor = Object.getOwnPropertyDescriptor(source, key);
+    if (!descriptor) throw new Error('missing page descriptor');
+    Object.defineProperty(target, key, key === 'items'
+      ? { ...descriptor, value: Object.freeze([...replacementItems]) }
+      : descriptor);
+  }
+  return Object.freeze(target) as RuntimePage<T>;
 }
 
 describe('bounded page requests and measured response bodies', () => {
@@ -481,6 +505,52 @@ describe('bounded page requests and measured response bodies', () => {
     ), 'timeout', 'deadline');
     expect(deadlineCancelled).toBe(true);
   });
+
+  it('enforces the hard 1 MiB page cap before decode at declared and streamed boundaries', async () => {
+    const encoder = new TextEncoder();
+    const prefix = JSON.stringify(pageBody([]));
+    const exactText = `${prefix}${' '.repeat(LEARNING_LIMITS.maxPageBytes - encoder.encode(prefix).byteLength)}`;
+    let exactDecoded = false;
+    const exact = await providerApi.readAndNormalizeLearningPage<LearningCourse>(
+      new Response(exactText, { headers: { 'Content-Length': String(LEARNING_LIMITS.maxPageBytes) } }),
+      normalizedOperation({ maxRawBytes: LEARNING_LIMITS.maxSyncBytes }),
+      (value) => { exactDecoded = true; return value; },
+      COURSE_PAGE,
+      () => NOW,
+    );
+    expect(exact.responseBytes).toBe(LEARNING_LIMITS.maxPageBytes);
+    expect(exactDecoded).toBe(true);
+
+    let streamedCancelled = false;
+    let streamedDecoded = false;
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningPage(
+      chunkedResponse([
+        encoder.encode(exactText), encoder.encode(' '),
+      ], () => { streamedCancelled = true; }),
+      normalizedOperation({ maxRawBytes: LEARNING_LIMITS.maxSyncBytes }),
+      (value) => { streamedDecoded = true; return value; },
+      COURSE_PAGE,
+      () => NOW,
+    ), 'response_too_large');
+    expect(streamedCancelled).toBe(true);
+    expect(streamedDecoded).toBe(false);
+
+    let declaredCancelled = false;
+    let declaredDecoded = false;
+    await expectProviderReject(() => providerApi.readAndNormalizeLearningPage(
+      chunkedResponse(
+        [encoder.encode(prefix)],
+        () => { declaredCancelled = true; },
+        { 'Content-Length': String(LEARNING_LIMITS.maxPageBytes + 1) },
+      ),
+      normalizedOperation({ maxRawBytes: LEARNING_LIMITS.maxSyncBytes }),
+      (value) => { declaredDecoded = true; return value; },
+      COURSE_PAGE,
+      () => NOW,
+    ), 'response_too_large');
+    expect(declaredCancelled).toBe(true);
+    expect(declaredDecoded).toBe(false);
+  });
 });
 
 describe('sanitized page and contract normalization', () => {
@@ -600,6 +670,21 @@ describe('sanitized page and contract normalization', () => {
 });
 
 describe('opaque page accumulators', () => {
+  it('rejects descriptor/symbol/prototype copies while accepting the real page owner', async () => {
+    const operation = normalizedOperation();
+    const original = await normalizedPage(pageBody([course('original')]), COURSE_PAGE, operation);
+    const replacement = normalizeLearningCourse(course('descriptor-forged'), URL_POLICY);
+    const forged = descriptorCopiedPage(original, [replacement]);
+    expect(Object.getPrototypeOf(forged)).toBe(Object.getPrototypeOf(original));
+    expect(Reflect.ownKeys(forged)).toEqual(Reflect.ownKeys(original));
+
+    const accepted = providerApi.createLearningPageAccumulator<LearningCourse>(operation, COURSE_SEQUENCE)
+      .accept(original, NOW);
+    expect(accepted.view.items[0].externalCourseId).toBe('original');
+    expectInvalid(() => providerApi.createLearningPageAccumulator<LearningCourse>(operation, COURSE_SEQUENCE)
+      .accept(forged, NOW));
+  });
+
   it('rejects valid empty-page replay across kind, scope, activity, and role-separated policy', async () => {
     const courseScope = (externalCourseId: string) => normalizedOperation({
       scope: {
@@ -1065,6 +1150,12 @@ describe('operation and request scope validation', () => {
 describe('provider invocation boundary', () => {
   const subject = { provider: 'canvas', connectionId: 7 } as const;
   const healthRequest = () => ({ subject, operation: operationInput() });
+  const notificationRequest = (overrides: Record<string, unknown> = {}) => ({
+    subject,
+    payload: { accessToken: 'raw-notification-secret', event: 'course.updated' },
+    operation: operationInput(),
+    ...overrides,
+  });
 
   function mockProvider(overrides: Partial<LearningProvider> = {}): LearningProvider {
     return {
@@ -1186,6 +1277,145 @@ describe('provider invocation boundary', () => {
     }), 'timeout');
   });
 
+  it('safely invokes notification normalization with exact frozen or null results', async () => {
+    const raw = {
+      connectionId: 7,
+      provider: 'canvas' as const,
+      sourceEventId: 'event-42',
+      externalCourseId: 'course-42',
+      receivedAt: '2026-08-17T11:00:00.123456789Z',
+    };
+    const result = await providerApi.invokeLearningProvider(mockProvider({
+      async normalizeNotification() { return raw; },
+    }), {
+      method: 'normalizeNotification', request: notificationRequest(), now: () => NOW,
+    }) as LearningProviderNotification;
+    raw.sourceEventId = 'mutated';
+    expect(result).toMatchObject({ sourceEventId: 'event-42', provider: 'canvas', connectionId: 7 });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('raw-notification-secret');
+
+    await expect(providerApi.invokeLearningProvider(mockProvider({
+      async normalizeNotification() { return null; },
+    }), {
+      method: 'normalizeNotification', request: notificationRequest(), now: () => NOW,
+    })).resolves.toBeNull();
+  });
+
+  it('rejects unsafe notification results and sanitizes adapter errors', async () => {
+    const secret = 'secret-notification-sdk-body';
+    for (const result of [
+      {
+        connectionId: 8, provider: 'canvas', sourceEventId: 'event-1',
+        externalCourseId: null, receivedAt: '2026-08-17T11:00:00Z',
+      },
+      {
+        connectionId: 7, provider: 'google_classroom', sourceEventId: 'event-1',
+        externalCourseId: null, receivedAt: '2026-08-17T11:00:00Z',
+      },
+      {
+        connectionId: 7, provider: 'canvas', sourceEventId: 'event-1',
+        externalCourseId: null, receivedAt: '2026-08-17T11:00:00Z', rawBody: secret,
+      },
+    ]) await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      async normalizeNotification() { return result as never; },
+    }), {
+      method: 'normalizeNotification', request: notificationRequest(), now: () => NOW,
+    }), 'malformed_response', secret);
+
+    for (const normalizeNotification of [
+      async () => { throw new Error(secret); },
+      () => Promise.reject(new Error(secret)),
+    ]) await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      normalizeNotification,
+    }), {
+      method: 'normalizeNotification', request: notificationRequest(), now: () => NOW,
+    }), 'provider_unavailable', secret);
+  });
+
+  it('passes a combined abort signal to notification adapters and rejects late resolution', async () => {
+    const alreadyCancelled = new AbortController();
+    alreadyCancelled.abort();
+    let alreadyCalled = false;
+    await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      async normalizeNotification() { alreadyCalled = true; return null; },
+    }), {
+      method: 'normalizeNotification',
+      request: notificationRequest({ operation: operationInput({ signal: alreadyCancelled.signal }) }),
+      now: () => NOW,
+    }), 'cancelled');
+    expect(alreadyCalled).toBe(false);
+    await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider(), {
+      method: 'normalizeNotification', request: notificationRequest(),
+      now: () => Date.parse('2026-08-17T12:00:00Z'),
+    }), 'timeout');
+
+    const caller = new AbortController();
+    let adapterSignal: AbortSignal | null = null;
+    let observedAbort = false;
+    const during = providerApi.invokeLearningProvider(mockProvider({
+      normalizeNotification(request) {
+        const typed = request as LearningNormalizeNotificationRequest;
+        adapterSignal = typed.operation.signal;
+        return new Promise((resolve) => typed.operation.signal.addEventListener('abort', () => {
+          observedAbort = true;
+          resolve(null);
+        }, { once: true }));
+      },
+    }), {
+      method: 'normalizeNotification',
+      request: notificationRequest({ operation: operationInput({ signal: caller.signal }) }),
+      now: () => NOW,
+    });
+    await Promise.resolve();
+    caller.abort();
+    await expectProviderReject(() => during, 'cancelled');
+    expect(observedAbort).toBe(true);
+    expect(adapterSignal).not.toBe(caller.signal);
+
+    let resolveLate!: (value: LearningProviderNotification | null) => void;
+    const lateResult = new Promise<LearningProviderNotification | null>((resolve) => { resolveLate = resolve; });
+    let injectedNow = NOW;
+    const late = providerApi.invokeLearningProvider(mockProvider({
+      normalizeNotification() {
+        return lateResult;
+      },
+    }), {
+      method: 'normalizeNotification',
+      request: notificationRequest({ operation: operationInput({
+        deadlineAt: new Date(NOW + 1_000).toISOString(),
+      }) }),
+      now: () => injectedNow,
+    });
+    await Promise.resolve();
+    injectedNow = NOW + 1_000;
+    resolveLate({
+      connectionId: 7, provider: 'canvas', sourceEventId: 'late-event',
+      externalCourseId: null, receivedAt: '2026-08-17T11:00:00Z',
+    });
+    await expectProviderReject(() => late, 'timeout');
+  });
+
+  it('aborts the adapter-owned signal when a notification deadline fires', async () => {
+    let observedAbort = false;
+    await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      normalizeNotification(request) {
+        const typed = request as LearningNormalizeNotificationRequest;
+        return new Promise((resolve) => typed.operation.signal.addEventListener('abort', () => {
+          observedAbort = true;
+          resolve(null);
+        }, { once: true }));
+      },
+    }), {
+      method: 'normalizeNotification',
+      request: notificationRequest({ operation: operationInput({
+        deadlineAt: new Date(NOW + 5).toISOString(),
+      }) }),
+      now: () => NOW,
+    }), 'timeout');
+    expect(observedAbort).toBe(true);
+  });
+
   it('requires strict branded provider-neutral pages and exact item normalizers', async () => {
     const request = {
       subject,
@@ -1206,6 +1436,25 @@ describe('provider invocation boundary', () => {
           nextPageToken: null, pageNumber: 1, responseBytes: 1,
         } as unknown as LearningProviderPage<LearningCourse>;
       },
+    }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }), 'malformed_response');
+  });
+
+  it('rejects fully reflected page proof copies at invocation while accepting the owner', async () => {
+    const request = {
+      subject,
+      page: { pageSize: 50, pageNumber: 1, pageToken: null },
+      operation: operationInput(),
+    };
+    const original = await normalizedPage(pageBody([course('original')]), COURSE_PAGE, normalizedOperation());
+    const forged = descriptorCopiedPage(original, [
+      normalizeLearningCourse(course('descriptor-forged'), URL_POLICY),
+    ]);
+    const valid = await providerApi.invokeLearningProvider(mockProvider({
+      async listCourses() { return original as LearningProviderPage<LearningCourse>; },
+    }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }) as RuntimePage<LearningCourse>;
+    expect(valid.items[0].externalCourseId).toBe('original');
+    await expectProviderReject(() => providerApi.invokeLearningProvider(mockProvider({
+      async listCourses() { return forged as LearningProviderPage<LearningCourse>; },
     }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }), 'malformed_response');
   });
 
@@ -1541,6 +1790,29 @@ describe('provider-neutral interface implementability', () => {
     expectTypeOf<Parameters<LearningProvider['syncSubmissions']>[0]>().toEqualTypeOf<LearningSyncSubmissionsRequest>();
     expectTypeOf<Parameters<LearningProvider['buildLaunchUrl']>[0]>().toEqualTypeOf<LearningBuildLaunchRequest>();
     expectTypeOf<Awaited<ReturnType<LearningProvider['buildLaunchUrl']>>>().toEqualTypeOf<LearningLaunchContract>();
+    expectTypeOf<Parameters<LearningProvider['normalizeNotification']>[0]>()
+      .toEqualTypeOf<LearningNormalizeNotificationRequest>();
+
+    type HealthInvocation = Extract<LearningProviderInvocation, { method: 'healthCheck' }>;
+    type CoursesInvocation = Extract<LearningProviderInvocation, { method: 'listCourses' }>;
+    type NotificationInvocation = Extract<LearningProviderInvocation, { method: 'normalizeNotification' }>;
+    expectTypeOf<[HealthInvocation] extends [never] ? true : false>().toEqualTypeOf<false>();
+    expectTypeOf<[CoursesInvocation] extends [never] ? true : false>().toEqualTypeOf<false>();
+    expectTypeOf<[NotificationInvocation] extends [never] ? true : false>().toEqualTypeOf<false>();
+    expectTypeOf<'urlPolicy' extends keyof HealthInvocation ? true : false>().toEqualTypeOf<false>();
+    expectTypeOf<'urlPolicy' extends keyof NotificationInvocation ? true : false>().toEqualTypeOf<false>();
+    expectTypeOf<'urlPolicy' extends keyof CoursesInvocation ? true : false>().toEqualTypeOf<true>();
+    const typedHealthInvoke = (provider: LearningProvider, invocation: HealthInvocation) =>
+      invokeLearningProvider(provider, invocation);
+    const typedCoursesInvoke = (provider: LearningProvider, invocation: CoursesInvocation) =>
+      invokeLearningProvider(provider, invocation);
+    const typedNotificationInvoke = (provider: LearningProvider, invocation: NotificationInvocation) =>
+      invokeLearningProvider(provider, invocation);
+    expectTypeOf<ReturnType<typeof typedHealthInvoke>>().toEqualTypeOf<Promise<LearningProviderHealth>>();
+    expectTypeOf<ReturnType<typeof typedCoursesInvoke>>()
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningCourse>>>();
+    expectTypeOf<ReturnType<typeof typedNotificationInvoke>>()
+      .toEqualTypeOf<Promise<LearningProviderNotification | null>>();
 
     const typedCourseBoundary = (
       response: Response,

@@ -38,8 +38,7 @@ import {
 } from './learningModel';
 
 const BYTE_MEASUREMENT_BRAND: unique symbol = Symbol('LearningByteMeasurement');
-const PAGE_PROOF_BRAND: unique symbol = Symbol('LearningPageProof');
-const NORMALIZED_PAGE_BRAND: unique symbol = Symbol('LearningProviderPage');
+const PAGE_OWNER_TOKEN: unique symbol = Symbol('LearningProviderPageOwner');
 
 export interface LearningPageRequest {
   readonly pageSize: number;
@@ -48,7 +47,6 @@ export interface LearningPageRequest {
 }
 
 export interface LearningProviderPage<T extends object> {
-  readonly [NORMALIZED_PAGE_BRAND]: LearningPageProof;
   readonly items: readonly T[];
   readonly requestPageToken: string | null;
   readonly nextPageToken: string | null;
@@ -63,7 +61,6 @@ interface LearningByteMeasurement {
 }
 
 interface LearningPageProof {
-  readonly [PAGE_PROOF_BRAND]: true;
   readonly measurement: LearningByteMeasurement;
   readonly kind: LearningPageResponseContract['kind'];
   readonly scope: LearningPageScope;
@@ -170,6 +167,11 @@ export interface LearningHealthRequest {
   readonly operation: LearningOperationContext;
 }
 
+/** Raw notification data is request-only and never appears in a result. */
+export interface LearningNormalizeNotificationRequest extends LearningHealthRequest {
+  readonly payload: unknown;
+}
+
 export interface LearningListCoursesRequest extends LearningHealthRequest {
   readonly page: LearningPageRequest;
 }
@@ -251,7 +253,7 @@ export interface LearningProvider {
   syncResources(request: LearningSyncResourcesRequest): Promise<LearningProviderPage<LearningResource>>;
   syncSubmissions(request: LearningSyncSubmissionsRequest): Promise<LearningProviderPage<LearningProviderSubmission>>;
   buildLaunchUrl(request: LearningBuildLaunchRequest): Promise<LearningLaunchContract>;
-  normalizeNotification(input: unknown): Promise<LearningProviderNotification | null>;
+  normalizeNotification(request: LearningNormalizeNotificationRequest): Promise<LearningProviderNotification | null>;
 }
 
 function token(value: unknown): string | null {
@@ -376,13 +378,64 @@ function byteMeasurement(value: unknown): LearningByteMeasurement {
   }
 }
 
+type NormalizedPageData<T extends object> = LearningProviderPage<T>;
+
+/**
+ * Concrete ownership is deliberately module-private. Copying every visible
+ * descriptor or the prototype cannot copy an ECMAScript private field, so a
+ * page proof is bound to the exact instance that the closed stream boundary
+ * constructed.
+ */
+class ConcreteLearningProviderPage<T extends object> implements LearningProviderPage<T> {
+  readonly items: readonly T[];
+  readonly requestPageToken: string | null;
+  readonly nextPageToken: string | null;
+  readonly pageNumber: number;
+  readonly responseBytes: number;
+  readonly #proof: LearningPageProof;
+
+  constructor(
+    value: NormalizedPageData<T>,
+    proof: LearningPageProof,
+    ownerToken: typeof PAGE_OWNER_TOKEN,
+  ) {
+    if (ownerToken !== PAGE_OWNER_TOKEN) learningValidation.invalid();
+    this.items = value.items;
+    this.requestPageToken = value.requestPageToken;
+    this.nextPageToken = value.nextPageToken;
+    this.pageNumber = value.pageNumber;
+    this.responseBytes = value.responseBytes;
+    this.#proof = proof;
+    Object.freeze(this);
+  }
+
+  readProof(ownerToken: typeof PAGE_OWNER_TOKEN): LearningPageProof {
+    if (ownerToken !== PAGE_OWNER_TOKEN) learningValidation.invalid();
+    return this.#proof;
+  }
+}
+
+const readConcretePageProof = ConcreteLearningProviderPage.prototype.readProof;
+Object.freeze(ConcreteLearningProviderPage.prototype);
+
+function concretePageProof(value: unknown): LearningPageProof {
+  try {
+    if (
+      !(value instanceof ConcreteLearningProviderPage)
+      || Object.getPrototypeOf(value) !== ConcreteLearningProviderPage.prototype
+      || !Object.isFrozen(value)
+    ) learningValidation.invalid();
+    return Reflect.apply(readConcretePageProof, value, [PAGE_OWNER_TOKEN]) as LearningPageProof;
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
 function brandedPage<T extends object>(
-  value: Omit<LearningProviderPage<T>, typeof NORMALIZED_PAGE_BRAND>,
+  value: NormalizedPageData<T>,
   proof: LearningPageProof,
 ): LearningProviderPage<T> {
-  const result = { ...value } as LearningProviderPage<T>;
-  Object.defineProperty(result, NORMALIZED_PAGE_BRAND, { value: proof });
-  return Object.freeze(result);
+  return new ConcreteLearningProviderPage(value, proof, PAGE_OWNER_TOKEN);
 }
 
 function revalidateLearningPage<T extends object>(
@@ -391,19 +444,13 @@ function revalidateLearningPage<T extends object>(
   expectedProof: LearningPageProofExpectation,
 ): LearningProviderPage<T> {
   try {
-    if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
-      learningValidation.invalid();
-    }
+    const proof = concretePageProof(value);
     const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
     const keys = Reflect.ownKeys(descriptors);
     if (
-      keys.length !== 6
-      || !keys.includes(NORMALIZED_PAGE_BRAND)
-      || !descriptors[NORMALIZED_PAGE_BRAND]
-      || !('value' in descriptors[NORMALIZED_PAGE_BRAND])
-      || !Object.isFrozen(value)
+      keys.length !== 5
+      || keys.some((key) => typeof key !== 'string')
     ) learningValidation.invalid();
-    const proof = pageProof(descriptors[NORMALIZED_PAGE_BRAND].value);
     requireExpectedPageProof(proof, expectedProof);
     const stringKeys = ['items', 'requestPageToken', 'nextPageToken', 'pageNumber', 'responseBytes'] as const;
     const row: Record<(typeof stringKeys)[number], unknown> = Object.create(null) as Record<
@@ -427,8 +474,6 @@ function revalidateLearningPage<T extends object>(
     return learningValidation.invalid();
   }
 }
-
-type NormalizedPageData<T extends object> = Omit<LearningProviderPage<T>, typeof NORMALIZED_PAGE_BRAND>;
 
 function normalizeLearningPageCandidate<T extends object>(
   value: unknown,
@@ -552,60 +597,12 @@ function makePageProof(
   measurement: LearningByteMeasurement,
   expected: LearningPageProofExpectation,
 ): LearningPageProof {
-  const result = {
+  return Object.freeze({
     measurement: byteMeasurement(measurement),
     kind: expected.kind,
     scope: expected.scope,
     policyFingerprint: expected.policyFingerprint,
-  } as LearningPageProof;
-  Object.defineProperty(result, PAGE_PROOF_BRAND, { value: true });
-  return Object.freeze(result);
-}
-
-function pageProof(value: unknown): LearningPageProof {
-  try {
-    if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
-      learningValidation.invalid();
-    }
-    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
-    const keys = Reflect.ownKeys(descriptors);
-    if (
-      keys.length !== 5
-      || !keys.includes(PAGE_PROOF_BRAND)
-      || !keys.includes('measurement')
-      || !keys.includes('kind')
-      || !keys.includes('scope')
-      || !keys.includes('policyFingerprint')
-      || descriptors[PAGE_PROOF_BRAND]?.value !== true
-      || !Object.isFrozen(value)
-    ) learningValidation.invalid();
-    const dataValue = (key: 'measurement' | 'kind' | 'scope' | 'policyFingerprint'): unknown => {
-      const descriptor = descriptors[key];
-      if (!descriptor || !('value' in descriptor)) return learningValidation.invalid();
-      return descriptor.value;
-    };
-    const measurement = byteMeasurement(dataValue('measurement'));
-    const kind = learningValidation.oneOf(dataValue('kind'), [
-      'courses', 'provider_enrollments', 'activities', 'resources', 'provider_submissions',
-    ] as const);
-    const rawScope = dataValue('scope');
-    if (!Object.isFrozen(rawScope)) learningValidation.invalid();
-    const scope = normalizeLearningPageScope(rawScope);
-    const rawFingerprint = dataValue('policyFingerprint');
-    const policyFingerprint = rawFingerprint === null
-      ? null
-      : learningValidation.boundedString(rawFingerprint, 1, LEARNING_LIMITS.maxSyncBytes, false);
-    const proof = value as LearningPageProof;
-    if (
-      proof.measurement !== measurement
-      || proof.kind !== kind
-      || !sameScope(proof.scope, scope)
-      || proof.policyFingerprint !== policyFingerprint
-    ) learningValidation.invalid();
-    return proof;
-  } catch {
-    return learningValidation.invalid();
-  }
+  });
 }
 
 function requireExpectedPageProof(
@@ -824,6 +821,16 @@ export function normalizeLearningHealthRequest(value: unknown, now: number): Lea
   const subject = normalizeProviderSubject(row.subject);
   const operation = operationBoundToScope(row.operation, scopeForSubject(subject, null, null, null), now);
   return Object.freeze({ subject, operation });
+}
+
+export function normalizeLearningNormalizeNotificationRequest(
+  value: unknown,
+  now: number,
+): LearningNormalizeNotificationRequest {
+  const row = learningValidation.exactRecord(value, ['subject', 'payload', 'operation']);
+  const subject = normalizeProviderSubject(row.subject);
+  const operation = operationBoundToScope(row.operation, scopeForSubject(subject, null, null, null), now);
+  return Object.freeze({ subject, payload: row.payload, operation });
 }
 
 export function normalizeLearningListCoursesRequest(value: unknown, now: number): LearningListCoursesRequest {
@@ -1298,6 +1305,7 @@ async function readDecodedLearningPageCandidate(
     }
     operation = normalizeLearningOperationContext(rawOperation, initialNow);
     activeProviderOperation(operation, initialNow);
+    const responseLimit = Math.min(operation.maxRawBytes, LEARNING_LIMITS.maxPageBytes);
     const contentLengthValue = response.headers.get('Content-Length');
     let declaredLength: number | null = null;
     if (contentLengthValue !== null) {
@@ -1306,7 +1314,7 @@ async function readDecodedLearningPageCandidate(
       }
       declaredLength = Number(contentLengthValue);
       if (!Number.isSafeInteger(declaredLength)) throw providerFailure('malformed_response', provider);
-      if (declaredLength > operation.maxRawBytes) {
+      if (declaredLength > responseLimit) {
         await cancelReader(reader);
         throw providerFailure('response_too_large', provider);
       }
@@ -1328,7 +1336,7 @@ async function readDecodedLearningPageCandidate(
         throw providerFailure('malformed_response', provider);
       }
       byteCount += result.value.byteLength;
-      if (byteCount > operation.maxRawBytes) {
+      if (byteCount > responseLimit) {
         await cancelReader(reader);
         throw providerFailure('response_too_large', provider);
       }
@@ -1443,14 +1451,50 @@ export type LearningProviderMethod =
   | 'syncActivities'
   | 'syncResources'
   | 'syncSubmissions'
-  | 'buildLaunchUrl';
+  | 'buildLaunchUrl'
+  | 'normalizeNotification';
 
-export interface LearningProviderInvocation {
-  readonly method: LearningProviderMethod;
-  readonly request: unknown;
-  readonly now: () => number;
-  readonly urlPolicy?: LearningConnectionUrlPolicy;
-}
+/** Method-specific invocation shapes keep URL policy roles explicit. */
+export type LearningProviderInvocation =
+  | { readonly method: 'healthCheck'; readonly request: LearningHealthRequest; readonly now: () => number }
+  | {
+    readonly method: 'listCourses'; readonly request: LearningListCoursesRequest;
+    readonly now: () => number; readonly urlPolicy: LearningConnectionUrlPolicy;
+  }
+  | {
+    readonly method: 'syncCourse'; readonly request: LearningSyncCourseRequest;
+    readonly now: () => number; readonly urlPolicy: LearningConnectionUrlPolicy;
+  }
+  | { readonly method: 'syncEnrollments'; readonly request: LearningSyncEnrollmentsRequest; readonly now: () => number }
+  | {
+    readonly method: 'syncActivities'; readonly request: LearningSyncActivitiesRequest;
+    readonly now: () => number; readonly urlPolicy: LearningConnectionUrlPolicy;
+  }
+  | {
+    readonly method: 'syncResources'; readonly request: LearningSyncResourcesRequest;
+    readonly now: () => number; readonly urlPolicy: LearningConnectionUrlPolicy;
+  }
+  | { readonly method: 'syncSubmissions'; readonly request: LearningSyncSubmissionsRequest; readonly now: () => number }
+  | {
+    readonly method: 'buildLaunchUrl'; readonly request: LearningBuildLaunchRequest;
+    readonly now: () => number; readonly urlPolicy: LearningConnectionUrlPolicy;
+  }
+  | {
+    readonly method: 'normalizeNotification'; readonly request: LearningNormalizeNotificationRequest;
+    readonly now: () => number;
+  };
+
+export type LearningProviderInvocationResult =
+  | LearningProviderHealth
+  | LearningProviderPage<LearningCourse>
+  | LearningCourse
+  | LearningProviderPage<LearningProviderEnrollment>
+  | LearningProviderPage<LearningActivity>
+  | LearningProviderPage<LearningResource>
+  | LearningProviderPage<LearningProviderSubmission>
+  | LearningLaunchContract
+  | LearningProviderNotification
+  | null;
 
 function rawOperationStatus(request: unknown, provider: LearningProviderKind, now: number): void {
   try {
@@ -1466,12 +1510,14 @@ function rawOperationStatus(request: unknown, provider: LearningProviderKind, no
 }
 
 async function guardedProviderCall<T>(
-  call: () => Promise<T>,
+  call: (signal: AbortSignal) => Promise<T>,
   operation: LearningOperationContext,
-  now: number,
+  now: () => number,
 ): Promise<T> {
-  activeProviderOperation(operation, now);
-  const remaining = Date.parse(operation.deadlineAt) - now;
+  const initialNow = now();
+  activeProviderOperation(operation, initialNow);
+  const remaining = Date.parse(operation.deadlineAt) - initialNow;
+  const combinedController = new AbortController();
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const finish = (run: () => void): void => {
@@ -1481,21 +1527,39 @@ async function guardedProviderCall<T>(
       operation.signal.removeEventListener('abort', abort);
       run();
     };
-    const abort = (): void => finish(() => reject(providerFailure('cancelled', operation.scope.provider)));
+    const fail = (code: 'cancelled' | 'timeout'): void => {
+      combinedController.abort();
+      finish(() => reject(providerFailure(code, operation.scope.provider)));
+    };
+    const abort = (): void => fail('cancelled');
     const timer = setTimeout(
-      () => finish(() => reject(providerFailure('timeout', operation.scope.provider))),
+      () => fail('timeout'),
       Math.max(0, remaining),
     );
     operation.signal.addEventListener('abort', abort, { once: true });
     let promise: Promise<T>;
     try {
-      promise = call();
+      promise = Promise.resolve(call(combinedController.signal));
     } catch {
       finish(() => reject(providerFailure('provider_unavailable', operation.scope.provider)));
       return;
     }
     promise.then(
-      (value) => finish(() => resolve(value)),
+      (value) => {
+        try {
+          activeProviderOperation(operation, now());
+          if (combinedController.signal.aborted) {
+            throw providerFailure(operation.signal.aborted ? 'cancelled' : 'timeout', operation.scope.provider);
+          }
+          finish(() => resolve(value));
+        } catch (error) {
+          const safe = error instanceof LearningProviderError
+            ? providerFailure(error.code, error.provider, error.httpStatus, error.retryAfterSeconds)
+            : providerFailure('provider_unavailable', operation.scope.provider);
+          combinedController.abort();
+          finish(() => reject(safe));
+        }
+      },
       (error: unknown) => finish(() => reject(
         error instanceof LearningProviderError
           ? providerFailure(error.code, error.provider, error.httpStatus, error.retryAfterSeconds)
@@ -1503,6 +1567,17 @@ async function guardedProviderCall<T>(
       )),
     );
   });
+}
+
+type ProviderAdapterRequest = LearningHealthRequest | LearningListCoursesRequest | LearningSyncCourseRequest
+  | LearningSyncEnrollmentsRequest | LearningSyncActivitiesRequest | LearningSyncResourcesRequest
+  | LearningSyncSubmissionsRequest | LearningBuildLaunchRequest | LearningNormalizeNotificationRequest;
+
+function requestWithSignal<T extends ProviderAdapterRequest>(request: T, signal: AbortSignal): T {
+  return Object.freeze({
+    ...request,
+    operation: Object.freeze({ ...request.operation, signal }),
+  }) as T;
 }
 
 function providerAdapter(value: unknown, method: LearningProviderMethod): {
@@ -1540,10 +1615,50 @@ function pageMatchesRequest<T extends object>(
 }
 
 /** Single runtime gate for every network-capable provider adapter method. */
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'healthCheck' }>,
+): Promise<LearningProviderHealth>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'listCourses' }>,
+): Promise<LearningProviderPage<LearningCourse>>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'syncCourse' }>,
+): Promise<LearningCourse>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'syncEnrollments' }>,
+): Promise<LearningProviderPage<LearningProviderEnrollment>>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'syncActivities' }>,
+): Promise<LearningProviderPage<LearningActivity>>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'syncResources' }>,
+): Promise<LearningProviderPage<LearningResource>>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'syncSubmissions' }>,
+): Promise<LearningProviderPage<LearningProviderSubmission>>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'buildLaunchUrl' }>,
+): Promise<LearningLaunchContract>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  invocation: Extract<LearningProviderInvocation, { method: 'normalizeNotification' }>,
+): Promise<LearningProviderNotification | null>;
+export function invokeLearningProvider(
+  rawProvider: LearningProvider,
+  rawInvocation: unknown,
+): Promise<LearningProviderInvocationResult>;
 export async function invokeLearningProvider(
   rawProvider: LearningProvider,
-  rawInvocation: LearningProviderInvocation,
-): Promise<unknown> {
+  rawInvocation: unknown,
+): Promise<LearningProviderInvocationResult> {
   let provider: LearningProviderKind = 'canvas';
   let operation: LearningOperationContext | null = null;
   let phase: 'request' | 'call' | 'result' = 'request';
@@ -1552,8 +1667,14 @@ export async function invokeLearningProvider(
     const method = learningValidation.oneOf(invocation.method, [
       'healthCheck', 'listCourses', 'syncCourse', 'syncEnrollments',
       'syncActivities', 'syncResources', 'syncSubmissions', 'buildLaunchUrl',
+      'normalizeNotification',
     ] as const);
-    invocation = Object.prototype.hasOwnProperty.call(invocation, 'urlPolicy')
+    const requiresUrlPolicy = method === 'listCourses'
+      || method === 'syncCourse'
+      || method === 'syncActivities'
+      || method === 'syncResources'
+      || method === 'buildLaunchUrl';
+    invocation = requiresUrlPolicy
       ? learningValidation.exactRecord(rawInvocation, ['method', 'request', 'now', 'urlPolicy'])
       : learningValidation.exactRecord(rawInvocation, ['method', 'request', 'now']);
     const adapter = providerAdapter(rawProvider, method);
@@ -1565,7 +1686,7 @@ export async function invokeLearningProvider(
 
     let request: LearningHealthRequest | LearningListCoursesRequest | LearningSyncCourseRequest
       | LearningSyncEnrollmentsRequest | LearningSyncActivitiesRequest | LearningSyncResourcesRequest
-      | LearningSyncSubmissionsRequest | LearningBuildLaunchRequest;
+      | LearningSyncSubmissionsRequest | LearningBuildLaunchRequest | LearningNormalizeNotificationRequest;
     if (method === 'healthCheck') request = normalizeLearningHealthRequest(invocation.request, now);
     else if (method === 'listCourses') request = normalizeLearningListCoursesRequest(invocation.request, now);
     else if (method === 'syncCourse') request = normalizeLearningSyncCourseRequest(invocation.request, now);
@@ -1573,13 +1694,21 @@ export async function invokeLearningProvider(
     else if (method === 'syncActivities') request = normalizeLearningSyncActivitiesRequest(invocation.request, now);
     else if (method === 'syncResources') request = normalizeLearningSyncResourcesRequest(invocation.request, now);
     else if (method === 'syncSubmissions') request = normalizeLearningSyncSubmissionsRequest(invocation.request, now);
-    else request = normalizeLearningBuildLaunchRequest(invocation.request, now);
+    else if (method === 'buildLaunchUrl') request = normalizeLearningBuildLaunchRequest(invocation.request, now);
+    else request = normalizeLearningNormalizeNotificationRequest(invocation.request, now);
     operation = request.operation;
     if (request.subject.provider !== provider) learningValidation.invalid();
+    const urlPolicy = requiresUrlPolicy
+      ? normalizeLearningConnectionUrlPolicy(invocation.urlPolicy)
+      : null;
+    if (urlPolicy !== null && (
+      urlPolicy.provider !== request.subject.provider
+      || urlPolicy.connectionId !== request.subject.connectionId
+    )) learningValidation.invalid();
 
     phase = 'call';
     const rawResult = await guardedProviderCall(
-      () => adapter.call(request as never), operation, now,
+      (signal) => adapter.call(requestWithSignal(request, signal) as never), operation, invocation.now as () => number,
     );
     phase = 'result';
 
@@ -1588,9 +1717,17 @@ export async function invokeLearningProvider(
       if (result.provider !== provider || result.connectionId !== request.subject.connectionId) learningValidation.invalid();
       return result;
     }
+    if (method === 'normalizeNotification') {
+      if (rawResult === null) return null;
+      const result = normalizeLearningProviderNotification(rawResult);
+      if (
+        result.provider !== provider
+        || result.connectionId !== request.subject.connectionId
+      ) learningValidation.invalid();
+      return result;
+    }
     if (method === 'syncCourse') {
-      const policy = invocation.urlPolicy;
-      const result = normalizeLearningCourse(rawResult, policy);
+      const result = normalizeLearningCourse(rawResult, urlPolicy);
       const subject = (request as LearningSyncCourseRequest).subject;
       if (result.externalCourseId !== subject.externalCourseId) learningValidation.invalid();
       return result;
@@ -1598,7 +1735,7 @@ export async function invokeLearningProvider(
     if (method === 'buildLaunchUrl') {
       return normalizeLearningLaunchContract(
         rawResult,
-        invocation.urlPolicy,
+        urlPolicy,
         (request as LearningBuildLaunchRequest).subject,
       );
     }
@@ -1606,17 +1743,17 @@ export async function invokeLearningProvider(
     let responseContract: LearningPageResponseContract;
     if (method === 'listCourses') {
       responseContract = {
-        kind: 'courses', urlPolicy: invocation.urlPolicy as LearningConnectionUrlPolicy,
+        kind: 'courses', urlPolicy: urlPolicy as LearningConnectionUrlPolicy,
       };
     } else if (method === 'syncEnrollments') {
       responseContract = { kind: 'provider_enrollments' };
     } else if (method === 'syncActivities') {
       responseContract = {
-        kind: 'activities', urlPolicy: invocation.urlPolicy as LearningConnectionUrlPolicy,
+        kind: 'activities', urlPolicy: urlPolicy as LearningConnectionUrlPolicy,
       };
     } else if (method === 'syncResources') {
       responseContract = {
-        kind: 'resources', urlPolicy: invocation.urlPolicy as LearningConnectionUrlPolicy,
+        kind: 'resources', urlPolicy: urlPolicy as LearningConnectionUrlPolicy,
       };
     } else {
       responseContract = { kind: 'provider_submissions' };
@@ -1627,7 +1764,7 @@ export async function invokeLearningProvider(
     );
     pageMatchesRequest(page, request as LearningListCoursesRequest | LearningSyncEnrollmentsRequest
       | LearningSyncActivitiesRequest | LearningSyncResourcesRequest | LearningSyncSubmissionsRequest);
-    return page;
+    return page as LearningStrictProviderPage;
   } catch (error) {
     if (error instanceof LearningProviderError) throw error;
     const code: LearningErrorCode = phase === 'result'
