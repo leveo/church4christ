@@ -6,7 +6,11 @@ import {
   mapSelectedGoogleClassroomCourse,
   unmapSelectedGoogleClassroomCourse,
 } from '../src/lib/learningGoogleAdmin';
-import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../src/lib/learningGoogleAuth';
+import {
+  encodeGoogleCredential,
+  GOOGLE_CLASSROOM_SCOPES,
+  loadGoogleCredentialForAdmin,
+} from '../src/lib/learningGoogleAuth';
 import {
   googleClassroomPushReadiness,
   renewGoogleClassroomRegistrations,
@@ -69,6 +73,37 @@ function providerCourse(): Record<string, unknown> {
     alternateLink: 'https://classroom.google.com/c/course-1',
     updateTime: '2026-08-17T11:00:00.000Z',
   };
+}
+
+function rotatedTokenResponse(accessToken: string, refreshToken: string): Response {
+  return new Response(JSON.stringify({
+    access_token: accessToken,
+    expires_in: 3_600,
+    refresh_token: refreshToken,
+    refresh_token_expires_in: 604_800,
+    scope: GOOGLE_CLASSROOM_SCOPES.join(' '),
+    token_type: 'Bearer',
+  }), { headers: { 'content-type': 'application/json' } });
+}
+
+async function storeExpiredCredential(refreshToken = 'old-refresh') {
+  const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+  const envelope = await encryptLearningCredential(keyRing, {
+    provider: 'google_classroom', connectionId: 27602,
+    plaintext: encodeGoogleCredential({
+      version: 1, accessToken: 'expired-access', refreshToken,
+      accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+      refreshTokenExpiresAt: '2026-08-20T12:00:00.000Z',
+      grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+    }), expiresAt: '2026-08-20T12:00:00.000Z',
+  });
+  await env.DB.prepare(`UPDATE learning_provider_credentials SET
+    ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,expires_at=?6
+    WHERE connection_id=27602`).bind(
+    envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
+    envelope.envelopeVersion, envelope.expiresAt,
+  ).run();
+  return keyRing;
 }
 
 function registrationFetcher(prefix: string, expectedTopic = TOPIC) {
@@ -375,6 +410,52 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
   });
 });
 
+describe('Google Classroom active and error cleanup credential rotation (D1)', () => {
+  beforeEach(seedGraph);
+
+  it.each(['active', 'error'] as const)(
+    'persists the complete rotated credential before %s cleanup uses it',
+    async (status) => {
+      if (status === 'error') {
+        await env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=27602").run();
+      }
+      const keyRing = await storeExpiredCredential();
+      await env.DB.prepare(`INSERT INTO learning_google_cleanup_tasks
+        (connection_id,task_type,registration_id) VALUES(27602,'registration',?1)`)
+        .bind(`cleanup-${status}`).run();
+      let refreshCalls = 0;
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.toString() === 'https://oauth2.googleapis.com/token') {
+          refreshCalls += 1;
+          expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('old-refresh');
+          return rotatedTokenResponse(`${status}-cleanup-access`, `${status}-cleanup-refresh`);
+        }
+        expect(url.pathname).toBe(`/v1/registrations/cleanup-${status}`);
+        expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${status}-cleanup-access`);
+        return new Response(null, { status: 200 });
+      });
+      await expect(recoverGoogleClassroomCleanup(env.DB as AppDb, {
+        connectionId: 27602,
+        clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+        keyRing, fetcher, signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+      }, { now: () => NOW })).resolves.toEqual({
+        selected: 1, cleaned: 1, pending: 0, finalizedDisconnect: false,
+      });
+      expect(refreshCalls).toBe(1);
+      await expect(loadGoogleCredentialForAdmin(env.DB as AppDb, {
+        connectionId: 27602, keyRing,
+      })).resolves.toMatchObject({
+        revision: 2, status,
+        credential: {
+          accessToken: `${status}-cleanup-access`, refreshToken: `${status}-cleanup-refresh`,
+          refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+        },
+      });
+    },
+  );
+});
+
 describe('Google Classroom bounded registration renewal (D1)', () => {
   beforeEach(async () => {
     await seedGraph();
@@ -401,6 +482,37 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     expect(await env.DB.prepare(`SELECT registration_id FROM learning_google_registrations
       WHERE connection_id=27602 ORDER BY feed_type`).all()).toMatchObject({
       results: [{ registration_id: 'renewed-1' }, { registration_id: 'renewed-2' }],
+    });
+  });
+
+  it('persists a rotated refresh token before renewal continues with the new access token', async () => {
+    const keyRing = await storeExpiredCredential();
+    const requests = registrationFetcher('rotated-renewal');
+    let refreshCalls = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('old-refresh');
+        return rotatedTokenResponse('renewal-access', 'renewal-refresh');
+      }
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer renewal-access');
+      return requests.fetcher(input, init);
+    });
+    await expect(renewGoogleClassroomRegistrations(env.DB as AppDb, {
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher, nowEpochMs: NOW, topicName: TOPIC,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({ selected: 2, renewed: 2, conflicted: 0, failed: 0 });
+    expect(refreshCalls).toBe(1);
+    await expect(loadGoogleCredentialForAdmin(env.DB as AppDb, {
+      connectionId: 27602, keyRing,
+    })).resolves.toMatchObject({
+      revision: 2, status: 'active',
+      credential: {
+        accessToken: 'renewal-access', refreshToken: 'renewal-refresh',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+      },
     });
   });
 
@@ -512,6 +624,7 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     }
     await env.DB.prepare(`INSERT INTO learning_google_cleanup_tasks
       (connection_id,task_type,registration_id) VALUES(27602,'registration','persistently-failing')`).run();
+    const keyRing = await storeExpiredCredential();
 
     let queries = 0;
     let maxBinds = 0;
@@ -529,8 +642,15 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
       batch: <T>(statements: AppStatement[]) => (env.DB as AppDb).batch<T>(statements),
     };
     const requests = registrationFetcher('fair');
+    let refreshCalls = 0;
     const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(request));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('old-refresh');
+        return rotatedTokenResponse('budget-access', 'budget-refresh');
+      }
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer budget-access');
       if (url.pathname === '/v1/registrations/persistently-failing' && init?.method === 'DELETE') {
         return new Response(null, { status: 503 });
       }
@@ -552,11 +672,21 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     })).resolves.toEqual({
       status: 'completed', summary: { selected: 8, renewed: 8, conflicted: 0, failed: 0 },
     });
-    expect(queries).toBe(40);
+    expect(queries).toBe(43);
     expect(queries).toBeLessThanOrEqual(50);
     expect(maxBinds).toBeLessThanOrEqual(100);
-    // One failing reserved cleanup plus create/delete for each renewed feed.
-    expect(fetcher).toHaveBeenCalledTimes(17);
+    expect(refreshCalls).toBe(1);
+    await expect(loadGoogleCredentialForAdmin(env.DB as AppDb, {
+      connectionId: 27602, keyRing,
+    })).resolves.toMatchObject({
+      revision: 2,
+      credential: {
+        accessToken: 'budget-access', refreshToken: 'budget-refresh',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+      },
+    });
+    // One refresh, one failing reserved cleanup, then create/delete for each renewed feed.
+    expect(fetcher).toHaveBeenCalledTimes(18);
     expect(fetcher.mock.calls.length).toBeLessThanOrEqual(20);
   });
 });

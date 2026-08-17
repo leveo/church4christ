@@ -2,11 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
 import {
+  checkGoogleClassroomConnectionHealth,
   disconnectGoogleClassroomConnection,
   mapSelectedGoogleClassroomCourse,
   unmapSelectedGoogleClassroomCourse,
 } from '../../src/lib/learningGoogleAdmin';
-import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../../src/lib/learningGoogleAuth';
+import {
+  encodeGoogleCredential,
+  GOOGLE_CLASSROOM_SCOPES,
+  loadGoogleCredentialForAdmin,
+} from '../../src/lib/learningGoogleAuth';
 import { renewGoogleClassroomRegistrations } from '../../src/lib/learningGoogleRegistrationLifecycle';
 import {
   acceptGooglePubSubDelivery,
@@ -38,6 +43,14 @@ function delivery(receivedAt = '2026-08-17T12:00:00.000Z'): GooglePubSubDelivery
     publishedAt: '2026-08-17T11:59:59.000Z',
     receivedAt,
   });
+}
+
+function rotatedTokenResponse(accessToken: string, refreshToken: string): Response {
+  return new Response(JSON.stringify({
+    access_token: accessToken, expires_in: 3_600,
+    refresh_token: refreshToken, refresh_token_expires_in: 604_800,
+    scope: GOOGLE_CLASSROOM_SCOPES.join(' '), token_type: 'Bearer',
+  }), { headers: { 'content-type': 'application/json' } });
 }
 
 describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (real Postgres)', () => {
@@ -156,6 +169,57 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     })).resolves.toMatchObject({ status: 'succeeded' });
     expect((await sqlA.unsafe(`SELECT display_name,last_synced_at FROM learning_courses WHERE id=27504`))[0])
       .toEqual({ display_name: 'Genesis 1', last_synced_at: '2026-08-17T12:00:00.000Z' });
+  });
+
+  it('persists a complete rotated error-health credential with exact Postgres CAS parity', async () => {
+    await sqlA.unsafe(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id)
+      VALUES(27532,'google_classroom','PG Error Health',NULL,'error',1,27501)`);
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const envelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27532,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'pg-expired-access', refreshToken: 'pg-old-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+        refreshTokenExpiresAt: '2026-08-20T12:00:00.000Z',
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: '2026-08-20T12:00:00.000Z',
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27532,?1,?2,?3,?4,?5,?6)`).bind(
+      envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
+      envelope.envelopeVersion, envelope.expiresAt,
+    ).run();
+    let refreshCalls = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('pg-old-refresh');
+        if (refreshCalls > 1) throw new Error('stale PG refresh token reused');
+        return rotatedTokenResponse('pg-rotated-access', 'pg-rotated-refresh');
+      }
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer pg-rotated-access');
+      return new Response(null, { status: 200 });
+    });
+    const input = {
+      connectionId: 27532, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+    };
+    await expect(checkGoogleClassroomConnectionHealth(dbA, input))
+      .resolves.toEqual({ ok: true, errorCode: null });
+    await expect(checkGoogleClassroomConnectionHealth(dbA, input))
+      .resolves.toEqual({ ok: true, errorCode: null });
+    await expect(loadGoogleCredentialForAdmin(dbA, { connectionId: 27532, keyRing: ring }))
+      .resolves.toMatchObject({
+        revision: 2, status: 'error',
+        credential: {
+          accessToken: 'pg-rotated-access', refreshToken: 'pg-rotated-refresh',
+          refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+        },
+      });
+    expect(refreshCalls).toBe(1);
   });
 
   it('has one exact-revision mapping winner with two feeds and cleans the losing registrations', async () => {

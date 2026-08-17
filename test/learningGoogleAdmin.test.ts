@@ -8,7 +8,11 @@ import {
   mapSelectedGoogleClassroomCourse,
 } from '../src/lib/learningGoogleAdmin';
 import { LearningConnectionConflictError, getLearningConnection } from '../src/lib/learningConnectionDb';
-import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../src/lib/learningGoogleAuth';
+import {
+  encodeGoogleCredential,
+  GOOGLE_CLASSROOM_SCOPES,
+  loadGoogleCredentialForAdmin,
+} from '../src/lib/learningGoogleAuth';
 import {
   encryptLearningCredential,
   importLearningCredentialKeyRing,
@@ -19,6 +23,17 @@ const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(28))) },
 });
+
+function rotatedTokenResponse(accessToken: string, refreshToken: string): Response {
+  return new Response(JSON.stringify({
+    access_token: accessToken,
+    expires_in: 3_600,
+    refresh_token: refreshToken,
+    refresh_token_expires_in: 604_800,
+    scope: GOOGLE_CLASSROOM_SCOPES.join(' '),
+    token_type: 'Bearer',
+  }), { headers: { 'content-type': 'application/json' } });
+}
 
 describe('Google Classroom admin authoritative course selection', () => {
   beforeEach(async () => {
@@ -117,6 +132,114 @@ describe('Google Classroom admin authoritative course selection', () => {
       clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
     })).resolves.toEqual({ ok: true, errorCode: null });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists a rotated refresh token before error-health continues and never reuses the old token', async () => {
+    await env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=27302").run();
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const expired = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27302,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'old-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+        refreshTokenExpiresAt: '2026-08-20T12:00:00.000Z',
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: '2026-08-20T12:00:00.000Z',
+    });
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET
+      ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,expires_at=?6
+      WHERE connection_id=27302`).bind(
+      expired.ciphertext, expired.nonce, expired.algorithm, expired.keyVersion,
+      expired.envelopeVersion, expired.expiresAt,
+    ).run();
+    let refreshCalls = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('old-refresh');
+        if (refreshCalls > 1) throw new Error('old refresh token was reused');
+        return rotatedTokenResponse('rotated-access', 'rotated-refresh');
+      }
+      expect(url.origin).toBe('https://classroom.googleapis.com');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer rotated-access');
+      return new Response(null, { status: 200 });
+    });
+    const input = {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+    };
+    await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, input))
+      .resolves.toEqual({ ok: true, errorCode: null });
+    await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, input))
+      .resolves.toEqual({ ok: true, errorCode: null });
+    const stored = await loadGoogleCredentialForAdmin(env.DB as AppDb, {
+      connectionId: 27302, keyRing: ring,
+    });
+    expect(stored).toMatchObject({
+      revision: 2, status: 'error',
+      credential: {
+        accessToken: 'rotated-access', refreshToken: 'rotated-refresh',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+      },
+    });
+    const envelope = await env.DB.prepare(`SELECT ciphertext,expires_at
+      FROM learning_provider_credentials WHERE connection_id=27302`).first<Record<string, unknown>>();
+    expect(envelope?.expires_at).toBe('2026-08-24T12:00:00.000Z');
+    expect(JSON.stringify(envelope)).not.toMatch(/rotated-access|rotated-refresh/u);
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('reloads the exact CAS winner so concurrent error-health never uses a losing rotated token', async () => {
+    await env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=27302").run();
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const expired = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27302,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'old-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z', refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: null,
+    });
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET
+      ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,expires_at=NULL
+      WHERE connection_id=27302`).bind(
+      expired.ciphertext, expired.nonce, expired.algorithm, expired.keyVersion, expired.envelopeVersion,
+    ).run();
+    let refreshCalls = 0;
+    let releaseBoth!: () => void;
+    const bothRefreshing = new Promise<void>((resolve) => { releaseBoth = resolve; });
+    const providerTokens: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        const sequence = ++refreshCalls;
+        if (sequence === 2) releaseBoth();
+        await bothRefreshing;
+        return rotatedTokenResponse(`race-access-${sequence}`, `race-refresh-${sequence}`);
+      }
+      providerTokens.push(new Headers(init?.headers).get('authorization') ?? '');
+      return new Response(null, { status: 200 });
+    });
+    const input = {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+    };
+    await expect(Promise.all([
+      checkGoogleClassroomConnectionHealth(env.DB as AppDb, input),
+      checkGoogleClassroomConnectionHealth(env.DB as AppDb, input),
+    ])).resolves.toEqual([
+      { ok: true, errorCode: null }, { ok: true, errorCode: null },
+    ]);
+    const stored = await loadGoogleCredentialForAdmin(env.DB as AppDb, {
+      connectionId: 27302, keyRing: ring,
+    });
+    expect(stored.revision).toBe(2);
+    expect(providerTokens).toEqual([
+      `Bearer ${stored.credential.accessToken}`,
+      `Bearer ${stored.credential.accessToken}`,
+    ]);
+    expect(stored.credential.refreshToken).toMatch(/^race-refresh-[12]$/u);
   });
 
   it('disconnects an error connection whose remote OAuth grant was already revoked', async () => {
