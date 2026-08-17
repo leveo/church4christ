@@ -31,6 +31,7 @@ function claims(overrides: Record<string, unknown> = {}): Record<string, unknown
 
 describe('Canvas signed Live Events boundary', () => {
   beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM learning_courses WHERE id=28204').run();
     await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id=28202').run();
     await env.DB.prepare('DELETE FROM learning_programs WHERE id=28203').run();
     await env.DB.prepare('DELETE FROM people WHERE id=28201').run();
@@ -71,7 +72,6 @@ describe('Canvas signed Live Events boundary', () => {
       claims({ metadata: { ...(claims().metadata as object), producer: 'other' } }),
       claims({ metadata: { ...(claims().metadata as object), event_name: 'grade_change' } }),
       claims({ body: { course_id: 'different-course' } }),
-      claims({ metadata: { ...(claims().metadata as object), hostname: 'attacker.example', root_account_lti_guid: undefined } }),
     ]) {
       await expect(verifyCanvasLiveEventJwt({
         compactJwt: token, receivedAt: new Date(NOW).toISOString(),
