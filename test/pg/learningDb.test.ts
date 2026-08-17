@@ -26,11 +26,19 @@ import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
 const NOW = '2026-08-17T12:00:00.000Z';
+const LATER = '2026-08-17T12:05:00.000Z';
+const AFTER = '2026-08-17T12:10:00.000Z';
+const FINAL = '2026-08-17T12:15:00.000Z';
 const LEASE_END = '2026-08-17T12:30:00.000Z';
 const POLICY = Object.freeze({
   provider: 'canvas' as const, connectionId: 801, baseUrl: 'https://canvas.learning.test',
   providerLaunchOrigins: ['https://canvas.learning.test'], providerFileOrigins: ['https://files.learning.test'],
   externalLinkOrigins: ['https://links.learning.test'],
+});
+const POLICY_WITH_DIFFERENT_ROLE_ORIGINS = Object.freeze({
+  ...POLICY,
+  providerFileOrigins: ['https://alternate-files.learning.test'],
+  externalLinkOrigins: ['https://alternate-links.learning.test'],
 });
 const course = () => ({
   connectionId: 801, provider: 'canvas' as const, externalCourseId: 'genesis-1', displayName: 'Genesis 1',
@@ -190,6 +198,54 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     expect((await sql.unsafe(`SELECT status FROM learning_identity_links
       WHERE connection_id=801 AND external_user_id='disabled-user'`))[0]).toEqual({ status: 'disabled' });
     expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_enrollments`))[0]).toEqual({ count: 0 });
+  });
+
+  it('atomically rejects PostgreSQL completion under policy role drift from the acquired lease', async () => {
+    const mapped = await mappedCourse();
+    const stableLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
+    });
+    await completeLearningCourseSync(db, stableLease, {
+      course: { ...course(), displayName: 'Stable policy generation', lastSyncedAt: NOW },
+      urlPolicy: POLICY, syncedAt: NOW, enrollments: [],
+      activities: [{
+        connectionId: 801, provider: 'canvas', externalCourseId: 'genesis-1',
+        externalActivityId: 'stable-policy-activity', title: 'Stable policy activity', kind: 'material',
+        lifecycleState: 'published', launchUrl: 'https://canvas.learning.test/courses/genesis-1/stable',
+        dueAt: null, publishedAt: NOW, providerUpdatedAt: NOW, lastSyncedAt: null,
+      }], resources: [], submissions: [],
+    });
+
+    const driftedLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
+    });
+    await expect(completeLearningCourseSync(db, driftedLease, {
+      course: { ...course(), displayName: 'Must not commit', lastSyncedAt: AFTER },
+      urlPolicy: POLICY_WITH_DIFFERENT_ROLE_ORIGINS, syncedAt: AFTER, enrollments: [],
+      activities: [{
+        connectionId: 801, provider: 'canvas', externalCourseId: 'genesis-1',
+        externalActivityId: 'must-not-commit-policy-activity', title: 'Must not commit', kind: 'material',
+        lifecycleState: 'published', launchUrl: 'https://canvas.learning.test/courses/genesis-1/new',
+        dueAt: null, publishedAt: AFTER, providerUpdatedAt: AFTER, lastSyncedAt: null,
+      }], resources: [], submissions: [],
+    })).rejects.toBeInstanceOf(LearningSyncConflictError);
+
+    expect((await sql.unsafe(`SELECT display_name,last_synced_at FROM learning_courses
+      WHERE id=${mapped.courseId}`))[0]).toEqual({
+      display_name: 'Stable policy generation', last_synced_at: NOW,
+    });
+    expect(await sql.unsafe(`SELECT external_activity_id,lifecycle_state FROM learning_activities
+      ORDER BY external_activity_id`)).toEqual([
+      { external_activity_id: 'stable-policy-activity', lifecycle_state: 'published' },
+    ]);
+    expect((await sql.unsafe(`SELECT status,finalization_marker FROM learning_sync_runs
+      WHERE id=${driftedLease.runId}`))[0]).toEqual({ status: 'running', finalization_marker: null });
+    await failLearningSync(db, driftedLease, { finishedAt: FINAL, errorCode: 'invalid_request' });
+    expect(await getLearningSyncRun(db, driftedLease.runId)).toMatchObject({
+      status: 'failed', errorCode: 'invalid_request',
+    });
   });
 
   it('matches D1 stable returned-event, actual-count, and active-only learner semantics', async () => {

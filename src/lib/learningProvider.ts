@@ -542,7 +542,7 @@ interface LearningPageProofExpectation {
   readonly policyFingerprint: string | null;
 }
 
-function urlPolicyFingerprint(policy: LearningConnectionUrlPolicy): string {
+export function canonicalLearningConnectionUrlPolicyProof(policy: LearningConnectionUrlPolicy): string {
   const sorted = (values: readonly string[]): readonly string[] => Object.freeze([...values].sort(compareCodeUnits));
   const fingerprint = canonicalJson({
     provider: policy.provider,
@@ -589,7 +589,7 @@ function expectedPageProof(
   return Object.freeze({
     kind: contract.kind,
     scope,
-    policyFingerprint: contract.policy === null ? null : urlPolicyFingerprint(contract.policy),
+    policyFingerprint: contract.policy === null ? null : canonicalLearningConnectionUrlPolicyProof(contract.policy),
   });
 }
 

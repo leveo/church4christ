@@ -41,6 +41,7 @@ const SUPABASE_MIGRATIONS = [
   '0016_activity_score.sql',
   '0017_learning.sql',
   '0018_learning_sync_leases.sql',
+  '0019_learning_sync_policy_fingerprint.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

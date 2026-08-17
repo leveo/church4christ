@@ -137,20 +137,21 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     await sql.unsafe('DELETE FROM learning_programs WHERE id=990001');
   });
 
-  it('persists bounded Learning lease and one-winner finalization markers', async () => {
-    const columns = await sql.unsafe<{ table_name: string; column_name: string }[]>(`
-      SELECT table_name,column_name FROM information_schema.columns
+  it('persists bounded Learning lease, policy proof, and one-winner finalization markers', async () => {
+    const columns = await sql.unsafe<{ table_name: string; column_name: string; data_type: string }[]>(`
+      SELECT table_name,column_name,data_type FROM information_schema.columns
       WHERE table_schema='public' AND (
         (table_name='learning_provider_connections' AND column_name='operation_expires_at') OR
         (table_name='learning_sync_runs' AND column_name IN
-          ('lease_marker','lease_expires_at','finalization_marker'))
+          ('lease_marker','lease_expires_at','finalization_marker','url_policy_fingerprint'))
       ) ORDER BY table_name,column_name
     `);
     expect(columns).toEqual([
-      { table_name: 'learning_provider_connections', column_name: 'operation_expires_at' },
-      { table_name: 'learning_sync_runs', column_name: 'finalization_marker' },
-      { table_name: 'learning_sync_runs', column_name: 'lease_expires_at' },
-      { table_name: 'learning_sync_runs', column_name: 'lease_marker' },
+      { table_name: 'learning_provider_connections', column_name: 'operation_expires_at', data_type: 'text' },
+      { table_name: 'learning_sync_runs', column_name: 'finalization_marker', data_type: 'text' },
+      { table_name: 'learning_sync_runs', column_name: 'lease_expires_at', data_type: 'text' },
+      { table_name: 'learning_sync_runs', column_name: 'lease_marker', data_type: 'text' },
+      { table_name: 'learning_sync_runs', column_name: 'url_policy_fingerprint', data_type: 'bytea' },
     ]);
     const indexes = await sql.unsafe<{ indexname: string }[]>(`
       SELECT indexname FROM pg_indexes WHERE schemaname='public'
@@ -161,6 +162,24 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
       { indexname: 'idx_learning_sync_runs_finalization' },
       { indexname: 'idx_learning_sync_runs_lease' },
     ]);
+  });
+
+  it('accepts only a 32-byte URL-policy fingerprint', async () => {
+    const graph = await seedGraph(699);
+    for (const bytes of [31, 33]) {
+      await rejects(`INSERT INTO learning_sync_runs
+        (connection_id,course_id,trigger_type,status,url_policy_fingerprint)
+        VALUES (${graph.connectionId},${graph.courseId},'manual','running',
+          decode(repeat('00',${bytes}),'hex'))`, '23514');
+    }
+    await sql.unsafe(`INSERT INTO learning_sync_runs
+      (connection_id,course_id,trigger_type,status,url_policy_fingerprint)
+      VALUES (${graph.connectionId},${graph.courseId},'manual','running',decode(repeat('00',32),'hex'))`);
+    expect((await sql.unsafe<{ storage_type: string; byte_length: number }[]>(`
+      SELECT pg_typeof(url_policy_fingerprint)::text AS storage_type,
+        octet_length(url_policy_fingerprint)::int AS byte_length
+      FROM learning_sync_runs WHERE connection_id=${graph.connectionId}
+    `))[0]).toEqual({ storage_type: 'bytea', byte_length: 32 });
   });
 
   it('enforces provider/envelope/resource/count bounds and rotates one bytea envelope', async () => {

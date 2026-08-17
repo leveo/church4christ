@@ -18,6 +18,7 @@ import {
   type LearningResource,
   type LearningSyncTrigger,
 } from './learningModel';
+import { canonicalLearningConnectionUrlPolicyProof } from './learningProvider';
 
 export class LearningPersistenceError extends Error {
   readonly code = 'learning_persistence_failed' as const;
@@ -94,6 +95,11 @@ function resultRows(result: AppDbResult<unknown> | undefined, maximum: number): 
 function oneRow(result: AppDbResult<unknown> | undefined): Record<string, unknown> | null {
   const rows = resultRows(result, 1);
   return rows.length === 0 ? null : rows[0];
+}
+
+async function learningUrlPolicyFingerprint(policy: LearningConnectionUrlPolicy): Promise<Uint8Array> {
+  const canonical = canonicalLearningConnectionUrlPolicyProof(policy);
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical)));
 }
 
 export interface LearningProgramRecord {
@@ -319,6 +325,7 @@ export async function startLearningSync(
   let policy: LearningConnectionUrlPolicy;
   try { policy = normalizeLearningConnectionUrlPolicy(input.urlPolicy); } catch { return invalid(); }
   if (policy.connectionId !== connectionId || policy.provider !== kind) invalid();
+  const policyFingerprint = await learningUrlPolicyFingerprint(policy);
   const marker = crypto.randomUUID();
   const recoveryMarker = crypto.randomUUID();
   try {
@@ -349,12 +356,14 @@ export async function startLearningSync(
           )`).bind(startedAt, recoveryMarker, connectionId, marker, leaseExpiresAt),
       db.prepare(`INSERT INTO learning_sync_runs
         (connection_id,course_id,trigger_type,status,started_at,attempt_count,
-         scanned_count,changed_count,removed_count,event_count,error_code,lease_marker,lease_expires_at)
-        SELECT ?1,?2,?3,'running',?4,1,0,0,0,0,NULL,?6,?7
+         scanned_count,changed_count,removed_count,event_count,error_code,lease_marker,lease_expires_at,
+         url_policy_fingerprint)
+        SELECT ?1,?2,?3,'running',?4,1,0,0,0,0,NULL,?6,?7,?8
         WHERE EXISTS (SELECT 1 FROM learning_provider_connections
           WHERE id=?1 AND provider=?5 AND operation_marker=?6 AND operation_expires_at=?7)
         RETURNING id AS run_id`).bind(
           connectionId, courseId, triggerType, startedAt, kind, marker, leaseExpiresAt,
+          policyFingerprint,
         ),
     ]);
     if (!Array.isArray(results) || results.length !== 3) persistenceFailure();
@@ -751,6 +760,7 @@ export async function completeLearningCourseSync(
   }
   await assertIdentityMappings(db, own, snapshot.enrollments, guard);
   const events = await eventsFor(snapshot, own, guard);
+  const policyFingerprint = await learningUrlPolicyFingerprint(snapshot.urlPolicy);
   guard();
   const finalizationMarker = crypto.randomUUID();
   const statements: AppStatement[] = [
@@ -758,12 +768,13 @@ export async function completeLearningCourseSync(
     db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
       WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
         AND lease_marker=?5 AND lease_expires_at>?6 AND finalization_marker IS NULL
+        AND url_policy_fingerprint=?8
         AND EXISTS (SELECT 1 FROM learning_provider_connections c
           WHERE c.id=?3 AND c.provider=?7 AND c.operation_marker=?5
             AND c.operation_expires_at>?6 AND c.status='active' AND c.deleted_at IS NULL)
       RETURNING id AS run_id`).bind(
         finalizationMarker, own.runId, own.connectionId, own.courseId,
-        own.marker, snapshot.syncedAt, own.provider,
+        own.marker, snapshot.syncedAt, own.provider, policyFingerprint,
       ),
     removedCountStatement(db, own, snapshot, finalizationMarker),
   ];

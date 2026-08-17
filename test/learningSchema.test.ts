@@ -158,7 +158,7 @@ describe('portable Learning schema (D1)', () => {
     ]);
     expect(await columns('learning_provider_connections')).toContain('operation_expires_at');
     expect(await columns('learning_sync_runs')).toEqual(expect.arrayContaining([
-      'lease_marker', 'lease_expires_at', 'finalization_marker',
+      'lease_marker', 'lease_expires_at', 'finalization_marker', 'url_policy_fingerprint',
     ]));
 
     const forbidden = /(?:access|refresh)_token|oauth_code|client_secret|plaintext|payload|homework|answer|comment|grade|rubric|file_bytes|content/i;
@@ -169,6 +169,21 @@ describe('portable Learning schema (D1)', () => {
     ]) {
       expect((await columns(table)).filter((column) => forbidden.test(column))).toEqual([]);
     }
+  });
+
+  it('stores only a fixed-length binary URL-policy fingerprint on a sync run', async () => {
+    const graph = await seedGraph(95);
+    for (const value of ["'not-binary'", 'zeroblob(31)', 'zeroblob(33)']) {
+      await reject(`INSERT INTO learning_sync_runs
+        (id,connection_id,course_id,trigger_type,status,url_policy_fingerprint)
+        VALUES (95${value.length},${graph.connectionId},${graph.courseId},'manual','running',${value})`);
+    }
+    await env.DB.prepare(`INSERT INTO learning_sync_runs
+      (id,connection_id,course_id,trigger_type,status,url_policy_fingerprint)
+      VALUES (9599,${graph.connectionId},${graph.courseId},'manual','running',zeroblob(32))`).run();
+    expect(await env.DB.prepare(`SELECT typeof(url_policy_fingerprint) AS storage_type,
+      length(url_policy_fingerprint) AS byte_length FROM learning_sync_runs WHERE id=9599`).first())
+      .toEqual({ storage_type: 'blob', byte_length: 32 });
   });
 
   it('enforces provider allowlists, provider/course coherence, soft deletion, and scoped uniqueness', async () => {

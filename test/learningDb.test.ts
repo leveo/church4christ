@@ -29,6 +29,11 @@ const POLICY = Object.freeze({
   providerFileOrigins: ['https://files.learning.test'],
   externalLinkOrigins: ['https://links.learning.test'],
 });
+const POLICY_WITH_DIFFERENT_ROLE_ORIGINS = Object.freeze({
+  ...POLICY,
+  providerFileOrigins: ['https://alternate-files.learning.test'],
+  externalLinkOrigins: ['https://alternate-links.learning.test'],
+});
 
 function course(externalCourseId = 'genesis-1', displayName = 'Genesis 1') {
   return {
@@ -145,6 +150,44 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     expect(await env.DB.prepare(`SELECT status FROM learning_identity_links
       WHERE connection_id=701 AND external_user_id='disabled-user'`).first()).toEqual({ status: 'disabled' });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities`).first()).toEqual({ count: 0 });
+  });
+
+  it('atomically rejects completion under a different URL policy than the lease started with', async () => {
+    const { mapped } = await seed();
+    const stableLease = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
+    });
+    await completeLearningCourseSync(env.DB, stableLease, {
+      course: { ...course('genesis-1', 'Stable policy generation'), lastSyncedAt: NOW },
+      urlPolicy: POLICY, syncedAt: NOW, enrollments: [],
+      activities: [activity('stable-policy-activity', 'material')], resources: [], submissions: [],
+    });
+
+    const driftedLease = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
+    });
+    await expect(completeLearningCourseSync(env.DB, driftedLease, {
+      course: { ...course('genesis-1', 'Must not commit'), lastSyncedAt: AFTER },
+      urlPolicy: POLICY_WITH_DIFFERENT_ROLE_ORIGINS, syncedAt: AFTER, enrollments: [],
+      activities: [activity('must-not-commit-policy-activity', 'material')], resources: [], submissions: [],
+    })).rejects.toBeInstanceOf(LearningSyncConflictError);
+
+    expect(await env.DB.prepare(`SELECT display_name,last_synced_at FROM learning_courses
+      WHERE id=?`).bind(mapped.courseId).first()).toEqual({
+      display_name: 'Stable policy generation', last_synced_at: NOW,
+    });
+    expect(await env.DB.prepare(`SELECT external_activity_id,lifecycle_state FROM learning_activities
+      ORDER BY external_activity_id`).all()).toMatchObject({ results: [
+      { external_activity_id: 'stable-policy-activity', lifecycle_state: 'published' },
+    ] });
+    expect(await env.DB.prepare(`SELECT status,finalization_marker FROM learning_sync_runs
+      WHERE id=?`).bind(driftedLease.runId).first()).toEqual({ status: 'running', finalization_marker: null });
+    await failLearningSync(env.DB, driftedLease, { finishedAt: FINAL, errorCode: 'invalid_request' });
+    expect(await getLearningSyncRun(env.DB, driftedLease.runId)).toMatchObject({
+      status: 'failed', errorCode: 'invalid_request',
+    });
   });
 
   it('links exact identities idempotently and rejects either alternate-unique conflict without remapping', async () => {
