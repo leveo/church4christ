@@ -89,6 +89,7 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
       }
     }
     await resetSchema(sql);
+    await sql.unsafe('GRANT USAGE ON SCHEMA public TO anon, authenticated');
     execFileSync('node', ['scripts/db/migrate-supabase.mjs'], {
       env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
       encoding: 'utf8',
@@ -96,6 +97,7 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
   });
 
   afterAll(async () => {
+    await sql?.unsafe('REVOKE USAGE ON SCHEMA public FROM anon, authenticated');
     for (const role of createdClientRoles.reverse()) await sql?.unsafe(`DROP ROLE ${role}`);
     await sql?.end();
   });
