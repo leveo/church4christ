@@ -755,6 +755,36 @@ export async function loadCanvasCredential(
   });
 }
 
+export async function loadCanvasCredentialForAdmin(
+  db: AppDb,
+  rawInput: { readonly connectionId: number; readonly keyRing: LearningCredentialKeyRing },
+): Promise<{
+  readonly connectionId: number;
+  readonly revision: number;
+  readonly baseUrl: string;
+  readonly credential: CanvasCredential;
+}> {
+  const connectionId = dbInteger(rawInput.connectionId);
+  const value = await db.prepare(`SELECT c.id AS connection_id,c.revision,c.base_url,
+    p.ciphertext,p.nonce,p.algorithm,p.key_version,p.envelope_version,p.expires_at
+    FROM learning_provider_connections c JOIN learning_provider_credentials p ON p.connection_id=c.id
+    WHERE c.id=?1 AND c.provider='canvas' AND c.status IN ('active','error')
+      AND c.deleted_at IS NULL AND c.operation_marker IS NULL`).bind(connectionId).first();
+  if (value === null) invalid();
+  const row = learningValidation.dataRecord(value);
+  const envelope = envelopeFromRow(row, '');
+  if (envelope.expiresAt !== null) invalid();
+  const credential = decodeCanvasCredential(await decryptLearningCredential(rawInput.keyRing, {
+    provider: 'canvas', connectionId, envelope,
+  }));
+  return Object.freeze({
+    connectionId,
+    revision: dbInteger(row.revision),
+    baseUrl: normalizeCanvasBaseUrl(row.base_url),
+    credential,
+  });
+}
+
 export async function rotateCanvasCredential(
   db: AppDb,
   rawInput: {
