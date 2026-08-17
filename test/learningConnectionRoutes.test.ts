@@ -47,6 +47,7 @@ const deps = () => ({
   updateConnection: vi.fn(async () => ({ connectionId: 401 })),
   reconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
   disconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
+  disconnectCanvasConnection: vi.fn(async () => ({ connectionId: 401 })),
   disconnectGoogleConnection: vi.fn(async () => ({ connectionId: 401 })),
   loadConnection: vi.fn(async () => ({
     provider: 'canvas' as const, baseUrl: 'https://canvas.test', revision: 0, status: 'active' as const,
@@ -301,9 +302,27 @@ describe('Learning connection action HTTP boundary', () => {
     });
   });
 
+  it('routes active Canvas disconnect through provider token revocation', async () => {
+    const injected = deps();
+    const handler = createLearningConnectionActionHandler(injected);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=disconnect&connection_id=401&revision=0',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(response.headers.get('location')).toBe('/admin/learning?saved=connection_disconnected');
+    expect(injected.disconnectCanvasConnection).toHaveBeenCalledWith({}, {
+      connectionId: 401, expectedRevision: 0, actorPersonId: 7,
+    });
+    expect(injected.disconnectConnection).not.toHaveBeenCalled();
+  });
+
   it('maps malformed, stale, keyring, and unknown failures to fixed codes without secret leakage', async () => {
     const injected = deps();
-    injected.disconnectConnection.mockRejectedValue(new Error('canvas-private-token ciphertext nonce'));
+    injected.disconnectCanvasConnection.mockRejectedValue(new Error('canvas-private-token ciphertext nonce'));
     const handler = createLearningConnectionActionHandler(injected);
     const request = new Request('https://church.test/admin/learning/connections', {
       method: 'POST', headers: {
