@@ -35,6 +35,10 @@ import {
   checkGoogleClassroomConnectionHealth,
   disconnectGoogleClassroomConnection,
 } from '../../../lib/learningGoogleAdmin';
+import {
+  checkCanvasConnectionHealth,
+  disconnectCanvasConnection,
+} from '../../../lib/learningCanvasAdmin';
 
 export const prerender = false;
 
@@ -52,6 +56,10 @@ interface LearningConnectionActionDeps {
   readonly createConnection: (db: AppDb, input: CreateLearningConnectionInput) => Promise<unknown>;
   readonly updateConnection: (db: AppDb, input: UpdateLearningConnectionInput) => Promise<unknown>;
   readonly disconnectConnection: (db: AppDb, input: DisconnectLearningConnectionInput) => Promise<unknown>;
+  readonly disconnectCanvasConnection: (
+    db: AppDb,
+    input: DisconnectLearningConnectionInput,
+  ) => Promise<unknown>;
   readonly disconnectGoogleConnection: (
     db: AppDb,
     input: DisconnectLearningConnectionInput,
@@ -85,6 +93,27 @@ const defaultDeps: LearningConnectionActionDeps = {
   createConnection: createLearningConnection,
   updateConnection: updateLearningConnection,
   disconnectConnection: disconnectLearningConnection,
+  disconnectCanvasConnection: async (db, input) => {
+    const vars = env as unknown as {
+      LEARNING_CREDENTIAL_KEYS?: string;
+      CANVAS_OAUTH_CLIENT_ID?: string;
+      CANVAS_OAUTH_CLIENT_SECRET?: string;
+    };
+    if (
+      typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+      || typeof vars.CANVAS_OAUTH_CLIENT_ID !== 'string'
+      || typeof vars.CANVAS_OAUTH_CLIENT_SECRET !== 'string'
+    ) throw new LearningCredentialConfigError();
+    const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
+    return disconnectCanvasConnection(db, {
+      ...input,
+      clientId: vars.CANVAS_OAUTH_CLIENT_ID,
+      clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
+      keyRing,
+      fetcher: fetch,
+      nowEpochMs: Date.now(),
+    });
+  },
   disconnectGoogleConnection: async (db, input) => {
     const vars = env as unknown as {
       LEARNING_CREDENTIAL_KEYS?: string;
@@ -108,14 +137,29 @@ const defaultDeps: LearningConnectionActionDeps = {
   },
   loadConnection: getLearningConnection,
   checkHealth: async (db, input) => {
-    if (input.provider !== 'google_classroom') {
-      return { ok: false, errorCode: 'provider_unavailable' };
-    }
     const vars = env as unknown as {
       GOOGLE_CLASSROOM_CLIENT_ID?: string;
       GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+      CANVAS_OAUTH_CLIENT_ID?: string;
+      CANVAS_OAUTH_CLIENT_SECRET?: string;
       LEARNING_CREDENTIAL_KEYS?: string;
     };
+    if (input.provider === 'canvas') {
+      if (
+        typeof vars.CANVAS_OAUTH_CLIENT_ID !== 'string'
+        || typeof vars.CANVAS_OAUTH_CLIENT_SECRET !== 'string'
+        || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+      ) throw new LearningCredentialConfigError();
+      const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
+      return checkCanvasConnectionHealth(db, {
+        connectionId: input.connectionId,
+        clientId: vars.CANVAS_OAUTH_CLIENT_ID,
+        clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
+        keyRing,
+        fetcher: fetch,
+        nowEpochMs: Date.now(),
+      });
+    }
     if (
       typeof vars.GOOGLE_CLASSROOM_CLIENT_ID !== 'string'
       || typeof vars.GOOGLE_CLASSROOM_CLIENT_SECRET !== 'string'
@@ -255,6 +299,8 @@ export function createLearningConnectionActionHandler(
         }
         if (connection.provider === 'google_classroom' && connection.status !== 'pending') {
           await deps.disconnectGoogleConnection(locals.db, disconnectInput);
+        } else if (connection.provider === 'canvas' && connection.status !== 'pending') {
+          await deps.disconnectCanvasConnection(locals.db, disconnectInput);
         } else {
           await deps.disconnectConnection(locals.db, disconnectInput);
         }
