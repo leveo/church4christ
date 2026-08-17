@@ -15,6 +15,13 @@ import {
   startLearningSync,
 } from '../../src/lib/learningDb';
 import { learningSyntheticEnrollmentId } from '../../src/lib/learningModel';
+import type { LearningCourse } from '../../src/lib/learningModel';
+import {
+  readAndNormalizeLearningPage,
+  type LearningProvider,
+  type LearningProviderPage,
+} from '../../src/lib/learningProvider';
+import { synchronizeLearningCourse } from '../../src/lib/learningSync';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
@@ -30,6 +37,69 @@ const course = () => ({
   launchUrl: 'https://canvas.learning.test/courses/genesis-1', lifecycleState: 'active' as const,
   providerUpdatedAt: NOW, lastSyncedAt: NOW,
 });
+
+async function providerPage<T extends object>(
+  items: readonly T[],
+  request: { page: { pageNumber: number; pageToken: string | null }; operation: any },
+  contract: any,
+  nextPageToken: string | null = null,
+): Promise<LearningProviderPage<T>> {
+  return readAndNormalizeLearningPage(
+    new Response(JSON.stringify({
+      items, requestPageToken: request.page.pageToken,
+      nextPageToken, pageNumber: request.page.pageNumber,
+    })),
+    request.operation,
+    (value) => ({ ...(value as Record<string, unknown>) }),
+    contract,
+    () => Date.parse(NOW),
+  ) as Promise<LearningProviderPage<T>>;
+}
+
+function orchestrationProvider(continueForever = false): LearningProvider {
+  return {
+    provider: 'canvas',
+    async healthCheck() {
+      return { connectionId: 801, provider: 'canvas', healthy: 1, checkedAt: NOW, errorCode: null };
+    },
+    async listCourses(request) {
+      return providerPage<LearningCourse>([course()], request, { kind: 'courses', urlPolicy: POLICY });
+    },
+    async syncCourse() { return course(); },
+    async syncEnrollments(request) {
+      return providerPage([], request, { kind: 'provider_enrollments' }, continueForever ? 'next-secret' : null);
+    },
+    async syncActivities(request) {
+      return providerPage([], request, { kind: 'activities', urlPolicy: POLICY });
+    },
+    async syncResources(request) {
+      return providerPage([], request, { kind: 'resources', urlPolicy: POLICY });
+    },
+    async syncSubmissions(request) {
+      return providerPage([], request, { kind: 'provider_submissions' });
+    },
+    async buildLaunchUrl(request) {
+      return {
+        ...request.subject,
+        externalActivityId: 'externalActivityId' in request.subject ? request.subject.externalActivityId : null,
+        url: course().launchUrl, origin: 'https://canvas.learning.test',
+      };
+    },
+    async normalizeNotification() { return null; },
+  };
+}
+
+function pgOperation(signal = new AbortController().signal, maxPages = 10) {
+  return {
+    scope: {
+      provider: 'canvas' as const, connectionId: 801, externalCourseId: 'genesis-1',
+      externalActivityId: null, externalEnrollmentId: null,
+    },
+    startedAt: NOW, deadlineAt: LEASE_END, maxPages, maxItems: 50,
+    maxRawBytes: 100_000, maxNormalizedBytes: 100_000, maxUniqueKeyBytes: 100_000,
+    signal,
+  };
+}
 
 describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -186,6 +256,25 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       .toHaveLength(1);
     await sql.unsafe(`UPDATE learning_enrollments SET state='invited' WHERE course_id=$1`, [mapped.courseId]);
     expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 })).toEqual([]);
+    await sql.unsafe(`UPDATE learning_enrollments SET state='active' WHERE course_id=$1`, [mapped.courseId]);
+    const removalAt = '2026-08-17T12:20:00.000Z';
+    const removalLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: removalAt, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
+    });
+    const removed = await completeLearningCourseSync(db, removalLease, {
+      course: { ...course(), lastSyncedAt: removalAt }, urlPolicy: POLICY, syncedAt: removalAt,
+      enrollments: [], activities: [], resources: [], submissions: [],
+    });
+    expect(removed).toMatchObject({ scannedCount: 0, changedCount: 0, removedCount: 3, eventCount: 0 });
+    expect((await sql.unsafe(`SELECT state FROM learning_enrollments WHERE course_id=$1`, [mapped.courseId]))[0])
+      .toEqual({ state: 'inactive' });
+    expect((await sql.unsafe(`SELECT lifecycle_state FROM learning_activities WHERE course_id=$1`, [mapped.courseId]))[0])
+      .toEqual({ lifecycle_state: 'deleted' });
+    expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_submission_snapshots
+      WHERE course_id=$1`, [mapped.courseId]))[0]).toEqual({ count: 0 });
+    expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_activity_events
+      WHERE course_id=$1`, [mapped.courseId]))[0]).toEqual({ count: 3 });
   });
 
   it('serializes concurrent leases with exactly one winner and one run', async () => {
@@ -204,6 +293,72 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     const rejected = attempts.find((item) => item.status === 'rejected');
     expect(rejected).toMatchObject({ reason: expect.any(LearningSyncConflictError) });
     expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_sync_runs`))[0]).toEqual({ count: 1 });
+  });
+
+  it('isolates the same Person and opaque user across PostgreSQL connections, providers, and courses', async () => {
+    const canvasMapped = await mappedCourse();
+    await sql.unsafe(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id,updated_by_person_id)
+      VALUES (802,'google_classroom','Classroom',NULL,'active',0,8011,8011)`);
+    const googleProgram = await createLearningProgram(db, {
+      slug: 'genesis-google-pg', displayName: 'Genesis Google PG', actorPersonId: 8011,
+    });
+    const googlePolicy = {
+      provider: 'google_classroom' as const, connectionId: 802, baseUrl: null,
+      providerLaunchOrigins: ['https://classroom.google.com'],
+      providerFileOrigins: ['https://drive.google.com'], externalLinkOrigins: [],
+    };
+    const googleCourse = {
+      connectionId: 802, provider: 'google_classroom' as const, externalCourseId: 'genesis-1',
+      displayName: 'Genesis Google', launchUrl: 'https://classroom.google.com/c/genesis-1',
+      lifecycleState: 'active' as const, providerUpdatedAt: NOW, lastSyncedAt: NOW,
+    };
+    const googleMapped = await mapLearningCourse(db, {
+      programId: googleProgram.programId, course: googleCourse, urlPolicy: googlePolicy,
+    });
+    const canvasEnrollmentId = learningSyntheticEnrollmentId({
+      provider: 'canvas', externalCourseId: 'genesis-1', externalUserId: 'shared-opaque-user',
+    });
+    const googleEnrollmentId = learningSyntheticEnrollmentId({
+      provider: 'google_classroom', externalCourseId: 'genesis-1', externalUserId: 'shared-opaque-user',
+    });
+    for (const sync of [
+      {
+        connectionId: 801, provider: 'canvas' as const, courseId: canvasMapped.courseId,
+        policy: POLICY, courseValue: course(), externalEnrollmentId: canvasEnrollmentId,
+      },
+      {
+        connectionId: 802, provider: 'google_classroom' as const, courseId: googleMapped.courseId,
+        policy: googlePolicy, courseValue: googleCourse, externalEnrollmentId: googleEnrollmentId,
+      },
+    ]) {
+      await linkLearningIdentity(db, {
+        connectionId: sync.connectionId, provider: sync.provider,
+        externalUserId: 'shared-opaque-user', personId: 8012,
+      });
+      const lease = await startLearningSync(db, {
+        connectionId: sync.connectionId, provider: sync.provider, courseId: sync.courseId,
+        externalCourseId: 'genesis-1', trigger: 'manual', startedAt: NOW,
+        urlPolicy: sync.policy, leaseExpiresAt: LEASE_END,
+      });
+      await completeLearningCourseSync(db, lease, {
+        course: sync.courseValue, urlPolicy: sync.policy, syncedAt: NOW,
+        enrollments: [{
+          providerEnrollment: {
+            connectionId: sync.connectionId, provider: sync.provider, externalCourseId: 'genesis-1',
+            externalUserId: 'shared-opaque-user', externalEnrollmentId: sync.externalEnrollmentId,
+            role: 'student', state: 'active',
+          },
+          personId: 8012,
+        }], activities: [], resources: [], submissions: [],
+      });
+    }
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: canvasMapped.courseId, personId: 8012 }))
+      .toEqual([expect.objectContaining({ connectionId: 801, externalEnrollmentId: canvasEnrollmentId })]);
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: googleMapped.courseId, personId: 8012 }))
+      .toEqual([expect.objectContaining({ connectionId: 802, externalEnrollmentId: googleEnrollmentId })]);
+    expect((await sql.unsafe(`SELECT connection_id,provider,source_event_id FROM learning_activity_events
+      ORDER BY connection_id`)).map((row) => row.connection_id)).toEqual([801, 802]);
   });
 
   it('rolls back an entity conflict and preserves the prior complete PostgreSQL generation', async () => {
@@ -314,5 +469,29 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_enrollments`))[0]).toEqual({ count: 0 });
     expect((await sql.unsafe(`SELECT status FROM learning_sync_runs WHERE id=$1`, [lease.runId]))[0])
       .toEqual({ status: 'running' });
+  });
+
+  it('matches D1 pagination and cancellation failure lifecycle through PostgreSQL orchestration', async () => {
+    const mapped = await mappedCourse();
+    await expect(synchronizeLearningCourse(db, {
+      provider: orchestrationProvider(true), urlPolicy: POLICY,
+      connectionId: 801, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: pgOperation(undefined, 1),
+      now: () => Date.parse(NOW), resolvePerson: async () => null,
+    })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'canvas' });
+    expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs ORDER BY id DESC LIMIT 1`))[0])
+      .toEqual({ status: 'failed', error_code: 'pagination_limit' });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(synchronizeLearningCourse(db, {
+      provider: orchestrationProvider(), urlPolicy: POLICY,
+      connectionId: 801, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled', operation: pgOperation(controller.signal),
+      now: () => Date.parse(NOW), resolvePerson: async () => null,
+    })).rejects.toMatchObject({ code: 'cancelled', provider: 'canvas' });
+    expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs ORDER BY id DESC LIMIT 1`))[0])
+      .toEqual({ status: 'cancelled', error_code: null });
+    expect(JSON.stringify(await sql.unsafe(`SELECT * FROM learning_sync_runs`))).not.toContain('next-secret');
   });
 });

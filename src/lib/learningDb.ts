@@ -528,9 +528,11 @@ function normalizedSnapshot(rawValue: unknown, own: LearningSyncLease): Normaliz
   });
 }
 
-async function hashEvent(parts: readonly string[]): Promise<string> {
+async function hashEvent(parts: readonly string[], guard: () => void): Promise<string> {
+  guard();
   const bytes = new TextEncoder().encode(JSON.stringify(parts));
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  guard();
   return `sync_${[...digest].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
 }
 
@@ -543,7 +545,11 @@ interface PendingEvent {
   readonly occurredAt: string;
 }
 
-async function eventsFor(snapshot: NormalizedSnapshot, own: LearningSyncLease): Promise<readonly PendingEvent[]> {
+async function eventsFor(
+  snapshot: NormalizedSnapshot,
+  own: LearningSyncLease,
+  guard: () => void,
+): Promise<readonly PendingEvent[]> {
   const events: PendingEvent[] = [];
   for (const item of snapshot.enrollments) {
     const enrollment = item.providerEnrollment;
@@ -553,7 +559,7 @@ async function eventsFor(snapshot: NormalizedSnapshot, own: LearningSyncLease): 
     const sourceEventId = await hashEvent([
       own.provider, String(own.connectionId), own.externalCourseId,
       enrollment.externalEnrollmentId, eventType,
-    ]);
+    ], guard);
     events.push(Object.freeze({
       sourceEventId, eventType, externalEnrollmentId: enrollment.externalEnrollmentId,
       externalActivityId: null, activityKind: null, occurredAt: snapshot.syncedAt,
@@ -573,7 +579,7 @@ async function eventsFor(snapshot: NormalizedSnapshot, own: LearningSyncLease): 
         own.provider, String(own.connectionId), own.externalCourseId,
         submission.externalActivityId, submission.externalEnrollmentId,
         eventType, String(submission.attemptNumber), occurredAt,
-      ]);
+      ], guard);
       events.push(Object.freeze({
         sourceEventId, eventType, externalEnrollmentId: submission.externalEnrollmentId,
         externalActivityId: submission.externalActivityId, activityKind: activity.kind, occurredAt,
@@ -608,11 +614,13 @@ async function assertIdentityMappings(
   db: AppDb,
   own: LearningSyncLease,
   enrollments: readonly ResolvedLearningEnrollment[],
+  guard: () => void = () => undefined,
 ): Promise<void> {
   if (enrollments.length === 0) return;
   try {
     const chunkSize = 40;
     for (let start = 0; start < enrollments.length; start += chunkSize) {
+      guard();
       const chunk = enrollments.slice(start, start + chunkSize);
       const userPlaceholders = chunk.map((_, index) => `?${index + 2}`).join(',');
       const personOffset = chunk.length + 2;
@@ -627,6 +635,7 @@ async function assertIdentityMappings(
           external_user_id IN (${userPlaceholders}) OR person_id IN (${personPlaceholders})
         ) ORDER BY id`).bind(...values).all();
       const rows = resultRows(result, chunk.length * 2);
+      guard();
       for (const enrollment of chunk) {
         const exactMatch = rows.find((row) => (
           row.external_user_id === enrollment.providerEnrollment.externalUserId
@@ -731,14 +740,18 @@ export async function completeLearningCourseSync(
   db: AppDb,
   rawLease: LearningSyncLease,
   rawSnapshot: unknown,
+  guard: () => void = () => undefined,
 ): Promise<LearningSyncCompletion> {
+  guard();
   const own = lease(rawLease);
   const snapshot = normalizedSnapshot(rawSnapshot, own);
+  guard();
   if (Date.parse(snapshot.syncedAt) >= Date.parse(own.leaseExpiresAt)) {
     throw new LearningSyncConflictError();
   }
-  await assertIdentityMappings(db, own, snapshot.enrollments);
-  const events = await eventsFor(snapshot, own);
+  await assertIdentityMappings(db, own, snapshot.enrollments, guard);
+  const events = await eventsFor(snapshot, own, guard);
+  guard();
   const finalizationMarker = crypto.randomUUID();
   const statements: AppStatement[] = [
     activeLeaseGuard(db, own, snapshot.syncedAt),
@@ -1041,6 +1054,7 @@ export async function completeLearningCourseSync(
       ),
   );
 
+  guard();
   try {
     const results = await db.batch(statements);
     if (!Array.isArray(results) || results.length !== statements.length) persistenceFailure();

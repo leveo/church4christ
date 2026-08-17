@@ -7,7 +7,10 @@ import {
 } from '../src/lib/learningDb';
 import {
   LearningProviderError,
+  learningActivitySubjectKey,
+  learningProviderEnrollmentSubjectKey,
   learningSyntheticEnrollmentId,
+  learningValidation,
   type LearningActivity,
   type LearningCourse,
   type LearningProviderEnrollment,
@@ -66,16 +69,33 @@ async function page<T extends object>(
   ) as Promise<LearningProviderPage<T>>;
 }
 
-function fakeProvider(options: { failActivityPage?: number; onSyncCourse?: () => void } = {}): LearningProvider {
+function fakeProvider(options: {
+  failActivityPage?: number;
+  onSyncCourse?: () => void;
+  onlyEnrollment?: boolean;
+  crossKindCollision?: boolean;
+  providerError?: LearningProviderError;
+} = {}): LearningProvider {
   return {
     provider: 'canvas',
     async healthCheck() { return { connectionId: 901, provider: 'canvas', healthy: 1, checkedAt: new Date(NOW_EPOCH).toISOString(), errorCode: null }; },
     async listCourses(request) { return page<LearningCourse>([COURSE], request, { kind: 'courses', urlPolicy: POLICY }); },
-    async syncCourse() { options.onSyncCourse?.(); return COURSE; },
+    async syncCourse() {
+      options.onSyncCourse?.();
+      if (options.providerError) throw options.providerError;
+      return COURSE;
+    },
     async syncEnrollments(request) {
       return page<LearningProviderEnrollment>([ENROLLMENT], request, { kind: 'provider_enrollments' });
     },
     async syncActivities(request) {
+      if (options.onlyEnrollment) return page<LearningActivity>([], request, { kind: 'activities', urlPolicy: POLICY });
+      if (options.crossKindCollision) {
+        return page<LearningActivity>([{
+          ...ACTIVITIES[0], externalActivityId: ENROLLMENT.externalEnrollmentId,
+          launchUrl: `https://canvas.sync.test/courses/genesis-1/modules/${ENROLLMENT.externalEnrollmentId}`,
+        }], request, { kind: 'activities', urlPolicy: POLICY });
+      }
       if (options.failActivityPage === request.page.pageNumber) throw new Error('raw-token-and-grade-must-not-leak');
       return request.page.pageNumber === 1
         ? page<LearningActivity>([ACTIVITIES[0]], request, { kind: 'activities', urlPolicy: POLICY }, 'next-secret-token')
@@ -148,6 +168,108 @@ beforeEach(async () => {
 });
 
 describe('Learning provider orchestration', () => {
+  it('extracts a legal Google provider hint before exact-shape rejection', async () => {
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider(),
+      urlPolicy: {
+        provider: 'google_classroom', connectionId: 902, baseUrl: null,
+        providerLaunchOrigins: ['https://classroom.google.com'],
+        providerFileOrigins: ['https://drive.google.com'], externalLinkOrigins: [],
+      },
+      connectionId: 902, providerKind: 'google_classroom', courseId: 999,
+      externalCourseId: 'google-course', trigger: 'manual',
+      operation: {
+        ...operation(),
+        scope: {
+          provider: 'google_classroom', connectionId: 902, externalCourseId: 'google-course',
+          externalActivityId: null, externalEnrollmentId: null,
+        },
+      },
+      now: () => NOW_EPOCH, resolvePerson: async () => null,
+      unexpectedField: 'reject-before-persistence',
+    } as never)).rejects.toMatchObject({ code: 'invalid_request', provider: 'google_classroom' });
+  });
+
+  it('namespaces uniqueness keys by entity kind while charging namespace bytes to the global budget', async () => {
+    const mapped = await seed();
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ crossKindCollision: true }), urlPolicy: POLICY,
+      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(), now: () => NOW_EPOCH,
+      resolvePerson: async () => ({ personId: 9012 }),
+    })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 2 });
+
+    const rawKeyBudget = learningValidation.utf8Bytes(learningProviderEnrollmentSubjectKey(ENROLLMENT));
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onlyEnrollment: true }), urlPolicy: POLICY,
+      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled',
+      operation: { ...operation(), maxUniqueKeyBytes: rawKeyBudget }, now: () => NOW_EPOCH,
+      resolvePerson: async () => ({ personId: 9012 }),
+    })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'canvas' });
+    expect(learningActivitySubjectKey({ ...ACTIVITIES[0], externalActivityId: ENROLLMENT.externalEnrollmentId }))
+      .toBe(learningProviderEnrollmentSubjectKey({ ...ENROLLMENT, externalEnrollmentId: ENROLLMENT.externalEnrollmentId }));
+  });
+
+  it('races every pending People resolution against caller cancellation and deadline', async () => {
+    const mapped = await seed();
+    const controller = new AbortController();
+    const cancelled = synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onlyEnrollment: true }), urlPolicy: POLICY,
+      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(20, controller.signal),
+      now: () => NOW_EPOCH,
+      resolvePerson: async () => {
+        controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return { personId: 9012 };
+      },
+    });
+    const earlyCancellation = await Promise.race([
+      cancelled.catch((error: unknown) => error),
+      new Promise((resolve) => setTimeout(() => resolve('resolver_still_pending'), 20)),
+    ]);
+    expect(earlyCancellation).toMatchObject({ code: 'cancelled', provider: 'canvas' });
+    await cancelled.catch(() => undefined);
+
+    const deadlineOperation = {
+      ...operation(), deadlineAt: '2026-08-17T12:00:00.010Z',
+    };
+    const timedOut = synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onlyEnrollment: true }), urlPolicy: POLICY,
+      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled', operation: deadlineOperation,
+      now: () => NOW_EPOCH,
+      resolvePerson: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return { personId: 9012 };
+      },
+    });
+    const earlyTimeout = await Promise.race([
+      timedOut.catch((error: unknown) => error),
+      new Promise((resolve) => setTimeout(() => resolve('resolver_still_pending'), 30)),
+    ]);
+    expect(earlyTimeout).toMatchObject({ code: 'timeout', provider: 'canvas' });
+    await timedOut.catch(() => undefined);
+  });
+
+  it('preserves bounded provider retry metadata for Task 10 without retrying or sleeping here', async () => {
+    const mapped = await seed();
+    let calls = 0;
+    const failure = new LearningProviderError({
+      code: 'rate_limited', provider: 'canvas', httpStatus: 429, retryAfterSeconds: 17,
+    });
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ providerError: failure, onSyncCourse: () => { calls += 1; } }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
+      now: () => NOW_EPOCH, resolvePerson: async () => ({ personId: 9012 }),
+    })).rejects.toMatchObject({
+      code: 'rate_limited', provider: 'canvas', httpStatus: 429, retryAfterSeconds: 17,
+    });
+    expect(calls).toBe(1);
+  });
+
   it('rejects database connection URL-policy drift before any provider work or sync run', async () => {
     const mapped = await seed();
     let providerCalls = 0;

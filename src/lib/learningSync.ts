@@ -41,12 +41,22 @@ import {
 export class LearningSynchronizationError extends Error {
   readonly code: LearningErrorCode;
   readonly provider: LearningProviderKind;
+  readonly httpStatus: number | null;
+  readonly retryAfterSeconds: number | null;
 
-  constructor(code: LearningErrorCode, provider: LearningProviderKind) {
+  constructor(
+    code: LearningErrorCode,
+    provider: LearningProviderKind,
+    metadata: { readonly httpStatus: number | null; readonly retryAfterSeconds: number | null } = {
+      httpStatus: null, retryAfterSeconds: null,
+    },
+  ) {
     super(code);
     this.name = 'LearningSynchronizationError';
     this.code = code;
     this.provider = provider;
+    this.httpStatus = metadata.httpStatus;
+    this.retryAfterSeconds = metadata.retryAfterSeconds;
     Object.freeze(this);
   }
 }
@@ -131,6 +141,7 @@ function addPageToBudget<T extends object>(
   operation: LearningOperationContext,
   budget: GlobalBudget,
   uniquenessKey: (item: T) => string,
+  entityKind: 'enrollment' | 'activity' | 'resource' | 'submission',
 ): void {
   budget.pageCount += 1;
   budget.rawBytes += page.responseBytes;
@@ -142,7 +153,7 @@ function addPageToBudget<T extends object>(
     let key: string;
     try {
       json = JSON.stringify(item);
-      key = uniquenessKey(item);
+      key = JSON.stringify([entityKind, uniquenessKey(item)]);
     } catch {
       throw new LearningSynchronizationError('malformed_response', operation.scope.provider);
     }
@@ -170,6 +181,7 @@ async function collectPages<T extends object>(options: {
   readonly budget: GlobalBudget;
   readonly call: (page: LearningPageRequest, operation: LearningOperationContext) => Promise<LearningProviderPage<T>>;
   readonly uniquenessKey: (item: T) => string;
+  readonly entityKind: 'enrollment' | 'activity' | 'resource' | 'submission';
 }): Promise<readonly T[]> {
   let pageNumber = 1;
   let pageToken: string | null = null;
@@ -186,7 +198,7 @@ async function collectPages<T extends object>(options: {
       pageToken,
     });
     const page = await options.call(request, options.operation);
-    addPageToBudget(page, options.operation, options.budget, options.uniquenessKey);
+    addPageToBudget(page, options.operation, options.budget, options.uniquenessKey, options.entityKind);
     items.push(...page.items);
     if (page.nextPageToken === null) return Object.freeze(items);
     if (seenTokens.has(page.nextPageToken)) {
@@ -215,21 +227,24 @@ function subjectFor(operation: LearningOperationContext) {
 async function resolveEnrollments(
   enrollments: readonly LearningProviderEnrollment[],
   resolver: SynchronizeLearningCourseInput['resolvePerson'],
-  providerKind: LearningProviderKind,
+  operation: LearningOperationContext,
+  now: () => number,
 ): Promise<readonly ResolvedLearningEnrollment[]> {
   const resolved: ResolvedLearningEnrollment[] = [];
   for (const providerEnrollment of enrollments) {
     let result: unknown;
     try {
-      result = await resolver(Object.freeze({
+      const resolution = Promise.resolve().then(() => resolver(Object.freeze({
         connectionId: providerEnrollment.connectionId,
         provider: providerEnrollment.provider,
         externalCourseId: providerEnrollment.externalCourseId,
         externalUserId: providerEnrollment.externalUserId,
         externalEnrollmentId: providerEnrollment.externalEnrollmentId,
-      }));
-    } catch {
-      throw new LearningSynchronizationError('provider_unavailable', providerKind);
+      })));
+      result = await raceWithOperation(resolution, operation, now);
+    } catch (error) {
+      if (error instanceof LearningSynchronizationError) throw error;
+      throw new LearningSynchronizationError('provider_unavailable', operation.scope.provider);
     }
     if (result === null) continue;
     try {
@@ -237,10 +252,41 @@ async function resolveEnrollments(
       const personId = learningValidation.integer(row.personId, 1, LEARNING_LIMITS.databaseInteger);
       resolved.push(Object.freeze({ providerEnrollment, personId }));
     } catch {
-      throw new LearningSynchronizationError('malformed_response', providerKind);
+      throw new LearningSynchronizationError('malformed_response', operation.scope.provider);
     }
   }
   return Object.freeze(resolved);
+}
+
+async function raceWithOperation<T>(
+  action: Promise<T>,
+  operation: LearningOperationContext,
+  now: () => number,
+): Promise<T> {
+  checkActive(operation, now);
+  const remaining = Date.parse(operation.deadlineAt) - safeNow(now, operation.scope.provider);
+  if (remaining <= 0) throw new LearningSynchronizationError('timeout', operation.scope.provider);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abortHandler: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abortHandler = () => reject(new LearningSynchronizationError('cancelled', operation.scope.provider));
+    operation.signal.addEventListener('abort', abortHandler, { once: true });
+    if (operation.signal.aborted) abortHandler();
+  });
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new LearningSynchronizationError('timeout', operation.scope.provider)),
+      remaining,
+    );
+  });
+  try {
+    const value = await Promise.race([action, cancelled, deadline]);
+    checkActive(operation, now);
+    return value;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (abortHandler) operation.signal.removeEventListener('abort', abortHandler);
+  }
 }
 
 function resolvedSubmissions(
@@ -265,7 +311,9 @@ function resolvedSubmissions(
 
 function classify(error: unknown, providerKind: LearningProviderKind): LearningSynchronizationError {
   if (error instanceof LearningSynchronizationError) return error;
-  if (error instanceof LearningProviderError) return new LearningSynchronizationError(error.code, providerKind);
+  if (error instanceof LearningProviderError) return new LearningSynchronizationError(error.code, providerKind, {
+    httpStatus: error.httpStatus, retryAfterSeconds: error.retryAfterSeconds,
+  });
   if (error instanceof LearningIdentityConflictError) return new LearningSynchronizationError('malformed_response', providerKind);
   if (error instanceof LearningPersistenceError) return new LearningSynchronizationError('provider_unavailable', providerKind);
   if (error instanceof LearningSyncConflictError) return new LearningSynchronizationError('invalid_request', providerKind);
@@ -280,10 +328,24 @@ export async function synchronizeLearningCourse(
   let providerKind: LearningProviderKind = 'canvas';
   let now: (() => number) = () => Date.now();
   try {
-    const input = learningValidation.exactRecord(rawInput, [
-      'provider', 'urlPolicy', 'connectionId', 'providerKind', 'courseId', 'externalCourseId',
-      'trigger', 'operation', 'now', 'resolvePerson',
-    ]);
+    try {
+      if (rawInput && typeof rawInput === 'object') {
+        const descriptor = Object.getOwnPropertyDescriptor(rawInput, 'providerKind');
+        if (descriptor && 'value' in descriptor
+          && (descriptor.value === 'google_classroom' || descriptor.value === 'canvas')) {
+          providerKind = descriptor.value;
+        }
+      }
+    } catch { /* the exact validator below owns malformed objects */ }
+    let input: Record<string, unknown>;
+    try {
+      input = learningValidation.exactRecord(rawInput, [
+        'provider', 'urlPolicy', 'connectionId', 'providerKind', 'courseId', 'externalCourseId',
+        'trigger', 'operation', 'now', 'resolvePerson',
+      ]);
+    } catch {
+      throw new LearningSynchronizationError('invalid_request', providerKind);
+    }
     providerKind = learningValidation.oneOf(input.providerKind, ['google_classroom', 'canvas'] as const);
     const connectionId = learningValidation.integer(input.connectionId, 1, LEARNING_LIMITS.databaseInteger);
     const courseId = learningValidation.integer(input.courseId, 1, LEARNING_LIMITS.databaseInteger);
@@ -332,6 +394,7 @@ export async function synchronizeLearningCourse(
         method: 'syncEnrollments', request: { subject: courseSubject, page, operation: childOperation }, now,
       }),
       uniquenessKey: learningProviderEnrollmentSubjectKey,
+      entityKind: 'enrollment',
     });
     const activities = await collectPages({
       operation, now, budget,
@@ -339,6 +402,7 @@ export async function synchronizeLearningCourse(
         method: 'syncActivities', request: { subject: courseSubject, page, operation: childOperation }, now, urlPolicy,
       }),
       uniquenessKey: learningActivitySubjectKey,
+      entityKind: 'activity',
     });
 
     const resources: LearningResource[] = [];
@@ -354,6 +418,7 @@ export async function synchronizeLearningCourse(
           method: 'syncResources', request: { subject: activitySubject, page, operation: childOperation }, now, urlPolicy,
         }),
         uniquenessKey: learningResourceSubjectKey,
+        entityKind: 'resource',
       }));
       if (activity.kind === 'assignment' || activity.kind === 'quiz') {
         submissions.push(...await collectPages({
@@ -364,12 +429,14 @@ export async function synchronizeLearningCourse(
             }, now,
           }),
           uniquenessKey: learningProviderSubmissionSubjectKey,
+          entityKind: 'submission',
         }));
       }
     }
     const resolvedEnrollments = await resolveEnrollments(
-      enrollments, input.resolvePerson as SynchronizeLearningCourseInput['resolvePerson'], providerKind,
+      enrollments, input.resolvePerson as SynchronizeLearningCourseInput['resolvePerson'], operation, now,
     );
+    checkActive(operation, now);
     const resolvedSubmissionValues = resolvedSubmissions(submissions, resolvedEnrollments, providerKind);
     checkActive(operation, now);
     const syncedAt = new Date(safeNow(now, providerKind)).toISOString();
@@ -377,7 +444,7 @@ export async function synchronizeLearningCourse(
       course: courseValue as LearningCourse, urlPolicy, syncedAt,
       enrollments: resolvedEnrollments, activities, resources,
       submissions: resolvedSubmissionValues,
-    });
+    }, () => checkActive(operation, now));
   } catch (error) {
     const safe = classify(error, providerKind);
     if (ownLease !== null) {
