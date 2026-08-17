@@ -141,6 +141,7 @@ async function activeAccessToken(
     clientId: input.clientId,
     clientSecret: input.clientSecret,
     refreshToken: loaded.credential.refreshToken,
+    refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
     fetcher: input.fetcher,
     signal: new AbortController().signal,
     nowEpochMs: input.nowEpochMs,

@@ -51,7 +51,8 @@ const callbackDeps = () => ({
   })),
   exchangeCode: vi.fn(async () => ({
     version: 1 as const, accessToken: 'private-access', refreshToken: 'private-refresh',
-    accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', grantedScopes: Object.freeze([
+    accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', refreshTokenExpiresAt: null,
+    grantedScopes: Object.freeze([
       'https://www.googleapis.com/auth/classroom.courses.readonly',
       'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
       'https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly',

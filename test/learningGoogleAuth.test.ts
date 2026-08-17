@@ -86,6 +86,7 @@ describe('Google Classroom OAuth protocol', () => {
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
       accessTokenExpiresAt: '2026-08-17T13:00:00.000Z',
+      refreshTokenExpiresAt: null,
       grantedScopes: GOOGLE_CLASSROOM_SCOPES,
     });
     for (const response of [

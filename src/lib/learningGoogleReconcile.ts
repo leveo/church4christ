@@ -88,6 +88,7 @@ async function accessToken(
     clientId: input.clientId,
     clientSecret: input.clientSecret,
     refreshToken: loaded.credential.refreshToken,
+    refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
     fetcher: input.fetcher,
     signal: input.signal,
     nowEpochMs: input.nowEpochMs,

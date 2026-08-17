@@ -20,6 +20,7 @@ const GOOGLE_AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/a
 const GOOGLE_CALLBACK_PATH = '/admin/learning/google/callback';
 const MAX_ACCESS_TOKEN_BYTES = 2_048;
 const MAX_REFRESH_TOKEN_BYTES = 512;
+const MAX_REFRESH_TOKEN_LIFETIME_SECONDS = 316_224_000;
 const MAX_GOOGLE_TOKEN_RESPONSE_BYTES = 65_536;
 const GOOGLE_AUTH_HTTP_TIMEOUT_MS = 10_000;
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -49,6 +50,20 @@ function plainRecord(value: unknown): Record<string, unknown> {
 
 function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
   try { return learningValidation.exactRecord(value, keys); } catch { return invalid(); }
+}
+
+function exactOptionalRecord(
+  value: unknown,
+  allowed: readonly string[],
+  required: readonly string[],
+): Record<string, unknown> {
+  const row = plainRecord(value);
+  const keys = Object.keys(row);
+  if (
+    keys.some((key) => !allowed.includes(key))
+    || required.some((key) => !Object.hasOwn(row, key))
+  ) invalid();
+  return row;
 }
 
 function asciiToken(value: unknown, maximumBytes: number): string {
@@ -168,6 +183,7 @@ export interface GoogleCredential {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly accessTokenExpiresAt: string;
+  readonly refreshTokenExpiresAt: string | null;
   readonly grantedScopes: typeof GOOGLE_CLASSROOM_SCOPES;
 }
 
@@ -184,16 +200,9 @@ function normalizedScopes(value: unknown): typeof GOOGLE_CLASSROOM_SCOPES {
 }
 
 function exactTokenResponse(value: unknown): Record<string, unknown> {
-  const row = plainRecord(value);
-  const keys = Object.keys(row).sort();
-  const withoutRefresh = ['access_token', 'expires_in', 'scope', 'token_type'];
-  const withRefresh = [...withoutRefresh, 'refresh_token'].sort();
-  if (
-    keys.length !== withoutRefresh.length && keys.length !== withRefresh.length
-    || keys.length === withoutRefresh.length && keys.some((key, index) => key !== withoutRefresh.sort()[index])
-    || keys.length === withRefresh.length && keys.some((key, index) => key !== withRefresh[index])
-  ) invalid();
-  return row;
+  return exactOptionalRecord(value, [
+    'access_token', 'expires_in', 'refresh_token', 'refresh_token_expires_in', 'scope', 'token_type',
+  ], ['access_token', 'expires_in', 'scope', 'token_type']);
 }
 
 export function normalizeGoogleTokenResponse(
@@ -202,9 +211,12 @@ export function normalizeGoogleTokenResponse(
     readonly nowEpochMs: number;
     readonly requireRefreshToken: boolean;
     readonly retainedRefreshToken: string | null;
+    readonly retainedRefreshTokenExpiresAt?: string | null;
   },
 ): GoogleCredential {
-  const options = exactRecord(rawOptions, ['nowEpochMs', 'requireRefreshToken', 'retainedRefreshToken']);
+  const options = exactOptionalRecord(rawOptions, [
+    'nowEpochMs', 'requireRefreshToken', 'retainedRefreshToken', 'retainedRefreshTokenExpiresAt',
+  ], ['nowEpochMs', 'requireRefreshToken', 'retainedRefreshToken']);
   const now = epoch(options.nowEpochMs);
   if (typeof options.requireRefreshToken !== 'boolean') invalid();
   const retained = options.retainedRefreshToken === null
@@ -219,11 +231,28 @@ export function normalizeGoogleTokenResponse(
   const refreshToken = returnedRefresh ?? retained;
   if (refreshToken === null || (options.requireRefreshToken && returnedRefresh === null)) invalid();
   const safeRefreshToken = refreshToken ?? invalid();
+  let retainedRefreshTokenExpiresAt: string | null = null;
+  if (options.retainedRefreshTokenExpiresAt !== undefined && options.retainedRefreshTokenExpiresAt !== null) {
+    try { retainedRefreshTokenExpiresAt = learningValidation.timestamp(options.retainedRefreshTokenExpiresAt); } catch { return invalid(); }
+    if (Date.parse(retainedRefreshTokenExpiresAt) <= now) invalid();
+  }
+  let returnedRefreshTokenExpiresAt: string | null = null;
+  if (Object.hasOwn(row, 'refresh_token_expires_in')) {
+    if (
+      !Number.isInteger(row.refresh_token_expires_in)
+      || (row.refresh_token_expires_in as number) < 1
+      || (row.refresh_token_expires_in as number) > MAX_REFRESH_TOKEN_LIFETIME_SECONDS
+    ) invalid();
+    returnedRefreshTokenExpiresAt = new Date(
+      now + (row.refresh_token_expires_in as number) * 1_000,
+    ).toISOString();
+  }
   return Object.freeze({
     version: 1,
     accessToken: asciiToken(row.access_token, MAX_ACCESS_TOKEN_BYTES),
     refreshToken: safeRefreshToken,
     accessTokenExpiresAt: new Date(now + (row.expires_in as number) * 1_000).toISOString(),
+    refreshTokenExpiresAt: returnedRefreshTokenExpiresAt ?? retainedRefreshTokenExpiresAt,
     grantedScopes: normalizedScopes(row.scope),
   });
 }
@@ -234,9 +263,9 @@ export function encodeGoogleCredential(value: GoogleCredential): Uint8Array {
 }
 
 function normalizeGoogleCredential(value: unknown): GoogleCredential {
-  const row = exactRecord(value, [
-    'version', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'grantedScopes',
-  ]);
+  const row = exactOptionalRecord(value, [
+    'version', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'refreshTokenExpiresAt', 'grantedScopes',
+  ], ['version', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'grantedScopes']);
   if (row.version !== 1 || !Array.isArray(row.grantedScopes)) invalid();
   const scopes = (row.grantedScopes as unknown[]).map((scope) => {
     if (typeof scope !== 'string') invalid();
@@ -246,11 +275,16 @@ function normalizeGoogleCredential(value: unknown): GoogleCredential {
   if (scopes.some((scope, index) => scope !== GOOGLE_CLASSROOM_SCOPES[index])) invalid();
   let accessTokenExpiresAt: string;
   try { accessTokenExpiresAt = learningValidation.timestamp(row.accessTokenExpiresAt); } catch { return invalid(); }
+  let refreshTokenExpiresAt: string | null = null;
+  if (row.refreshTokenExpiresAt !== undefined && row.refreshTokenExpiresAt !== null) {
+    try { refreshTokenExpiresAt = learningValidation.timestamp(row.refreshTokenExpiresAt); } catch { return invalid(); }
+  }
   return Object.freeze({
     version: 1,
     accessToken: asciiToken(row.accessToken, MAX_ACCESS_TOKEN_BYTES),
     refreshToken: asciiToken(row.refreshToken, MAX_REFRESH_TOKEN_BYTES),
     accessTokenExpiresAt,
+    refreshTokenExpiresAt,
     grantedScopes: GOOGLE_CLASSROOM_SCOPES,
   });
 }
@@ -422,6 +456,7 @@ export async function exchangeGoogleAuthorizationCode(rawInput: {
     const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, body, fetcher, boundedSignal);
     return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, boundedSignal), {
       nowEpochMs, requireRefreshToken: true, retainedRefreshToken: null,
+      retainedRefreshTokenExpiresAt: null,
     });
   });
 }
@@ -430,13 +465,14 @@ export async function refreshGoogleAccessToken(rawInput: {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly refreshToken: string;
+  readonly refreshTokenExpiresAt?: string | null;
   readonly fetcher: GoogleAuthFetcher;
   readonly signal: AbortSignal;
   readonly nowEpochMs: number;
 }): Promise<GoogleCredential> {
-  const input = exactRecord(rawInput, [
-    'clientId', 'clientSecret', 'refreshToken', 'fetcher', 'signal', 'nowEpochMs',
-  ]);
+  const input = exactOptionalRecord(rawInput, [
+    'clientId', 'clientSecret', 'refreshToken', 'refreshTokenExpiresAt', 'fetcher', 'signal', 'nowEpochMs',
+  ], ['clientId', 'clientSecret', 'refreshToken', 'fetcher', 'signal', 'nowEpochMs']);
   const id = clientId(input.clientId);
   const secret = clientSecret(input.clientSecret);
   const retainedRefreshToken = asciiToken(input.refreshToken, MAX_REFRESH_TOKEN_BYTES);
@@ -452,6 +488,9 @@ export async function refreshGoogleAccessToken(rawInput: {
     }), fetcher, boundedSignal);
     return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, boundedSignal), {
       nowEpochMs, requireRefreshToken: false, retainedRefreshToken,
+      retainedRefreshTokenExpiresAt: input.refreshTokenExpiresAt === undefined
+        ? null
+        : input.refreshTokenExpiresAt as string | null,
     });
   });
 }
@@ -740,13 +779,13 @@ export async function completeGoogleOAuthState(
   const credential = normalizeGoogleCredential(rawInput.credential);
   const envelope = await encryptLearningCredential(rawInput.keyRing, {
     provider: 'google_classroom', connectionId,
-    plaintext: encodeGoogleCredential(credential), expiresAt: null,
+    plaintext: encodeGoogleCredential(credential), expiresAt: credential.refreshTokenExpiresAt,
   });
   try {
     const results = await db.batch([
       db.prepare(`INSERT INTO learning_provider_credentials
         (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at,updated_at)
-        SELECT s.connection_id,?1,?2,?3,?4,?5,NULL,datetime('now')
+        SELECT s.connection_id,?1,?2,?3,?4,?5,?11,datetime('now')
         FROM learning_google_oauth_states s JOIN learning_provider_connections c ON c.id=s.connection_id
         WHERE s.connection_id=?6 AND s.connection_revision=?7 AND s.actor_person_id=?8
           AND s.redirect_uri=?9 AND s.claim_marker=?10
@@ -755,10 +794,11 @@ export async function completeGoogleOAuthState(
         ON CONFLICT(connection_id) DO UPDATE SET
           ciphertext=excluded.ciphertext,nonce=excluded.nonce,algorithm=excluded.algorithm,
           key_version=excluded.key_version,envelope_version=excluded.envelope_version,
-          expires_at=NULL,updated_at=datetime('now')`)
+          expires_at=excluded.expires_at,updated_at=datetime('now')`)
         .bind(
           envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
           envelope.envelopeVersion, connectionId, revision, actorPersonId, claim.redirectUri, marker,
+          envelope.expiresAt,
         ),
       db.prepare(`UPDATE learning_provider_connections SET
         status='active',last_error_code=NULL,deleted_at=NULL,revision=revision+1,
@@ -806,10 +846,13 @@ export async function loadGoogleCredential(
     const plaintext = await decryptLearningCredential(rawInput.keyRing, {
       provider: 'google_classroom', connectionId, envelope: envelopeFromRow(row, ''),
     });
+    const credential = decodeGoogleCredential(plaintext);
+    const envelope = envelopeFromRow(row, '');
+    if (credential.refreshTokenExpiresAt !== envelope.expiresAt) invalid();
     return Object.freeze({
       connectionId,
       revision: databaseInteger(row.revision),
-      credential: decodeGoogleCredential(plaintext),
+      credential,
     });
   } catch (error) {
     if (error instanceof LearningGoogleAuthError) throw error;
@@ -834,7 +877,7 @@ export async function rotateGoogleCredential(
   const credential = normalizeGoogleCredential(rawInput.credential);
   const envelope = await encryptLearningCredential(rawInput.keyRing, {
     provider: 'google_classroom', connectionId,
-    plaintext: encodeGoogleCredential(credential), expiresAt: null,
+    plaintext: encodeGoogleCredential(credential), expiresAt: credential.refreshTokenExpiresAt,
   });
   const marker = uuid();
   const nextRevision = expectedRevision + 1;
@@ -847,12 +890,12 @@ export async function rotateGoogleCredential(
         .bind(marker, new Date(rawInput.nowEpochMs + GOOGLE_OAUTH_STATE_TTL_MS).toISOString(), connectionId, expectedRevision),
       db.prepare(`UPDATE learning_provider_credentials SET
         ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,
-        expires_at=NULL,updated_at=datetime('now')
+        expires_at=?9,updated_at=datetime('now')
         WHERE connection_id=?6 AND EXISTS (SELECT 1 FROM learning_provider_connections c
           WHERE c.id=?6 AND c.provider='google_classroom' AND c.revision=?7 AND c.operation_marker=?8)`)
         .bind(
           envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
-          envelope.envelopeVersion, connectionId, nextRevision, marker,
+          envelope.envelopeVersion, connectionId, nextRevision, marker, envelope.expiresAt,
         ),
       db.prepare(`UPDATE learning_provider_connections SET
         operation_marker=NULL,operation_expires_at=NULL,updated_at=datetime('now')

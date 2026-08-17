@@ -50,7 +50,8 @@ describe('Google notification authoritative single-course reconciliation', () =>
       provider: 'google_classroom', connectionId: 27402,
       plaintext: encodeGoogleCredential({
         version: 1, accessToken: 'private-access', refreshToken: 'private-refresh',
-        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
       }), expiresAt: null,
     });
     await env.DB.prepare(`INSERT INTO learning_provider_credentials
