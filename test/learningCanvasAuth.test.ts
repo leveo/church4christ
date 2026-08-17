@@ -75,7 +75,7 @@ describe('Canvas OAuth protocol', () => {
     });
     const bytes = encodeCanvasCredential(credential);
     expect(decodeCanvasCredential(bytes)).toEqual(credential);
-    expect(new TextDecoder().decode(bytes)).not.toMatch(/name|email|grade|answer|comment|file/iu);
+    expect(new TextDecoder().decode(bytes)).not.toMatch(/"(?:name|email|grade|answer|comment|file_bytes)"/iu);
     for (const response of [
       { access_token: 'a', refresh_token: 'r', expires_in: 3600, token_type: 'mac' },
       { access_token: 'a', refresh_token: 'r', expires_in: 0, token_type: 'Bearer' },

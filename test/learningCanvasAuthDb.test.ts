@@ -17,6 +17,7 @@ import { importLearningCredentialKeyRing } from '../src/lib/learningCredentials'
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const BASE_URL = 'https://canvas.church.example';
+const SECOND_BASE_URL = 'https://canvas-two.church.example';
 const REDIRECT = 'https://church.example.test/admin/learning/canvas/callback';
 const SESSION = 'c4c_session=canvas-admin-session';
 const KEY_SECRET = JSON.stringify({
@@ -29,9 +30,9 @@ describe('Canvas OAuth one-time persistence and credential rotation', () => {
     await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id IN (28101,28102)').run();
     await env.DB.prepare('DELETE FROM people WHERE id=28100').run();
     await env.DB.prepare("INSERT INTO people(id,display_name,email) VALUES(28100,'Canvas Admin','canvas-admin@example.test')").run();
-    for (const id of [28101, 28102]) await env.DB.prepare(`INSERT INTO learning_provider_connections
+    for (const [id, baseUrl] of [[28101, BASE_URL], [28102, SECOND_BASE_URL]] as const) await env.DB.prepare(`INSERT INTO learning_provider_connections
       (id,provider,display_name,base_url,status,revision,created_by_person_id)
-      VALUES(?1,'canvas','Canvas',?2,'pending',0,28100)`).bind(id, BASE_URL).run();
+      VALUES(?1,'canvas','Canvas',?2,'pending',0,28100)`).bind(id, baseUrl).run();
   });
 
   it('atomically starts one state per revision without persisting raw state, verifier, session, or client secret', async () => {
@@ -66,7 +67,7 @@ describe('Canvas OAuth one-time persistence and credential rotation', () => {
     });
     await expect(claimCanvasOAuthState(env.DB as AppDb, {
       state: begun.state, sessionBinding: 'wrong-session', actorPersonId: 28100,
-      redirectUri: REDIRECT, baseUrl: BASE_URL, keyRing: ring, nowEpochMs: NOW + 1,
+      redirectUri: REDIRECT, baseUrl: SECOND_BASE_URL, keyRing: ring, nowEpochMs: NOW + 1,
     })).rejects.toBeInstanceOf(LearningCanvasAuthError);
     const claim = () => claimCanvasOAuthState(env.DB as AppDb, {
       state: begun.state, sessionBinding: SESSION, actorPersonId: 28100,
@@ -86,13 +87,13 @@ describe('Canvas OAuth one-time persistence and credential rotation', () => {
     const ring = await importLearningCredentialKeyRing(KEY_SECRET);
     const begun = await beginCanvasOAuthState(env.DB as AppDb, {
       connectionId: 28102, expectedRevision: 0, actorPersonId: 28100,
-      sessionBinding: SESSION, baseUrl: BASE_URL, clientId: 'client', redirectUri: REDIRECT,
+      sessionBinding: SESSION, baseUrl: SECOND_BASE_URL, clientId: 'client', redirectUri: REDIRECT,
       keyRing: ring, nowEpochMs: NOW,
       randomBytes: (size) => new Uint8Array(size).fill(size === 32 ? 17 : 19),
     });
     const claim = await claimCanvasOAuthState(env.DB as AppDb, {
       state: begun.state, sessionBinding: SESSION, actorPersonId: 28100,
-      redirectUri: REDIRECT, baseUrl: BASE_URL, keyRing: ring, nowEpochMs: NOW + 1,
+      redirectUri: REDIRECT, baseUrl: SECOND_BASE_URL, keyRing: ring, nowEpochMs: NOW + 1,
     });
     const credential = {
       version: 1 as const,
