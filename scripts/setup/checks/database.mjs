@@ -52,7 +52,8 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',
     'learning_courses', 'learning_identity_links', 'learning_enrollments', 'learning_activities',
     'learning_resources', 'learning_submission_snapshots', 'learning_activity_events',
-    'learning_sync_runs',
+    'learning_sync_runs', 'learning_google_oauth_states', 'learning_google_registrations',
+    'learning_google_notification_receipts', 'learning_google_cleanup_tasks',
   ]),
 });
 const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
