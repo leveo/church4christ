@@ -5,6 +5,8 @@ import {
   createLearningProgram,
   getLearningSyncRun,
   mapLearningCourse,
+  recoverExpiredLearningSync,
+  startLearningSync,
 } from '../src/lib/learningDb';
 import {
   LearningProviderError,
@@ -86,10 +88,14 @@ interface D1BudgetMetrics {
   queryCount: number;
   readonly overQueryAttempts: number[];
   readonly overBindAttempts: number[];
+  readonly batchSizes: number[];
+  singleQueryAttempts: number;
 }
 
 function freePlanBudgetDb(): { readonly db: AppDb; readonly metrics: D1BudgetMetrics } {
-  const metrics: D1BudgetMetrics = { queryCount: 0, overQueryAttempts: [], overBindAttempts: [] };
+  const metrics: D1BudgetMetrics = {
+    queryCount: 0, overQueryAttempts: [], overBindAttempts: [], batchSizes: [], singleQueryAttempts: 0,
+  };
   interface TrackedStatement extends AppStatement {
     readonly inner: D1PreparedStatement;
   }
@@ -110,14 +116,17 @@ function freePlanBudgetDb(): { readonly db: AppDb; readonly metrics: D1BudgetMet
       return wrap(inner.bind(...values));
     },
     async first<T = unknown>(column?: string) {
+      metrics.singleQueryAttempts += 1;
       charge(1);
       return column === undefined ? inner.first<T>() : inner.first<T>(column);
     },
     async all<T = unknown>() {
+      metrics.singleQueryAttempts += 1;
       charge(1);
       return inner.all<T>();
     },
     async run<T = unknown>() {
+      metrics.singleQueryAttempts += 1;
       charge(1);
       return inner.run<T>();
     },
@@ -125,6 +134,7 @@ function freePlanBudgetDb(): { readonly db: AppDb; readonly metrics: D1BudgetMet
   const db: AppDb = {
     prepare(sql: string) { return wrap(env.DB.prepare(sql)); },
     async batch<T = unknown>(statements: AppStatement[]) {
+      metrics.batchSizes.push(statements.length);
       charge(statements.length);
       return env.DB.batch<T>(statements.map((statement) => (statement as TrackedStatement).inner));
     },
@@ -266,6 +276,13 @@ describe('Learning provider orchestration', () => {
       materialResource(activity, activityIndex * 2 + 2),
     ]),
   ])));
+  const tenBoundaryActivities = Object.freeze(Array.from(
+    { length: 10 }, (_, index) => materialActivity(index + 1),
+  ));
+  const elevenBoundaryActivities = Object.freeze([
+    ...tenBoundaryActivities, materialActivity(11),
+  ]);
+  const boundaryResource = materialResource(tenBoundaryActivities[0], 1);
 
   it.each([
     {
@@ -327,6 +344,70 @@ describe('Learning provider orchestration', () => {
     expect(metrics.overQueryAttempts).toEqual([]);
     expect(metrics.overBindAttempts).toEqual([]);
     expect(metrics.queryCount).toBeLessThanOrEqual(50);
+  });
+
+  it('counts expired recovery as four queries for the winner and five for a loser', async () => {
+    const mapped = await seed();
+    const expiresAt = new Date(NOW_EPOCH + 1_000).toISOString();
+    const finishedAt = new Date(NOW_EPOCH + 1_001).toISOString();
+    const start = () => startLearningSync(env.DB, {
+      connectionId: 901, provider: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual',
+      startedAt: new Date(NOW_EPOCH).toISOString(), urlPolicy: POLICY, leaseExpiresAt: expiresAt,
+    });
+
+    const winningLease = await start();
+    const winning = freePlanBudgetDb();
+    await recoverExpiredLearningSync(winning.db, winningLease, { finishedAt, errorCode: 'rate_limited' });
+    expect(winning.metrics.batchSizes).toEqual([4]);
+    expect(winning.metrics.singleQueryAttempts).toBe(0);
+    expect(winning.metrics.queryCount).toBe(4);
+
+    const losingLease = await start();
+    await recoverExpiredLearningSync(env.DB, losingLease, { finishedAt, errorCode: 'rate_limited' });
+    const losing = freePlanBudgetDb();
+    await expect(recoverExpiredLearningSync(losing.db, losingLease, {
+      finishedAt, errorCode: 'provider_unavailable',
+    })).resolves.toBeUndefined();
+    expect(losing.metrics.batchSizes).toEqual([4]);
+    expect(losing.metrics.singleQueryAttempts).toBe(1);
+    expect(losing.metrics.queryCount).toBe(5);
+  });
+
+  it('accepts a 50-query worst-case plan and rejects the adjacent 51-query plan', async () => {
+    const mapped = await seed();
+    const accepted = freePlanBudgetDb();
+    await expect(synchronizeLearningCourse(accepted.db, {
+      provider: fakeProvider({
+        activities: tenBoundaryActivities, emptyEnrollments: true,
+        resourcesByActivity: Object.freeze({
+          [tenBoundaryActivities[0].externalActivityId]: Object.freeze([boundaryResource]),
+        }),
+      }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled',
+      operation: operation(100), now: () => NOW_EPOCH, resolvePerson: async () => null,
+    })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 11 });
+    expect(accepted.metrics.batchSizes).toEqual([3, 42]);
+    expect(accepted.metrics.singleQueryAttempts).toBe(0);
+    expect(accepted.metrics.overQueryAttempts).toEqual([]);
+    expect(accepted.metrics.queryCount).toBe(45);
+
+    const rejected = freePlanBudgetDb();
+    await expect(synchronizeLearningCourse(rejected.db, {
+      provider: fakeProvider({ activities: elevenBoundaryActivities, emptyEnrollments: true }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled',
+      operation: operation(100), now: () => NOW_EPOCH, resolvePerson: async () => null,
+    })).rejects.toMatchObject({ code: 'provider_unavailable', provider: 'canvas' });
+    expect(rejected.metrics.batchSizes).toEqual([3, 4]);
+    expect(rejected.metrics.singleQueryAttempts).toBe(0);
+    expect(rejected.metrics.overQueryAttempts).toEqual([]);
+    expect(rejected.metrics.queryCount).toBe(7);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count,
+      SUM(CASE WHEN external_activity_id='planned-material-11' THEN 1 ELSE 0 END) AS rejected_count
+      FROM learning_activities WHERE course_id=?1`).bind(mapped.courseId).first())
+      .toEqual({ count: 10, rejected_count: 0 });
   });
 
   it('rejects an atomic entity budget above 50 before provider work or a sync run', async () => {

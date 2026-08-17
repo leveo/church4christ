@@ -49,7 +49,10 @@ export const LEARNING_MAX_ATOMIC_ENTITIES = 50;
 const LEARNING_D1_FREE_QUERY_LIMIT = 50;
 const LEARNING_D1_QUERY_BIND_LIMIT = 100;
 const LEARNING_SYNC_START_QUERY_COUNT = 3;
-const LEARNING_SYNC_FAILURE_QUERY_COUNT = 4;
+const LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT = 4;
+const LEARNING_SYNC_EXPIRED_STATUS_QUERY_COUNT = 1;
+const LEARNING_SYNC_EXPIRED_RECOVERY_QUERY_COUNT = LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT
+  + LEARNING_SYNC_EXPIRED_STATUS_QUERY_COUNT;
 const LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE = 40;
 const LEARNING_FINALIZATION_FIXED_QUERY_COUNT = 10;
 const LEARNING_FINALIZATION_ENROLLMENT_QUERY_COUNT = 5;
@@ -603,12 +606,13 @@ function planLearningSyncExecution(
     + resourceCount * LEARNING_FINALIZATION_RESOURCE_QUERY_COUNT
     + submissionCount * LEARNING_FINALIZATION_SUBMISSION_QUERY_COUNT;
   // If the atomic finalization rejects, completeLearningCourseSync performs one
-  // exact identity recheck before orchestration safely terminalizes the run.
+  // exact identity recheck. Expired terminal recovery can then lose its claim
+  // and must spend one additional status query after its four-query batch.
   const maximumInvocationQueries = LEARNING_SYNC_START_QUERY_COUNT
     + identityPreflightQueries
     + finalizationQueries
     + identityPreflightQueries
-    + LEARNING_SYNC_FAILURE_QUERY_COUNT;
+    + LEARNING_SYNC_EXPIRED_RECOVERY_QUERY_COUNT;
   const identityPreflightBinds = enrollmentCount === 0
     ? 0
     : 1 + Math.min(enrollmentCount, LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE) * 2;
@@ -1221,9 +1225,9 @@ export async function failLearningSync(
           own.runId, finalizationMarker,
         ),
     ];
-    assertQueryCount(statements.length, LEARNING_SYNC_FAILURE_QUERY_COUNT);
+    assertQueryCount(statements.length, LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT);
     const results = await db.batch(statements);
-    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_FAILURE_QUERY_COUNT
+    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT
       || !oneRow(results[1]) || !oneRow(results[2])) throw new LearningSyncConflictError();
   } catch (error) {
     if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
@@ -1287,14 +1291,15 @@ export async function recoverExpiredLearningSync(
           own.connectionId, own.provider, own.marker, own.runId, finalizationMarker,
         ),
     ];
-    assertQueryCount(statements.length, LEARNING_SYNC_FAILURE_QUERY_COUNT);
+    assertQueryCount(statements.length, LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT);
     const results = await db.batch(statements);
-    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_FAILURE_QUERY_COUNT) persistenceFailure();
+    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT) persistenceFailure();
     if (oneRow(results[0]) && oneRow(results[1]) && oneRow(results[2])) return;
-    const observed = await db.prepare(`SELECT status FROM learning_sync_runs
+    const statusStatements = [db.prepare(`SELECT status FROM learning_sync_runs
       WHERE id=?1 AND connection_id=?2 AND course_id=?3 AND lease_marker=?4`)
-      .bind(own.runId, own.connectionId, own.courseId, own.marker)
-      .first<Record<string, unknown>>();
+      .bind(own.runId, own.connectionId, own.courseId, own.marker)];
+    assertQueryCount(statusStatements.length, LEARNING_SYNC_EXPIRED_STATUS_QUERY_COUNT);
+    const observed = await statusStatements[0].first<Record<string, unknown>>();
     if (observed && (
       observed.status === 'succeeded' || observed.status === 'failed' || observed.status === 'cancelled'
     )) {
