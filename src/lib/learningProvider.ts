@@ -5,8 +5,14 @@ import {
   LEARNING_SYNC_STATUSES,
   LEARNING_SYNC_TRIGGERS,
   LearningProviderError,
+  learningActivitySubjectKey,
+  learningCourseSubjectKey,
+  learningProviderEnrollmentSubjectKey,
+  learningProviderSubmissionSubjectKey,
+  learningResourceSubjectKey,
   learningValidation,
   normalizeLearningActivity,
+  normalizeLearningConnectionUrlPolicy,
   normalizeLearningCourse,
   normalizeLearningLaunchContract,
   normalizeLearningProviderEnrollment,
@@ -32,7 +38,6 @@ import {
 } from './learningModel';
 
 const BYTE_MEASUREMENT_BRAND: unique symbol = Symbol('LearningByteMeasurement');
-const NORMALIZED_RESPONSE_BRAND: unique symbol = Symbol('LearningNormalizedResponse');
 const NORMALIZED_PAGE_BRAND: unique symbol = Symbol('LearningProviderPage');
 
 export interface LearningPageRequest {
@@ -51,22 +56,53 @@ export interface LearningProviderPage<T extends object> {
 }
 
 /** Opaque proof created only after actual response bytes are streamed and counted. */
-export interface LearningByteMeasurement {
+interface LearningByteMeasurement {
   readonly [BYTE_MEASUREMENT_BRAND]: true;
   readonly byteCount: number;
 }
 
-/** Contains only trusted normalized data; the parsed provider body is never exposed. */
-export interface LearningNormalizedResponse<T> {
-  readonly [NORMALIZED_RESPONSE_BRAND]: true;
-  readonly value: T;
-  readonly measurement: LearningByteMeasurement;
-}
-
-export interface LearningPageContract<T extends object> {
+interface LearningPageContract<T extends object> {
   readonly normalizeItem: (value: unknown) => T;
   readonly subjectKey: (value: T) => string;
 }
+
+export interface LearningCoursesPageResponseContract {
+  readonly kind: 'courses';
+  readonly urlPolicy: LearningConnectionUrlPolicy;
+}
+
+export interface LearningProviderEnrollmentsPageResponseContract {
+  readonly kind: 'provider_enrollments';
+}
+
+export interface LearningActivitiesPageResponseContract {
+  readonly kind: 'activities';
+  readonly urlPolicy: LearningConnectionUrlPolicy;
+}
+
+export interface LearningResourcesPageResponseContract {
+  readonly kind: 'resources';
+  readonly urlPolicy: LearningConnectionUrlPolicy;
+}
+
+export interface LearningProviderSubmissionsPageResponseContract {
+  readonly kind: 'provider_submissions';
+}
+
+/** Closed module-owned selection of exact provider-neutral page contracts. */
+export type LearningPageResponseContract =
+  | LearningCoursesPageResponseContract
+  | LearningProviderEnrollmentsPageResponseContract
+  | LearningActivitiesPageResponseContract
+  | LearningResourcesPageResponseContract
+  | LearningProviderSubmissionsPageResponseContract;
+
+export type LearningStrictProviderPage =
+  | LearningProviderPage<LearningCourse>
+  | LearningProviderPage<LearningProviderEnrollment>
+  | LearningProviderPage<LearningActivity>
+  | LearningProviderPage<LearningResource>
+  | LearningProviderPage<LearningProviderSubmission>;
 
 export interface LearningPageScope extends LearningProviderSubject {
   readonly externalCourseId: string | null;
@@ -330,32 +366,6 @@ function byteMeasurement(value: unknown): LearningByteMeasurement {
   }
 }
 
-function normalizedResponse<T>(value: unknown): LearningNormalizedResponse<T> {
-  try {
-    if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
-      learningValidation.invalid();
-    }
-    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
-    const keys = Reflect.ownKeys(descriptors);
-    if (
-      keys.length !== 3
-      || !keys.includes(NORMALIZED_RESPONSE_BRAND)
-      || !keys.includes('value')
-      || !keys.includes('measurement')
-      || descriptors[NORMALIZED_RESPONSE_BRAND]?.value !== true
-      || !descriptors.value
-      || !('value' in descriptors.value)
-      || !descriptors.measurement
-      || !('value' in descriptors.measurement)
-      || !Object.isFrozen(value)
-    ) learningValidation.invalid();
-    byteMeasurement(descriptors.measurement.value);
-    return value as LearningNormalizedResponse<T>;
-  } catch {
-    return learningValidation.invalid();
-  }
-}
-
 function brandedPage<T extends object>(
   value: Omit<LearningProviderPage<T>, typeof NORMALIZED_PAGE_BRAND>,
   measurement: LearningByteMeasurement,
@@ -394,31 +404,31 @@ function revalidateLearningPage<T extends object>(
       row[key] = descriptor.value;
     }
     if (row.responseBytes !== measurement.byteCount) learningValidation.invalid();
-    const response = makeNormalizedResponse({
+    return normalizeLearningPageCandidate({
       items: row.items,
       requestPageToken: row.requestPageToken,
       nextPageToken: row.nextPageToken,
       pageNumber: row.pageNumber,
-    }, measurement);
-    return normalizeLearningPage(response, contract);
+    }, measurement, contract);
   } catch {
     return learningValidation.invalid();
   }
 }
 
-export function normalizeLearningPage<T extends object>(
-  value: LearningNormalizedResponse<unknown>,
+function normalizeLearningPageCandidate<T extends object>(
+  value: unknown,
+  measurement: LearningByteMeasurement,
   contract: LearningPageContract<T>,
 ): LearningProviderPage<T> {
   const callbacks = contractCallbacks(contract, ['normalizeItem', 'subjectKey']);
-  const response = normalizedResponse<unknown>(value);
-  const row = learningValidation.exactRecord(response.value, [
+  const verifiedMeasurement = byteMeasurement(measurement);
+  const row = learningValidation.exactRecord(value, [
     'items', 'requestPageToken', 'nextPageToken', 'pageNumber',
   ]);
   const itemInputs = learningValidation.dataArray(row.items, LEARNING_LIMITS.maxPageItems);
   const pageNumber = learningValidation.integer(row.pageNumber, 1, LEARNING_LIMITS.maxPages);
   const responseBytes = learningValidation.integer(
-    response.measurement.byteCount, 0, LEARNING_LIMITS.maxPageBytes,
+    verifiedMeasurement.byteCount, 0, LEARNING_LIMITS.maxPageBytes,
   );
   const byKey = new Map<string, { item: T; json: string }>();
   for (let index = 0; index < itemInputs.length; index += 1) {
@@ -457,7 +467,80 @@ export function normalizeLearningPage<T extends object>(
     nextPageToken: token(row.nextPageToken),
     pageNumber,
     responseBytes,
-  }, response.measurement);
+  }, verifiedMeasurement);
+}
+
+type ClosedPageContract = {
+  readonly kind: LearningPageResponseContract['kind'];
+  readonly policy: LearningConnectionUrlPolicy | null;
+  readonly page: LearningPageContract<object>;
+};
+
+function closedPageContract(value: unknown): ClosedPageContract {
+  try {
+    const discriminator = learningValidation.dataRecord(value);
+    const kind = learningValidation.oneOf(discriminator.kind, [
+      'courses', 'provider_enrollments', 'activities', 'resources', 'provider_submissions',
+    ] as const);
+    if (kind === 'courses') {
+      const row = learningValidation.exactRecord(value, ['kind', 'urlPolicy']);
+      const policy = normalizeLearningConnectionUrlPolicy(row.urlPolicy);
+      return Object.freeze({
+        kind,
+        policy,
+        page: Object.freeze({
+          normalizeItem: (item: unknown) => normalizeLearningCourse(item, policy),
+          subjectKey: (item: object) => learningCourseSubjectKey(item as LearningCourse),
+        }),
+      });
+    }
+    if (kind === 'provider_enrollments') {
+      learningValidation.exactRecord(value, ['kind']);
+      return Object.freeze({
+        kind,
+        policy: null,
+        page: Object.freeze({
+          normalizeItem: normalizeLearningProviderEnrollment,
+          subjectKey: (item: object) => learningProviderEnrollmentSubjectKey(item as LearningProviderEnrollment),
+        }),
+      });
+    }
+    if (kind === 'activities') {
+      const row = learningValidation.exactRecord(value, ['kind', 'urlPolicy']);
+      const policy = normalizeLearningConnectionUrlPolicy(row.urlPolicy);
+      return Object.freeze({
+        kind,
+        policy,
+        page: Object.freeze({
+          normalizeItem: (item: unknown) => normalizeLearningActivity(item, policy),
+          subjectKey: (item: object) => learningActivitySubjectKey(item as LearningActivity),
+        }),
+      });
+    }
+    if (kind === 'resources') {
+      const row = learningValidation.exactRecord(value, ['kind', 'urlPolicy']);
+      const policy = normalizeLearningConnectionUrlPolicy(row.urlPolicy);
+      return Object.freeze({
+        kind,
+        policy,
+        page: Object.freeze({
+          normalizeItem: (item: unknown) => normalizeLearningResource(item, policy),
+          subjectKey: (item: object) => learningResourceSubjectKey(item as LearningResource),
+        }),
+      });
+    }
+    learningValidation.exactRecord(value, ['kind']);
+    return Object.freeze({
+      kind,
+      policy: null,
+      page: Object.freeze({
+        normalizeItem: normalizeLearningProviderSubmission,
+        subjectKey: (item: object) => learningProviderSubmissionSubjectKey(item as LearningProviderSubmission),
+      }),
+    });
+  } catch {
+    return learningValidation.invalid();
+  }
 }
 
 function nullableExternalId(value: unknown): string | null {
@@ -1028,31 +1111,23 @@ function makeByteMeasurement(value: unknown): LearningByteMeasurement {
   return Object.freeze(result);
 }
 
-function makeNormalizedResponse<T>(
-  value: T,
-  measurement: LearningByteMeasurement,
-): LearningNormalizedResponse<T> {
-  const result = { value, measurement } as LearningNormalizedResponse<T>;
-  Object.defineProperty(result, NORMALIZED_RESPONSE_BRAND, { value: true });
-  return Object.freeze(result);
+interface DecodedLearningPageCandidate {
+  readonly candidate: unknown;
+  readonly measurement: LearningByteMeasurement;
+  readonly operation: LearningOperationContext;
 }
 
-/**
- * Streams and measures a supplied response before parsing JSON, then
- * immediately replaces the parsed provider body with exact normalized data.
- * It performs no fetch and never returns the parsed provider body.
- */
-export async function readAndNormalizeLearningResponse<T extends object>(
+async function readDecodedLearningPageCandidate(
   response: Response,
   rawOperation: LearningOperationContext,
-  exactNormalizer: (value: unknown) => T,
+  decode: (value: unknown) => unknown,
   now: () => number,
-): Promise<LearningNormalizedResponse<T>> {
+): Promise<DecodedLearningPageCandidate> {
   let operation: LearningOperationContext;
   let provider: LearningProviderKind = 'canvas';
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
-    if (typeof exactNormalizer !== 'function' || typeof now !== 'function') learningValidation.invalid();
+    if (typeof decode !== 'function' || typeof now !== 'function') learningValidation.invalid();
     const initialNow = now();
     const rawOperationRow = learningValidation.dataRecord(rawOperation);
     const rawScope = learningValidation.dataRecord(rawOperationRow.scope);
@@ -1125,18 +1200,88 @@ export async function readAndNormalizeLearningResponse<T extends object>(
     } catch {
       throw providerFailure('malformed_response', provider);
     }
-    let normalized: T;
+    let candidate: unknown;
     try {
-      normalized = exactNormalizer(parsed);
-      if (normalized === parsed) learningValidation.invalid();
-      normalized = cloneAndFreeze(learningValidation.dataRecord(normalized)) as T;
+      candidate = decode(parsed);
     } catch {
       throw providerFailure('malformed_response', provider);
     }
-    return makeNormalizedResponse(normalized, makeByteMeasurement(byteCount));
+    return Object.freeze({
+      candidate,
+      measurement: makeByteMeasurement(byteCount),
+      operation,
+    });
   } catch (error) {
     if (error instanceof LearningProviderError) throw error;
     throw providerFailure('malformed_response', provider);
+  }
+}
+
+/**
+ * Streams and measures a supplied response, decodes provider JSON, and then
+ * selects a module-owned exact provider-neutral page normalizer. Parsed JSON,
+ * decoded candidates, and byte proof are never exposed separately.
+ */
+export function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningCoursesPageResponseContract,
+  now: () => number,
+): Promise<LearningProviderPage<LearningCourse>>;
+export function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningProviderEnrollmentsPageResponseContract,
+  now: () => number,
+): Promise<LearningProviderPage<LearningProviderEnrollment>>;
+export function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningActivitiesPageResponseContract,
+  now: () => number,
+): Promise<LearningProviderPage<LearningActivity>>;
+export function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningResourcesPageResponseContract,
+  now: () => number,
+): Promise<LearningProviderPage<LearningResource>>;
+export function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningProviderSubmissionsPageResponseContract,
+  now: () => number,
+): Promise<LearningProviderPage<LearningProviderSubmission>>;
+export async function readAndNormalizeLearningPage(
+  response: Response,
+  operation: LearningOperationContext,
+  decode: (value: unknown) => unknown,
+  contract: LearningPageResponseContract,
+  now: () => number,
+): Promise<LearningStrictProviderPage> {
+  let decoded: DecodedLearningPageCandidate | null = null;
+  let provider: LearningProviderKind = 'canvas';
+  try {
+    decoded = await readDecodedLearningPageCandidate(response, operation, decode, now);
+    provider = decoded.operation.scope.provider;
+    const selected = closedPageContract(contract);
+    if (selected.policy !== null && (
+      selected.policy.provider !== decoded.operation.scope.provider
+      || selected.policy.connectionId !== decoded.operation.scope.connectionId
+    )) learningValidation.invalid();
+    const page = normalizeLearningPageCandidate(decoded.candidate, decoded.measurement, selected.page);
+    for (let index = 0; index < page.items.length; index += 1) {
+      if (!itemMatchesScope(page.items[index], decoded.operation.scope)) learningValidation.invalid();
+    }
+    return page as unknown as LearningStrictProviderPage;
+  } catch (error) {
+    if (error instanceof LearningProviderError) throw error;
+    throw providerFailure('malformed_response', decoded?.operation.scope.provider ?? provider);
   }
 }
 
