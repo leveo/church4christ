@@ -51,6 +51,36 @@ describe('Google Classroom registration API and renewal persistence', () => {
     })).resolves.toBe(false);
   });
 
+  it('bounds a registration fetcher that ignores abort and a response stream that never finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = {
+        accessToken: 'private-access', externalCourseId: 'course-1', feedType: 'COURSE_WORK_CHANGES' as const,
+        topicName: 'projects/church-project/topics/classroom', signal: new AbortController().signal,
+        nowEpochMs: NOW,
+      };
+      const pendingFetch = createGoogleClassroomRegistration({
+        ...base,
+        fetcher: async () => new Promise<Response>(() => undefined),
+      });
+      const pendingFetchAssertion = expect(pendingFetch).rejects.toThrow('learning_google_pubsub_invalid');
+      await vi.advanceTimersByTimeAsync(10_001);
+      await pendingFetchAssertion;
+
+      const pendingStream = createGoogleClassroomRegistration({
+        ...base,
+        fetcher: async () => new Response(new ReadableStream<Uint8Array>({
+          pull: async () => new Promise<void>(() => undefined),
+        })),
+      });
+      const pendingStreamAssertion = expect(pendingStream).rejects.toThrow('learning_google_pubsub_invalid');
+      await vi.advanceTimersByTimeAsync(10_001);
+      await pendingStreamAssertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('D1 parity', () => {
     beforeEach(async () => {
       await env.DB.prepare('DELETE FROM learning_courses WHERE id=27204').run();
