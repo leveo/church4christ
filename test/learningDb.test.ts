@@ -368,7 +368,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     expect(exactReplay).toMatchObject({ scannedCount: 3, changedCount: 0, removedCount: 0, eventCount: 0 });
   });
 
-  it('rejects a generation above the explicit atomic entity ceiling before replacing the prior snapshot', async () => {
+  it('rejects a generation above the executable D1 plan ceiling before replacing the prior snapshot', async () => {
     const { mapped } = await seed();
     const initialLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
@@ -377,7 +377,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     await completeLearningCourseSync(env.DB, initialLease, {
       course: { ...course(), displayName: 'Stable generation', lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
       enrollments: [],
-      activities: Array.from({ length: 50 }, (_, index) => activity(`stable-${index}`, 'material')),
+      activities: Array.from({ length: 2 }, (_, index) => activity(`stable-${index}`, 'material')),
       resources: [], submissions: [],
     });
     const oversizedLease = await startLearningSync(env.DB, {
@@ -387,13 +387,13 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     await expect(completeLearningCourseSync(env.DB, oversizedLease, {
       course: { ...course(), displayName: 'Oversized generation', lastSyncedAt: LATER }, urlPolicy: POLICY, syncedAt: LATER,
       enrollments: [],
-      activities: Array.from({ length: 51 }, (_, index) => activity(`oversized-${index}`, 'material')),
+      activities: Array.from({ length: 50 }, (_, index) => activity(`oversized-${index}`, 'material')),
       resources: [], submissions: [],
     })).rejects.toThrow('learning_limit_exceeded');
     expect(await env.DB.prepare(`SELECT display_name FROM learning_courses WHERE id=?`).bind(mapped.courseId).first())
       .toEqual({ display_name: 'Stable generation' });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities
-      WHERE lifecycle_state<>'deleted'`).first()).toEqual({ count: 50 });
+      WHERE lifecycle_state<>'deleted'`).first()).toEqual({ count: 2 });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities
       WHERE external_activity_id LIKE 'oversized-%'`).first()).toEqual({ count: 0 });
   });

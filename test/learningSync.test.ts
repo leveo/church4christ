@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { AppDb, AppStatement } from '../src/lib/appDb';
 import {
   createLearningProgram,
   getLearningSyncRun,
@@ -58,6 +59,79 @@ const ACTIVITIES = Object.freeze([
   },
 ]);
 
+function materialActivity(index: number): LearningActivity {
+  const externalActivityId = `planned-material-${index}`;
+  return Object.freeze({
+    connectionId: 901, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalActivityId,
+    title: `Planned material ${index}`, kind: 'material' as const, lifecycleState: 'published' as const,
+    launchUrl: `https://canvas.sync.test/courses/genesis-1/modules/${externalActivityId}`,
+    dueAt: null, publishedAt: '2026-08-17T11:00:00.000Z',
+    providerUpdatedAt: '2026-08-17T11:00:00.000Z', lastSyncedAt: null,
+  });
+}
+
+function materialResource(activity: LearningActivity, index: number): LearningResource {
+  const externalResourceId = `planned-resource-${index}`;
+  return Object.freeze({
+    connectionId: 901, provider: 'canvas' as const, externalCourseId: 'genesis-1',
+    externalActivityId: activity.externalActivityId, externalResourceId,
+    title: `Planned resource ${index}`, kind: 'link' as const,
+    launchUrl: `https://links.sync.test/resources/${externalResourceId}`,
+    youtubeVideoId: null, mimeType: null, sizeBytes: null,
+    providerUpdatedAt: '2026-08-17T11:00:00.000Z',
+  });
+}
+
+interface D1BudgetMetrics {
+  queryCount: number;
+  readonly overQueryAttempts: number[];
+  readonly overBindAttempts: number[];
+}
+
+function freePlanBudgetDb(): { readonly db: AppDb; readonly metrics: D1BudgetMetrics } {
+  const metrics: D1BudgetMetrics = { queryCount: 0, overQueryAttempts: [], overBindAttempts: [] };
+  interface TrackedStatement extends AppStatement {
+    readonly inner: D1PreparedStatement;
+  }
+  const charge = (queries: number): void => {
+    if (metrics.queryCount + queries > 50) {
+      metrics.overQueryAttempts.push(queries);
+      throw new Error('test_d1_query_budget_exceeded');
+    }
+    metrics.queryCount += queries;
+  };
+  const wrap = (inner: D1PreparedStatement): TrackedStatement => ({
+    inner,
+    bind(...values: unknown[]) {
+      if (values.length > 100) {
+        metrics.overBindAttempts.push(values.length);
+        throw new Error('test_d1_bind_budget_exceeded');
+      }
+      return wrap(inner.bind(...values));
+    },
+    async first<T = unknown>(column?: string) {
+      charge(1);
+      return inner.first<T>(column);
+    },
+    async all<T = unknown>() {
+      charge(1);
+      return inner.all<T>();
+    },
+    async run<T = unknown>() {
+      charge(1);
+      return inner.run<T>();
+    },
+  });
+  const db: AppDb = {
+    prepare(sql: string) { return wrap(env.DB.prepare(sql)); },
+    async batch<T = unknown>(statements: AppStatement[]) {
+      charge(statements.length);
+      return env.DB.batch<T>(statements.map((statement) => (statement as TrackedStatement).inner));
+    },
+  };
+  return Object.freeze({ db, metrics });
+}
+
 async function page<T extends object>(
   items: readonly T[], request: { page: { pageNumber: number; pageToken: string | null }; operation: any },
   contract: any, nextPageToken: string | null = null,
@@ -75,6 +149,9 @@ function fakeProvider(options: {
   onlyEnrollment?: boolean;
   crossKindCollision?: boolean;
   providerError?: LearningProviderError;
+  activities?: readonly LearningActivity[];
+  resourcesByActivity?: Readonly<Record<string, readonly LearningResource[]>>;
+  emptyEnrollments?: boolean;
 } = {}): LearningProvider {
   return {
     provider: 'canvas',
@@ -86,9 +163,10 @@ function fakeProvider(options: {
       return COURSE;
     },
     async syncEnrollments(request) {
-      return page<LearningProviderEnrollment>([ENROLLMENT], request, { kind: 'provider_enrollments' });
+      return page<LearningProviderEnrollment>(options.emptyEnrollments ? [] : [ENROLLMENT], request, { kind: 'provider_enrollments' });
     },
     async syncActivities(request) {
+      if (options.activities) return page<LearningActivity>(options.activities, request, { kind: 'activities', urlPolicy: POLICY });
       if (options.onlyEnrollment) return page<LearningActivity>([], request, { kind: 'activities', urlPolicy: POLICY });
       if (options.crossKindCollision) {
         return page<LearningActivity>([{
@@ -102,6 +180,13 @@ function fakeProvider(options: {
         : page<LearningActivity>([ACTIVITIES[1]], request, { kind: 'activities', urlPolicy: POLICY });
     },
     async syncResources(request) {
+      if (options.resourcesByActivity) {
+        return page(
+          options.resourcesByActivity[request.subject.externalActivityId] ?? [],
+          request,
+          { kind: 'resources', urlPolicy: POLICY },
+        );
+      }
       const resources: LearningResource[] = request.subject.externalActivityId === 'lesson-video' ? [{
         connectionId: 901, provider: 'canvas', externalCourseId: 'genesis-1', externalActivityId: 'lesson-video',
         externalResourceId: 'youtube-1', title: 'Creation video', kind: 'youtube',
@@ -168,6 +253,82 @@ beforeEach(async () => {
 });
 
 describe('Learning provider orchestration', () => {
+  const fiftyActivities = Object.freeze(Array.from({ length: 50 }, (_, index) => materialActivity(index + 1)));
+  const oneActivity = Object.freeze([materialActivity(1)]);
+  const fortyNineResources = Object.freeze(Array.from(
+    { length: 49 }, (_, index) => materialResource(oneActivity[0], index + 1),
+  ));
+  const mixedActivities = Object.freeze(Array.from({ length: 6 }, (_, index) => materialActivity(index + 1)));
+  const mixedResources = Object.freeze(Object.fromEntries(mixedActivities.map((activity, activityIndex) => [
+    activity.externalActivityId,
+    Object.freeze([
+      materialResource(activity, activityIndex * 2 + 1),
+      materialResource(activity, activityIndex * 2 + 2),
+    ]),
+  ])));
+
+  it.each([
+    {
+      name: '50 activities', activities: fiftyActivities,
+      resourcesByActivity: Object.freeze({}) as Readonly<Record<string, readonly LearningResource[]>>,
+    },
+    {
+      name: 'one activity and 49 resources', activities: oneActivity,
+      resourcesByActivity: Object.freeze({
+        [oneActivity[0].externalActivityId]: fortyNineResources,
+      }),
+    },
+    {
+      name: 'a mixed activity/resource snapshot', activities: mixedActivities,
+      resourcesByActivity: mixedResources,
+    },
+  ])('rejects $name before constructing or calling a D1-over-limit batch', async ({
+    activities, resourcesByActivity,
+  }) => {
+    const mapped = await seed();
+    await synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
+      courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
+      operation: operation(100), now: () => NOW_EPOCH,
+      resolvePerson: async () => ({ personId: 9012 }),
+    });
+    const { db, metrics } = freePlanBudgetDb();
+    const failed = synchronizeLearningCourse(db, {
+      provider: fakeProvider({ activities, resourcesByActivity, emptyEnrollments: true }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'scheduled', operation: operation(100),
+      now: () => NOW_EPOCH, resolvePerson: async () => null,
+    });
+    await expect(failed).rejects.toMatchObject({ code: 'provider_unavailable', provider: 'canvas' });
+    await expect(failed).rejects.not.toThrow(/planned-material|planned-resource|test_d1/i);
+    expect(metrics.overQueryAttempts).toEqual([]);
+    expect(metrics.overBindAttempts).toEqual([]);
+    expect(metrics.queryCount).toBeLessThanOrEqual(50);
+    expect(await env.DB.prepare(`SELECT external_activity_id FROM learning_activities
+      ORDER BY external_activity_id`).all()).toMatchObject({
+      results: [{ external_activity_id: 'lesson-video' }, { external_activity_id: 'quiz-1' }],
+    });
+    expect(await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs
+      ORDER BY id DESC LIMIT 1`).first()).toEqual({ status: 'failed', error_code: 'provider_unavailable' });
+    expect(await env.DB.prepare(`SELECT operation_marker,operation_expires_at
+      FROM learning_provider_connections WHERE id=901`).first())
+      .toEqual({ operation_marker: null, operation_expires_at: null });
+  });
+
+  it('commits a legal small snapshot within the same D1 Free execution budget', async () => {
+    const mapped = await seed();
+    const { db, metrics } = freePlanBudgetDb();
+    await expect(synchronizeLearningCourse(db, {
+      provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
+      courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
+      operation: operation(100), now: () => NOW_EPOCH,
+      resolvePerson: async () => ({ personId: 9012 }),
+    })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 5 });
+    expect(metrics.overQueryAttempts).toEqual([]);
+    expect(metrics.overBindAttempts).toEqual([]);
+    expect(metrics.queryCount).toBeLessThanOrEqual(50);
+  });
+
   it('rejects an atomic entity budget above 50 before provider work or a sync run', async () => {
     const mapped = await seed();
     let providerCalls = 0;

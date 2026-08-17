@@ -43,8 +43,31 @@ export class LearningAtomicLimitError extends Error {
 /** Conservative ceiling for one portable D1/PostgreSQL atomic reconciliation. */
 export const LEARNING_MAX_ATOMIC_ENTITIES = 50;
 
+// Cloudflare D1 Free permits at most 50 queries per Worker invocation and D1
+// permits at most 100 bound parameters per query. Keep these counts beside the
+// statement builders so the planner and executed paths cannot drift apart.
+const LEARNING_D1_FREE_QUERY_LIMIT = 50;
+const LEARNING_D1_QUERY_BIND_LIMIT = 100;
+const LEARNING_SYNC_START_QUERY_COUNT = 3;
+const LEARNING_SYNC_FAILURE_QUERY_COUNT = 4;
+const LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE = 40;
+const LEARNING_FINALIZATION_FIXED_QUERY_COUNT = 10;
+const LEARNING_FINALIZATION_ENROLLMENT_QUERY_COUNT = 5;
+const LEARNING_FINALIZATION_ACTIVITY_QUERY_COUNT = 3;
+const LEARNING_FINALIZATION_EVENT_QUERY_COUNT = 2;
+const LEARNING_FINALIZATION_RESOURCE_QUERY_COUNT = 2;
+const LEARNING_FINALIZATION_SUBMISSION_QUERY_COUNT = 2;
+
 const persistenceFailure = (): never => { throw new LearningPersistenceError(); };
 const invalid = (): never => { throw new LearningPersistenceError(); };
+
+function assertQueryCount(actual: number, expected: number): void {
+  if (actual !== expected) persistenceFailure();
+}
+
+function assertBindCount(actual: number): void {
+  if (actual > LEARNING_D1_QUERY_BIND_LIMIT) throw new LearningAtomicLimitError();
+}
 
 function integer(value: unknown, minimum: number = 1, maximum: number = LEARNING_LIMITS.databaseInteger): number {
   try { return learningValidation.integer(value, minimum, maximum); } catch { return invalid(); }
@@ -329,7 +352,7 @@ export async function startLearningSync(
   const marker = crypto.randomUUID();
   const recoveryMarker = crypto.randomUUID();
   try {
-    const results = await db.batch([
+    const statements = [
       db.prepare(`UPDATE learning_provider_connections
         SET operation_marker=?1,operation_expires_at=?6
         WHERE id=?2 AND provider=?3 AND status='active' AND deleted_at IS NULL
@@ -365,8 +388,10 @@ export async function startLearningSync(
           connectionId, courseId, triggerType, startedAt, kind, marker, leaseExpiresAt,
           policyFingerprint,
         ),
-    ]);
-    if (!Array.isArray(results) || results.length !== 3) persistenceFailure();
+    ];
+    assertQueryCount(statements.length, LEARNING_SYNC_START_QUERY_COUNT);
+    const results = await db.batch(statements);
+    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_START_QUERY_COUNT) persistenceFailure();
     const started = oneRow(results[2]);
     if (!started) throw new LearningSyncConflictError();
     return lease({
@@ -554,6 +579,52 @@ interface PendingEvent {
   readonly occurredAt: string;
 }
 
+interface LearningSyncExecutionPlan {
+  readonly identityPreflightQueries: number;
+  readonly finalizationQueries: number;
+  readonly maximumInvocationQueries: number;
+  readonly maximumBindCount: number;
+  readonly executable: boolean;
+}
+
+function planLearningSyncExecution(
+  snapshot: NormalizedSnapshot,
+  eventCount: number,
+): LearningSyncExecutionPlan {
+  const enrollmentCount = snapshot.enrollments.length;
+  const activityCount = snapshot.activities.length;
+  const resourceCount = snapshot.resources.length;
+  const submissionCount = snapshot.submissions.length;
+  const identityPreflightQueries = Math.ceil(enrollmentCount / LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE);
+  const finalizationQueries = LEARNING_FINALIZATION_FIXED_QUERY_COUNT
+    + enrollmentCount * LEARNING_FINALIZATION_ENROLLMENT_QUERY_COUNT
+    + activityCount * LEARNING_FINALIZATION_ACTIVITY_QUERY_COUNT
+    + eventCount * LEARNING_FINALIZATION_EVENT_QUERY_COUNT
+    + resourceCount * LEARNING_FINALIZATION_RESOURCE_QUERY_COUNT
+    + submissionCount * LEARNING_FINALIZATION_SUBMISSION_QUERY_COUNT;
+  // If the atomic finalization rejects, completeLearningCourseSync performs one
+  // exact identity recheck before orchestration safely terminalizes the run.
+  const maximumInvocationQueries = LEARNING_SYNC_START_QUERY_COUNT
+    + identityPreflightQueries
+    + finalizationQueries
+    + identityPreflightQueries
+    + LEARNING_SYNC_FAILURE_QUERY_COUNT;
+  const identityPreflightBinds = enrollmentCount === 0
+    ? 0
+    : 1 + Math.min(enrollmentCount, LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE) * 2;
+  const removedCountBinds = 8 + enrollmentCount + activityCount + resourceCount * 2 + submissionCount * 2;
+  const resourceKeepBinds = 3 + resourceCount * 3;
+  const submissionKeepBinds = submissionCount === 0 ? 3 : 5 + submissionCount * 2;
+  const maximumBindCount = Math.max(
+    14, identityPreflightBinds, removedCountBinds, resourceKeepBinds, submissionKeepBinds,
+  );
+  return Object.freeze({
+    identityPreflightQueries, finalizationQueries, maximumInvocationQueries, maximumBindCount,
+    executable: maximumInvocationQueries <= LEARNING_D1_FREE_QUERY_LIMIT
+      && maximumBindCount <= LEARNING_D1_QUERY_BIND_LIMIT,
+  });
+}
+
 async function eventsFor(
   snapshot: NormalizedSnapshot,
   own: LearningSyncLease,
@@ -624,10 +695,11 @@ async function assertIdentityMappings(
   own: LearningSyncLease,
   enrollments: readonly ResolvedLearningEnrollment[],
   guard: () => void = () => undefined,
-): Promise<void> {
-  if (enrollments.length === 0) return;
+): Promise<number> {
+  if (enrollments.length === 0) return 0;
+  let queryCount = 0;
   try {
-    const chunkSize = 40;
+    const chunkSize = LEARNING_IDENTITY_PREFLIGHT_CHUNK_SIZE;
     for (let start = 0; start < enrollments.length; start += chunkSize) {
       guard();
       const chunk = enrollments.slice(start, start + chunkSize);
@@ -639,10 +711,12 @@ async function assertIdentityMappings(
         ...chunk.map((item) => item.providerEnrollment.externalUserId),
         ...chunk.map((item) => item.personId),
       ];
+      assertBindCount(values.length);
       const result = await db.prepare(`SELECT person_id,external_user_id,status FROM learning_identity_links
         WHERE connection_id=?1 AND (
           external_user_id IN (${userPlaceholders}) OR person_id IN (${personPlaceholders})
         ) ORDER BY id`).bind(...values).all();
+      queryCount += 1;
       const rows = resultRows(result, chunk.length * 2);
       guard();
       for (const enrollment of chunk) {
@@ -661,6 +735,7 @@ async function assertIdentityMappings(
         if (conflict) throw new LearningIdentityConflictError();
       }
     }
+    return queryCount;
   } catch (error) {
     if (error instanceof LearningIdentityConflictError || error instanceof LearningPersistenceError) throw error;
     throw new LearningPersistenceError();
@@ -720,6 +795,7 @@ function removedCountStatement(
   const connectionId = bind(own.connectionId);
   const courseId = bind(own.courseId);
   const marker = bind(finalizationMarker);
+  assertBindCount(values.length);
   return db.prepare(`UPDATE learning_sync_runs SET removed_count=
     (SELECT COUNT(*) FROM learning_enrollments e
       WHERE e.course_id=${courseForEnrollments} AND e.state<>'inactive' AND ${enrollmentAbsent})
@@ -758,8 +834,11 @@ export async function completeLearningCourseSync(
   if (Date.parse(snapshot.syncedAt) >= Date.parse(own.leaseExpiresAt)) {
     throw new LearningSyncConflictError();
   }
-  await assertIdentityMappings(db, own, snapshot.enrollments, guard);
   const events = await eventsFor(snapshot, own, guard);
+  const executionPlan = planLearningSyncExecution(snapshot, events.length);
+  if (!executionPlan.executable) throw new LearningAtomicLimitError();
+  const identityPreflightQueries = await assertIdentityMappings(db, own, snapshot.enrollments, guard);
+  assertQueryCount(identityPreflightQueries, executionPlan.identityPreflightQueries);
   const policyFingerprint = await learningUrlPolicyFingerprint(snapshot.urlPolicy);
   guard();
   const finalizationMarker = crypto.randomUUID();
@@ -946,15 +1025,19 @@ export async function completeLearningCourseSync(
   const resourceKeepSql = snapshot.resources.length === 0 ? '' : ` AND NOT (${snapshot.resources
     .map(() => `(r.activity_id=(SELECT a.id FROM learning_activities a
       WHERE a.course_id=? AND a.external_activity_id=?) AND r.external_resource_id=?)`).join(' OR ')})`;
-  statements.push(db.prepare(`DELETE FROM learning_resources AS r WHERE r.activity_id IN (
-    SELECT a.id FROM learning_activities a WHERE a.course_id=?
-  )${resourceKeepSql} AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
-    WHERE sync_run.id=? AND sync_run.status='running' AND sync_run.finalization_marker=?)`).bind(
+  const resourceKeepValues = [
     own.courseId,
     ...snapshot.resources.flatMap((resource) => [
       own.courseId, resource.externalActivityId, resource.externalResourceId,
     ]),
     own.runId, finalizationMarker,
+  ];
+  assertBindCount(resourceKeepValues.length);
+  statements.push(db.prepare(`DELETE FROM learning_resources AS r WHERE r.activity_id IN (
+    SELECT a.id FROM learning_activities a WHERE a.course_id=?
+  )${resourceKeepSql} AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+    WHERE sync_run.id=? AND sync_run.status='running' AND sync_run.finalization_marker=?)`).bind(
+    ...resourceKeepValues,
   ));
 
   for (const resolved of snapshot.submissions) {
@@ -1000,27 +1083,31 @@ export async function completeLearningCourseSync(
     );
   }
   if (snapshot.submissions.length === 0) {
+    const submissionKeepValues = [own.courseId, own.runId, finalizationMarker];
+    assertBindCount(submissionKeepValues.length);
     statements.push(db.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=?
       AND EXISTS (SELECT 1 FROM learning_sync_runs r
         WHERE r.id=? AND r.status='running' AND r.finalization_marker=?)`)
-      .bind(own.courseId, own.runId, finalizationMarker));
+      .bind(...submissionKeepValues));
   } else {
     const keepPairs = snapshot.submissions
       .map(() => '(a.external_activity_id=? AND e.external_enrollment_id=?)').join(' OR ');
-    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots
-      WHERE course_id=? AND (activity_id,enrollment_id) NOT IN (
-        SELECT a.id,e.id FROM learning_activities a CROSS JOIN learning_enrollments e
-        WHERE a.course_id=? AND e.course_id=? AND (${keepPairs})
-      ) AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
-        WHERE sync_run.id=? AND sync_run.status='running'
-          AND sync_run.finalization_marker=?)`).bind(
+    const submissionKeepValues = [
       own.courseId, own.courseId, own.courseId,
       ...snapshot.submissions.flatMap((item) => [
         item.providerSubmission.externalActivityId,
         item.providerSubmission.externalEnrollmentId,
       ]),
       own.runId, finalizationMarker,
-    ));
+    ];
+    assertBindCount(submissionKeepValues.length);
+    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots
+      WHERE course_id=? AND (activity_id,enrollment_id) NOT IN (
+        SELECT a.id,e.id FROM learning_activities a CROSS JOIN learning_enrollments e
+        WHERE a.course_id=? AND e.course_id=? AND (${keepPairs})
+      ) AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+        WHERE sync_run.id=? AND sync_run.status='running'
+          AND sync_run.finalization_marker=?)`).bind(...submissionKeepValues));
   }
 
   const scannedCount = snapshot.enrollments.length + snapshot.activities.length
@@ -1066,6 +1153,7 @@ export async function completeLearningCourseSync(
   );
 
   guard();
+  assertQueryCount(statements.length, executionPlan.finalizationQueries);
   try {
     const results = await db.batch(statements);
     if (!Array.isArray(results) || results.length !== statements.length) persistenceFailure();
@@ -1101,7 +1189,7 @@ export async function failLearningSync(
   const safeCode = errorCode(input.errorCode);
   const finalizationMarker = crypto.randomUUID();
   try {
-    const results = await db.batch([
+    const statements = [
       activeLeaseGuard(db, own, finishedAt),
       db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
         WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
@@ -1132,8 +1220,10 @@ export async function failLearningSync(
           safeCode, finishedAt, own.connectionId, own.provider, own.marker,
           own.runId, finalizationMarker,
         ),
-    ]);
-    if (!Array.isArray(results) || results.length !== 4
+    ];
+    assertQueryCount(statements.length, LEARNING_SYNC_FAILURE_QUERY_COUNT);
+    const results = await db.batch(statements);
+    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_FAILURE_QUERY_COUNT
       || !oneRow(results[1]) || !oneRow(results[2])) throw new LearningSyncConflictError();
   } catch (error) {
     if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
@@ -1157,7 +1247,7 @@ export async function recoverExpiredLearningSync(
   const safeCode = errorCode(input.errorCode);
   const finalizationMarker = crypto.randomUUID();
   try {
-    const results = await db.batch([
+    const statements = [
       db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
         WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
           AND lease_marker=?5 AND lease_expires_at<=?6 AND finalization_marker IS NULL
@@ -1196,8 +1286,10 @@ export async function recoverExpiredLearningSync(
               AND r.status IN ('failed','cancelled'))`).bind(
           own.connectionId, own.provider, own.marker, own.runId, finalizationMarker,
         ),
-    ]);
-    if (!Array.isArray(results) || results.length !== 4) persistenceFailure();
+    ];
+    assertQueryCount(statements.length, LEARNING_SYNC_FAILURE_QUERY_COUNT);
+    const results = await db.batch(statements);
+    if (!Array.isArray(results) || results.length !== LEARNING_SYNC_FAILURE_QUERY_COUNT) persistenceFailure();
     if (oneRow(results[0]) && oneRow(results[1]) && oneRow(results[2])) return;
     const observed = await db.prepare(`SELECT status FROM learning_sync_runs
       WHERE id=?1 AND connection_id=?2 AND course_id=?3 AND lease_marker=?4`)
