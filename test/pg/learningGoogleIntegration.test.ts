@@ -4,6 +4,7 @@ import type { AppDb } from '../../src/lib/appDb';
 import {
   disconnectGoogleClassroomConnection,
   mapSelectedGoogleClassroomCourse,
+  unmapSelectedGoogleClassroomCourse,
 } from '../../src/lib/learningGoogleAdmin';
 import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../../src/lib/learningGoogleAuth';
 import { renewGoogleClassroomRegistrations } from '../../src/lib/learningGoogleRegistrationLifecycle';
@@ -200,6 +201,89 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     expect(deleted).toHaveLength(2);
   });
 
+  it('keeps Postgres mapping state retryable when remap or unmap remote cleanup fails', async () => {
+    await sqlA.unsafe(`
+      INSERT INTO learning_programs(id,slug,display_name)
+        VALUES(27523,'pg-google-cleanup','PG Google Cleanup');
+      INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id)
+        VALUES(27522,'google_classroom','Cleanup Classroom',NULL,'active',1,27501);
+    `);
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const envelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27522,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'cleanup-access', refreshToken: 'cleanup-refresh',
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: null,
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27522,?1,?2,?3,?4,?5,NULL)`)
+      .bind(envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion, envelope.envelopeVersion).run();
+    let sequence = 0;
+    let failPriorCleanup = false;
+    const priorIds = new Set<string>();
+    const attemptedDeletes: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/courses/course-cleanup') return new Response(JSON.stringify({
+        id: 'course-cleanup', name: 'Cleanup course', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/course-cleanup',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+      if (url.pathname === '/v1/registrations' && init?.method === 'POST') {
+        sequence += 1;
+        const registrationId = sequence <= 2 ? `pg-prior-${sequence}` : `pg-replacement-${sequence}`;
+        if (sequence <= 2) priorIds.add(registrationId);
+        return new Response(JSON.stringify({
+          registrationId, expiryTime: '2026-08-24T12:00:00.000Z',
+        }));
+      }
+      if (url.pathname.startsWith('/v1/registrations/') && init?.method === 'DELETE') {
+        const registrationId = decodeURIComponent(url.pathname.slice('/v1/registrations/'.length));
+        attemptedDeletes.push(registrationId);
+        return failPriorCleanup && priorIds.has(registrationId)
+          ? new Response(null, { status: 503 })
+          : new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected ${init?.method ?? 'GET'} ${url.pathname}`);
+    });
+    const common = {
+      connectionId: 27522, externalCourseId: 'course-cleanup', actorPersonId: 27501,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    };
+    await mapSelectedGoogleClassroomCourse(dbA, {
+      ...common, expectedRevision: 1, programId: 27523,
+      pushTopicName: 'projects/church-project/topics/classroom',
+    });
+    failPriorCleanup = true;
+    await expect(mapSelectedGoogleClassroomCourse(dbA, {
+      ...common, expectedRevision: 2, programId: 27523,
+      pushTopicName: 'projects/church-project/topics/classroom',
+    })).rejects.toThrow();
+    expect(attemptedDeletes).toEqual(expect.arrayContaining([
+      'pg-prior-1', 'pg-replacement-3', 'pg-replacement-4',
+    ]));
+    expect(await sqlA.unsafe(`SELECT revision FROM learning_provider_connections WHERE id=27522`))
+      .toEqual([{ revision: 2 }]);
+    expect(await sqlA.unsafe(`SELECT registration_id FROM learning_google_registrations
+      WHERE connection_id=27522 ORDER BY feed_type`)).toEqual([
+      { registration_id: 'pg-prior-1' }, { registration_id: 'pg-prior-2' },
+    ]);
+    attemptedDeletes.length = 0;
+    await expect(unmapSelectedGoogleClassroomCourse(dbA, {
+      ...common, expectedRevision: 2,
+    })).rejects.toThrow();
+    expect(attemptedDeletes).toEqual(['pg-prior-1']);
+    expect(await sqlA.unsafe(`SELECT lifecycle_state,deleted_at FROM learning_courses
+      WHERE connection_id=27522 AND external_course_id='course-cleanup'`)).toEqual([
+      { lifecycle_state: 'active', deleted_at: null },
+    ]);
+  });
+
   it('CAS-renews both feeds under concurrent Postgres drains and disconnects with remote-first cleanup', async () => {
     await sqlA.unsafe(`UPDATE learning_google_registrations
       SET expiry_time='2026-08-18T12:00:00.000Z' WHERE connection_id=27512`);
@@ -227,7 +311,8 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     });
     const renewInput = {
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
-      keyRing: ring, fetcher, nowEpochMs: NOW, signal: new AbortController().signal,
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+      topicName: 'projects/church-project/topics/classroom', signal: new AbortController().signal,
     };
     const drains = await Promise.all([
       renewGoogleClassroomRegistrations(dbA, renewInput),

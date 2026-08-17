@@ -9,6 +9,9 @@ const COMPLETE_ENV = Object.freeze({
   DB_BACKEND: 'd1',
   GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
   GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+  GOOGLE_CLASSROOM_PUBSUB_TOPIC: 'projects/church-project/topics/classroom',
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: 'classroom-push@church-project.iam.gserviceaccount.com',
+  GOOGLE_PUBSUB_SUBSCRIPTION_NAME: 'projects/church-project/subscriptions/classroom',
   LEARNING_CREDENTIAL_KEYS: 'private-key-ring',
 });
 
@@ -42,6 +45,22 @@ describe('production Google Classroom registration renewal pass', () => {
     expect(renew).not.toHaveBeenCalled();
   });
 
+  it('does not renew registrations for a removed or incomplete current push binding', async () => {
+    const importKeyRing = vi.fn();
+    const renew = vi.fn();
+    await expect(runGoogleClassroomRegistrationRenewalPass({
+      DB_BACKEND: 'd1',
+      GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
+      GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+      LEARNING_CREDENTIAL_KEYS: 'private-key-ring',
+    }, env.DB as AppDb, {
+      fetcher: vi.fn(), now: () => Date.parse('2026-08-17T12:00:00.000Z'),
+      importKeyRing, renew,
+    })).resolves.toEqual({ status: 'skipped', reason: 'not_configured' });
+    expect(importKeyRing).not.toHaveBeenCalled();
+    expect(renew).not.toHaveBeenCalled();
+  });
+
   it('imports the server key ring and runs one bounded, no-backoff renewal drain', async () => {
     const keyRing = { currentVersion: 1, keys: new Map() } as never;
     const importKeyRing = vi.fn(async () => keyRing);
@@ -61,6 +80,7 @@ describe('production Google Classroom registration renewal pass', () => {
     expect(call?.[1]).toEqual({
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing, fetcher, nowEpochMs: Date.parse('2026-08-17T12:00:00.000Z'),
+      topicName: 'projects/church-project/topics/classroom',
       signal: expect.any(AbortSignal),
     });
   });
