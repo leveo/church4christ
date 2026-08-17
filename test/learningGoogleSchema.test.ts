@@ -31,7 +31,7 @@ describe('Google Classroom forward schema', () => {
     ]);
     expect(await columns(TABLES[3])).toEqual([
       'id', 'connection_id', 'task_type', 'registration_id', 'attempt_count',
-      'last_attempt_at', 'created_at',
+      'claim_marker', 'claim_expires_at', 'last_attempt_at', 'created_at',
     ]);
     const forbidden = /payload|body|token|code_verifier|access_token|refresh_token|grade|answer|comment|file_bytes/iu;
     for (const table of TABLES) expect((await columns(table)).join(' ')).not.toMatch(forbidden);
