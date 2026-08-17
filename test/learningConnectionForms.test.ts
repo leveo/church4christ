@@ -34,7 +34,7 @@ describe('Learning connection form parser', () => {
     ]) expect(parseLearningConnectionForm(invalid)).toEqual({ ok: false, code: 'learning_connection_invalid' });
   });
 
-  it('parses revisioned update, reconnect, health-check, and disconnect actions exactly', () => {
+  it('parses revisioned update, health-check, and disconnect actions exactly', () => {
     expect(parseLearningConnectionForm({
       action: 'update', connection_id: '41', revision: '3', provider: 'canvas',
       display_name: 'Updated Canvas', base_url: 'https://new-canvas.test',
@@ -42,10 +42,6 @@ describe('Learning connection form parser', () => {
       action: 'update', connectionId: 41, revision: 3, provider: 'canvas',
       displayName: 'Updated Canvas', baseUrl: 'https://new-canvas.test',
     } });
-    expect(parseLearningConnectionForm({
-      action: 'reconnect', connection_id: '41', revision: '4', provider: 'canvas',
-      base_url: 'https://new-canvas.test', access_token: 'new-private-token',
-    })).toMatchObject({ ok: true, data: { action: 'reconnect', connectionId: 41, revision: 4 } });
     expect(parseLearningConnectionForm({
       action: 'health_check', connection_id: '41', revision: '5', provider: 'canvas', status: 'active',
     })).toEqual({ ok: true, data: {
@@ -57,6 +53,7 @@ describe('Learning connection form parser', () => {
       { action: 'disconnect', connection_id: '0', revision: '1' },
       { action: 'disconnect', connection_id: '1', revision: '-1' },
       { action: 'disconnect', connection_id: '1', revision: '1', access_token: 'private' },
+      { action: 'reconnect', connection_id: '41', revision: '4', provider: 'canvas', base_url: 'https://new-canvas.test', access_token: 'private' },
       { action: 'health_check', connection_id: '1', revision: '1' },
       { action: 'health_check', connection_id: '1', revision: '1', provider: 'canvas', status: 'unknown' },
       { action: 'health_check', connection_id: '1', revision: '1', extra: 'x' },

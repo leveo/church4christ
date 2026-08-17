@@ -7,12 +7,10 @@ import {
   createLearningConnection,
   disconnectLearningConnection,
   getLearningConnection,
-  reconnectLearningConnection,
   updateLearningConnection,
   updateLearningConnectionHealth,
   type CreateLearningConnectionInput,
   type DisconnectLearningConnectionInput,
-  type ReconnectLearningConnectionInput,
   type UpdateLearningConnectionHealthInput,
   type UpdateLearningConnectionInput,
 } from '../../../lib/learningConnectionDb';
@@ -22,7 +20,6 @@ import {
 } from '../../../lib/learningConnectionForms';
 import {
   LearningCredentialConfigError,
-  encryptLearningCredential,
   importLearningCredentialKeyRing,
 } from '../../../lib/learningCredentials';
 import type { AppDb } from '../../../lib/appDb';
@@ -51,11 +48,9 @@ type HealthResult =
   | { readonly ok: false; readonly errorCode: LearningErrorCode; readonly connectionRevision?: number | null };
 
 interface LearningConnectionActionDeps {
-  readonly keySecret: string | undefined | (() => string | undefined);
   readonly nextConnectionId: () => number;
   readonly createConnection: (db: AppDb, input: CreateLearningConnectionInput) => Promise<unknown>;
   readonly updateConnection: (db: AppDb, input: UpdateLearningConnectionInput) => Promise<unknown>;
-  readonly reconnectConnection: (db: AppDb, input: ReconnectLearningConnectionInput) => Promise<unknown>;
   readonly disconnectConnection: (db: AppDb, input: DisconnectLearningConnectionInput) => Promise<unknown>;
   readonly disconnectGoogleConnection: (
     db: AppDb,
@@ -86,11 +81,9 @@ function nextConnectionId(): number {
 }
 
 const defaultDeps: LearningConnectionActionDeps = {
-  keySecret: () => (env as unknown as { LEARNING_CREDENTIAL_KEYS?: string }).LEARNING_CREDENTIAL_KEYS,
   nextConnectionId,
   createConnection: createLearningConnection,
   updateConnection: updateLearningConnection,
-  reconnectConnection: reconnectLearningConnection,
   disconnectConnection: disconnectLearningConnection,
   disconnectGoogleConnection: async (db, input) => {
     const vars = env as unknown as {
@@ -152,26 +145,6 @@ function bodyError(status: 413 | 415): Response {
   return new Response('learning_connection_invalid', {
     status,
     headers: { ...SAFE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' },
-  });
-}
-
-function secretFrom(deps: LearningConnectionActionDeps): string {
-  const value = typeof deps.keySecret === 'function' ? deps.keySecret() : deps.keySecret;
-  if (typeof value !== 'string') throw new LearningCredentialConfigError();
-  return value;
-}
-
-async function canvasCredential(
-  deps: LearningConnectionActionDeps,
-  connectionId: number,
-  accessToken: string,
-) {
-  const ring = await importLearningCredentialKeyRing(secretFrom(deps));
-  return encryptLearningCredential(ring, {
-    provider: 'canvas',
-    connectionId,
-    plaintext: new TextEncoder().encode(JSON.stringify({ accessToken })),
-    expiresAt: null,
   });
 }
 
@@ -249,16 +222,13 @@ export function createLearningConnectionActionHandler(
       const data = parsed.data;
       if (data.action === 'create') {
         const connectionId = deps.nextConnectionId();
-        const credential = data.provider === 'canvas'
-          ? await canvasCredential(deps, connectionId, data.accessToken)
-          : null;
         await deps.createConnection(locals.db, {
           connectionId,
           provider: data.provider,
           displayName: data.displayName,
           baseUrl: data.baseUrl,
           actorPersonId: user!.id,
-          credential,
+          credential: null,
         });
         return redirect('saved', 'connection_created');
       }
@@ -272,18 +242,6 @@ export function createLearningConnectionActionHandler(
           actorPersonId: user!.id,
         });
         return redirect('saved', 'connection_updated');
-      }
-      if (data.action === 'reconnect') {
-        const credential = await canvasCredential(deps, data.connectionId, data.accessToken);
-        await deps.reconnectConnection(locals.db, {
-          connectionId: data.connectionId,
-          expectedRevision: data.revision,
-          provider: data.provider,
-          baseUrl: data.baseUrl,
-          actorPersonId: user!.id,
-          credential,
-        });
-        return redirect('saved', 'connection_reconnected');
       }
       if (data.action === 'disconnect') {
         const disconnectInput = {

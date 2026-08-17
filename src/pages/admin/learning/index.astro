@@ -33,18 +33,19 @@ const copy = lang === 'zh' ? {
   createGoogle: '准备 Google Classroom',
   name: '显示名称',
   baseUrl: 'Canvas HTTPS 地址',
-  token: 'Canvas 访问令牌',
   create: '建立连接',
   update: '保存设置',
   health: '检查状态',
-  reconnect: '重新连接',
   disconnect: '断开连接',
   authorizeGoogle: '授权 Google Classroom',
+  authorizeCanvas: '使用 OAuth 授权 Canvas',
   selectGoogleCourses: '选择 Classroom 课程',
   googleNote: 'Google 授权将在 OAuth 设置步骤中完成。',
   saved: '连接设置已保存。',
   googleConnected: 'Google Classroom 已安全连接。',
+  canvasConnected: 'Canvas 已安全连接。',
   googleAuthorizationFailed: 'Google 授权未完成；请重新开始授权流程。',
+  canvasAuthorizationFailed: 'Canvas 授权未完成；请重新开始授权流程。',
   error: '连接设置未能保存；请刷新后重试。',
 } : {
   providers: 'Learning provider connections',
@@ -53,18 +54,19 @@ const copy = lang === 'zh' ? {
   createGoogle: 'Prepare Google Classroom',
   name: 'Display name',
   baseUrl: 'Canvas HTTPS address',
-  token: 'Canvas access token',
   create: 'Create connection',
   update: 'Save settings',
   health: 'Check status',
-  reconnect: 'Reconnect',
   disconnect: 'Disconnect',
   authorizeGoogle: 'Authorize Google Classroom',
+  authorizeCanvas: 'Authorize Canvas with OAuth',
   selectGoogleCourses: 'Select Classroom courses',
   googleNote: 'Google authorization is completed in the OAuth setup step.',
   saved: 'Connection settings were saved.',
   googleConnected: 'Google Classroom was connected securely.',
+  canvasConnected: 'Canvas was connected securely.',
   googleAuthorizationFailed: 'Google authorization was not completed. Start the authorization flow again.',
+  canvasAuthorizationFailed: 'Canvas authorization was not completed. Start the authorization flow again.',
   error: 'Connection settings could not be saved. Refresh and try again.',
 };
 type ConnectionErrorCode =
@@ -73,6 +75,7 @@ type ConnectionErrorCode =
   | 'credentials_unavailable'
   | 'connection_failed'
   | 'google_authorization_failed'
+  | 'canvas_authorization_failed'
   | LearningErrorCode;
 const statusLabels: Record<LearningConnectionStatus, string> = lang === 'zh' ? {
   pending: '等待授权', active: '正常', error: '需要处理', disabled: '已断开',
@@ -85,6 +88,7 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
   credentials_unavailable: '学习平台凭据暂时不可用。',
   connection_failed: '连接设置未能安全保存；请刷新后重试。',
   google_authorization_failed: copy.googleAuthorizationFailed,
+  canvas_authorization_failed: copy.canvasAuthorizationFailed,
   invalid_request: '学习平台拒绝了状态检查请求。',
   authentication_required: '学习平台需要重新授权。',
   permission_denied: '学习平台账号没有所需权限。',
@@ -104,6 +108,7 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
   credentials_unavailable: 'Learning provider credentials are temporarily unavailable.',
   connection_failed: 'The connection settings could not be saved safely. Refresh and try again.',
   google_authorization_failed: copy.googleAuthorizationFailed,
+  canvas_authorization_failed: copy.canvasAuthorizationFailed,
   invalid_request: 'The Learning provider rejected the health-check request.',
   authentication_required: 'The Learning provider must be authorized again.',
   permission_denied: 'The Learning provider account lacks the required permission.',
@@ -119,15 +124,16 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
   internal_error: 'The Learning provider health check failed safely.',
 };
 const savedCodes = new Set([
-  'connection_created', 'connection_updated', 'connection_reconnected',
-  'connection_disconnected', 'health_checked', 'google_connected',
+  'connection_created', 'connection_updated',
+  'connection_disconnected', 'health_checked', 'google_connected', 'canvas_connected',
 ]);
 const queryEntries = [...Astro.url.searchParams.entries()];
 let banner: { readonly tone: 'success' | 'danger'; readonly text: string } | null = null;
 if (queryEntries.length === 1) {
   const [name, value] = queryEntries[0];
   if (name === 'saved' && savedCodes.has(value)) {
-    banner = { tone: 'success', text: value === 'google_connected' ? copy.googleConnected : copy.saved };
+    banner = { tone: 'success', text: value === 'google_connected'
+      ? copy.googleConnected : value === 'canvas_connected' ? copy.canvasConnected : copy.saved };
   }
   if (name === 'error' && Object.hasOwn(errorMessages, value)) {
     banner = { tone: 'danger', text: errorMessages[value as ConnectionErrorCode] };
@@ -183,6 +189,14 @@ if (queryEntries.length === 1) {
                     <button class={btn} type="submit">{copy.authorizeGoogle}</button>
                   </form>
                 )}
+                {connection.provider === 'canvas' && connection.baseUrl && (
+                  <form method="post" action="/admin/learning/canvas/start">
+                    <input type="hidden" name="connection_id" value={connection.connectionId} />
+                    <input type="hidden" name="revision" value={connection.revision} />
+                    <input type="hidden" name="base_url" value={connection.baseUrl} />
+                    <button class={btn} type="submit">{copy.authorizeCanvas}</button>
+                  </form>
+                )}
                 {connection.provider === 'google_classroom' && connection.status === 'active' && (
                   <a class={btnSecondary} href={`/admin/learning/google/courses?connection_id=${connection.connectionId}`}>
                     {copy.selectGoogleCourses}
@@ -204,16 +218,6 @@ if (queryEntries.length === 1) {
                 </form>
               </div>
             </div>
-          ) : connection.provider === 'canvas' ? (
-            <form method="post" action="/admin/learning/connections" class="mt-5 grid gap-3 md:grid-cols-2">
-              <input type="hidden" name="action" value="reconnect" />
-              <input type="hidden" name="connection_id" value={connection.connectionId} />
-              <input type="hidden" name="revision" value={connection.revision} />
-              <input type="hidden" name="provider" value="canvas" />
-              <label class={lab}>{copy.baseUrl}<input class={tin} type="url" name="base_url" value={connection.baseUrl ?? ''} required maxlength="2048" /></label>
-              <label class={lab}>{copy.token}<input class={tin} type="password" name="access_token" autocomplete="off" required maxlength="8192" /></label>
-              <button class={btn} type="submit">{copy.reconnect}</button>
-            </form>
           ) : <p class="mt-4 text-sm text-ink-muted">{copy.googleNote}</p>}
         </article>
       ))}
@@ -227,7 +231,6 @@ if (queryEntries.length === 1) {
       <h2 class="font-display text-heading-sm font-bold">{copy.createCanvas}</h2>
       <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
       <label class={`${lab} mt-3`}>{copy.baseUrl}<input class={tin} type="url" name="base_url" placeholder="https://canvas.example.org" required maxlength="2048" /></label>
-      <label class={`${lab} mt-3`}>{copy.token}<input class={tin} type="password" name="access_token" autocomplete="off" required maxlength="8192" /></label>
       <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
     </form>
     <form method="post" action="/admin/learning/connections" class={card}>

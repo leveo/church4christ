@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('Learning connection administration page', () => {
-  it('renders safe create/update/health/reconnect/disconnect forms from metadata only', () => {
+  it('renders safe create/update/health/disconnect and OAuth forms from metadata only', () => {
     const page = readFileSync('src/pages/admin/learning/index.astro', 'utf8');
     expect(page).toContain('listLearningConnections');
     expect(page).toContain('action="/admin/learning/connections"');
@@ -11,7 +11,7 @@ describe('Learning connection administration page', () => {
     expect(page).toContain('/admin/learning/google/courses?connection_id=');
     expect(page).toContain("'google_connected'");
     expect(page).toContain('google_authorization_failed');
-    for (const action of ['create', 'update', 'health_check', 'reconnect', 'disconnect']) {
+    for (const action of ['create', 'update', 'health_check', 'disconnect']) {
       expect(page).toContain(`value="${action}"`);
     }
     expect(page).not.toContain('name="access_token"');

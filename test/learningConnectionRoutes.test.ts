@@ -59,14 +59,12 @@ const deps = () => ({
 });
 
 describe('Learning connection action HTTP boundary', () => {
-  it('checks capability, Learning area, and same-origin CSRF before body/database/secrets', async () => {
+  it('checks capability, Learning area, and same-origin CSRF before body/database', async () => {
     const injected = deps();
-    const keyRead = vi.fn(() => { throw new Error('secret read'); });
-    const handler = createLearningConnectionActionHandler({ ...injected, keySecret: keyRead });
+    const handler = createLearningConnectionActionHandler(injected);
     expect((await handler(poisonedContext([]))).status).toBe(404);
     expect((await handler(poisonedContext(['learning'], user({ adminAreas: [] })))).status).toBe(403);
     expect((await handler(poisonedContext(['learning'], user(), { origin: 'https://evil.test' }))).status).toBe(403);
-    expect(keyRead).not.toHaveBeenCalled();
   });
 
   it('accepts exact Origin or a same-origin fetch proof and rejects every unproven mutation', async () => {
@@ -245,10 +243,9 @@ describe('Learning connection action HTTP boundary', () => {
     expect(response.headers.get('location')).toBe('/admin/learning?error=provider_unavailable');
   });
 
-  it('creates a pending Google connection without reading the encryption secret', async () => {
+  it('creates a pending Google connection without a credential', async () => {
     const injected = deps();
-    const keyRead = vi.fn(() => { throw new Error('must not read'); });
-    const handler = createLearningConnectionActionHandler({ ...injected, keySecret: keyRead });
+    const handler = createLearningConnectionActionHandler(injected);
     const request = new Request('https://church.test/admin/learning/connections', {
       method: 'POST', headers: {
         'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
@@ -258,7 +255,6 @@ describe('Learning connection action HTTP boundary', () => {
       modules: new Set(['learning']), user: user(), db: {},
     } } as never);
     expect(response.headers.get('location')).toBe('/admin/learning?saved=connection_created');
-    expect(keyRead).not.toHaveBeenCalled();
     expect(injected.createConnection).toHaveBeenCalledWith({}, expect.objectContaining({
       provider: 'google_classroom', baseUrl: null, credential: null,
     }));

@@ -182,7 +182,7 @@ export async function createLearningConnection(
   const name = displayName(input.displayName);
   const url = baseUrl(kind, input.baseUrl);
   const actor = integer(input.actorPersonId, 1);
-  if ((kind === 'canvas') !== (input.credential !== null)) invalid();
+  if (kind === 'google_classroom' && input.credential !== null) invalid();
   const credential = input.credential === null ? null : safeEnvelope(input.credential);
   const status = credential === null ? 'pending' : 'active';
   const statements = [

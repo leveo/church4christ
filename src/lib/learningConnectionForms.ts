@@ -6,10 +6,9 @@ import {
 } from './learningModel';
 
 export const LEARNING_CONNECTION_FORM_MAX_BYTES = 16 * 1024;
-const MAX_ACCESS_TOKEN_BYTES = 8 * 1024;
 const encoder = new TextEncoder();
 const FORM_FIELD_NAMES = new Set([
-  'action', 'provider', 'display_name', 'base_url', 'access_token',
+  'action', 'provider', 'display_name', 'base_url',
   'connection_id', 'revision', 'status',
 ]);
 
@@ -19,7 +18,6 @@ export type LearningConnectionFormData =
       readonly provider: 'canvas';
       readonly displayName: string;
       readonly baseUrl: string;
-      readonly accessToken: string;
     }
   | {
       readonly action: 'create';
@@ -34,14 +32,6 @@ export type LearningConnectionFormData =
       readonly provider: LearningProviderKind;
       readonly displayName: string;
       readonly baseUrl: string | null;
-    }
-  | {
-      readonly action: 'reconnect';
-      readonly connectionId: number;
-      readonly revision: number;
-      readonly provider: 'canvas';
-      readonly baseUrl: string;
-      readonly accessToken: string;
     }
   | {
       readonly action: 'health_check';
@@ -107,10 +97,6 @@ function displayName(value: string): string | null {
   return boundedExactString(value, LEARNING_LIMITS.connectionDisplayNameBytes);
 }
 
-function accessToken(value: string): string | null {
-  return boundedExactString(value, MAX_ACCESS_TOKEN_BYTES);
-}
-
 function provider(value: string): LearningProviderKind | null {
   return value === 'canvas' || value === 'google_classroom' ? value : null;
 }
@@ -140,11 +126,10 @@ export function parseLearningConnectionForm(
       if (!exactKeys(fields, ['action', 'provider', 'display_name'])) return invalid();
       return { ok: true, data: { action, provider: kind, displayName: name, baseUrl: null } };
     }
-    if (!exactKeys(fields, ['action', 'provider', 'display_name', 'base_url', 'access_token'])) return invalid();
+    if (!exactKeys(fields, ['action', 'provider', 'display_name', 'base_url'])) return invalid();
     const baseUrl = canvasBaseUrl(fields.base_url ?? '');
-    const token = accessToken(fields.access_token ?? '');
-    return baseUrl && token
-      ? { ok: true, data: { action, provider: kind, displayName: name, baseUrl, accessToken: token } }
+    return baseUrl
+      ? { ok: true, data: { action, provider: kind, displayName: name, baseUrl } }
       : invalid();
   }
 
@@ -159,18 +144,6 @@ export function parseLearningConnectionForm(
     if (kind === 'canvas' && baseUrl === null) return invalid();
     return { ok: true, data: {
       action, connectionId, revision, provider: kind, displayName: name, baseUrl,
-    } };
-  }
-
-  if (action === 'reconnect') {
-    if (!exactKeys(fields, ['action', 'connection_id', 'revision', 'provider', 'base_url', 'access_token'])) return invalid();
-    const connectionId = integer(fields.connection_id ?? '', 1);
-    const revision = integer(fields.revision ?? '', 0);
-    const baseUrl = canvasBaseUrl(fields.base_url ?? '');
-    const token = accessToken(fields.access_token ?? '');
-    if (connectionId === null || revision === null || fields.provider !== 'canvas' || !baseUrl || !token) return invalid();
-    return { ok: true, data: {
-      action, connectionId, revision, provider: 'canvas', baseUrl, accessToken: token,
     } };
   }
 
