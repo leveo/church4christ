@@ -337,7 +337,7 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);
-    expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining(GOOGLE_CLASSROOM_TABLES));
+    expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining([...GOOGLE_CLASSROOM_TABLES]));
     expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat(), ...Object.values(SUPABASE_TABLES_BY_CAPABILITY).flat()])];
