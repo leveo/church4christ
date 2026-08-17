@@ -130,6 +130,8 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
       .resolves.toMatchObject({ disposition: 'succeeded', attemptCount: 1 });
     expect((await sqlA.unsafe(`SELECT relrowsecurity FROM pg_class
       WHERE relname='learning_google_notification_receipts'`))[0]).toEqual({ relrowsecurity: true });
+    expect((await sqlA.unsafe(`SELECT relrowsecurity FROM pg_class
+      WHERE relname='learning_google_cleanup_tasks'`))[0]).toEqual({ relrowsecurity: true });
   });
 
   it('runs the same bounded authoritative notification sync through PgAdapter', async () => {
@@ -201,7 +203,7 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     expect(deleted).toHaveLength(2);
   });
 
-  it('keeps Postgres mapping state retryable when remap or unmap remote cleanup fails', async () => {
+  it('keeps Postgres remap and unmap cleanup durable when remote deletion fails', async () => {
     await sqlA.unsafe(`
       INSERT INTO learning_programs(id,slug,display_name)
         VALUES(27523,'pg-google-cleanup','PG Google Cleanup');
@@ -263,28 +265,30 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     await expect(mapSelectedGoogleClassroomCourse(dbA, {
       ...common, expectedRevision: 2, programId: 27523,
       pushTopicName: 'projects/church-project/topics/classroom',
-    })).rejects.toThrow();
-    expect(attemptedDeletes).toEqual(expect.arrayContaining([
-      'pg-prior-1', 'pg-replacement-3', 'pg-replacement-4',
-    ]));
+    })).resolves.toMatchObject({ programId: 27523 });
+    expect(attemptedDeletes).toEqual(expect.arrayContaining(['pg-prior-1']));
     expect(await sqlA.unsafe(`SELECT revision FROM learning_provider_connections WHERE id=27522`))
-      .toEqual([{ revision: 2 }]);
+      .toEqual([{ revision: 3 }]);
     expect(await sqlA.unsafe(`SELECT registration_id FROM learning_google_registrations
       WHERE connection_id=27522 ORDER BY feed_type`)).toEqual([
+      { registration_id: 'pg-replacement-3' }, { registration_id: 'pg-replacement-4' },
+    ]);
+    expect(await sqlA.unsafe(`SELECT registration_id FROM learning_google_cleanup_tasks
+      WHERE connection_id=27522 AND task_type='registration' ORDER BY registration_id`)).toEqual([
       { registration_id: 'pg-prior-1' }, { registration_id: 'pg-prior-2' },
     ]);
     attemptedDeletes.length = 0;
     await expect(unmapSelectedGoogleClassroomCourse(dbA, {
-      ...common, expectedRevision: 2,
-    })).rejects.toThrow();
-    expect(attemptedDeletes).toEqual(['pg-prior-1']);
+      ...common, expectedRevision: 3,
+    })).resolves.toMatchObject({ connectionId: 27522, connectionRevision: 4 });
+    expect(attemptedDeletes).toEqual(['pg-replacement-3', 'pg-replacement-4']);
     expect(await sqlA.unsafe(`SELECT lifecycle_state,deleted_at FROM learning_courses
       WHERE connection_id=27522 AND external_course_id='course-cleanup'`)).toEqual([
-      { lifecycle_state: 'active', deleted_at: null },
+      { lifecycle_state: 'deleted', deleted_at: expect.any(String) },
     ]);
   });
 
-  it('CAS-renews both feeds under concurrent Postgres drains and disconnects with remote-first cleanup', async () => {
+  it('CAS-renews both feeds under concurrent Postgres drains and disconnects through the durable saga', async () => {
     await sqlA.unsafe(`UPDATE learning_google_registrations
       SET expiry_time='2026-08-18T12:00:00.000Z' WHERE connection_id=27512`);
     const ring = await importLearningCredentialKeyRing(KEY_SECRET);
