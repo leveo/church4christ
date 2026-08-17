@@ -445,25 +445,9 @@ function mapSubmission(
   let returnedAt: string | null = null;
   const history = optionalArray(row.submissionHistory, LEARNING_LIMITS.maxSubmissionAttempts * 2);
   for (let index = 0; index < history.length; index += 1) {
-    const wrapper = exactOptionalRecord(history[index], ['stateHistory', 'gradeHistory']);
-    if (Object.keys(wrapper).length !== 1) learningValidation.invalid();
-    if (wrapper.gradeHistory !== undefined) {
-      const grade = exactOptionalRecord(wrapper.gradeHistory, [
-        'pointsEarned', 'maxPoints', 'gradeTimestamp', 'actorUserId', 'gradeChangeType',
-      ], ['pointsEarned', 'maxPoints', 'gradeTimestamp', 'actorUserId', 'gradeChangeType']);
-      if (
-        typeof grade.pointsEarned !== 'number' || !Number.isFinite(grade.pointsEarned) || grade.pointsEarned < 0
-        || typeof grade.maxPoints !== 'number' || !Number.isFinite(grade.maxPoints) || grade.maxPoints < 0
-      ) learningValidation.invalid();
-      learningValidation.timestamp(grade.gradeTimestamp);
-      learningValidation.externalId(grade.actorUserId);
-      learningValidation.oneOf(grade.gradeChangeType, [
-        'DRAFT_GRADE_POINTS_EARNED_CHANGE',
-        'ASSIGNED_GRADE_POINTS_EARNED_CHANGE',
-        'MAX_POINTS_CHANGE',
-      ] as const);
-      continue;
-    }
+    const wrapper = exactOptionalRecord(history[index], ['stateHistory']);
+    if (Object.keys(wrapper).length === 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(wrapper, 'stateHistory')) learningValidation.invalid();
     const entry = exactOptionalRecord(
       wrapper.stateHistory,
       ['state', 'stateTimestamp', 'actorUserId'],
