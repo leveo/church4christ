@@ -8,6 +8,7 @@ import {
 import {
   LearningGoogleAuthConflictError,
   loadGoogleCredential,
+  loadGoogleCredentialForAdmin,
   refreshGoogleAccessToken,
   revokeGoogleRefreshToken,
   rotateGoogleCredential,
@@ -141,14 +142,22 @@ function operation(
 async function activeAccessToken(
   db: AppDb,
   input: GoogleAdminEnvironment,
+  allowError = false,
 ): Promise<{
   readonly accessToken: string;
   readonly revision: number;
   readonly refreshTokenExpiresAt: string | null;
 }> {
   const connection = await getLearningConnection(db, input.connectionId, { includeDeleted: false });
-  if (!connection || connection.provider !== 'google_classroom' || connection.status !== 'active') invalid();
-  let loaded = await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
+  if (
+    !connection
+    || connection.provider !== 'google_classroom'
+    || (connection.status !== 'active' && (!allowError || connection.status !== 'error'))
+  ) invalid();
+  const connectionStatus = connection.status;
+  let loaded = allowError
+    ? await loadGoogleCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
+    : await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
   if (Date.parse(loaded.credential.accessTokenExpiresAt) > input.nowEpochMs + REFRESH_SKEW_MS) {
     return Object.freeze({
       accessToken: loaded.credential.accessToken,
@@ -165,6 +174,13 @@ async function activeAccessToken(
     signal: new AbortController().signal,
     nowEpochMs: input.nowEpochMs,
   });
+  if (connectionStatus === 'error') {
+    return Object.freeze({
+      accessToken: credential.accessToken,
+      revision: loaded.revision,
+      refreshTokenExpiresAt: credential.refreshTokenExpiresAt,
+    });
+  }
   try {
     const rotated = await rotateGoogleCredential(db, {
       connectionId: input.connectionId,
@@ -190,10 +206,10 @@ async function activeAccessToken(
   }
 }
 
-async function providerContext(db: AppDb, rawInput: GoogleAdminEnvironment) {
+async function providerContext(db: AppDb, rawInput: GoogleAdminEnvironment, allowError = false) {
   const input = environment(rawInput);
   const policy = urlPolicy(input.connectionId);
-  const access = await activeAccessToken(db, input);
+  const access = await activeAccessToken(db, input, allowError);
   return Object.freeze({
     input,
     policy,
@@ -258,7 +274,7 @@ export async function checkGoogleClassroomConnectionHealth(
   rawInput: GoogleAdminEnvironment,
 ): Promise<GoogleClassroomHealthResult> {
   try {
-    const context = await providerContext(db, rawInput);
+    const context = await providerContext(db, rawInput, true);
     await invokeLearningProvider(context.provider, {
       method: 'healthCheck',
       request: {
@@ -315,8 +331,37 @@ export async function disconnectGoogleClassroomConnection(
     fetcher: input.fetcher as AdminFetcher,
     nowEpochMs: input.nowEpochMs as number,
   });
-  const access = await activeAccessToken(db, adminEnvironment);
-  if (access.revision !== expectedRevision) throw new LearningConnectionConflictError();
+  const loaded = await loadGoogleCredentialForAdmin(db, {
+    connectionId,
+    keyRing: input.keyRing as LearningCredentialKeyRing,
+  });
+  if (loaded.revision !== expectedRevision) throw new LearningConnectionConflictError();
+  let accessToken: string | null = loaded.credential.accessToken;
+  let refreshToken = loaded.credential.refreshToken;
+  let grantAlreadyRevoked = false;
+  if (Date.parse(loaded.credential.accessTokenExpiresAt) <= adminEnvironment.nowEpochMs + REFRESH_SKEW_MS) {
+    try {
+      const refreshed = await refreshGoogleAccessToken({
+        clientId: adminEnvironment.clientId,
+        clientSecret: adminEnvironment.clientSecret,
+        refreshToken,
+        refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
+        fetcher: adminEnvironment.fetcher,
+        signal: new AbortController().signal,
+        nowEpochMs: adminEnvironment.nowEpochMs,
+      });
+      accessToken = refreshed.accessToken;
+      refreshToken = refreshed.refreshToken;
+    } catch {
+      await revokeGoogleRefreshToken({
+        refreshToken,
+        fetcher: adminEnvironment.fetcher,
+        signal: new AbortController().signal,
+      });
+      accessToken = null;
+      grantAlreadyRevoked = true;
+    }
+  }
   const registrationResult = await db.prepare(`SELECT registration_id FROM learning_google_registrations
     WHERE connection_id=?1 ORDER BY external_course_id,feed_type LIMIT 2001`)
     .bind(connectionId).all<Record<string, unknown>>();
@@ -333,8 +378,9 @@ export async function disconnectGoogleClassroomConnection(
       while (cursor < registrationIds.length) {
         const registrationId = registrationIds[cursor];
         cursor += 1;
+        if (accessToken === null) return;
         await deleteGoogleClassroomRegistration({
-          accessToken: access.accessToken,
+          accessToken,
           registrationId,
           fetcher: adminEnvironment.fetcher,
           signal: cleanupController.signal,
@@ -348,16 +394,13 @@ export async function disconnectGoogleClassroomConnection(
   } finally {
     clearTimeout(cleanupTimer);
   }
-  const loaded = await loadGoogleCredential(db, {
-    connectionId,
-    keyRing: input.keyRing as LearningCredentialKeyRing,
-  });
-  if (loaded.revision !== expectedRevision) throw new LearningConnectionConflictError();
-  await revokeGoogleRefreshToken({
-    refreshToken: loaded.credential.refreshToken,
-    fetcher: input.fetcher as AdminFetcher,
-    signal: new AbortController().signal,
-  });
+  if (!grantAlreadyRevoked) {
+    await revokeGoogleRefreshToken({
+      refreshToken,
+      fetcher: input.fetcher as AdminFetcher,
+      signal: new AbortController().signal,
+    });
+  }
   return disconnectLearningConnection(db, { connectionId, expectedRevision, actorPersonId });
 }
 
