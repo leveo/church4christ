@@ -494,6 +494,28 @@ describe('Learning provider orchestration', () => {
       .toEqual({ count: 10, rejected_count: 0 });
   });
 
+  it('reserves caller-owned D1 queries before accepting an otherwise legal atomic plan', async () => {
+    const mapped = await seed();
+    const tracked = freePlanBudgetDb();
+    await expect(synchronizeLearningCourse(tracked.db, {
+      provider: fakeProvider({
+        activities: tenBoundaryActivities, emptyEnrollments: true,
+        resourcesByActivity: Object.freeze({
+          [tenBoundaryActivities[0].externalActivityId]: Object.freeze([boundaryResource]),
+        }),
+      }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'notification',
+      operation: operation(100), now: () => NOW_EPOCH,
+      preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
+      reservedInvocationQueries: 1,
+    } as never)).rejects.toMatchObject({
+      code: 'pagination_limit', provider: 'canvas', httpStatus: null, retryAfterSeconds: null,
+    });
+    expect(tracked.metrics.overQueryAttempts).toEqual([]);
+    expect(tracked.metrics.queryCount).toBe(7);
+  });
+
   it('rejects an atomic entity budget above 50 before provider work or a sync run', async () => {
     const mapped = await seed();
     let providerCalls = 0;
