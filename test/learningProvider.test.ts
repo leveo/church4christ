@@ -9,6 +9,7 @@ import {
   learningEnrollmentUniquenessKeys,
   learningIdentityUniquenessKeys,
   learningResourceSubjectKey,
+  learningResourceUniquenessKeys,
   learningSubmissionSubjectKey,
   learningSubmissionUniquenessKeys,
   normalizeLearningConnectionUrlPolicy,
@@ -176,6 +177,10 @@ const ENROLLMENT_SEQUENCE = Object.freeze({
   normalizeItem: normalizeLearningEnrollment,
   uniquenessKeys: learningEnrollmentUniquenessKeys,
 });
+const RESOURCE_SEQUENCE = Object.freeze({
+  normalizeItem: normalizeResource,
+  uniquenessKeys: learningResourceUniquenessKeys,
+});
 const SUBMISSION_SEQUENCE = Object.freeze({
   normalizeItem: normalizeSubmission,
   uniquenessKeys: learningSubmissionUniquenessKeys,
@@ -340,6 +345,32 @@ describe('resource pages', () => {
       normalizeItem: normalizeResource,
       subjectKey: learningResourceSubjectKey,
     }));
+  });
+
+  it('accepts and revalidates a bounded normalized YouTube resource sequence', () => {
+    const context = normalizeLearningOperationContext(operationInput({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId: 'activity-3', externalEnrollmentId: null,
+      },
+    }), NOW);
+    const canonical = normalizeResource({
+      ...resource('youtube-1', 'Canonical video'),
+      kind: 'youtube',
+      launchUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      youtubeVideoId: 'dQw4w9WgXcQ',
+    });
+    const accepted = acceptLearningPageSequence(
+      createLearningPageSequence<LearningResource>(context),
+      page([canonical], 1, null, null, 100),
+      RESOURCE_SEQUENCE,
+      context,
+      NOW,
+    );
+
+    expect(accepted.items).toEqual([canonical]);
+    expect(accepted).toMatchObject({ pageCount: 1, itemCount: 1, complete: 1 });
+    expect(Object.isFrozen(accepted.items[0])).toBe(true);
   });
 });
 

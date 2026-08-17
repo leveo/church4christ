@@ -620,6 +620,11 @@ export function normalizeYouTube(value: unknown): NormalizedYouTube {
         if (!match || url.searchParams.has('v')) invalid();
         videoId = match[1];
       }
+    } else if (host === 'www.youtube-nocookie.com') {
+      const match = /^\/embed\/([A-Za-z0-9_-]{11})$/u.exec(url.pathname);
+      if (!match) invalid();
+      videoId = youtubeId(match[1]);
+      if (value !== `https://www.youtube-nocookie.com/embed/${videoId}`) invalid();
     } else {
       invalid();
     }

@@ -617,6 +617,30 @@ describe('YouTube normalization', () => {
     }
   });
 
+  it('accepts only the exact canonical privacy-enhanced embed shape', () => {
+    const canonical = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ';
+    expect(normalizeYouTube(canonical)).toEqual({
+      videoId: 'dQw4w9WgXcQ',
+      embedUrl: canonical,
+    });
+
+    for (const value of [
+      'https://youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      'https://www.youtube-nocookie.com.evil.test/embed/dQw4w9WgXcQ',
+      'http://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      'https://user:pass@www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      'https://www.youtube-nocookie.com:443/embed/dQw4w9WgXcQ',
+      'https://www.youtube-nocookie.com:444/embed/dQw4w9WgXcQ',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ#fragment',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0',
+      'https://www.youtube-nocookie.com/embed',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ/extra',
+      'https://www.youtube-nocookie.com/embed/%64Qw4w9WgXcQ',
+      'https://www.youtube-nocookie.com/embed%2FdQw4w9WgXcQ',
+      ' https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ ',
+    ]) expectInvalid(() => normalizeYouTube(value));
+  });
+
   it('rejects spoofing, playlists-only, credentials, fragments, and ambiguous ids', () => {
     const invalid = [
       'short',
@@ -667,6 +691,28 @@ describe('provider-neutral normalized records', () => {
       mimeType: null,
       sizeBytes: null,
     }), URL_POLICY));
+    expectInvalid(() => normalizeLearningResource(validResource({
+      kind: 'youtube',
+      launchUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      youtubeVideoId: 'M7lc1UVf-VE',
+      mimeType: null,
+      sizeBytes: null,
+    }), URL_POLICY));
+  });
+
+  it('normalizes its own frozen canonical YouTube resource output idempotently', () => {
+    const first = normalizeLearningResource(validResource({
+      kind: 'youtube',
+      launchUrl: 'https://youtu.be/dQw4w9WgXcQ?t=42',
+      youtubeVideoId: 'dQw4w9WgXcQ',
+      mimeType: null,
+      sizeBytes: null,
+    }), URL_POLICY);
+    const second = normalizeLearningResource(first, URL_POLICY);
+
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(second)).toBe(true);
+    expect(second).toEqual(first);
   });
 
   it('enforces submission activity-kind and timestamp coherence', () => {
