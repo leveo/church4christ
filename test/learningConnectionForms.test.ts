@@ -9,10 +9,10 @@ describe('Learning connection form parser', () => {
   it('parses exact Canvas and Google create contracts without treating Google as Canvas', () => {
     expect(parseLearningConnectionForm({
       action: 'create', provider: 'canvas', display_name: 'Church Canvas',
-      base_url: 'https://canvas.church.test', access_token: 'canvas-private-token',
+      base_url: 'https://canvas.church.test',
     })).toEqual({ ok: true, data: {
       action: 'create', provider: 'canvas', displayName: 'Church Canvas',
-      baseUrl: 'https://canvas.church.test', accessToken: 'canvas-private-token',
+      baseUrl: 'https://canvas.church.test',
     } });
     expect(parseLearningConnectionForm({
       action: 'create', provider: 'google_classroom', display_name: 'Sunday School',
@@ -25,6 +25,7 @@ describe('Learning connection form parser', () => {
     for (const invalid of [
       { action: 'create', provider: 'google_classroom', display_name: 'Google', base_url: 'https://classroom.google.com' },
       { action: 'create', provider: 'google_classroom', display_name: 'Google', access_token: 'private' },
+      { action: 'create', provider: 'canvas', display_name: 'Canvas', base_url: 'https://canvas.test', access_token: 'private' },
       { action: 'create', provider: 'canvas', display_name: 'Canvas', base_url: 'http://canvas.test', access_token: 'private' },
       { action: 'create', provider: 'canvas', display_name: 'Canvas', base_url: 'https://user@canvas.test', access_token: 'private' },
       { action: 'create', provider: 'canvas', display_name: 'Canvas', base_url: 'https://canvas.test/path', access_token: 'private' },

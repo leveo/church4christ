@@ -146,10 +146,12 @@ describe('Learning connection action HTTP boundary', () => {
       locals: { modules: new Set(['learning']), user: user(), db: {} },
     } as never);
 
-    const created = await call('action=create&provider=canvas&display_name=Canvas&base_url=https%3A%2F%2Fcanvas.test&access_token=private-token');
+    const created = await call('action=create&provider=canvas&display_name=Canvas&base_url=https%3A%2F%2Fcanvas.test');
     expect(created.status).toBe(303);
     expect(created.headers.get('location')).toBe('/admin/learning?saved=connection_created');
-    expect(JSON.stringify(injected.createConnection.mock.calls)).not.toContain('private-token');
+    expect(injected.createConnection).toHaveBeenCalledWith({}, expect.objectContaining({
+      provider: 'canvas', baseUrl: 'https://canvas.test', credential: null,
+    }));
 
     const checked = await call('action=health_check&connection_id=401&revision=0&provider=canvas&status=active');
     expect(checked.headers.get('location')).toBe('/admin/learning?saved=health_checked');

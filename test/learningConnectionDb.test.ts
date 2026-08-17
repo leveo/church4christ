@@ -54,6 +54,14 @@ function oneWinner<T>(results: readonly PromiseSettledResult<T>[]): number {
 }
 
 describe('Learning provider connection persistence (D1)', () => {
+  it('creates a Canvas OAuth connection pending without a manually supplied token', async () => {
+    await expect(createLearningConnection(env.DB, {
+      connectionId: 100, provider: 'canvas', displayName: 'OAuth Canvas',
+      baseUrl: 'https://oauth-canvas.church.test', actorPersonId: actor, credential: null,
+    })).resolves.toMatchObject({ provider: 'canvas', status: 'pending', revision: 0 });
+    expect(await env.DB.prepare('SELECT count(*) AS count FROM learning_provider_credentials WHERE connection_id=100').first('count')).toBe(0);
+  });
+
   it('atomically creates credentialed Canvas and pending credential-free Google connections', async () => {
     expect(await createLearningConnection(env.DB, {
       connectionId: 101, provider: 'canvas', displayName: 'Church Canvas', baseUrl: 'https://canvas.church.test',

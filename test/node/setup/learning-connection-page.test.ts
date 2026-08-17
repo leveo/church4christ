@@ -7,14 +7,14 @@ describe('Learning connection administration page', () => {
     expect(page).toContain('listLearningConnections');
     expect(page).toContain('action="/admin/learning/connections"');
     expect(page).toContain('action="/admin/learning/google/start"');
+    expect(page).toContain('action="/admin/learning/canvas/start"');
     expect(page).toContain('/admin/learning/google/courses?connection_id=');
     expect(page).toContain("'google_connected'");
     expect(page).toContain('google_authorization_failed');
     for (const action of ['create', 'update', 'health_check', 'reconnect', 'disconnect']) {
       expect(page).toContain(`value="${action}"`);
     }
-    expect(page).toContain('type="password"');
-    expect(page).toContain('autocomplete="off"');
+    expect(page).not.toContain('name="access_token"');
     expect(page).not.toMatch(/\bciphertext\b|\bnonce\b|\bkeyVersion\b|\bclientSecret\b|\bkey_version\b|\bclient_secret\b/);
   });
 
