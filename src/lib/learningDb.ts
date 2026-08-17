@@ -60,6 +60,8 @@ const LEARNING_FINALIZATION_ACTIVITY_QUERY_COUNT = 3;
 const LEARNING_FINALIZATION_EVENT_QUERY_COUNT = 2;
 const LEARNING_FINALIZATION_RESOURCE_QUERY_COUNT = 2;
 const LEARNING_FINALIZATION_SUBMISSION_QUERY_COUNT = 2;
+export const LEARNING_MAX_RESERVED_D1_QUERIES = LEARNING_D1_FREE_QUERY_LIMIT
+  - LEARNING_SYNC_START_QUERY_COUNT - LEARNING_SYNC_TERMINAL_BATCH_QUERY_COUNT;
 
 const persistenceFailure = (): never => { throw new LearningPersistenceError(); };
 const invalid = (): never => { throw new LearningPersistenceError(); };
@@ -593,6 +595,7 @@ interface LearningSyncExecutionPlan {
 function planLearningSyncExecution(
   snapshot: NormalizedSnapshot,
   eventCount: number,
+  reservedInvocationQueries: number,
 ): LearningSyncExecutionPlan {
   const enrollmentCount = snapshot.enrollments.length;
   const activityCount = snapshot.activities.length;
@@ -624,7 +627,7 @@ function planLearningSyncExecution(
   );
   return Object.freeze({
     identityPreflightQueries, finalizationQueries, maximumInvocationQueries, maximumBindCount,
-    executable: maximumInvocationQueries <= LEARNING_D1_FREE_QUERY_LIMIT
+    executable: maximumInvocationQueries + reservedInvocationQueries <= LEARNING_D1_FREE_QUERY_LIMIT
       && maximumBindCount <= LEARNING_D1_QUERY_BIND_LIMIT,
   });
 }
@@ -830,16 +833,20 @@ export async function completeLearningCourseSync(
   rawLease: LearningSyncLease,
   rawSnapshot: unknown,
   guard: () => void = () => undefined,
+  rawReservedInvocationQueries = 0,
 ): Promise<LearningSyncCompletion> {
   guard();
   const own = lease(rawLease);
+  const reservedInvocationQueries = integer(
+    rawReservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES,
+  );
   const snapshot = normalizedSnapshot(rawSnapshot, own);
   guard();
   if (Date.parse(snapshot.syncedAt) >= Date.parse(own.leaseExpiresAt)) {
     throw new LearningSyncConflictError();
   }
   const events = await eventsFor(snapshot, own, guard);
-  const executionPlan = planLearningSyncExecution(snapshot, events.length);
+  const executionPlan = planLearningSyncExecution(snapshot, events.length, reservedInvocationQueries);
   if (!executionPlan.executable) throw new LearningAtomicLimitError();
   const identityPreflightQueries = await assertIdentityMappings(db, own, snapshot.enrollments, guard);
   assertQueryCount(identityPreflightQueries, executionPlan.identityPreflightQueries);

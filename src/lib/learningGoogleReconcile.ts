@@ -23,6 +23,9 @@ import {
 
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const RECONCILIATION_DEADLINE_MS = 30_000;
+// Receipt claim (2), authoritative/identity/credential reads (3), refresh CAS
+// plus a losing-writer reload (4), and terminal receipt update (1).
+const GOOGLE_WEBHOOK_RESERVED_D1_QUERIES = 10;
 const GOOGLE_POLICY = Object.freeze({
   providerLaunchOrigins: Object.freeze(['https://classroom.google.com']),
   providerFileOrigins: Object.freeze(['https://drive.google.com', 'https://docs.google.com']),
@@ -235,6 +238,7 @@ export async function reconcileGoogleClassroomCourse(
       operation,
       now: () => safeNow(now),
       preResolvedPeople,
+      reservedInvocationQueries: GOOGLE_WEBHOOK_RESERVED_D1_QUERIES,
     });
   } catch (error) {
     if (error instanceof LearningGoogleReconcileError) throw error;

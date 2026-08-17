@@ -3,6 +3,7 @@ import {
   LearningAtomicLimitError,
   LearningIdentityConflictError,
   LEARNING_MAX_ATOMIC_ENTITIES,
+  LEARNING_MAX_RESERVED_D1_QUERIES,
   LearningPersistenceError,
   LearningSyncConflictError,
   completeLearningCourseSync,
@@ -90,6 +91,8 @@ export interface SynchronizeLearningCourseInput {
   readonly now: () => number;
   /** Caller-preloaded, query-free People mappings; the array and entries must be frozen. */
   readonly preResolvedPeople: readonly PreResolvedLearningPerson[];
+  /** Queries owned by the containing Worker invocation outside this synchronization call. */
+  readonly reservedInvocationQueries?: number;
 }
 
 interface GlobalBudget {
@@ -359,9 +362,11 @@ export async function synchronizeLearningCourse(
     } catch { /* the exact validator below owns malformed objects */ }
     let input: Record<string, unknown>;
     try {
+      const hasReservation = Object.prototype.hasOwnProperty.call(rawInput, 'reservedInvocationQueries');
       input = learningValidation.exactRecord(rawInput, [
         'provider', 'urlPolicy', 'connectionId', 'providerKind', 'courseId', 'externalCourseId',
         'trigger', 'operation', 'now', 'preResolvedPeople',
+        ...(hasReservation ? ['reservedInvocationQueries'] : []),
       ]);
     } catch {
       throw new LearningSynchronizationError('invalid_request', providerKind);
@@ -371,6 +376,11 @@ export async function synchronizeLearningCourse(
     const courseId = learningValidation.integer(input.courseId, 1, LEARNING_LIMITS.databaseInteger);
     const externalCourseId = learningValidation.externalId(input.externalCourseId);
     const trigger = learningValidation.oneOf(input.trigger, ['manual', 'scheduled', 'notification'] as const);
+    const reservedInvocationQueries = input.reservedInvocationQueries === undefined
+      ? 0
+      : learningValidation.integer(
+        input.reservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES,
+      );
     if (typeof input.now !== 'function') {
       throw new LearningSynchronizationError('invalid_request', providerKind);
     }
@@ -466,7 +476,7 @@ export async function synchronizeLearningCourse(
       course: courseValue as LearningCourse, urlPolicy, syncedAt,
       enrollments: resolvedEnrollments, activities, resources,
       submissions: resolvedSubmissionValues,
-    }, () => checkActive(operation, now));
+    }, () => checkActive(operation, now), reservedInvocationQueries);
   } catch (error) {
     const safe = classify(error, providerKind);
     if (ownLease !== null) {

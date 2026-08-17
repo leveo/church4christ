@@ -296,7 +296,7 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     expect((await createGooglePubSubPushHandler(productionDeps)(context(request, ['learning'], trackedDb))).status)
       .toBe(503);
     expect(metrics.overQueryAttempts).toEqual([]);
-    expect(metrics.queries).toBeLessThanOrEqual(50);
+    expect(metrics.queries).toBe(16);
     expect(metrics.maxBinds).toBeLessThanOrEqual(100);
     expect(await env.DB.prepare(`SELECT status FROM learning_google_notification_receipts
       WHERE subscription_name=?1 AND message_id='message-1'`).bind(SUBSCRIPTION).first('status')).toBe('failed');
