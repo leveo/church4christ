@@ -454,6 +454,7 @@ export async function mapSelectedGoogleClassroomCourse(
       urlPolicy: context.policy,
       now: () => adminEnvironment.nowEpochMs + 1,
     });
+    if (course.lifecycleState !== 'active') invalid();
     const registrations: GoogleClassroomRegistration[] = [];
     try {
       const replacedRegistrationIds = await loadGoogleClassroomCourseRegistrationIds(db, {
