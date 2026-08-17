@@ -166,8 +166,8 @@ the command is idempotent and can be rerun after `npm run db:seed:local`.
 
 ## Scheduled work: cron triggers
 
-The Worker's `scheduled` handler (`src/worker.ts`) recognizes five schedule branches.
-Generated configuration enables exactly four for either provider: three shared jobs plus
+The Worker's `scheduled` handler (`src/worker.ts`) recognizes six schedule branches.
+Generated configuration enables exactly five for either provider: four shared jobs plus
 the provider-specific D1 backup or Supabase Stripe recovery job.
 
 | Cron | Configuration | Job |
@@ -175,6 +175,7 @@ the provider-specific D1 backup or Supabase Stripe recovery job.
 | `0 13 * * *` | D1 and Supabase | Daily serving reminders; skips when Serve is disabled |
 | `0 14 * * 4` | D1 and Supabase | Weekly serving digest; skips when Serve is disabled |
 | `0 * * * *` | D1 and Supabase | Hourly group-attendance tracking email; skips when Groups is disabled |
+| `15 * * * *` | D1 and Supabase | Isolated Google Classroom registration cleanup and renewal; skips unless Learning and push configuration are ready |
 | `0 9 * * *` | D1 only | Export D1 → `backups/YYYY-MM-DD.sql` in R2 |
 | `*/5 * * * *` | Supabase only | Preview/test-only Stripe webhook inbox and Checkout recovery; processing honors enabled Giving and Registration modules |
 

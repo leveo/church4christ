@@ -108,9 +108,10 @@ dev-log and remote-send branches on the right, and each provider's distinct four
   received/result), `src/lib/digest.ts` (`sendReminders`, `sendWeeklyDigest`), and
   `src/lib/groupAttendance.ts` (`sendAttendanceEmails`).
 - **Scheduled triggers:** declared in `wrangler.jsonc` and dispatched in `src/worker.ts`. Both
-  providers run reminders (`0 13 * * *`), digest (`0 14 * * 4`), and attendance
-  (`0 * * * *`). D1's fourth trigger is backup (`0 9 * * *`) via `src/lib/backup.ts`
-  (`runBackup`, D1 → R2, skips gracefully without `D1_EXPORT_TOKEN`). Supabase's fourth trigger
+  providers run reminders (`0 13 * * *`), digest (`0 14 * * 4`), attendance
+  (`0 * * * *`), and an isolated Google Classroom renewal pass (`15 * * * *`). D1's
+  fifth trigger is backup (`0 9 * * *`) via `src/lib/backup.ts`
+  (`runBackup`, D1 → R2, skips gracefully without `D1_EXPORT_TOKEN`). Supabase's fifth trigger
   is the Preview/test-mode Stripe recovery path (`*/5 * * * *`).
 - **Rules, templates, log:** `src/lib/emailSettingsDb.ts` (`listRules`, `setRule`, templates,
   `listEmailLog`, `fillTemplate`) behind `src/components/admin/EmailTab.astro`.

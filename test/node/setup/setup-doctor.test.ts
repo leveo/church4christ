@@ -214,7 +214,7 @@ describe('doctor generated configuration check', () => {
       .toEqual(['config.worker-crons']);
   });
 
-  it('validates provider schedules separately from all five Worker schedule branches', async () => {
+  it('validates provider schedules separately from all six Worker schedule branches', async () => {
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
     const workerSource = await readFile('src/worker.ts', 'utf8');
     const supabase: any = {

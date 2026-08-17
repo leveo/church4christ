@@ -16,6 +16,7 @@ const REMINDER_CRON = '0 13 * * *'; // daily serving reminders (remind7 / remind
 const DIGEST_CRON = '0 14 * * 4'; // weekly serving digest (Thursday)
 const BACKUP_CRON = '0 9 * * *'; // daily D1 export schedule (unused by Supabase)
 const ATTENDANCE_CRON = '0 * * * *'; // hourly group-attendance tracker emails
+const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15 * * * *'; // isolated Classroom cleanup + renewal budget
 const STRIPE_RECOVERY_CRON = '*/5 * * * *'; // Supabase durable inbox + Checkout recovery
 
 export default {
@@ -43,10 +44,12 @@ export default {
       }
       case ATTENDANCE_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(Promise.all([
-          sendAttendanceEmails(vars, db),
-          runGoogleClassroomRegistrationRenewalPass(env as never, db),
-        ]).finally(end));
+        ctx.waitUntil(sendAttendanceEmails(vars, db).finally(end));
+        break;
+      }
+      case GOOGLE_CLASSROOM_REGISTRATION_CRON: {
+        const { db, end } = openDb(env as never);
+        ctx.waitUntil(runGoogleClassroomRegistrationRenewalPass(env as never, db).finally(end));
         break;
       }
       case BACKUP_CRON:
