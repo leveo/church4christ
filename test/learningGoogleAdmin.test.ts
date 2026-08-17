@@ -261,4 +261,60 @@ describe('Google Classroom admin authoritative course selection', () => {
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
       WHERE connection_id=27302`).first()).toEqual({ count: 0 });
   });
+
+  it('keeps one live disconnect claimant while an admin drain crosses sixty seconds and cron races', async () => {
+    for (let course = 1; course <= 4; course += 1) {
+      await env.DB.prepare(`INSERT INTO learning_courses
+        (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+        VALUES(27303,27302,'google_classroom',?1,?2,?3)`)
+        .bind(`lease-course-${course}`, `Lease course ${course}`, `https://classroom.google.com/c/lease-${course}`).run();
+      await env.DB.prepare(`INSERT INTO learning_google_registrations
+        (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+        (27302,?1,'COURSE_ROSTER_CHANGES',?2,'projects/church-project/topics/classroom',
+          '2026-08-24T12:00:00.000Z'),
+        (27302,?1,'COURSE_WORK_CHANGES',?3,'projects/church-project/topics/classroom',
+          '2026-08-24T12:00:00.000Z')`)
+        .bind(`lease-course-${course}`, `lease-${course}-roster`, `lease-${course}-work`).run();
+    }
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    let current = NOW;
+    let cronResult: Awaited<ReturnType<typeof recoverGoogleClassroomCleanup>> | null = null;
+    const deleted: string[] = [];
+    let revocations = 0;
+    const now = () => current;
+    const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.origin === 'https://classroom.googleapis.com') {
+        const registrationId = decodeURIComponent(url.pathname.slice('/v1/registrations/'.length));
+        deleted.push(registrationId);
+        current += 10_001;
+        if (deleted.length === 7) {
+          cronResult = await recoverGoogleClassroomCleanup(env.DB as AppDb, {
+            connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+            clientSecret: 'private-client-secret', keyRing: ring, fetcher,
+            signal: new AbortController().signal, nowEpochMs: current, limit: 1,
+          }, { now });
+        }
+        return new Response(null, { status: 200 });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
+      revocations += 1;
+      return new Response(null, { status: 200 });
+    });
+
+    await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, {
+      connectionId: 27302, expectedRevision: 1, actorPersonId: 27301,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    }, { now })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(current - NOW).toBeGreaterThan(60_000);
+    expect(cronResult).toEqual({
+      selected: 0, cleaned: 0, pending: 0, finalizedDisconnect: false,
+    });
+    expect(deleted).toHaveLength(8);
+    expect(new Set(deleted).size).toBe(8);
+    expect(revocations).toBe(1);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_cleanup_tasks
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+  });
 });
