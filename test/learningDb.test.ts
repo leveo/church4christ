@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { AppDb } from '../src/lib/appDb';
+import * as learningDb from '../src/lib/learningDb';
 import {
   LearningIdentityConflictError,
   LearningSyncConflictError,
@@ -18,6 +20,7 @@ const NOW = '2026-08-17T12:00:00.000Z';
 const LATER = '2026-08-17T12:05:00.000Z';
 const AFTER = '2026-08-17T12:10:00.000Z';
 const FINAL = '2026-08-17T12:15:00.000Z';
+const LEASE_END = '2026-08-17T12:30:00.000Z';
 const POLICY = Object.freeze({
   provider: 'canvas' as const,
   connectionId: 701,
@@ -132,7 +135,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
       WHERE connection_id=701 AND external_user_id='disabled-user'`).run();
     const lease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await expect(completeLearningCourseSync(env.DB, lease, {
       course: { ...course(), lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
@@ -167,7 +170,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     const { mapped } = await seed();
     const lease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     const firstEnrollment = enrollment('canvas-user-1');
     const assignment = activity('homework-1', 'assignment');
@@ -191,7 +194,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
 
     const replayLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY,
+      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await completeLearningCourseSync(env.DB, replayLease, {
       course: { ...course('genesis-1', 'Genesis 1 updated'), lastSyncedAt: LATER }, urlPolicy: POLICY, syncedAt: LATER,
@@ -217,7 +220,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     });
     const initialLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await completeLearningCourseSync(env.DB, initialLease, {
       course: { ...course('genesis-1', 'Last complete generation'), lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
@@ -226,7 +229,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     });
     const lease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY,
+      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await expect(completeLearningCourseSync(env.DB, lease, {
       course: { ...course('genesis-1', 'Must not commit'), lastSyncedAt: LATER }, urlPolicy: POLICY, syncedAt: LATER,
@@ -245,7 +248,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     const { mapped } = await seed();
     const lease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await completeLearningCourseSync(env.DB, lease, {
       course: { ...course(), lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
@@ -277,7 +280,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     const { mapped } = await seed();
     const firstLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     const quiz = activity('quiz-returned', 'quiz');
     const returned = submission('quiz-returned', 'canvas-user-1', 'returned');
@@ -297,7 +300,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
 
     const replayLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: AFTER, urlPolicy: POLICY,
+      trigger: 'scheduled', startedAt: AFTER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     const replay = await completeLearningCourseSync(env.DB, replayLease, {
       course: { ...course(), lastSyncedAt: AFTER }, urlPolicy: POLICY, syncedAt: AFTER,
@@ -310,7 +313,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
 
     const exactReplayLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: FINAL, urlPolicy: POLICY,
+      trigger: 'scheduled', startedAt: FINAL, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     const exactReplay = await completeLearningCourseSync(env.DB, exactReplayLease, {
       course: { ...course(), lastSyncedAt: FINAL }, urlPolicy: POLICY, syncedAt: FINAL,
@@ -325,7 +328,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     const { mapped } = await seed();
     const initialLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await completeLearningCourseSync(env.DB, initialLease, {
       course: { ...course(), displayName: 'Stable generation', lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
@@ -333,7 +336,7 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     });
     const oversizedLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY,
+      trigger: 'scheduled', startedAt: LATER, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
     });
     await expect(completeLearningCourseSync(env.DB, oversizedLease, {
       course: { ...course(), displayName: 'Oversized generation', lastSyncedAt: LATER }, urlPolicy: POLICY, syncedAt: LATER,
@@ -352,16 +355,92 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     const attempts = await Promise.allSettled([
       startLearningSync(env.DB, {
         connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-        trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+        trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
       }),
       startLearningSync(env.DB, {
         connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-        trigger: 'scheduled', startedAt: NOW, urlPolicy: POLICY,
+        trigger: 'scheduled', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LEASE_END,
       }),
     ]);
     expect(attempts.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
     expect(attempts.filter((item) => item.status === 'rejected')).toHaveLength(1);
     expect(attempts.find((item) => item.status === 'rejected')).toMatchObject({ reason: expect.any(LearningSyncConflictError) });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 1 });
+  });
+
+  it('heartbeats a live lease, rejects expired completion, and crash-recovers with a cancelled old run', async () => {
+    const { mapped } = await seed();
+    const first = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: LATER,
+    } as never);
+    const heartbeat = (learningDb as unknown as {
+      heartbeatLearningSync?: (
+        db: AppDb,
+        lease: typeof first,
+        input: { heartbeatAt: string; leaseExpiresAt: string },
+      ) => Promise<typeof first>;
+    }).heartbeatLearningSync;
+    expect(heartbeat).toBeTypeOf('function');
+    if (!heartbeat) return;
+    const extended = await heartbeat(env.DB, first, {
+      heartbeatAt: '2026-08-17T12:04:00.000Z', leaseExpiresAt: AFTER,
+    });
+    expect(extended).toMatchObject({ leaseExpiresAt: AFTER });
+    await completeLearningCourseSync(env.DB, extended, {
+      course: { ...course(), lastSyncedAt: '2026-08-17T12:06:00.000Z' },
+      urlPolicy: POLICY, syncedAt: '2026-08-17T12:06:00.000Z',
+      enrollments: [], activities: [], resources: [], submissions: [],
+    });
+
+    const expired = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: AFTER, urlPolicy: POLICY, leaseExpiresAt: FINAL,
+    } as never);
+    const replacement = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: '2026-08-17T12:16:00.000Z', urlPolicy: POLICY,
+      leaseExpiresAt: '2026-08-17T12:25:00.000Z',
+    } as never);
+    expect(await getLearningSyncRun(env.DB, expired.runId)).toMatchObject({ status: 'cancelled', errorCode: null });
+    await expect(completeLearningCourseSync(env.DB, expired, {
+      course: { ...course(), lastSyncedAt: '2026-08-17T12:17:00.000Z' },
+      urlPolicy: POLICY, syncedAt: '2026-08-17T12:17:00.000Z',
+      enrollments: [], activities: [], resources: [], submissions: [],
+    })).rejects.toBeInstanceOf(LearningSyncConflictError);
+    await failLearningSync(env.DB, replacement, {
+      finishedAt: '2026-08-17T12:17:00.000Z', errorCode: 'cancelled',
+    });
+    expect(await getLearningSyncRun(env.DB, replacement.runId)).toMatchObject({ status: 'cancelled', errorCode: null });
+  });
+
+  it('rolls back a generation when an admin disables its exact identity after preflight', async () => {
+    const { mapped } = await seed();
+    await linkLearningIdentity(env.DB, {
+      connectionId: 701, provider: 'canvas', externalUserId: 'raced-user', personId: 7012,
+    });
+    const lease = await startLearningSync(env.DB, {
+      connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY, leaseExpiresAt: AFTER,
+    } as never);
+    let raced = false;
+    const racingDb: AppDb = {
+      prepare: (sql) => env.DB.prepare(sql),
+      batch: async (statements) => {
+        if (!raced) {
+          raced = true;
+          await env.DB.prepare(`UPDATE learning_identity_links SET status='disabled'
+            WHERE connection_id=701 AND external_user_id='raced-user'`).run();
+        }
+        return env.DB.batch(statements as D1PreparedStatement[]);
+      },
+    };
+    await expect(completeLearningCourseSync(racingDb, lease, {
+      course: { ...course(), lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
+      enrollments: [{ providerEnrollment: enrollment('raced-user'), personId: 7012 }],
+      activities: [activity('raced-activity', 'quiz')], resources: [], submissions: [],
+    })).rejects.toBeInstanceOf(LearningIdentityConflictError);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities`).first()).toEqual({ count: 0 });
+    expect(await getLearningSyncRun(env.DB, lease.runId)).toMatchObject({ status: 'running' });
   });
 });

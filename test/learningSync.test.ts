@@ -250,6 +250,6 @@ describe('Learning provider orchestration', () => {
       resolvePerson: async () => ({ personId: 9012 }),
     })).rejects.toMatchObject({ code: 'cancelled' });
     expect(await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs`).first())
-      .toEqual({ status: 'failed', error_code: 'cancelled' });
+      .toEqual({ status: 'cancelled', error_code: null });
   });
 });

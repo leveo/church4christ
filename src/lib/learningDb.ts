@@ -272,11 +272,13 @@ export interface LearningSyncLease {
   readonly externalCourseId: string;
   readonly trigger: LearningSyncTrigger;
   readonly startedAt: string;
+  readonly leaseExpiresAt: string;
 }
 
 function lease(value: unknown): LearningSyncLease {
   const row = exact(value, [
     'runId', 'marker', 'connectionId', 'provider', 'courseId', 'externalCourseId', 'trigger', 'startedAt',
+    'leaseExpiresAt',
   ]);
   const markerValue = row.marker;
   if (typeof markerValue !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(markerValue)) invalid();
@@ -285,7 +287,7 @@ function lease(value: unknown): LearningSyncLease {
     runId: integer(row.runId), marker, connectionId: integer(row.connectionId),
     provider: provider(row.provider), courseId: integer(row.courseId),
     externalCourseId: externalId(row.externalCourseId), trigger: trigger(row.trigger),
-    startedAt: timestamp(row.startedAt),
+    startedAt: timestamp(row.startedAt), leaseExpiresAt: timestamp(row.leaseExpiresAt),
   });
 }
 
@@ -299,10 +301,12 @@ export async function startLearningSync(
     readonly trigger: LearningSyncTrigger;
     readonly startedAt: string;
     readonly urlPolicy: LearningConnectionUrlPolicy;
+    readonly leaseExpiresAt: string;
   },
 ): Promise<LearningSyncLease> {
   const input = exact(rawInput, [
     'connectionId', 'provider', 'courseId', 'externalCourseId', 'trigger', 'startedAt', 'urlPolicy',
+    'leaseExpiresAt',
   ]);
   const connectionId = integer(input.connectionId);
   const kind = provider(input.provider);
@@ -310,35 +314,105 @@ export async function startLearningSync(
   const courseExternalId = externalId(input.externalCourseId);
   const triggerType = trigger(input.trigger);
   const startedAt = timestamp(input.startedAt);
+  const leaseExpiresAt = timestamp(input.leaseExpiresAt);
+  if (Date.parse(leaseExpiresAt) <= Date.parse(startedAt)) invalid();
   let policy: LearningConnectionUrlPolicy;
   try { policy = normalizeLearningConnectionUrlPolicy(input.urlPolicy); } catch { return invalid(); }
   if (policy.connectionId !== connectionId || policy.provider !== kind) invalid();
   const marker = crypto.randomUUID();
+  const recoveryMarker = crypto.randomUUID();
   try {
     const results = await db.batch([
-      db.prepare(`UPDATE learning_provider_connections SET operation_marker=?1
+      db.prepare(`UPDATE learning_provider_connections
+        SET operation_marker=?1,operation_expires_at=?6
         WHERE id=?2 AND provider=?3 AND status='active' AND deleted_at IS NULL
-          AND ((?3='canvas' AND base_url=?6)
-            OR (?3='google_classroom' AND base_url IS NULL AND ?6 IS NULL))
-          AND operation_marker IS NULL AND EXISTS (
+          AND ((?3='canvas' AND base_url=?8)
+            OR (?3='google_classroom' AND base_url IS NULL AND ?8 IS NULL))
+          AND (operation_marker IS NULL OR (
+            operation_expires_at IS NOT NULL AND operation_expires_at<=?7
+            AND EXISTS (SELECT 1 FROM learning_sync_runs stale
+              WHERE stale.connection_id=?2 AND stale.lease_marker=operation_marker
+                AND stale.status='running' AND stale.lease_expires_at<=?7)
+          )) AND EXISTS (
             SELECT 1 FROM learning_courses c WHERE c.id=?4 AND c.connection_id=?2
               AND c.provider=?3 AND c.external_course_id=?5 AND c.deleted_at IS NULL
-          )`).bind(marker, connectionId, kind, courseId, courseExternalId, policy.baseUrl),
+          )`).bind(
+          marker, connectionId, kind, courseId, courseExternalId,
+          leaseExpiresAt, startedAt, policy.baseUrl,
+        ),
+      db.prepare(`UPDATE learning_sync_runs SET status='cancelled',finished_at=?1,
+        error_code=NULL,finalization_marker=COALESCE(finalization_marker,?2)
+        WHERE connection_id=?3 AND status='running' AND lease_expires_at<=?1
+          AND lease_marker<>?4 AND EXISTS (
+            SELECT 1 FROM learning_provider_connections c
+            WHERE c.id=?3 AND c.operation_marker=?4 AND c.operation_expires_at=?5
+          )`).bind(startedAt, recoveryMarker, connectionId, marker, leaseExpiresAt),
       db.prepare(`INSERT INTO learning_sync_runs
         (connection_id,course_id,trigger_type,status,started_at,attempt_count,
-         scanned_count,changed_count,removed_count,event_count,error_code)
-        SELECT ?1,?2,?3,'running',?4,1,0,0,0,0,NULL
+         scanned_count,changed_count,removed_count,event_count,error_code,lease_marker,lease_expires_at)
+        SELECT ?1,?2,?3,'running',?4,1,0,0,0,0,NULL,?6,?7
         WHERE EXISTS (SELECT 1 FROM learning_provider_connections
-          WHERE id=?1 AND provider=?5 AND operation_marker=?6)
-        RETURNING id AS run_id`).bind(connectionId, courseId, triggerType, startedAt, kind, marker),
+          WHERE id=?1 AND provider=?5 AND operation_marker=?6 AND operation_expires_at=?7)
+        RETURNING id AS run_id`).bind(
+          connectionId, courseId, triggerType, startedAt, kind, marker, leaseExpiresAt,
+        ),
     ]);
-    if (!Array.isArray(results) || results.length !== 2) persistenceFailure();
-    const started = oneRow(results[1]);
+    if (!Array.isArray(results) || results.length !== 3) persistenceFailure();
+    const started = oneRow(results[2]);
     if (!started) throw new LearningSyncConflictError();
     return lease({
       runId: started.run_id, marker, connectionId, provider: kind, courseId,
-      externalCourseId: courseExternalId, trigger: triggerType, startedAt,
+      externalCourseId: courseExternalId, trigger: triggerType, startedAt, leaseExpiresAt,
     });
+  } catch (error) {
+    if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
+    throw new LearningPersistenceError();
+  }
+}
+
+export async function heartbeatLearningSync(
+  db: AppDb,
+  rawLease: LearningSyncLease,
+  rawInput: { readonly heartbeatAt: string; readonly leaseExpiresAt: string },
+): Promise<LearningSyncLease> {
+  const own = lease(rawLease);
+  const input = exact(rawInput, ['heartbeatAt', 'leaseExpiresAt']);
+  const heartbeatAt = timestamp(input.heartbeatAt);
+  const leaseExpiresAt = timestamp(input.leaseExpiresAt);
+  if (Date.parse(heartbeatAt) < Date.parse(own.startedAt)
+    || Date.parse(heartbeatAt) >= Date.parse(own.leaseExpiresAt)
+    || Date.parse(leaseExpiresAt) <= Date.parse(heartbeatAt)) invalid();
+  try {
+    const results = await db.batch([
+      db.prepare(`UPDATE learning_provider_connections SET revision=-1
+        WHERE id=?1 AND (
+          provider<>?2 OR operation_marker IS NULL OR operation_marker<>?3
+          OR operation_expires_at IS NULL OR operation_expires_at<=?4
+          OR NOT EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?5 AND r.connection_id=?1 AND r.course_id=?6
+              AND r.status='running' AND r.lease_marker=?3
+              AND r.finalization_marker IS NULL AND r.lease_expires_at>?4)
+        )`).bind(
+          own.connectionId, own.provider, own.marker, heartbeatAt, own.runId, own.courseId,
+        ),
+      db.prepare(`UPDATE learning_sync_runs SET lease_expires_at=?1
+        WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
+          AND lease_marker=?5 AND finalization_marker IS NULL AND lease_expires_at>?6
+        RETURNING id AS run_id`).bind(
+          leaseExpiresAt, own.runId, own.connectionId, own.courseId, own.marker, heartbeatAt,
+        ),
+      db.prepare(`UPDATE learning_provider_connections SET operation_expires_at=?1,updated_at=?2
+        WHERE id=?3 AND provider=?4 AND operation_marker=?5 AND operation_expires_at>?2
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?6 AND r.lease_marker=?5 AND r.lease_expires_at=?1
+              AND r.status='running' AND r.finalization_marker IS NULL)
+        RETURNING id AS connection_id`).bind(
+          leaseExpiresAt, heartbeatAt, own.connectionId, own.provider, own.marker, own.runId,
+        ),
+    ]);
+    if (!Array.isArray(results) || results.length !== 3
+      || !oneRow(results[1]) || !oneRow(results[2])) throw new LearningSyncConflictError();
+    return lease({ ...own, leaseExpiresAt });
   } catch (error) {
     if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
     throw new LearningPersistenceError();
@@ -515,11 +589,19 @@ async function eventsFor(snapshot: NormalizedSnapshot, own: LearningSyncLease): 
   return Object.freeze(events);
 }
 
-function leaseGuard(db: AppDb, own: LearningSyncLease): AppStatement {
-  // A lost/forged lease deliberately violates the revision CHECK so the entire
-  // AppDb batch rolls back on both SQLite/D1 and PostgreSQL.
+function activeLeaseGuard(db: AppDb, own: LearningSyncLease, at: string): AppStatement {
+  // A lost, forged, or expired lease deliberately violates the revision CHECK
+  // so the whole AppDb batch rolls back on SQLite/D1 and PostgreSQL.
   return db.prepare(`UPDATE learning_provider_connections SET revision=-1
-    WHERE id=?1 AND (operation_marker IS NULL OR operation_marker<>?2)`).bind(own.connectionId, own.marker);
+    WHERE id=?1 AND (
+      provider<>?2 OR status<>'active' OR deleted_at IS NOT NULL
+      OR operation_marker IS NULL OR operation_marker<>?3
+      OR operation_expires_at IS NULL OR operation_expires_at<=?4
+      OR NOT EXISTS (SELECT 1 FROM learning_sync_runs r
+        WHERE r.id=?5 AND r.connection_id=?1 AND r.course_id=?6
+          AND r.status='running' AND r.lease_marker=?3
+          AND r.finalization_marker IS NULL AND r.lease_expires_at>?4)
+    )`).bind(own.connectionId, own.provider, own.marker, at, own.runId, own.courseId);
 }
 
 async function assertIdentityMappings(
@@ -571,6 +653,7 @@ function removedCountStatement(
   db: AppDb,
   own: LearningSyncLease,
   snapshot: NormalizedSnapshot,
+  finalizationMarker: string,
 ): AppStatement {
   const values: unknown[] = [];
   const bind = (value: unknown): string => {
@@ -618,6 +701,7 @@ function removedCountStatement(
   const runId = bind(own.runId);
   const connectionId = bind(own.connectionId);
   const courseId = bind(own.courseId);
+  const marker = bind(finalizationMarker);
   return db.prepare(`UPDATE learning_sync_runs SET removed_count=
     (SELECT COUNT(*) FROM learning_enrollments e
       WHERE e.course_id=${courseForEnrollments} AND e.state<>'inactive' AND ${enrollmentAbsent})
@@ -629,7 +713,8 @@ function removedCountStatement(
       JOIN learning_activities a ON a.id=s.activity_id
       JOIN learning_enrollments e ON e.id=s.enrollment_id
       WHERE s.course_id=${courseForSubmissions} AND ${submissionAbsent})
-    WHERE id=${runId} AND connection_id=${connectionId} AND course_id=${courseId} AND status='running'`)
+    WHERE id=${runId} AND connection_id=${connectionId} AND course_id=${courseId}
+      AND status='running' AND finalization_marker=${marker}`)
     .bind(...values);
 }
 
@@ -649,15 +734,32 @@ export async function completeLearningCourseSync(
 ): Promise<LearningSyncCompletion> {
   const own = lease(rawLease);
   const snapshot = normalizedSnapshot(rawSnapshot, own);
+  if (Date.parse(snapshot.syncedAt) >= Date.parse(own.leaseExpiresAt)) {
+    throw new LearningSyncConflictError();
+  }
   await assertIdentityMappings(db, own, snapshot.enrollments);
   const events = await eventsFor(snapshot, own);
-  const statements: AppStatement[] = [leaseGuard(db, own), removedCountStatement(db, own, snapshot)];
+  const finalizationMarker = crypto.randomUUID();
+  const statements: AppStatement[] = [
+    activeLeaseGuard(db, own, snapshot.syncedAt),
+    db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
+      WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
+        AND lease_marker=?5 AND lease_expires_at>?6 AND finalization_marker IS NULL
+        AND EXISTS (SELECT 1 FROM learning_provider_connections c
+          WHERE c.id=?3 AND c.provider=?7 AND c.operation_marker=?5
+            AND c.operation_expires_at>?6 AND c.status='active' AND c.deleted_at IS NULL)
+      RETURNING id AS run_id`).bind(
+        finalizationMarker, own.runId, own.connectionId, own.courseId,
+        own.marker, snapshot.syncedAt, own.provider,
+      ),
+    removedCountStatement(db, own, snapshot, finalizationMarker),
+  ];
 
   for (const resolved of snapshot.enrollments) {
     const enrollment = resolved.providerEnrollment;
     statements.push(
       db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
-        WHERE id=?1 AND status='running' AND NOT EXISTS (
+        WHERE id=?1 AND status='running' AND finalization_marker=?9 AND NOT EXISTS (
           SELECT 1 FROM learning_enrollments e
           JOIN learning_identity_links i ON i.id=e.identity_link_id AND i.connection_id=e.connection_id
           WHERE e.course_id=?2 AND e.connection_id=?3 AND e.external_enrollment_id=?4
@@ -666,11 +768,17 @@ export async function completeLearningCourseSync(
         )`).bind(
           own.runId, own.courseId, own.connectionId, enrollment.externalEnrollmentId,
           resolved.personId, enrollment.externalUserId, enrollment.role, enrollment.state,
+          finalizationMarker,
         ),
       db.prepare(`INSERT INTO learning_identity_links
         (connection_id,person_id,external_user_id,status,created_at,updated_at)
-        VALUES (?1,?2,?3,'active',?4,?4)
-        ON CONFLICT DO NOTHING`).bind(own.connectionId, resolved.personId, enrollment.externalUserId, snapshot.syncedAt),
+        SELECT ?1,?2,?3,'active',?4,?4 WHERE EXISTS (
+          SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?5 AND r.status='running' AND r.finalization_marker=?6
+        ) ON CONFLICT DO NOTHING`).bind(
+          own.connectionId, resolved.personId, enrollment.externalUserId, snapshot.syncedAt,
+          own.runId, finalizationMarker,
+        ),
       db.prepare(`UPDATE learning_enrollments SET connection_id=0
         WHERE course_id=?1 AND (
           external_enrollment_id=?2 OR identity_link_id=(SELECT id FROM learning_identity_links
@@ -678,20 +786,37 @@ export async function completeLearningCourseSync(
         ) AND NOT (
           external_enrollment_id=?2 AND identity_link_id=(SELECT id FROM learning_identity_links
             WHERE connection_id=?3 AND person_id=?4 AND external_user_id=?5)
-        )`).bind(
+        ) AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?6 AND r.status='running' AND r.finalization_marker=?7)`).bind(
           own.courseId, enrollment.externalEnrollmentId, own.connectionId,
-          resolved.personId, enrollment.externalUserId,
+          resolved.personId, enrollment.externalUserId, own.runId, finalizationMarker,
         ),
       db.prepare(`INSERT INTO learning_enrollments
         (connection_id,course_id,identity_link_id,external_enrollment_id,role,state,last_synced_at,created_at,updated_at)
         SELECT ?1,?2,i.id,?3,?4,?5,?6,?6,?6 FROM learning_identity_links i
         WHERE i.connection_id=?1 AND i.person_id=?7 AND i.external_user_id=?8 AND i.status='active'
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?9 AND r.status='running' AND r.finalization_marker=?10)
         ON CONFLICT(course_id,external_enrollment_id) DO UPDATE SET
           role=excluded.role,state=excluded.state,last_synced_at=excluded.last_synced_at,
           updated_at=excluded.updated_at`).bind(
           own.connectionId, own.courseId, enrollment.externalEnrollmentId,
           enrollment.role, enrollment.state, snapshot.syncedAt,
-          resolved.personId, enrollment.externalUserId,
+          resolved.personId, enrollment.externalUserId, own.runId, finalizationMarker,
+        ),
+      db.prepare(`UPDATE learning_provider_connections SET revision=-1
+        WHERE id=?1 AND operation_marker=?2
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?3 AND r.finalization_marker=?4 AND r.status='running')
+          AND NOT EXISTS (
+            SELECT 1 FROM learning_identity_links i
+            JOIN learning_enrollments e ON e.identity_link_id=i.id AND e.connection_id=i.connection_id
+            WHERE i.connection_id=?1 AND i.person_id=?5 AND i.external_user_id=?6 AND i.status='active'
+              AND e.course_id=?7 AND e.external_enrollment_id=?8 AND e.role=?9 AND e.state=?10
+          )`).bind(
+          own.connectionId, own.marker, own.runId, finalizationMarker,
+          resolved.personId, enrollment.externalUserId, own.courseId,
+          enrollment.externalEnrollmentId, enrollment.role, enrollment.state,
         ),
     );
   }
@@ -699,7 +824,7 @@ export async function completeLearningCourseSync(
   for (const activity of snapshot.activities) {
     statements.push(
       db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
-        WHERE id=?1 AND status='running' AND NOT EXISTS (
+        WHERE id=?1 AND status='running' AND finalization_marker=?11 AND NOT EXISTS (
           SELECT 1 FROM learning_activities a WHERE a.course_id=?2 AND a.external_activity_id=?3
             AND a.title=?4 AND a.kind=?5 AND a.lifecycle_state=?6 AND a.launch_url=?7
             AND a.due_at IS NOT DISTINCT FROM ?8 AND a.published_at IS NOT DISTINCT FROM ?9
@@ -707,15 +832,19 @@ export async function completeLearningCourseSync(
         )`).bind(
           own.runId, own.courseId, activity.externalActivityId, activity.title, activity.kind,
           activity.lifecycleState, activity.launchUrl, activity.dueAt, activity.publishedAt,
-          activity.providerUpdatedAt,
+          activity.providerUpdatedAt, finalizationMarker,
         ),
       db.prepare(`UPDATE learning_activities SET kind='__learning_kind_conflict__'
-        WHERE course_id=?1 AND external_activity_id=?2 AND kind<>?3`)
-        .bind(own.courseId, activity.externalActivityId, activity.kind),
+        WHERE course_id=?1 AND external_activity_id=?2 AND kind<>?3
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?4 AND r.status='running' AND r.finalization_marker=?5)`)
+        .bind(own.courseId, activity.externalActivityId, activity.kind, own.runId, finalizationMarker),
       db.prepare(`INSERT INTO learning_activities
         (course_id,external_activity_id,title,kind,lifecycle_state,launch_url,due_at,published_at,
          provider_updated_at,last_synced_at,created_at,updated_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?10)
+        SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?10
+        WHERE EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?11 AND r.status='running' AND r.finalization_marker=?12)
         ON CONFLICT(course_id,external_activity_id) DO UPDATE SET
           title=excluded.title,lifecycle_state=excluded.lifecycle_state,launch_url=excluded.launch_url,
           due_at=excluded.due_at,published_at=excluded.published_at,
@@ -723,7 +852,7 @@ export async function completeLearningCourseSync(
           updated_at=excluded.updated_at`).bind(
           own.courseId, activity.externalActivityId, activity.title, activity.kind,
           activity.lifecycleState, activity.launchUrl, activity.dueAt, activity.publishedAt,
-          activity.providerUpdatedAt, snapshot.syncedAt,
+          activity.providerUpdatedAt, snapshot.syncedAt, own.runId, finalizationMarker,
         ),
     );
   }
@@ -731,10 +860,10 @@ export async function completeLearningCourseSync(
   for (const event of events) {
     statements.push(
       db.prepare(`UPDATE learning_sync_runs SET event_count=event_count+1
-        WHERE id=?1 AND connection_id=?2 AND status='running' AND NOT EXISTS (
+        WHERE id=?1 AND connection_id=?2 AND status='running' AND finalization_marker=?4 AND NOT EXISTS (
           SELECT 1 FROM learning_activity_events
           WHERE connection_id=?2 AND source_event_id=?3
-        )`).bind(own.runId, own.connectionId, event.sourceEventId),
+        )`).bind(own.runId, own.connectionId, event.sourceEventId, finalizationMarker),
       db.prepare(`INSERT INTO learning_activity_events
       (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
        enrollment_id,course_id,activity_id,activity_kind,occurred_at,ingested_at)
@@ -744,10 +873,12 @@ export async function completeLearningCourseSync(
       LEFT JOIN learning_activities a ON a.course_id=e.course_id AND a.external_activity_id=?9
       WHERE e.course_id=?5 AND e.connection_id=?2 AND e.external_enrollment_id=?10
         AND ((?9 IS NULL AND a.id IS NULL) OR (?9 IS NOT NULL AND a.id IS NOT NULL))
+        AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?11 AND r.status='running' AND r.finalization_marker=?12)
       ON CONFLICT(connection_id,source_event_id) DO NOTHING`).bind(
       event.sourceEventId, own.connectionId, own.provider, event.eventType, own.courseId,
       event.activityKind, event.occurredAt, snapshot.syncedAt, event.externalActivityId,
-      event.externalEnrollmentId,
+      event.externalEnrollmentId, own.runId, finalizationMarker,
       ),
     );
   }
@@ -755,7 +886,7 @@ export async function completeLearningCourseSync(
   for (const resource of snapshot.resources) {
     statements.push(
       db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
-        WHERE id=?1 AND status='running' AND NOT EXISTS (
+        WHERE id=?1 AND status='running' AND finalization_marker=?12 AND NOT EXISTS (
           SELECT 1 FROM learning_resources r JOIN learning_activities a ON a.id=r.activity_id
           WHERE a.course_id=?2 AND a.external_activity_id=?3 AND r.external_resource_id=?4
             AND r.title=?5 AND r.kind=?6 AND r.launch_url=?7
@@ -766,13 +897,16 @@ export async function completeLearningCourseSync(
         )`).bind(
           own.runId, own.courseId, resource.externalActivityId, resource.externalResourceId,
           resource.title, resource.kind, resource.launchUrl, resource.youtubeVideoId,
-          resource.mimeType, resource.sizeBytes, resource.providerUpdatedAt,
+          resource.mimeType, resource.sizeBytes, resource.providerUpdatedAt, finalizationMarker,
         ),
       db.prepare(`INSERT INTO learning_resources
         (activity_id,external_resource_id,title,kind,launch_url,youtube_video_id,mime_type,
          size_bytes,provider_updated_at,created_at,updated_at)
         SELECT a.id,?1,?2,?3,?4,?5,?6,?7,?8,?9,?9 FROM learning_activities a
         WHERE a.course_id=?10 AND a.external_activity_id=?11
+          AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+            WHERE sync_run.id=?12 AND sync_run.status='running'
+              AND sync_run.finalization_marker=?13)
         ON CONFLICT(activity_id,external_resource_id) DO UPDATE SET
           title=excluded.title,kind=excluded.kind,launch_url=excluded.launch_url,
           youtube_video_id=excluded.youtube_video_id,mime_type=excluded.mime_type,
@@ -781,6 +915,7 @@ export async function completeLearningCourseSync(
         resource.externalResourceId, resource.title, resource.kind, resource.launchUrl,
         resource.youtubeVideoId, resource.mimeType, resource.sizeBytes,
         resource.providerUpdatedAt, snapshot.syncedAt, own.courseId, resource.externalActivityId,
+        own.runId, finalizationMarker,
       ),
     );
   }
@@ -789,18 +924,20 @@ export async function completeLearningCourseSync(
       WHERE a.course_id=? AND a.external_activity_id=?) AND r.external_resource_id=?)`).join(' OR ')})`;
   statements.push(db.prepare(`DELETE FROM learning_resources AS r WHERE r.activity_id IN (
     SELECT a.id FROM learning_activities a WHERE a.course_id=?
-  )${resourceKeepSql}`).bind(
+  )${resourceKeepSql} AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+    WHERE sync_run.id=? AND sync_run.status='running' AND sync_run.finalization_marker=?)`).bind(
     own.courseId,
     ...snapshot.resources.flatMap((resource) => [
       own.courseId, resource.externalActivityId, resource.externalResourceId,
     ]),
+    own.runId, finalizationMarker,
   ));
 
   for (const resolved of snapshot.submissions) {
     const submission = resolved.providerSubmission;
     statements.push(
       db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
-        WHERE id=?1 AND status='running' AND NOT EXISTS (
+        WHERE id=?1 AND status='running' AND finalization_marker=?11 AND NOT EXISTS (
           SELECT 1 FROM learning_submission_snapshots s
           JOIN learning_activities a ON a.id=s.activity_id
           JOIN learning_enrollments e ON e.id=s.enrollment_id
@@ -812,7 +949,7 @@ export async function completeLearningCourseSync(
         )`).bind(
           own.runId, own.courseId, submission.externalActivityId, submission.externalEnrollmentId,
           submission.status, submission.late, submission.attemptNumber, submission.submittedAt,
-          submission.returnedAt, submission.providerUpdatedAt,
+          submission.returnedAt, submission.providerUpdatedAt, finalizationMarker,
         ),
       db.prepare(`INSERT INTO learning_submission_snapshots
         (course_id,activity_id,activity_kind,enrollment_id,status,late,attempt_number,
@@ -823,6 +960,9 @@ export async function completeLearningCourseSync(
         WHERE a.course_id=?1 AND a.external_activity_id=?9
           AND a.kind IN ('assignment','quiz') AND e.external_enrollment_id=?10
           AND i.person_id=?11 AND i.external_user_id=?12 AND i.status='active'
+          AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+            WHERE sync_run.id=?13 AND sync_run.status='running'
+              AND sync_run.finalization_marker=?14)
         ON CONFLICT(activity_id,enrollment_id) DO UPDATE SET
           activity_kind=excluded.activity_kind,status=excluded.status,late=excluded.late,
           attempt_number=excluded.attempt_number,submitted_at=excluded.submitted_at,
@@ -831,12 +971,15 @@ export async function completeLearningCourseSync(
         own.courseId, submission.status, submission.late, submission.attemptNumber,
         submission.submittedAt, submission.returnedAt, submission.providerUpdatedAt,
         snapshot.syncedAt, submission.externalActivityId, submission.externalEnrollmentId,
-        resolved.personId, submission.externalUserId,
+        resolved.personId, submission.externalUserId, own.runId, finalizationMarker,
       ),
     );
   }
   if (snapshot.submissions.length === 0) {
-    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=?`).bind(own.courseId));
+    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=?
+      AND EXISTS (SELECT 1 FROM learning_sync_runs r
+        WHERE r.id=? AND r.status='running' AND r.finalization_marker=?)`)
+      .bind(own.courseId, own.runId, finalizationMarker));
   } else {
     const keepPairs = snapshot.submissions
       .map(() => '(a.external_activity_id=? AND e.external_enrollment_id=?)').join(' OR ');
@@ -844,12 +987,15 @@ export async function completeLearningCourseSync(
       WHERE course_id=? AND (activity_id,enrollment_id) NOT IN (
         SELECT a.id,e.id FROM learning_activities a CROSS JOIN learning_enrollments e
         WHERE a.course_id=? AND e.course_id=? AND (${keepPairs})
-      )`).bind(
+      ) AND EXISTS (SELECT 1 FROM learning_sync_runs sync_run
+        WHERE sync_run.id=? AND sync_run.status='running'
+          AND sync_run.finalization_marker=?)`).bind(
       own.courseId, own.courseId, own.courseId,
       ...snapshot.submissions.flatMap((item) => [
         item.providerSubmission.externalActivityId,
         item.providerSubmission.externalEnrollmentId,
       ]),
+      own.runId, finalizationMarker,
     ));
   }
 
@@ -857,34 +1003,51 @@ export async function completeLearningCourseSync(
     + snapshot.resources.length + snapshot.submissions.length;
   statements.push(
     db.prepare(`UPDATE learning_enrollments SET state='inactive',last_synced_at=?1,updated_at=?1
-      WHERE course_id=?2 AND (last_synced_at IS NULL OR last_synced_at<>?1)`).bind(snapshot.syncedAt, own.courseId),
+      WHERE course_id=?2 AND (last_synced_at IS NULL OR last_synced_at<>?1)
+        AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?3 AND r.status='running' AND r.finalization_marker=?4)`)
+      .bind(snapshot.syncedAt, own.courseId, own.runId, finalizationMarker),
     db.prepare(`UPDATE learning_activities SET lifecycle_state='deleted',last_synced_at=?1,updated_at=?1
-      WHERE course_id=?2 AND (last_synced_at IS NULL OR last_synced_at<>?1)`).bind(snapshot.syncedAt, own.courseId),
+      WHERE course_id=?2 AND (last_synced_at IS NULL OR last_synced_at<>?1)
+        AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?3 AND r.status='running' AND r.finalization_marker=?4)`)
+      .bind(snapshot.syncedAt, own.courseId, own.runId, finalizationMarker),
     db.prepare(`UPDATE learning_courses SET display_name=?1,launch_url=?2,lifecycle_state=?3,
       provider_updated_at=?4,last_synced_at=?5,updated_at=?5
-      WHERE id=?6 AND connection_id=?7 AND provider=?8 AND external_course_id=?9`)
+      WHERE id=?6 AND connection_id=?7 AND provider=?8 AND external_course_id=?9
+        AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?10 AND r.status='running' AND r.finalization_marker=?11)`)
       .bind(
         snapshot.course.displayName, snapshot.course.launchUrl, snapshot.course.lifecycleState,
         snapshot.course.providerUpdatedAt, snapshot.syncedAt, own.courseId,
-        own.connectionId, own.provider, own.externalCourseId,
+        own.connectionId, own.provider, own.externalCourseId, own.runId, finalizationMarker,
       ),
     db.prepare(`UPDATE learning_sync_runs SET status='succeeded',finished_at=?1,
       scanned_count=?2,error_code=NULL
       WHERE id=?4 AND connection_id=?3 AND course_id=?5 AND status='running'
+        AND finalization_marker=?6 AND lease_marker=?7 AND lease_expires_at>?1
       RETURNING id AS run_id,changed_count,removed_count,event_count`).bind(
         snapshot.syncedAt, scannedCount, own.connectionId, own.runId, own.courseId,
+        finalizationMarker, own.marker,
       ),
     db.prepare(`UPDATE learning_provider_connections SET operation_marker=NULL,status='active',
-      last_successful_sync_at=?1,last_error_code=NULL,updated_at=?1
-      WHERE id=?2 AND provider=?3 AND operation_marker=?4`)
-      .bind(snapshot.syncedAt, own.connectionId, own.provider, own.marker),
+      operation_expires_at=NULL,last_successful_sync_at=?1,last_error_code=NULL,updated_at=?1
+      WHERE id=?2 AND provider=?3 AND operation_marker=?4
+        AND EXISTS (SELECT 1 FROM learning_sync_runs r
+          WHERE r.id=?5 AND r.status='succeeded' AND r.finalization_marker=?6)`)
+      .bind(
+        snapshot.syncedAt, own.connectionId, own.provider, own.marker,
+        own.runId, finalizationMarker,
+      ),
   );
 
   try {
     const results = await db.batch(statements);
     if (!Array.isArray(results) || results.length !== statements.length) persistenceFailure();
+    const claimResult = oneRow(results[1]);
     const runResult = oneRow(results[results.length - 2]);
-    if (!runResult || integer(runResult.run_id) !== own.runId) throw new LearningSyncConflictError();
+    if (!claimResult || integer(claimResult.run_id) !== own.runId
+      || !runResult || integer(runResult.run_id) !== own.runId) throw new LearningSyncConflictError();
     return Object.freeze({
       runId: own.runId, status: 'succeeded' as const, scannedCount,
       changedCount: integer(runResult.changed_count, 0, LEARNING_MAX_ATOMIC_ENTITIES),
@@ -893,6 +1056,9 @@ export async function completeLearningCourseSync(
     });
   } catch (error) {
     if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
+    try { await assertIdentityMappings(db, own, snapshot.enrollments); } catch (identityError) {
+      if (identityError instanceof LearningIdentityConflictError) throw identityError;
+    }
     throw new LearningPersistenceError();
   }
 }
@@ -906,20 +1072,44 @@ export async function failLearningSync(
   const input = exact(rawInput, ['finishedAt', 'errorCode']);
   const finishedAt = timestamp(input.finishedAt);
   if (Date.parse(finishedAt) < Date.parse(own.startedAt)) invalid();
+  if (Date.parse(finishedAt) >= Date.parse(own.leaseExpiresAt)) throw new LearningSyncConflictError();
   const safeCode = errorCode(input.errorCode);
+  const finalizationMarker = crypto.randomUUID();
   try {
     const results = await db.batch([
-      leaseGuard(db, own),
-      db.prepare(`UPDATE learning_sync_runs SET status='failed',finished_at=?1,error_code=?2
+      activeLeaseGuard(db, own, finishedAt),
+      db.prepare(`UPDATE learning_sync_runs SET finalization_marker=?1
+        WHERE id=?2 AND connection_id=?3 AND course_id=?4 AND status='running'
+          AND lease_marker=?5 AND lease_expires_at>?6 AND finalization_marker IS NULL
+          AND EXISTS (SELECT 1 FROM learning_provider_connections c
+            WHERE c.id=?3 AND c.provider=?7 AND c.operation_marker=?5
+              AND c.operation_expires_at>?6 AND c.status='active' AND c.deleted_at IS NULL)
+        RETURNING id AS run_id`).bind(
+          finalizationMarker, own.runId, own.connectionId, own.courseId,
+          own.marker, finishedAt, own.provider,
+        ),
+      db.prepare(`UPDATE learning_sync_runs
+        SET status=CASE WHEN ?1='cancelled' THEN 'cancelled' ELSE 'failed' END,
+          finished_at=?2,error_code=CASE WHEN ?1='cancelled' THEN NULL ELSE ?1 END
         WHERE id=?3 AND connection_id=?4 AND course_id=?5 AND status='running'
-        RETURNING id AS run_id`).bind(finishedAt, safeCode, own.runId, own.connectionId, own.courseId),
-      db.prepare(`UPDATE learning_provider_connections SET operation_marker=NULL,
+          AND lease_marker=?6 AND finalization_marker=?7 AND lease_expires_at>?2
+        RETURNING id AS run_id`).bind(
+          safeCode, finishedAt, own.runId, own.connectionId, own.courseId,
+          own.marker, finalizationMarker,
+        ),
+      db.prepare(`UPDATE learning_provider_connections SET operation_marker=NULL,operation_expires_at=NULL,
         status=CASE WHEN ?1='authentication_required' THEN 'error' ELSE status END,
         last_error_code=?1,updated_at=?2
-        WHERE id=?3 AND provider=?4 AND operation_marker=?5`)
-        .bind(safeCode, finishedAt, own.connectionId, own.provider, own.marker),
+        WHERE id=?3 AND provider=?4 AND operation_marker=?5
+          AND EXISTS (SELECT 1 FROM learning_sync_runs r
+            WHERE r.id=?6 AND r.finalization_marker=?7 AND r.status IN ('failed','cancelled'))`)
+        .bind(
+          safeCode, finishedAt, own.connectionId, own.provider, own.marker,
+          own.runId, finalizationMarker,
+        ),
     ]);
-    if (!Array.isArray(results) || results.length !== 3 || !oneRow(results[1])) throw new LearningSyncConflictError();
+    if (!Array.isArray(results) || results.length !== 4
+      || !oneRow(results[1]) || !oneRow(results[2])) throw new LearningSyncConflictError();
   } catch (error) {
     if (error instanceof LearningSyncConflictError || error instanceof LearningPersistenceError) throw error;
     throw new LearningPersistenceError();

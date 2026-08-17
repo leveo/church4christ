@@ -137,6 +137,32 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     await sql.unsafe('DELETE FROM learning_programs WHERE id=990001');
   });
 
+  it('persists bounded Learning lease and one-winner finalization markers', async () => {
+    const columns = await sql.unsafe<{ table_name: string; column_name: string }[]>(`
+      SELECT table_name,column_name FROM information_schema.columns
+      WHERE table_schema='public' AND (
+        (table_name='learning_provider_connections' AND column_name='operation_expires_at') OR
+        (table_name='learning_sync_runs' AND column_name IN
+          ('lease_marker','lease_expires_at','finalization_marker'))
+      ) ORDER BY table_name,column_name
+    `);
+    expect(columns).toEqual([
+      { table_name: 'learning_provider_connections', column_name: 'operation_expires_at' },
+      { table_name: 'learning_sync_runs', column_name: 'finalization_marker' },
+      { table_name: 'learning_sync_runs', column_name: 'lease_expires_at' },
+      { table_name: 'learning_sync_runs', column_name: 'lease_marker' },
+    ]);
+    const indexes = await sql.unsafe<{ indexname: string }[]>(`
+      SELECT indexname FROM pg_indexes WHERE schemaname='public'
+        AND indexname IN ('idx_learning_sync_runs_lease','idx_learning_sync_runs_finalization')
+      ORDER BY indexname
+    `);
+    expect(indexes).toEqual([
+      { indexname: 'idx_learning_sync_runs_finalization' },
+      { indexname: 'idx_learning_sync_runs_lease' },
+    ]);
+  });
+
   it('enforces provider/envelope/resource/count bounds and rotates one bytea envelope', async () => {
     const graph = await seedGraph(700, 'assignment', 'google_classroom');
     await rejects(`INSERT INTO learning_provider_connections

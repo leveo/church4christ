@@ -35,6 +35,8 @@ const LEARNING_INDEXES = [
   'idx_learning_snapshots_enrollment_state',
   'idx_learning_sync_runs_connection_time',
   'idx_learning_sync_runs_course_time',
+  'idx_learning_sync_runs_finalization',
+  'idx_learning_sync_runs_lease',
   'idx_learning_sync_runs_status_time',
 ] as const;
 
@@ -154,6 +156,10 @@ describe('portable Learning schema (D1)', () => {
       'identity_link_id', 'enrollment_id', 'course_id', 'activity_id', 'activity_kind',
       'occurred_at', 'ingested_at',
     ]);
+    expect(await columns('learning_provider_connections')).toContain('operation_expires_at');
+    expect(await columns('learning_sync_runs')).toEqual(expect.arrayContaining([
+      'lease_marker', 'lease_expires_at', 'finalization_marker',
+    ]));
 
     const forbidden = /(?:access|refresh)_token|oauth_code|client_secret|plaintext|payload|homework|answer|comment|grade|rubric|file_bytes|content/i;
     for (const table of [

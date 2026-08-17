@@ -314,7 +314,7 @@ export async function synchronizeLearningCourse(
 
     ownLease = await startLearningSync(db, {
       connectionId, provider: providerKind, courseId, externalCourseId,
-      trigger, startedAt: operation.startedAt, urlPolicy,
+      trigger, startedAt: operation.startedAt, urlPolicy, leaseExpiresAt: operation.deadlineAt,
     });
     checkActive(operation, now);
     const providerAdapter = input.provider as LearningProvider;
