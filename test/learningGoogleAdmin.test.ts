@@ -72,6 +72,7 @@ describe('Google Classroom admin authoritative course selection', () => {
     }]);
     await expect(mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
       ...common, externalCourseId: 'course-1', programId: 27303, actorPersonId: 27301,
+      expectedRevision: 1, pushTopicName: null,
     })).resolves.toMatchObject({
       programId: 27303, connectionId: 27302, externalCourseId: 'course-1', displayName: 'Genesis 1',
     });

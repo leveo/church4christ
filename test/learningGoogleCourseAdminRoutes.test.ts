@@ -19,6 +19,7 @@ const deps = () => ({
     courseId: 801, programId: 31, connectionId: 73, provider: 'google_classroom' as const,
     externalCourseId: 'course-1', displayName: 'Genesis 1', lifecycleState: 'active' as const, lastSyncedAt: null,
   })),
+  unmapSelectedCourse: vi.fn(async () => ({ connectionId: 73, connectionRevision: 5 })),
 });
 
 describe('Google Classroom mapped-course action', () => {
@@ -41,24 +42,41 @@ describe('Google Classroom mapped-course action', () => {
     const request = new Request('https://church.test/admin/learning/google/map-course', {
       method: 'POST', headers: {
         'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
-      }, body: 'connection_id=73&external_course_id=course-1&program_id=31',
+      }, body: 'action=map&connection_id=73&revision=4&external_course_id=course-1&program_id=31',
     });
     const response = await createGoogleCourseMappingHandler(injected)(context(request));
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe('/admin/learning/google/courses?connection_id=73&saved=course_mapped');
     expect(injected.mapSelectedCourse).toHaveBeenCalledWith({}, {
-      connectionId: 73, externalCourseId: 'course-1', programId: 31, actorPersonId: 91,
+      connectionId: 73, expectedRevision: 4, externalCourseId: 'course-1',
+      programId: 31, actorPersonId: 91,
     });
     expect(JSON.stringify(injected.mapSelectedCourse.mock.calls)).not.toMatch(/Genesis|launchUrl|accessToken|refreshToken/iu);
+  });
+
+  it('unmaps only the exact mapped course under the submitted connection revision', async () => {
+    const injected = deps();
+    const request = new Request('https://church.test/admin/learning/google/map-course', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=unmap&connection_id=73&revision=4&external_course_id=course-1',
+    });
+    const response = await createGoogleCourseMappingHandler(injected)(context(request));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/admin/learning/google/courses?connection_id=73&saved=course_unmapped');
+    expect(injected.unmapSelectedCourse).toHaveBeenCalledWith({}, {
+      connectionId: 73, expectedRevision: 4, externalCourseId: 'course-1', actorPersonId: 91,
+    });
+    expect(injected.mapSelectedCourse).not.toHaveBeenCalled();
   });
 
   it('rejects duplicate/unknown fields and provider failures through a fixed bilingual-safe redirect', async () => {
     const injected = deps();
     injected.mapSelectedCourse.mockRejectedValue(new Error('private-access provider body'));
     for (const body of [
-      'connection_id=73&external_course_id=course-1&program_id=31&title=hostile',
-      'connection_id=73&connection_id=74&external_course_id=course-1&program_id=31',
-      'connection_id=73&external_course_id=course-1&program_id=31',
+      'action=map&connection_id=73&revision=4&external_course_id=course-1&program_id=31&title=hostile',
+      'action=map&connection_id=73&connection_id=74&revision=4&external_course_id=course-1&program_id=31',
+      'action=map&connection_id=73&revision=4&external_course_id=course-1&program_id=31',
     ]) {
       const response = await createGoogleCourseMappingHandler(injected)(context(new Request(
         'https://church.test/admin/learning/google/map-course', {

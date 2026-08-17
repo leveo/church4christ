@@ -22,9 +22,14 @@ describe('Learning connection administration page', () => {
     const page = readFileSync('src/pages/admin/learning/google/courses.astro', 'utf8');
     expect(page).toContain('listGoogleClassroomCourseOptions');
     expect(page).toContain('action="/admin/learning/google/map-course"');
-    for (const name of ['connection_id', 'external_course_id', 'program_id']) {
+    for (const name of ['action', 'connection_id', 'revision', 'external_course_id', 'program_id']) {
       expect(page).toContain(`name="${name}"`);
     }
+    expect(page).toContain('googleClassroomPushReadiness');
+    expect(page).toContain('refreshTokenExpiresAt');
+    expect(page).toContain('value="unmap"');
+    expect(page).toContain("t(lang, 'admin.learning.google.pushReady')");
+    expect(page).toContain("t(lang, 'admin.learning.google.reconnectDeadline')");
     const markup = page.split('---').slice(2).join('---');
     expect(markup).not.toMatch(/accessToken|refreshToken|clientSecret|ciphertext|CLIENT_SECRET|CREDENTIAL_KEYS/iu);
     expect(markup).not.toMatch(/name="(?:token|credential|grade|answer|submission)"/iu);
