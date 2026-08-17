@@ -1,6 +1,10 @@
 import type { AppDb } from './appDb';
 import { getBackend } from './dbProvider';
 import {
+  listGoogleClassroomCleanupConnectionIds,
+  recoverGoogleClassroomCleanup,
+} from './learningGoogleCleanup';
+import {
   googleClassroomPushReadiness,
   renewGoogleClassroomRegistrations,
   type GoogleRegistrationRenewalSummary,
@@ -41,6 +45,8 @@ interface GoogleClassroomRegistrationCronDeps {
       readonly signal: AbortSignal;
     },
   ) => Promise<GoogleRegistrationRenewalSummary>;
+  readonly listCleanupConnectionIds?: typeof listGoogleClassroomCleanupConnectionIds;
+  readonly recoverCleanup?: typeof recoverGoogleClassroomCleanup;
 }
 
 const DEFAULT_DEPS: GoogleClassroomRegistrationCronDeps = Object.freeze({
@@ -48,6 +54,8 @@ const DEFAULT_DEPS: GoogleClassroomRegistrationCronDeps = Object.freeze({
   now: Date.now,
   importKeyRing: importLearningCredentialKeyRing,
   renew: renewGoogleClassroomRegistrations,
+  listCleanupConnectionIds: listGoogleClassroomCleanupConnectionIds,
+  recoverCleanup: recoverGoogleClassroomCleanup,
 });
 
 export type GoogleClassroomRegistrationCronResult =
@@ -86,6 +94,26 @@ export async function runGoogleClassroomRegistrationRenewalPass(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PASS_DEADLINE_MS);
   try {
+    if (dependencies.listCleanupConnectionIds && dependencies.recoverCleanup) {
+      const cleanupConnections = await dependencies.listCleanupConnectionIds(db, 1);
+      const cleanupConnectionId = cleanupConnections[0];
+      if (cleanupConnectionId !== undefined) {
+        await dependencies.recoverCleanup(db, {
+          connectionId: cleanupConnectionId,
+          clientId,
+          clientSecret,
+          keyRing,
+          fetcher: dependencies.fetcher,
+          nowEpochMs: now,
+          signal: controller.signal,
+          limit: 4,
+        });
+        return Object.freeze({
+          status: 'completed',
+          summary: Object.freeze({ selected: 0, renewed: 0, conflicted: 0, failed: 0 }),
+        });
+      }
+    }
     const summary = await dependencies.renew(db, {
       clientId,
       clientSecret,

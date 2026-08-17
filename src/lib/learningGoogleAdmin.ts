@@ -1,7 +1,6 @@
 import type { AppDb } from './appDb';
 import {
   LearningConnectionConflictError,
-  disconnectLearningConnection,
   getLearningConnection,
   type LearningConnectionRecord,
 } from './learningConnectionDb';
@@ -10,10 +9,14 @@ import {
   loadGoogleCredential,
   loadGoogleCredentialForAdmin,
   refreshGoogleAccessToken,
-  revokeGoogleRefreshToken,
   rotateGoogleCredential,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
+import {
+  cleanupGoogleClassroomRegistrationTask,
+  commitGoogleClassroomDisconnect,
+  recoverGoogleClassroomCleanup,
+} from './learningGoogleCleanup';
 import {
   type LearningMappedCourseRecord,
   type LearningProgramRecord,
@@ -336,72 +339,26 @@ export async function disconnectGoogleClassroomConnection(
     keyRing: input.keyRing as LearningCredentialKeyRing,
   });
   if (loaded.revision !== expectedRevision) throw new LearningConnectionConflictError();
-  let accessToken: string | null = loaded.credential.accessToken;
-  let refreshToken = loaded.credential.refreshToken;
-  let grantAlreadyRevoked = false;
-  if (Date.parse(loaded.credential.accessTokenExpiresAt) <= adminEnvironment.nowEpochMs + REFRESH_SKEW_MS) {
-    try {
-      const refreshed = await refreshGoogleAccessToken({
-        clientId: adminEnvironment.clientId,
-        clientSecret: adminEnvironment.clientSecret,
-        refreshToken,
-        refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
-        fetcher: adminEnvironment.fetcher,
-        signal: new AbortController().signal,
-        nowEpochMs: adminEnvironment.nowEpochMs,
-      });
-      accessToken = refreshed.accessToken;
-      refreshToken = refreshed.refreshToken;
-    } catch {
-      await revokeGoogleRefreshToken({
-        refreshToken,
-        fetcher: adminEnvironment.fetcher,
-        signal: new AbortController().signal,
-      });
-      accessToken = null;
-      grantAlreadyRevoked = true;
-    }
-  }
-  const registrationResult = await db.prepare(`SELECT registration_id FROM learning_google_registrations
-    WHERE connection_id=?1 ORDER BY external_course_id,feed_type LIMIT 2001`)
-    .bind(connectionId).all<Record<string, unknown>>();
-  if (
-    !registrationResult || !Array.isArray(registrationResult.results)
-    || registrationResult.results.length > 2_000
-  ) invalid();
-  const registrationIds = registrationResult.results.map((row) => externalId(row.registration_id));
-  const cleanupController = new AbortController();
-  const cleanupTimer = setTimeout(() => cleanupController.abort(), 25_000);
-  let cursor = 0;
-  try {
-    const workers = Array.from({ length: Math.min(8, registrationIds.length) }, async () => {
-      while (cursor < registrationIds.length) {
-        const registrationId = registrationIds[cursor];
-        cursor += 1;
-        if (accessToken === null) return;
-        await deleteGoogleClassroomRegistration({
-          accessToken,
-          registrationId,
-          fetcher: adminEnvironment.fetcher,
-          signal: cleanupController.signal,
-        });
-      }
-    });
-    await Promise.all(workers);
-  } catch (error) {
-    cleanupController.abort();
-    throw error;
-  } finally {
-    clearTimeout(cleanupTimer);
-  }
-  if (!grantAlreadyRevoked) {
-    await revokeGoogleRefreshToken({
-      refreshToken,
-      fetcher: input.fetcher as AdminFetcher,
-      signal: new AbortController().signal,
-    });
-  }
-  return disconnectLearningConnection(db, { connectionId, expectedRevision, actorPersonId });
+  await commitGoogleClassroomDisconnect(db, {
+    connectionId,
+    expectedRevision,
+    actorPersonId,
+    nowEpochMs: adminEnvironment.nowEpochMs,
+  });
+  const cleanup = await recoverGoogleClassroomCleanup(db, {
+    connectionId,
+    clientId: adminEnvironment.clientId,
+    clientSecret: adminEnvironment.clientSecret,
+    keyRing: adminEnvironment.keyRing,
+    fetcher: adminEnvironment.fetcher,
+    signal: new AbortController().signal,
+    nowEpochMs: adminEnvironment.nowEpochMs,
+    limit: 8,
+  });
+  if (cleanup.pending > 0) invalid();
+  const disconnected = await getLearningConnection(db, connectionId, { includeDeleted: true });
+  if (!disconnected || disconnected.status !== 'disabled' || disconnected.revision !== expectedRevision + 1) invalid();
+  return disconnected;
 }
 
 export async function listGoogleClassroomCourseOptions(
@@ -516,14 +473,6 @@ export async function mapSelectedGoogleClassroomCourse(
           }));
         }
       }
-      for (const registrationId of replacedRegistrationIds) {
-        await deleteGoogleClassroomRegistration({
-          accessToken: context.access.accessToken,
-          registrationId,
-          fetcher: adminEnvironment.fetcher,
-          signal: new AbortController().signal,
-        });
-      }
       const committed = await commitGoogleClassroomCourseMapping(db, {
         connectionId: adminEnvironment.connectionId,
         expectedRevision,
@@ -535,6 +484,19 @@ export async function mapSelectedGoogleClassroomCourse(
         registrations,
         nowEpochMs: adminEnvironment.nowEpochMs,
       });
+      for (const registrationId of replacedRegistrationIds) {
+        try {
+          const cleaned = await cleanupGoogleClassroomRegistrationTask(db, {
+            connectionId: adminEnvironment.connectionId,
+            registrationId,
+            accessToken: context.access.accessToken,
+            fetcher: adminEnvironment.fetcher,
+            signal: new AbortController().signal,
+            nowEpochMs: adminEnvironment.nowEpochMs,
+          });
+          if (!cleaned) break;
+        } catch { break; }
+      }
       return committed.mappedCourse;
     } catch (error) {
       for (const registration of registrations) {
@@ -591,14 +553,6 @@ export async function unmapSelectedGoogleClassroomCourse(
       expectedRevision,
       externalCourseId,
     });
-    for (const registrationId of removedRegistrationIds) {
-      await deleteGoogleClassroomRegistration({
-        accessToken: context.access.accessToken,
-        registrationId,
-        fetcher: adminEnvironment.fetcher,
-        signal: new AbortController().signal,
-      });
-    }
     const committed = await commitGoogleClassroomCourseUnmap(db, {
       connectionId: adminEnvironment.connectionId,
       expectedRevision,
@@ -607,6 +561,19 @@ export async function unmapSelectedGoogleClassroomCourse(
       expectedRegistrationIds: removedRegistrationIds,
       nowEpochMs: adminEnvironment.nowEpochMs,
     });
+    for (const registrationId of removedRegistrationIds) {
+      try {
+        const cleaned = await cleanupGoogleClassroomRegistrationTask(db, {
+          connectionId: adminEnvironment.connectionId,
+          registrationId,
+          accessToken: context.access.accessToken,
+          fetcher: adminEnvironment.fetcher,
+          signal: new AbortController().signal,
+          nowEpochMs: adminEnvironment.nowEpochMs,
+        });
+        if (!cleaned) break;
+      } catch { break; }
+    }
     return Object.freeze({
       connectionId: committed.connectionId,
       connectionRevision: committed.connectionRevision,

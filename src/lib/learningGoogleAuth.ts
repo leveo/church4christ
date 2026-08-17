@@ -922,6 +922,39 @@ export async function loadGoogleCredentialForAdmin(
   }
 }
 
+export async function loadGoogleCredentialForCleanup(
+  db: AppDb,
+  rawInput: { readonly connectionId: number; readonly keyRing: LearningCredentialKeyRing },
+): Promise<{
+  readonly connectionId: number;
+  readonly revision: number;
+  readonly status: 'active' | 'error' | 'disabled';
+  readonly credential: GoogleCredential;
+}> {
+  const connectionId = databaseInteger(rawInput.connectionId);
+  try {
+    const value = await db.prepare(`SELECT c.id AS connection_id,c.revision,c.status,
+      p.ciphertext,p.nonce,p.algorithm,p.key_version,p.envelope_version,p.expires_at
+      FROM learning_provider_connections c JOIN learning_provider_credentials p ON p.connection_id=c.id
+      WHERE c.id=?1 AND c.provider='google_classroom' AND c.status IN ('active','error','disabled')
+        AND c.operation_marker IS NULL`).bind(connectionId).first();
+    if (value === null) invalid();
+    const row = plainRecord(value);
+    const plaintext = await decryptLearningCredential(rawInput.keyRing, {
+      provider: 'google_classroom', connectionId, envelope: envelopeFromRow(row, ''),
+    });
+    const credential = decodeGoogleCredential(plaintext);
+    const envelope = envelopeFromRow(row, '');
+    if (credential.refreshTokenExpiresAt !== envelope.expiresAt) invalid();
+    if (row.status !== 'active' && row.status !== 'error' && row.status !== 'disabled') invalid();
+    const status: 'active' | 'error' | 'disabled' = row.status;
+    return Object.freeze({ connectionId, revision: databaseInteger(row.revision), status, credential });
+  } catch (error) {
+    if (error instanceof LearningGoogleAuthError) throw error;
+    return invalid();
+  }
+}
+
 export async function rotateGoogleCredential(
   db: AppDb,
   rawInput: {

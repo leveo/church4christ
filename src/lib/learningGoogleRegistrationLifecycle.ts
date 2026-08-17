@@ -6,6 +6,7 @@ import {
   rotateGoogleCredential,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
+import { cleanupGoogleClassroomRegistrationTask } from './learningGoogleCleanup';
 import type { LearningMappedCourseRecord } from './learningDb';
 import {
   LEARNING_LIMITS,
@@ -298,6 +299,13 @@ export async function commitGoogleClassroomCourseMapping(
         programId, course.externalCourseId, course.displayName, course.launchUrl,
         course.providerUpdatedAt, course.lastSyncedAt, connectionId, claimedRevision, marker,
       ),
+    db.prepare(`INSERT INTO learning_google_cleanup_tasks(connection_id,task_type,registration_id)
+      SELECT r.connection_id,'registration',r.registration_id FROM learning_google_registrations r
+      WHERE r.connection_id=?1 AND r.external_course_id=?2
+        AND EXISTS (SELECT 1 FROM learning_provider_connections c
+          WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)
+      ON CONFLICT(registration_id) WHERE task_type='registration' DO NOTHING`)
+      .bind(connectionId, course.externalCourseId, claimedRevision, marker),
     db.prepare(`DELETE FROM learning_google_registrations WHERE connection_id=?1 AND external_course_id=?2
       AND EXISTS (SELECT 1 FROM learning_provider_connections c
         WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)`)
@@ -398,6 +406,13 @@ export async function commitGoogleClassroomCourseUnmap(
           connectionId, expectedRevision, courseId, expectedRegistrationIds.length,
           expectedRegistrationIds[0] ?? null, expectedRegistrationIds[1] ?? null,
         ),
+      db.prepare(`INSERT INTO learning_google_cleanup_tasks(connection_id,task_type,registration_id)
+        SELECT r.connection_id,'registration',r.registration_id FROM learning_google_registrations r
+        WHERE r.connection_id=?1 AND r.external_course_id=?2
+          AND EXISTS (SELECT 1 FROM learning_provider_connections c
+            WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)
+        ON CONFLICT(registration_id) WHERE task_type='registration' DO NOTHING`)
+        .bind(connectionId, courseId, claimedRevision, marker),
       db.prepare(`DELETE FROM learning_google_registrations WHERE connection_id=?1 AND external_course_id=?2
         AND EXISTS (SELECT 1 FROM learning_provider_connections c
           WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)`)
@@ -418,9 +433,9 @@ export async function commitGoogleClassroomCourseUnmap(
         RETURNING id AS connection_id,revision`)
         .bind(actor, connectionId, claimedRevision, marker, courseId),
     ]);
-    if (!Array.isArray(results) || results.length !== 4) invalid();
+    if (!Array.isArray(results) || results.length !== 5) invalid();
     if (affected(results[0]) !== 1) throw new LearningGoogleRegistrationLifecycleConflictError();
-    const rows = resultRows(results[3], 1);
+    const rows = resultRows(results[4], 1);
     if (rows.length !== 1 || integer(rows[0].revision) !== claimedRevision) {
       throw new LearningGoogleRegistrationLifecycleConflictError();
     }
@@ -553,17 +568,14 @@ export async function renewGoogleClassroomRegistrations(
         now: nowTimestamp,
       });
       renewed += 1;
-      try {
-        await deleteGoogleClassroomRegistration({
-          accessToken: token,
-          registrationId: stored.registrationId,
-          fetcher: input.fetcher as RegistrationFetcher,
-          signal: input.signal as AbortSignal,
-        });
-      } catch {
-        // The old ID is no longer accepted by our push route and expires within
-        // the provider's bounded registration lifetime. Keep the CAS winner.
-      }
+      await cleanupGoogleClassroomRegistrationTask(db, {
+        connectionId: stored.connectionId,
+        registrationId: stored.registrationId,
+        accessToken: token,
+        fetcher: input.fetcher as RegistrationFetcher,
+        signal: input.signal as AbortSignal,
+        nowEpochMs: now,
+      });
     } catch (error) {
       if (replacement !== null) {
         try {

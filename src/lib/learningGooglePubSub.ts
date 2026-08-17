@@ -839,11 +839,31 @@ export async function saveGoogleClassroomRegistration(
         )
       : db.prepare(`UPDATE learning_google_registrations SET
           registration_id=?4,topic_name=?5,expiry_time=?6,updated_at=?7
-          WHERE connection_id=?1 AND external_course_id=?2 AND feed_type=?3 AND registration_id=?8`)
+          WHERE connection_id=?1 AND external_course_id=?2 AND feed_type=?3 AND registration_id=?8
+            AND EXISTS (SELECT 1 FROM learning_provider_connections c
+              WHERE c.id=?1 AND c.provider='google_classroom' AND c.status='active'
+                AND c.deleted_at IS NULL AND c.operation_marker IS NULL)`)
         .bind(
           connectionId, registration.externalCourseId, registration.feedType, registration.registrationId,
           registration.topicName, registration.expiryTime, now, expected,
         );
+    if (expected !== null) {
+      const results = await db.batch([
+        db.prepare(`INSERT INTO learning_google_cleanup_tasks(connection_id,task_type,registration_id)
+          SELECT connection_id,'registration',registration_id FROM learning_google_registrations
+          WHERE connection_id=?1 AND external_course_id=?2 AND feed_type=?3 AND registration_id=?4
+            AND EXISTS (SELECT 1 FROM learning_provider_connections c
+              WHERE c.id=?1 AND c.provider='google_classroom' AND c.status='active'
+                AND c.deleted_at IS NULL AND c.operation_marker IS NULL)
+          ON CONFLICT(registration_id) WHERE task_type='registration' DO NOTHING`)
+          .bind(connectionId, registration.externalCourseId, registration.feedType, expected),
+        statement,
+      ]);
+      if (!Array.isArray(results) || results.length !== 2 || results[1]?.meta?.changes !== 1) {
+        throw new LearningGooglePubSubConflictError();
+      }
+      return Object.freeze({ connectionId, registrationId: registration.registrationId });
+    }
     const result = await statement.run();
     if (result?.meta?.changes !== 1) throw new LearningGooglePubSubConflictError();
     return Object.freeze({ connectionId, registrationId: registration.registrationId });
