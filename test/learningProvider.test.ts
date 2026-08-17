@@ -331,7 +331,7 @@ async function normalizedPage<C extends RuntimePageContract>(
 }
 
 function chunkedResponse(
-  chunks: readonly Uint8Array[], onCancel: () => void, headers?: HeadersInit,
+  chunks: readonly Uint8Array[], onCancel: () => void | Promise<void>, headers?: HeadersInit,
 ): Response {
   let index = 0;
   return new Response(new ReadableStream<Uint8Array>({
@@ -340,8 +340,46 @@ function chunkedResponse(
       controller.enqueue(chunks[index]);
       index += 1;
     },
-    cancel() { onCancel(); },
+    cancel() { return onCancel(); },
   }, { highWaterMark: 0 }), { headers });
+}
+
+function cancelOverriddenResponse(
+  cancel: () => void | Promise<void>,
+  headers?: HeadersInit,
+): Response {
+  const response = chunkedResponse(
+    [new TextEncoder().encode('{"items":[]}')],
+    () => undefined,
+    headers,
+  );
+  const body = response.body;
+  if (body === null) throw new Error('missing response body');
+  const reader = body.getReader();
+  Object.defineProperty(body, 'getReader', {
+    value: () => ({ read: () => reader.read(), cancel }) as ReadableStreamDefaultReader<Uint8Array>,
+  });
+  return response;
+}
+
+async function expectTimelyProviderReject(
+  run: () => Promise<unknown>,
+  code: string,
+  secret?: string,
+): Promise<void> {
+  const timedOut = Object.freeze({ timedOut: true });
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const outcome = await Promise.race([
+    run().then(() => null, (error: unknown) => error),
+    new Promise<typeof timedOut>((resolve) => {
+      timeout = setTimeout(() => resolve(timedOut), 50);
+    }),
+  ]);
+  if (timeout !== null) clearTimeout(timeout);
+  if (outcome === timedOut) throw new Error('provider operation did not settle after reader cancellation');
+  expect(outcome).toBeInstanceOf(LearningProviderError);
+  expect(outcome).toMatchObject({ code });
+  if (secret) expect(String(outcome)).not.toContain(secret);
 }
 
 function descriptorCopiedPage<T extends object>(
@@ -504,6 +542,61 @@ describe('bounded page requests and measured response bodies', () => {
       normalizedOperation(), (value) => value, COURSE_PAGE, () => Date.parse('2026-08-17T12:00:00Z'),
     ), 'timeout', 'deadline');
     expect(deadlineCancelled).toBe(true);
+  });
+
+  it('does not wait for a never-settling cancel on overflow', async () => {
+    const never = new Promise<void>(() => undefined);
+    let overflowCancelCalled = false;
+    await expectTimelyProviderReject(() => providerApi.readAndNormalizeLearningPage(
+      chunkedResponse(
+        [new Uint8Array(33)],
+        () => { overflowCancelCalled = true; return never; },
+      ),
+      normalizedOperation({ maxRawBytes: 32 }),
+      (value) => value,
+      COURSE_PAGE,
+      () => NOW,
+    ), 'response_too_large');
+    expect(overflowCancelCalled).toBe(true);
+  });
+
+  it('does not wait for a never-settling cancel on caller cancellation', async () => {
+    const never = new Promise<void>(() => undefined);
+    const controller = new AbortController();
+    controller.abort();
+    let abortCancelCalled = false;
+    await expectTimelyProviderReject(() => providerApi.readAndNormalizeLearningPage(
+      chunkedResponse(
+        [new TextEncoder().encode('{"items":[]}')],
+        () => { abortCancelCalled = true; return never; },
+      ),
+      normalizedOperation({ signal: controller.signal }),
+      (value) => value,
+      COURSE_PAGE,
+      () => NOW,
+    ), 'cancelled');
+    expect(abortCancelCalled).toBe(true);
+  });
+
+  it('sanitizes synchronous and asynchronous cancel failures without replacing the bounded error', async () => {
+    const secret = 'secret-reader-cancel-failure';
+    for (const cancel of [
+      () => { throw new Error(secret); },
+      () => Promise.reject(new Error(secret)),
+    ]) {
+      let cancelCalled = false;
+      await expectTimelyProviderReject(() => providerApi.readAndNormalizeLearningPage(
+        cancelOverriddenResponse(
+          () => { cancelCalled = true; return cancel(); },
+          { 'Content-Length': '33' },
+        ),
+        normalizedOperation({ maxRawBytes: 32 }),
+        (value) => value,
+        COURSE_PAGE,
+        () => NOW,
+      ), 'response_too_large', secret);
+      expect(cancelCalled).toBe(true);
+    }
   });
 
   it('enforces the hard 1 MiB page cap before decode at declared and streamed boundaries', async () => {

@@ -1216,9 +1216,11 @@ function providerFailure(
   return new LearningProviderError({ code, provider, httpStatus, retryAfterSeconds });
 }
 
-async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
   try {
-    await reader.cancel();
+    // Observe rejection, but never let best-effort cancellation block the
+    // bounded error that caused it (a valid stream may never settle cancel()).
+    void Promise.resolve(reader.cancel()).catch(() => undefined);
   } catch {
     // Cancellation is best-effort; the original bounded error remains authoritative.
   }
@@ -1295,12 +1297,12 @@ async function readDecodedLearningPageCandidate(
     reader = response.body.getReader();
     const rawSignal = abortSignal(rawOperationRow.signal);
     if (isCancelled(rawSignal)) {
-      await cancelReader(reader);
+      cancelReader(reader);
       throw providerFailure('cancelled', provider);
     }
     const rawDeadline = learningValidation.timestamp(rawOperationRow.deadlineAt);
     if (initialNow >= Date.parse(rawDeadline)) {
-      await cancelReader(reader);
+      cancelReader(reader);
       throw providerFailure('timeout', provider);
     }
     operation = normalizeLearningOperationContext(rawOperation, initialNow);
@@ -1315,7 +1317,7 @@ async function readDecodedLearningPageCandidate(
       declaredLength = Number(contentLengthValue);
       if (!Number.isSafeInteger(declaredLength)) throw providerFailure('malformed_response', provider);
       if (declaredLength > responseLimit) {
-        await cancelReader(reader);
+        cancelReader(reader);
         throw providerFailure('response_too_large', provider);
       }
     }
@@ -1327,17 +1329,17 @@ async function readDecodedLearningPageCandidate(
       try {
         result = await guardedRead(reader, operation, now);
       } catch (error) {
-        await cancelReader(reader);
+        cancelReader(reader);
         throw error;
       }
       if (result.done) break;
       if (!(result.value instanceof Uint8Array)) {
-        await cancelReader(reader);
+        cancelReader(reader);
         throw providerFailure('malformed_response', provider);
       }
       byteCount += result.value.byteLength;
       if (byteCount > responseLimit) {
-        await cancelReader(reader);
+        cancelReader(reader);
         throw providerFailure('response_too_large', provider);
       }
       chunks[chunks.length] = result.value;
