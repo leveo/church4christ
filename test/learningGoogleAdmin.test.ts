@@ -101,6 +101,62 @@ describe('Google Classroom admin authoritative course selection', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('checks health for a recoverable error connection without widening ordinary provider access', async () => {
+    await env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=27302").run();
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe('https://classroom.googleapis.com');
+      expect(url.pathname).toBe('/v1/courses');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer private-access');
+      return new Response(null, { status: 200 });
+    });
+    await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).resolves.toEqual({ ok: true, errorCode: null });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects an error connection whose remote OAuth grant was already revoked', async () => {
+    await env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=27302").run();
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const expiredEnvelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27302,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'private-expired-access', refreshToken: 'private-revoked-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z', refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: null,
+    });
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET
+      ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5
+      WHERE connection_id=27302`).bind(
+      expiredEnvelope.ciphertext, expiredEnvelope.nonce, expiredEnvelope.algorithm,
+      expiredEnvelope.keyVersion, expiredEnvelope.envelopeVersion,
+    ).run();
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+          status: 400, headers: { 'content-type': 'application/json' },
+        });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
+      return new Response(JSON.stringify({
+        error: 'invalid_token', error_description: 'Token expired or revoked.',
+      }), { status: 400, headers: { 'content-type': 'application/json' } });
+    });
+    await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, {
+      connectionId: 27302, expectedRevision: 1, actorPersonId: 27301,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+  });
+
   it('revokes the refresh token before a CAS disconnect and rejects a stale revision before network access', async () => {
     await env.DB.prepare(`INSERT INTO learning_courses
       (program_id,connection_id,provider,external_course_id,display_name,launch_url)

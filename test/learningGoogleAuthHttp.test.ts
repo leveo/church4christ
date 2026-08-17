@@ -75,6 +75,36 @@ describe('Google OAuth token and revocation HTTP boundary', () => {
     })).resolves.toBeUndefined();
   });
 
+  it('treats only the documented invalid_token revocation response as idempotent success', async () => {
+    const input = {
+      refreshToken: 'refresh-private', signal: new AbortController().signal,
+    };
+    await expect(revokeGoogleRefreshToken({
+      ...input,
+      fetcher: async () => new Response(JSON.stringify({
+        error: 'invalid_token', error_description: 'Token expired or revoked.',
+      }), { status: 400, headers: { 'content-type': 'application/json' } }),
+    })).resolves.toBeUndefined();
+    await expect(revokeGoogleRefreshToken({
+      ...input,
+      fetcher: async () => new Response(JSON.stringify({ error: 'invalid_request' }), {
+        status: 400, headers: { 'content-type': 'application/json' },
+      }),
+    })).rejects.toThrow('learning_google_auth_invalid');
+    await expect(revokeGoogleRefreshToken({
+      ...input,
+      fetcher: async () => new Response(JSON.stringify({ error: 'invalid_token', unexpected: true }), {
+        status: 400, headers: { 'content-type': 'application/json' },
+      }),
+    })).rejects.toThrow('learning_google_auth_invalid');
+    await expect(revokeGoogleRefreshToken({
+      ...input,
+      fetcher: async () => new Response(new Uint8Array(65_537), {
+        status: 400, headers: { 'content-length': '65537', 'content-type': 'application/json' },
+      }),
+    })).rejects.toThrow('learning_google_auth_invalid');
+  });
+
   it('rejects non-exact scopes and oversized/malformed upstream responses without leaking provider details', async () => {
     const wrongScope = GOOGLE_CLASSROOM_SCOPES.slice(0, -1).join(' ');
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
