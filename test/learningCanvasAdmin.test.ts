@@ -77,6 +77,45 @@ describe('Canvas admin connection and course mapping', () => {
     }));
   });
 
+  it('refreshes an expired credential while recovering an error-state connection', async () => {
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const { CANVAS_REQUIRED_SCOPES } = await import('../src/lib/learningCanvasProvider');
+    const envelope = await encryptLearningCredential(keyRing, {
+      provider: 'canvas', connectionId: 28302,
+      plaintext: encodeCanvasCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'canvas-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+        grantedScopes: CANVAS_REQUIRED_SCOPES,
+      }), expiresAt: null,
+    });
+    await env.DB.batch([
+      env.DB.prepare("UPDATE learning_provider_connections SET status='error' WHERE id=28302"),
+      env.DB.prepare(`UPDATE learning_provider_credentials SET
+        ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5
+        WHERE connection_id=28302`).bind(
+        envelope.ciphertext, envelope.nonce, envelope.algorithm,
+        envelope.keyVersion, envelope.envelopeVersion,
+      ),
+    ]);
+    const fetcher = vi.fn(async (raw: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(raw));
+      if (url.pathname === '/login/oauth2/token') {
+        expect(init?.method).toBe('POST');
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('canvas-refresh');
+        return new Response(JSON.stringify({
+          access_token: 'refreshed-access', expires_in: 3600, token_type: 'Bearer',
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+      expect(url.pathname).toBe('/api/v1/courses');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer refreshed-access');
+      return new Response('[]', { headers: { 'content-type': 'application/json' } });
+    });
+
+    await expect(checkCanvasConnectionHealth(env.DB as AppDb, await input(fetcher as typeof fetch)))
+      .resolves.toEqual({ ok: true, errorCode: null, connectionRevision: 2 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('CAS maps/unmaps an authoritative course and configures only the root-account allowlist', async () => {
     const fetcher = vi.fn(async (raw: RequestInfo | URL) => {
       const url = new URL(String(raw));
