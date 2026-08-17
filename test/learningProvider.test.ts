@@ -6,10 +6,12 @@ import {
   LEARNING_LIMITS,
   LearningProviderError,
   LearningValidationError,
+  learningActivityUniquenessKeys,
   learningCourseUniquenessKeys,
   learningProviderEnrollmentUniquenessKeys,
   learningResourceUniquenessKeys,
   learningSyntheticEnrollmentId,
+  normalizeLearningActivity,
   normalizeLearningCourse,
   normalizeLearningProviderEnrollment,
   normalizeLearningResource,
@@ -59,6 +61,21 @@ const URL_POLICY = {
   externalLinkOrigins: ['https://links.example.test'],
 } as const;
 
+const GOOGLE_URL_POLICY = {
+  provider: 'google_classroom',
+  connectionId: 8,
+  baseUrl: null,
+  providerLaunchOrigins: ['https://classroom.google.com'],
+  providerFileOrigins: ['https://drive.google.com', 'https://files.googleusercontent.com'],
+  externalLinkOrigins: ['https://links.example.test'],
+} as const;
+
+const ROLE_SWAPPED_URL_POLICY = {
+  ...URL_POLICY,
+  providerFileOrigins: URL_POLICY.externalLinkOrigins,
+  externalLinkOrigins: URL_POLICY.providerFileOrigins,
+} as const;
+
 const NOW = Date.parse('2026-08-17T11:00:00Z');
 
 type RuntimePage<T extends object> = {
@@ -95,7 +112,11 @@ const providerApi = learningProviderModule as unknown as {
   ): Promise<RuntimePage<T>>;
   createLearningPageAccumulator<T extends object>(
     operation: LearningOperationContext,
-    contract: { normalizeItem(value: unknown): T; uniquenessKeys(value: T): readonly string[] },
+    contract: {
+      page: RuntimePageContract;
+      normalizeItem(value: unknown): T;
+      uniquenessKeys(value: T): readonly string[];
+    },
   ): RuntimeAccumulator<T>;
   invokeLearningProvider(provider: LearningProvider, invocation: Record<string, unknown>): Promise<unknown>;
 };
@@ -260,6 +281,7 @@ async function expectProviderReject(
 
 const COURSE_PAGE = Object.freeze({ kind: 'courses', urlPolicy: URL_POLICY } as const);
 const COURSE_SEQUENCE = Object.freeze({
+  page: COURSE_PAGE,
   normalizeItem: (value: unknown) => normalizeLearningCourse(value, URL_POLICY),
   uniquenessKeys: learningCourseUniquenessKeys,
 });
@@ -267,7 +289,23 @@ const PROVIDER_ENROLLMENT_PAGE = Object.freeze({ kind: 'provider_enrollments' } 
 const ACTIVITY_PAGE = Object.freeze({ kind: 'activities', urlPolicy: URL_POLICY } as const);
 const RESOURCE_PAGE = Object.freeze({ kind: 'resources', urlPolicy: URL_POLICY } as const);
 const PROVIDER_SUBMISSION_PAGE = Object.freeze({ kind: 'provider_submissions' } as const);
+const PROVIDER_ENROLLMENT_SEQUENCE = Object.freeze({
+  page: PROVIDER_ENROLLMENT_PAGE,
+  normalizeItem: normalizeLearningProviderEnrollment,
+  uniquenessKeys: learningProviderEnrollmentUniquenessKeys,
+});
+const ACTIVITY_SEQUENCE = Object.freeze({
+  page: ACTIVITY_PAGE,
+  normalizeItem: (value: unknown) => normalizeLearningActivity(value, URL_POLICY),
+  uniquenessKeys: learningActivityUniquenessKeys,
+});
+const RESOURCE_SEQUENCE = Object.freeze({
+  page: RESOURCE_PAGE,
+  normalizeItem: (value: unknown) => normalizeLearningResource(value, URL_POLICY),
+  uniquenessKeys: learningResourceUniquenessKeys,
+});
 const PROVIDER_SUBMISSION_SEQUENCE = Object.freeze({
+  page: PROVIDER_SUBMISSION_PAGE,
   normalizeItem: submissionApi.normalizeLearningProviderSubmission,
   uniquenessKeys: submissionApi.learningProviderSubmissionUniquenessKeys,
 });
@@ -562,6 +600,106 @@ describe('sanitized page and contract normalization', () => {
 });
 
 describe('opaque page accumulators', () => {
+  it('rejects valid empty-page replay across kind, scope, activity, and role-separated policy', async () => {
+    const courseScope = (externalCourseId: string) => normalizedOperation({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId,
+        externalActivityId: null, externalEnrollmentId: null,
+      },
+    });
+    const activityScope = (externalActivityId: string) => normalizedOperation({
+      scope: {
+        provider: 'canvas', connectionId: 7, externalCourseId: 'course-42',
+        externalActivityId, externalEnrollmentId: null,
+      },
+    });
+    const sourceCourse = await normalizedPage(pageBody([]), COURSE_PAGE, normalizedOperation());
+    const sourceActivity = await normalizedPage(pageBody([]), ACTIVITY_PAGE, courseScope('course-42'));
+    const sourceEnrollment = await normalizedPage(
+      pageBody([]), PROVIDER_ENROLLMENT_PAGE, courseScope('course-42'),
+    );
+    const sourceResource = await normalizedPage(pageBody([]), RESOURCE_PAGE, activityScope('activity-3'));
+    const sourceSubmission = await normalizedPage(
+      pageBody([]), PROVIDER_SUBMISSION_PAGE, activityScope('activity-3'),
+    );
+    const sourceEnrolledSubmission = await normalizedPage(
+      pageBody([]), PROVIDER_SUBMISSION_PAGE, normalizedOperation({ scope: {
+        ...activityScope('activity-3').scope, externalEnrollmentId: 'enrollment-a',
+      } }),
+    );
+    const googleOperation = normalizedOperation({
+      scope: {
+        provider: 'google_classroom', connectionId: 8, externalCourseId: null,
+        externalActivityId: null, externalEnrollmentId: null,
+      },
+    });
+    const accepted: string[] = [];
+    const replay = <T extends object>(
+      label: string,
+      operation: LearningOperationContext,
+      contract: {
+        page: RuntimePageContract;
+        normalizeItem(value: unknown): T;
+        uniquenessKeys(value: T): readonly string[];
+      },
+      page: RuntimePage<T>,
+    ): void => {
+      try {
+        providerApi.createLearningPageAccumulator<T>(operation, contract).accept(page, NOW);
+        accepted.push(label);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LearningValidationError);
+      }
+    };
+
+    replay('kind', courseScope('course-42'), PROVIDER_ENROLLMENT_SEQUENCE,
+      sourceActivity as unknown as RuntimePage<LearningProviderEnrollment>);
+    replay('provider_connection', googleOperation, {
+      page: { kind: 'courses', urlPolicy: GOOGLE_URL_POLICY },
+      normalizeItem: (value) => normalizeLearningCourse(value, GOOGLE_URL_POLICY),
+      uniquenessKeys: learningCourseUniquenessKeys,
+    }, sourceCourse as unknown as RuntimePage<LearningCourse>);
+    replay('course', courseScope('course-99'), PROVIDER_ENROLLMENT_SEQUENCE, sourceEnrollment);
+    replay('resource_activity', activityScope('activity-4'), RESOURCE_SEQUENCE, sourceResource);
+    replay('submission_activity', activityScope('activity-4'), PROVIDER_SUBMISSION_SEQUENCE, sourceSubmission);
+    replay('submission_enrollment', normalizedOperation({ scope: {
+      ...activityScope('activity-3').scope, externalEnrollmentId: 'enrollment-b',
+    } }), PROVIDER_SUBMISSION_SEQUENCE, sourceEnrolledSubmission);
+    replay('role_policy', activityScope('activity-3'), {
+      page: { kind: 'resources', urlPolicy: ROLE_SWAPPED_URL_POLICY },
+      normalizeItem: (value) => normalizeLearningResource(value, ROLE_SWAPPED_URL_POLICY),
+      uniquenessKeys: learningResourceUniquenessKeys,
+    }, sourceResource);
+    expect(accepted).toEqual([]);
+
+    for (const copied of [
+      Object.freeze({ ...sourceCourse }),
+      JSON.parse(JSON.stringify(sourceCourse)) as RuntimePage<LearningCourse>,
+    ]) expectInvalid(() => providerApi.createLearningPageAccumulator<LearningCourse>(
+      normalizedOperation(), COURSE_SEQUENCE,
+    ).accept(copied, NOW));
+  });
+
+  it('uses deterministic URL-policy fingerprints without conflating origin roles', async () => {
+    const operation = normalizedOperation({ scope: {
+      provider: 'google_classroom', connectionId: 8, externalCourseId: null,
+      externalActivityId: null, externalEnrollmentId: null,
+    } });
+    const page = await normalizedPage(
+      pageBody([]), { kind: 'courses', urlPolicy: GOOGLE_URL_POLICY }, operation,
+    );
+    const reorderedPolicy = {
+      ...GOOGLE_URL_POLICY,
+      providerFileOrigins: [...GOOGLE_URL_POLICY.providerFileOrigins].reverse(),
+    } as const;
+    const accumulator = providerApi.createLearningPageAccumulator<LearningCourse>(operation, {
+      page: { kind: 'courses', urlPolicy: reorderedPolicy },
+      normalizeItem: (value) => normalizeLearningCourse(value, reorderedPolicy),
+      uniquenessKeys: learningCourseUniquenessKeys,
+    });
+    expect(accumulator.accept(page, NOW).view).toMatchObject({ pageCount: 1, complete: 1 });
+  });
+
   it('closes over private history and exposes only a frozen derivable view', async () => {
     expect('acceptLearningPageSequence' in learningProviderModule).toBe(false);
     const operation = normalizedOperation({ maxPages: 2, maxItems: 2 });
@@ -609,6 +747,7 @@ describe('opaque page accumulators', () => {
   it('normalizes only newly received items and never replays historical callbacks', async () => {
     let normalizeCalls = 0;
     const contract = {
+      page: COURSE_PAGE,
       normalizeItem(value: unknown) {
         normalizeCalls += 1;
         return normalizeLearningCourse(value, URL_POLICY);
@@ -665,6 +804,7 @@ describe('opaque page accumulators', () => {
       maxItems: 3,
     });
     const contract = Object.freeze({
+      page: PROVIDER_ENROLLMENT_PAGE,
       normalizeItem: normalizeLearningProviderEnrollment,
       uniquenessKeys: learningProviderEnrollmentUniquenessKeys,
     });
@@ -802,6 +942,7 @@ describe('opaque page accumulators', () => {
       youtubeVideoId: 'dQw4w9WgXcQ',
     }]), RESOURCE_PAGE, operation);
     const accumulator = providerApi.createLearningPageAccumulator<LearningResource>(operation, {
+      page: RESOURCE_PAGE,
       normalizeItem: (value) => normalizeLearningResource(value, URL_POLICY),
       uniquenessKeys: learningResourceUniquenessKeys,
     });
@@ -1066,6 +1207,156 @@ describe('provider invocation boundary', () => {
         } as unknown as LearningProviderPage<LearningCourse>;
       },
     }), { method: 'listCourses', request, urlPolicy: URL_POLICY, now: () => NOW }), 'malformed_response');
+  });
+
+  it('rejects valid empty-page replay at invocation across every proof dimension', async () => {
+    const pageRequest = { pageSize: 50, pageNumber: 1, pageToken: null } as const;
+    const courseScope = (externalCourseId: string) => ({
+      provider: 'canvas' as const, connectionId: 7, externalCourseId,
+      externalActivityId: null, externalEnrollmentId: null,
+    });
+    const activityScope = (externalActivityId: string) => ({
+      provider: 'canvas' as const, connectionId: 7, externalCourseId: 'course-42',
+      externalActivityId, externalEnrollmentId: null,
+    });
+    const sourceCourse = await normalizedPage(pageBody([]), COURSE_PAGE, normalizedOperation());
+    const sourceActivity = await normalizedPage(
+      pageBody([]), ACTIVITY_PAGE, normalizedOperation({ scope: courseScope('course-42') }),
+    );
+    const sourceEnrollment = await normalizedPage(
+      pageBody([]), PROVIDER_ENROLLMENT_PAGE, normalizedOperation({ scope: courseScope('course-42') }),
+    );
+    const sourceResource = await normalizedPage(
+      pageBody([]), RESOURCE_PAGE, normalizedOperation({ scope: activityScope('activity-3') }),
+    );
+    const sourceSubmission = await normalizedPage(
+      pageBody([]), PROVIDER_SUBMISSION_PAGE, normalizedOperation({ scope: activityScope('activity-3') }),
+    );
+    const sourceEnrolledSubmission = await normalizedPage(
+      pageBody([]), PROVIDER_SUBMISSION_PAGE, normalizedOperation({ scope: {
+        ...activityScope('activity-3'), externalEnrollmentId: 'enrollment-a',
+      } }),
+    );
+    const accepted: string[] = [];
+    const replay = async (
+      label: string,
+      provider: LearningProvider,
+      invocation: Record<string, unknown>,
+    ): Promise<void> => {
+      try {
+        await providerApi.invokeLearningProvider(provider, invocation);
+        accepted.push(label);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LearningProviderError);
+        expect(error).toMatchObject({ code: 'malformed_response' });
+      }
+    };
+
+    await replay('kind', mockProvider({
+      async syncEnrollments() {
+        return sourceActivity as unknown as LearningProviderPage<LearningProviderEnrollment>;
+      },
+    }), {
+      method: 'syncEnrollments',
+      request: {
+        subject: { provider: 'canvas', connectionId: 7, externalCourseId: 'course-42' },
+        page: pageRequest,
+        operation: operationInput({ scope: courseScope('course-42') }),
+      },
+      now: () => NOW,
+    });
+
+    await replay('provider_connection', {
+      ...mockProvider({
+        async listCourses() { return sourceCourse as LearningProviderPage<LearningCourse>; },
+      }),
+      provider: 'google_classroom',
+    }, {
+      method: 'listCourses',
+      request: {
+        subject: { provider: 'google_classroom', connectionId: 8 },
+        page: pageRequest,
+        operation: operationInput({ scope: {
+          provider: 'google_classroom', connectionId: 8, externalCourseId: null,
+          externalActivityId: null, externalEnrollmentId: null,
+        } }),
+      },
+      urlPolicy: GOOGLE_URL_POLICY,
+      now: () => NOW,
+    });
+
+    await replay('course', mockProvider({
+      async syncEnrollments() { return sourceEnrollment as LearningProviderPage<LearningProviderEnrollment>; },
+    }), {
+      method: 'syncEnrollments',
+      request: {
+        subject: { provider: 'canvas', connectionId: 7, externalCourseId: 'course-99' },
+        page: pageRequest,
+        operation: operationInput({ scope: courseScope('course-99') }),
+      },
+      now: () => NOW,
+    });
+
+    await replay('resource_activity', mockProvider({
+      async syncResources() { return sourceResource as LearningProviderPage<LearningResource>; },
+    }), {
+      method: 'syncResources',
+      request: {
+        subject: {
+          provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalActivityId: 'activity-4',
+        },
+        page: pageRequest,
+        operation: operationInput({ scope: activityScope('activity-4') }),
+      },
+      urlPolicy: URL_POLICY,
+      now: () => NOW,
+    });
+
+    await replay('submission_activity', mockProvider({
+      async syncSubmissions() {
+        return sourceSubmission as LearningProviderPage<LearningProviderSubmission>;
+      },
+    }), {
+      method: 'syncSubmissions',
+      request: {
+        subject: { ...activityScope('activity-4'), externalEnrollmentId: null },
+        page: pageRequest,
+        operation: operationInput({ scope: activityScope('activity-4') }),
+      },
+      now: () => NOW,
+    });
+
+    await replay('submission_enrollment', mockProvider({
+      async syncSubmissions() {
+        return sourceEnrolledSubmission as LearningProviderPage<LearningProviderSubmission>;
+      },
+    }), {
+      method: 'syncSubmissions',
+      request: {
+        subject: { ...activityScope('activity-3'), externalEnrollmentId: 'enrollment-b' },
+        page: pageRequest,
+        operation: operationInput({ scope: {
+          ...activityScope('activity-3'), externalEnrollmentId: 'enrollment-b',
+        } }),
+      },
+      now: () => NOW,
+    });
+
+    await replay('role_policy', mockProvider({
+      async syncResources() { return sourceResource as LearningProviderPage<LearningResource>; },
+    }), {
+      method: 'syncResources',
+      request: {
+        subject: {
+          provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalActivityId: 'activity-3',
+        },
+        page: pageRequest,
+        operation: operationInput({ scope: activityScope('activity-3') }),
+      },
+      urlPolicy: ROLE_SWAPPED_URL_POLICY,
+      now: () => NOW,
+    });
+    expect(accepted).toEqual([]);
   });
 
   it('revalidates pre-resolution submission pages without local People fields', async () => {
