@@ -94,9 +94,19 @@ export const LEARNING_LIMITS = Object.freeze({
 
 export type LearningIntegerBoolean = 0 | 1;
 
-export interface LearningUrlPolicy {
+export interface LearningConnectionUrlPolicy extends LearningProviderSubject {
+  readonly baseUrl: string | null;
   readonly allowedOrigins: readonly string[];
-  readonly allowLocalDevelopmentHttp?: boolean;
+}
+
+export interface LearningLaunchContract extends LearningProviderSubject {
+  readonly url: string;
+  readonly origin: string;
+}
+
+export interface LearningDevelopmentEndpoint {
+  readonly nonPersistedDevelopmentEndpoint: true;
+  readonly url: string;
 }
 
 export interface LearningProviderSubject {
@@ -250,7 +260,7 @@ function dataRecord(value: unknown): Record<string, unknown> {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid();
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) invalid();
-    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
     const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const key of Reflect.ownKeys(descriptors)) {
       if (typeof key !== 'string') invalid();
@@ -259,6 +269,30 @@ function dataRecord(value: unknown): Record<string, unknown> {
       result[key] = descriptor.value;
     }
     return result;
+  } catch {
+    return invalid();
+  }
+}
+
+function dataArray(value: unknown, maximumLength: number): readonly unknown[] {
+  try {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) invalid();
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.some((key) => typeof key !== 'string')) invalid();
+    const lengthDescriptor = descriptors.length;
+    const length = lengthDescriptor?.value;
+    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > maximumLength) {
+      invalid();
+    }
+    if (keys.length !== length + 1) invalid();
+    const result: unknown[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor || !('value' in descriptor)) invalid();
+      result[index] = descriptor.value;
+    }
+    return Object.freeze(result);
   } catch {
     return invalid();
   }
@@ -287,11 +321,26 @@ function nullableInteger(value: unknown, minimum: number, maximum: number = LEAR
 
 function boundedString(value: unknown, minimumBytes: number, maximumBytes: number, trim = true): string {
   if (typeof value !== 'string') invalid();
-  if (CONTROL_RE.test(value)) invalid();
+  if (CONTROL_RE.test(value) || !hasWellFormedUnicode(value)) invalid();
   const normalized = trim ? value.trim() : value;
   const length = utf8.encode(normalized).byteLength;
   if (length < minimumBytes || length > maximumBytes) invalid();
   return normalized;
+}
+
+function hasWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) return false;
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function externalId(value: unknown): string {
@@ -378,39 +427,111 @@ function originSuffix(raw: string): string {
   return raw.slice(suffixStart);
 }
 
-function allowedOrigins(policy: LearningUrlPolicy): ReadonlySet<string> {
+function normalizedHttpsOrigin(value: unknown): string {
+  const { raw, url } = parsedUrl(value);
   if (
-    policy === null
-    || typeof policy !== 'object'
-    || !Array.isArray(policy.allowedOrigins)
-    || policy.allowedOrigins.length < 1
-    || policy.allowedOrigins.length > 100
-  ) invalid();
-  const origins = new Set<string>();
-  for (const candidate of policy.allowedOrigins) {
-    const { raw, url } = parsedUrl(candidate);
-    if (url.pathname !== '/' || url.search !== '' || !['', '/'].includes(originSuffix(raw))) invalid();
-    if (url.protocol === 'http:' && (!policy.allowLocalDevelopmentHttp || !isLocalHostname(url.hostname))) invalid();
-    origins.add(url.origin);
+    url.protocol !== 'https:'
+    || url.port !== ''
+    || url.pathname !== '/'
+    || url.search !== ''
+    || !['', '/'].includes(originSuffix(raw))
+  ) {
+    invalid();
   }
-  return origins;
+  return url.origin;
 }
 
-export function normalizeLearningLaunchUrl(value: unknown, policy: LearningUrlPolicy): string {
+function youtubeOrigin(hostname: string): boolean {
+  return hostname === 'youtube.com'
+    || hostname === 'www.youtube.com'
+    || hostname === 'm.youtube.com'
+    || hostname === 'youtu.be';
+}
+
+function googleProviderOrigin(hostname: string): boolean {
+  return hostname === 'classroom.google.com'
+    || hostname === 'drive.google.com'
+    || hostname === 'docs.google.com'
+    || hostname.endsWith('.googleusercontent.com')
+    || youtubeOrigin(hostname);
+}
+
+export function normalizeLearningConnectionUrlPolicy(value: unknown): LearningConnectionUrlPolicy {
+  const row = exactRecord(value, ['provider', 'connectionId', 'baseUrl', 'allowedOrigins']);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const connectionId = integer(row.connectionId, 1);
+  const baseUrl = provider === 'canvas'
+    ? normalizeCanvasBaseUrl(row.baseUrl)
+    : row.baseUrl === null ? null : invalid();
+  const rawOrigins = dataArray(row.allowedOrigins, 100);
+  if (rawOrigins.length < 1) invalid();
+  const seen = new Set<string>();
+  const allowedOrigins: string[] = [];
+  for (let index = 0; index < rawOrigins.length; index += 1) {
+    const origin = normalizedHttpsOrigin(rawOrigins[index]);
+    if (seen.has(origin)) invalid();
+    const hostname = new URL(origin).hostname.toLowerCase();
+    if (
+      (provider === 'google_classroom' && !googleProviderOrigin(hostname))
+      || (provider === 'canvas' && googleProviderOrigin(hostname) && !youtubeOrigin(hostname))
+    ) invalid();
+    seen.add(origin);
+    allowedOrigins[index] = origin;
+  }
+  if (baseUrl !== null && !seen.has(baseUrl)) invalid();
+  return frozen({ provider, connectionId, baseUrl, allowedOrigins: Object.freeze(allowedOrigins) });
+}
+
+function matchingPolicySubject(
+  provider: LearningProviderKind,
+  connectionId: number,
+  policy: LearningConnectionUrlPolicy,
+): void {
+  if (provider !== policy.provider || connectionId !== policy.connectionId) invalid();
+}
+
+export function normalizeLearningLaunchUrl(value: unknown, rawPolicy: unknown): string {
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
   const { url } = parsedUrl(value);
-  if (url.protocol === 'http:' && (!policy.allowLocalDevelopmentHttp || !isLocalHostname(url.hostname))) invalid();
-  if (!allowedOrigins(policy).has(url.origin)) invalid();
+  if (url.protocol !== 'https:' || !policy.allowedOrigins.includes(url.origin)) invalid();
   const normalized = url.toString();
   if (utf8.encode(normalized).byteLength > LEARNING_LIMITS.urlBytes) invalid();
   return normalized;
 }
 
-export function normalizeCanvasBaseUrl(value: unknown, policy: LearningUrlPolicy): string {
+export function normalizeCanvasBaseUrl(value: unknown, rawPolicy?: unknown): string {
   const { raw, url } = parsedUrl(value);
-  if (url.pathname !== '/' || url.search !== '' || !['', '/'].includes(originSuffix(raw))) invalid();
-  if (url.protocol === 'http:' && (!policy.allowLocalDevelopmentHttp || !isLocalHostname(url.hostname))) invalid();
-  if (!allowedOrigins(policy).has(url.origin)) invalid();
+  if (
+    url.protocol !== 'https:'
+    || url.port !== ''
+    || url.pathname !== '/'
+    || url.search !== ''
+    || !['', '/'].includes(originSuffix(raw))
+  ) invalid();
+  if (rawPolicy !== undefined) {
+    const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+    if (policy.provider !== 'canvas' || policy.baseUrl !== url.origin) invalid();
+  }
   return url.origin;
+}
+
+export function normalizeLearningDevelopmentEndpoint(value: unknown): LearningDevelopmentEndpoint {
+  const { url } = parsedUrl(value);
+  if (url.protocol !== 'http:' || !isLocalHostname(url.hostname) || url.port === '') invalid();
+  return frozen({ nonPersistedDevelopmentEndpoint: true, url: url.toString() });
+}
+
+export function normalizeLearningLaunchContract(
+  value: unknown,
+  rawPolicy: unknown,
+): LearningLaunchContract {
+  const row = exactRecord(value, ['provider', 'connectionId', 'url']);
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const connectionId = integer(row.connectionId, 1);
+  matchingPolicySubject(provider, connectionId, policy);
+  const url = normalizeLearningLaunchUrl(row.url, policy);
+  return frozen({ provider, connectionId, url, origin: new URL(url).origin });
 }
 
 function youtubeId(value: unknown): string {
@@ -453,17 +574,21 @@ export function normalizeYouTube(value: unknown): NormalizedYouTube {
   });
 }
 
-export function normalizeLearningConnection(value: unknown, policy: LearningUrlPolicy): LearningConnection {
+export function normalizeLearningConnection(value: unknown, rawPolicy: unknown): LearningConnection {
   const row = exactRecord(value, [
     'connectionId', 'provider', 'displayName', 'baseUrl', 'status', 'revision',
     'lastSuccessfulSyncAt', 'lastErrorCode',
   ]);
   const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const connectionId = integer(row.connectionId, 1);
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  matchingPolicySubject(provider, connectionId, policy);
   const baseUrl = provider === 'canvas'
-    ? normalizeCanvasBaseUrl(row.baseUrl, policy)
+    ? normalizeCanvasBaseUrl(row.baseUrl)
     : row.baseUrl === null ? null : invalid();
+  if (baseUrl !== policy.baseUrl) invalid();
   return frozen({
-    connectionId: integer(row.connectionId, 1),
+    connectionId,
     provider,
     displayName: boundedString(row.displayName, 1, LEARNING_LIMITS.connectionDisplayNameBytes),
     baseUrl,
@@ -474,14 +599,18 @@ export function normalizeLearningConnection(value: unknown, policy: LearningUrlP
   });
 }
 
-export function normalizeLearningCourse(value: unknown, policy: LearningUrlPolicy): LearningCourse {
+export function normalizeLearningCourse(value: unknown, rawPolicy: unknown): LearningCourse {
   const row = exactRecord(value, [
     'connectionId', 'provider', 'externalCourseId', 'displayName', 'launchUrl',
     'lifecycleState', 'providerUpdatedAt', 'lastSyncedAt',
   ]);
+  const connectionId = integer(row.connectionId, 1);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  matchingPolicySubject(provider, connectionId, policy);
   return frozen({
-    connectionId: integer(row.connectionId, 1),
-    provider: oneOf(row.provider, LEARNING_PROVIDERS),
+    connectionId,
+    provider,
     externalCourseId: externalId(row.externalCourseId),
     displayName: boundedString(row.displayName, 1, LEARNING_LIMITS.courseDisplayNameBytes),
     launchUrl: normalizeLearningLaunchUrl(row.launchUrl, policy),
@@ -520,15 +649,19 @@ export function normalizeLearningEnrollment(value: unknown): LearningEnrollment 
   });
 }
 
-export function normalizeLearningActivity(value: unknown, policy: LearningUrlPolicy): LearningActivity {
+export function normalizeLearningActivity(value: unknown, rawPolicy: unknown): LearningActivity {
   const row = exactRecord(value, [
     'connectionId', 'provider', 'externalCourseId', 'externalActivityId', 'title',
     'kind', 'lifecycleState', 'launchUrl', 'dueAt', 'publishedAt',
     'providerUpdatedAt', 'lastSyncedAt',
   ]);
+  const connectionId = integer(row.connectionId, 1);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  matchingPolicySubject(provider, connectionId, policy);
   return frozen({
-    connectionId: integer(row.connectionId, 1),
-    provider: oneOf(row.provider, LEARNING_PROVIDERS),
+    connectionId,
+    provider,
     externalCourseId: externalId(row.externalCourseId),
     externalActivityId: externalId(row.externalActivityId),
     title: boundedString(row.title, 1, LEARNING_LIMITS.titleBytes),
@@ -542,11 +675,15 @@ export function normalizeLearningActivity(value: unknown, policy: LearningUrlPol
   });
 }
 
-export function normalizeLearningResource(value: unknown, policy: LearningUrlPolicy): LearningResource {
+export function normalizeLearningResource(value: unknown, rawPolicy: unknown): LearningResource {
   const row = exactRecord(value, [
     'connectionId', 'provider', 'externalCourseId', 'externalActivityId', 'externalResourceId',
     'title', 'kind', 'launchUrl', 'youtubeVideoId', 'mimeType', 'sizeBytes', 'providerUpdatedAt',
   ]);
+  const connectionId = integer(row.connectionId, 1);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const policy = normalizeLearningConnectionUrlPolicy(rawPolicy);
+  matchingPolicySubject(provider, connectionId, policy);
   const kind = oneOf(row.kind, LEARNING_RESOURCE_KINDS);
   const launchUrl = normalizeLearningLaunchUrl(row.launchUrl, policy);
   let youtubeVideoId: string | null;
@@ -569,8 +706,8 @@ export function normalizeLearningResource(value: unknown, policy: LearningUrlPol
     sizeBytes = null;
   }
   return frozen({
-    connectionId: integer(row.connectionId, 1),
-    provider: oneOf(row.provider, LEARNING_PROVIDERS),
+    connectionId,
+    provider,
     externalCourseId: externalId(row.externalCourseId),
     externalActivityId: externalId(row.externalActivityId),
     externalResourceId: externalId(row.externalResourceId),
@@ -665,12 +802,41 @@ export function learningIdentitySubjectKey(subject: LearningIdentitySubject): st
   return JSON.stringify([subject.provider, subject.connectionId, subject.externalUserId]);
 }
 
+export function learningEnrollmentSubjectKey(enrollment: LearningEnrollment): string {
+  return JSON.stringify([
+    enrollment.provider,
+    enrollment.connectionId,
+    enrollment.externalCourseId,
+    enrollment.externalEnrollmentId,
+  ]);
+}
+
 export function learningActivitySubjectKey(subject: LearningActivitySubject): string {
   return JSON.stringify([
     subject.provider,
     subject.connectionId,
     subject.externalCourseId,
     subject.externalActivityId,
+  ]);
+}
+
+export function learningResourceSubjectKey(resource: LearningResource): string {
+  return JSON.stringify([
+    resource.provider,
+    resource.connectionId,
+    resource.externalCourseId,
+    resource.externalActivityId,
+    resource.externalResourceId,
+  ]);
+}
+
+export function learningSubmissionSubjectKey(submission: LearningSubmissionSnapshot): string {
+  return JSON.stringify([
+    submission.provider,
+    submission.connectionId,
+    submission.externalCourseId,
+    submission.externalActivityId,
+    submission.externalEnrollmentId,
   ]);
 }
 
@@ -691,6 +857,7 @@ export function normalizeLearningProviderErrorMetadata(value: unknown): Learning
 /** Internal helpers shared by the dependency-light provider contract module. */
 export const learningValidation = Object.freeze({
   dataRecord,
+  dataArray,
   exactRecord,
   oneOf,
   integer,

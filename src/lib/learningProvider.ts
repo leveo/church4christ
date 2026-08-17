@@ -13,9 +13,11 @@ import {
   type LearningEnrollment,
   type LearningErrorCode,
   type LearningIntegerBoolean,
+  type LearningLaunchContract,
   type LearningProviderErrorMetadata,
   type LearningProviderKind,
   type LearningProviderSubject,
+  type LearningResource,
   type LearningSubmissionSnapshot,
   type LearningSyncStatus,
   type LearningSyncTrigger,
@@ -29,6 +31,7 @@ export interface LearningPageRequest {
 
 export interface LearningProviderPage<T extends object> {
   readonly items: readonly T[];
+  readonly requestPageToken: string | null;
   readonly nextPageToken: string | null;
   readonly pageNumber: number;
   readonly responseBytes: number;
@@ -36,6 +39,41 @@ export interface LearningProviderPage<T extends object> {
 
 export interface LearningPageContract<T extends object> {
   readonly normalizeItem: (value: unknown) => T;
+  readonly subjectKey: (value: T) => string;
+}
+
+export interface LearningPageScope extends LearningProviderSubject {
+  readonly externalCourseId: string | null;
+  readonly externalActivityId: string | null;
+  readonly externalEnrollmentId: string | null;
+}
+
+export interface LearningOperationContext {
+  readonly scope: LearningPageScope;
+  readonly deadlineAt: string;
+  readonly maxPages: number;
+  readonly maxItems: number;
+  readonly maxBytes: number;
+  readonly signal: AbortSignal;
+}
+
+export interface LearningPageSequence<T extends object> {
+  readonly scope: LearningPageScope;
+  readonly deadlineAt: string;
+  readonly maxPages: number;
+  readonly maxItems: number;
+  readonly maxBytes: number;
+  readonly pageCount: number;
+  readonly itemCount: number;
+  readonly responseBytes: number;
+  readonly expectedPageToken: string | null;
+  readonly seenPageTokens: readonly string[];
+  readonly seenEntityKeys: readonly string[];
+  readonly items: readonly T[];
+  readonly complete: LearningIntegerBoolean;
+}
+
+export interface LearningPageSequenceContract<T extends object> {
   readonly subjectKey: (value: T) => string;
 }
 
@@ -74,13 +112,37 @@ export interface LearningProviderNotification extends LearningProviderSubject {
  */
 export interface LearningProvider {
   readonly provider: LearningProviderKind;
-  healthCheck(subject: LearningProviderSubject): Promise<LearningProviderHealth>;
-  listCourses(subject: LearningProviderSubject, page: LearningPageRequest): Promise<LearningProviderPage<LearningCourse>>;
-  syncCourse(subject: LearningCourseSubject): Promise<LearningCourse>;
-  syncEnrollments(subject: LearningCourseSubject, page: LearningPageRequest): Promise<LearningProviderPage<LearningEnrollment>>;
-  syncActivities(subject: LearningCourseSubject, page: LearningPageRequest): Promise<LearningProviderPage<LearningActivity>>;
-  syncSubmissions(subject: LearningActivitySubject, page: LearningPageRequest): Promise<LearningProviderPage<LearningSubmissionSnapshot>>;
-  buildLaunchUrl(subject: LearningCourseSubject | LearningActivitySubject): Promise<string>;
+  healthCheck(subject: LearningProviderSubject, operation: LearningOperationContext): Promise<LearningProviderHealth>;
+  listCourses(
+    subject: LearningProviderSubject,
+    page: LearningPageRequest,
+    operation: LearningOperationContext,
+  ): Promise<LearningProviderPage<LearningCourse>>;
+  syncCourse(subject: LearningCourseSubject, operation: LearningOperationContext): Promise<LearningCourse>;
+  syncEnrollments(
+    subject: LearningCourseSubject,
+    page: LearningPageRequest,
+    operation: LearningOperationContext,
+  ): Promise<LearningProviderPage<LearningEnrollment>>;
+  syncActivities(
+    subject: LearningCourseSubject,
+    page: LearningPageRequest,
+    operation: LearningOperationContext,
+  ): Promise<LearningProviderPage<LearningActivity>>;
+  syncResources(
+    subject: LearningActivitySubject,
+    page: LearningPageRequest,
+    operation: LearningOperationContext,
+  ): Promise<LearningProviderPage<LearningResource>>;
+  syncSubmissions(
+    subject: LearningActivitySubject,
+    page: LearningPageRequest,
+    operation: LearningOperationContext,
+  ): Promise<LearningProviderPage<LearningSubmissionSnapshot>>;
+  buildLaunchUrl(
+    subject: LearningCourseSubject | LearningActivitySubject,
+    operation: LearningOperationContext,
+  ): Promise<LearningLaunchContract>;
   normalizeNotification(input: unknown): Promise<LearningProviderNotification | null>;
 }
 
@@ -122,7 +184,12 @@ function cloneAndFreeze(
   state.active.add(objectValue);
   try {
     if (Array.isArray(value)) {
-      return Object.freeze(value.map((item) => cloneAndFreeze(item, state, depth + 1)));
+      const source = learningValidation.dataArray(value, 10_000);
+      const clone: unknown[] = [];
+      for (let index = 0; index < source.length; index += 1) {
+        clone[index] = cloneAndFreeze(source[index], state, depth + 1);
+      }
+      return Object.freeze(clone);
     }
     const row = learningValidation.dataRecord(value);
     const clone: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
@@ -156,14 +223,15 @@ export function normalizeLearningPage<T extends object>(
   if (!contract || typeof contract.normalizeItem !== 'function' || typeof contract.subjectKey !== 'function') {
     learningValidation.invalid();
   }
-  const row = learningValidation.exactRecord(value, ['items', 'nextPageToken', 'pageNumber', 'responseBytes']);
-  const rawItems = row.items;
-  if (!Array.isArray(rawItems) || rawItems.length > LEARNING_LIMITS.maxPageItems) learningValidation.invalid();
-  const itemInputs = rawItems as unknown[];
+  const row = learningValidation.exactRecord(value, [
+    'items', 'requestPageToken', 'nextPageToken', 'pageNumber', 'responseBytes',
+  ]);
+  const itemInputs = learningValidation.dataArray(row.items, LEARNING_LIMITS.maxPageItems);
   const pageNumber = learningValidation.integer(row.pageNumber, 1, LEARNING_LIMITS.maxPages);
   const responseBytes = learningValidation.integer(row.responseBytes, 0, LEARNING_LIMITS.maxPageBytes);
   const byKey = new Map<string, { item: T; json: string }>();
-  for (const rawItem of itemInputs) {
+  for (let index = 0; index < itemInputs.length; index += 1) {
+    const rawItem = itemInputs[index];
     const normalized = (() => {
       try {
         return contract.normalizeItem(rawItem);
@@ -194,9 +262,267 @@ export function normalizeLearningPage<T extends object>(
   if (learningValidation.utf8Bytes(canonicalJson(items)) > LEARNING_LIMITS.maxPageBytes) learningValidation.invalid();
   return Object.freeze({
     items,
+    requestPageToken: token(row.requestPageToken),
     nextPageToken: token(row.nextPageToken),
     pageNumber,
     responseBytes,
+  });
+}
+
+function nullableExternalId(value: unknown): string | null {
+  return value === null ? null : learningValidation.externalId(value);
+}
+
+export function normalizeLearningPageScope(value: unknown): LearningPageScope {
+  const row = learningValidation.exactRecord(value, [
+    'provider', 'connectionId', 'externalCourseId', 'externalActivityId', 'externalEnrollmentId',
+  ]);
+  const externalCourseId = nullableExternalId(row.externalCourseId);
+  const externalActivityId = nullableExternalId(row.externalActivityId);
+  const externalEnrollmentId = nullableExternalId(row.externalEnrollmentId);
+  if ((externalActivityId !== null || externalEnrollmentId !== null) && externalCourseId === null) {
+    learningValidation.invalid();
+  }
+  return Object.freeze({
+    provider: learningValidation.oneOf(row.provider, LEARNING_PROVIDERS),
+    connectionId: learningValidation.integer(row.connectionId, 1),
+    externalCourseId,
+    externalActivityId,
+    externalEnrollmentId,
+  });
+}
+
+function abortSignal(value: unknown): AbortSignal {
+  try {
+    if (typeof AbortSignal === 'undefined' || !(value instanceof AbortSignal)) learningValidation.invalid();
+    return value as AbortSignal;
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
+export function normalizeLearningOperationContext(value: unknown): LearningOperationContext {
+  const row = learningValidation.exactRecord(value, [
+    'scope', 'deadlineAt', 'maxPages', 'maxItems', 'maxBytes', 'signal',
+  ]);
+  return Object.freeze({
+    scope: normalizeLearningPageScope(row.scope),
+    deadlineAt: learningValidation.timestamp(row.deadlineAt),
+    maxPages: learningValidation.integer(row.maxPages, 1, LEARNING_LIMITS.maxPages),
+    maxItems: learningValidation.integer(row.maxItems, 1, LEARNING_LIMITS.maxSyncItems),
+    maxBytes: learningValidation.integer(row.maxBytes, 1, LEARNING_LIMITS.maxSyncBytes),
+    signal: abortSignal(row.signal),
+  });
+}
+
+function sameScope(left: LearningPageScope, right: LearningPageScope): boolean {
+  return left.provider === right.provider
+    && left.connectionId === right.connectionId
+    && left.externalCourseId === right.externalCourseId
+    && left.externalActivityId === right.externalActivityId
+    && left.externalEnrollmentId === right.externalEnrollmentId;
+}
+
+function stringArray(value: unknown, maximumLength: number, tokenValues = false): readonly string[] {
+  const values = learningValidation.dataArray(value, maximumLength);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < values.length; index += 1) {
+    const item = tokenValues
+      ? token(values[index])
+      : learningValidation.boundedString(values[index], 1, LEARNING_LIMITS.urlBytes, false);
+    if (item === null) learningValidation.invalid();
+    const normalizedItem = item as string;
+    if (seen.has(normalizedItem)) learningValidation.invalid();
+    seen.add(normalizedItem);
+    result[index] = normalizedItem;
+  }
+  return Object.freeze(result);
+}
+
+function normalizeLearningPageSequence<T extends object>(value: unknown): LearningPageSequence<T> {
+  const row = learningValidation.exactRecord(value, [
+    'scope', 'deadlineAt', 'maxPages', 'maxItems', 'maxBytes', 'pageCount', 'itemCount',
+    'responseBytes', 'expectedPageToken', 'seenPageTokens', 'seenEntityKeys', 'items', 'complete',
+  ]);
+  const maxPages = learningValidation.integer(row.maxPages, 1, LEARNING_LIMITS.maxPages);
+  const maxItems = learningValidation.integer(row.maxItems, 1, LEARNING_LIMITS.maxSyncItems);
+  const maxBytes = learningValidation.integer(row.maxBytes, 1, LEARNING_LIMITS.maxSyncBytes);
+  const pageCount = learningValidation.integer(row.pageCount, 0, maxPages);
+  const itemCount = learningValidation.integer(row.itemCount, 0, maxItems);
+  const responseBytes = learningValidation.integer(row.responseBytes, 0, maxBytes);
+  const itemInputs = learningValidation.dataArray(row.items, maxItems);
+  if (itemInputs.length !== itemCount) learningValidation.invalid();
+  const items: T[] = [];
+  for (let index = 0; index < itemInputs.length; index += 1) {
+    items[index] = cloneAndFreeze(learningValidation.dataRecord(itemInputs[index])) as T;
+  }
+  const seenEntityKeys = stringArray(row.seenEntityKeys, maxItems);
+  if (seenEntityKeys.length !== itemCount) learningValidation.invalid();
+  const complete = learningValidation.integer(row.complete, 0, 1) as LearningIntegerBoolean;
+  const expectedPageToken = token(row.expectedPageToken);
+  if ((complete === 1 && expectedPageToken !== null) || (complete === 0 && pageCount > 0 && expectedPageToken === null)) {
+    learningValidation.invalid();
+  }
+  return Object.freeze({
+    scope: normalizeLearningPageScope(row.scope),
+    deadlineAt: learningValidation.timestamp(row.deadlineAt),
+    maxPages,
+    maxItems,
+    maxBytes,
+    pageCount,
+    itemCount,
+    responseBytes,
+    expectedPageToken,
+    seenPageTokens: stringArray(row.seenPageTokens, maxPages, true),
+    seenEntityKeys,
+    items: Object.freeze(items),
+    complete,
+  });
+}
+
+export function createLearningPageSequence<T extends object>(
+  rawContext: LearningOperationContext,
+): LearningPageSequence<T> {
+  const context = normalizeLearningOperationContext(rawContext);
+  return Object.freeze({
+    scope: context.scope,
+    deadlineAt: context.deadlineAt,
+    maxPages: context.maxPages,
+    maxItems: context.maxItems,
+    maxBytes: context.maxBytes,
+    pageCount: 0,
+    itemCount: 0,
+    responseBytes: 0,
+    expectedPageToken: null,
+    seenPageTokens: Object.freeze([] as string[]),
+    seenEntityKeys: Object.freeze([] as string[]),
+    items: Object.freeze([] as T[]),
+    complete: 0,
+  });
+}
+
+function safeSubjectKey<T extends object>(item: T, contract: LearningPageSequenceContract<T>): string {
+  try {
+    return learningValidation.boundedString(
+      contract.subjectKey(item),
+      1,
+      LEARNING_LIMITS.urlBytes,
+      false,
+    );
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
+function itemMatchesScope(item: object, scope: LearningPageScope): boolean {
+  try {
+    const row = learningValidation.dataRecord(item);
+    return row.provider === scope.provider
+      && row.connectionId === scope.connectionId
+      && (scope.externalCourseId === null || row.externalCourseId === scope.externalCourseId)
+      && (scope.externalActivityId === null || row.externalActivityId === scope.externalActivityId)
+      && (scope.externalEnrollmentId === null || row.externalEnrollmentId === scope.externalEnrollmentId);
+  } catch {
+    return false;
+  }
+}
+
+function isCancelled(signal: AbortSignal): boolean {
+  try {
+    return signal.aborted;
+  } catch {
+    return learningValidation.invalid();
+  }
+}
+
+export function acceptLearningPageSequence<T extends object>(
+  rawState: LearningPageSequence<T>,
+  rawPage: LearningProviderPage<T>,
+  contract: LearningPageSequenceContract<T>,
+  rawContext: LearningOperationContext,
+  nowEpochMs: number,
+): LearningPageSequence<T> {
+  const context = normalizeLearningOperationContext(rawContext);
+  const state = normalizeLearningPageSequence<T>(rawState);
+  if (
+    !sameScope(state.scope, context.scope)
+    || state.deadlineAt !== context.deadlineAt
+    || state.maxPages !== context.maxPages
+    || state.maxItems !== context.maxItems
+    || state.maxBytes !== context.maxBytes
+    || !Number.isSafeInteger(nowEpochMs)
+    || nowEpochMs < 0
+    || nowEpochMs >= Date.parse(context.deadlineAt)
+    || isCancelled(context.signal)
+    || state.complete === 1
+  ) learningValidation.invalid();
+
+  const page = normalizeLearningPage(rawPage, {
+    normalizeItem(value) {
+      return learningValidation.dataRecord(value) as T;
+    },
+    subjectKey(item) {
+      return safeSubjectKey(item, contract);
+    },
+  });
+  if (
+    page.pageNumber !== state.pageCount + 1
+    || page.requestPageToken !== state.expectedPageToken
+  ) learningValidation.invalid();
+
+  const nextPageCount = state.pageCount + 1;
+  const nextItemCount = state.itemCount + page.items.length;
+  const nextResponseBytes = state.responseBytes + page.responseBytes;
+  if (
+    nextPageCount > context.maxPages
+    || nextItemCount > context.maxItems
+    || nextResponseBytes > context.maxBytes
+  ) learningValidation.invalid();
+
+  const seenKeys = new Set(state.seenEntityKeys);
+  const pairs: Array<{ key: string; item: T }> = [];
+  for (let index = 0; index < state.items.length; index += 1) {
+    if (!itemMatchesScope(state.items[index], context.scope)) learningValidation.invalid();
+    const key = safeSubjectKey(state.items[index], contract);
+    if (key !== state.seenEntityKeys[index]) learningValidation.invalid();
+    pairs[index] = { key, item: state.items[index] };
+  }
+  for (let index = 0; index < page.items.length; index += 1) {
+    const item = page.items[index];
+    if (!itemMatchesScope(item, context.scope)) learningValidation.invalid();
+    const key = safeSubjectKey(item, contract);
+    if (seenKeys.has(key)) learningValidation.invalid();
+    seenKeys.add(key);
+    pairs[pairs.length] = { key, item };
+  }
+  pairs.sort((left, right) => compareCodeUnits(left.key, right.key));
+  const items: T[] = [];
+  const entityKeys: string[] = [];
+  for (let index = 0; index < pairs.length; index += 1) {
+    items[index] = pairs[index].item;
+    entityKeys[index] = pairs[index].key;
+  }
+
+  const pageTokens = [...state.seenPageTokens];
+  if (page.nextPageToken !== null) {
+    if (pageTokens.includes(page.nextPageToken)) learningValidation.invalid();
+    pageTokens[pageTokens.length] = page.nextPageToken;
+  }
+  return Object.freeze({
+    scope: context.scope,
+    deadlineAt: context.deadlineAt,
+    maxPages: context.maxPages,
+    maxItems: context.maxItems,
+    maxBytes: context.maxBytes,
+    pageCount: nextPageCount,
+    itemCount: nextItemCount,
+    responseBytes: nextResponseBytes,
+    expectedPageToken: page.nextPageToken,
+    seenPageTokens: Object.freeze(pageTokens),
+    seenEntityKeys: Object.freeze(entityKeys),
+    items: Object.freeze(items),
+    complete: page.nextPageToken === null ? 1 : 0,
   });
 }
 
