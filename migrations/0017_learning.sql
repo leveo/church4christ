@@ -22,7 +22,8 @@ CREATE TABLE learning_provider_connections (
   ),
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (instr(status,char(0)) = 0 AND status IN ('pending','active','error','disabled')),
-  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision BETWEEN 0 AND 2147483647),
+  revision INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(revision) = 'integer' AND revision BETWEEN 0 AND 2147483647),
   last_successful_sync_at TEXT CHECK (
     last_successful_sync_at IS NULL OR (
       instr(last_successful_sync_at,char(0)) = 0 AND
@@ -70,8 +71,10 @@ CREATE TABLE learning_provider_credentials (
     CHECK (typeof(nonce) = 'blob' AND length(nonce) BETWEEN 12 AND 32),
   algorithm TEXT NOT NULL
     CHECK (instr(algorithm,char(0)) = 0 AND algorithm = 'AES-256-GCM'),
-  key_version INTEGER NOT NULL CHECK (key_version BETWEEN 1 AND 2147483647),
-  envelope_version INTEGER NOT NULL DEFAULT 1 CHECK (envelope_version = 1),
+  key_version INTEGER NOT NULL
+    CHECK (typeof(key_version) = 'integer' AND key_version BETWEEN 1 AND 2147483647),
+  envelope_version INTEGER NOT NULL DEFAULT 1
+    CHECK (typeof(envelope_version) = 'integer' AND envelope_version = 1),
   expires_at TEXT CHECK (
     expires_at IS NULL OR (
       instr(expires_at,char(0)) = 0 AND length(CAST(expires_at AS BLOB)) BETWEEN 19 AND 40
@@ -274,6 +277,7 @@ CREATE TABLE learning_activities (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (instr(updated_at,char(0)) = 0 AND length(CAST(updated_at AS BLOB)) BETWEEN 19 AND 40),
   UNIQUE (id, course_id),
+  UNIQUE (id, course_id, kind),
   UNIQUE (course_id, external_activity_id)
 );
 
@@ -281,6 +285,21 @@ CREATE INDEX idx_learning_activities_course_due
   ON learning_activities(course_id, lifecycle_state, due_at, id);
 CREATE INDEX idx_learning_activities_course_kind
   ON learning_activities(course_id, kind, provider_updated_at, id);
+
+-- Direct activity purges are a retention operation. They are permitted only
+-- after the owning course is soft-deleted or its connection is disabled/deleted;
+-- hard course deletion still cascades through the foreign key.
+CREATE TRIGGER learning_activities_no_delete
+BEFORE DELETE ON learning_activities
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM learning_courses
+    WHERE id = OLD.course_id AND deleted_at IS NULL AND EXISTS (
+      SELECT 1 FROM learning_provider_connections
+      WHERE id = learning_courses.connection_id AND deleted_at IS NULL AND status <> 'disabled'
+    )
+  ) THEN RAISE(ABORT, 'learning_activity_active_parent') END;
+END;
 
 CREATE TABLE learning_resources (
   id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647),
@@ -313,7 +332,11 @@ CREATE TABLE learning_resources (
       length(CAST(mime_type AS BLOB)) BETWEEN 1 AND 127
     )
   ),
-  size_bytes INTEGER CHECK (size_bytes BETWEEN 0 AND 2147483647),
+  size_bytes INTEGER CHECK (
+    size_bytes IS NULL OR (
+      typeof(size_bytes) = 'integer' AND size_bytes BETWEEN 0 AND 2147483647
+    )
+  ),
   provider_updated_at TEXT CHECK (
     provider_updated_at IS NULL OR (
       instr(provider_updated_at,char(0)) = 0 AND
@@ -339,11 +362,15 @@ CREATE INDEX idx_learning_resources_activity_kind
 CREATE TABLE learning_submission_snapshots (
   course_id INTEGER NOT NULL,
   activity_id INTEGER NOT NULL,
+  activity_kind TEXT NOT NULL CHECK (
+    instr(activity_kind,char(0)) = 0 AND activity_kind IN ('assignment','quiz')
+  ),
   enrollment_id INTEGER NOT NULL,
   status TEXT NOT NULL
     CHECK (instr(status,char(0)) = 0 AND status IN ('not_submitted','submitted','returned','excused')),
-  late INTEGER NOT NULL DEFAULT 0 CHECK (late IN (0,1)),
-  attempt_number INTEGER NOT NULL DEFAULT 0 CHECK (attempt_number BETWEEN 0 AND 1000),
+  late INTEGER NOT NULL DEFAULT 0 CHECK (typeof(late) = 'integer' AND late IN (0,1)),
+  attempt_number INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(attempt_number) = 'integer' AND attempt_number BETWEEN 0 AND 1000),
   submitted_at TEXT CHECK (
     submitted_at IS NULL OR (
       instr(submitted_at,char(0)) = 0 AND length(CAST(submitted_at AS BLOB)) BETWEEN 19 AND 40
@@ -363,8 +390,8 @@ CREATE TABLE learning_submission_snapshots (
   synced_at TEXT NOT NULL DEFAULT (datetime('now'))
     CHECK (instr(synced_at,char(0)) = 0 AND length(CAST(synced_at AS BLOB)) BETWEEN 19 AND 40),
   PRIMARY KEY (activity_id, enrollment_id),
-  FOREIGN KEY (activity_id, course_id)
-    REFERENCES learning_activities(id, course_id) ON DELETE CASCADE,
+  FOREIGN KEY (activity_id, course_id, activity_kind)
+    REFERENCES learning_activities(id, course_id, kind) ON DELETE CASCADE,
   FOREIGN KEY (enrollment_id, course_id)
     REFERENCES learning_enrollments(id, course_id) ON DELETE CASCADE
 ) WITHOUT ROWID;
@@ -374,9 +401,10 @@ CREATE INDEX idx_learning_snapshots_enrollment_state
 CREATE INDEX idx_learning_snapshots_course_state
   ON learning_submission_snapshots(course_id, status, late, synced_at, activity_id);
 
--- Append-only normalized evidence. IDs, allowlisted type, references, and times
--- are the complete event shape; raw provider payloads and display/content fields
--- are deliberately absent.
+-- Append-only normalized evidence. Person identity is derived only through the
+-- enrollment -> identity link -> Person path. IDs, allowlisted type, references,
+-- and times are the complete event shape; raw provider payloads and
+-- display/content fields are deliberately absent.
 CREATE TABLE learning_activity_events (
   id TEXT NOT NULL PRIMARY KEY CHECK (
     instr(id,char(0)) = 0 AND id = trim(id) AND length(CAST(id AS BLOB)) BETWEEN 1 AND 255
@@ -394,9 +422,14 @@ CREATE TABLE learning_activity_events (
       'submission_returned','course_completed'
     )
   ),
-  person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  enrollment_id INTEGER NOT NULL,
   course_id INTEGER NOT NULL,
   activity_id INTEGER,
+  activity_kind TEXT CHECK (
+    activity_kind IS NULL OR (
+      instr(activity_kind,char(0)) = 0 AND activity_kind IN ('material','assignment','quiz')
+    )
+  ),
   occurred_at TEXT NOT NULL CHECK (
     instr(occurred_at,char(0)) = 0 AND length(CAST(occurred_at AS BLOB)) BETWEEN 19 AND 40
   ),
@@ -408,17 +441,26 @@ CREATE TABLE learning_activity_events (
     REFERENCES learning_provider_connections(id, provider) ON DELETE RESTRICT,
   FOREIGN KEY (course_id, connection_id)
     REFERENCES learning_courses(id, connection_id) ON DELETE CASCADE,
-  FOREIGN KEY (activity_id, course_id)
-    REFERENCES learning_activities(id, course_id) ON DELETE CASCADE,
+  FOREIGN KEY (enrollment_id, course_id)
+    REFERENCES learning_enrollments(id, course_id) ON DELETE CASCADE,
+  FOREIGN KEY (activity_id, course_id, activity_kind)
+    REFERENCES learning_activities(id, course_id, kind) ON DELETE CASCADE,
   CHECK (
-    (event_type IN ('enrolled','course_completed') AND activity_id IS NULL) OR
-    (event_type IN ('resource_opened','assignment_submitted','quiz_submitted','submission_returned')
-      AND activity_id IS NOT NULL)
+    (event_type IN ('enrolled','course_completed') AND
+      activity_id IS NULL AND activity_kind IS NULL) OR
+    (event_type = 'resource_opened' AND
+      activity_id IS NOT NULL AND activity_kind IN ('material','assignment','quiz')) OR
+    (event_type = 'assignment_submitted' AND
+      activity_id IS NOT NULL AND activity_kind = 'assignment') OR
+    (event_type = 'quiz_submitted' AND
+      activity_id IS NOT NULL AND activity_kind = 'quiz') OR
+    (event_type = 'submission_returned' AND
+      activity_id IS NOT NULL AND activity_kind IN ('assignment','quiz'))
   )
 );
 
-CREATE INDEX idx_learning_events_person_time
-  ON learning_activity_events(person_id, occurred_at, id);
+CREATE INDEX idx_learning_events_enrollment_time
+  ON learning_activity_events(enrollment_id, occurred_at, id);
 CREATE INDEX idx_learning_events_course_time
   ON learning_activity_events(course_id, occurred_at, id);
 CREATE INDEX idx_learning_events_activity_time
@@ -437,8 +479,10 @@ CREATE TRIGGER learning_activity_events_no_delete
 BEFORE DELETE ON learning_activity_events
 BEGIN
   SELECT CASE WHEN
-    EXISTS (SELECT 1 FROM people WHERE id = OLD.person_id) AND
-    EXISTS (SELECT 1 FROM learning_courses WHERE id = OLD.course_id)
+    EXISTS (SELECT 1 FROM learning_enrollments WHERE id = OLD.enrollment_id) AND
+    EXISTS (SELECT 1 FROM learning_courses WHERE id = OLD.course_id AND deleted_at IS NULL) AND
+    EXISTS (SELECT 1 FROM learning_provider_connections
+      WHERE id = OLD.connection_id AND deleted_at IS NULL AND status <> 'disabled')
     THEN RAISE(ABORT, 'learning_event_append_only') END;
 END;
 
@@ -461,11 +505,16 @@ CREATE TABLE learning_sync_runs (
       instr(finished_at,char(0)) = 0 AND length(CAST(finished_at AS BLOB)) BETWEEN 19 AND 40
     )
   ),
-  attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count BETWEEN 1 AND 10),
-  scanned_count INTEGER NOT NULL DEFAULT 0 CHECK (scanned_count BETWEEN 0 AND 100000),
-  changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count BETWEEN 0 AND 100000),
-  removed_count INTEGER NOT NULL DEFAULT 0 CHECK (removed_count BETWEEN 0 AND 100000),
-  event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count BETWEEN 0 AND 100000),
+  attempt_count INTEGER NOT NULL DEFAULT 1
+    CHECK (typeof(attempt_count) = 'integer' AND attempt_count BETWEEN 1 AND 10),
+  scanned_count INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(scanned_count) = 'integer' AND scanned_count BETWEEN 0 AND 100000),
+  changed_count INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(changed_count) = 'integer' AND changed_count BETWEEN 0 AND 100000),
+  removed_count INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(removed_count) = 'integer' AND removed_count BETWEEN 0 AND 100000),
+  event_count INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(event_count) = 'integer' AND event_count BETWEEN 0 AND 100000),
   error_code TEXT CHECK (
     error_code IS NULL OR (
       instr(error_code,char(0)) = 0 AND length(CAST(error_code AS BLOB)) BETWEEN 1 AND 64 AND

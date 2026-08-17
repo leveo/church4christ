@@ -26,7 +26,7 @@ const LEARNING_INDEXES = [
   'idx_learning_events_activity_time',
   'idx_learning_events_connection_ingested',
   'idx_learning_events_course_time',
-  'idx_learning_events_person_time',
+  'idx_learning_events_enrollment_time',
   'idx_learning_identities_person_status',
   'idx_learning_programs_active_name',
   'idx_learning_resources_activity_kind',
@@ -56,7 +56,11 @@ type SeededGraph = {
   personId: number;
 };
 
-async function seedGraph(seed: number, provider: 'google_classroom' | 'canvas' = 'canvas'): Promise<SeededGraph> {
+async function seedGraph(
+  seed: number,
+  provider: 'google_classroom' | 'canvas' = 'canvas',
+  activityKind: 'material' | 'assignment' | 'quiz' = 'assignment',
+): Promise<SeededGraph> {
   const connectionId = seed * 10 + 1;
   const programId = seed * 10 + 2;
   const courseId = seed * 10 + 3;
@@ -88,7 +92,7 @@ async function seedGraph(seed: number, provider: 'google_classroom' | 'canvas' =
         'student', 'active')`),
     env.DB.prepare(`INSERT INTO learning_activities
       (id, course_id, external_activity_id, title, kind, lifecycle_state, launch_url)
-      VALUES (${activityId}, ${courseId}, 'activity-${seed}', 'Activity ${seed}', 'assignment',
+      VALUES (${activityId}, ${courseId}, 'activity-${seed}', 'Activity ${seed}', '${activityKind}',
         'published', 'https://courses-${seed}.example.test/activity')`),
   ]);
 
@@ -113,12 +117,12 @@ describe('portable Learning schema (D1)', () => {
       'expires_at', 'updated_at',
     ]);
     expect(await columns('learning_submission_snapshots')).toEqual([
-      'course_id', 'activity_id', 'enrollment_id', 'status', 'late', 'attempt_number',
+      'course_id', 'activity_id', 'activity_kind', 'enrollment_id', 'status', 'late', 'attempt_number',
       'submitted_at', 'returned_at', 'provider_updated_at', 'synced_at',
     ]);
     expect(await columns('learning_activity_events')).toEqual([
-      'id', 'connection_id', 'provider', 'source_event_id', 'event_type', 'person_id',
-      'course_id', 'activity_id', 'occurred_at', 'ingested_at',
+      'id', 'connection_id', 'provider', 'source_event_id', 'event_type', 'enrollment_id',
+      'course_id', 'activity_id', 'activity_kind', 'occurred_at', 'ingested_at',
     ]);
 
     const forbidden = /(?:access|refresh)_token|oauth_code|client_secret|plaintext|payload|homework|answer|comment|grade|rubric|file_bytes|content/i;
@@ -145,6 +149,8 @@ describe('portable Learning schema (D1)', () => {
       (id, provider, display_name, status) VALUES (1094, 'google_classroom', 'Bad state', 'ready')`);
     await reject(`INSERT INTO learning_programs
       (id, slug, display_name) VALUES (1095, 'Bad Slug', 'Bad slug')`);
+    await reject(`UPDATE learning_provider_connections
+      SET revision = 0.5 WHERE id = ${graph.connectionId}`);
     await reject(`UPDATE learning_provider_connections
       SET deleted_at = '2026-08-16 12:00:00' WHERE id = ${graph.connectionId}`);
 
@@ -194,6 +200,18 @@ describe('portable Learning schema (D1)', () => {
     await reject(`INSERT INTO learning_provider_credentials
       (connection_id, ciphertext, nonce, algorithm, key_version)
       VALUES (2991, zeroblob(32), zeroblob(12), 'AES-256-GCM', 1)`);
+
+    await env.DB.prepare(`UPDATE learning_provider_credentials
+      SET ciphertext = zeroblob(48), nonce = zeroblob(16), key_version = 2
+      WHERE connection_id = ${graph.connectionId}`).run();
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count, key_version,
+      length(ciphertext) AS ciphertext_length, length(nonce) AS nonce_length
+      FROM learning_provider_credentials WHERE connection_id = ${graph.connectionId}`)
+      .first()).toEqual({ count: 1, key_version: 2, ciphertext_length: 48, nonce_length: 16 });
+    await reject(`UPDATE learning_provider_credentials SET key_version = 2.5
+      WHERE connection_id = ${graph.connectionId}`);
+    await reject(`UPDATE learning_provider_credentials SET envelope_version = 1.5
+      WHERE connection_id = ${graph.connectionId}`);
 
     const other = await seedGraph(201);
     for (const values of [
@@ -247,6 +265,10 @@ describe('portable Learning schema (D1)', () => {
         (id, activity_id, external_resource_id, title, kind, launch_url, size_bytes)
         VALUES (3098, ${graph.activityId}, 'bad-link-size', 'Bad link', 'link',
           'https://example.test/resource', 10)`,
+      `INSERT INTO learning_resources
+        (id, activity_id, external_resource_id, title, kind, launch_url, mime_type, size_bytes)
+        VALUES (3095, ${graph.activityId}, 'fractional-file', 'Fractional file', 'provider_file',
+          'https://example.test/file', 'application/pdf', 0.5)`,
       `INSERT INTO learning_activities
         (id, course_id, external_activity_id, title, kind, lifecycle_state, launch_url)
         VALUES (3099, ${graph.courseId}, '${'x'.repeat(256)}', 'Too long', 'material', 'published',
@@ -263,10 +285,11 @@ describe('portable Learning schema (D1)', () => {
 
   it('keeps one privacy-bounded current submission snapshot per learner and activity', async () => {
     const graph = await seedGraph(400);
+    const materialGraph = await seedGraph(401, 'canvas', 'material');
     await env.DB.prepare(`INSERT INTO learning_submission_snapshots
-      (course_id, activity_id, enrollment_id, status, late, attempt_number, submitted_at,
+      (course_id, activity_id, activity_kind, enrollment_id, status, late, attempt_number, submitted_at,
        provider_updated_at)
-      VALUES (${graph.courseId}, ${graph.activityId}, ${graph.enrollmentId}, 'submitted', 1, 2,
+      VALUES (${graph.courseId}, ${graph.activityId}, 'assignment', ${graph.enrollmentId}, 'submitted', 1, 2,
         '2026-08-16 10:00:00', '2026-08-16 10:01:00')`).run();
     expect(await env.DB.prepare(`SELECT status, late, attempt_number, length(synced_at) AS synced_length
       FROM learning_submission_snapshots WHERE activity_id = ${graph.activityId}`).first()).toEqual({
@@ -277,30 +300,60 @@ describe('portable Learning schema (D1)', () => {
     });
 
     await reject(`INSERT INTO learning_submission_snapshots
-      (course_id, activity_id, enrollment_id, status)
-      VALUES (${graph.courseId}, ${graph.activityId}, ${graph.enrollmentId}, 'submitted')`);
+      (course_id, activity_id, activity_kind, enrollment_id, status, late, attempt_number)
+      VALUES (${graph.courseId}, ${graph.activityId}, 'assignment', ${graph.enrollmentId + 99},
+        'submitted', 0, 1)`);
     await reject(`INSERT INTO learning_submission_snapshots
-      (course_id, activity_id, enrollment_id, status, late, attempt_number)
-      VALUES (${graph.courseId}, ${graph.activityId}, ${graph.enrollmentId + 99}, 'submitted', 0, 1)`);
+      (course_id, activity_id, activity_kind, enrollment_id, status)
+      VALUES (${graph.courseId}, ${graph.activityId}, 'quiz', ${graph.enrollmentId}, 'submitted')`);
+    await reject(`INSERT INTO learning_submission_snapshots
+      (course_id, activity_id, activity_kind, enrollment_id, status)
+      VALUES (${materialGraph.courseId}, ${materialGraph.activityId}, 'material',
+        ${materialGraph.enrollmentId}, 'submitted')`);
     await reject(`UPDATE learning_submission_snapshots SET status = 'graded'
       WHERE activity_id = ${graph.activityId} AND enrollment_id = ${graph.enrollmentId}`);
     await reject(`UPDATE learning_submission_snapshots SET late = 2
       WHERE activity_id = ${graph.activityId} AND enrollment_id = ${graph.enrollmentId}`);
+    await reject(`UPDATE learning_submission_snapshots SET late = 0.5
+      WHERE activity_id = ${graph.activityId} AND enrollment_id = ${graph.enrollmentId}`);
     await reject(`UPDATE learning_submission_snapshots SET attempt_number = 1001
       WHERE activity_id = ${graph.activityId} AND enrollment_id = ${graph.enrollmentId}`);
+    await reject(`UPDATE learning_submission_snapshots SET attempt_number = 2.5
+      WHERE activity_id = ${graph.activityId} AND enrollment_id = ${graph.enrollmentId}`);
+    await reject(`UPDATE learning_activities SET kind = 'material' WHERE id = ${graph.activityId}`);
   });
 
-  it('deduplicates append-only normalized events without payload or content carriers', async () => {
+  it('binds compatible normalized events to an enrollment and retains them append-only while active', async () => {
     const graph = await seedGraph(500);
     const otherGraph = await seedGraph(501);
+    const quizGraph = await seedGraph(502, 'canvas', 'quiz');
+    const materialGraph = await seedGraph(503, 'canvas', 'material');
     await env.DB.prepare(`INSERT INTO learning_submission_snapshots
-      (course_id, activity_id, enrollment_id, status)
-      VALUES (${graph.courseId}, ${graph.activityId}, ${graph.enrollmentId}, 'submitted')`).run();
+      (course_id, activity_id, activity_kind, enrollment_id, status)
+      VALUES (${graph.courseId}, ${graph.activityId}, 'assignment', ${graph.enrollmentId}, 'submitted')`).run();
     await env.DB.prepare(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, activity_id,
-       occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
       VALUES ('event-500-a', ${graph.connectionId}, 'canvas', 'source-500', 'assignment_submitted',
-        ${graph.personId}, ${graph.courseId}, ${graph.activityId}, '2026-08-16 11:00:00')`).run();
+        ${graph.enrollmentId}, ${graph.courseId}, ${graph.activityId}, 'assignment',
+        '2026-08-16 11:00:00')`).run();
+    await env.DB.prepare(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-502-a', ${quizGraph.connectionId}, 'canvas', 'source-502-a', 'quiz_submitted',
+        ${quizGraph.enrollmentId}, ${quizGraph.courseId}, ${quizGraph.activityId}, 'quiz',
+        '2026-08-16 11:00:00')`).run();
+    await env.DB.prepare(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-503-a', ${materialGraph.connectionId}, 'canvas', 'source-503-a', 'resource_opened',
+        ${materialGraph.enrollmentId}, ${materialGraph.courseId}, ${materialGraph.activityId}, 'material',
+        '2026-08-16 11:00:00')`).run();
+    await env.DB.prepare(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       occurred_at)
+      VALUES ('event-500-enrolled', ${graph.connectionId}, 'canvas', 'source-500-enrolled', 'enrolled',
+        ${graph.enrollmentId}, ${graph.courseId}, '2026-08-16 11:00:00')`).run();
     expect(await env.DB.prepare(`SELECT event_type, length(ingested_at) AS ingested_length
       FROM learning_activity_events WHERE id = 'event-500-a'`).first()).toEqual({
       event_type: 'assignment_submitted',
@@ -308,38 +361,97 @@ describe('portable Learning schema (D1)', () => {
     });
 
     await reject(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, activity_id,
-       occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
       VALUES ('event-500-b', ${graph.connectionId}, 'canvas', 'source-500', 'assignment_submitted',
-        ${graph.personId}, ${graph.courseId}, ${graph.activityId}, '2026-08-16 11:00:01')`);
+        ${graph.enrollmentId}, ${graph.courseId}, ${graph.activityId}, 'assignment',
+        '2026-08-16 11:00:01')`);
     await reject(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, course_id, occurred_at)
       VALUES ('event-500-c', ${graph.connectionId}, 'canvas', 'source-501', 'assignment_submitted',
-        ${graph.personId}, ${graph.courseId}, '2026-08-16 11:00:02')`);
+        ${graph.courseId}, '2026-08-16 11:00:02')`);
     await reject(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, activity_id,
-       occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-500-missing-enrollment', ${graph.connectionId}, 'canvas', 'source-501-missing',
+        'assignment_submitted', ${graph.enrollmentId + 99}, ${graph.courseId}, ${graph.activityId},
+        'assignment', '2026-08-16 11:00:02')`);
+    await reject(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
       VALUES ('event-500-d', ${graph.connectionId}, 'canvas', 'source-502', 'enrolled',
-        ${graph.personId}, ${graph.courseId}, ${graph.activityId}, '2026-08-16 11:00:03')`);
+        ${graph.enrollmentId}, ${graph.courseId}, ${graph.activityId}, 'assignment',
+        '2026-08-16 11:00:03')`);
     await reject(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, activity_id,
-       occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
       VALUES ('event-500-e', ${graph.connectionId}, 'canvas', 'source-503', 'graded',
-        ${graph.personId}, ${graph.courseId}, ${graph.activityId}, '2026-08-16 11:00:04')`);
+        ${graph.enrollmentId}, ${graph.courseId}, ${graph.activityId}, 'assignment',
+        '2026-08-16 11:00:04')`);
     await reject(`INSERT INTO learning_activity_events
-      (id, connection_id, provider, source_event_id, event_type, person_id, course_id, activity_id,
-       occurred_at)
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
       VALUES ('event-500-f', ${graph.connectionId}, 'canvas', 'source-504', 'assignment_submitted',
-        ${graph.personId}, ${graph.courseId}, ${otherGraph.activityId}, '2026-08-16 11:00:05')`);
+        ${graph.enrollmentId}, ${graph.courseId}, ${otherGraph.activityId}, 'assignment',
+        '2026-08-16 11:00:05')`);
+    await reject(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-500-cross-enrollment', ${graph.connectionId}, 'canvas', 'source-505',
+        'assignment_submitted', ${otherGraph.enrollmentId}, ${graph.courseId}, ${graph.activityId},
+        'assignment', '2026-08-16 11:00:06')`);
+    for (const [eventType, activityKind] of [
+      ['assignment_submitted', 'quiz'],
+      ['quiz_submitted', 'assignment'],
+      ['submission_returned', 'material'],
+    ]) {
+      await reject(`INSERT INTO learning_activity_events
+        (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+         activity_id, activity_kind, occurred_at)
+        VALUES ('event-500-${eventType}', ${graph.connectionId}, 'canvas',
+          'source-500-${eventType}', '${eventType}', ${graph.enrollmentId}, ${graph.courseId},
+          ${graph.activityId}, '${activityKind}', '2026-08-16 11:00:07')`);
+    }
     await reject(`UPDATE learning_activity_events SET occurred_at = '2026-08-16 12:00:00'
       WHERE id = 'event-500-a'`);
     await reject("DELETE FROM learning_activity_events WHERE id = 'event-500-a'");
 
-    await env.DB.prepare(`DELETE FROM people WHERE id = ${graph.personId}`).run();
+    await env.DB.prepare(`UPDATE learning_courses SET lifecycle_state = 'archived',
+      deleted_at = '2026-08-16 12:00:00' WHERE id = ${graph.courseId}`).run();
+    await env.DB.prepare("DELETE FROM learning_activity_events WHERE id = 'event-500-a'").run();
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM learning_activity_events WHERE id = 'event-500-a'")
       .first<number>('n')).toBe(0);
-    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM learning_submission_snapshots
-      WHERE enrollment_id = ${graph.enrollmentId}`).first<number>('n')).toBe(0);
+  });
+
+  it('allows parent cascades but rejects direct active activity deletion until a parent is retired', async () => {
+    const personGraph = await seedGraph(510);
+    await env.DB.prepare(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-510-a', ${personGraph.connectionId}, 'canvas', 'source-510-a',
+        'assignment_submitted', ${personGraph.enrollmentId}, ${personGraph.courseId},
+        ${personGraph.activityId}, 'assignment', '2026-08-16 11:00:00')`).run();
+    await env.DB.prepare(`DELETE FROM people WHERE id = ${personGraph.personId}`).run();
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM learning_activity_events WHERE id = 'event-510-a'")
+      .first<number>('n')).toBe(0);
+
+    const courseGraph = await seedGraph(511);
+    await env.DB.prepare(`INSERT INTO learning_activity_events
+      (id, connection_id, provider, source_event_id, event_type, enrollment_id, course_id,
+       activity_id, activity_kind, occurred_at)
+      VALUES ('event-511-a', ${courseGraph.connectionId}, 'canvas', 'source-511-a',
+        'assignment_submitted', ${courseGraph.enrollmentId}, ${courseGraph.courseId},
+        ${courseGraph.activityId}, 'assignment', '2026-08-16 11:00:00')`).run();
+    await env.DB.prepare(`DELETE FROM learning_courses WHERE id = ${courseGraph.courseId}`).run();
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM learning_activity_events WHERE id = 'event-511-a'")
+      .first<number>('n')).toBe(0);
+
+    const directGraph = await seedGraph(512);
+    await reject(`DELETE FROM learning_activities WHERE id = ${directGraph.activityId}`);
+    await env.DB.prepare(`UPDATE learning_provider_connections
+      SET status = 'disabled', deleted_at = '2026-08-16 12:00:00'
+      WHERE id = ${directGraph.connectionId}`).run();
+    await env.DB.prepare(`DELETE FROM learning_activities WHERE id = ${directGraph.activityId}`).run();
   });
 
   it('bounds sync-run triggers, statuses, error codes, counts, attempts, and completion timestamps', async () => {
@@ -380,5 +492,18 @@ describe('portable Learning schema (D1)', () => {
        attempt_count, scanned_count, changed_count, removed_count, event_count)
       VALUES (6009, ${graph.connectionId}, ${graph.courseId}, 'notification', 'failed',
         '2026-08-16 12:00:00', 'provider_rate_limited', 3, 100000, 99999, 1, 100000)`).run();
+
+    for (const [column, value] of [
+      ['attempt_count', '1.5'],
+      ['scanned_count', '0.5'],
+      ['changed_count', '0.5'],
+      ['removed_count', '0.5'],
+      ['event_count', '0.5'],
+      ['changed_count', '100001'],
+      ['removed_count', '100001'],
+      ['event_count', '100001'],
+    ]) {
+      await reject(`UPDATE learning_sync_runs SET ${column} = ${value} WHERE id = 6009`);
+    }
   });
 });

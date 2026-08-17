@@ -264,6 +264,7 @@ describe('final D1 schema parser', () => {
       'newcomer_field_options_custom_update',
       'newcomer_answers_custom_insert',
       'newcomer_answers_custom_update',
+      'learning_activities_no_delete',
       'learning_activity_events_no_update',
       'learning_activity_events_no_delete',
     ]);
@@ -319,7 +320,15 @@ describe('final D1 schema parser', () => {
       abortMessage: 'learning_event_append_only',
     });
     expect(schema.triggers.get('learning_activity_events_no_delete')?.semanticGuard)
-      .toMatch(/exists \( select 1 from people.*and exists \( select 1 from learning_courses/);
+      .toMatch(/exists \( select 1 from learning_enrollments.*and exists \( select 1 from learning_courses.*and exists \( select 1 from learning_provider_connections/);
+    expect(schema.triggers.get('learning_activities_no_delete')).toMatchObject({
+      table: 'learning_activities',
+      timing: 'before',
+      event: 'delete',
+      abortMessage: 'learning_activity_active_parent',
+    });
+    expect(schema.triggers.get('learning_activities_no_delete')?.semanticGuard)
+      .toMatch(/exists \( select 1 from learning_courses.*and exists \( select 1 from learning_provider_connections/);
   });
 
   it('fails closed on unsupported trigger bodies and duplicate trigger names', () => {
