@@ -9,6 +9,7 @@ const MAX_PUSH_BODY_BYTES = 65_536;
 const MAX_JWT_BYTES = 8_192;
 const MAX_TOKEN_LIFETIME_SECONDS = 3_900;
 const CLOCK_SKEW_SECONDS = 30;
+const RECEIPT_CLAIM_TTL_MS = 2 * 60 * 1_000;
 const COLLECTIONS = Object.freeze([
   'courses.students',
   'courses.teachers',
@@ -372,7 +373,59 @@ function databaseInteger(value: unknown): number {
 export interface AcceptedGooglePubSubDelivery {
   readonly connectionId: number;
   readonly externalCourseId: string;
-  readonly accepted: boolean;
+  readonly disposition: 'claimed' | 'in_progress' | 'succeeded';
+  readonly subscriptionName: string;
+  readonly messageId: string;
+  readonly claimMarker: string | null;
+  readonly attemptCount: number;
+}
+
+function uuid(value: unknown): string {
+  const marker = bounded(value, 36, 36);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(marker)) invalid();
+  return marker;
+}
+
+function attemptCount(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > LEARNING_LIMITS.databaseInteger) {
+    invalid();
+  }
+  return value as number;
+}
+
+function receiptResult(
+  row: Record<string, unknown>,
+  delivery: GooglePubSubDelivery,
+  connectionId: number,
+  ownMarker: string,
+): AcceptedGooglePubSubDelivery {
+  if (
+    row.registration_id !== delivery.registrationId
+    || row.external_course_id !== delivery.externalCourseId
+    || row.collection_name !== delivery.collection
+  ) invalid();
+  const attempts = attemptCount(row.attempt_count);
+  let disposition: AcceptedGooglePubSubDelivery['disposition'] = 'in_progress';
+  let claimMarker: string | null = null;
+  if (row.status === 'succeeded') {
+    if (row.claim_marker !== null || row.claim_expires_at !== null) invalid();
+    disposition = 'succeeded';
+  } else if (row.status === 'pending') {
+    claimMarker = uuid(row.claim_marker);
+    timestamp(row.claim_expires_at);
+    disposition = claimMarker === ownMarker ? 'claimed' : 'in_progress';
+  } else {
+    invalid();
+  }
+  return Object.freeze({
+    connectionId,
+    externalCourseId: delivery.externalCourseId,
+    disposition,
+    subscriptionName: delivery.subscriptionName,
+    messageId: delivery.messageId,
+    claimMarker,
+    attemptCount: attempts,
+  });
 }
 
 export async function acceptGooglePubSubDelivery(
@@ -394,31 +447,83 @@ export async function acceptGooglePubSubDelivery(
     const safeRegistration = registration ?? invalid();
     const connectionId = databaseInteger(safeRegistration.connection_id);
     if (externalId(safeRegistration.external_course_id) !== delivery.externalCourseId) invalid();
-    const result = await db.prepare(`INSERT INTO learning_google_notification_receipts
-      (subscription_name,message_id,registration_id,external_course_id,collection_name,received_at)
-      VALUES(?1,?2,?3,?4,?5,?6)
-      ON CONFLICT(subscription_name,message_id) DO NOTHING`)
+    const marker = uuid(crypto.randomUUID());
+    const claimExpiresAt = new Date(Date.parse(delivery.receivedAt) + RECEIPT_CLAIM_TTL_MS).toISOString();
+    const result = await db.prepare(`INSERT INTO learning_google_notification_receipts AS receipt
+      (subscription_name,message_id,registration_id,external_course_id,collection_name,received_at,
+       status,attempt_count,claim_marker,claim_expires_at,completed_at)
+      VALUES(?1,?2,?3,?4,?5,?6,'pending',1,?7,?8,NULL)
+      ON CONFLICT(subscription_name,message_id) DO UPDATE SET
+        status='pending',attempt_count=receipt.attempt_count+1,claim_marker=excluded.claim_marker,
+        claim_expires_at=excluded.claim_expires_at,completed_at=NULL
+      WHERE receipt.registration_id=excluded.registration_id
+        AND receipt.external_course_id=excluded.external_course_id
+        AND receipt.collection_name=excluded.collection_name
+        AND (
+          receipt.status='failed'
+          OR (receipt.status='pending' AND (
+            receipt.claim_expires_at IS NULL OR receipt.claim_expires_at<=excluded.received_at
+          ))
+        )
+      RETURNING registration_id,external_course_id,collection_name,status,attempt_count,
+        claim_marker,claim_expires_at`)
       .bind(
         delivery.subscriptionName, delivery.messageId, delivery.registrationId,
-        delivery.externalCourseId, delivery.collection, delivery.receivedAt,
+        delivery.externalCourseId, delivery.collection, delivery.receivedAt, marker, claimExpiresAt,
       ).run();
-    const changes = result?.meta?.changes;
-    if (changes === 1) return Object.freeze({ connectionId, externalCourseId: delivery.externalCourseId, accepted: true });
-    if (changes !== 0) invalid();
-    const receipt = await db.prepare(`SELECT registration_id,external_course_id,collection_name
+    if (!result || !Array.isArray(result.results) || result.results.length > 1) invalid();
+    if (result.results.length === 1) {
+      return receiptResult(record(result.results[0]), delivery, connectionId, marker);
+    }
+    const receipt = await db.prepare(`SELECT registration_id,external_course_id,collection_name,
+      status,attempt_count,claim_marker,claim_expires_at
       FROM learning_google_notification_receipts
       WHERE subscription_name=?1 AND message_id=?2 LIMIT 1`)
       .bind(delivery.subscriptionName, delivery.messageId)
       .first<Record<string, unknown>>();
-    if (
-      receipt === null
-      || receipt.registration_id !== delivery.registrationId
-      || receipt.external_course_id !== delivery.externalCourseId
-      || receipt.collection_name !== delivery.collection
-    ) invalid();
-    return Object.freeze({ connectionId, externalCourseId: delivery.externalCourseId, accepted: false });
+    return receiptResult(record(receipt), delivery, connectionId, marker);
   } catch (error) {
     if (error instanceof LearningGooglePubSubError) throw error;
+    return invalid();
+  }
+}
+
+export async function finishGooglePubSubDelivery(
+  db: AppDb,
+  rawInput: {
+    readonly receipt: AcceptedGooglePubSubDelivery;
+    readonly outcome: 'failed' | 'succeeded';
+    readonly completedAt: string;
+  },
+): Promise<void> {
+  try {
+    const input = exact(rawInput, ['receipt', 'outcome', 'completedAt']);
+    const receipt = exact(input.receipt, [
+      'connectionId', 'externalCourseId', 'disposition', 'subscriptionName',
+      'messageId', 'claimMarker', 'attemptCount',
+    ]);
+    databaseInteger(receipt.connectionId);
+    externalId(receipt.externalCourseId);
+    if (receipt.disposition !== 'claimed') invalid();
+    const subscription = subscriptionName(receipt.subscriptionName);
+    const messageId = externalId(receipt.messageId);
+    const marker = uuid(receipt.claimMarker);
+    attemptCount(receipt.attemptCount);
+    if (input.outcome !== 'failed' && input.outcome !== 'succeeded') invalid();
+    const outcome = input.outcome as 'failed' | 'succeeded';
+    const completedAt = timestamp(input.completedAt);
+    const result = await db.prepare(`UPDATE learning_google_notification_receipts SET
+      status=?1,claim_marker=NULL,claim_expires_at=NULL,completed_at=?2
+      WHERE subscription_name=?3 AND message_id=?4 AND status='pending' AND claim_marker=?5
+      RETURNING subscription_name,message_id`)
+      .bind(outcome, completedAt, subscription, messageId, marker).run<Record<string, unknown>>();
+    if (
+      !result || !Array.isArray(result.results) || result.results.length !== 1
+      || result.results[0]?.subscription_name !== subscription
+      || result.results[0]?.message_id !== messageId
+    ) throw new LearningGooglePubSubConflictError();
+  } catch (error) {
+    if (error instanceof LearningGooglePubSubConflictError || error instanceof LearningGooglePubSubError) throw error;
     return invalid();
   }
 }

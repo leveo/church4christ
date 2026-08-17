@@ -34,7 +34,12 @@ const deps = () => ({
   subscriptionName: SUBSCRIPTION,
   now: vi.fn(() => Date.parse('2026-08-17T12:00:00.000Z')),
   verifyAuthorization: vi.fn(async () => ({ subject: '123', email: 'classroom-push@church-project.iam.gserviceaccount.com' })),
-  acceptDelivery: vi.fn(async () => ({ connectionId: 81, externalCourseId: 'course-1', accepted: true })),
+  acceptDelivery: vi.fn(async () => ({
+    connectionId: 81, externalCourseId: 'course-1', disposition: 'claimed' as const,
+    subscriptionName: SUBSCRIPTION, messageId: 'message-1', claimMarker: '10000000-0000-4000-8000-000000000001',
+    attemptCount: 1,
+  })),
+  finishDelivery: vi.fn(async () => undefined),
   reconcileCourse: vi.fn(async () => undefined),
 });
 
@@ -80,7 +85,7 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     }
   });
 
-  it('deduplicates storage, acknowledges with no content, and always retries authoritative reconciliation', async () => {
+  it('marks a claimed reconciliation succeeded and skips a terminal succeeded duplicate', async () => {
     const injected = deps();
     const request = new Request('https://church.test/api/learning/google/pubsub', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
@@ -91,13 +96,38 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     expect(injected.acceptDelivery).toHaveBeenCalledWith({}, expect.objectContaining({
       messageId: 'message-1', registrationId: 'registration-1', externalCourseId: 'course-1',
     }));
-    expect(injected.reconcileCourse).toHaveBeenCalledWith({
+    expect(injected.reconcileCourse).toHaveBeenCalledWith({}, {
       connectionId: 81, externalCourseId: 'course-1', trigger: 'notification',
+      signal: expect.any(AbortSignal),
     });
-    injected.acceptDelivery.mockResolvedValueOnce({ connectionId: 81, externalCourseId: 'course-1', accepted: false });
-    await createGooglePubSubPushHandler(injected)(context(new Request('https://church.test/api/learning/google/pubsub', {
+    expect(injected.finishDelivery).toHaveBeenCalledWith({}, expect.objectContaining({
+      outcome: 'succeeded', receipt: expect.objectContaining({ disposition: 'claimed' }),
+    }));
+    injected.acceptDelivery.mockResolvedValueOnce({
+      connectionId: 81, externalCourseId: 'course-1', disposition: 'succeeded',
+      subscriptionName: SUBSCRIPTION, messageId: 'message-1', claimMarker: null, attemptCount: 1,
+    } as never);
+    const duplicate = await createGooglePubSubPushHandler(injected)(context(new Request('https://church.test/api/learning/google/pubsub', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
     })));
-    expect(injected.reconcileCourse).toHaveBeenCalledTimes(2);
+    expect(duplicate.status).toBe(204);
+    expect(injected.reconcileCourse).toHaveBeenCalledTimes(1);
+    expect(injected.finishDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks failed reconciliation retryable and returns 503 for failed or concurrent pending work', async () => {
+    const injected = deps();
+    injected.reconcileCourse.mockRejectedValueOnce(new Error('provider private body'));
+    const request = () => new Request('https://church.test/api/learning/google/pubsub', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
+    });
+    expect((await createGooglePubSubPushHandler(injected)(context(request()))).status).toBe(503);
+    expect(injected.finishDelivery).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'failed' }));
+    injected.acceptDelivery.mockResolvedValueOnce({
+      connectionId: 81, externalCourseId: 'course-1', disposition: 'in_progress',
+      subscriptionName: SUBSCRIPTION, messageId: 'message-1', claimMarker: null, attemptCount: 1,
+    } as never);
+    expect((await createGooglePubSubPushHandler(injected)(context(request()))).status).toBe(503);
+    expect(injected.reconcileCourse).toHaveBeenCalledTimes(1);
   });
 });

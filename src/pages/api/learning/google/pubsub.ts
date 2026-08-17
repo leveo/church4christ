@@ -1,8 +1,11 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import type { AppDb } from '../../../../lib/appDb';
+import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+import { reconcileGoogleClassroomCourse } from '../../../../lib/learningGoogleReconcile';
 import {
   acceptGooglePubSubDelivery,
+  finishGooglePubSubDelivery,
   parseGooglePubSubPushBody,
   verifyGooglePubSubAuthorization,
   type AcceptedGooglePubSubDelivery,
@@ -30,10 +33,16 @@ interface GooglePubSubRouteDeps {
     readonly nowEpochMs: number;
   }) => Promise<GooglePubSubIdentity>;
   readonly acceptDelivery: (db: AppDb, delivery: GooglePubSubDelivery) => Promise<AcceptedGooglePubSubDelivery>;
-  readonly reconcileCourse: (input: {
+  readonly finishDelivery: (db: AppDb, input: {
+    readonly receipt: AcceptedGooglePubSubDelivery;
+    readonly outcome: 'failed' | 'succeeded';
+    readonly completedAt: string;
+  }) => Promise<void>;
+  readonly reconcileCourse: (db: AppDb, input: {
     readonly connectionId: number;
     readonly externalCourseId: string;
     readonly trigger: 'notification';
+    readonly signal: AbortSignal;
   }) => Promise<void>;
 }
 
@@ -41,6 +50,9 @@ type GooglePushEnv = {
   APP_ORIGIN?: string;
   GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
   GOOGLE_PUBSUB_SUBSCRIPTION_NAME?: string;
+  GOOGLE_CLASSROOM_CLIENT_ID?: string;
+  GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+  LEARNING_CREDENTIAL_KEYS?: string;
 };
 
 const defaultVars = env as unknown as GooglePushEnv;
@@ -53,11 +65,26 @@ const defaultDeps: GooglePubSubRouteDeps = {
   now: Date.now,
   verifyAuthorization: verifyGooglePubSubAuthorization,
   acceptDelivery: acceptGooglePubSubDelivery,
-  // The notification is acknowledged only after this authoritative hook
-  // succeeds. A failed hook returns 503; the durable receipt is idempotent and
-  // a Pub/Sub redelivery invokes reconciliation again rather than applying an
-  // event delta. The sync-orchestration slice replaces this dependency.
-  reconcileCourse: async () => { throw new Error('learning_reconciliation_unavailable'); },
+  finishDelivery: finishGooglePubSubDelivery,
+  reconcileCourse: async (db, input) => {
+    const clientId = defaultVars.GOOGLE_CLASSROOM_CLIENT_ID;
+    const clientSecret = defaultVars.GOOGLE_CLASSROOM_CLIENT_SECRET;
+    const keySecret = defaultVars.LEARNING_CREDENTIAL_KEYS;
+    if (
+      typeof clientId !== 'string' || clientId.length < 1
+      || typeof clientSecret !== 'string' || clientSecret.length < 1
+      || typeof keySecret !== 'string' || keySecret.length < 1
+    ) throw new Error('learning_google_config_unavailable');
+    const keyRing = await importLearningCredentialKeyRing(keySecret);
+    await reconcileGoogleClassroomCourse(db, {
+      ...input,
+      clientId,
+      clientSecret,
+      keyRing,
+      fetcher: fetch,
+      now: Date.now,
+    });
+  },
 };
 
 function response(status: number): Response {
@@ -141,10 +168,25 @@ export function createGooglePubSubPushHandler(
     }
     try {
       const accepted = await dependencies.acceptDelivery(locals.db, delivery);
-      await dependencies.reconcileCourse({
-        connectionId: accepted.connectionId,
-        externalCourseId: accepted.externalCourseId,
-        trigger: 'notification',
+      if (accepted.disposition === 'succeeded') return response(204);
+      if (accepted.disposition === 'in_progress') return response(503);
+      try {
+        await dependencies.reconcileCourse(locals.db, {
+          connectionId: accepted.connectionId,
+          externalCourseId: accepted.externalCourseId,
+          trigger: 'notification',
+          signal: request.signal,
+        });
+      } catch {
+        try {
+          await dependencies.finishDelivery(locals.db, {
+            receipt: accepted, outcome: 'failed', completedAt: new Date(dependencies.now()).toISOString(),
+          });
+        } catch { /* the 503 preserves Pub/Sub redelivery and stale-claim recovery */ }
+        return response(503);
+      }
+      await dependencies.finishDelivery(locals.db, {
+        receipt: accepted, outcome: 'succeeded', completedAt: new Date(dependencies.now()).toISOString(),
       });
       return response(204);
     } catch {

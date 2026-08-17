@@ -4,17 +4,22 @@ import type { AppDb } from '../src/lib/appDb';
 import {
   LearningGooglePubSubError,
   acceptGooglePubSubDelivery,
+  finishGooglePubSubDelivery,
   type GooglePubSubDelivery,
 } from '../src/lib/learningGooglePubSub';
 
 const RECEIVED = '2026-08-17T12:00:00.000Z';
 
-function delivery(messageId = 'message-1', registrationId = 'registration-work'): GooglePubSubDelivery {
+function delivery(
+  messageId = 'message-1',
+  registrationId = 'registration-work',
+  receivedAt = RECEIVED,
+): GooglePubSubDelivery {
   return Object.freeze({
     subscriptionName: 'projects/church-project/subscriptions/classroom',
     messageId, registrationId, collection: 'courses.courseWork', externalCourseId: 'course-1',
     resourceId: Object.freeze({ courseId: 'course-1', id: 'work-1' }),
-    publishedAt: '2026-08-17T11:59:59.000Z', receivedAt: RECEIVED,
+    publishedAt: '2026-08-17T11:59:59.000Z', receivedAt,
   });
 }
 
@@ -45,15 +50,42 @@ describe('Google Pub/Sub authoritative registration lookup and deduplication', (
     ]);
   });
 
-  it('lets exactly one concurrent delivery create the bounded receipt and treats replay as an idempotent duplicate', async () => {
+  it('lets exactly one concurrent delivery claim work and treats a succeeded replay as terminal', async () => {
     const calls = await Promise.all([
       acceptGooglePubSubDelivery(env.DB as AppDb, delivery()),
       acceptGooglePubSubDelivery(env.DB as AppDb, delivery()),
     ]);
-    expect(calls.filter((value) => value.accepted)).toHaveLength(1);
-    expect(calls.filter((value) => !value.accepted)).toHaveLength(1);
+    expect(calls.filter((value) => value.disposition === 'claimed')).toHaveLength(1);
+    expect(calls.filter((value) => value.disposition === 'in_progress')).toHaveLength(1);
     expect(calls[0]).toMatchObject({ connectionId: 27102, externalCourseId: 'course-1' });
+    const claimed = calls.find((value) => value.disposition === 'claimed')!;
+    await expect(finishGooglePubSubDelivery(env.DB as AppDb, {
+      receipt: claimed, outcome: 'succeeded', completedAt: '2026-08-17T12:00:10.000Z',
+    })).resolves.toBeUndefined();
+    await expect(acceptGooglePubSubDelivery(env.DB as AppDb, delivery(
+      'message-1', 'registration-work', '2026-08-17T12:00:11.000Z',
+    ))).resolves.toMatchObject({ disposition: 'succeeded', claimMarker: null, attemptCount: 1 });
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM learning_google_notification_receipts').first('count')).toBe(1);
+  });
+
+  it('reclaims failed and stale-pending work with a new bounded CAS attempt', async () => {
+    const failed = await acceptGooglePubSubDelivery(env.DB as AppDb, delivery('message-failed'));
+    expect(failed).toMatchObject({ disposition: 'claimed', attemptCount: 1 });
+    await finishGooglePubSubDelivery(env.DB as AppDb, {
+      receipt: failed, outcome: 'failed', completedAt: '2026-08-17T12:00:01.000Z',
+    });
+    const retry = await acceptGooglePubSubDelivery(env.DB as AppDb, delivery(
+      'message-failed', 'registration-work', '2026-08-17T12:00:02.000Z',
+    ));
+    expect(retry).toMatchObject({ disposition: 'claimed', attemptCount: 2 });
+    expect(retry.claimMarker).not.toBe(failed.claimMarker);
+
+    const stale = await acceptGooglePubSubDelivery(env.DB as AppDb, delivery('message-stale'));
+    const recovered = await acceptGooglePubSubDelivery(env.DB as AppDb, delivery(
+      'message-stale', 'registration-work', '2026-08-17T12:02:01.000Z',
+    ));
+    expect(recovered).toMatchObject({ disposition: 'claimed', attemptCount: 2 });
+    expect(recovered.claimMarker).not.toBe(stale.claimMarker);
   });
 
   it('rejects unknown/mismatched registration, course, or feed instead of trusting notification routing data', async () => {
