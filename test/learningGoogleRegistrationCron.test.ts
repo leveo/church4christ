@@ -63,8 +63,12 @@ describe('production Google Classroom registration renewal pass', () => {
       importKeyRing, renew, listCleanupConnectionIds, recoverCleanup,
     })).resolves.toEqual({ status: 'skipped', reason: 'not_configured' });
     expect(importKeyRing).toHaveBeenCalledWith('private-key-ring');
-    expect(listCleanupConnectionIds).toHaveBeenCalledWith(env.DB, 1);
-    expect(recoverCleanup).toHaveBeenCalledWith(env.DB, expect.objectContaining({
+    expect(listCleanupConnectionIds).toHaveBeenCalledTimes(1);
+    expect(listCleanupConnectionIds.mock.calls[0]?.[0] === env.DB).toBe(true);
+    expect(listCleanupConnectionIds.mock.calls[0]?.[1]).toBe(1);
+    expect(recoverCleanup).toHaveBeenCalledTimes(1);
+    expect(recoverCleanup.mock.calls[0]?.[0] === env.DB).toBe(true);
+    expect(recoverCleanup.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
       connectionId: 27302, keyRing, limit: 1,
     }));
     expect(renew).not.toHaveBeenCalled();

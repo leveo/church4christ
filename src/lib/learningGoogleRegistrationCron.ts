@@ -77,17 +77,16 @@ export async function runGoogleClassroomRegistrationRenewalPass(
   const clientId = environment.GOOGLE_CLASSROOM_CLIENT_ID;
   const clientSecret = environment.GOOGLE_CLASSROOM_CLIENT_SECRET;
   const keySecret = environment.LEARNING_CREDENTIAL_KEYS;
+  if (
+    !configured(clientId, 512)
+    || !configured(clientSecret, 2_048)
+    || !configured(keySecret, 16_384)
+  ) return Object.freeze({ status: 'skipped', reason: 'not_configured' });
   const pushReadiness = googleClassroomPushReadiness({
     topicName: environment.GOOGLE_CLASSROOM_PUBSUB_TOPIC,
     subscriptionName: environment.GOOGLE_PUBSUB_SUBSCRIPTION_NAME,
     serviceAccountEmail: environment.GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL,
   });
-  if (
-    !configured(clientId, 512)
-    || !configured(clientSecret, 2_048)
-    || !configured(keySecret, 16_384)
-    || pushReadiness.mode !== 'ready'
-  ) return Object.freeze({ status: 'skipped', reason: 'not_configured' });
   const now = dependencies.now();
   if (!Number.isSafeInteger(now) || now < 0) throw new Error('learning_google_registration_cron_invalid');
   const keyRing = await dependencies.importKeyRing(keySecret);
@@ -98,21 +97,22 @@ export async function runGoogleClassroomRegistrationRenewalPass(
       const cleanupConnections = await dependencies.listCleanupConnectionIds(db, 1);
       const cleanupConnectionId = cleanupConnections[0];
       if (cleanupConnectionId !== undefined) {
-        await dependencies.recoverCleanup(db, {
-          connectionId: cleanupConnectionId,
-          clientId,
-          clientSecret,
-          keyRing,
-          fetcher: dependencies.fetcher,
-          nowEpochMs: now,
-          signal: controller.signal,
-          limit: 4,
-        });
-        return Object.freeze({
-          status: 'completed',
-          summary: Object.freeze({ selected: 0, renewed: 0, conflicted: 0, failed: 0 }),
-        });
+        try {
+          await dependencies.recoverCleanup(db, {
+            connectionId: cleanupConnectionId,
+            clientId,
+            clientSecret,
+            keyRing,
+            fetcher: dependencies.fetcher,
+            nowEpochMs: now,
+            signal: controller.signal,
+            limit: 1,
+          });
+        } catch { /* the durable task remains available to a later bounded pass */ }
       }
+    }
+    if (pushReadiness.mode !== 'ready') {
+      return Object.freeze({ status: 'skipped', reason: 'not_configured' });
     }
     const summary = await dependencies.renew(db, {
       clientId,

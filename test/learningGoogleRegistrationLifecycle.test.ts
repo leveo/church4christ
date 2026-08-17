@@ -552,8 +552,10 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     })).resolves.toEqual({
       status: 'completed', summary: { selected: 8, renewed: 8, conflicted: 0, failed: 0 },
     });
+    expect(queries).toBe(40);
     expect(queries).toBeLessThanOrEqual(50);
     expect(maxBinds).toBeLessThanOrEqual(100);
+    // One failing reserved cleanup plus create/delete for each renewed feed.
     expect(fetcher).toHaveBeenCalledTimes(17);
     expect(fetcher.mock.calls.length).toBeLessThanOrEqual(20);
   });
