@@ -17,6 +17,11 @@
     "APP_ORIGIN": "@@APP_ORIGIN@@",
     "EMAIL_FROM": "@@EMAIL_FROM@@",
     "DB_BACKEND": "@@DB_BACKEND@@"@@STRIPE_MODE_SUFFIX@@
+    // Optional Google Classroom real-time bindings. Set all three together,
+    // or leave all absent for scheduled/manual polling-only operation.
+    // "GOOGLE_CLASSROOM_PUBSUB_TOPIC": "projects/PROJECT/topics/TOPIC",
+    // "GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL": "push@PROJECT.iam.gserviceaccount.com",
+    // "GOOGLE_PUBSUB_SUBSCRIPTION_NAME": "projects/PROJECT/subscriptions/SUBSCRIPTION",
   },
   @@DATABASE_BLOCK@@
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "@@R2_BUCKET@@" }],

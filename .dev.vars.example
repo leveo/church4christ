@@ -23,9 +23,11 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # `npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_SECRET`
 # GOOGLE_CLASSROOM_CLIENT_SECRET=
 
-# Pub/Sub push identity/routing allowlists. These are identifiers rather than
-# credentials, but remain unset in the tracked example so each deployment must
-# explicitly bind its own service account and subscription.
+# Pub/Sub push topic and identity/routing allowlists. These are identifiers
+# rather than credentials, but remain unset in the tracked example. Set all
+# three to enable real-time roster and course-work registrations; leave all
+# three unset for explicit scheduled/manual polling-only operation.
+# GOOGLE_CLASSROOM_PUBSUB_TOPIC=
 # GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL=
 # GOOGLE_PUBSUB_SUBSCRIPTION_NAME=
 

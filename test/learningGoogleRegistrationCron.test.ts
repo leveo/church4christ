@@ -53,7 +53,10 @@ describe('production Google Classroom registration renewal pass', () => {
       status: 'completed', summary: { selected: 2, renewed: 1, conflicted: 1, failed: 0 },
     });
     expect(importKeyRing).toHaveBeenCalledWith('private-key-ring');
-    expect(renew).toHaveBeenCalledWith(env.DB, {
+    expect(renew).toHaveBeenCalledTimes(1);
+    const call = renew.mock.calls[0];
+    expect(call?.[0] === env.DB).toBe(true);
+    expect(call?.[1]).toEqual({
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing, fetcher, nowEpochMs: Date.parse('2026-08-17T12:00:00.000Z'),
       signal: expect.any(AbortSignal),

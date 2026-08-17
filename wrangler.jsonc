@@ -21,6 +21,11 @@
     // reads/writes Postgres over the HYPERDRIVE binding below; see the commented
     // hyperdrive block and docs/supabase-setup.md.
     "DB_BACKEND": "d1"
+    // Optional Google Classroom real-time bindings: uncomment and set all
+    // three together, or leave all three absent for polling-only operation.
+    // "GOOGLE_CLASSROOM_PUBSUB_TOPIC": "projects/PROJECT/topics/TOPIC",
+    // "GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL": "push@PROJECT.iam.gserviceaccount.com",
+    // "GOOGLE_PUBSUB_SUBSCRIPTION_NAME": "projects/PROJECT/subscriptions/SUBSCRIPTION",
     // Nightly D1→R2 backup (src/lib/backup.ts): uncomment and fill both vars
     // below, then run `wrangler secret put D1_EXPORT_TOKEN`. All three must be
     // set together; if any is missing the backup cron logs "backup skipped: not

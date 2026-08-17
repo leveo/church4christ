@@ -6,6 +6,7 @@ import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
 import { getBackend, openDb } from './lib/dbProvider';
 import { runStripeRecovery } from './lib/stripeRecovery';
+import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -42,7 +43,10 @@ export default {
       }
       case ATTENDANCE_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(sendAttendanceEmails(vars, db).finally(end));
+        ctx.waitUntil(Promise.all([
+          sendAttendanceEmails(vars, db),
+          runGoogleClassroomRegistrationRenewalPass(env as never, db),
+        ]).finally(end));
         break;
       }
       case BACKUP_CRON:
