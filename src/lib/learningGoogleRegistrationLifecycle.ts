@@ -156,7 +156,6 @@ export function googleClassroomPushReadiness(rawInput: {
 export interface GoogleCourseMappingCommit {
   readonly mappedCourse: LearningMappedCourseRecord;
   readonly connectionRevision: number;
-  readonly replacedRegistrationIds: readonly string[];
 }
 
 function normalizedRegistrations(
@@ -200,14 +199,32 @@ function mappedCourse(row: Record<string, unknown>): LearningMappedCourseRecord 
   });
 }
 
-async function storedRegistrationIds(
+function normalizedRegistrationIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > 2) invalid();
+  const ids = (value as unknown[]).map(externalId);
+  if (new Set(ids).size !== ids.length) invalid();
+  return Object.freeze(ids);
+}
+
+export async function loadGoogleClassroomCourseRegistrationIds(
   db: AppDb,
-  connectionId: number,
-  courseId: string,
+  rawInput: {
+    readonly connectionId: number;
+    readonly expectedRevision: number;
+    readonly externalCourseId: string;
+  },
 ): Promise<readonly string[]> {
+  const input = exact(rawInput, ['connectionId', 'expectedRevision', 'externalCourseId']);
+  const connectionId = integer(input.connectionId);
+  const expectedRevision = integer(input.expectedRevision, 0);
+  const courseId = externalId(input.externalCourseId);
   const result = await db.prepare(`SELECT registration_id FROM learning_google_registrations
-    WHERE connection_id=?1 AND external_course_id=?2 ORDER BY feed_type LIMIT 3`)
-    .bind(connectionId, courseId).all<Record<string, unknown>>();
+    WHERE connection_id=?1 AND external_course_id=?2
+      AND EXISTS (SELECT 1 FROM learning_provider_connections c
+        WHERE c.id=?1 AND c.provider='google_classroom' AND c.status='active'
+          AND c.revision=?3 AND c.deleted_at IS NULL AND c.operation_marker IS NULL)
+    ORDER BY feed_type LIMIT 3`)
+    .bind(connectionId, courseId, expectedRevision).all<Record<string, unknown>>();
   const rows = resultRows(result, 2);
   return Object.freeze(rows.map((row) => externalId(row.registration_id)));
 }
@@ -221,13 +238,14 @@ export async function commitGoogleClassroomCourseMapping(
     readonly actorPersonId: number;
     readonly course: LearningCourse;
     readonly urlPolicy: LearningConnectionUrlPolicy;
+    readonly expectedRegistrationIds: readonly string[];
     readonly registrations: readonly GoogleClassroomRegistration[];
     readonly nowEpochMs: number;
   },
 ): Promise<GoogleCourseMappingCommit> {
   const input = exact(rawInput, [
     'connectionId', 'expectedRevision', 'programId', 'actorPersonId', 'course',
-    'urlPolicy', 'registrations', 'nowEpochMs',
+    'urlPolicy', 'expectedRegistrationIds', 'registrations', 'nowEpochMs',
   ]);
   const connectionId = integer(input.connectionId);
   const expectedRevision = integer(input.expectedRevision, 0);
@@ -240,8 +258,8 @@ export async function commitGoogleClassroomCourseMapping(
   const course = normalizeLearningCourse(input.course, policy);
   if (course.connectionId !== connectionId || course.provider !== 'google_classroom') invalid();
   const registrations = normalizedRegistrations(input.registrations, course.externalCourseId);
+  const expectedRegistrationIds = normalizedRegistrationIds(input.expectedRegistrationIds);
   if (registrations.some((registration) => Date.parse(registration.expiryTime) <= now)) invalid();
-  const oldRegistrationIds = await storedRegistrationIds(db, connectionId, course.externalCourseId);
   const marker = uuid();
   const claimExpiresAt = new Date(now + MAPPING_CLAIM_MS).toISOString();
   const statements: AppStatement[] = [
@@ -251,8 +269,17 @@ export async function commitGoogleClassroomCourseMapping(
       WHERE id=?4 AND provider='google_classroom' AND status='active' AND revision=?5
         AND deleted_at IS NULL AND operation_marker IS NULL
         AND EXISTS (SELECT 1 FROM learning_programs p
-          WHERE p.id=?6 AND p.status='active' AND p.deleted_at IS NULL)`)
-      .bind(marker, claimExpiresAt, actorPersonId, connectionId, expectedRevision, programId),
+          WHERE p.id=?6 AND p.status='active' AND p.deleted_at IS NULL)
+        AND (SELECT COUNT(*) FROM learning_google_registrations r
+          WHERE r.connection_id=?4 AND r.external_course_id=?7)=?8
+        AND (SELECT COUNT(*) FROM learning_google_registrations r
+          WHERE r.connection_id=?4 AND r.external_course_id=?7
+            AND r.registration_id IN (?9,?10))=?8`)
+      .bind(
+        marker, claimExpiresAt, actorPersonId, connectionId, expectedRevision, programId,
+        course.externalCourseId, expectedRegistrationIds.length,
+        expectedRegistrationIds[0] ?? null, expectedRegistrationIds[1] ?? null,
+      ),
     db.prepare(`INSERT INTO learning_courses
       (program_id,connection_id,provider,external_course_id,display_name,launch_url,lifecycle_state,
        provider_updated_at,last_synced_at,created_at,updated_at,deleted_at)
@@ -310,7 +337,6 @@ export async function commitGoogleClassroomCourseMapping(
     return Object.freeze({
       mappedCourse: mappedCourse(courseRows[0]),
       connectionRevision: claimedRevision,
-      replacedRegistrationIds: oldRegistrationIds,
     });
   } catch (error) {
     if (
@@ -324,7 +350,6 @@ export async function commitGoogleClassroomCourseMapping(
 export interface GoogleCourseUnmapCommit {
   readonly connectionId: number;
   readonly connectionRevision: number;
-  readonly removedRegistrationIds: readonly string[];
 }
 
 export async function commitGoogleClassroomCourseUnmap(
@@ -334,11 +359,13 @@ export async function commitGoogleClassroomCourseUnmap(
     readonly expectedRevision: number;
     readonly actorPersonId: number;
     readonly externalCourseId: string;
+    readonly expectedRegistrationIds: readonly string[];
     readonly nowEpochMs: number;
   },
 ): Promise<GoogleCourseUnmapCommit> {
   const input = exact(rawInput, [
-    'connectionId', 'expectedRevision', 'actorPersonId', 'externalCourseId', 'nowEpochMs',
+    'connectionId', 'expectedRevision', 'actorPersonId', 'externalCourseId',
+    'expectedRegistrationIds', 'nowEpochMs',
   ]);
   const connectionId = integer(input.connectionId);
   const expectedRevision = integer(input.expectedRevision, 0);
@@ -346,8 +373,8 @@ export async function commitGoogleClassroomCourseUnmap(
   const claimedRevision = expectedRevision + 1;
   const actor = integer(input.actorPersonId);
   const courseId = externalId(input.externalCourseId);
+  const expectedRegistrationIds = normalizedRegistrationIds(input.expectedRegistrationIds);
   const now = epoch(input.nowEpochMs);
-  const oldRegistrationIds = await storedRegistrationIds(db, connectionId, courseId);
   const marker = uuid();
   try {
     const results = await db.batch([
@@ -358,8 +385,17 @@ export async function commitGoogleClassroomCourseUnmap(
           AND deleted_at IS NULL AND operation_marker IS NULL
           AND EXISTS (SELECT 1 FROM learning_courses lc
             WHERE lc.connection_id=?4 AND lc.external_course_id=?6
-              AND lc.lifecycle_state='active' AND lc.deleted_at IS NULL)`)
-        .bind(marker, new Date(now + MAPPING_CLAIM_MS).toISOString(), actor, connectionId, expectedRevision, courseId),
+              AND lc.lifecycle_state='active' AND lc.deleted_at IS NULL)
+          AND (SELECT COUNT(*) FROM learning_google_registrations r
+            WHERE r.connection_id=?4 AND r.external_course_id=?6)=?7
+          AND (SELECT COUNT(*) FROM learning_google_registrations r
+            WHERE r.connection_id=?4 AND r.external_course_id=?6
+              AND r.registration_id IN (?8,?9))=?7`)
+        .bind(
+          marker, new Date(now + MAPPING_CLAIM_MS).toISOString(), actor,
+          connectionId, expectedRevision, courseId, expectedRegistrationIds.length,
+          expectedRegistrationIds[0] ?? null, expectedRegistrationIds[1] ?? null,
+        ),
       db.prepare(`DELETE FROM learning_google_registrations WHERE connection_id=?1 AND external_course_id=?2
         AND EXISTS (SELECT 1 FROM learning_provider_connections c
           WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)`)
@@ -389,7 +425,6 @@ export async function commitGoogleClassroomCourseUnmap(
     return Object.freeze({
       connectionId,
       connectionRevision: claimedRevision,
-      removedRegistrationIds: oldRegistrationIds,
     });
   } catch (error) {
     if (
@@ -457,20 +492,23 @@ export async function renewGoogleClassroomRegistrations(
     readonly keyRing: LearningCredentialKeyRing;
     readonly fetcher: RegistrationFetcher;
     readonly nowEpochMs: number;
+    readonly topicName: string;
     readonly signal: AbortSignal;
   },
 ): Promise<GoogleRegistrationRenewalSummary> {
   const input = exact(rawInput, [
-    'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs', 'signal',
+    'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs', 'topicName', 'signal',
   ]);
   if (typeof input.fetcher !== 'function' || !(input.signal instanceof AbortSignal) || input.signal.aborted) invalid();
   const clientId = bounded(input.clientId, 1, 512);
   const clientSecret = bounded(input.clientSecret, 1, 2_048);
+  const currentTopicName = topicName(input.topicName);
   const now = epoch(input.nowEpochMs);
   const nowTimestamp = new Date(now).toISOString();
   const due = await listGoogleClassroomRegistrationsDue(db, {
     now: nowTimestamp,
     renewalHorizon: new Date(now + RENEWAL_HORIZON_MS).toISOString(),
+    topicName: currentTopicName,
     limit: RENEWAL_LIMIT,
   });
   let renewed = 0;

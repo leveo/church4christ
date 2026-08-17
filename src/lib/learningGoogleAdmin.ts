@@ -22,6 +22,7 @@ import {
   commitGoogleClassroomCourseMapping,
   commitGoogleClassroomCourseUnmap,
   LearningGoogleRegistrationLifecycleConflictError,
+  loadGoogleClassroomCourseRegistrationIds,
 } from './learningGoogleRegistrationLifecycle';
 import {
   createGoogleClassroomRegistration,
@@ -454,6 +455,11 @@ export async function mapSelectedGoogleClassroomCourse(
     });
     const registrations: GoogleClassroomRegistration[] = [];
     try {
+      const replacedRegistrationIds = await loadGoogleClassroomCourseRegistrationIds(db, {
+        connectionId: adminEnvironment.connectionId,
+        expectedRevision,
+        externalCourseId,
+      });
       if (pushTopicName !== null) {
         for (const feedType of GOOGLE_CLASSROOM_FEED_TYPES) {
           registrations.push(await createGoogleClassroomRegistration({
@@ -467,6 +473,14 @@ export async function mapSelectedGoogleClassroomCourse(
           }));
         }
       }
+      for (const registrationId of replacedRegistrationIds) {
+        await deleteGoogleClassroomRegistration({
+          accessToken: context.access.accessToken,
+          registrationId,
+          fetcher: adminEnvironment.fetcher,
+          signal: new AbortController().signal,
+        });
+      }
       const committed = await commitGoogleClassroomCourseMapping(db, {
         connectionId: adminEnvironment.connectionId,
         expectedRevision,
@@ -474,19 +488,10 @@ export async function mapSelectedGoogleClassroomCourse(
         actorPersonId,
         course,
         urlPolicy: context.policy,
+        expectedRegistrationIds: replacedRegistrationIds,
         registrations,
         nowEpochMs: adminEnvironment.nowEpochMs,
       });
-      for (const registrationId of committed.replacedRegistrationIds) {
-        try {
-          await deleteGoogleClassroomRegistration({
-            accessToken: context.access.accessToken,
-            registrationId,
-            fetcher: adminEnvironment.fetcher,
-            signal: new AbortController().signal,
-          });
-        } catch { /* stale IDs are rejected locally and expire provider-side */ }
-      }
       return committed.mappedCourse;
     } catch (error) {
       for (const registration of registrations) {
@@ -538,23 +543,27 @@ export async function unmapSelectedGoogleClassroomCourse(
     if (context.access.revision !== expectedRevision) {
       throw new LearningGoogleRegistrationLifecycleConflictError();
     }
+    const removedRegistrationIds = await loadGoogleClassroomCourseRegistrationIds(db, {
+      connectionId: adminEnvironment.connectionId,
+      expectedRevision,
+      externalCourseId,
+    });
+    for (const registrationId of removedRegistrationIds) {
+      await deleteGoogleClassroomRegistration({
+        accessToken: context.access.accessToken,
+        registrationId,
+        fetcher: adminEnvironment.fetcher,
+        signal: new AbortController().signal,
+      });
+    }
     const committed = await commitGoogleClassroomCourseUnmap(db, {
       connectionId: adminEnvironment.connectionId,
       expectedRevision,
       actorPersonId,
       externalCourseId,
+      expectedRegistrationIds: removedRegistrationIds,
       nowEpochMs: adminEnvironment.nowEpochMs,
     });
-    for (const registrationId of committed.removedRegistrationIds) {
-      try {
-        await deleteGoogleClassroomRegistration({
-          accessToken: context.access.accessToken,
-          registrationId,
-          fetcher: adminEnvironment.fetcher,
-          signal: new AbortController().signal,
-        });
-      } catch { /* stale IDs no longer pass local registration lookup */ }
-    }
     return Object.freeze({
       connectionId: committed.connectionId,
       connectionRevision: committed.connectionRevision,

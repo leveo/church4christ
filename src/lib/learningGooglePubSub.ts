@@ -766,11 +766,17 @@ export interface StoredGoogleClassroomRegistration extends GoogleClassroomRegist
 
 export async function listGoogleClassroomRegistrationsDue(
   db: AppDb,
-  rawInput: { readonly now: string; readonly renewalHorizon: string; readonly limit: number },
+  rawInput: {
+    readonly now: string;
+    readonly renewalHorizon: string;
+    readonly topicName: string;
+    readonly limit: number;
+  },
 ): Promise<readonly StoredGoogleClassroomRegistration[]> {
-  const input = exact(rawInput, ['now', 'renewalHorizon', 'limit']);
+  const input = exact(rawInput, ['now', 'renewalHorizon', 'topicName', 'limit']);
   const now = timestamp(input.now);
   const horizon = timestamp(input.renewalHorizon);
+  const currentTopicName = topicName(input.topicName);
   if (horizon <= now || Date.parse(horizon) - Date.parse(now) > 7 * 24 * 60 * 60 * 1_000) invalid();
   const limit = learningValidation.integer(input.limit, 1, 100);
   try {
@@ -780,9 +786,10 @@ export async function listGoogleClassroomRegistrationsDue(
       FROM learning_google_registrations r
       JOIN learning_provider_connections c ON c.id=r.connection_id
       WHERE r.expiry_time>?1 AND r.expiry_time<=?2
+        AND r.topic_name=?3
         AND c.provider='google_classroom' AND c.status='active' AND c.deleted_at IS NULL
-      ORDER BY r.expiry_time,r.connection_id,r.external_course_id,r.feed_type LIMIT ?3`)
-      .bind(now, horizon, limit).all<Record<string, unknown>>();
+      ORDER BY r.expiry_time,r.connection_id,r.external_course_id,r.feed_type LIMIT ?4`)
+      .bind(now, horizon, currentTopicName, limit).all<Record<string, unknown>>();
     if (!result || !Array.isArray(result.results) || result.results.length > limit) invalid();
     return Object.freeze(result.results.map((row) => Object.freeze({
       connectionId: databaseInteger(row.connection_id),

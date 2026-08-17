@@ -1,6 +1,7 @@
 import type { AppDb } from './appDb';
 import { getBackend } from './dbProvider';
 import {
+  googleClassroomPushReadiness,
   renewGoogleClassroomRegistrations,
   type GoogleRegistrationRenewalSummary,
 } from './learningGoogleRegistrationLifecycle';
@@ -18,6 +19,9 @@ export interface GoogleClassroomRegistrationCronEnv {
   readonly DB_BACKEND?: string;
   readonly GOOGLE_CLASSROOM_CLIENT_ID?: string;
   readonly GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+  readonly GOOGLE_CLASSROOM_PUBSUB_TOPIC?: string;
+  readonly GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
+  readonly GOOGLE_PUBSUB_SUBSCRIPTION_NAME?: string;
   readonly LEARNING_CREDENTIAL_KEYS?: string;
 }
 
@@ -33,6 +37,7 @@ interface GoogleClassroomRegistrationCronDeps {
       readonly keyRing: LearningCredentialKeyRing;
       readonly fetcher: CronFetcher;
       readonly nowEpochMs: number;
+      readonly topicName: string;
       readonly signal: AbortSignal;
     },
   ) => Promise<GoogleRegistrationRenewalSummary>;
@@ -64,10 +69,16 @@ export async function runGoogleClassroomRegistrationRenewalPass(
   const clientId = environment.GOOGLE_CLASSROOM_CLIENT_ID;
   const clientSecret = environment.GOOGLE_CLASSROOM_CLIENT_SECRET;
   const keySecret = environment.LEARNING_CREDENTIAL_KEYS;
+  const pushReadiness = googleClassroomPushReadiness({
+    topicName: environment.GOOGLE_CLASSROOM_PUBSUB_TOPIC,
+    subscriptionName: environment.GOOGLE_PUBSUB_SUBSCRIPTION_NAME,
+    serviceAccountEmail: environment.GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL,
+  });
   if (
     !configured(clientId, 512)
     || !configured(clientSecret, 2_048)
     || !configured(keySecret, 16_384)
+    || pushReadiness.mode !== 'ready'
   ) return Object.freeze({ status: 'skipped', reason: 'not_configured' });
   const now = dependencies.now();
   if (!Number.isSafeInteger(now) || now < 0) throw new Error('learning_google_registration_cron_invalid');
@@ -81,6 +92,7 @@ export async function runGoogleClassroomRegistrationRenewalPass(
       keyRing,
       fetcher: dependencies.fetcher,
       nowEpochMs: now,
+      topicName: pushReadiness.topicName,
       signal: controller.signal,
     });
     return Object.freeze({ status: 'completed', summary });
