@@ -167,6 +167,28 @@ export interface LearningEnrollment extends LearningCourseSubject, LearningIdent
   readonly lastSyncedAt: string | null;
 }
 
+/** Provider roster data before a later persistence layer resolves a local Person. */
+export interface LearningProviderEnrollment extends LearningCourseSubject, LearningIdentitySubject {
+  readonly externalEnrollmentId: string;
+  readonly role: LearningEnrollmentRole;
+  readonly state: LearningEnrollmentState;
+}
+
+export interface GoogleClassroomRosterRecord extends LearningCourseSubject, LearningIdentitySubject {
+  readonly role: 'STUDENT' | 'TEACHER';
+  readonly state: 'ACTIVE' | 'INVITED' | 'COMPLETED' | 'INACTIVE';
+}
+
+export interface CanvasEnrollmentRecord extends LearningCourseSubject, LearningIdentitySubject {
+  readonly type:
+    | 'StudentEnrollment'
+    | 'TeacherEnrollment'
+    | 'TaEnrollment'
+    | 'DesignerEnrollment'
+    | 'ObserverEnrollment';
+  readonly state: 'active' | 'invited' | 'creation_pending' | 'completed' | 'inactive';
+}
+
 export interface LearningActivity extends LearningActivitySubject {
   readonly title: string;
   readonly kind: LearningActivityKind;
@@ -258,9 +280,9 @@ export class LearningProviderError extends Error implements LearningProviderErro
 const utf8 = new TextEncoder();
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/u;
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/u;
-const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/u;
+const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/u;
 const INVALID_PERCENT_RE = /%(?![0-9a-f]{2})/iu;
-const AMBIGUOUS_PERCENT_RE = /%(?:0[0-9a-f]|1[0-9a-f]|7f|2e|2f|5c|23|3f|40)/iu;
+const AMBIGUOUS_PERCENT_RE = /%(?:0[0-9a-f]|1[0-9a-f]|7f|25|2e|2f|5c|23|3f|40)/iu;
 
 function invalid(): never {
   throw new LearningValidationError();
@@ -372,7 +394,9 @@ function timestamp(value: unknown): string {
   const hour = Number(match[4]);
   const minute = Number(match[5]);
   const second = Number(match[6]);
-  const calendarProbe = new Date(Date.UTC(year, month - 1, day));
+  const calendarProbe = new Date(0);
+  calendarProbe.setUTCFullYear(year, month - 1, day);
+  calendarProbe.setUTCHours(hour, minute, second, 0);
   if (
     calendarProbe.getUTCFullYear() !== year
     || calendarProbe.getUTCMonth() !== month - 1
@@ -381,14 +405,23 @@ function timestamp(value: unknown): string {
     || minute > 59
     || second > 59
   ) invalid();
-  if (match[7] !== 'Z') {
-    const offsetHour = Number(match[7].slice(1, 3));
-    const offsetMinute = Number(match[7].slice(4, 6));
+  const zone = match[8];
+  let offsetMilliseconds = 0;
+  if (zone !== 'Z') {
+    const offsetHour = Number(zone.slice(1, 3));
+    const offsetMinute = Number(zone.slice(4, 6));
     if (offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) invalid();
+    const direction = zone[0] === '+' ? 1 : -1;
+    offsetMilliseconds = direction * ((offsetHour * 60 + offsetMinute) * 60_000);
   }
-  const milliseconds = Date.parse(source);
+  const milliseconds = calendarProbe.getTime() - offsetMilliseconds;
   if (!Number.isFinite(milliseconds)) invalid();
-  return new Date(milliseconds).toISOString();
+  const wholeSeconds = new Date(milliseconds).toISOString().slice(0, 19);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/u.test(wholeSeconds)) invalid();
+  const inputFraction = match[7] ?? '';
+  const significantFraction = inputFraction.replace(/0+$/u, '');
+  const fraction = significantFraction === '' ? '000' : significantFraction;
+  return `${wholeSeconds}.${fraction}Z`;
 }
 
 function nullableTimestamp(value: unknown): string | null {
@@ -415,12 +448,20 @@ function parsedUrl(value: unknown): { raw: string; url: URL } {
   let url: URL;
   try {
     url = new URL(raw);
-    decodeURIComponent(`${url.pathname}${url.search}`);
+    let encoded = `${url.pathname}${url.search}`;
+    for (let depth = 0; depth < 5; depth += 1) {
+      if (INVALID_PERCENT_RE.test(encoded) || AMBIGUOUS_PERCENT_RE.test(encoded)) invalid();
+      const decoded = decodeURIComponent(encoded);
+      if (decoded === encoded) break;
+      encoded = decoded;
+    }
+    if (encoded.includes('%')) invalid();
   } catch {
     invalid();
   }
   if (
     (url.protocol !== 'https:' && url.protocol !== 'http:')
+    || url.hostname.endsWith('.')
     || url.username !== ''
     || url.password !== ''
     || url.hash !== ''
@@ -710,6 +751,141 @@ export function normalizeLearningEnrollment(value: unknown): LearningEnrollment 
   });
 }
 
+function stableHash64(value: string, offset: bigint): string {
+  let hash = offset;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  const bytes = utf8.encode(value);
+  for (let index = 0; index < bytes.length; index += 1) {
+    hash ^= BigInt(bytes[index]);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
+export function learningSyntheticEnrollmentId(value: unknown): string {
+  const row = exactRecord(value, ['provider', 'externalCourseId', 'externalUserId']);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const externalCourseId = externalId(row.externalCourseId);
+  const externalUserId = externalId(row.externalUserId);
+  const source = JSON.stringify([provider, externalCourseId, externalUserId]);
+  return `enr_${stableHash64(source, 0xcbf29ce484222325n)}${stableHash64(source, 0x84222325cbf29ce4n)}`;
+}
+
+export function normalizeLearningProviderEnrollment(value: unknown): LearningProviderEnrollment {
+  const row = exactRecord(value, [
+    'connectionId', 'provider', 'externalCourseId', 'externalUserId',
+    'externalEnrollmentId', 'role', 'state',
+  ]);
+  const provider = oneOf(row.provider, LEARNING_PROVIDERS);
+  const externalCourseId = externalId(row.externalCourseId);
+  const externalUserId = externalId(row.externalUserId);
+  const externalEnrollmentId = externalId(row.externalEnrollmentId);
+  if (externalEnrollmentId !== learningSyntheticEnrollmentId({
+    provider, externalCourseId, externalUserId,
+  })) invalid();
+  return frozen({
+    connectionId: integer(row.connectionId, 1),
+    provider,
+    externalCourseId,
+    externalUserId,
+    externalEnrollmentId,
+    role: oneOf(row.role, LEARNING_ENROLLMENT_ROLES),
+    state: oneOf(row.state, LEARNING_ENROLLMENT_STATES),
+  });
+}
+
+export function normalizeGoogleClassroomRosterRecord(value: unknown): LearningProviderEnrollment {
+  const row = exactRecord(value, [
+    'connectionId', 'provider', 'externalCourseId', 'externalUserId', 'role', 'state',
+  ]);
+  if (row.provider !== 'google_classroom') invalid();
+  const externalCourseId = externalId(row.externalCourseId);
+  const externalUserId = externalId(row.externalUserId);
+  const role = oneOf(row.role, ['STUDENT', 'TEACHER'] as const) === 'STUDENT' ? 'student' : 'teacher';
+  const stateValue = oneOf(row.state, ['ACTIVE', 'INVITED', 'COMPLETED', 'INACTIVE'] as const);
+  const state = stateValue.toLowerCase() as LearningEnrollmentState;
+  return normalizeLearningProviderEnrollment({
+    connectionId: integer(row.connectionId, 1),
+    provider: 'google_classroom',
+    externalCourseId,
+    externalUserId,
+    externalEnrollmentId: learningSyntheticEnrollmentId({
+      provider: 'google_classroom', externalCourseId, externalUserId,
+    }),
+    role,
+    state,
+  });
+}
+
+const CANVAS_ROLE_PRECEDENCE = Object.freeze({ observer: 0, student: 1, teacher: 2 } as const);
+const CANVAS_STATE_PRECEDENCE = Object.freeze({ inactive: 0, completed: 1, invited: 2, active: 3 } as const);
+
+function canvasRole(value: unknown): LearningEnrollmentRole {
+  const type = oneOf(value, [
+    'StudentEnrollment', 'TeacherEnrollment', 'TaEnrollment',
+    'DesignerEnrollment', 'ObserverEnrollment',
+  ] as const);
+  if (type === 'StudentEnrollment') return 'student';
+  if (type === 'ObserverEnrollment') return 'observer';
+  return 'teacher';
+}
+
+function canvasState(value: unknown): LearningEnrollmentState {
+  const state = oneOf(value, [
+    'active', 'invited', 'creation_pending', 'completed', 'inactive',
+  ] as const);
+  return state === 'creation_pending' ? 'invited' : state;
+}
+
+/**
+ * Canvas may return several enrollment types for one user/course. Aggregation
+ * uses teacher > student > observer and active > invited > completed > inactive.
+ * The synthetic id depends only on provider/course/user, never input order/role.
+ */
+export function aggregateCanvasEnrollmentRecords(value: unknown): LearningProviderEnrollment {
+  const records = dataArray(value, LEARNING_LIMITS.maxPageItems);
+  if (records.length < 1) invalid();
+  let connectionId = 0;
+  let externalCourseId = '';
+  let externalUserId = '';
+  let selectedRole: LearningEnrollmentRole = 'observer';
+  let selectedState: LearningEnrollmentState = 'inactive';
+  for (let index = 0; index < records.length; index += 1) {
+    const row = exactRecord(records[index], [
+      'connectionId', 'provider', 'externalCourseId', 'externalUserId', 'type', 'state',
+    ]);
+    if (row.provider !== 'canvas') invalid();
+    const currentConnectionId = integer(row.connectionId, 1);
+    const currentCourseId = externalId(row.externalCourseId);
+    const currentUserId = externalId(row.externalUserId);
+    if (index === 0) {
+      connectionId = currentConnectionId;
+      externalCourseId = currentCourseId;
+      externalUserId = currentUserId;
+    } else if (
+      currentConnectionId !== connectionId
+      || currentCourseId !== externalCourseId
+      || currentUserId !== externalUserId
+    ) invalid();
+    const role = canvasRole(row.type);
+    const state = canvasState(row.state);
+    if (CANVAS_ROLE_PRECEDENCE[role] > CANVAS_ROLE_PRECEDENCE[selectedRole]) selectedRole = role;
+    if (CANVAS_STATE_PRECEDENCE[state] > CANVAS_STATE_PRECEDENCE[selectedState]) selectedState = state;
+  }
+  return normalizeLearningProviderEnrollment({
+    connectionId,
+    provider: 'canvas',
+    externalCourseId,
+    externalUserId,
+    externalEnrollmentId: learningSyntheticEnrollmentId({
+      provider: 'canvas', externalCourseId, externalUserId,
+    }),
+    role: selectedRole,
+    state: selectedState,
+  });
+}
+
 export function normalizeLearningActivity(value: unknown, rawPolicy: unknown): LearningActivity {
   const row = exactRecord(value, [
     'connectionId', 'provider', 'externalCourseId', 'externalActivityId', 'title',
@@ -876,6 +1052,15 @@ export function learningEnrollmentSubjectKey(enrollment: LearningEnrollment): st
   ]);
 }
 
+export function learningProviderEnrollmentSubjectKey(enrollment: LearningProviderEnrollment): string {
+  return JSON.stringify([
+    enrollment.provider,
+    enrollment.connectionId,
+    enrollment.externalCourseId,
+    enrollment.externalEnrollmentId,
+  ]);
+}
+
 export function learningActivitySubjectKey(subject: LearningActivitySubject): string {
   return JSON.stringify([
     subject.provider,
@@ -942,6 +1127,21 @@ export function learningEnrollmentUniquenessKeys(enrollment: LearningEnrollment)
       enrollment.externalCourseId,
       'identity_link_person',
       enrollment.personId,
+    ]),
+  );
+}
+
+export function learningProviderEnrollmentUniquenessKeys(
+  enrollment: LearningProviderEnrollment,
+): readonly string[] {
+  return frozenKeys(
+    learningProviderEnrollmentSubjectKey(enrollment),
+    JSON.stringify([
+      enrollment.provider,
+      enrollment.connectionId,
+      enrollment.externalCourseId,
+      'external_user',
+      enrollment.externalUserId,
     ]),
   );
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as learningModelModule from '../src/lib/learningModel';
 import {
   LEARNING_ACTIVITY_KINDS,
   LEARNING_ACTIVITY_LIFECYCLE_STATES,
@@ -193,8 +194,22 @@ function validEvent(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 const expectInvalid = (run: () => unknown): void => {
-  expect(run).toThrow(LearningValidationError);
-  expect(run).toThrow('Learning input is invalid');
+  let caught: unknown;
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(LearningValidationError);
+  expect(String(caught)).toContain('Learning input is invalid');
+};
+
+const modelApi = learningModelModule as unknown as {
+  normalizeGoogleClassroomRosterRecord(value: unknown): Record<string, unknown>;
+  aggregateCanvasEnrollmentRecords(value: unknown): Record<string, unknown>;
+  learningSyntheticEnrollmentId(value: unknown): string;
+  normalizeLearningProviderEnrollment(value: unknown): Record<string, unknown>;
+  learningProviderEnrollmentUniquenessKeys(value: unknown): readonly string[];
 };
 
 describe('Learning model allowlists', () => {
@@ -366,6 +381,36 @@ describe('connection, strings, numbers, and timestamps', () => {
       expectInvalid(() => normalizeLearningActivity(validActivity({ dueAt }), URL_POLICY));
     }
   });
+
+  it('preserves nanosecond precision and canonicalizes offsets without Date truncation', () => {
+    const earlier = normalizeLearningActivity(validActivity({
+      providerUpdatedAt: '2026-08-16T15:40:00.123456788Z',
+    }), URL_POLICY).providerUpdatedAt;
+    const later = normalizeLearningActivity(validActivity({
+      providerUpdatedAt: '2026-08-16T15:40:00.123456789Z',
+    }), URL_POLICY).providerUpdatedAt;
+    expect(earlier).toBe('2026-08-16T15:40:00.123456788Z');
+    expect(later).toBe('2026-08-16T15:40:00.123456789Z');
+    expect(earlier! < later!).toBe(true);
+    expect(normalizeLearningActivity(validActivity({
+      providerUpdatedAt: '2026-08-16T15:40:00.123456789-05:30',
+    }), URL_POLICY).providerUpdatedAt).toBe('2026-08-16T21:10:00.123456789Z');
+    expect(normalizeLearningActivity(validActivity({
+      providerUpdatedAt: '2026-08-16T15:40:00.120000000Z',
+    }), URL_POLICY).providerUpdatedAt).toBe('2026-08-16T15:40:00.12Z');
+  });
+
+  it('enforces isolated timestamp precision and calendar boundaries', () => {
+    expect(normalizeLearningActivity(validActivity({
+      providerUpdatedAt: '2024-02-29T23:59:59.123456789Z',
+    }), URL_POLICY).providerUpdatedAt).toBe('2024-02-29T23:59:59.123456789Z');
+    for (const providerUpdatedAt of [
+      '2026-08-16T15:40:00.1234567890Z',
+      '2026-02-29T15:40:00.123456789Z',
+      '2026-04-31T15:40:00.123456789Z',
+      '2026-08-16T24:00:00.123456789Z',
+    ]) expectInvalid(() => normalizeLearningActivity(validActivity({ providerUpdatedAt }), URL_POLICY));
+  });
 });
 
 describe('URL policy', () => {
@@ -496,6 +541,31 @@ describe('URL policy', () => {
     });
     expect(Object.isFrozen(development)).toBe(true);
     expectInvalid(() => normalizeLearningDevelopmentEndpoint('http://canvas.church.test/api'));
+  });
+
+  it('rejects trailing-dot and recursively encoded URL canonicalization bypasses', () => {
+    expectInvalid(() => normalizeCanvasBaseUrl('https://canvas.church.test.'));
+    expectInvalid(() => normalizeYouTube('https://www.youtube.com./watch?v=dQw4w9WgXcQ'));
+    expectInvalid(() => normalizeYouTube('https://www.youtube-nocookie.com./embed/dQw4w9WgXcQ'));
+
+    for (const launchUrl of [
+      'https://links.example.test/resources/%252e%252e/secret',
+      'https://links.example.test/resources/%252f%252fsecret.test',
+      'https://links.example.test/resources/%25252e%25252e/secret',
+      'https://links.example.test/resources/%25255csecret',
+    ]) expectInvalid(() => normalizeLearningResource(validResource({
+      kind: 'link', launchUrl, youtubeVideoId: null, mimeType: null, sizeBytes: null,
+    }), URL_POLICY));
+
+    expectInvalid(() => normalizeLearningConnectionUrlPolicy({
+      ...URL_POLICY,
+      externalLinkOrigins: ['https://links.example.test.'],
+    }));
+    expectInvalid(() => normalizeYouTube('https://www.youtub\u0435.com/watch?v=dQw4w9WgXcQ'));
+    expectInvalid(() => normalizeLearningResource(validResource({
+      kind: 'link', launchUrl: 'https://links.example.test.evil.test/resource',
+      youtubeVideoId: null, mimeType: null, sizeBytes: null,
+    }), URL_POLICY));
   });
 
   it('accepts only a Canvas origin as a base URL and returns it without a slash', () => {
@@ -783,5 +853,59 @@ describe('provider-neutral normalized records', () => {
       learningResourceUniquenessKeys(resource),
       learningSubmissionUniquenessKeys(submission),
     ]) expect(Object.isFrozen(keys)).toBe(true);
+  });
+});
+
+describe('provider roster enrollment DTOs', () => {
+  it('maps realistic Google Classroom student and teacher roster records without local identities', () => {
+    const student = modelApi.normalizeGoogleClassroomRosterRecord({
+      provider: 'google_classroom', connectionId: 8, externalCourseId: 'google-course-1',
+      externalUserId: 'google-user-1', role: 'STUDENT', state: 'ACTIVE',
+    });
+    const teacher = modelApi.normalizeGoogleClassroomRosterRecord({
+      provider: 'google_classroom', connectionId: 8, externalCourseId: 'google-course-1',
+      externalUserId: 'google-user-2', role: 'TEACHER', state: 'ACTIVE',
+    });
+    expect(student).toMatchObject({ role: 'student', state: 'active' });
+    expect(teacher).toMatchObject({ role: 'teacher', state: 'active' });
+    expect(student.externalEnrollmentId).toBe(modelApi.learningSyntheticEnrollmentId({
+      provider: 'google_classroom', externalCourseId: 'google-course-1', externalUserId: 'google-user-1',
+    }));
+    expect(student).not.toHaveProperty('personId');
+    expect(student).not.toHaveProperty('identityLinkId');
+    expect(Object.isFrozen(student)).toBe(true);
+  });
+
+  it('aggregates Canvas roles and states with deterministic precedence and a role-independent id', () => {
+    const records = [
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12', type: 'ObserverEnrollment', state: 'completed' },
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12', type: 'StudentEnrollment', state: 'invited' },
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12', type: 'TaEnrollment', state: 'active' },
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-42', externalUserId: 'user-12', type: 'DesignerEnrollment', state: 'inactive' },
+    ];
+    const forward = modelApi.aggregateCanvasEnrollmentRecords(records);
+    const reversed = modelApi.aggregateCanvasEnrollmentRecords([...records].reverse());
+    expect(forward).toEqual(reversed);
+    expect(forward).toMatchObject({ role: 'teacher', state: 'active' });
+    expect(forward).not.toHaveProperty('personId');
+    expect(modelApi.learningProviderEnrollmentUniquenessKeys(forward)).toHaveLength(2);
+  });
+
+  it('rejects unknown roster mappings and cross-scope Canvas aggregation', () => {
+    for (const input of [
+      { provider: 'google_classroom', connectionId: 8, externalCourseId: 'c', externalUserId: 'u', role: 'OWNER', state: 'ACTIVE' },
+      { provider: 'google_classroom', connectionId: 8, externalCourseId: 'c', externalUserId: 'u', role: 'STUDENT', state: 'SUSPENDED' },
+    ]) expectInvalid(() => modelApi.normalizeGoogleClassroomRosterRecord(input));
+    expectInvalid(() => modelApi.aggregateCanvasEnrollmentRecords([
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-a', externalUserId: 'user-1', type: 'TeacherEnrollment', state: 'active' },
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-b', externalUserId: 'user-1', type: 'StudentEnrollment', state: 'active' },
+    ]));
+    expectInvalid(() => modelApi.aggregateCanvasEnrollmentRecords([
+      { provider: 'canvas', connectionId: 7, externalCourseId: 'course-a', externalUserId: 'user-1', type: 'OwnerEnrollment', state: 'active' },
+    ]));
+    expectInvalid(() => modelApi.normalizeLearningProviderEnrollment({
+      provider: 'canvas', connectionId: 7, externalCourseId: 'course-a', externalUserId: 'user-1',
+      externalEnrollmentId: 'synthetic', role: 'student', state: 'active', personId: 12,
+    }));
   });
 });
