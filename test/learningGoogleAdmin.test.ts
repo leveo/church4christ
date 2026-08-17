@@ -13,6 +13,7 @@ import {
   encryptLearningCredential,
   importLearningCredentialKeyRing,
 } from '../src/lib/learningCredentials';
+import { recoverGoogleClassroomCleanup } from '../src/lib/learningGoogleCleanup';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const KEY_SECRET = JSON.stringify({
@@ -234,5 +235,30 @@ describe('Google Classroom admin authoritative course selection', () => {
       { task_type: 'disconnect', registration_id: null },
       { task_type: 'registration', registration_id: 'cleanup-fails' },
     ] });
+
+    const recoveryFetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.origin === 'https://classroom.googleapis.com') {
+        expect(init?.method).toBe('DELETE');
+        return new Response(null, { status: 404 });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
+      return new Response(null, { status: 200 });
+    });
+    const recoveryInput = {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher: recoveryFetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW + 61_000, limit: 8,
+    };
+    const recoveries = await Promise.all([
+      recoverGoogleClassroomCleanup(env.DB as AppDb, recoveryInput),
+      recoverGoogleClassroomCleanup(env.DB as AppDb, recoveryInput),
+    ]);
+    expect(recoveries.filter((result) => result.finalizedDisconnect)).toHaveLength(1);
+    expect(recoveryFetcher).toHaveBeenCalledTimes(2);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_cleanup_tasks
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
   });
 });

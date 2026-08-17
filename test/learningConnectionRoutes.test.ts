@@ -263,6 +263,26 @@ describe('Learning connection action HTTP boundary', () => {
     expect(injected.disconnectConnection).not.toHaveBeenCalled();
   });
 
+  it('routes a recoverable error-state Google disconnect through the durable cleanup path', async () => {
+    const injected = deps();
+    injected.loadConnection.mockResolvedValue({
+      provider: 'google_classroom', baseUrl: null, revision: 4, status: 'error',
+    } as never);
+    const handler = createLearningConnectionActionHandler(injected);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=disconnect&connection_id=401&revision=4',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(response.headers.get('location')).toBe('/admin/learning?saved=connection_disconnected');
+    expect(injected.disconnectGoogleConnection).toHaveBeenCalledWith({}, {
+      connectionId: 401, expectedRevision: 4, actorPersonId: 7,
+    });
+  });
+
   it('maps malformed, stale, keyring, and unknown failures to fixed codes without secret leakage', async () => {
     const injected = deps();
     injected.disconnectConnection.mockRejectedValue(new Error('canvas-private-token ciphertext nonce'));
