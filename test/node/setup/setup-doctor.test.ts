@@ -45,6 +45,7 @@ const SUPABASE_MIGRATIONS = [
   '0020_learning_google.sql',
   '0021_learning_google_receipt_lifecycle.sql',
   '0022_learning_google_cleanup_saga.sql',
+  '0023_learning_canvas.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -62,6 +63,12 @@ const GOOGLE_CLASSROOM_TABLES = Object.freeze([
   'learning_google_registrations',
   'learning_google_notification_receipts',
   'learning_google_cleanup_tasks',
+]);
+
+const CANVAS_TABLES = Object.freeze([
+  'learning_canvas_oauth_states',
+  'learning_canvas_webhook_configs',
+  'learning_canvas_event_receipts',
 ]);
 
 function relationRows(relations: string[]) {
@@ -337,7 +344,10 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);
-    expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining([...GOOGLE_CLASSROOM_TABLES]));
+    expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining([
+      ...GOOGLE_CLASSROOM_TABLES,
+      ...CANVAS_TABLES,
+    ]));
     expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat(), ...Object.values(SUPABASE_TABLES_BY_CAPABILITY).flat()])];
@@ -420,6 +430,20 @@ describe('doctor database check', () => {
       ).toContain(missing);
       expect(
         missingRequiredTables(catalog, 'supabase', pgMissingGoogleTable),
+        `PostgreSQL doctor must require public.${missing}`,
+      ).toContain(`public.${missing}`);
+    }
+    for (const missing of CANVAS_TABLES) {
+      const d1MissingCanvasTable = new Set(createdByProvider.d1);
+      d1MissingCanvasTable.delete(missing);
+      const pgMissingCanvasTable = new Set(createdByProvider.supabase);
+      pgMissingCanvasTable.delete(`public.${missing}`);
+      expect(
+        missingRequiredTables(catalog, 'd1', d1MissingCanvasTable),
+        `D1 doctor must require ${missing}`,
+      ).toContain(missing);
+      expect(
+        missingRequiredTables(catalog, 'supabase', pgMissingCanvasTable),
         `PostgreSQL doctor must require public.${missing}`,
       ).toContain(`public.${missing}`);
     }

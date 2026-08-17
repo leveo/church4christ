@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 const LEARNING_TABLES = [
   'learning_activities',
   'learning_activity_events',
+  'learning_canvas_event_receipts',
+  'learning_canvas_oauth_states',
+  'learning_canvas_webhook_configs',
   'learning_courses',
   'learning_enrollments',
   'learning_google_cleanup_tasks',
@@ -22,6 +25,10 @@ const LEARNING_TABLES = [
 const LEARNING_INDEXES = [
   'idx_learning_activities_course_due',
   'idx_learning_activities_course_kind',
+  'idx_learning_canvas_oauth_expiry',
+  'idx_learning_canvas_receipts_recovery',
+  'idx_learning_canvas_receipts_retention',
+  'idx_learning_canvas_webhook_account',
   'idx_learning_connections_active_sync',
   'idx_learning_courses_connection_sync',
   'idx_learning_courses_program_state',
@@ -169,6 +176,13 @@ describe('portable Learning schema (D1)', () => {
       'identity_link_id', 'enrollment_id', 'course_id', 'activity_id', 'activity_kind',
       'occurred_at', 'ingested_at',
     ]);
+    expect(await columns('learning_canvas_event_receipts')).toEqual([
+      'connection_id', 'source_event_id', 'external_course_id', 'event_name', 'received_at',
+      'status', 'attempt_count', 'claim_marker', 'claim_expires_at', 'completed_at',
+    ]);
+    expect(await columns('learning_canvas_webhook_configs')).toEqual([
+      'connection_id', 'root_account_id', 'verification_mode', 'jwk_set_url', 'status', 'updated_at',
+    ]);
     expect(await columns('learning_provider_connections')).toContain('operation_expires_at');
     expect(await columns('learning_sync_runs')).toEqual(expect.arrayContaining([
       'lease_marker', 'lease_expires_at', 'finalization_marker', 'url_policy_fingerprint',
@@ -179,9 +193,11 @@ describe('portable Learning schema (D1)', () => {
       'learning_provider_credentials',
       'learning_submission_snapshots',
       'learning_activity_events',
+      'learning_canvas_event_receipts',
     ]) {
       expect((await columns(table)).filter((column) => forbidden.test(column))).toEqual([]);
     }
+    expect(await columns('learning_canvas_event_receipts')).not.toContain('payload');
   });
 
   it('stores only a fixed-length binary URL-policy fingerprint on a sync run', async () => {

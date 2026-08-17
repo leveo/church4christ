@@ -54,6 +54,8 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'learning_resources', 'learning_submission_snapshots', 'learning_activity_events',
     'learning_sync_runs', 'learning_google_oauth_states', 'learning_google_registrations',
     'learning_google_notification_receipts', 'learning_google_cleanup_tasks',
+    'learning_canvas_oauth_states', 'learning_canvas_webhook_configs',
+    'learning_canvas_event_receipts',
   ]),
 });
 const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
