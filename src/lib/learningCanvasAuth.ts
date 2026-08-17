@@ -607,6 +607,54 @@ export async function claimCanvasOAuthState(
   });
 }
 
+/** Resolve the exact DB-bound Canvas origin from a one-time state hash before
+ * claiming it. The callback never accepts an origin from OAuth query data. */
+export async function claimCanvasOAuthCallbackState(
+  db: AppDb,
+  rawInput: {
+    readonly state: string;
+    readonly sessionBinding: string;
+    readonly actorPersonId: number;
+    readonly redirectUri: string;
+    readonly keyRing: LearningCredentialKeyRing;
+    readonly nowEpochMs: number;
+  },
+): Promise<ClaimedCanvasOAuthState> {
+  try {
+    const state = asciiToken(rawInput.state, 128);
+    if (!/^[A-Za-z0-9_-]{43,128}$/u.test(state)) invalid();
+    const sessionHash = await bindingHash(sessionBinding(rawInput.sessionBinding));
+    const actorPersonId = dbInteger(rawInput.actorPersonId);
+    const redirect = redirectUri(rawInput.redirectUri);
+    const now = epoch(rawInput.nowEpochMs);
+    const result = await db.prepare(`SELECT s.base_url AS base_url
+      FROM learning_canvas_oauth_states s
+      JOIN learning_provider_connections c ON c.id=s.connection_id
+      WHERE s.state_hash=?1 AND s.session_hash=?2 AND s.actor_person_id=?3
+        AND s.redirect_uri=?4 AND s.expires_at>?5 AND s.claim_marker IS NULL
+        AND c.id=s.connection_id AND c.provider='canvas' AND c.base_url=s.base_url
+        AND c.revision=s.connection_revision AND c.deleted_at IS NULL
+        AND c.operation_marker IS NULL
+      ORDER BY s.connection_id LIMIT 2`)
+      .bind(await bindingHash(state), sessionHash, actorPersonId, redirect, new Date(now).toISOString())
+      .all<Record<string, unknown>>();
+    if (!result || !Array.isArray(result.results) || result.results.length !== 1) invalid();
+    const baseUrl = normalizeCanvasBaseUrl(result.results[0]?.base_url);
+    return claimCanvasOAuthState(db, {
+      state,
+      sessionBinding: rawInput.sessionBinding,
+      actorPersonId,
+      redirectUri: redirect,
+      baseUrl,
+      keyRing: rawInput.keyRing,
+      nowEpochMs: now,
+    });
+  } catch (error) {
+    if (error instanceof LearningCanvasAuthError || error instanceof LearningCanvasAuthConflictError) throw error;
+    return invalid();
+  }
+}
+
 export async function completeCanvasOAuthState(
   db: AppDb,
   rawInput: {

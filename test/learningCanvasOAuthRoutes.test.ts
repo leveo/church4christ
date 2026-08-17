@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { SessionUser } from '../src/lib/types';
 import { createCanvasOAuthStartHandler } from '../src/pages/admin/learning/canvas/start';
 import { createCanvasOAuthCallbackHandler } from '../src/pages/admin/learning/canvas/callback';
 
 const STATE = 's'.repeat(43);
 const BASE_URL = 'https://canvas.church.example';
+
+function user(): SessionUser {
+  return {
+    id: 61, email: 'canvas@example.test', displayName: 'Canvas Admin', role: 'admin',
+    isAdmin: true, isEditor: false, finance: 0, memberTeamIds: [], leaderTeamIds: [],
+    lang: 'en', isSuperAdmin: false, adminAreas: ['learning'],
+  };
+}
 
 function context(request: Request, options: {
   modules?: string[]; user?: object | null; cookie?: string; db?: object;
@@ -12,7 +21,7 @@ function context(request: Request, options: {
     request, url: new URL(request.url),
     locals: {
       modules: new Set(options.modules ?? ['learning']),
-      user: options.user === undefined ? { id: 61, roles: ['super_admin'] } : options.user,
+      user: options.user === undefined ? user() : options.user,
       db: options.db ?? {},
     },
     cookies: { get: vi.fn(() => options.cookie === undefined ? { value: 'session-binding' } : { value: options.cookie }) },
