@@ -166,7 +166,7 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
       WHERE connection_id=27602`).first()).toEqual({ count: 2 });
   });
 
-  it('keeps the prior mapping and registrations retryable when replacement cleanup fails remotely', async () => {
+  it('commits the remap and durably retries prior cleanup when remote deletion fails', async () => {
     const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
     const first = registrationFetcher('prior');
     const common = {
@@ -201,17 +201,65 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
     await expect(mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
       ...common, fetcher: failingFetcher, expectedRevision: 2, externalCourseId: 'course-1',
       programId: 27604, actorPersonId: 27601, pushTopicName: TOPIC,
-    })).rejects.toThrow();
-    expect(attemptedDeletes).toEqual(expect.arrayContaining(['prior-1', 'replacement-1', 'replacement-2']));
+    })).resolves.toMatchObject({ programId: 27604 });
+    expect(attemptedDeletes).toEqual(['prior-1']);
     expect(await env.DB.prepare(`SELECT c.program_id,p.revision FROM learning_courses c
       JOIN learning_provider_connections p ON p.id=c.connection_id
       WHERE c.connection_id=27602 AND c.external_course_id='course-1'`).first()).toEqual({
-      program_id: 27603, revision: 2,
+      program_id: 27604, revision: 3,
     });
     expect(await env.DB.prepare(`SELECT registration_id FROM learning_google_registrations
       WHERE connection_id=27602 ORDER BY feed_type`).all()).toMatchObject({
-      results: [{ registration_id: 'prior-1' }, { registration_id: 'prior-2' }],
+      results: [{ registration_id: 'replacement-1' }, { registration_id: 'replacement-2' }],
     });
+    expect(await env.DB.prepare(`SELECT registration_id,task_type FROM learning_google_cleanup_tasks
+      WHERE connection_id=27602 ORDER BY registration_id`).all()).toMatchObject({ results: [
+      { registration_id: 'prior-1', task_type: 'registration' },
+      { registration_id: 'prior-2', task_type: 'registration' },
+    ] });
+  });
+
+  it('lets only the remap CAS winner enqueue and delete prior authoritative registrations', async () => {
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const initial = registrationFetcher('authoritative');
+    const common = {
+      connectionId: 27602, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing, nowEpochMs: NOW,
+      externalCourseId: 'course-1', actorPersonId: 27601, pushTopicName: TOPIC,
+    };
+    await mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
+      ...common, fetcher: initial.fetcher, expectedRevision: 1, programId: 27603,
+    });
+    let sequence = 0;
+    const deleted: string[] = [];
+    const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname === '/v1/courses/course-1') return new Response(JSON.stringify(providerCourse()));
+      if (url.pathname === '/v1/registrations' && init?.method === 'POST') {
+        sequence += 1;
+        return new Response(JSON.stringify({
+          registrationId: `contest-${sequence}`, expiryTime: '2026-08-24T12:00:00.000Z',
+        }));
+      }
+      if (url.pathname.startsWith('/v1/registrations/') && init?.method === 'DELETE') {
+        deleted.push(decodeURIComponent(url.pathname.slice('/v1/registrations/'.length)));
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected Google request ${init?.method ?? 'GET'} ${url.pathname}`);
+    });
+    const settled = await Promise.allSettled([
+      mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
+        ...common, fetcher, expectedRevision: 2, programId: 27603,
+      }),
+      mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
+        ...common, fetcher, expectedRevision: 2, programId: 27604,
+      }),
+    ]);
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(settled.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(deleted.filter((id) => id === 'authoritative-1')).toHaveLength(1);
+    expect(deleted.filter((id) => id === 'authoritative-2')).toHaveLength(1);
+    expect(deleted.filter((id) => id.startsWith('contest-'))).toHaveLength(2);
   });
 
   it('unmaps with exact revision, deletes both remote registrations, and soft-deletes the local course', async () => {
@@ -237,7 +285,7 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
       WHERE connection_id=27602`).first()).toEqual({ count: 0 });
   });
 
-  it('keeps the mapped course and registration IDs retryable when remote unmap cleanup fails', async () => {
+  it('commits the unmap and durably retries cleanup when remote deletion fails', async () => {
     const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
     const initial = registrationFetcher('retryable');
     const common = {
@@ -260,15 +308,19 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
     await expect(unmapSelectedGoogleClassroomCourse(env.DB as AppDb, {
       ...common, fetcher: failingFetcher, expectedRevision: 2,
       externalCourseId: 'course-1', actorPersonId: 27601,
-    })).rejects.toThrow();
+    })).resolves.toMatchObject({ connectionId: 27602, connectionRevision: 3 });
     expect(attemptedDeletes).toEqual(['retryable-1']);
     expect(await env.DB.prepare(`SELECT c.lifecycle_state,c.deleted_at,p.revision FROM learning_courses c
       JOIN learning_provider_connections p ON p.id=c.connection_id
       WHERE c.connection_id=27602 AND c.external_course_id='course-1'`).first()).toEqual({
-      lifecycle_state: 'active', deleted_at: null, revision: 2,
+      lifecycle_state: 'deleted', deleted_at: expect.any(String), revision: 3,
     });
     expect(await env.DB.prepare(`SELECT registration_id FROM learning_google_registrations
       WHERE connection_id=27602 ORDER BY feed_type`).all()).toMatchObject({
+      results: [],
+    });
+    expect(await env.DB.prepare(`SELECT registration_id FROM learning_google_cleanup_tasks
+      WHERE connection_id=27602 ORDER BY registration_id`).all()).toMatchObject({
       results: [{ registration_id: 'retryable-1' }, { registration_id: 'retryable-2' }],
     });
   });
@@ -371,6 +423,27 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
       keyRing, fetcher: requests.fetcher, nowEpochMs: NOW, topicName: TOPIC,
       signal: new AbortController().signal,
     })).resolves.toEqual({ selected: 2, renewed: 2, conflicted: 0, failed: 0 });
+  });
+
+  it('keeps failed old-registration cleanup in the durable outbox after renewal wins', async () => {
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const requests = registrationFetcher('durable-renewal');
+    const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname.startsWith('/v1/registrations/') && init?.method === 'DELETE') {
+        return new Response(null, { status: 503 });
+      }
+      return requests.fetcher(request, init);
+    });
+    await expect(renewGoogleClassroomRegistrations(env.DB as AppDb, {
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher, nowEpochMs: NOW, topicName: TOPIC,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({ selected: 2, renewed: 2, conflicted: 0, failed: 0 });
+    expect(await env.DB.prepare(`SELECT registration_id FROM learning_google_cleanup_tasks
+      WHERE connection_id=27602 ORDER BY registration_id`).all()).toMatchObject({
+      results: [{ registration_id: 'old-roster' }, { registration_id: 'old-work' }],
+    });
   });
 
   it('drains twelve feeds per hourly pass within the D1 query and bind budgets', async () => {

@@ -205,7 +205,7 @@ describe('Google Classroom admin authoritative course selection', () => {
       WHERE connection_id=27302`).first()).toEqual({ count: 0 });
   });
 
-  it('leaves connection, credential, and registration state intact when remote cleanup fails', async () => {
+  it('durably disables before remote cleanup and leaves failed work recoverable', async () => {
     await env.DB.prepare(`INSERT INTO learning_courses
       (program_id,connection_id,provider,external_course_id,display_name,launch_url)
       VALUES(27303,27302,'google_classroom','course-failure','Failure course',
@@ -222,12 +222,17 @@ describe('Google Classroom admin authoritative course selection', () => {
       keyRing: ring, fetcher, nowEpochMs: NOW,
     })).rejects.toThrow();
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(await getLearningConnection(env.DB as AppDb, 27302, { includeDeleted: false })).toMatchObject({
-      status: 'active', revision: 1,
+    expect(await getLearningConnection(env.DB as AppDb, 27302, { includeDeleted: true })).toMatchObject({
+      status: 'disabled', revision: 2, deletedAt: expect.any(String),
     });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
       WHERE connection_id=27302`).first()).toEqual({ count: 1 });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_registrations
-      WHERE connection_id=27302`).first()).toEqual({ count: 1 });
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+    expect(await env.DB.prepare(`SELECT task_type,registration_id FROM learning_google_cleanup_tasks
+      WHERE connection_id=27302 ORDER BY task_type,registration_id`).all()).toMatchObject({ results: [
+      { task_type: 'disconnect', registration_id: null },
+      { task_type: 'registration', registration_id: 'cleanup-fails' },
+    ] });
   });
 });

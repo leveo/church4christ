@@ -7,6 +7,7 @@ const LEARNING_TABLES = [
   'learning_activity_events',
   'learning_courses',
   'learning_enrollments',
+  'learning_google_cleanup_tasks',
   'learning_google_notification_receipts',
   'learning_google_oauth_states',
   'learning_google_registrations',

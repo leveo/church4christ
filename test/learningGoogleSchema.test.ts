@@ -5,6 +5,7 @@ const TABLES = [
   'learning_google_oauth_states',
   'learning_google_registrations',
   'learning_google_notification_receipts',
+  'learning_google_cleanup_tasks',
 ] as const;
 
 async function columns(table: string): Promise<string[]> {
@@ -27,6 +28,10 @@ describe('Google Classroom forward schema', () => {
       'subscription_name', 'message_id', 'registration_id', 'external_course_id',
       'collection_name', 'received_at', 'status', 'attempt_count', 'claim_marker',
       'claim_expires_at', 'completed_at',
+    ]);
+    expect(await columns(TABLES[3])).toEqual([
+      'id', 'connection_id', 'task_type', 'registration_id', 'attempt_count',
+      'last_attempt_at', 'created_at',
     ]);
     const forbidden = /payload|body|token|code_verifier|access_token|refresh_token|grade|answer|comment|file_bytes/iu;
     for (const table of TABLES) expect((await columns(table)).join(' ')).not.toMatch(forbidden);
