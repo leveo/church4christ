@@ -226,8 +226,29 @@ describe('Google Classroom provider adapter', () => {
         id: 'submission-1', courseId: '123', courseWorkId: 'quiz-1', userId: 'student-1',
         state: 'RETURNED', late: true, updateTime: '2026-08-17T11:30:00.000Z',
         submissionHistory: [
-          { stateHistory: { state: 'TURNED_IN', stateTimestamp: '2026-08-17T10:00:00.000Z' } },
-          { stateHistory: { state: 'RETURNED', stateTimestamp: '2026-08-17T11:00:00.000Z' } },
+          {
+            stateHistory: {
+              state: 'TURNED_IN', stateTimestamp: '2026-08-17T10:00:00.000Z', actorUserId: 'student-1',
+            },
+          },
+          {
+            stateHistory: {
+              state: 'STUDENT_EDITED_AFTER_TURN_IN',
+              stateTimestamp: '2026-08-17T10:30:00.000Z',
+              actorUserId: 'student-1',
+            },
+          },
+          {
+            gradeHistory: {
+              pointsEarned: 8.5, maxPoints: 10, gradeTimestamp: '2026-08-17T10:45:00.000Z',
+              actorUserId: 'teacher-1', gradeChangeType: 'ASSIGNED_GRADE_POINTS_EARNED_CHANGE',
+            },
+          },
+          {
+            stateHistory: {
+              state: 'RETURNED', stateTimestamp: '2026-08-17T11:00:00.000Z', actorUserId: 'teacher-1',
+            },
+          },
         ],
       }] });
     });
@@ -246,6 +267,37 @@ describe('Google Classroom provider adapter', () => {
       submittedAt: '2026-08-17T10:00:00.000Z', returnedAt: '2026-08-17T11:00:00.000Z',
     });
     expect(JSON.stringify(result)).not.toMatch(/submission-1|grade|answer|comment|attachment/iu);
+  });
+
+  it('rejects malformed documented submission-history unions and unknown history fields', async () => {
+    const malformedHistories = [
+      {
+        stateHistory: { state: 'TURNED_IN', stateTimestamp: '2026-08-17T10:00:00.000Z' },
+        gradeHistory: {
+          pointsEarned: 8, maxPoints: 10, gradeTimestamp: '2026-08-17T10:30:00.000Z',
+          actorUserId: 'teacher-1', gradeChangeType: 'ASSIGNED_GRADE_POINTS_EARNED_CHANGE',
+        },
+      },
+      { stateHistory: { state: 'TURNED_IN', stateTimestamp: '2026-08-17T10:00:00.000Z', answer: 'private' } },
+      { gradeHistory: { pointsEarned: Number.POSITIVE_INFINITY, maxPoints: 10,
+        gradeTimestamp: '2026-08-17T10:30:00.000Z', actorUserId: 'teacher-1',
+        gradeChangeType: 'ASSIGNED_GRADE_POINTS_EARNED_CHANGE' } },
+    ];
+    for (const submissionHistory of malformedHistories) {
+      await expect(invokeLearningProvider(provider(async () => json({ studentSubmissions: [{
+        courseId: '123', courseWorkId: 'quiz-1', userId: 'student-1', state: 'TURNED_IN',
+        updateTime: '2026-08-17T11:30:00.000Z', submissionHistory: [submissionHistory],
+      }] })), {
+        method: 'syncSubmissions', request: {
+          subject: {
+            connectionId: CONNECTION_ID, provider: 'google_classroom', externalCourseId: '123',
+            externalActivityId: 'coursework:quiz-1', externalEnrollmentId: null,
+          },
+          page: { pageSize: 100, pageNumber: 1, pageToken: null },
+          operation: operation('123', 'coursework:quiz-1'),
+        }, now: () => NOW + 1,
+      })).rejects.toMatchObject({ code: 'malformed_response' });
+    }
   });
 
   it('classifies auth, quota, transient, malformed, oversized, and cross-origin failures safely', async () => {
