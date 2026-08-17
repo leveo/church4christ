@@ -6,6 +6,7 @@ import { badge, btn, btnSecondary, card, lab, tin } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
 import { listLearningConnections } from '../../../lib/learningConnectionDb';
 import type { Locale } from '../../../lib/locales';
+import type { LearningConnectionStatus, LearningErrorCode } from '../../../lib/learningModel';
 
 export const prerender = false;
 
@@ -58,15 +59,75 @@ const copy = lang === 'zh' ? {
   saved: 'Connection settings were saved.',
   error: 'Connection settings could not be saved. Refresh and try again.',
 };
-const saved = Astro.url.searchParams.has('saved');
-const error = Astro.url.searchParams.has('error');
+type ConnectionErrorCode =
+  | 'connection_conflict'
+  | 'connection_invalid'
+  | 'credentials_unavailable'
+  | 'connection_failed'
+  | LearningErrorCode;
+const statusLabels: Record<LearningConnectionStatus, string> = lang === 'zh' ? {
+  pending: '等待授权', active: '正常', error: '需要处理', disabled: '已断开',
+} : {
+  pending: 'Pending authorization', active: 'Active', error: 'Needs attention', disabled: 'Disconnected',
+};
+const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
+  connection_conflict: '连接已被其他管理员更新；请刷新后重试。',
+  connection_invalid: '连接设置无效。',
+  credentials_unavailable: '学习平台凭据暂时不可用。',
+  connection_failed: '连接设置未能安全保存；请刷新后重试。',
+  invalid_request: '学习平台拒绝了状态检查请求。',
+  authentication_required: '学习平台需要重新授权。',
+  permission_denied: '学习平台账号没有所需权限。',
+  not_found: '学习平台连接不存在。',
+  rate_limited: '学习平台请求过多；请稍后重试。',
+  provider_unavailable: '学习平台暂时不可用。',
+  malformed_response: '学习平台返回了无效响应。',
+  response_too_large: '学习平台响应超过安全大小限制。',
+  pagination_limit: '学习平台响应超过安全分页限制。',
+  conflict: '学习平台状态已改变；请重试。',
+  timeout: '学习平台状态检查超时。',
+  cancelled: '学习平台状态检查已取消。',
+  internal_error: '学习平台状态检查安全失败。',
+} : {
+  connection_conflict: 'Another administrator changed this connection. Refresh and try again.',
+  connection_invalid: 'The connection settings are invalid.',
+  credentials_unavailable: 'Learning provider credentials are temporarily unavailable.',
+  connection_failed: 'The connection settings could not be saved safely. Refresh and try again.',
+  invalid_request: 'The Learning provider rejected the health-check request.',
+  authentication_required: 'The Learning provider must be authorized again.',
+  permission_denied: 'The Learning provider account lacks the required permission.',
+  not_found: 'The Learning provider connection was not found.',
+  rate_limited: 'The Learning provider rate limit was reached. Try again later.',
+  provider_unavailable: 'The Learning provider is temporarily unavailable.',
+  malformed_response: 'The Learning provider returned an invalid response.',
+  response_too_large: 'The Learning provider response exceeded the safe size limit.',
+  pagination_limit: 'The Learning provider response exceeded the safe page limit.',
+  conflict: 'The Learning provider state changed. Try again.',
+  timeout: 'The Learning provider health check timed out.',
+  cancelled: 'The Learning provider health check was cancelled.',
+  internal_error: 'The Learning provider health check failed safely.',
+};
+const savedCodes = new Set([
+  'connection_created', 'connection_updated', 'connection_reconnected',
+  'connection_disconnected', 'health_checked',
+]);
+const queryEntries = [...Astro.url.searchParams.entries()];
+let banner: { readonly tone: 'success' | 'danger'; readonly text: string } | null = null;
+if (queryEntries.length === 1) {
+  const [name, value] = queryEntries[0];
+  if (name === 'saved' && savedCodes.has(value)) banner = { tone: 'success', text: copy.saved };
+  if (name === 'error' && Object.hasOwn(errorMessages, value)) {
+    banner = { tone: 'danger', text: errorMessages[value as ConnectionErrorCode] };
+  }
+}
 ---
 
 <Admin title={t(lang, 'admin.learning.title')}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.learning.title')}</h1>
   <p class="mt-2 max-w-3xl text-ink-muted">{t(lang, 'admin.learning.intro')}</p>
-  {saved && <p class="mt-4 max-w-3xl rounded-card bg-success/10 px-4 py-3 text-sm text-success">{copy.saved}</p>}
-  {error && <p class="mt-4 max-w-3xl rounded-card bg-danger/10 px-4 py-3 text-sm text-danger">{copy.error}</p>}
+  {banner && <p class={`mt-4 max-w-3xl rounded-card px-4 py-3 text-sm ${
+    banner.tone === 'success' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+  }`}>{banner.text}</p>}
 
   <section class="mt-8 max-w-4xl">
     <h2 class="font-display text-heading-sm font-bold">{copy.providers}</h2>
@@ -82,8 +143,11 @@ const error = Astro.url.searchParams.has('error');
                 {connection.baseUrl ? ` · ${connection.baseUrl}` : ''}
               </p>
             </div>
-            <span class={badge}>{connection.status}</span>
+            <span class={badge}>{statusLabels[connection.status]}</span>
           </div>
+          {connection.lastErrorCode && Object.hasOwn(errorMessages, connection.lastErrorCode) && (
+            <p class="mt-3 text-sm text-danger">{errorMessages[connection.lastErrorCode as ConnectionErrorCode]}</p>
+          )}
 
           {connection.deletedAt === null ? (
             <div class="mt-5 grid gap-4">
@@ -103,6 +167,8 @@ const error = Astro.url.searchParams.has('error');
                   <input type="hidden" name="action" value="health_check" />
                   <input type="hidden" name="connection_id" value={connection.connectionId} />
                   <input type="hidden" name="revision" value={connection.revision} />
+                  <input type="hidden" name="provider" value={connection.provider} />
+                  <input type="hidden" name="status" value={connection.status} />
                   <button class={btnSecondary} type="submit">{copy.health}</button>
                 </form>
                 <form method="post" action="/admin/learning/connections">

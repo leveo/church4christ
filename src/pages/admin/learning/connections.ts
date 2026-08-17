@@ -26,7 +26,12 @@ import {
   importLearningCredentialKeyRing,
 } from '../../../lib/learningCredentials';
 import type { AppDb } from '../../../lib/appDb';
-import type { LearningErrorCode, LearningProviderKind } from '../../../lib/learningModel';
+import {
+  LEARNING_ERROR_CODES,
+  type LearningConnectionStatus,
+  type LearningErrorCode,
+  type LearningProviderKind,
+} from '../../../lib/learningModel';
 
 export const prerender = false;
 
@@ -50,7 +55,12 @@ interface LearningConnectionActionDeps {
     db: AppDb,
     connectionId: number,
     options: { readonly includeDeleted?: boolean },
-  ) => Promise<{ readonly provider: LearningProviderKind; readonly baseUrl: string | null } | null>;
+  ) => Promise<{
+    readonly provider: LearningProviderKind;
+    readonly baseUrl: string | null;
+    readonly revision: number;
+    readonly status: LearningConnectionStatus;
+  } | null>;
   readonly checkHealth: (input: {
     readonly connectionId: number;
     readonly provider: LearningProviderKind;
@@ -128,6 +138,24 @@ function safeErrorCode(error: unknown): string {
   return 'connection_failed';
 }
 
+function normalizedHealthResult(value: unknown): HealthResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new LearningConnectionInvalidError();
+  }
+  const keys = Object.keys(value as object).sort();
+  if (keys.length !== 2 || keys[0] !== 'errorCode' || keys[1] !== 'ok') {
+    throw new LearningConnectionInvalidError();
+  }
+  const result = value as { readonly ok?: unknown; readonly errorCode?: unknown };
+  if (result.ok === true && result.errorCode === null) return { ok: true, errorCode: null };
+  if (
+    result.ok === false
+    && typeof result.errorCode === 'string'
+    && LEARNING_ERROR_CODES.includes(result.errorCode as LearningErrorCode)
+  ) return { ok: false, errorCode: result.errorCode as LearningErrorCode };
+  throw new LearningConnectionInvalidError();
+}
+
 export function createLearningConnectionActionHandler(
   deps: LearningConnectionActionDeps = defaultDeps,
 ): APIRoute {
@@ -199,20 +227,29 @@ export function createLearningConnectionActionHandler(
       }
 
       const connection = await deps.loadConnection(locals.db, data.connectionId, { includeDeleted: false });
-      if (!connection) return redirect('error', 'connection_conflict');
-      const health = await deps.checkHealth({
+      if (
+        !connection
+        || connection.revision !== data.revision
+        || connection.provider !== data.provider
+        || connection.status !== data.status
+      ) return redirect('error', 'connection_conflict');
+      const health = normalizedHealthResult(await deps.checkHealth({
         connectionId: data.connectionId,
         provider: connection.provider,
         baseUrl: connection.baseUrl,
-      });
+      }));
       await deps.updateHealth(locals.db, {
         connectionId: data.connectionId,
         expectedRevision: data.revision,
+        expectedProvider: data.provider,
+        expectedStatus: data.status,
         ok: health.ok,
         errorCode: health.errorCode,
         actorPersonId: user!.id,
       });
-      return redirect('saved', 'health_checked');
+      return health.ok
+        ? redirect('saved', 'health_checked')
+        : redirect('error', health.errorCode);
     } catch (error) {
       return redirect('error', safeErrorCode(error));
     }

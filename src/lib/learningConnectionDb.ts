@@ -48,6 +48,21 @@ function provider(value: unknown): LearningProviderKind {
   return value as LearningProviderKind;
 }
 
+function connectionStatus(value: unknown): LearningConnectionRecord['status'] {
+  if (value !== 'pending' && value !== 'active' && value !== 'error' && value !== 'disabled') invalid();
+  return value as LearningConnectionRecord['status'];
+}
+
+function nextRevision(value: unknown): number {
+  const revision = integer(value, 0);
+  if (revision >= LEARNING_LIMITS.databaseInteger) invalid();
+  return revision + 1;
+}
+
+function operationMarker(): string {
+  return crypto.randomUUID();
+}
+
 function hasWellFormedUnicode(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -112,9 +127,7 @@ function row(value: unknown): LearningConnectionRecord {
   const kind = provider(record.provider);
   const connectionId = integer(record.connection_id, 1);
   const revision = integer(record.revision, 0);
-  const status = record.status;
-  if (status !== 'pending' && status !== 'active' && status !== 'error' && status !== 'disabled') failed();
-  const safeStatus = status as LearningConnectionRecord['status'];
+  const safeStatus = connectionStatus(record.status);
   if (record.last_successful_sync_at !== null && typeof record.last_successful_sync_at !== 'string') failed();
   if (record.last_error_code !== null && typeof record.last_error_code !== 'string') failed();
   if (record.deleted_at !== null && typeof record.deleted_at !== 'string') failed();
@@ -213,7 +226,8 @@ export async function updateLearningConnection(
   try {
     const result = await db.prepare(`UPDATE learning_provider_connections SET
       display_name=?1,base_url=?2,revision=revision+1,updated_by_person_id=?3,updated_at=datetime('now')
-      WHERE id=?4 AND provider=?5 AND revision=?6 AND deleted_at IS NULL ${RETURNING}`)
+      WHERE id=?4 AND provider=?5 AND revision=?6 AND deleted_at IS NULL
+        AND operation_marker IS NULL ${RETURNING}`)
       .bind(name, url, actor, connectionId, kind, expectedRevision).run();
     const updated = returnedConnection(result);
     if (!updated) throw new LearningConnectionConflictError();
@@ -236,21 +250,27 @@ export async function disconnectLearningConnection(
 ): Promise<LearningConnectionRecord> {
   const connectionId = integer(input.connectionId, 1);
   const expectedRevision = integer(input.expectedRevision, 0);
+  const claimedRevision = nextRevision(expectedRevision);
   const actor = integer(input.actorPersonId, 1);
+  const marker = operationMarker();
   try {
     const results = await db.batch([
+      db.prepare(`UPDATE learning_provider_connections SET
+        operation_marker=?1,revision=revision+1,updated_by_person_id=?2,updated_at=datetime('now')
+        WHERE id=?3 AND revision=?4 AND deleted_at IS NULL AND operation_marker IS NULL`)
+        .bind(marker, actor, connectionId, expectedRevision),
       db.prepare(`DELETE FROM learning_provider_credentials WHERE connection_id=?1 AND EXISTS (
         SELECT 1 FROM learning_provider_connections
-        WHERE id=?1 AND revision=?2 AND deleted_at IS NULL
-      )`).bind(connectionId, expectedRevision),
+        WHERE id=?1 AND revision=?2 AND operation_marker=?3
+      )`).bind(connectionId, claimedRevision, marker),
       db.prepare(`UPDATE learning_provider_connections SET
-        status='disabled',revision=revision+1,last_error_code=NULL,
+        status='disabled',operation_marker=NULL,last_error_code=NULL,
         updated_by_person_id=?1,updated_at=datetime('now'),deleted_at=datetime('now')
-        WHERE id=?2 AND revision=?3 AND deleted_at IS NULL ${RETURNING}`)
-        .bind(actor, connectionId, expectedRevision),
+        WHERE id=?2 AND revision=?3 AND operation_marker=?4 ${RETURNING}`)
+        .bind(actor, connectionId, claimedRevision, marker),
     ]);
-    if (!Array.isArray(results) || results.length !== 2) failed();
-    const disconnected = returnedConnection(results[1]);
+    if (!Array.isArray(results) || results.length !== 3) failed();
+    const disconnected = returnedConnection(results[2]);
     if (!disconnected) throw new LearningConnectionConflictError();
     return disconnected;
   } catch (error) {
@@ -275,34 +295,43 @@ export async function reconnectLearningConnection(
 ): Promise<LearningConnectionRecord> {
   const connectionId = integer(input.connectionId, 1);
   const expectedRevision = integer(input.expectedRevision, 0);
+  const claimedRevision = nextRevision(expectedRevision);
   const kind = provider(input.provider);
   if (kind !== 'canvas') invalid();
   const url = baseUrl(kind, input.baseUrl);
   const actor = integer(input.actorPersonId, 1);
   const credential = safeEnvelope(input.credential);
+  const marker = operationMarker();
   try {
     const results = await db.batch([
+      db.prepare(`UPDATE learning_provider_connections SET
+        operation_marker=?1,revision=revision+1,updated_by_person_id=?2,updated_at=datetime('now')
+        WHERE id=?3 AND provider='canvas' AND revision=?4 AND status='disabled'
+          AND deleted_at IS NOT NULL AND operation_marker IS NULL`)
+        .bind(marker, actor, connectionId, expectedRevision),
       db.prepare(`INSERT INTO learning_provider_credentials
         (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at,updated_at)
         SELECT ?1,?2,?3,?4,?5,?6,?7,datetime('now')
         WHERE EXISTS (SELECT 1 FROM learning_provider_connections
-          WHERE id=?1 AND provider='canvas' AND revision=?8 AND status='disabled' AND deleted_at IS NOT NULL)
+          WHERE id=?1 AND provider='canvas' AND revision=?8 AND status='disabled'
+            AND deleted_at IS NOT NULL AND operation_marker=?9)
         ON CONFLICT(connection_id) DO UPDATE SET
           ciphertext=excluded.ciphertext,nonce=excluded.nonce,algorithm=excluded.algorithm,
           key_version=excluded.key_version,envelope_version=excluded.envelope_version,
           expires_at=excluded.expires_at,updated_at=datetime('now')`)
         .bind(
           connectionId, credential.ciphertext, credential.nonce, credential.algorithm,
-          credential.keyVersion, credential.envelopeVersion, credential.expiresAt, expectedRevision,
+          credential.keyVersion, credential.envelopeVersion, credential.expiresAt, claimedRevision, marker,
         ),
       db.prepare(`UPDATE learning_provider_connections SET
-        base_url=?1,status='active',revision=revision+1,last_error_code=NULL,
+        base_url=?1,status='active',operation_marker=NULL,last_error_code=NULL,
         updated_by_person_id=?2,updated_at=datetime('now'),deleted_at=NULL
-        WHERE id=?3 AND provider='canvas' AND revision=?4 AND status='disabled' AND deleted_at IS NOT NULL ${RETURNING}`)
-        .bind(url, actor, connectionId, expectedRevision),
+        WHERE id=?3 AND provider='canvas' AND revision=?4 AND status='disabled'
+          AND deleted_at IS NOT NULL AND operation_marker=?5 ${RETURNING}`)
+        .bind(url, actor, connectionId, claimedRevision, marker),
     ]);
-    if (!Array.isArray(results) || results.length !== 2) failed();
-    const reconnected = returnedConnection(results[1]);
+    if (!Array.isArray(results) || results.length !== 3) failed();
+    const reconnected = returnedConnection(results[2]);
     if (!reconnected) throw new LearningConnectionConflictError();
     return reconnected;
   } catch (error) {
@@ -315,6 +344,8 @@ export async function reconnectLearningConnection(
 export interface UpdateLearningConnectionHealthInput {
   readonly connectionId: number;
   readonly expectedRevision: number;
+  readonly expectedProvider: LearningProviderKind;
+  readonly expectedStatus: LearningConnectionRecord['status'];
   readonly ok: boolean;
   readonly errorCode: LearningErrorCode | null;
   readonly actorPersonId: number;
@@ -326,6 +357,9 @@ export async function updateLearningConnectionHealth(
 ): Promise<LearningConnectionRecord> {
   const connectionId = integer(input.connectionId, 1);
   const expectedRevision = integer(input.expectedRevision, 0);
+  nextRevision(expectedRevision);
+  const expectedProvider = provider(input.expectedProvider);
+  const expectedStatus = connectionStatus(input.expectedStatus);
   const actor = integer(input.actorPersonId, 1);
   if (typeof input.ok !== 'boolean') invalid();
   if (input.ok ? input.errorCode !== null : !LEARNING_ERROR_CODES.includes(input.errorCode as LearningErrorCode)) invalid();
@@ -333,8 +367,12 @@ export async function updateLearningConnectionHealth(
     const result = await db.prepare(`UPDATE learning_provider_connections SET
       status=?1,last_error_code=?2,revision=revision+1,
       updated_by_person_id=?3,updated_at=datetime('now')
-      WHERE id=?4 AND revision=?5 AND deleted_at IS NULL ${RETURNING}`)
-      .bind(input.ok ? 'active' : 'error', input.errorCode, actor, connectionId, expectedRevision).run();
+      WHERE id=?4 AND revision=?5 AND provider=?6 AND status=?7
+        AND deleted_at IS NULL AND operation_marker IS NULL ${RETURNING}`)
+      .bind(
+        input.ok ? 'active' : 'error', input.errorCode, actor, connectionId,
+        expectedRevision, expectedProvider, expectedStatus,
+      ).run();
     const updated = returnedConnection(result);
     if (!updated) throw new LearningConnectionConflictError();
     return updated;

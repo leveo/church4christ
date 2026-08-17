@@ -18,6 +18,7 @@ CREATE TABLE learning_provider_connections (
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending','active','error','disabled')),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision BETWEEN 0 AND 2147483647),
+  operation_marker TEXT CHECK (operation_marker IS NULL OR length(operation_marker) = 36),
   last_successful_sync_at TEXT
     CHECK (last_successful_sync_at IS NULL OR octet_length(last_successful_sync_at) BETWEEN 19 AND 40),
   last_error_code TEXT

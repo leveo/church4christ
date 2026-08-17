@@ -11,6 +11,6 @@ describe('Learning connection administration page', () => {
     }
     expect(page).toContain('type="password"');
     expect(page).toContain('autocomplete="off"');
-    expect(page).not.toMatch(/credential|ciphertext|nonce|keyVersion|clientSecret/);
+    expect(page).not.toMatch(/\bciphertext\b|\bnonce\b|\bkeyVersion\b|\bclientSecret\b|\bkey_version\b|\bclient_secret\b/);
   });
 });

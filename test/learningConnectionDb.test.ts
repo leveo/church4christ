@@ -34,6 +34,25 @@ async function canvasEnvelope(connectionId: number, token = 'canvas-private-toke
   });
 }
 
+function bytes(value: unknown): number[] {
+  if (Array.isArray(value) && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)) return value;
+  if (value instanceof ArrayBuffer) return [...new Uint8Array(value)];
+  if (value instanceof Uint8Array) return [...value];
+  if (value !== null && typeof value === 'object' && Number.isInteger((value as { byteLength?: unknown }).byteLength)) {
+    return [...new Uint8Array(value as ArrayBuffer)];
+  }
+  throw new TypeError('expected credential bytes');
+}
+
+function oneWinner<T>(results: readonly PromiseSettledResult<T>[]): number {
+  const winners = results.flatMap((result, index) => result.status === 'fulfilled' ? [index] : []);
+  expect(winners).toHaveLength(1);
+  for (const result of results) {
+    if (result.status === 'rejected') expect(result.reason).toBeInstanceOf(LearningConnectionConflictError);
+  }
+  return winners[0];
+}
+
 describe('Learning provider connection persistence (D1)', () => {
   it('atomically creates credentialed Canvas and pending credential-free Google connections', async () => {
     expect(await createLearningConnection(env.DB, {
@@ -109,11 +128,22 @@ describe('Learning provider connection persistence (D1)', () => {
       connectionId: 131, provider: 'google_classroom', displayName: 'Google', baseUrl: null,
       actorPersonId: actor, credential: null,
     });
+    for (const mismatch of [
+      { expectedProvider: 'canvas' as const, expectedStatus: 'pending' as const },
+      { expectedProvider: 'google_classroom' as const, expectedStatus: 'active' as const },
+    ]) {
+      await expect(updateLearningConnectionHealth(env.DB, {
+        connectionId: 131, expectedRevision: 0, ...mismatch,
+        ok: false, errorCode: 'provider_unavailable', actorPersonId: actor,
+      })).rejects.toBeInstanceOf(LearningConnectionConflictError);
+    }
     expect(await updateLearningConnectionHealth(env.DB, {
-      connectionId: 131, expectedRevision: 0, ok: false, errorCode: 'provider_unavailable', actorPersonId: actor,
+      connectionId: 131, expectedRevision: 0, expectedProvider: 'google_classroom', expectedStatus: 'pending',
+      ok: false, errorCode: 'provider_unavailable', actorPersonId: actor,
     })).toMatchObject({ status: 'error', lastErrorCode: 'provider_unavailable', revision: 1 });
     await expect(updateLearningConnectionHealth(env.DB, {
-      connectionId: 131, expectedRevision: 0, ok: true, errorCode: null, actorPersonId: actor,
+      connectionId: 131, expectedRevision: 0, expectedProvider: 'google_classroom', expectedStatus: 'pending',
+      ok: true, errorCode: null, actorPersonId: actor,
     })).rejects.toBeInstanceOf(LearningConnectionConflictError);
   });
 
@@ -135,5 +165,67 @@ describe('Learning provider connection persistence (D1)', () => {
     ]);
     expect(JSON.stringify(rows)).not.toMatch(/canvas-private-token|ciphertext|nonce|key_version/i);
     await expect(listLearningConnections(env.DB, { includeDeleted: true, limit: 0 })).rejects.toThrow('learning_connection_invalid');
+  });
+
+  it('atomically resolves concurrent update-vs-disconnect with no losing credential side effect', async () => {
+    await createLearningConnection(env.DB, {
+      connectionId: 151, provider: 'canvas', displayName: 'Canvas', baseUrl: 'https://canvas.church.test',
+      actorPersonId: actor, credential: await canvasEnvelope(151),
+    });
+    const results = await Promise.allSettled([
+      updateLearningConnection(env.DB, {
+        connectionId: 151, expectedRevision: 0, provider: 'canvas', displayName: 'Update winner',
+        baseUrl: 'https://updated.church.test', actorPersonId: actor,
+      }),
+      disconnectLearningConnection(env.DB, { connectionId: 151, expectedRevision: 0, actorPersonId: actor }),
+    ]);
+    const winner = oneWinner(results);
+    const connection = await getLearningConnection(env.DB, 151, { includeDeleted: true });
+    const credential = await env.DB.prepare(
+      'SELECT ciphertext FROM learning_provider_credentials WHERE connection_id=?',
+    ).bind(151).first();
+    expect(connection?.revision).toBe(1);
+    if (winner === 0) {
+      expect(connection).toMatchObject({ status: 'active', displayName: 'Update winner', deletedAt: null });
+      expect(credential).not.toBeNull();
+    } else {
+      expect(connection).toMatchObject({ status: 'disabled', displayName: 'Canvas' });
+      expect(connection?.deletedAt).not.toBeNull();
+      expect(credential).toBeNull();
+    }
+    expect(await env.DB.prepare('SELECT operation_marker FROM learning_provider_connections WHERE id=?')
+      .bind(151).first()).toEqual({ operation_marker: null });
+  });
+
+  it('keeps the winning reconnect credential under concurrent reconnect attempts', async () => {
+    await createLearningConnection(env.DB, {
+      connectionId: 161, provider: 'canvas', displayName: 'Canvas', baseUrl: 'https://canvas.church.test',
+      actorPersonId: actor, credential: await canvasEnvelope(161),
+    });
+    await disconnectLearningConnection(env.DB, { connectionId: 161, expectedRevision: 0, actorPersonId: actor });
+    const envelopes = [await canvasEnvelope(161, 'winner-a'), await canvasEnvelope(161, 'winner-b')] as const;
+    const results = await Promise.allSettled([
+      reconnectLearningConnection(env.DB, {
+        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://a.church.test',
+        actorPersonId: actor, credential: envelopes[0],
+      }),
+      reconnectLearningConnection(env.DB, {
+        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://b.church.test',
+        actorPersonId: actor, credential: envelopes[1],
+      }),
+    ]);
+    const winner = oneWinner(results);
+    const connection = await getLearningConnection(env.DB, 161, { includeDeleted: true });
+    const stored = await env.DB.prepare(
+      'SELECT ciphertext FROM learning_provider_credentials WHERE connection_id=?',
+    ).bind(161).first<{ ciphertext: ArrayBuffer }>();
+    expect(connection).toMatchObject({
+      revision: 2, status: 'active', baseUrl: winner === 0 ? 'https://a.church.test' : 'https://b.church.test',
+    });
+    expect(stored).not.toBeNull();
+    expect(stored?.ciphertext).toBeDefined();
+    expect(bytes(stored?.ciphertext)).toEqual(bytes(envelopes[winner].ciphertext));
+    expect(await env.DB.prepare('SELECT operation_marker FROM learning_provider_connections WHERE id=?')
+      .bind(161).first()).toEqual({ operation_marker: null });
   });
 });

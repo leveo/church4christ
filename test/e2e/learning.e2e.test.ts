@@ -86,4 +86,57 @@ describe('Learning built-worker shell boundaries', () => {
     const superAdmin = await sessionCookie(1, 'admin@example.com');
     expect(await status(await get('/admin/learning', { cookie: superAdmin }))).toBe(200);
   });
+
+  it('allowlists banners and renders safe bilingual health errors and statuses', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM learning_provider_connections WHERE id BETWEEN 880 AND 883`),
+      env.DB.prepare(`INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id,updated_by_person_id)
+        VALUES (880,'google_classroom','Pending provider',NULL,'pending',0,80,80)`),
+      env.DB.prepare(`INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id,updated_by_person_id)
+        VALUES (881,'google_classroom','Active provider',NULL,'active',0,80,80)`),
+      env.DB.prepare(`INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,last_error_code,created_by_person_id,updated_by_person_id)
+        VALUES (882,'google_classroom','Error provider',NULL,'error',0,'provider_unavailable',80,80)`),
+      env.DB.prepare(`INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id,updated_by_person_id,deleted_at)
+        VALUES (883,'canvas','Disabled provider','https://disabled.canvas.test','disabled',1,80,80,datetime('now'))`),
+    ]);
+    try {
+      const learningAdmin = await sessionCookie(80, 'lena.learning@example.com');
+      const arbitrary = await get('/admin/learning?saved=anything&error=anything', { cookie: learningAdmin });
+      const arbitraryHtml = await arbitrary.text();
+      expect(arbitraryHtml).not.toContain('Connection settings were saved.');
+      expect(arbitraryHtml).not.toContain('Connection settings could not be saved.');
+
+      const mixed = await get('/admin/learning?saved=connection_created&extra=anything', { cookie: learningAdmin });
+      expect(await mixed.text()).not.toContain('Connection settings were saved.');
+
+      const saved = await get('/admin/learning?saved=connection_created', { cookie: learningAdmin });
+      const savedHtml = await saved.text();
+      expect(savedHtml).toContain('Connection settings were saved.');
+      for (const label of ['Pending authorization', 'Active', 'Needs attention', 'Disconnected']) {
+        expect(savedHtml).toContain(label);
+      }
+      expect(savedHtml).not.toMatch(/>\s*(?:pending|active|error|disabled)\s*</);
+
+      const health = await get('/admin/learning?error=provider_unavailable', { cookie: learningAdmin });
+      const healthHtml = await health.text();
+      expect(healthHtml).toContain('The Learning provider is temporarily unavailable.');
+      expect(healthHtml).toContain('text-danger');
+      expect(healthHtml).not.toContain('Connection settings were saved.');
+
+      await env.DB.prepare("UPDATE people SET lang='zh' WHERE id=80").run();
+      const chinese = await get('/admin/learning?error=provider_unavailable', { cookie: learningAdmin });
+      const chineseHtml = await chinese.text();
+      expect(chineseHtml).toContain('学习平台暂时不可用。');
+      for (const label of ['等待授权', '正常', '需要处理', '已断开']) expect(chineseHtml).toContain(label);
+    } finally {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE people SET lang='en' WHERE id=80"),
+        env.DB.prepare(`DELETE FROM learning_provider_connections WHERE id BETWEEN 880 AND 883`),
+      ]);
+    }
+  });
 });

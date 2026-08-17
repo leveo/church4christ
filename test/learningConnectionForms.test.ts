@@ -45,14 +45,19 @@ describe('Learning connection form parser', () => {
       action: 'reconnect', connection_id: '41', revision: '4', provider: 'canvas',
       base_url: 'https://new-canvas.test', access_token: 'new-private-token',
     })).toMatchObject({ ok: true, data: { action: 'reconnect', connectionId: 41, revision: 4 } });
-    expect(parseLearningConnectionForm({ action: 'health_check', connection_id: '41', revision: '5' }))
-      .toEqual({ ok: true, data: { action: 'health_check', connectionId: 41, revision: 5 } });
+    expect(parseLearningConnectionForm({
+      action: 'health_check', connection_id: '41', revision: '5', provider: 'canvas', status: 'active',
+    })).toEqual({ ok: true, data: {
+      action: 'health_check', connectionId: 41, revision: 5, provider: 'canvas', status: 'active',
+    } });
     expect(parseLearningConnectionForm({ action: 'disconnect', connection_id: '41', revision: '6' }))
       .toEqual({ ok: true, data: { action: 'disconnect', connectionId: 41, revision: 6 } });
     for (const invalid of [
       { action: 'disconnect', connection_id: '0', revision: '1' },
       { action: 'disconnect', connection_id: '1', revision: '-1' },
       { action: 'disconnect', connection_id: '1', revision: '1', access_token: 'private' },
+      { action: 'health_check', connection_id: '1', revision: '1' },
+      { action: 'health_check', connection_id: '1', revision: '1', provider: 'canvas', status: 'unknown' },
       { action: 'health_check', connection_id: '1', revision: '1', extra: 'x' },
       { action: 'update', connection_id: '1', revision: '1', provider: 'google_classroom', display_name: 'Google', base_url: '' },
     ]) expect(parseLearningConnectionForm(invalid)).toEqual({ ok: false, code: 'learning_connection_invalid' });

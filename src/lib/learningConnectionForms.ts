@@ -1,11 +1,16 @@
-import { LEARNING_LIMITS, normalizeCanvasBaseUrl, type LearningProviderKind } from './learningModel';
+import {
+  LEARNING_LIMITS,
+  normalizeCanvasBaseUrl,
+  type LearningConnectionStatus,
+  type LearningProviderKind,
+} from './learningModel';
 
 export const LEARNING_CONNECTION_FORM_MAX_BYTES = 16 * 1024;
 const MAX_ACCESS_TOKEN_BYTES = 8 * 1024;
 const encoder = new TextEncoder();
 const FORM_FIELD_NAMES = new Set([
   'action', 'provider', 'display_name', 'base_url', 'access_token',
-  'connection_id', 'revision',
+  'connection_id', 'revision', 'status',
 ]);
 
 export type LearningConnectionFormData =
@@ -39,7 +44,14 @@ export type LearningConnectionFormData =
       readonly accessToken: string;
     }
   | {
-      readonly action: 'health_check' | 'disconnect';
+      readonly action: 'health_check';
+      readonly connectionId: number;
+      readonly revision: number;
+      readonly provider: LearningProviderKind;
+      readonly status: LearningConnectionStatus;
+    }
+  | {
+      readonly action: 'disconnect';
       readonly connectionId: number;
       readonly revision: number;
     };
@@ -103,6 +115,11 @@ function provider(value: string): LearningProviderKind | null {
   return value === 'canvas' || value === 'google_classroom' ? value : null;
 }
 
+function connectionStatus(value: string): LearningConnectionStatus | null {
+  return value === 'pending' || value === 'active' || value === 'error' || value === 'disabled'
+    ? value : null;
+}
+
 function canvasBaseUrl(value: string): string | null {
   try { return normalizeCanvasBaseUrl(value); } catch { return null; }
 }
@@ -157,7 +174,18 @@ export function parseLearningConnectionForm(
     } };
   }
 
-  if (action === 'health_check' || action === 'disconnect') {
+  if (action === 'health_check') {
+    if (!exactKeys(fields, ['action', 'connection_id', 'revision', 'provider', 'status'])) return invalid();
+    const connectionId = integer(fields.connection_id ?? '', 1);
+    const revision = integer(fields.revision ?? '', 0);
+    const kind = provider(fields.provider ?? '');
+    const status = connectionStatus(fields.status ?? '');
+    return connectionId === null || revision === null || kind === null || status === null
+      ? invalid()
+      : { ok: true, data: { action, connectionId, revision, provider: kind, status } };
+  }
+
+  if (action === 'disconnect') {
     if (!exactKeys(fields, ['action', 'connection_id', 'revision'])) return invalid();
     const connectionId = integer(fields.connection_id ?? '', 1);
     const revision = integer(fields.revision ?? '', 0);

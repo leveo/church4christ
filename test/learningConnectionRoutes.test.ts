@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { LearningConnectionConflictError } from '../src/lib/learningConnectionDb';
 import type { SessionUser } from '../src/lib/types';
 import { ALL, createLearningConnectionActionHandler } from '../src/pages/admin/learning/connections';
 
@@ -26,8 +27,13 @@ const deps = () => ({
   updateConnection: vi.fn(async () => ({ connectionId: 401 })),
   reconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
   disconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
-  loadConnection: vi.fn(async () => ({ provider: 'canvas' as const, baseUrl: 'https://canvas.test' })),
-  checkHealth: vi.fn(async () => ({ ok: true as const, errorCode: null })),
+  loadConnection: vi.fn(async () => ({
+    provider: 'canvas' as const, baseUrl: 'https://canvas.test', revision: 0, status: 'active' as const,
+  })),
+  checkHealth: vi.fn(async (): Promise<
+    { readonly ok: true; readonly errorCode: null }
+    | { readonly ok: false; readonly errorCode: 'provider_unavailable' }
+  > => ({ ok: true, errorCode: null })),
   updateHealth: vi.fn(async () => ({ connectionId: 401 })),
 });
 
@@ -93,12 +99,76 @@ describe('Learning connection action HTTP boundary', () => {
     expect(created.headers.get('location')).toBe('/admin/learning?saved=connection_created');
     expect(JSON.stringify(injected.createConnection.mock.calls)).not.toContain('private-token');
 
-    const checked = await call('action=health_check&connection_id=401&revision=0');
+    const checked = await call('action=health_check&connection_id=401&revision=0&provider=canvas&status=active');
     expect(checked.headers.get('location')).toBe('/admin/learning?saved=health_checked');
     expect(injected.checkHealth).toHaveBeenCalledTimes(1);
     expect(injected.updateHealth).toHaveBeenCalledWith({}, expect.objectContaining({
       connectionId: 401, expectedRevision: 0, ok: true, actorPersonId: 7,
+      expectedProvider: 'canvas', expectedStatus: 'active',
     }));
+  });
+
+  it('rejects stale health revision/provider/status before calling the provider', async () => {
+    const cases = [
+      { revision: 1, provider: 'canvas', status: 'active' },
+      { revision: 0, provider: 'google_classroom', status: 'active' },
+      { revision: 0, provider: 'canvas', status: 'error' },
+    ] as const;
+    for (const expected of cases) {
+      const injected = deps();
+      const handler = createLearningConnectionActionHandler(injected);
+      const body = new URLSearchParams({
+        action: 'health_check', connection_id: '401', revision: String(expected.revision),
+        provider: expected.provider, status: expected.status,
+      });
+      const response = await handler({
+        request: new Request('https://church.test/admin/learning/connections', {
+          method: 'POST', headers: {
+            'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+          }, body,
+        }),
+        url: new URL('https://church.test/admin/learning/connections'),
+        locals: { modules: new Set(['learning']), user: user(), db: {} },
+      } as never);
+      expect(response.headers.get('location')).toBe('/admin/learning?error=connection_conflict');
+      expect(injected.checkHealth).not.toHaveBeenCalled();
+      expect(injected.updateHealth).not.toHaveBeenCalled();
+    }
+  });
+
+  it('discards a health result when the revision changes during the provider check', async () => {
+    const injected = deps();
+    injected.updateHealth.mockRejectedValue(new LearningConnectionConflictError());
+    const handler = createLearningConnectionActionHandler(injected);
+    const response = await handler({
+      request: new Request('https://church.test/admin/learning/connections', {
+        method: 'POST', headers: {
+          'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+        }, body: 'action=health_check&connection_id=401&revision=0&provider=canvas&status=active',
+      }),
+      url: new URL('https://church.test/admin/learning/connections'),
+      locals: { modules: new Set(['learning']), user: user(), db: {} },
+    } as never);
+    expect(injected.checkHealth).toHaveBeenCalledTimes(1);
+    expect(response.headers.get('location')).toBe('/admin/learning?error=connection_conflict');
+  });
+
+  it('persists a failed health result but redirects to an allowlisted non-success error', async () => {
+    const injected = deps();
+    injected.checkHealth.mockResolvedValue({ ok: false, errorCode: 'provider_unavailable' });
+    const handler = createLearningConnectionActionHandler(injected);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=health_check&connection_id=401&revision=0&provider=canvas&status=active',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(injected.updateHealth).toHaveBeenCalledWith({}, expect.objectContaining({
+      ok: false, errorCode: 'provider_unavailable',
+    }));
+    expect(response.headers.get('location')).toBe('/admin/learning?error=provider_unavailable');
   });
 
   it('creates a pending Google connection without reading the encryption secret', async () => {
