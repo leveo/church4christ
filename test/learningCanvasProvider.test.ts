@@ -2,9 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   LearningProviderError,
   learningSyntheticEnrollmentId,
+  type LearningActivity,
   type LearningConnectionUrlPolicy,
 } from '../src/lib/learningModel';
-import { invokeLearningProvider, type LearningOperationContext } from '../src/lib/learningProvider';
+import {
+  invokeLearningProvider,
+  type LearningOperationContext,
+  type LearningProviderPage,
+} from '../src/lib/learningProvider';
 import {
   CANVAS_REQUIRED_SCOPES,
   createCanvasProvider,
@@ -20,7 +25,7 @@ const POLICY: LearningConnectionUrlPolicy = Object.freeze({
   baseUrl: BASE_URL,
   providerLaunchOrigins: Object.freeze([BASE_URL]),
   providerFileOrigins: Object.freeze([BASE_URL]),
-  externalLinkOrigins: Object.freeze(['https://resources.church.example']),
+  externalLinkOrigins: Object.freeze([BASE_URL, 'https://resources.church.example']),
 });
 
 function operation(
@@ -212,7 +217,7 @@ describe('Canvas provider adapter', () => {
     const all = [];
     let pageToken: string | null = null;
     for (let pageNumber = 1; pageNumber <= 3; pageNumber += 1) {
-      const page = await invokeLearningProvider(adapter, {
+      const page: LearningProviderPage<LearningActivity> = await invokeLearningProvider(adapter, {
         method: 'syncActivities',
         request: {
           subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
@@ -350,7 +355,12 @@ describe('Canvas provider adapter', () => {
         now: () => NOW + 1,
       }).catch((value: unknown) => value);
       expect(error).toBeInstanceOf(LearningProviderError);
-      expect(error).toMatchObject({ code, provider: 'canvas', httpStatus: status, retryAfterSeconds });
+      expect(error).toMatchObject({
+        code,
+        provider: 'canvas',
+        httpStatus: status >= 400 ? status : null,
+        retryAfterSeconds,
+      });
       expect(String(error)).not.toMatch(/private|upstream|token/iu);
     }
     await expect(invokeLearningProvider(provider(async () => new Response(new Uint8Array(1_048_577), {
