@@ -20,6 +20,26 @@ function poisonedContext(modules: string[], actor: SessionUser | null = user(), 
   return { request, url: new URL(request.url), locals: { modules: new Set(modules), user: actor, db } } as never;
 }
 
+function unprovenPoisonedContext(headers: HeadersInit = {}): { context: never; wasPulled: () => boolean } {
+  let pulled = false;
+  const request = new Request('https://church.test/admin/learning/connections', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+    body: new ReadableStream({
+      pull(controller) {
+        pulled = true;
+        controller.error(new Error('body read'));
+      },
+    }, { highWaterMark: 0 }),
+  });
+  return {
+    context: {
+      request, url: new URL(request.url),
+      locals: { modules: new Set(['learning']), user: user(), db: {} },
+    } as never,
+    wasPulled: () => pulled,
+  };
+}
+
 const deps = () => ({
   keySecret: JSON.stringify({ currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(4))) } }),
   nextConnectionId: vi.fn(() => 401),
@@ -46,6 +66,37 @@ describe('Learning connection action HTTP boundary', () => {
     expect((await handler(poisonedContext(['learning'], user({ adminAreas: [] })))).status).toBe(403);
     expect((await handler(poisonedContext(['learning'], user(), { origin: 'https://evil.test' }))).status).toBe(403);
     expect(keyRead).not.toHaveBeenCalled();
+  });
+
+  it('accepts exact Origin or a same-origin fetch proof and rejects every unproven mutation', async () => {
+    const handler = createLearningConnectionActionHandler(deps());
+    const call = (headers: HeadersInit) => {
+      const request = new Request('https://church.test/admin/learning/connections', {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+        body: 'action=health_check&connection_id=401&revision=0&provider=canvas&status=active',
+      });
+      return handler({ request, url: new URL(request.url), locals: {
+        modules: new Set(['learning']), user: user(), db: {},
+      } } as never);
+    };
+    expect((await call({ origin: 'https://church.test' })).status).toBe(303);
+    expect((await call({ 'sec-fetch-site': 'same-origin' })).status).toBe(303);
+    for (const [label, headers] of [
+      ['missing', {}],
+      ['none', { 'sec-fetch-site': 'none' }],
+      ['same-site', { 'sec-fetch-site': 'same-site' }],
+      ['cross-site', { 'sec-fetch-site': 'cross-site' }],
+      ['unknown', { 'sec-fetch-site': 'unexpected' }],
+      ['mismatched Origin', { origin: 'https://attacker.test', 'sec-fetch-site': 'same-origin' }],
+    ] as const) expect.soft((await call(headers)).status, label).toBe(403);
+  });
+
+  it('rejects a mutation with no provenance before pulling its body', async () => {
+    const poisoned = unprovenPoisonedContext();
+    const response = await createLearningConnectionActionHandler(deps())(poisoned.context);
+    expect(response.status).toBe(403);
+    expect(poisoned.wasPulled()).toBe(false);
+    expect((poisoned.context as { request: Request }).request.body?.locked).toBe(false);
   });
 
   it('advertises POST and rejects a direct non-POST invocation before body access', async () => {

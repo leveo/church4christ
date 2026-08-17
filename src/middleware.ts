@@ -8,6 +8,7 @@ import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
+import { hasSameOriginProvenance } from './lib/csrf';
 import { openDb, type DbEnv } from './lib/dbProvider';
 
 // Baseline security headers (spec §14) live in ./lib/securityHeaders; the route
@@ -174,19 +175,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return finish(res);
     }
 
-    // CSRF: reject cross-origin state-changing requests before doing any work. When
-    // the Origin header is present it must match this origin; when it is absent,
-    // fall back to Sec-Fetch-Site (a forged cross-site POST cannot set it to
-    // same-origin). SameSite=Lax on the session cookie is the backstop. The 403 is
+    // CSRF: reject state-changing requests without exact same-origin browser
+    // provenance. Origin is authoritative when present; otherwise Fetch Metadata
+    // must explicitly say same-origin. Missing/none/same-site/unknown values fail
+    // closed. SameSite=Lax on the session cookie remains a backstop. The 403 is
     // hardened like every other early return (baseline headers + no-store).
     const method = context.request.method;
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-      const origin = context.request.headers.get('origin');
-      const site = context.request.headers.get('sec-fetch-site');
-      const sameOrigin = origin
-        ? origin === context.url.origin
-        : site === null || site === 'same-origin' || site === 'none';
-      if (!sameOrigin) {
+      if (!hasSameOriginProvenance(context.request)) {
         const res = new Response('Forbidden', {
           status: 403,
           headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },

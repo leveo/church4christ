@@ -103,7 +103,7 @@ function safeEnvelope(value: LearningCredentialEnvelope): LearningCredentialEnve
     || Object.getPrototypeOf(value) !== Object.prototype
     || Object.keys(value).sort().join(',') !== 'algorithm,ciphertext,envelopeVersion,expiresAt,keyVersion,nonce'
     || value.algorithm !== 'AES-256-GCM'
-    || value.envelopeVersion !== 1
+    || (value.envelopeVersion !== 1 && value.envelopeVersion !== 2)
     || !Number.isInteger(value.keyVersion)
     || value.keyVersion < 1
     || value.keyVersion > LEARNING_LIMITS.databaseInteger
@@ -117,7 +117,7 @@ function safeEnvelope(value: LearningCredentialEnvelope): LearningCredentialEnve
   return {
     ciphertext: value.ciphertext.slice(), nonce: value.nonce.slice(),
     algorithm: 'AES-256-GCM', keyVersion: value.keyVersion,
-    envelopeVersion: 1, expiresAt: value.expiresAt,
+    envelopeVersion: value.envelopeVersion, expiresAt: value.expiresAt,
   };
 }
 

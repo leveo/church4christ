@@ -242,6 +242,14 @@ describe('portable Learning schema (D1)', () => {
       WHERE connection_id = ${graph.connectionId}`);
     await reject(`UPDATE learning_provider_credentials SET envelope_version = 1.5
       WHERE connection_id = ${graph.connectionId}`);
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET envelope_version = 2
+      WHERE connection_id = ${graph.connectionId}`).run();
+    expect(await env.DB.prepare(`SELECT envelope_version FROM learning_provider_credentials
+      WHERE connection_id = ${graph.connectionId}`).first()).toEqual({ envelope_version: 2 });
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET envelope_version = 1
+      WHERE connection_id = ${graph.connectionId}`).run();
+    await reject(`UPDATE learning_provider_credentials SET envelope_version = 3
+      WHERE connection_id = ${graph.connectionId}`);
 
     const other = await seedGraph(201);
     for (const values of [
@@ -249,7 +257,7 @@ describe('portable Learning schema (D1)', () => {
       `(${other.connectionId}, zeroblob(32), zeroblob(11), 'AES-256-GCM', 1, 1)`,
       `(${other.connectionId}, zeroblob(32), zeroblob(12), 'AES-CBC', 1, 1)`,
       `(${other.connectionId}, zeroblob(32), zeroblob(12), 'AES-256-GCM', 0, 1)`,
-      `(${other.connectionId}, zeroblob(32), zeroblob(12), 'AES-256-GCM', 1, 2)`,
+      `(${other.connectionId}, zeroblob(32), zeroblob(12), 'AES-256-GCM', 1, 3)`,
     ]) {
       await reject(`INSERT INTO learning_provider_credentials
         (connection_id, ciphertext, nonce, algorithm, key_version, envelope_version) VALUES ${values}`);

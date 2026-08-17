@@ -79,7 +79,7 @@ CREATE TABLE learning_provider_credentials (
   key_version INTEGER NOT NULL
     CHECK (typeof(key_version) = 'integer' AND key_version BETWEEN 1 AND 2147483647),
   envelope_version INTEGER NOT NULL DEFAULT 1
-    CHECK (typeof(envelope_version) = 'integer' AND envelope_version = 1),
+    CHECK (typeof(envelope_version) = 'integer' AND envelope_version IN (1,2)),
   expires_at TEXT CHECK (
     expires_at IS NULL OR (
       instr(expires_at,char(0)) = 0 AND length(CAST(expires_at AS BLOB)) BETWEEN 19 AND 40

@@ -1,9 +1,9 @@
 // Learning shell authorization against the BUILT worker (SELF.fetch). These
 // assertions exercise the real middleware, dynamic Astro routes, session
 // loading, module toggle, and per-admin area gate rather than source shape.
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { get, post } from './helpers';
+import { get, ORIGIN, post } from './helpers';
 import {
   attendanceModulesBody as modulesBody,
   attendanceSessionCookie as sessionCookie,
@@ -85,6 +85,29 @@ describe('Learning built-worker shell boundaries', () => {
 
     const superAdmin = await sessionCookie(1, 'admin@example.com');
     expect(await status(await get('/admin/learning', { cookie: superAdmin }))).toBe(200);
+  });
+
+  it('fails closed for built-worker Learning mutations without exact same-origin provenance', async () => {
+    const learningAdmin = await sessionCookie(80, 'lena.learning@example.com');
+    const mutate = (headers: Record<string, string>) => SELF.fetch(`${ORIGIN}/admin/learning/connections`, {
+      method: 'POST',
+      headers: {
+        cookie: learningAdmin,
+        'content-type': 'application/x-www-form-urlencoded',
+        ...headers,
+      },
+      body: 'action=health_check&connection_id=999999&revision=0&provider=canvas&status=active',
+      redirect: 'manual',
+    });
+    expect(await status(await mutate({ origin: ORIGIN }))).toBe(303);
+    for (const [label, headers] of [
+      ['missing', {}],
+      ['none', { 'sec-fetch-site': 'none' }],
+      ['same-site', { 'sec-fetch-site': 'same-site' }],
+      ['cross-site', { 'sec-fetch-site': 'cross-site' }],
+      ['unknown', { 'sec-fetch-site': 'unexpected' }],
+      ['mismatched Origin', { origin: 'https://attacker.example', 'sec-fetch-site': 'same-origin' }],
+    ] as const) expect.soft(await status(await mutate(headers)), label).toBe(403);
   });
 
   it('allowlists banners and renders safe bilingual health errors and statuses', async () => {

@@ -1,7 +1,8 @@
 import type { LearningProviderKind } from './learningModel';
 
 export const LEARNING_CREDENTIAL_ALGORITHM = 'AES-256-GCM' as const;
-export const LEARNING_CREDENTIAL_ENVELOPE_VERSION = 1 as const;
+export const LEARNING_CREDENTIAL_ENVELOPE_VERSION = 2 as const;
+export type LearningCredentialEnvelopeVersion = 1 | typeof LEARNING_CREDENTIAL_ENVELOPE_VERSION;
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const MAX_CIPHERTEXT_BYTES = 16_384;
@@ -15,7 +16,7 @@ export interface LearningCredentialEnvelope {
   readonly nonce: Uint8Array<ArrayBuffer>;
   readonly algorithm: typeof LEARNING_CREDENTIAL_ALGORITHM;
   readonly keyVersion: number;
-  readonly envelopeVersion: typeof LEARNING_CREDENTIAL_ENVELOPE_VERSION;
+  readonly envelopeVersion: LearningCredentialEnvelopeVersion;
   readonly expiresAt: string | null;
 }
 
@@ -90,17 +91,27 @@ function timestampOrNull(value: unknown): string | null {
 function additionalData(
   provider: LearningProviderKind,
   connectionId: number,
-  envelopeVersion: number,
+  envelopeVersion: LearningCredentialEnvelopeVersion,
   keyVersion: number,
+  expiresAt: string | null,
 ): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(AAD_MAGIC.byteLength + 13);
+  const baseLength = AAD_MAGIC.byteLength + 13;
+  const expiry = envelopeVersion === 2 && expiresAt !== null
+    ? new TextEncoder().encode(expiresAt)
+    : new Uint8Array();
+  const bytes = new Uint8Array(baseLength + (envelopeVersion === 2 ? 5 + expiry.byteLength : 0));
   bytes.set(AAD_MAGIC, 0);
   const view = new DataView(bytes.buffer);
   let offset = AAD_MAGIC.byteLength;
   view.setUint32(offset, envelopeVersion, false); offset += 4;
   view.setUint32(offset, keyVersion, false); offset += 4;
   view.setUint8(offset, providerCode(provider)); offset += 1;
-  view.setUint32(offset, connectionId, false);
+  view.setUint32(offset, connectionId, false); offset += 4;
+  if (envelopeVersion === 2) {
+    view.setUint8(offset, expiresAt === null ? 0 : 1); offset += 1;
+    view.setUint32(offset, expiry.byteLength, false); offset += 4;
+    bytes.set(expiry, offset);
+  }
   return bytes;
 }
 
@@ -199,7 +210,11 @@ function envelopeCopy(value: unknown): LearningCredentialEnvelope {
     const expected = ['algorithm', 'ciphertext', 'envelopeVersion', 'expiresAt', 'keyVersion', 'nonce'].sort();
     if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) unavailable();
     const row = value as Record<string, unknown>;
-    if (row.algorithm !== LEARNING_CREDENTIAL_ALGORITHM || row.envelopeVersion !== LEARNING_CREDENTIAL_ENVELOPE_VERSION) unavailable();
+    if (
+      row.algorithm !== LEARNING_CREDENTIAL_ALGORITHM
+      || (row.envelopeVersion !== 1 && row.envelopeVersion !== LEARNING_CREDENTIAL_ENVELOPE_VERSION)
+    ) unavailable();
+    const envelopeVersion = row.envelopeVersion as LearningCredentialEnvelopeVersion;
     const keyVersion = dbInteger(row.keyVersion);
     if (!(row.ciphertext instanceof Uint8Array) || row.ciphertext.byteLength < TAG_BYTES || row.ciphertext.byteLength > MAX_CIPHERTEXT_BYTES) unavailable();
     if (!(row.nonce instanceof Uint8Array) || row.nonce.byteLength !== NONCE_BYTES) unavailable();
@@ -208,7 +223,7 @@ function envelopeCopy(value: unknown): LearningCredentialEnvelope {
       nonce: ownedBytes(row.nonce),
       algorithm: LEARNING_CREDENTIAL_ALGORITHM,
       keyVersion,
-      envelopeVersion: LEARNING_CREDENTIAL_ENVELOPE_VERSION,
+      envelopeVersion,
       expiresAt: timestampOrNull(row.expiresAt),
     };
   } catch (error) {
@@ -229,7 +244,9 @@ export async function encryptLearningCredential(
     const expiresAt = timestampOrNull(input.expiresAt);
     const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
     const keyVersion = ring.currentVersion;
-    const aad = additionalData(input.provider, connectionId, LEARNING_CREDENTIAL_ENVELOPE_VERSION, keyVersion);
+    const aad = additionalData(
+      input.provider, connectionId, LEARNING_CREDENTIAL_ENVELOPE_VERSION, keyVersion, expiresAt,
+    );
     const ciphertext = new Uint8Array(await ring.encrypt(keyVersion, nonce, aad, ownedBytes(input.plaintext)));
     if (ciphertext.byteLength < TAG_BYTES || ciphertext.byteLength > MAX_CIPHERTEXT_BYTES) unavailable();
     return {
@@ -257,7 +274,9 @@ export async function decryptLearningCredential(
     const connectionId = dbInteger(input.connectionId);
     const envelope = envelopeCopy(input.envelope);
     if (!ring.has(envelope.keyVersion)) unavailable();
-    const aad = additionalData(input.provider, connectionId, envelope.envelopeVersion, envelope.keyVersion);
+    const aad = additionalData(
+      input.provider, connectionId, envelope.envelopeVersion, envelope.keyVersion, envelope.expiresAt,
+    );
     const plaintext = new Uint8Array(await ring.decrypt(
       envelope.keyVersion, envelope.nonce, aad, envelope.ciphertext,
     ));
@@ -275,7 +294,8 @@ export function learningCredentialNeedsRotation(
 ): boolean {
   const envelope = envelopeCopy(rawEnvelope);
   if (!ring.has(envelope.keyVersion)) unavailable();
-  return envelope.keyVersion !== ring.currentVersion;
+  return envelope.keyVersion !== ring.currentVersion
+    || envelope.envelopeVersion !== LEARNING_CREDENTIAL_ENVELOPE_VERSION;
 }
 
 export async function reencryptLearningCredential(

@@ -166,4 +166,35 @@ describe('People export central middleware gate', () => {
     expect(pulled).toBe(false);
     expect(context.request.body?.locked).toBe(false);
   });
+
+  it('rejects a mutation with neither Origin nor fetch-site proof before session or body reads', async () => {
+    const secret = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+    const session = await mintSession(secret, {
+      id: 972,
+      email: 'super-export@example.com',
+      sessionEpoch: 0,
+    });
+    let pulled = false;
+    const context = middlewareContext('/admin/people/export-notes', {
+      method: 'POST',
+      session,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new ReadableStream<Uint8Array>({
+        pull() {
+          pulled = true;
+          throw new Error('body must not be read');
+        },
+      }, { highWaterMark: 0 }),
+    });
+    const next = vi.fn(async () => {
+      await context.request.text();
+      return new Response('must not render');
+    });
+    const response = await onRequest(context as never, next);
+    expect(response?.status).toBe(403);
+    expect(context.cookies.get).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(pulled).toBe(false);
+    expect(context.request.body?.locked).toBe(false);
+  });
 });

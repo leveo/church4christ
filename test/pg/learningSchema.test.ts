@@ -160,6 +160,15 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
       WHERE connection_id=${graph.connectionId}`, '22P02');
     await rejects(`UPDATE learning_provider_credentials SET envelope_version='1.5'
       WHERE connection_id=${graph.connectionId}`, '22P02');
+    await sql.unsafe(`UPDATE learning_provider_credentials SET envelope_version=2
+      WHERE connection_id=${graph.connectionId}`);
+    expect((await sql.unsafe<{ envelope_version: number }[]>(`
+      SELECT envelope_version FROM learning_provider_credentials WHERE connection_id=${graph.connectionId}
+    `))[0]).toEqual({ envelope_version: 2 });
+    await sql.unsafe(`UPDATE learning_provider_credentials SET envelope_version=1
+      WHERE connection_id=${graph.connectionId}`);
+    await rejects(`UPDATE learning_provider_credentials SET envelope_version=3
+      WHERE connection_id=${graph.connectionId}`, '23514');
     await rejects(`UPDATE learning_provider_credentials SET ciphertext=decode(repeat('00',15),'hex')
       WHERE connection_id=${graph.connectionId}`, '23514');
 

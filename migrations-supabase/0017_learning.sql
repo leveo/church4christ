@@ -50,7 +50,7 @@ CREATE TABLE learning_provider_credentials (
   nonce bytea NOT NULL CHECK (octet_length(nonce) BETWEEN 12 AND 32),
   algorithm TEXT NOT NULL CHECK (algorithm = 'AES-256-GCM'),
   key_version INTEGER NOT NULL CHECK (key_version BETWEEN 1 AND 2147483647),
-  envelope_version INTEGER NOT NULL DEFAULT 1 CHECK (envelope_version = 1),
+  envelope_version INTEGER NOT NULL DEFAULT 1 CHECK (envelope_version IN (1,2)),
   expires_at TEXT CHECK (expires_at IS NULL OR octet_length(expires_at) BETWEEN 19 AND 40),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (octet_length(updated_at) BETWEEN 19 AND 40)
 );

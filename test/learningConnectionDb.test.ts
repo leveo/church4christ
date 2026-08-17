@@ -63,8 +63,11 @@ describe('Learning provider connection persistence (D1)', () => {
       connectionId: 102, provider: 'google_classroom', displayName: 'Sunday School', baseUrl: null,
       actorPersonId: actor, credential: null,
     })).toMatchObject({ connectionId: 102, provider: 'google_classroom', status: 'pending', revision: 0 });
-    const rows = await env.DB.prepare('SELECT connection_id,ciphertext,nonce FROM learning_provider_credentials').all();
+    const rows = await env.DB.prepare(
+      'SELECT connection_id,ciphertext,nonce,envelope_version FROM learning_provider_credentials',
+    ).all();
     expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]).toMatchObject({ connection_id: 101, envelope_version: 2 });
     expect(JSON.stringify(rows.results)).not.toContain('canvas-private-token');
 
     const invalidEnvelope = { ...(await canvasEnvelope(103)), extra: 'forbidden' };

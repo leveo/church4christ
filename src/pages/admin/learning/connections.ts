@@ -26,6 +26,7 @@ import {
   importLearningCredentialKeyRing,
 } from '../../../lib/learningCredentials';
 import type { AppDb } from '../../../lib/appDb';
+import { hasSameOriginProvenance } from '../../../lib/csrf';
 import {
   LEARNING_ERROR_CODES,
   type LearningConnectionStatus,
@@ -103,14 +104,6 @@ function bodyError(status: 413 | 415): Response {
   });
 }
 
-function csrfAllowed(request: Request): boolean {
-  const url = new URL(request.url);
-  const origin = request.headers.get('origin');
-  if (origin !== null) return origin === url.origin;
-  const site = request.headers.get('sec-fetch-site');
-  return site === null || site === 'same-origin' || site === 'none';
-}
-
 function secretFrom(deps: LearningConnectionActionDeps): string {
   const value = typeof deps.keySecret === 'function' ? deps.keySecret() : deps.keySecret;
   if (typeof value !== 'string') throw new LearningCredentialConfigError();
@@ -166,7 +159,7 @@ export function createLearningConnectionActionHandler(
     if (request.method !== 'POST') return new Response(null, {
       status: 405, headers: { ...SAFE_HEADERS, Allow: 'POST' },
     });
-    if (!csrfAllowed(request)) return new Response(null, { status: 403, headers: SAFE_HEADERS });
+    if (!hasSameOriginProvenance(request)) return new Response(null, { status: 403, headers: SAFE_HEADERS });
 
     const read = await readLearningConnectionForm(request);
     if (!read.ok) {
