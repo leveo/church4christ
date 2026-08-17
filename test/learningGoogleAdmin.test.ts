@@ -102,16 +102,34 @@ describe('Google Classroom admin authoritative course selection', () => {
   });
 
   it('revokes the refresh token before a CAS disconnect and rejects a stale revision before network access', async () => {
+    await env.DB.prepare(`INSERT INTO learning_courses
+      (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+      VALUES(27303,27302,'google_classroom','course-disconnect','Disconnect course',
+        'https://classroom.google.com/c/course-disconnect')`).run();
+    await env.DB.prepare(`INSERT INTO learning_google_registrations
+      (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+      (27302,'course-disconnect','COURSE_ROSTER_CHANGES','disconnect-roster',
+        'projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+      (27302,'course-disconnect','COURSE_WORK_CHANGES','disconnect-work',
+        'projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z')`).run();
     const ring = await importLearningCredentialKeyRing(KEY_SECRET);
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toBe('https://oauth2.googleapis.com/revoke');
+      const url = new URL(String(input));
+      if (url.origin === 'https://classroom.googleapis.com') {
+        expect(init?.method).toBe('DELETE');
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer private-access');
+        expect(['/v1/registrations/disconnect-roster', '/v1/registrations/disconnect-work']).toContain(url.pathname);
+        return new Response(null, { status: 200 });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
       expect(init?.method).toBe('POST');
       expect(String(init?.body)).toBe('token=private-refresh');
       return new Response(null, { status: 200 });
     });
     const input = {
       connectionId: 27302, expectedRevision: 1, actorPersonId: 27301,
-      keyRing: ring, fetcher,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
     };
     await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, {
       ...input, expectedRevision: 0,
@@ -121,11 +139,39 @@ describe('Google Classroom admin authoritative course selection', () => {
     await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, input)).resolves.toMatchObject({
       connectionId: 27302, provider: 'google_classroom', status: 'disabled', revision: 2,
     });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     expect(await getLearningConnection(env.DB as AppDb, 27302, { includeDeleted: true })).toMatchObject({
       status: 'disabled', deletedAt: expect.any(String),
     });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
       WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_registrations
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
+  });
+
+  it('leaves connection, credential, and registration state intact when remote cleanup fails', async () => {
+    await env.DB.prepare(`INSERT INTO learning_courses
+      (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+      VALUES(27303,27302,'google_classroom','course-failure','Failure course',
+        'https://classroom.google.com/c/course-failure')`).run();
+    await env.DB.prepare(`INSERT INTO learning_google_registrations
+      (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time)
+      VALUES(27302,'course-failure','COURSE_WORK_CHANGES','cleanup-fails',
+        'projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z')`).run();
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async () => new Response(null, { status: 503 }));
+    await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, {
+      connectionId: 27302, expectedRevision: 1, actorPersonId: 27301,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await getLearningConnection(env.DB as AppDb, 27302, { includeDeleted: false })).toMatchObject({
+      status: 'active', revision: 1,
+    });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=27302`).first()).toEqual({ count: 1 });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_registrations
+      WHERE connection_id=27302`).first()).toEqual({ count: 1 });
   });
 });
