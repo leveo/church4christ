@@ -444,10 +444,33 @@ function mapSubmission(
   let returnedAt: string | null = null;
   const history = optionalArray(row.submissionHistory, LEARNING_LIMITS.maxSubmissionAttempts * 2);
   for (let index = 0; index < history.length; index += 1) {
-    const wrapper = exactOptionalRecord(history[index], ['stateHistory'], ['stateHistory']);
-    const entry = exactOptionalRecord(wrapper.stateHistory, ['state', 'stateTimestamp'], ['state', 'stateTimestamp']);
+    const wrapper = exactOptionalRecord(history[index], ['stateHistory', 'gradeHistory']);
+    if (Object.keys(wrapper).length !== 1) learningValidation.invalid();
+    if (wrapper.gradeHistory !== undefined) {
+      const grade = exactOptionalRecord(wrapper.gradeHistory, [
+        'pointsEarned', 'maxPoints', 'gradeTimestamp', 'actorUserId', 'gradeChangeType',
+      ], ['pointsEarned', 'maxPoints', 'gradeTimestamp', 'actorUserId', 'gradeChangeType']);
+      if (
+        typeof grade.pointsEarned !== 'number' || !Number.isFinite(grade.pointsEarned) || grade.pointsEarned < 0
+        || typeof grade.maxPoints !== 'number' || !Number.isFinite(grade.maxPoints) || grade.maxPoints < 0
+      ) learningValidation.invalid();
+      learningValidation.timestamp(grade.gradeTimestamp);
+      learningValidation.externalId(grade.actorUserId);
+      learningValidation.oneOf(grade.gradeChangeType, [
+        'DRAFT_GRADE_POINTS_EARNED_CHANGE',
+        'ASSIGNED_GRADE_POINTS_EARNED_CHANGE',
+        'MAX_POINTS_CHANGE',
+      ] as const);
+      continue;
+    }
+    const entry = exactOptionalRecord(
+      wrapper.stateHistory,
+      ['state', 'stateTimestamp', 'actorUserId'],
+      ['state', 'stateTimestamp'],
+    );
+    if (entry.actorUserId !== undefined) learningValidation.externalId(entry.actorUserId);
     const event = learningValidation.oneOf(entry.state, [
-      'NEW', 'CREATED', 'TURNED_IN', 'RETURNED', 'RECLAIMED_BY_STUDENT',
+      'CREATED', 'TURNED_IN', 'RETURNED', 'RECLAIMED_BY_STUDENT', 'STUDENT_EDITED_AFTER_TURN_IN',
     ] as const);
     const timestamp = learningValidation.timestamp(entry.stateTimestamp);
     if (event === 'TURNED_IN') {
