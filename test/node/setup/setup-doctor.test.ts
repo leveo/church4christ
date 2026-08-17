@@ -57,6 +57,13 @@ const EXPECTED_PRIVATE_TABLES_BY_CAPABILITY = {
   ],
 } as const;
 
+const GOOGLE_CLASSROOM_TABLES = Object.freeze([
+  'learning_google_oauth_states',
+  'learning_google_registrations',
+  'learning_google_notification_receipts',
+  'learning_google_cleanup_tasks',
+]);
+
 function relationRows(relations: string[]) {
   return relations.map((relation) => {
     const [table_schema, table_name] = relation.includes('.') ? relation.split('.', 2) : ['public', relation];
@@ -330,6 +337,7 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
     ]);
+    expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining(GOOGLE_CLASSROOM_TABLES));
     expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat(), ...Object.values(SUPABASE_TABLES_BY_CAPABILITY).flat()])];
@@ -400,6 +408,21 @@ describe('doctor database check', () => {
     expect(createdByProvider.d1.has('sermons')).toBe(true);
     expect(missingRequiredTables(catalog, 'd1', d1MissingSermons)).toContain('sermons');
     expect(missingRequiredTables(catalog, 'supabase', pgMissingSermons)).toContain('public.sermons');
+
+    for (const missing of GOOGLE_CLASSROOM_TABLES) {
+      const d1MissingGoogleTable = new Set(createdByProvider.d1);
+      d1MissingGoogleTable.delete(missing);
+      const pgMissingGoogleTable = new Set(createdByProvider.supabase);
+      pgMissingGoogleTable.delete(`public.${missing}`);
+      expect(
+        missingRequiredTables(catalog, 'd1', d1MissingGoogleTable),
+        `D1 doctor must require ${missing}`,
+      ).toContain(missing);
+      expect(
+        missingRequiredTables(catalog, 'supabase', pgMissingGoogleTable),
+        `PostgreSQL doctor must require public.${missing}`,
+      ).toContain(`public.${missing}`);
+    }
   });
 
   it('verifies Supabase migration completeness against qualified public and private relations', async () => {
