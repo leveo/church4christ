@@ -1,7 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
+import {
+  disconnectGoogleClassroomConnection,
+  mapSelectedGoogleClassroomCourse,
+} from '../../src/lib/learningGoogleAdmin';
 import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../../src/lib/learningGoogleAuth';
+import { renewGoogleClassroomRegistrations } from '../../src/lib/learningGoogleRegistrationLifecycle';
 import {
   acceptGooglePubSubDelivery,
   finishGooglePubSubDelivery,
@@ -54,7 +59,10 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
         (id,provider,display_name,base_url,status,revision,created_by_person_id)
         VALUES(27502,'google_classroom','Classroom',NULL,'active',1,27501);
       INSERT INTO learning_programs(id,slug,display_name)
-        VALUES(27503,'pg-google','PG Google');
+        VALUES(27503,'pg-google','PG Google'),(27513,'pg-google-lifecycle','PG Google Lifecycle');
+      INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id)
+        VALUES(27512,'google_classroom','Lifecycle Classroom',NULL,'active',1,27501);
       INSERT INTO learning_courses
         (id,program_id,connection_id,provider,external_course_id,display_name,launch_url)
         VALUES(27504,27503,27502,'google_classroom','course-1','Old title',
@@ -77,6 +85,21 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
       (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
       VALUES(27502,?1,?2,?3,?4,?5,NULL)`)
       .bind(envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion, envelope.envelopeVersion).run();
+    const lifecycleEnvelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27512,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'lifecycle-access', refreshToken: 'lifecycle-refresh',
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: null,
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27512,?1,?2,?3,?4,?5,NULL)`)
+      .bind(
+        lifecycleEnvelope.ciphertext, lifecycleEnvelope.nonce, lifecycleEnvelope.algorithm,
+        lifecycleEnvelope.keyVersion, lifecycleEnvelope.envelopeVersion,
+      ).run();
   });
 
   afterAll(async () => {
@@ -130,5 +153,102 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     })).resolves.toMatchObject({ status: 'succeeded' });
     expect((await sqlA.unsafe(`SELECT display_name,last_synced_at FROM learning_courses WHERE id=27504`))[0])
       .toEqual({ display_name: 'Genesis 1', last_synced_at: '2026-08-17T12:00:00.000Z' });
+  });
+
+  it('has one exact-revision mapping winner with two feeds and cleans the losing registrations', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    let sequence = 0;
+    const deleted: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/courses/course-lifecycle') return new Response(JSON.stringify({
+        id: 'course-lifecycle', name: 'Lifecycle course', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/course-lifecycle',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+      if (url.pathname === '/v1/registrations' && init?.method === 'POST') {
+        sequence += 1;
+        return new Response(JSON.stringify({
+          registrationId: `pg-lifecycle-${sequence}`,
+          expiryTime: '2026-08-24T12:00:00.000Z',
+        }));
+      }
+      if (url.pathname.startsWith('/v1/registrations/') && init?.method === 'DELETE') {
+        deleted.push(decodeURIComponent(url.pathname.slice('/v1/registrations/'.length)));
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected ${init?.method ?? 'GET'} ${url.pathname}`);
+    });
+    const common = {
+      connectionId: 27512, expectedRevision: 1, externalCourseId: 'course-lifecycle',
+      programId: 27513, actorPersonId: 27501, pushTopicName: 'projects/church-project/topics/classroom',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    };
+    const settled = await Promise.allSettled([
+      mapSelectedGoogleClassroomCourse(dbA, common),
+      mapSelectedGoogleClassroomCourse(dbB, common),
+    ]);
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(settled.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await sqlA.unsafe(`SELECT revision FROM learning_provider_connections WHERE id=27512`))
+      .toEqual([{ revision: 2 }]);
+    expect(await sqlA.unsafe(`SELECT feed_type FROM learning_google_registrations
+      WHERE connection_id=27512 ORDER BY feed_type`)).toEqual([
+      { feed_type: 'COURSE_ROSTER_CHANGES' }, { feed_type: 'COURSE_WORK_CHANGES' },
+    ]);
+    expect(deleted).toHaveLength(2);
+  });
+
+  it('CAS-renews both feeds under concurrent Postgres drains and disconnects with remote-first cleanup', async () => {
+    await sqlA.unsafe(`UPDATE learning_google_registrations
+      SET expiry_time='2026-08-18T12:00:00.000Z' WHERE connection_id=27512`);
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    let sequence = 0;
+    const deleted: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/registrations' && init?.method === 'POST') {
+        sequence += 1;
+        return new Response(JSON.stringify({
+          registrationId: `pg-renewed-${sequence}`,
+          expiryTime: '2026-08-24T12:00:00.000Z',
+        }));
+      }
+      if (url.pathname.startsWith('/v1/registrations/') && init?.method === 'DELETE') {
+        deleted.push(decodeURIComponent(url.pathname.slice('/v1/registrations/'.length)));
+        return new Response(null, { status: 200 });
+      }
+      if (url.toString() === 'https://oauth2.googleapis.com/revoke') {
+        expect(String(init?.body)).toBe('token=lifecycle-refresh');
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected ${init?.method ?? 'GET'} ${url.pathname}`);
+    });
+    const renewInput = {
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW, signal: new AbortController().signal,
+    };
+    const drains = await Promise.all([
+      renewGoogleClassroomRegistrations(dbA, renewInput),
+      renewGoogleClassroomRegistrations(dbB, renewInput),
+    ]);
+    expect(drains.reduce((sum, result) => sum + result.renewed, 0)).toBe(2);
+    expect(drains.reduce((sum, result) => sum + result.conflicted, 0)).toBe(2);
+    expect(await sqlA.unsafe(`SELECT registration_id FROM learning_google_registrations
+      WHERE connection_id=27512 ORDER BY feed_type`)).toEqual([
+      { registration_id: expect.stringMatching(/^pg-renewed-/u) },
+      { registration_id: expect.stringMatching(/^pg-renewed-/u) },
+    ]);
+    await expect(disconnectGoogleClassroomConnection(dbA, {
+      connectionId: 27512, expectedRevision: 2, actorPersonId: 27501,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 3 });
+    expect(await sqlA.unsafe(`SELECT
+      (SELECT COUNT(*)::int FROM learning_google_registrations WHERE connection_id=27512) AS registrations,
+      (SELECT COUNT(*)::int FROM learning_provider_credentials WHERE connection_id=27512) AS credentials`))
+      .toEqual([{ registrations: 0, credentials: 0 }]);
+    expect(deleted.length).toBeGreaterThanOrEqual(6);
   });
 });
