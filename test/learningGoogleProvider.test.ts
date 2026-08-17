@@ -330,6 +330,66 @@ describe('Google Classroom provider adapter', () => {
     })).rejects.toMatchObject({ code: 'response_too_large' });
   });
 
+  it('uses manual redirects for every authenticated Classroom request', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.redirect).toBe('manual');
+      return json({ courses: [] });
+    });
+    await invokeLearningProvider(provider(fetcher), {
+      method: 'listCourses', request: {
+        subject: { connectionId: CONNECTION_ID, provider: 'google_classroom' },
+        page: { pageSize: 100, pageNumber: 1, pageToken: null }, operation: operation(null),
+      }, urlPolicy: POLICY, now: () => NOW + 1,
+    });
+  });
+
+  it('times out an abort-ignoring fetch and cancels a response body that arrives late', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    let resolveFetch: ((response: Response) => void) | undefined;
+    let requestSignal: AbortSignal | undefined;
+    const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolve) => { resolveFetch = resolve; });
+    });
+    const shortOperation = Object.freeze({
+      ...operation(null), deadlineAt: '2026-08-17T12:00:00.010Z',
+    });
+    try {
+      let outcome: unknown;
+      void provider(fetcher).listCourses({
+        subject: { connectionId: CONNECTION_ID, provider: 'google_classroom' },
+        page: { pageSize: 100, pageNumber: 1, pageToken: null }, operation: shortOperation,
+      }).then((value) => { outcome = value; }, (error: unknown) => { outcome = error; });
+      await vi.advanceTimersByTimeAsync(11);
+      expect(outcome).toMatchObject({ code: 'timeout' });
+      expect(requestSignal?.aborted).toBe(true);
+      const body = new ReadableStream<Uint8Array>({ cancel });
+      resolveFetch?.(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles at the operation deadline even when fetch never resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      let outcome: unknown;
+      void provider(() => new Promise<Response>(() => undefined)).listCourses({
+        subject: { connectionId: CONNECTION_ID, provider: 'google_classroom' },
+        page: { pageSize: 100, pageNumber: 1, pageToken: null },
+        operation: Object.freeze({ ...operation(null), deadlineAt: '2026-08-17T12:00:00.010Z' }),
+      }).then((value) => { outcome = value; }, (error: unknown) => { outcome = error; });
+      await vi.advanceTimersByTimeAsync(11);
+      expect(outcome).toMatchObject({ code: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('builds only official Classroom launch URLs and strictly normalizes reconciliation notifications', async () => {
     const adapter = provider(async () => { throw new Error('must not fetch'); });
     const launch = await invokeLearningProvider(adapter, {
