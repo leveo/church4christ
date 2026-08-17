@@ -103,7 +103,8 @@ describe('Google Classroom registration API and renewal persistence', () => {
         VALUES(27202,'course-1','COURSE_WORK_CHANGES','registration-old',
           'projects/church-project/topics/classroom','2026-08-18T12:00:00.000Z')`).run();
       expect(await listGoogleClassroomRegistrationsDue(env.DB as AppDb, {
-        now: '2026-08-17T12:00:00.000Z', renewalHorizon: '2026-08-19T12:00:00.000Z', limit: 10,
+        now: '2026-08-17T12:00:00.000Z', renewalHorizon: '2026-08-19T12:00:00.000Z',
+        topicName: 'projects/church-project/topics/classroom', limit: 10,
       })).toEqual([{
         connectionId: 27202, externalCourseId: 'course-1', feedType: 'COURSE_WORK_CHANGES',
         registrationId: 'registration-old', topicName: 'projects/church-project/topics/classroom',
