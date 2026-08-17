@@ -104,6 +104,7 @@ describe('Google OAuth one-time persistence and rotation', () => {
       accessToken: 'private-access',
       refreshToken: 'private-refresh',
       accessTokenExpiresAt: '2026-08-17T13:00:00.000Z',
+      refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
       grantedScopes: (await import('../src/lib/learningGoogleAuth')).GOOGLE_CLASSROOM_SCOPES,
     };
     const completed = await completeGoogleOAuthState(env.DB as AppDb, {
@@ -111,10 +112,12 @@ describe('Google OAuth one-time persistence and rotation', () => {
     });
     expect(completed).toEqual({ connectionId: 27001, revision: 2, status: 'active' });
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM learning_google_oauth_states WHERE connection_id=27001').first('count')).toBe(0);
-    const stored = await env.DB.prepare(`SELECT c.status,c.revision,p.ciphertext,p.nonce
+    const stored = await env.DB.prepare(`SELECT c.status,c.revision,p.ciphertext,p.nonce,p.expires_at
       FROM learning_provider_connections c JOIN learning_provider_credentials p ON p.connection_id=c.id
       WHERE c.id=27001`).first<Record<string, unknown>>();
-    expect(stored).toMatchObject({ status: 'active', revision: 2 });
+    expect(stored).toMatchObject({
+      status: 'active', revision: 2, expires_at: '2026-08-24T12:00:00.000Z',
+    });
     expect(JSON.stringify(stored)).not.toMatch(/private-access|private-refresh/u);
     expect(await loadGoogleCredential(env.DB as AppDb, {
       connectionId: 27001, keyRing: ring,
@@ -141,6 +144,7 @@ describe('Google OAuth one-time persistence and rotation', () => {
       credential: {
         version: 1, accessToken: 'old-access', refreshToken: 'old-refresh',
         accessTokenExpiresAt: '2026-08-17T12:05:00.000Z',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
         grantedScopes: (await import('../src/lib/learningGoogleAuth')).GOOGLE_CLASSROOM_SCOPES,
       },
     });
@@ -155,6 +159,11 @@ describe('Google OAuth one-time persistence and rotation', () => {
     expect(settled.filter((value) => value.status === 'rejected')).toHaveLength(1);
     const after = await loadGoogleCredential(env.DB as AppDb, { connectionId: 27002, keyRing: ring });
     expect(after.revision).toBe(3);
-    expect(after.credential).toMatchObject({ accessToken: 'new-access', refreshToken: 'old-refresh' });
+    expect(after.credential).toMatchObject({
+      accessToken: 'new-access', refreshToken: 'old-refresh',
+      refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+    });
+    expect(await env.DB.prepare(`SELECT expires_at FROM learning_provider_credentials WHERE connection_id=27002`)
+      .first('expires_at')).toBe('2026-08-24T12:00:00.000Z');
   });
 });

@@ -10,10 +10,11 @@ const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const REDIRECT = 'https://church.example.test/admin/learning/google/callback';
 const SCOPE = GOOGLE_CLASSROOM_SCOPES.join(' ');
 
-function tokenResponse(refreshToken?: string): Response {
+function tokenResponse(refreshToken?: string, refreshTokenExpiresIn?: number): Response {
   return new Response(JSON.stringify({
     access_token: 'access-new', expires_in: 3600,
     ...(refreshToken === undefined ? {} : { refresh_token: refreshToken }),
+    ...(refreshTokenExpiresIn === undefined ? {} : { refresh_token_expires_in: refreshTokenExpiresIn }),
     scope: SCOPE, token_type: 'Bearer',
   }), { headers: { 'content-type': 'application/json' } });
 }
@@ -30,7 +31,7 @@ describe('Google OAuth token and revocation HTTP boundary', () => {
         code: 'one-time-code', code_verifier: 'v'.repeat(64), grant_type: 'authorization_code',
         redirect_uri: REDIRECT,
       });
-      return tokenResponse('refresh-new');
+      return tokenResponse('refresh-new', 604_800);
     });
     await expect(exchangeGoogleAuthorizationCode({
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
@@ -39,6 +40,7 @@ describe('Google OAuth token and revocation HTTP boundary', () => {
     })).resolves.toMatchObject({
       accessToken: 'access-new', refreshToken: 'refresh-new',
       accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
     });
   });
 
@@ -50,10 +52,15 @@ describe('Google OAuth token and revocation HTTP boundary', () => {
       });
       return tokenResponse();
     });
-    await expect(refreshGoogleAccessToken({
+    const input = {
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       refreshToken: 'refresh-old', fetcher, signal: new AbortController().signal, nowEpochMs: NOW,
-    })).resolves.toMatchObject({ accessToken: 'access-new', refreshToken: 'refresh-old' });
+      refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+    };
+    await expect(refreshGoogleAccessToken(input)).resolves.toMatchObject({
+      accessToken: 'access-new', refreshToken: 'refresh-old',
+      refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+    });
   });
 
   it('revokes only at the official endpoint and never puts the refresh token in the URL', async () => {

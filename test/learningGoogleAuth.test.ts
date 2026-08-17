@@ -112,6 +112,35 @@ describe('Google Classroom OAuth protocol', () => {
     expect(next.grantedScopes).toEqual(GOOGLE_CLASSROOM_SCOPES);
   });
 
+  it('derives a bounded refresh-token reconnect deadline and preserves it when omitted later', () => {
+    const issuedOptions = {
+      nowEpochMs: NOW, requireRefreshToken: true, retainedRefreshToken: null,
+      retainedRefreshTokenExpiresAt: null,
+    };
+    const issued = normalizeGoogleTokenResponse({
+      access_token: 'access-token', refresh_token: 'refresh-token', expires_in: 3600,
+      refresh_token_expires_in: 604_800,
+      scope: GOOGLE_CLASSROOM_SCOPES.join(' '), token_type: 'Bearer',
+    }, issuedOptions);
+    expect(issued).toMatchObject({ refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z' });
+    const refreshed = normalizeGoogleTokenResponse({
+      access_token: 'next-access', refresh_token: 'rotated-refresh', expires_in: 3600,
+      scope: GOOGLE_CLASSROOM_SCOPES.join(' '), token_type: 'Bearer',
+    }, {
+      nowEpochMs: NOW + 1_000, requireRefreshToken: false, retainedRefreshToken: 'refresh-token',
+      retainedRefreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+    });
+    expect(refreshed).toMatchObject({
+      refreshToken: 'rotated-refresh', refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+    });
+    for (const refresh_token_expires_in of [0, -1, 1.5, 316_224_001, Number.MAX_SAFE_INTEGER]) {
+      expect(() => normalizeGoogleTokenResponse({
+        access_token: 'access-token', refresh_token: 'refresh-token', expires_in: 3600,
+        refresh_token_expires_in, scope: GOOGLE_CLASSROOM_SCOPES.join(' '), token_type: 'Bearer',
+      }, issuedOptions)).toThrow('learning_google_auth_invalid');
+    }
+  });
+
   it('serializes only the exact encrypted credential plaintext contract', () => {
     const credential = normalizeGoogleTokenResponse({
       access_token: 'access-token', refresh_token: 'refresh-token', expires_in: 3600,
