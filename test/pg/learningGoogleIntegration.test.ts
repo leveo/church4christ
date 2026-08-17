@@ -11,7 +11,9 @@ import {
   encodeGoogleCredential,
   GOOGLE_CLASSROOM_SCOPES,
   loadGoogleCredentialForAdmin,
+  loadGoogleCredentialForCleanup,
 } from '../../src/lib/learningGoogleAuth';
+import { recoverGoogleClassroomCleanup } from '../../src/lib/learningGoogleCleanup';
 import { renewGoogleClassroomRegistrations } from '../../src/lib/learningGoogleRegistrationLifecycle';
 import {
   acceptGooglePubSubDelivery,
@@ -403,5 +405,111 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
       (SELECT COUNT(*)::int FROM learning_provider_credentials WHERE connection_id=27512) AS credentials`))
       .toEqual([{ registrations: 0, credentials: 0 }]);
     expect(deleted.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('persists a disabled rotation before concurrent limit-one Postgres cleanup passes', async () => {
+    await sqlA.unsafe(`
+      INSERT INTO learning_provider_connections
+        (id,provider,display_name,base_url,status,revision,created_by_person_id)
+        VALUES(27542,'google_classroom','Rotating Disconnect',NULL,'active',1,27501);
+      INSERT INTO learning_programs(id,slug,display_name)
+        VALUES(27543,'pg-google-rotating-disconnect','PG Google Rotating Disconnect');
+      INSERT INTO learning_courses
+        (program_id,connection_id,provider,external_course_id,display_name,launch_url) VALUES
+        (27543,27542,'google_classroom','disconnect-1','Disconnect 1','https://classroom.google.com/c/disconnect-1'),
+        (27543,27542,'google_classroom','disconnect-2','Disconnect 2','https://classroom.google.com/c/disconnect-2'),
+        (27543,27542,'google_classroom','disconnect-3','Disconnect 3','https://classroom.google.com/c/disconnect-3'),
+        (27543,27542,'google_classroom','disconnect-4','Disconnect 4','https://classroom.google.com/c/disconnect-4'),
+        (27543,27542,'google_classroom','disconnect-5','Disconnect 5','https://classroom.google.com/c/disconnect-5');
+      INSERT INTO learning_google_registrations
+        (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+        (27542,'disconnect-1','COURSE_ROSTER_CHANGES','pg-disconnect-1-roster','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-1','COURSE_WORK_CHANGES','pg-disconnect-1-work','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-2','COURSE_ROSTER_CHANGES','pg-disconnect-2-roster','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-2','COURSE_WORK_CHANGES','pg-disconnect-2-work','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-3','COURSE_ROSTER_CHANGES','pg-disconnect-3-roster','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-3','COURSE_WORK_CHANGES','pg-disconnect-3-work','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-4','COURSE_ROSTER_CHANGES','pg-disconnect-4-roster','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-4','COURSE_WORK_CHANGES','pg-disconnect-4-work','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-5','COURSE_ROSTER_CHANGES','pg-disconnect-5-roster','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z'),
+        (27542,'disconnect-5','COURSE_WORK_CHANGES','pg-disconnect-5-work','projects/church-project/topics/classroom','2026-08-24T12:00:00.000Z');
+    `);
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const envelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27542,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'pg-expired-access', refreshToken: 'pg-old-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+        refreshTokenExpiresAt: '2026-08-20T12:00:00.000Z',
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: '2026-08-20T12:00:00.000Z',
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27542,?1,?2,?3,?4,?5,?6)`)
+      .bind(
+        envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
+        envelope.envelopeVersion, envelope.expiresAt,
+      ).run();
+    let refreshCalls = 0;
+    const deleted: string[] = [];
+    const revoked: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        const token = new URLSearchParams(String(init?.body)).get('refresh_token');
+        if (token !== 'pg-old-refresh' || refreshCalls > 1) {
+          return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+            status: 400, headers: { 'content-type': 'application/json' },
+          });
+        }
+        return rotatedTokenResponse('pg-disconnect-access', 'pg-disconnect-refresh');
+      }
+      if (url.origin === 'https://classroom.googleapis.com') {
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer pg-disconnect-access');
+        deleted.push(decodeURIComponent(url.pathname.slice('/v1/registrations/'.length)));
+        return new Response(null, { status: 200 });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
+      revoked.push(new URLSearchParams(String(init?.body)).get('token') ?? '');
+      return new Response(null, { status: 200 });
+    });
+    const common = {
+      connectionId: 27542, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher,
+      signal: new AbortController().signal, nowEpochMs: NOW, limit: 1,
+    };
+    await expect(disconnectGoogleClassroomConnection(dbA, {
+      connectionId: common.connectionId, clientId: common.clientId,
+      clientSecret: common.clientSecret, keyRing: common.keyRing, fetcher: common.fetcher,
+      nowEpochMs: common.nowEpochMs, expectedRevision: 1, actorPersonId: 27501,
+    }, { now: () => NOW })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    await expect(loadGoogleCredentialForCleanup(dbA, {
+      connectionId: 27542, keyRing: ring,
+    })).resolves.toMatchObject({
+      revision: 2, status: 'disabled',
+      credential: {
+        accessToken: 'pg-disconnect-access', refreshToken: 'pg-disconnect-refresh',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+      },
+    });
+    expect(deleted).toHaveLength(8);
+    const concurrent = await Promise.all([
+      recoverGoogleClassroomCleanup(dbA, common, { now: () => NOW + 1_000 }),
+      recoverGoogleClassroomCleanup(dbB, common, { now: () => NOW + 1_000 }),
+    ]);
+    expect(concurrent.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(concurrent.filter((result) => result.selected === 0)).toHaveLength(1);
+    await expect(recoverGoogleClassroomCleanup(dbB, common, { now: () => NOW + 2_000 }))
+      .resolves.toMatchObject({ selected: 1, cleaned: 1, finalizedDisconnect: true });
+    expect(refreshCalls).toBe(1);
+    expect(deleted).toHaveLength(10);
+    expect(new Set(deleted).size).toBe(10);
+    expect(revoked).toEqual(['pg-disconnect-refresh']);
+    expect(await sqlA.unsafe(`SELECT
+      (SELECT COUNT(*)::int FROM learning_google_cleanup_tasks WHERE connection_id=27542) AS tasks,
+      (SELECT COUNT(*)::int FROM learning_provider_credentials WHERE connection_id=27542) AS credentials`))
+      .toEqual([{ tasks: 0, credentials: 0 }]);
   });
 });

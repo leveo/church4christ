@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppDb, AppDbResult, AppStatement } from '../src/lib/appDb';
 import {
+  disconnectGoogleClassroomConnection,
   listGoogleClassroomCourseOptions,
   mapSelectedGoogleClassroomCourse,
   unmapSelectedGoogleClassroomCourse,
@@ -10,6 +11,7 @@ import {
   encodeGoogleCredential,
   GOOGLE_CLASSROOM_SCOPES,
   loadGoogleCredentialForAdmin,
+  loadGoogleCredentialForCleanup,
 } from '../src/lib/learningGoogleAuth';
 import {
   googleClassroomPushReadiness,
@@ -688,5 +690,116 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     // One refresh, one failing reserved cleanup, then create/delete for each renewed feed.
     expect(fetcher).toHaveBeenCalledTimes(18);
     expect(fetcher.mock.calls.length).toBeLessThanOrEqual(20);
+  });
+
+  it('persists a disabled disconnect rotation across an eight-task admin drain and limit-one cron passes', async () => {
+    await setSetting(env.DB, 'module.learning', '1');
+    clearModuleCache();
+    for (let course = 2; course <= 5; course += 1) {
+      await env.DB.prepare(`INSERT INTO learning_courses
+        (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+        VALUES(27603,27602,'google_classroom',?1,?2,?3)`)
+        .bind(`disconnect-${course}`, `Disconnect ${course}`, `https://classroom.google.com/c/disconnect-${course}`).run();
+      await env.DB.prepare(`INSERT INTO learning_google_registrations
+        (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+        (27602,?1,'COURSE_ROSTER_CHANGES',?2,?4,'2026-08-24T12:00:00.000Z'),
+        (27602,?1,'COURSE_WORK_CHANGES',?3,?4,'2026-08-24T12:00:00.000Z')`)
+        .bind(
+          `disconnect-${course}`, `disconnect-${course}-roster`, `disconnect-${course}-work`, TOPIC,
+        ).run();
+    }
+    const keyRing = await storeExpiredCredential();
+    let queries = 0;
+    let maxBinds = 0;
+    const wrapped: AppDb = {
+      prepare(sql: string): AppStatement {
+        queries += 1;
+        const statement = (env.DB as AppDb).prepare(sql);
+        return {
+          bind(...values: unknown[]) {
+            maxBinds = Math.max(maxBinds, values.length);
+            return statement.bind(...values);
+          },
+          first: <T>(column?: string) => statement.first<T>(column),
+          all: <T>() => statement.all<T>(),
+          run: <T>() => statement.run<T>(),
+        };
+      },
+      batch: <T>(statements: AppStatement[]) => (env.DB as AppDb).batch<T>(statements),
+    };
+    let refreshCalls = 0;
+    const deleted: string[] = [];
+    const revoked: string[] = [];
+    const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        refreshCalls += 1;
+        const token = new URLSearchParams(String(init?.body)).get('refresh_token');
+        if (token !== 'old-refresh' || refreshCalls > 1) {
+          return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+            status: 400, headers: { 'content-type': 'application/json' },
+          });
+        }
+        return rotatedTokenResponse('disconnect-access', 'disconnect-refresh');
+      }
+      if (url.origin === 'https://classroom.googleapis.com') {
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer disconnect-access');
+        deleted.push(decodeURIComponent(url.pathname.slice('/v1/registrations/'.length)));
+        return new Response(null, { status: 200 });
+      }
+      expect(url.toString()).toBe('https://oauth2.googleapis.com/revoke');
+      revoked.push(new URLSearchParams(String(init?.body)).get('token') ?? '');
+      return new Response(null, { status: 200 });
+    });
+    await expect(disconnectGoogleClassroomConnection(wrapped, {
+      connectionId: 27602, expectedRevision: 1, actorPersonId: 27601,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher, nowEpochMs: NOW,
+    }, { now: () => NOW })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    await expect(loadGoogleCredentialForCleanup(env.DB as AppDb, {
+      connectionId: 27602, keyRing,
+    })).resolves.toMatchObject({
+      revision: 2, status: 'disabled',
+      credential: {
+        accessToken: 'disconnect-access', refreshToken: 'disconnect-refresh',
+        refreshTokenExpiresAt: '2026-08-24T12:00:00.000Z',
+      },
+    });
+    expect(deleted).toHaveLength(8);
+    expect(queries).toBe(40);
+    expect(maxBinds).toBeLessThanOrEqual(100);
+
+    const cronQueries: number[] = [];
+    for (let pass = 1; pass <= 2; pass += 1) {
+      queries = 0;
+      clearModuleCache();
+      await expect(runGoogleClassroomRegistrationRenewalPass({
+        DB_BACKEND: 'd1',
+        GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
+        GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+        GOOGLE_CLASSROOM_PUBSUB_TOPIC: TOPIC,
+        GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: SERVICE_ACCOUNT,
+        GOOGLE_PUBSUB_SUBSCRIPTION_NAME: SUBSCRIPTION,
+        LEARNING_CREDENTIAL_KEYS: KEY_SECRET,
+      }, wrapped, {
+        fetcher, now: () => NOW + pass * 1_000, importKeyRing: importLearningCredentialKeyRing,
+        renew: renewGoogleClassroomRegistrations,
+        listCleanupConnectionIds: listGoogleClassroomCleanupConnectionIds,
+        recoverCleanup: recoverGoogleClassroomCleanup,
+      })).resolves.toEqual({
+        status: 'completed', summary: { selected: 0, renewed: 0, conflicted: 0, failed: 0 },
+      });
+      cronQueries.push(queries);
+    }
+    expect(cronQueries).toEqual([12, 15]);
+    expect(Math.max(...cronQueries)).toBeLessThanOrEqual(50);
+    expect(refreshCalls).toBe(1);
+    expect(deleted).toHaveLength(10);
+    expect(new Set(deleted).size).toBe(10);
+    expect(revoked).toEqual(['disconnect-refresh']);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_cleanup_tasks
+      WHERE connection_id=27602`).first()).toEqual({ count: 0 });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=27602`).first()).toEqual({ count: 0 });
   });
 });
