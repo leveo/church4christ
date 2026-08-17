@@ -10,6 +10,7 @@ import {
   loadGoogleCredentialForAdmin,
   refreshGoogleAccessToken,
   rotateGoogleCredential,
+  rotateGoogleCredentialForActiveOrError,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
 import {
@@ -157,7 +158,6 @@ async function activeAccessToken(
     connection.provider !== 'google_classroom'
     || (connection.status !== 'active' && (!allowError || connection.status !== 'error'))
   ) invalid();
-  const connectionStatus = connection.status;
   let loaded = allowError
     ? await loadGoogleCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
     : await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
@@ -177,15 +177,9 @@ async function activeAccessToken(
     signal: new AbortController().signal,
     nowEpochMs: input.nowEpochMs,
   });
-  if (connectionStatus === 'error') {
-    return Object.freeze({
-      accessToken: credential.accessToken,
-      revision: loaded.revision,
-      refreshTokenExpiresAt: credential.refreshTokenExpiresAt,
-    });
-  }
   try {
-    const rotated = await rotateGoogleCredential(db, {
+    const rotate = allowError ? rotateGoogleCredentialForActiveOrError : rotateGoogleCredential;
+    const rotated = await rotate(db, {
       connectionId: input.connectionId,
       expectedRevision: loaded.revision,
       credential,
@@ -199,7 +193,9 @@ async function activeAccessToken(
     });
   } catch (error) {
     if (!(error instanceof LearningGoogleAuthConflictError)) throw error;
-    loaded = await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
+    loaded = allowError
+      ? await loadGoogleCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
+      : await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
     if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs) invalid();
     return Object.freeze({
       accessToken: loaded.credential.accessToken,

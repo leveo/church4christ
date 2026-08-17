@@ -1,8 +1,10 @@
 import type { AppDb, AppDbResult } from './appDb';
 import {
+  LearningGoogleAuthConflictError,
   loadGoogleCredentialForCleanup,
   refreshGoogleAccessToken,
   revokeGoogleRefreshToken,
+  rotateGoogleCredentialForActiveOrError,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
 import { deleteGoogleClassroomRegistration } from './learningGooglePubSub';
@@ -316,7 +318,7 @@ export async function recoverGoogleClassroomCleanup(
 ): Promise<GoogleCleanupDrainSummary & { readonly finalizedDisconnect: boolean }> {
   const connectionId = integer(input.connectionId);
   const now = epoch(input.nowEpochMs);
-  const loaded = await loadGoogleCredentialForCleanup(db, { connectionId, keyRing: input.keyRing });
+  let loaded = await loadGoogleCredentialForCleanup(db, { connectionId, keyRing: input.keyRing });
   const disconnectMarker = loaded.status === 'disabled'
     ? await claimDisconnectTask(db, connectionId, freshEpoch(clock))
     : null;
@@ -337,8 +339,33 @@ export async function recoverGoogleClassroomCleanup(
           signal: input.signal,
           nowEpochMs: now,
         });
-        accessToken = refreshed.accessToken;
-        refreshToken = refreshed.refreshToken;
+        if (loaded.status === 'disabled') {
+          accessToken = refreshed.accessToken;
+          refreshToken = refreshed.refreshToken;
+        } else {
+          try {
+            await rotateGoogleCredentialForActiveOrError(db, {
+              connectionId,
+              expectedRevision: loaded.revision,
+              credential: refreshed,
+              keyRing: input.keyRing,
+              nowEpochMs: now,
+            });
+            accessToken = refreshed.accessToken;
+            refreshToken = refreshed.refreshToken;
+          } catch (error) {
+            if (!(error instanceof LearningGoogleAuthConflictError)) throw error;
+            loaded = await loadGoogleCredentialForCleanup(db, {
+              connectionId, keyRing: input.keyRing,
+            });
+            if (
+              loaded.status === 'disabled'
+              || Date.parse(loaded.credential.accessTokenExpiresAt) <= now
+            ) invalid();
+            accessToken = loaded.credential.accessToken;
+            refreshToken = loaded.credential.refreshToken;
+          }
+        }
       } catch (error) {
         if (disconnectMarker === null) throw error;
         await revokeGoogleRefreshToken({ refreshToken, fetcher: input.fetcher, signal: input.signal });

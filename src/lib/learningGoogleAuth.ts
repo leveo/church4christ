@@ -953,15 +953,18 @@ export async function loadGoogleCredentialForCleanup(
   }
 }
 
-export async function rotateGoogleCredential(
+interface GoogleCredentialRotationInput {
+  readonly connectionId: number;
+  readonly expectedRevision: number;
+  readonly credential: GoogleCredential;
+  readonly keyRing: LearningCredentialKeyRing;
+  readonly nowEpochMs: number;
+}
+
+async function rotateGoogleCredentialForStatuses(
   db: AppDb,
-  rawInput: {
-    readonly connectionId: number;
-    readonly expectedRevision: number;
-    readonly credential: GoogleCredential;
-    readonly keyRing: LearningCredentialKeyRing;
-    readonly nowEpochMs: number;
-  },
+  rawInput: GoogleCredentialRotationInput,
+  includeError: boolean,
 ): Promise<{ readonly connectionId: number; readonly revision: number }> {
   const connectionId = databaseInteger(rawInput.connectionId);
   const expectedRevision = databaseInteger(rawInput.expectedRevision);
@@ -975,12 +978,20 @@ export async function rotateGoogleCredential(
   const marker = uuid();
   const nextRevision = expectedRevision + 1;
   try {
-    const results = await db.batch([
-      db.prepare(`UPDATE learning_provider_connections SET
+    const claim = includeError
+      ? db.prepare(`UPDATE learning_provider_connections SET
+        operation_marker=?1,operation_expires_at=?2,revision=revision+1,updated_at=datetime('now')
+        WHERE id=?3 AND provider='google_classroom' AND status IN ('active','error')
+          AND deleted_at IS NULL AND revision=?4 AND operation_marker IS NULL`)
+      : db.prepare(`UPDATE learning_provider_connections SET
         operation_marker=?1,operation_expires_at=?2,revision=revision+1,updated_at=datetime('now')
         WHERE id=?3 AND provider='google_classroom' AND status='active'
-          AND deleted_at IS NULL AND revision=?4 AND operation_marker IS NULL`)
-        .bind(marker, new Date(rawInput.nowEpochMs + GOOGLE_OAUTH_STATE_TTL_MS).toISOString(), connectionId, expectedRevision),
+          AND deleted_at IS NULL AND revision=?4 AND operation_marker IS NULL`);
+    const results = await db.batch([
+      claim.bind(
+        marker, new Date(rawInput.nowEpochMs + GOOGLE_OAUTH_STATE_TTL_MS).toISOString(),
+        connectionId, expectedRevision,
+      ),
       db.prepare(`UPDATE learning_provider_credentials SET
         ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,
         expires_at=?9,updated_at=datetime('now')
@@ -1007,4 +1018,18 @@ export async function rotateGoogleCredential(
     if (error instanceof LearningGoogleAuthConflictError || error instanceof LearningGoogleAuthError) throw error;
     throw new LearningGoogleAuthConflictError();
   }
+}
+
+export async function rotateGoogleCredential(
+  db: AppDb,
+  rawInput: GoogleCredentialRotationInput,
+): Promise<{ readonly connectionId: number; readonly revision: number }> {
+  return rotateGoogleCredentialForStatuses(db, rawInput, false);
+}
+
+export async function rotateGoogleCredentialForActiveOrError(
+  db: AppDb,
+  rawInput: GoogleCredentialRotationInput,
+): Promise<{ readonly connectionId: number; readonly revision: number }> {
+  return rotateGoogleCredentialForStatuses(db, rawInput, true);
 }
