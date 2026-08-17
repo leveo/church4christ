@@ -1,10 +1,10 @@
 ---
-// Provider-neutral Learning administration shell. Connection and mapping reads
-// land in their own slices; this page never invents a configured provider.
+// Provider-neutral Learning provider administration.
 import Admin from '../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
-import { card } from '../../../lib/adminUi';
+import { badge, btn, btnSecondary, card, lab, tin } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
+import { listLearningConnections } from '../../../lib/learningConnectionDb';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -24,13 +24,128 @@ if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
   });
 }
 const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const connections = await listLearningConnections(Astro.locals.db, { includeDeleted: true, limit: 100 });
+const copy = lang === 'zh' ? {
+  providers: '学习平台连接',
+  none: '尚未连接 Google Classroom 或 Canvas。',
+  createCanvas: '连接 Canvas',
+  createGoogle: '准备 Google Classroom',
+  name: '显示名称',
+  baseUrl: 'Canvas HTTPS 地址',
+  token: 'Canvas 访问令牌',
+  create: '建立连接',
+  update: '保存设置',
+  health: '检查状态',
+  reconnect: '重新连接',
+  disconnect: '断开连接',
+  googleNote: 'Google 授权将在 OAuth 设置步骤中完成。',
+  saved: '连接设置已保存。',
+  error: '连接设置未能保存；请刷新后重试。',
+} : {
+  providers: 'Learning provider connections',
+  none: 'No Google Classroom or Canvas connection has been configured.',
+  createCanvas: 'Connect Canvas',
+  createGoogle: 'Prepare Google Classroom',
+  name: 'Display name',
+  baseUrl: 'Canvas HTTPS address',
+  token: 'Canvas access token',
+  create: 'Create connection',
+  update: 'Save settings',
+  health: 'Check status',
+  reconnect: 'Reconnect',
+  disconnect: 'Disconnect',
+  googleNote: 'Google authorization is completed in the OAuth setup step.',
+  saved: 'Connection settings were saved.',
+  error: 'Connection settings could not be saved. Refresh and try again.',
+};
+const saved = Astro.url.searchParams.has('saved');
+const error = Astro.url.searchParams.has('error');
 ---
 
 <Admin title={t(lang, 'admin.learning.title')}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.learning.title')}</h1>
   <p class="mt-2 max-w-3xl text-ink-muted">{t(lang, 'admin.learning.intro')}</p>
-  <section class={`mt-8 max-w-3xl ${card}`}>
-    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.learning.emptyTitle')}</h2>
-    <p class="mt-2 text-ink-muted">{t(lang, 'admin.learning.emptyBody')}</p>
+  {saved && <p class="mt-4 max-w-3xl rounded-card bg-success/10 px-4 py-3 text-sm text-success">{copy.saved}</p>}
+  {error && <p class="mt-4 max-w-3xl rounded-card bg-danger/10 px-4 py-3 text-sm text-danger">{copy.error}</p>}
+
+  <section class="mt-8 max-w-4xl">
+    <h2 class="font-display text-heading-sm font-bold">{copy.providers}</h2>
+    {connections.length === 0 && <p class={`mt-4 ${card} text-ink-muted`}>{copy.none}</p>}
+    <div class="mt-4 grid gap-4">
+      {connections.map((connection) => (
+        <article class={card}>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="font-display text-lg font-bold">{connection.displayName}</h3>
+              <p class="mt-1 text-sm text-ink-muted">
+                {connection.provider === 'canvas' ? 'Canvas' : 'Google Classroom'}
+                {connection.baseUrl ? ` · ${connection.baseUrl}` : ''}
+              </p>
+            </div>
+            <span class={badge}>{connection.status}</span>
+          </div>
+
+          {connection.deletedAt === null ? (
+            <div class="mt-5 grid gap-4">
+              <form method="post" action="/admin/learning/connections" class="grid gap-3 md:grid-cols-2">
+                <input type="hidden" name="action" value="update" />
+                <input type="hidden" name="connection_id" value={connection.connectionId} />
+                <input type="hidden" name="revision" value={connection.revision} />
+                <input type="hidden" name="provider" value={connection.provider} />
+                <label class={lab}>{copy.name}<input class={tin} name="display_name" value={connection.displayName} required maxlength="120" /></label>
+                {connection.provider === 'canvas' && (
+                  <label class={lab}>{copy.baseUrl}<input class={tin} type="url" name="base_url" value={connection.baseUrl ?? ''} required maxlength="2048" /></label>
+                )}
+                <button class={btnSecondary} type="submit">{copy.update}</button>
+              </form>
+              <div class="flex flex-wrap gap-3">
+                <form method="post" action="/admin/learning/connections">
+                  <input type="hidden" name="action" value="health_check" />
+                  <input type="hidden" name="connection_id" value={connection.connectionId} />
+                  <input type="hidden" name="revision" value={connection.revision} />
+                  <button class={btnSecondary} type="submit">{copy.health}</button>
+                </form>
+                <form method="post" action="/admin/learning/connections">
+                  <input type="hidden" name="action" value="disconnect" />
+                  <input type="hidden" name="connection_id" value={connection.connectionId} />
+                  <input type="hidden" name="revision" value={connection.revision} />
+                  <button class={btnSecondary} type="submit">{copy.disconnect}</button>
+                </form>
+              </div>
+            </div>
+          ) : connection.provider === 'canvas' ? (
+            <form method="post" action="/admin/learning/connections" class="mt-5 grid gap-3 md:grid-cols-2">
+              <input type="hidden" name="action" value="reconnect" />
+              <input type="hidden" name="connection_id" value={connection.connectionId} />
+              <input type="hidden" name="revision" value={connection.revision} />
+              <input type="hidden" name="provider" value="canvas" />
+              <label class={lab}>{copy.baseUrl}<input class={tin} type="url" name="base_url" value={connection.baseUrl ?? ''} required maxlength="2048" /></label>
+              <label class={lab}>{copy.token}<input class={tin} type="password" name="access_token" autocomplete="off" required maxlength="8192" /></label>
+              <button class={btn} type="submit">{copy.reconnect}</button>
+            </form>
+          ) : <p class="mt-4 text-sm text-ink-muted">{copy.googleNote}</p>}
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <section class="mt-8 grid max-w-4xl gap-4 lg:grid-cols-2">
+    <form method="post" action="/admin/learning/connections" class={card}>
+      <input type="hidden" name="action" value="create" />
+      <input type="hidden" name="provider" value="canvas" />
+      <h2 class="font-display text-heading-sm font-bold">{copy.createCanvas}</h2>
+      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
+      <label class={`${lab} mt-3`}>{copy.baseUrl}<input class={tin} type="url" name="base_url" placeholder="https://canvas.example.org" required maxlength="2048" /></label>
+      <label class={`${lab} mt-3`}>{copy.token}<input class={tin} type="password" name="access_token" autocomplete="off" required maxlength="8192" /></label>
+      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
+    </form>
+    <form method="post" action="/admin/learning/connections" class={card}>
+      <input type="hidden" name="action" value="create" />
+      <input type="hidden" name="provider" value="google_classroom" />
+      <h2 class="font-display text-heading-sm font-bold">{copy.createGoogle}</h2>
+      <p class="mt-2 text-sm text-ink-muted">{copy.googleNote}</p>
+      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
+      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
+    </form>
   </section>
 </Admin>

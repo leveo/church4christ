@@ -8,6 +8,13 @@ SESSION_SECRET=dev-only-secret-change-me
 # wrangler.jsonc or logs; production uses `npx wrangler secret put`.
 NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 
+# AES-256-GCM key ring for encrypted Learning provider credentials. The value is
+# strict JSON: {"currentVersion":1,"keys":{"1":"<32-byte canonical base64>"}}.
+# Generate keys outside the repository and never paste the value into
+# wrangler.jsonc, logs, fixtures, or screenshots. Production uses
+# `npx wrangler secret put LEARNING_CREDENTIAL_KEYS`.
+# LEARNING_CREDENTIAL_KEYS=
+
 # When set, outgoing mail (including magic links) is logged to the console
 # instead of sent. Leave on for local development.
 EMAIL_DEV_LOG=1

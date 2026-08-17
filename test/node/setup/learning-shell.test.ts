@@ -136,13 +136,13 @@ describe('Learning capability shell', () => {
     const adminArea = admin.indexOf("if (!hasAreaAccess(user, 'learning'))");
     expect(adminModule).toBeGreaterThan(-1);
     expect(adminArea).toBeGreaterThan(adminModule);
-    expect(admin).toContain("t(lang, 'admin.learning.emptyTitle')");
-    expect(admin).toContain("t(lang, 'admin.learning.emptyBody')");
+    expect(admin).toContain('listLearningConnections');
+    expect(admin).toContain('action="/admin/learning/connections"');
 
     for (const source of [learnerIndex, course, admin]) {
       expect(source).not.toMatch(/\.prepare\s*\(|providerConnections\s*=|courses\s*=\s*\[/);
-      expect(source).not.toMatch(/Genesis|Google Classroom|Canvas LMS/i);
     }
+    for (const source of [learnerIndex, course]) expect(source).not.toMatch(/Genesis|Google Classroom|Canvas LMS/i);
   });
 
   it('registers Learning in admin navigation, dashboard, grants, dictionaries, and generated docs', () => {

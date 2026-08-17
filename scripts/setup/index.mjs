@@ -39,7 +39,7 @@ const MISSING_FLAGS = Object.freeze({
   churchName: '--church-name', locale: '--locale', adminEmail: '--admin-email',
   adminName: '--admin-name', appOrigin: '--app-origin', emailFrom: '--email-from',
 });
-const BASELINE_WRANGLER_SHA256 = 'fdfbc3e7e0db94666eb8d02310086fc3a71925af9885860afd338083cf7f79b2';
+const BASELINE_WRANGLER_SHA256 = 'ce0db7c9848e80b07c0a2a3f84dfc64fcb470b98f0ca40dbaed5b9c8544bd6c0';
 const PROSPECTIVE_RESOURCE_IDS = Object.freeze({
   d1: 'PENDING_D1_DATABASE_ID_AFTER_APPROVAL',
   supabase: 'PENDING_HYPERDRIVE_ID_AFTER_APPROVAL',
