@@ -84,4 +84,29 @@ describe('production Google Classroom registration renewal pass', () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it('drains one durable cleanup connection before renewal to preserve Worker and D1 budgets', async () => {
+    const keyRing = { currentVersion: 1, keys: new Map() } as never;
+    const importKeyRing = vi.fn(async () => keyRing);
+    const renew = vi.fn();
+    const listCleanupConnectionIds = vi.fn(async () => [27302] as const);
+    const recoverCleanup = vi.fn(async () => ({
+      selected: 4, cleaned: 4, pending: 0, finalizedDisconnect: false,
+    }));
+    const fetcher = vi.fn();
+    await expect(runGoogleClassroomRegistrationRenewalPass(COMPLETE_ENV, env.DB as AppDb, {
+      fetcher, now: () => Date.parse('2026-08-17T12:00:00.000Z'), importKeyRing, renew,
+      listCleanupConnectionIds, recoverCleanup,
+    })).resolves.toEqual({
+      status: 'completed', summary: { selected: 0, renewed: 0, conflicted: 0, failed: 0 },
+    });
+    expect(listCleanupConnectionIds).toHaveBeenCalledWith(env.DB, 1);
+    expect(recoverCleanup).toHaveBeenCalledWith(env.DB, {
+      connectionId: 27302,
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing, fetcher, nowEpochMs: Date.parse('2026-08-17T12:00:00.000Z'),
+      signal: expect.any(AbortSignal), limit: 4,
+    });
+    expect(renew).not.toHaveBeenCalled();
+  });
 });
