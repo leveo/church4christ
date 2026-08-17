@@ -146,7 +146,7 @@ describe('Wrangler rendering', () => {
     expect(output).toContain('"binding": "DB"');
     expect(output).toContain('"database_name": "grace-church-db"');
     expect(output).not.toContain('"hyperdrive"');
-    expect(output).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *", "0 * * * *", "15 * * * *"]');
+    expect(output).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 9 * * *", "0 * * * *", "15,45 * * * *"]');
     expect(output).not.toContain('*/5 * * * *');
     expect(output).not.toContain('"STRIPE_MODE"');
     expect(output).not.toMatch(/@@[A-Z_]+@@/);
@@ -170,7 +170,7 @@ describe('Wrangler rendering', () => {
 
     expect(output).toContain('"binding": "HYPERDRIVE"');
     expect(output).not.toContain('"d1_databases"');
-    expect(output).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "15 * * * *", "*/5 * * * *"]');
+    expect(output).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "15,45 * * * *", "*/5 * * * *"]');
     expect(output).toContain('"STRIPE_MODE": "test"');
     expect(output).not.toMatch(/STRIPE_MODE[^\n]*live/);
   });

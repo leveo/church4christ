@@ -42,7 +42,7 @@ describe('Learning credential secret declaration', () => {
       worker.indexOf('case GOOGLE_CLASSROOM_REGISTRATION_CRON:'),
       worker.indexOf('case BACKUP_CRON:'),
     );
-    expect(worker).toContain("const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15 * * * *'");
+    expect(worker).toContain("const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15,45 * * * *'");
     expect(attendanceCase).toContain('sendAttendanceEmails(vars, db).finally(end)');
     expect(attendanceCase).not.toContain('runGoogleClassroomRegistrationRenewalPass');
     expect(googleCase).toContain('runGoogleClassroomRegistrationRenewalPass(env as never, db).finally(end)');

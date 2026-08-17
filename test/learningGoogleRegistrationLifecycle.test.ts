@@ -446,7 +446,7 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     });
   });
 
-  it('drains twelve feeds per hourly pass within the D1 query and bind budgets', async () => {
+  it('drains eight feeds twice hourly within the complete production D1 query budget', async () => {
     for (let course = 2; course <= 6; course += 1) {
       await env.DB.prepare(`INSERT INTO learning_courses
         (program_id,connection_id,provider,external_course_id,display_name,launch_url)
@@ -479,8 +479,11 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing, fetcher: requests.fetcher, nowEpochMs: NOW, topicName: TOPIC,
       signal: new AbortController().signal,
-    })).resolves.toEqual({ selected: 12, renewed: 12, conflicted: 0, failed: 0 });
-    expect(queries).toBeLessThanOrEqual(50);
+    })).resolves.toEqual({ selected: 8, renewed: 8, conflicted: 0, failed: 0 });
+    // The production cron adds one fresh module-gate query and one durable
+    // cleanup-connection lookup before calling this function.
+    expect(queries + 2).toBeLessThanOrEqual(50);
     expect(maxBinds).toBeLessThanOrEqual(100);
+    expect(8 * 2 * 24 * 7).toBeGreaterThanOrEqual(2_000);
   });
 });
