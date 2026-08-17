@@ -20,6 +20,7 @@ type ActivityKind = 'material' | 'assignment' | 'quiz';
 type SeededGraph = {
   connectionId: number;
   courseId: number;
+  identityId: number;
   enrollmentId: number;
   activityId: number;
   personId: number;
@@ -74,7 +75,7 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
         VALUES (${activityId},${courseId},'activity-${seed}','Activity ${seed}','${kind}',
           'published','https://courses-${seed}.example.test/activity');
     `);
-    return { connectionId, courseId, enrollmentId, activityId, personId };
+    return { connectionId, courseId, identityId, enrollmentId, activityId, personId };
   }
 
   beforeAll(async () => {
@@ -198,50 +199,72 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     await rejects(`UPDATE learning_activities SET kind='material' WHERE id=${assignment.activityId}`, '23503');
 
     await sql.unsafe(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-event-assignment',${assignment.connectionId},'canvas','pg-source-assignment',
-        'assignment_submitted',${assignment.enrollmentId},${assignment.courseId},
-        ${assignment.activityId},'assignment','2026-08-16 11:00:00')`);
+        'assignment_submitted',${assignment.personId},${assignment.identityId},
+        ${assignment.enrollmentId},${assignment.courseId},${assignment.activityId},'assignment',
+        '2026-08-16 11:00:00')`);
+    await sql.unsafe(`
+      INSERT INTO people (id,display_name,email)
+        VALUES (7197,'Alternate Person 7197','alternate-7197@example.test'),
+          (7198,'Alternate Person 7198','alternate-7198@example.test');
+      INSERT INTO learning_identity_links
+        (id,connection_id,person_id,external_user_id,status)
+        VALUES (7199,${assignment.connectionId},7198,'alternate-7199','active');
+    `);
+    await rejects(`UPDATE learning_enrollments SET identity_link_id=7199
+      WHERE id=${assignment.enrollmentId}`, '23503');
+    await rejects(`UPDATE learning_identity_links SET person_id=7197
+      WHERE id=${assignment.identityId}`, '23503');
+    await rejects(`DELETE FROM learning_enrollments WHERE id=${assignment.enrollmentId}`, '23503');
+    await rejects(`DELETE FROM learning_identity_links WHERE id=${assignment.identityId}`, '23503');
     await sql.unsafe(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-event-quiz',${quiz.connectionId},'canvas','pg-source-quiz','quiz_submitted',
-        ${quiz.enrollmentId},${quiz.courseId},${quiz.activityId},'quiz','2026-08-16 11:00:00')`);
+        ${quiz.personId},${quiz.identityId},${quiz.enrollmentId},${quiz.courseId},${quiz.activityId},
+        'quiz','2026-08-16 11:00:00')`);
     await sql.unsafe(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-event-material',${material.connectionId},'canvas','pg-source-material',
-        'resource_opened',${material.enrollmentId},${material.courseId},${material.activityId},
-        'material','2026-08-16 11:00:00')`);
+        'resource_opened',${material.personId},${material.identityId},${material.enrollmentId},
+        ${material.courseId},${material.activityId},'material','2026-08-16 11:00:00')`);
     await rejects(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,course_id,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       course_id,occurred_at)
       VALUES ('pg-no-enrollment',${assignment.connectionId},'canvas','pg-no-enrollment',
-        'enrolled',${assignment.courseId},'2026-08-16 11:00:00')`, '23502');
+        'enrolled',${assignment.personId},${assignment.identityId},${assignment.courseId},
+        '2026-08-16 11:00:00')`, '23502');
     await rejects(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-missing-enrollment',${assignment.connectionId},'canvas','pg-missing-enrollment',
-        'assignment_submitted',${assignment.enrollmentId + 99},${assignment.courseId},
-        ${assignment.activityId},'assignment','2026-08-16 11:00:00')`, '23503');
+        'assignment_submitted',${assignment.personId},${assignment.identityId},
+        ${assignment.enrollmentId + 99},${assignment.courseId},${assignment.activityId},
+        'assignment','2026-08-16 11:00:00')`, '23503');
     await rejects(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-cross-enrollment',${assignment.connectionId},'canvas','pg-cross-enrollment',
-        'assignment_submitted',${quiz.enrollmentId},${assignment.courseId},
-        ${assignment.activityId},'assignment','2026-08-16 11:00:00')`, '23503');
+        'assignment_submitted',${assignment.personId},${assignment.identityId},${quiz.enrollmentId},
+        ${assignment.courseId},${assignment.activityId},'assignment',
+        '2026-08-16 11:00:00')`, '23503');
     await rejects(`INSERT INTO learning_activity_events
-      (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-       activity_id,activity_kind,occurred_at)
+      (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+       enrollment_id,course_id,activity_id,activity_kind,occurred_at)
       VALUES ('pg-wrong-kind',${assignment.connectionId},'canvas','pg-wrong-kind','quiz_submitted',
-        ${assignment.enrollmentId},${assignment.courseId},${assignment.activityId},
-        'assignment','2026-08-16 11:00:00')`, '23514');
+        ${assignment.personId},${assignment.identityId},${assignment.enrollmentId},
+        ${assignment.courseId},${assignment.activityId},'assignment','2026-08-16 11:00:00')`, '23514');
     await rejects("DELETE FROM learning_activity_events WHERE id='pg-event-assignment'", '23514');
     await rejects(`DELETE FROM learning_activities WHERE id=${directActivity.activityId}`, '23514');
 
     await sql.unsafe(`UPDATE learning_courses SET lifecycle_state='archived',
       deleted_at='2026-08-16 12:00:00' WHERE id=${assignment.courseId}`);
     await sql.unsafe("DELETE FROM learning_activity_events WHERE id='pg-event-assignment'");
+    await sql.unsafe(`DELETE FROM learning_enrollments WHERE id=${assignment.enrollmentId}`);
+    await sql.unsafe(`DELETE FROM learning_identity_links WHERE id=${assignment.identityId}`);
     await sql.unsafe(`UPDATE learning_provider_connections SET status='disabled',
       deleted_at='2026-08-16 12:00:00' WHERE id=${directActivity.connectionId}`);
     await sql.unsafe(`DELETE FROM learning_activities WHERE id=${directActivity.activityId}`);
@@ -251,11 +274,11 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     for (const [seed, parent] of [[720, 'person'], [721, 'course']] as const) {
       const graph = await seedGraph(seed);
       await sql.unsafe(`INSERT INTO learning_activity_events
-        (id,connection_id,provider,source_event_id,event_type,enrollment_id,course_id,
-         activity_id,activity_kind,occurred_at)
+        (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+         enrollment_id,course_id,activity_id,activity_kind,occurred_at)
         VALUES ('pg-event-${seed}',${graph.connectionId},'canvas','pg-source-${seed}',
-          'assignment_submitted',${graph.enrollmentId},${graph.courseId},${graph.activityId},
-          'assignment','2026-08-16 11:00:00')`);
+          'assignment_submitted',${graph.personId},${graph.identityId},${graph.enrollmentId},
+          ${graph.courseId},${graph.activityId},'assignment','2026-08-16 11:00:00')`);
       if (parent === 'person') await sql.unsafe(`DELETE FROM people WHERE id=${graph.personId}`);
       else await sql.unsafe(`DELETE FROM learning_courses WHERE id=${graph.courseId}`);
       expect(Number((await sql.unsafe<{ count: string }[]>(

@@ -122,6 +122,7 @@ CREATE TABLE learning_identity_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (octet_length(created_at) BETWEEN 19 AND 40),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (octet_length(updated_at) BETWEEN 19 AND 40),
   UNIQUE (id, connection_id),
+  UNIQUE (id, connection_id, person_id),
   UNIQUE (connection_id, external_user_id),
   UNIQUE (connection_id, person_id)
 );
@@ -143,6 +144,7 @@ CREATE TABLE learning_enrollments (
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (octet_length(created_at) BETWEEN 19 AND 40),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (octet_length(updated_at) BETWEEN 19 AND 40),
   UNIQUE (id, course_id),
+  UNIQUE (id, course_id, connection_id, identity_link_id),
   UNIQUE (course_id, identity_link_id),
   UNIQUE (course_id, external_enrollment_id),
   FOREIGN KEY (course_id, connection_id)
@@ -270,10 +272,10 @@ CREATE INDEX idx_learning_snapshots_enrollment_state
 CREATE INDEX idx_learning_snapshots_course_state
   ON learning_submission_snapshots(course_id, status, late, synced_at, activity_id);
 
--- Append-only normalized evidence. Person identity is derived only through the
--- enrollment -> identity link -> Person path. IDs, allowlisted type, references,
--- and times are the complete event shape; raw payloads and display/content
--- fields are absent.
+-- Append-only normalized evidence. Stable Person, identity-link, and enrollment
+-- identifiers are bound together declaratively so parent reassignment cannot
+-- reattribute an event. IDs, allowlisted type, references, and times are the
+-- complete event shape; raw payloads and display/content fields are absent.
 CREATE TABLE learning_activity_events (
   id TEXT NOT NULL PRIMARY KEY
     CHECK (id = trim(id) AND octet_length(id) BETWEEN 1 AND 255),
@@ -286,6 +288,8 @@ CREATE TABLE learning_activity_events (
     'enrolled','resource_opened','assignment_submitted','quiz_submitted',
     'submission_returned','course_completed'
   )),
+  person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  identity_link_id INTEGER NOT NULL,
   enrollment_id INTEGER NOT NULL,
   course_id INTEGER NOT NULL,
   activity_id INTEGER,
@@ -299,8 +303,11 @@ CREATE TABLE learning_activity_events (
     REFERENCES learning_provider_connections(id, provider) ON DELETE RESTRICT,
   FOREIGN KEY (course_id, connection_id)
     REFERENCES learning_courses(id, connection_id) ON DELETE CASCADE,
-  FOREIGN KEY (enrollment_id, course_id)
-    REFERENCES learning_enrollments(id, course_id) ON DELETE CASCADE,
+  FOREIGN KEY (identity_link_id, connection_id, person_id)
+    REFERENCES learning_identity_links(id, connection_id, person_id) ON DELETE NO ACTION,
+  FOREIGN KEY (enrollment_id, course_id, connection_id, identity_link_id)
+    REFERENCES learning_enrollments(id, course_id, connection_id, identity_link_id)
+    ON DELETE NO ACTION,
   FOREIGN KEY (activity_id, course_id, activity_kind)
     REFERENCES learning_activities(id, course_id, kind) ON DELETE CASCADE,
   CHECK (
@@ -319,6 +326,8 @@ CREATE TABLE learning_activity_events (
 
 CREATE INDEX idx_learning_events_enrollment_time
   ON learning_activity_events(enrollment_id, occurred_at, id);
+CREATE INDEX idx_learning_events_person_time
+  ON learning_activity_events(person_id, occurred_at, id);
 CREATE INDEX idx_learning_events_course_time
   ON learning_activity_events(course_id, occurred_at, id);
 CREATE INDEX idx_learning_events_activity_time
@@ -341,6 +350,8 @@ CREATE OR REPLACE FUNCTION learning_activity_events_no_delete_fn()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF
+    EXISTS (SELECT 1 FROM people WHERE id = OLD.person_id) AND
+    EXISTS (SELECT 1 FROM learning_identity_links WHERE id = OLD.identity_link_id) AND
     EXISTS (SELECT 1 FROM learning_enrollments WHERE id = OLD.enrollment_id) AND
     EXISTS (SELECT 1 FROM learning_courses WHERE id = OLD.course_id AND deleted_at IS NULL) AND
     EXISTS (SELECT 1 FROM learning_provider_connections

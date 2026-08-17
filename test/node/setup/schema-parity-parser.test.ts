@@ -320,7 +320,7 @@ describe('final D1 schema parser', () => {
       abortMessage: 'learning_event_append_only',
     });
     expect(schema.triggers.get('learning_activity_events_no_delete')?.semanticGuard)
-      .toMatch(/exists \( select 1 from learning_enrollments.*and exists \( select 1 from learning_courses.*and exists \( select 1 from learning_provider_connections/);
+      .toMatch(/exists \( select 1 from people.*and exists \( select 1 from learning_identity_links.*and exists \( select 1 from learning_enrollments.*and exists \( select 1 from learning_courses.*and exists \( select 1 from learning_provider_connections/);
     expect(schema.triggers.get('learning_activities_no_delete')).toMatchObject({
       table: 'learning_activities',
       timing: 'before',
