@@ -787,10 +787,10 @@ export async function listGoogleClassroomRegistrationsDue(
       r.registration_id AS registration_id,r.topic_name AS topic_name,r.expiry_time AS expiry_time
       FROM learning_google_registrations r
       JOIN learning_provider_connections c ON c.id=r.connection_id
-      WHERE r.expiry_time>?1 AND r.expiry_time<=?2
-        AND r.topic_name=?3
+      WHERE (r.expiry_time<=?2 OR r.topic_name<>?3)
         AND c.provider='google_classroom' AND c.status='active' AND c.deleted_at IS NULL
-      ORDER BY r.expiry_time,r.connection_id,r.external_course_id,r.feed_type LIMIT ?4`)
+      ORDER BY CASE WHEN r.topic_name<>?3 THEN 0 WHEN r.expiry_time<=?1 THEN 1 ELSE 2 END,
+        r.expiry_time,r.connection_id,r.external_course_id,r.feed_type LIMIT ?4`)
       .bind(now, horizon, currentTopicName, limit).all<Record<string, unknown>>();
     if (!result || !Array.isArray(result.results) || result.results.length > limit) invalid();
     return Object.freeze(result.results.map((row) => Object.freeze({

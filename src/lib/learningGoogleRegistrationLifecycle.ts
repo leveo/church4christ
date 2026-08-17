@@ -28,7 +28,9 @@ import {
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const MAPPING_CLAIM_MS = 2 * 60 * 1_000;
 const RENEWAL_HORIZON_MS = 48 * 60 * 60 * 1_000;
-const RENEWAL_LIMIT = 8;
+// Twelve hourly replacements provide 2,016 feed slots per week, covering the
+// supported 2,000 feeds while remaining below the D1 Free query budget.
+const RENEWAL_LIMIT = 12;
 
 type RegistrationFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -539,7 +541,7 @@ export async function renewGoogleClassroomRegistrations(
         accessToken: token,
         externalCourseId: stored.externalCourseId,
         feedType: stored.feedType,
-        topicName: stored.topicName,
+        topicName: currentTopicName,
         fetcher: input.fetcher as RegistrationFetcher,
         signal: input.signal as AbortSignal,
         nowEpochMs: now,
