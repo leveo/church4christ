@@ -87,18 +87,18 @@ interface GlobalBudget {
   readonly keys: Set<string>;
 }
 
-function safeNow(now: () => number): number {
+function safeNow(now: () => number, providerKind: LearningProviderKind): number {
   let value: unknown;
-  try { value = now(); } catch { throw new LearningSynchronizationError('invalid_request', 'canvas'); }
+  try { value = now(); } catch { throw new LearningSynchronizationError('invalid_request', providerKind); }
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new LearningSynchronizationError('invalid_request', 'canvas');
+    throw new LearningSynchronizationError('invalid_request', providerKind);
   }
   return value as number;
 }
 
 function checkActive(operation: LearningOperationContext, now: () => number): void {
   if (operation.signal.aborted) throw new LearningSynchronizationError('cancelled', operation.scope.provider);
-  if (safeNow(now) >= Date.parse(operation.deadlineAt)) {
+  if (safeNow(now, operation.scope.provider) >= Date.parse(operation.deadlineAt)) {
     throw new LearningSynchronizationError('timeout', operation.scope.provider);
   }
 }
@@ -119,7 +119,7 @@ function scopedOperation(
         externalActivityId,
         externalEnrollmentId,
       },
-    }, safeNow(now));
+    }, safeNow(now, base.scope.provider));
   } catch (error) {
     if (error instanceof LearningSynchronizationError) throw error;
     throw new LearningSynchronizationError('invalid_request', base.scope.provider);
@@ -293,7 +293,7 @@ export async function synchronizeLearningCourse(
       throw new LearningSynchronizationError('invalid_request', providerKind);
     }
     now = input.now as () => number;
-    const current = safeNow(now);
+    const current = safeNow(now, providerKind);
     let operation: LearningOperationContext;
     let urlPolicy: LearningConnectionUrlPolicy;
     try {
@@ -372,7 +372,7 @@ export async function synchronizeLearningCourse(
     );
     const resolvedSubmissionValues = resolvedSubmissions(submissions, resolvedEnrollments, providerKind);
     checkActive(operation, now);
-    const syncedAt = new Date(safeNow(now)).toISOString();
+    const syncedAt = new Date(safeNow(now, providerKind)).toISOString();
     return await completeLearningCourseSync(db, ownLease, {
       course: courseValue as LearningCourse, urlPolicy, syncedAt,
       enrollments: resolvedEnrollments, activities, resources,
@@ -383,7 +383,7 @@ export async function synchronizeLearningCourse(
     if (ownLease !== null) {
       try {
         await failLearningSync(db, ownLease, {
-          finishedAt: new Date(safeNow(now)).toISOString(), errorCode: safe.code,
+          finishedAt: new Date(safeNow(now, providerKind)).toISOString(), errorCode: safe.code,
         });
       } catch {
         throw new LearningSynchronizationError('provider_unavailable', providerKind);

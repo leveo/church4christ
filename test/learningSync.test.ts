@@ -148,6 +148,29 @@ beforeEach(async () => {
 });
 
 describe('Learning provider orchestration', () => {
+  it('attributes request-clock failures to the requested provider without touching persistence', async () => {
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider(),
+      urlPolicy: {
+        provider: 'google_classroom', connectionId: 902, baseUrl: null,
+        providerLaunchOrigins: ['https://classroom.google.com'],
+        providerFileOrigins: ['https://drive.google.com'], externalLinkOrigins: [],
+      },
+      connectionId: 902, providerKind: 'google_classroom', courseId: 999,
+      externalCourseId: 'google-course', trigger: 'manual',
+      operation: {
+        ...operation(),
+        scope: {
+          provider: 'google_classroom', connectionId: 902, externalCourseId: 'google-course',
+          externalActivityId: null, externalEnrollmentId: null,
+        },
+      },
+      now: () => Number.NaN,
+      resolvePerson: async () => null,
+    })).rejects.toMatchObject({ code: 'invalid_request', provider: 'google_classroom' });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
+  });
+
   it('paginates an injected provider, resolves People at the app seam, and commits one complete generation', async () => {
     const mapped = await seed();
     const resolutions: unknown[] = [];
