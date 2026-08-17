@@ -9,6 +9,7 @@ const MAX_PUSH_BODY_BYTES = 65_536;
 const MAX_JWT_BYTES = 8_192;
 const MAX_TOKEN_LIFETIME_SECONDS = 3_900;
 const CLOCK_SKEW_SECONDS = 30;
+const GOOGLE_REGISTRATION_HTTP_TIMEOUT_MS = 10_000;
 const RECEIPT_CLAIM_TTL_MS = 2 * 60 * 1_000;
 const COLLECTIONS = Object.freeze([
   'courses.students',
@@ -576,7 +577,10 @@ async function boundedResponseJson(response: Response, signal: AbortSignal): Pro
       invalid();
     }
     let part: ReadableStreamReadResult<Uint8Array>;
-    try { part = await reader.read(); } catch { return invalid(); }
+    try { part = await pubSubAbortable(reader.read(), signal); } catch {
+      try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+      return invalid();
+    }
     if (part.done) break;
     if (!(part.value instanceof Uint8Array)) invalid();
     length += part.value.byteLength;
@@ -600,14 +604,56 @@ async function boundedResponseJson(response: Response, signal: AbortSignal): Pro
 
 type GoogleRegistrationFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+function pubSubAbortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new LearningGooglePubSubError());
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      callback();
+    };
+    const abort = (): void => finish(() => reject(new LearningGooglePubSubError()));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      () => finish(() => reject(new LearningGooglePubSubError())),
+    );
+  });
+}
+
+async function withRegistrationDeadline<T>(
+  parentSignal: AbortSignal,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (!(parentSignal instanceof AbortSignal) || parentSignal.aborted) invalid();
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  parentSignal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, GOOGLE_REGISTRATION_HTTP_TIMEOUT_MS);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    clearTimeout(timer);
+    parentSignal.removeEventListener('abort', abort);
+  }
+}
+
 async function registrationFetch(
   fetcher: GoogleRegistrationFetcher,
   url: URL,
   init: RequestInit,
 ): Promise<Response> {
   if (url.origin !== 'https://classroom.googleapis.com' || typeof fetcher !== 'function') invalid();
+  if (!(init.signal instanceof AbortSignal) || init.signal.aborted) invalid();
+  const signal = init.signal as AbortSignal;
+  const pending = Promise.resolve().then(() => fetcher(url, init));
   let response: Response;
-  try { response = await fetcher(url, init); } catch { return invalid(); }
+  try { response = await pubSubAbortable(pending, signal); } catch {
+    void pending.then((lateResponse) => lateResponse.body?.cancel().catch(() => undefined)).catch(() => undefined);
+    return invalid();
+  }
   if (!(response instanceof Response)) invalid();
   return response;
 }
@@ -637,30 +683,32 @@ export async function createGoogleClassroomRegistration(rawInput: {
   const feedInfo = feedType === 'COURSE_ROSTER_CHANGES'
     ? { courseRosterChangesInfo: { courseId } }
     : { courseWorkChangesInfo: { courseId } };
-  const response = await registrationFetch(input.fetcher as GoogleRegistrationFetcher, url, {
-    method: 'POST',
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      feed: { feedType, ...feedInfo },
-      cloudPubsubTopic: { topicName: topic },
-    }),
-    signal,
+  return withRegistrationDeadline(signal, async (boundedSignal) => {
+    const response = await registrationFetch(input.fetcher as GoogleRegistrationFetcher, url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feed: { feedType, ...feedInfo },
+        cloudPubsubTopic: { topicName: topic },
+      }),
+      signal: boundedSignal,
+    });
+    if (!response.ok) {
+      try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
+      invalid();
+    }
+    const row = exact(await boundedResponseJson(response, boundedSignal), ['registrationId', 'expiryTime']);
+    const registration = normalizeRegistration({
+      externalCourseId: courseId,
+      feedType,
+      registrationId: row.registrationId,
+      topicName: topic,
+      expiryTime: row.expiryTime,
+    });
+    const expiry = Date.parse(registration.expiryTime);
+    if (expiry <= now || expiry > now + 8 * 24 * 60 * 60 * 1_000) invalid();
+    return registration;
   });
-  if (!response.ok) {
-    try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
-    invalid();
-  }
-  const row = exact(await boundedResponseJson(response, signal), ['registrationId', 'expiryTime']);
-  const registration = normalizeRegistration({
-    externalCourseId: courseId,
-    feedType,
-    registrationId: row.registrationId,
-    topicName: topic,
-    expiryTime: row.expiryTime,
-  });
-  const expiry = Date.parse(registration.expiryTime);
-  if (expiry <= now || expiry > now + 8 * 24 * 60 * 60 * 1_000) invalid();
-  return registration;
 }
 
 export async function deleteGoogleClassroomRegistration(rawInput: {
@@ -677,13 +725,15 @@ export async function deleteGoogleClassroomRegistration(rawInput: {
     `/v1/registrations/${encodeURIComponent(registrationId)}`,
     'https://classroom.googleapis.com',
   );
-  const response = await registrationFetch(input.fetcher as GoogleRegistrationFetcher, url, {
-    method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, signal: input.signal as AbortSignal,
+  return withRegistrationDeadline(input.signal as AbortSignal, async (boundedSignal) => {
+    const response = await registrationFetch(input.fetcher as GoogleRegistrationFetcher, url, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, signal: boundedSignal,
+    });
+    try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
+    if (response.status === 404) return false;
+    if (!response.ok) invalid();
+    return true;
   });
-  try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
-  if (response.status === 404) return false;
-  if (!response.ok) invalid();
-  return true;
 }
 
 export interface StoredGoogleClassroomRegistration extends GoogleClassroomRegistration {
