@@ -88,7 +88,7 @@ suite('clean-room Supabase setup', () => {
       const devVars = await readFile(join(workspace.root, '.dev.vars'), 'utf8');
       expect(devVars).toContain('STRIPE_SECRET_KEY=sk_test_clean_room_setup');
       expect(devVars).toContain('STRIPE_WEBHOOK_SECRET=whsec_clean_room_setup');
-      expect(configBefore.toString()).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "*/5 * * * *"]');
+      expect(configBefore.toString()).toContain('"crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "15 * * * *", "*/5 * * * *"]');
       expect(configBefore.toString()).toContain('"STRIPE_MODE": "test"');
       const secondRun = await workspace.execNode(flags, env, 300_000);
       const second = JSON.parse(secondRun.stdout);

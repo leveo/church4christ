@@ -32,12 +32,21 @@ describe('Learning credential secret declaration', () => {
     expect(example).toContain('AES-256-GCM');
   });
 
-  it('wires the bounded Classroom renewal pass into the existing hourly Worker lifecycle', () => {
+  it('isolates the bounded Classroom renewal pass in its own hourly Worker invocation', () => {
     const worker = readFileSync('src/worker.ts', 'utf8');
-    expect(worker).toContain("case ATTENDANCE_CRON:");
-    expect(worker).toContain('runGoogleClassroomRegistrationRenewalPass');
-    expect(worker).toContain('Promise.all([');
-    expect(worker).toContain(']).finally(end)');
+    const attendanceCase = worker.slice(
+      worker.indexOf('case ATTENDANCE_CRON:'),
+      worker.indexOf('case GOOGLE_CLASSROOM_REGISTRATION_CRON:'),
+    );
+    const googleCase = worker.slice(
+      worker.indexOf('case GOOGLE_CLASSROOM_REGISTRATION_CRON:'),
+      worker.indexOf('case BACKUP_CRON:'),
+    );
+    expect(worker).toContain("const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15 * * * *'");
+    expect(attendanceCase).toContain('sendAttendanceEmails(vars, db).finally(end)');
+    expect(attendanceCase).not.toContain('runGoogleClassroomRegistrationRenewalPass');
+    expect(googleCase).toContain('runGoogleClassroomRegistrationRenewalPass(env as never, db).finally(end)');
+    expect(googleCase).not.toContain('sendAttendanceEmails');
     expect(worker).not.toMatch(/learningGoogle[^\n]*(?:retry|backoff|setTimeout)/iu);
   });
 });
