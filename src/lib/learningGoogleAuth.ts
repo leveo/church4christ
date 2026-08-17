@@ -21,6 +21,7 @@ const GOOGLE_CALLBACK_PATH = '/admin/learning/google/callback';
 const MAX_ACCESS_TOKEN_BYTES = 2_048;
 const MAX_REFRESH_TOKEN_BYTES = 512;
 const MAX_GOOGLE_TOKEN_RESPONSE_BYTES = 65_536;
+const GOOGLE_AUTH_HTTP_TIMEOUT_MS = 10_000;
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOCATION_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 
@@ -277,6 +278,42 @@ function authFetcher(value: unknown): GoogleAuthFetcher {
   return value as GoogleAuthFetcher;
 }
 
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new LearningGoogleAuthError());
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      callback();
+    };
+    const abort = (): void => finish(() => reject(new LearningGoogleAuthError()));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      () => finish(() => reject(new LearningGoogleAuthError())),
+    );
+  });
+}
+
+async function withAuthDeadline<T>(
+  parentSignal: AbortSignal,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const parent = authSignal(parentSignal);
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  parent.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, GOOGLE_AUTH_HTTP_TIMEOUT_MS);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    clearTimeout(timer);
+    parent.removeEventListener('abort', abort);
+  }
+}
+
 function clientSecret(value: unknown): string {
   return asciiToken(value, 512);
 }
@@ -290,12 +327,12 @@ async function postGoogleAuth(
   if (url !== GOOGLE_TOKEN_ENDPOINT && url !== GOOGLE_REVOCATION_ENDPOINT) invalid();
   let response: Response;
   try {
-    response = await fetcher(url, {
+    response = await abortable(Promise.resolve().then(() => fetcher(url, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
       signal,
-    });
+    })), signal);
   } catch { return invalid(); }
   if (!(response instanceof Response)) invalid();
   return response;
@@ -326,7 +363,10 @@ async function boundedGoogleTokenJson(response: Response, signal: AbortSignal): 
       invalid();
     }
     let part: ReadableStreamReadResult<Uint8Array>;
-    try { part = await reader.read(); } catch { return invalid(); }
+    try { part = await abortable(reader.read(), signal); } catch {
+      try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+      return invalid();
+    }
     if (part.done) break;
     if (!(part.value instanceof Uint8Array)) invalid();
     length += part.value.byteLength;
@@ -378,9 +418,11 @@ export async function exchangeGoogleAuthorizationCode(rawInput: {
     grant_type: 'authorization_code',
     redirect_uri: redirect,
   });
-  const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, body, fetcher, signal);
-  return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, signal), {
-    nowEpochMs, requireRefreshToken: true, retainedRefreshToken: null,
+  return withAuthDeadline(signal, async (boundedSignal) => {
+    const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, body, fetcher, boundedSignal);
+    return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, boundedSignal), {
+      nowEpochMs, requireRefreshToken: true, retainedRefreshToken: null,
+    });
   });
 }
 
@@ -401,14 +443,16 @@ export async function refreshGoogleAccessToken(rawInput: {
   const fetcher = authFetcher(input.fetcher);
   const signal = authSignal(input.signal);
   const nowEpochMs = epoch(input.nowEpochMs);
-  const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, new URLSearchParams({
-    client_id: id,
-    client_secret: secret,
-    grant_type: 'refresh_token',
-    refresh_token: retainedRefreshToken,
-  }), fetcher, signal);
-  return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, signal), {
-    nowEpochMs, requireRefreshToken: false, retainedRefreshToken,
+  return withAuthDeadline(signal, async (boundedSignal) => {
+    const response = await postGoogleAuth(GOOGLE_TOKEN_ENDPOINT, new URLSearchParams({
+      client_id: id,
+      client_secret: secret,
+      grant_type: 'refresh_token',
+      refresh_token: retainedRefreshToken,
+    }), fetcher, boundedSignal);
+    return normalizeGoogleTokenResponse(await boundedGoogleTokenJson(response, boundedSignal), {
+      nowEpochMs, requireRefreshToken: false, retainedRefreshToken,
+    });
   });
 }
 
@@ -421,11 +465,13 @@ export async function revokeGoogleRefreshToken(rawInput: {
   const refreshToken = asciiToken(input.refreshToken, MAX_REFRESH_TOKEN_BYTES);
   const fetcher = authFetcher(input.fetcher);
   const signal = authSignal(input.signal);
-  const response = await postGoogleAuth(
-    GOOGLE_REVOCATION_ENDPOINT, new URLSearchParams({ token: refreshToken }), fetcher, signal,
-  );
-  try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
-  if (!response.ok) invalid();
+  await withAuthDeadline(signal, async (boundedSignal) => {
+    const response = await postGoogleAuth(
+      GOOGLE_REVOCATION_ENDPOINT, new URLSearchParams({ token: refreshToken }), fetcher, boundedSignal,
+    );
+    try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
+    if (!response.ok) invalid();
+  });
 }
 
 function databaseInteger(value: unknown, minimum = 1): number {

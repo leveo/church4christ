@@ -33,6 +33,10 @@ import {
   type LearningErrorCode,
   type LearningProviderKind,
 } from '../../../lib/learningModel';
+import {
+  checkGoogleClassroomConnectionHealth,
+  disconnectGoogleClassroomConnection,
+} from '../../../lib/learningGoogleAdmin';
 
 export const prerender = false;
 
@@ -52,6 +56,10 @@ interface LearningConnectionActionDeps {
   readonly updateConnection: (db: AppDb, input: UpdateLearningConnectionInput) => Promise<unknown>;
   readonly reconnectConnection: (db: AppDb, input: ReconnectLearningConnectionInput) => Promise<unknown>;
   readonly disconnectConnection: (db: AppDb, input: DisconnectLearningConnectionInput) => Promise<unknown>;
+  readonly disconnectGoogleConnection: (
+    db: AppDb,
+    input: DisconnectLearningConnectionInput,
+  ) => Promise<unknown>;
   readonly loadConnection: (
     db: AppDb,
     connectionId: number,
@@ -62,7 +70,7 @@ interface LearningConnectionActionDeps {
     readonly revision: number;
     readonly status: LearningConnectionStatus;
   } | null>;
-  readonly checkHealth: (input: {
+  readonly checkHealth: (db: AppDb, input: {
     readonly connectionId: number;
     readonly provider: LearningProviderKind;
     readonly baseUrl: string | null;
@@ -83,10 +91,39 @@ const defaultDeps: LearningConnectionActionDeps = {
   updateConnection: updateLearningConnection,
   reconnectConnection: reconnectLearningConnection,
   disconnectConnection: disconnectLearningConnection,
+  disconnectGoogleConnection: async (db, input) => {
+    const vars = env as unknown as {
+      LEARNING_CREDENTIAL_KEYS?: string;
+    };
+    if (typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string') throw new LearningCredentialConfigError();
+    const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
+    return disconnectGoogleClassroomConnection(db, { ...input, keyRing, fetcher: fetch });
+  },
   loadConnection: getLearningConnection,
-  // Provider network calls land in the adapter slices. Until then this safe seam
-  // records an unavailable health result rather than making an ad-hoc request.
-  checkHealth: async () => ({ ok: false, errorCode: 'provider_unavailable' }),
+  checkHealth: async (db, input) => {
+    if (input.provider !== 'google_classroom') {
+      return { ok: false, errorCode: 'provider_unavailable' };
+    }
+    const vars = env as unknown as {
+      GOOGLE_CLASSROOM_CLIENT_ID?: string;
+      GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+      LEARNING_CREDENTIAL_KEYS?: string;
+    };
+    if (
+      typeof vars.GOOGLE_CLASSROOM_CLIENT_ID !== 'string'
+      || typeof vars.GOOGLE_CLASSROOM_CLIENT_SECRET !== 'string'
+      || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+    ) throw new LearningCredentialConfigError();
+    const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
+    return checkGoogleClassroomConnectionHealth(db, {
+      connectionId: input.connectionId,
+      clientId: vars.GOOGLE_CLASSROOM_CLIENT_ID,
+      clientSecret: vars.GOOGLE_CLASSROOM_CLIENT_SECRET,
+      keyRing,
+      fetcher: fetch,
+      nowEpochMs: Date.now(),
+    });
+  },
   updateHealth: updateLearningConnectionHealth,
 };
 
@@ -211,11 +248,20 @@ export function createLearningConnectionActionHandler(
         return redirect('saved', 'connection_reconnected');
       }
       if (data.action === 'disconnect') {
-        await deps.disconnectConnection(locals.db, {
+        const disconnectInput = {
           connectionId: data.connectionId,
           expectedRevision: data.revision,
           actorPersonId: user!.id,
-        });
+        };
+        const connection = await deps.loadConnection(locals.db, data.connectionId, { includeDeleted: false });
+        if (!connection || connection.revision !== data.revision) {
+          return redirect('error', 'connection_conflict');
+        }
+        if (connection.provider === 'google_classroom' && connection.status !== 'pending') {
+          await deps.disconnectGoogleConnection(locals.db, disconnectInput);
+        } else {
+          await deps.disconnectConnection(locals.db, disconnectInput);
+        }
         return redirect('saved', 'connection_disconnected');
       }
 
@@ -226,7 +272,7 @@ export function createLearningConnectionActionHandler(
         || connection.provider !== data.provider
         || connection.status !== data.status
       ) return redirect('error', 'connection_conflict');
-      const health = normalizedHealthResult(await deps.checkHealth({
+      const health = normalizedHealthResult(await deps.checkHealth(locals.db, {
         connectionId: data.connectionId,
         provider: connection.provider,
         baseUrl: connection.baseUrl,

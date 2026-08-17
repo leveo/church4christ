@@ -87,4 +87,33 @@ describe('Google OAuth token and revocation HTTP boundary', () => {
       signal: new AbortController().signal, nowEpochMs: NOW,
     })).rejects.toThrow('learning_google_auth_invalid');
   });
+
+  it('bounds a fetcher that ignores abort and a token response stream that never finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = {
+        clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+        refreshToken: 'refresh-old', signal: new AbortController().signal, nowEpochMs: NOW,
+      };
+      const pendingFetch = refreshGoogleAccessToken({
+        ...base,
+        fetcher: async () => new Promise<Response>(() => undefined),
+      });
+      const pendingFetchAssertion = expect(pendingFetch).rejects.toThrow('learning_google_auth_invalid');
+      await vi.advanceTimersByTimeAsync(10_001);
+      await pendingFetchAssertion;
+
+      const pendingStream = refreshGoogleAccessToken({
+        ...base,
+        fetcher: async () => new Response(new ReadableStream<Uint8Array>({
+          pull: async () => new Promise<void>(() => undefined),
+        })),
+      });
+      const pendingStreamAssertion = expect(pendingStream).rejects.toThrow('learning_google_auth_invalid');
+      await vi.advanceTimersByTimeAsync(10_001);
+      await pendingStreamAssertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

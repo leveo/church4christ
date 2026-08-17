@@ -2,9 +2,12 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../src/lib/appDb';
 import {
+  checkGoogleClassroomConnectionHealth,
+  disconnectGoogleClassroomConnection,
   listGoogleClassroomCourseOptions,
   mapSelectedGoogleClassroomCourse,
 } from '../src/lib/learningGoogleAdmin';
+import { LearningConnectionConflictError, getLearningConnection } from '../src/lib/learningConnectionDb';
 import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../src/lib/learningGoogleAuth';
 import {
   encryptLearningCredential,
@@ -77,5 +80,50 @@ describe('Google Classroom admin authoritative course selection', () => {
       WHERE connection_id=27302 AND external_course_id='course-1'`).first<Record<string, unknown>>();
     expect(stored).toEqual({ display_name: 'Genesis 1', launch_url: 'https://classroom.google.com/c/course-1' });
     expect(JSON.stringify(stored)).not.toMatch(/private-access|private-refresh|private-client-secret/iu);
+  });
+
+  it('checks health through the official Classroom endpoint with an encrypted credential only', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe('https://classroom.googleapis.com');
+      expect(url.pathname).toBe('/v1/courses');
+      expect(url.searchParams.get('pageSize')).toBe('1');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer private-access');
+      return new Response(null, { status: 200 });
+    });
+    await expect(checkGoogleClassroomConnectionHealth(env.DB as AppDb, {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).resolves.toEqual({ ok: true, errorCode: null });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes the refresh token before a CAS disconnect and rejects a stale revision before network access', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://oauth2.googleapis.com/revoke');
+      expect(init?.method).toBe('POST');
+      expect(String(init?.body)).toBe('token=private-refresh');
+      return new Response(null, { status: 200 });
+    });
+    const input = {
+      connectionId: 27302, expectedRevision: 1, actorPersonId: 27301,
+      keyRing: ring, fetcher,
+    };
+    await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, {
+      ...input, expectedRevision: 0,
+    })).rejects.toBeInstanceOf(LearningConnectionConflictError);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    await expect(disconnectGoogleClassroomConnection(env.DB as AppDb, input)).resolves.toMatchObject({
+      connectionId: 27302, provider: 'google_classroom', status: 'disabled', revision: 2,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await getLearningConnection(env.DB as AppDb, 27302, { includeDeleted: true })).toMatchObject({
+      status: 'disabled', deletedAt: expect.any(String),
+    });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=27302`).first()).toEqual({ count: 0 });
   });
 });

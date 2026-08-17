@@ -1,9 +1,15 @@
 import type { AppDb } from './appDb';
-import { getLearningConnection } from './learningConnectionDb';
+import {
+  LearningConnectionConflictError,
+  disconnectLearningConnection,
+  getLearningConnection,
+  type LearningConnectionRecord,
+} from './learningConnectionDb';
 import {
   LearningGoogleAuthConflictError,
   loadGoogleCredential,
   refreshGoogleAccessToken,
+  revokeGoogleRefreshToken,
   rotateGoogleCredential,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
@@ -15,9 +21,11 @@ import {
 import { createGoogleClassroomProvider } from './learningGoogleProvider';
 import {
   LEARNING_LIMITS,
+  LearningProviderError,
   learningValidation,
   type LearningConnectionUrlPolicy,
   type LearningCourse,
+  type LearningErrorCode,
 } from './learningModel';
 import {
   invokeLearningProvider,
@@ -208,6 +216,72 @@ export interface GoogleClassroomCourseOption {
 export interface GoogleClassroomCourseOptions {
   readonly programs: readonly LearningProgramRecord[];
   readonly courses: readonly GoogleClassroomCourseOption[];
+}
+
+export type GoogleClassroomHealthResult =
+  | { readonly ok: true; readonly errorCode: null }
+  | { readonly ok: false; readonly errorCode: LearningErrorCode };
+
+export async function checkGoogleClassroomConnectionHealth(
+  db: AppDb,
+  rawInput: GoogleAdminEnvironment,
+): Promise<GoogleClassroomHealthResult> {
+  try {
+    const context = await providerContext(db, rawInput);
+    await invokeLearningProvider(context.provider, {
+      method: 'healthCheck',
+      request: {
+        subject: { connectionId: context.input.connectionId, provider: 'google_classroom' },
+        operation: operation(context.input.connectionId, context.input.nowEpochMs, null),
+      },
+      now: () => context.input.nowEpochMs + 1,
+    });
+    return Object.freeze({ ok: true, errorCode: null });
+  } catch (error) {
+    if (error instanceof LearningProviderError) {
+      return Object.freeze({ ok: false, errorCode: error.code });
+    }
+    return Object.freeze({ ok: false, errorCode: 'authentication_required' });
+  }
+}
+
+export async function disconnectGoogleClassroomConnection(
+  db: AppDb,
+  rawInput: {
+    readonly connectionId: number;
+    readonly expectedRevision: number;
+    readonly actorPersonId: number;
+    readonly keyRing: LearningCredentialKeyRing;
+    readonly fetcher: AdminFetcher;
+  },
+): Promise<LearningConnectionRecord> {
+  let input: Record<string, unknown>;
+  try {
+    input = learningValidation.exactRecord(rawInput, [
+      'connectionId', 'expectedRevision', 'actorPersonId', 'keyRing', 'fetcher',
+    ]);
+  } catch { return invalid(); }
+  const connectionId = integer(input.connectionId);
+  const expectedRevision = learningValidation.integer(input.expectedRevision, 0, LEARNING_LIMITS.databaseInteger);
+  const actorPersonId = integer(input.actorPersonId);
+  if (typeof input.fetcher !== 'function') invalid();
+  const connection = await getLearningConnection(db, connectionId, { includeDeleted: false });
+  if (
+    !connection
+    || connection.provider !== 'google_classroom'
+    || connection.revision !== expectedRevision
+    || connection.status === 'disabled'
+  ) throw new LearningConnectionConflictError();
+  const loaded = await loadGoogleCredential(db, {
+    connectionId,
+    keyRing: input.keyRing as LearningCredentialKeyRing,
+  });
+  await revokeGoogleRefreshToken({
+    refreshToken: loaded.credential.refreshToken,
+    fetcher: input.fetcher as AdminFetcher,
+    signal: new AbortController().signal,
+  });
+  return disconnectLearningConnection(db, { connectionId, expectedRevision, actorPersonId });
 }
 
 export async function listGoogleClassroomCourseOptions(

@@ -47,6 +47,7 @@ const deps = () => ({
   updateConnection: vi.fn(async () => ({ connectionId: 401 })),
   reconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
   disconnectConnection: vi.fn(async () => ({ connectionId: 401 })),
+  disconnectGoogleConnection: vi.fn(async () => ({ connectionId: 401 })),
   loadConnection: vi.fn(async () => ({
     provider: 'canvas' as const, baseUrl: 'https://canvas.test', revision: 0, status: 'active' as const,
   })),
@@ -239,6 +240,27 @@ describe('Learning connection action HTTP boundary', () => {
     expect(injected.createConnection).toHaveBeenCalledWith({}, expect.objectContaining({
       provider: 'google_classroom', baseUrl: null, credential: null,
     }));
+  });
+
+  it('routes an authorized active Google disconnect through refresh-token revocation', async () => {
+    const injected = deps();
+    injected.loadConnection.mockResolvedValue({
+      provider: 'google_classroom', baseUrl: null, revision: 0, status: 'active',
+    } as never);
+    const handler = createLearningConnectionActionHandler(injected);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=disconnect&connection_id=401&revision=0',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(response.headers.get('location')).toBe('/admin/learning?saved=connection_disconnected');
+    expect(injected.disconnectGoogleConnection).toHaveBeenCalledWith({}, {
+      connectionId: 401, expectedRevision: 0, actorPersonId: 7,
+    });
+    expect(injected.disconnectConnection).not.toHaveBeenCalled();
   });
 
   it('maps malformed, stale, keyring, and unknown failures to fixed codes without secret leakage', async () => {
