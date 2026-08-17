@@ -1651,10 +1651,6 @@ export function invokeLearningProvider(
   rawProvider: LearningProvider,
   invocation: Extract<LearningProviderInvocation, { method: 'normalizeNotification' }>,
 ): Promise<LearningProviderNotification | null>;
-export function invokeLearningProvider(
-  rawProvider: LearningProvider,
-  rawInvocation: unknown,
-): Promise<LearningProviderInvocationResult>;
 export async function invokeLearningProvider(
   rawProvider: LearningProvider,
   rawInvocation: unknown,

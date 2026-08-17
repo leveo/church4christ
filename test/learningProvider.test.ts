@@ -1825,6 +1825,35 @@ describe('provider-neutral interface implementability', () => {
     expectTypeOf<'measurement' extends keyof ClosedCoursePage ? true : false>().toEqualTypeOf<false>();
   });
 
+  it('makes URL-policy presence method-specific at the public invocation boundary', () => {
+    const healthRequestValue = null as unknown as LearningHealthRequest;
+    const courseRequestValue = null as unknown as LearningListCoursesRequest;
+    const notificationRequestValue = null as unknown as LearningNormalizeNotificationRequest;
+    if (false) {
+      // @ts-expect-error listCourses requires its connection URL policy.
+      invokeLearningProvider(canvasProvider, { method: 'listCourses', request: courseRequestValue, now: () => NOW });
+      // @ts-expect-error healthCheck must not accept a URL policy.
+      invokeLearningProvider(canvasProvider, { method: 'healthCheck', request: healthRequestValue, now: () => NOW, urlPolicy: URL_POLICY });
+      // @ts-expect-error notification normalization must not accept a URL policy.
+      invokeLearningProvider(canvasProvider, { method: 'normalizeNotification', request: notificationRequestValue, now: () => NOW, urlPolicy: URL_POLICY });
+    }
+
+    const healthInvoke = (request: LearningHealthRequest) => invokeLearningProvider(canvasProvider, {
+      method: 'healthCheck', request, now: () => NOW,
+    });
+    const coursesInvoke = (request: LearningListCoursesRequest) => invokeLearningProvider(canvasProvider, {
+      method: 'listCourses', request, now: () => NOW, urlPolicy: URL_POLICY,
+    });
+    const notificationInvoke = (request: LearningNormalizeNotificationRequest) => invokeLearningProvider(
+      canvasProvider, { method: 'normalizeNotification', request, now: () => NOW },
+    );
+    expectTypeOf<ReturnType<typeof healthInvoke>>().toEqualTypeOf<Promise<LearningProviderHealth>>();
+    expectTypeOf<ReturnType<typeof coursesInvoke>>()
+      .toEqualTypeOf<Promise<LearningProviderPage<LearningCourse>>>();
+    expectTypeOf<ReturnType<typeof notificationInvoke>>()
+      .toEqualTypeOf<Promise<LearningProviderNotification | null>>();
+  });
+
   it('executes representative submission adapters without any local identity data', async () => {
     const googleOperation = normalizedOperation({
       scope: {
