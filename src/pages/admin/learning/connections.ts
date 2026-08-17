@@ -110,7 +110,7 @@ const defaultDeps: LearningConnectionActionDeps = {
       keyRing,
       fetcher: fetch,
       nowEpochMs: Date.now(),
-    });
+    }, { now: Date.now });
   },
   loadConnection: getLearningConnection,
   checkHealth: async (db, input) => {

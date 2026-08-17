@@ -14,6 +14,12 @@ const MAX_CLEANUP_TASKS = 8;
 
 type CleanupFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+export interface GoogleCleanupClock {
+  readonly now: () => number;
+}
+
+const DEFAULT_CLOCK: GoogleCleanupClock = Object.freeze({ now: Date.now });
+
 export class LearningGoogleCleanupError extends Error {
   readonly code = 'learning_google_cleanup_failed' as const;
   constructor() {
@@ -43,6 +49,11 @@ function externalId(value: unknown): string {
 function epoch(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) invalid();
   return value as number;
+}
+
+function freshEpoch(clock: GoogleCleanupClock): number {
+  if (!clock || typeof clock !== 'object' || typeof clock.now !== 'function') invalid();
+  return epoch(clock.now());
 }
 
 function uuid(): string {
@@ -82,10 +93,12 @@ export async function cleanupGoogleClassroomRegistrationTask(
     readonly signal: AbortSignal;
     readonly nowEpochMs: number;
   },
+  clock: GoogleCleanupClock = DEFAULT_CLOCK,
 ): Promise<boolean> {
   const connectionId = integer(input.connectionId);
   const registrationId = externalId(input.registrationId);
-  const now = epoch(input.nowEpochMs);
+  epoch(input.nowEpochMs);
+  const now = freshEpoch(clock);
   if (typeof input.fetcher !== 'function' || !(input.signal instanceof AbortSignal) || input.signal.aborted) invalid();
   const marker = uuid();
   const claimed = await db.prepare(`UPDATE learning_google_cleanup_tasks SET
@@ -130,12 +143,15 @@ export async function drainGoogleClassroomRegistrationCleanup(
     readonly signal: AbortSignal;
     readonly nowEpochMs: number;
     readonly limit: number;
+    readonly disconnectClaimMarker: string | null;
   },
+  clock: GoogleCleanupClock = DEFAULT_CLOCK,
 ): Promise<GoogleCleanupDrainSummary> {
   const connectionId = integer(input.connectionId);
   const limit = integer(input.limit);
   if (limit > MAX_CLEANUP_TASKS) invalid();
-  const now = new Date(epoch(input.nowEpochMs)).toISOString();
+  epoch(input.nowEpochMs);
+  const now = new Date(freshEpoch(clock)).toISOString();
   const result = await db.prepare(`SELECT registration_id FROM learning_google_cleanup_tasks
     WHERE connection_id=?1 AND task_type='registration'
       AND (claim_marker IS NULL OR claim_expires_at<=?2)
@@ -144,9 +160,15 @@ export async function drainGoogleClassroomRegistrationCleanup(
   let cleaned = 0;
   let pending = 0;
   for (const registrationId of selected) {
+    if (input.disconnectClaimMarker !== null) {
+      const live = await heartbeatDisconnectTask(
+        db, connectionId, input.disconnectClaimMarker, freshEpoch(clock),
+      );
+      if (!live) throw new LearningGoogleCleanupConflictError();
+    }
     const completed = await cleanupGoogleClassroomRegistrationTask(db, {
       ...input, connectionId, registrationId,
-    });
+    }, clock);
     if (completed) cleaned += 1;
     else {
       pending += 1;
@@ -232,6 +254,21 @@ async function claimDisconnectTask(
   return rows(result, 1).length === 1 ? marker : null;
 }
 
+async function heartbeatDisconnectTask(
+  db: AppDb,
+  connectionId: number,
+  marker: string,
+  nowEpochMs: number,
+): Promise<boolean> {
+  const now = new Date(nowEpochMs).toISOString();
+  const result = await db.prepare(`UPDATE learning_google_cleanup_tasks SET claim_expires_at=?1
+    WHERE connection_id=?2 AND task_type='disconnect' AND claim_marker=?3 AND claim_expires_at>?4
+    RETURNING id`).bind(
+    new Date(nowEpochMs + CLAIM_TTL_MS).toISOString(), connectionId, marker, now,
+  ).run();
+  return rows(result, 1).length === 1;
+}
+
 async function releaseDisconnectTask(db: AppDb, connectionId: number, marker: string): Promise<void> {
   await db.prepare(`UPDATE learning_google_cleanup_tasks SET claim_marker=NULL,claim_expires_at=NULL
     WHERE connection_id=?1 AND task_type='disconnect' AND claim_marker=?2`).bind(connectionId, marker).run();
@@ -275,11 +312,14 @@ export async function recoverGoogleClassroomCleanup(
     readonly nowEpochMs: number;
     readonly limit: number;
   },
+  clock: GoogleCleanupClock = DEFAULT_CLOCK,
 ): Promise<GoogleCleanupDrainSummary & { readonly finalizedDisconnect: boolean }> {
   const connectionId = integer(input.connectionId);
   const now = epoch(input.nowEpochMs);
   const loaded = await loadGoogleCredentialForCleanup(db, { connectionId, keyRing: input.keyRing });
-  const disconnectMarker = loaded.status === 'disabled' ? await claimDisconnectTask(db, connectionId, now) : null;
+  const disconnectMarker = loaded.status === 'disabled'
+    ? await claimDisconnectTask(db, connectionId, freshEpoch(clock))
+    : null;
   if (loaded.status === 'disabled' && disconnectMarker === null) {
     return Object.freeze({ selected: 0, cleaned: 0, pending: 0, finalizedDisconnect: false });
   }
@@ -313,7 +353,8 @@ export async function recoverGoogleClassroomCleanup(
       signal: input.signal,
       nowEpochMs: now,
       limit: input.limit,
-    });
+      disconnectClaimMarker: disconnectMarker,
+    }, clock);
     if (disconnectMarker === null) return Object.freeze({ ...drained, finalizedDisconnect: false });
     const remaining = await db.prepare(`SELECT COUNT(*) AS count FROM learning_google_cleanup_tasks
       WHERE connection_id=?1 AND task_type='registration'`).bind(connectionId).first<number>('count');
@@ -321,6 +362,9 @@ export async function recoverGoogleClassroomCleanup(
     if (drained.pending > 0 || remaining !== 0) {
       await releaseDisconnectTask(db, connectionId, disconnectMarker);
       return Object.freeze({ ...drained, finalizedDisconnect: false });
+    }
+    if (!await heartbeatDisconnectTask(db, connectionId, disconnectMarker, freshEpoch(clock))) {
+      throw new LearningGoogleCleanupConflictError();
     }
     await revokeGoogleRefreshToken({ refreshToken, fetcher: input.fetcher, signal: input.signal });
     await finalizeDisconnectTask(db, connectionId, disconnectMarker, false);

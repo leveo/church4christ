@@ -6,7 +6,10 @@ import {
   rotateGoogleCredential,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
-import { cleanupGoogleClassroomRegistrationTask } from './learningGoogleCleanup';
+import {
+  cleanupGoogleClassroomRegistrationTask,
+  type GoogleCleanupClock,
+} from './learningGoogleCleanup';
 import type { LearningMappedCourseRecord } from './learningDb';
 import {
   LEARNING_LIMITS,
@@ -512,6 +515,7 @@ export async function renewGoogleClassroomRegistrations(
     readonly topicName: string;
     readonly signal: AbortSignal;
   },
+  clock: GoogleCleanupClock = Object.freeze({ now: Date.now }),
 ): Promise<GoogleRegistrationRenewalSummary> {
   const input = exact(rawInput, [
     'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs', 'topicName', 'signal',
@@ -575,7 +579,7 @@ export async function renewGoogleClassroomRegistrations(
         fetcher: input.fetcher as RegistrationFetcher,
         signal: input.signal as AbortSignal,
         nowEpochMs: now,
-      });
+      }, clock);
     } catch (error) {
       if (replacement !== null) {
         try {

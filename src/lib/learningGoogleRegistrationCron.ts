@@ -44,6 +44,7 @@ interface GoogleClassroomRegistrationCronDeps {
       readonly topicName: string;
       readonly signal: AbortSignal;
     },
+    clock?: { readonly now: () => number },
   ) => Promise<GoogleRegistrationRenewalSummary>;
   readonly listCleanupConnectionIds?: typeof listGoogleClassroomCleanupConnectionIds;
   readonly recoverCleanup?: typeof recoverGoogleClassroomCleanup;
@@ -107,7 +108,7 @@ export async function runGoogleClassroomRegistrationRenewalPass(
             nowEpochMs: now,
             signal: controller.signal,
             limit: 1,
-          });
+          }, { now: dependencies.now });
         } catch { /* the durable task remains available to a later bounded pass */ }
       }
     }
@@ -122,7 +123,7 @@ export async function runGoogleClassroomRegistrationRenewalPass(
       nowEpochMs: now,
       topicName: pushReadiness.topicName,
       signal: controller.signal,
-    });
+    }, { now: dependencies.now });
     return Object.freeze({ status: 'completed', summary });
   } finally {
     clearTimeout(timer);

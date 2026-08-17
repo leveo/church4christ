@@ -15,6 +15,7 @@ import type { LearningCredentialKeyRing } from './learningCredentials';
 import {
   cleanupGoogleClassroomRegistrationTask,
   commitGoogleClassroomDisconnect,
+  type GoogleCleanupClock,
   recoverGoogleClassroomCleanup,
 } from './learningGoogleCleanup';
 import {
@@ -306,6 +307,7 @@ export async function disconnectGoogleClassroomConnection(
     readonly fetcher: AdminFetcher;
     readonly nowEpochMs: number;
   },
+  clock: GoogleCleanupClock = Object.freeze({ now: Date.now }),
 ): Promise<LearningConnectionRecord> {
   let input: Record<string, unknown>;
   try {
@@ -353,7 +355,7 @@ export async function disconnectGoogleClassroomConnection(
     signal: new AbortController().signal,
     nowEpochMs: adminEnvironment.nowEpochMs,
     limit: 8,
-  });
+  }, clock);
   if (cleanup.pending > 0) invalid();
   const disconnected = (await getLearningConnection(db, connectionId, { includeDeleted: true })) ?? invalid();
   if (disconnected.status !== 'disabled' || disconnected.revision !== expectedRevision + 1) invalid();
