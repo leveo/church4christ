@@ -46,6 +46,18 @@ const ENROLLMENT = Object.freeze({
   }),
   role: 'student' as const, state: 'active' as const,
 });
+function preResolvedPerson(enrollment: LearningProviderEnrollment, personId: number) {
+  return Object.freeze({
+    connectionId: enrollment.connectionId,
+    provider: enrollment.provider,
+    externalCourseId: enrollment.externalCourseId,
+    externalUserId: enrollment.externalUserId,
+    externalEnrollmentId: enrollment.externalEnrollmentId,
+    personId,
+  });
+}
+const PRE_RESOLVED_PEOPLE = Object.freeze([preResolvedPerson(ENROLLMENT, 9012)]);
+const NO_PRE_RESOLVED_PEOPLE = Object.freeze([]);
 const ACTIVITIES = Object.freeze([
   {
     connectionId: 901, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalActivityId: 'lesson-video',
@@ -162,6 +174,7 @@ function fakeProvider(options: {
   activities?: readonly LearningActivity[];
   resourcesByActivity?: Readonly<Record<string, readonly LearningResource[]>>;
   emptyEnrollments?: boolean;
+  enrollments?: readonly LearningProviderEnrollment[];
 } = {}): LearningProvider {
   return {
     provider: 'canvas',
@@ -173,7 +186,8 @@ function fakeProvider(options: {
       return COURSE;
     },
     async syncEnrollments(request) {
-      return page<LearningProviderEnrollment>(options.emptyEnrollments ? [] : [ENROLLMENT], request, { kind: 'provider_enrollments' });
+      const enrollments = options.enrollments ?? (options.emptyEnrollments ? [] : [ENROLLMENT]);
+      return page<LearningProviderEnrollment>(enrollments, request, { kind: 'provider_enrollments' });
     },
     async syncActivities(request) {
       if (options.activities) return page<LearningActivity>(options.activities, request, { kind: 'activities', urlPolicy: POLICY });
@@ -283,6 +297,19 @@ describe('Learning provider orchestration', () => {
     ...tenBoundaryActivities, materialActivity(11),
   ]);
   const boundaryResource = materialResource(tenBoundaryActivities[0], 1);
+  const fiveEnrollments = Object.freeze(Array.from({ length: 5 }, (_, index) => {
+    const externalUserId = `opaque-budget-user-${index + 1}`;
+    return Object.freeze({
+      ...ENROLLMENT,
+      externalUserId,
+      externalEnrollmentId: learningSyntheticEnrollmentId({
+        provider: 'canvas', externalCourseId: 'genesis-1', externalUserId,
+      }),
+    });
+  }));
+  const fivePreResolvedPeople = Object.freeze(fiveEnrollments.map(
+    (enrollment, index) => preResolvedPerson(enrollment, 9101 + index),
+  ));
 
   it.each([
     {
@@ -307,16 +334,18 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
       courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
       operation: operation(100), now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     });
     const { db, metrics } = freePlanBudgetDb();
     const failed = synchronizeLearningCourse(db, {
       provider: fakeProvider({ activities, resourcesByActivity, emptyEnrollments: true }),
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'scheduled', operation: operation(100),
-      now: () => NOW_EPOCH, resolvePerson: async () => null,
+      now: () => NOW_EPOCH, preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
     });
-    await expect(failed).rejects.toMatchObject({ code: 'provider_unavailable', provider: 'canvas' });
+    await expect(failed).rejects.toMatchObject({
+      code: 'pagination_limit', provider: 'canvas', httpStatus: null, retryAfterSeconds: null,
+    });
     await expect(failed).rejects.not.toThrow(/planned-material|planned-resource|test_d1/i);
     expect(metrics.overQueryAttempts).toEqual([]);
     expect(metrics.overBindAttempts).toEqual([]);
@@ -326,7 +355,7 @@ describe('Learning provider orchestration', () => {
       results: [{ external_activity_id: 'lesson-video' }, { external_activity_id: 'quiz-1' }],
     });
     expect(await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs
-      ORDER BY id DESC LIMIT 1`).first()).toEqual({ status: 'failed', error_code: 'provider_unavailable' });
+      ORDER BY id DESC LIMIT 1`).first()).toEqual({ status: 'failed', error_code: 'pagination_limit' });
     expect(await env.DB.prepare(`SELECT operation_marker,operation_expires_at
       FROM learning_provider_connections WHERE id=901`).first())
       .toEqual({ operation_marker: null, operation_expires_at: null });
@@ -339,11 +368,64 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
       courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
       operation: operation(100), now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 5 });
     expect(metrics.overQueryAttempts).toEqual([]);
     expect(metrics.overBindAttempts).toEqual([]);
     expect(metrics.queryCount).toBeLessThanOrEqual(50);
+  });
+
+  it('does not charge per-enrollment D1 queries for separately preloaded People mappings', async () => {
+    const mapped = await seed();
+    const { db, metrics } = freePlanBudgetDb();
+    await expect(synchronizeLearningCourse(db, {
+      provider: fakeProvider({ onlyEnrollment: true, enrollments: fiveEnrollments }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(100),
+      now: () => NOW_EPOCH, preResolvedPeople: fivePreResolvedPeople,
+    })).rejects.toMatchObject({
+      code: 'pagination_limit', provider: 'canvas', httpStatus: null, retryAfterSeconds: null,
+    });
+    expect(metrics.batchSizes).toEqual([3, 4]);
+    expect(metrics.singleQueryAttempts).toBe(0);
+    expect(metrics.overQueryAttempts).toEqual([]);
+    expect(metrics.queryCount).toBe(7);
+    expect(await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs`).first())
+      .toEqual({ status: 'failed', error_code: 'pagination_limit' });
+  });
+
+  it.each([
+    {
+      name: 'an unfrozen mapping array',
+      people: [PRE_RESOLVED_PEOPLE[0]],
+    },
+    {
+      name: 'a cross-course mapping',
+      people: Object.freeze([Object.freeze({
+        ...PRE_RESOLVED_PEOPLE[0], externalCourseId: 'other-course',
+      })]),
+    },
+    {
+      name: 'an alternate duplicate person mapping',
+      people: Object.freeze([
+        PRE_RESOLVED_PEOPLE[0],
+        Object.freeze({
+          ...PRE_RESOLVED_PEOPLE[0], externalUserId: 'alternate-user',
+          externalEnrollmentId: 'alternate-enrollment',
+        }),
+      ]),
+    },
+  ])('rejects $name before provider work or persistence', async ({ people }) => {
+    const mapped = await seed();
+    let providerCalls = 0;
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onSyncCourse: () => { providerCalls += 1; } }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
+      now: () => NOW_EPOCH, preResolvedPeople: people,
+    })).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
+    expect(providerCalls).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
   });
 
   it('counts expired recovery as four queries for the winner and five for a loser', async () => {
@@ -386,7 +468,7 @@ describe('Learning provider orchestration', () => {
       }),
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'scheduled',
-      operation: operation(100), now: () => NOW_EPOCH, resolvePerson: async () => null,
+      operation: operation(100), now: () => NOW_EPOCH, preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
     })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 11 });
     expect(accepted.metrics.batchSizes).toEqual([3, 42]);
     expect(accepted.metrics.singleQueryAttempts).toBe(0);
@@ -398,8 +480,10 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider({ activities: elevenBoundaryActivities, emptyEnrollments: true }),
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'scheduled',
-      operation: operation(100), now: () => NOW_EPOCH, resolvePerson: async () => null,
-    })).rejects.toMatchObject({ code: 'provider_unavailable', provider: 'canvas' });
+      operation: operation(100), now: () => NOW_EPOCH, preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
+    })).rejects.toMatchObject({
+      code: 'pagination_limit', provider: 'canvas', httpStatus: null, retryAfterSeconds: null,
+    });
     expect(rejected.metrics.batchSizes).toEqual([3, 4]);
     expect(rejected.metrics.singleQueryAttempts).toBe(0);
     expect(rejected.metrics.overQueryAttempts).toEqual([]);
@@ -418,7 +502,7 @@ describe('Learning provider orchestration', () => {
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'manual',
       operation: { ...operation(), maxItems: 51 }, now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
     expect(providerCalls).toBe(0);
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
@@ -441,7 +525,7 @@ describe('Learning provider orchestration', () => {
           externalActivityId: null, externalEnrollmentId: null,
         },
       },
-      now: () => NOW_EPOCH, resolvePerson: async () => null,
+      now: () => NOW_EPOCH, preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
       unexpectedField: 'reject-before-persistence',
     } as never)).rejects.toMatchObject({ code: 'invalid_request', provider: 'google_classroom' });
   });
@@ -452,7 +536,7 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider({ crossKindCollision: true }), urlPolicy: POLICY,
       connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(), now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).resolves.toMatchObject({ status: 'succeeded', scannedCount: 2 });
 
     const rawKeyBudget = learningValidation.utf8Bytes(learningProviderEnrollmentSubjectKey(ENROLLMENT));
@@ -461,52 +545,31 @@ describe('Learning provider orchestration', () => {
       connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'scheduled',
       operation: { ...operation(), maxUniqueKeyBytes: rawKeyBudget }, now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'canvas' });
     expect(learningActivitySubjectKey({ ...ACTIVITIES[0], externalActivityId: ENROLLMENT.externalEnrollmentId }))
       .toBe(learningProviderEnrollmentSubjectKey({ ...ENROLLMENT, externalEnrollmentId: ENROLLMENT.externalEnrollmentId }));
   });
 
-  it('races every pending People resolution against caller cancellation and deadline', async () => {
+  it('rejects a legacy async or thenable People resolver before provider work or persistence', async () => {
     const mapped = await seed();
-    const controller = new AbortController();
-    const cancelled = synchronizeLearningCourse(env.DB, {
-      provider: fakeProvider({ onlyEnrollment: true }), urlPolicy: POLICY,
+    let providerCalls = 0;
+    let resolverCalls = 0;
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onlyEnrollment: true, onSyncCourse: () => { providerCalls += 1; } }), urlPolicy: POLICY,
       connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
-      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(20, controller.signal),
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
       now: () => NOW_EPOCH,
-      resolvePerson: async () => {
-        controller.abort();
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return { personId: 9012 };
+      resolvePerson: () => {
+        resolverCalls += 1;
+        return {
+          then(resolve: (value: { personId: number }) => void) { resolve({ personId: 9012 }); },
+        };
       },
-    });
-    const earlyCancellation = await Promise.race([
-      cancelled.catch((error: unknown) => error),
-      new Promise((resolve) => setTimeout(() => resolve('resolver_still_pending'), 20)),
-    ]);
-    expect(earlyCancellation).toMatchObject({ code: 'cancelled', provider: 'canvas' });
-    await cancelled.catch(() => undefined);
-
-    const deadlineOperation = {
-      ...operation(), deadlineAt: '2026-08-17T12:00:00.010Z',
-    };
-    const timedOut = synchronizeLearningCourse(env.DB, {
-      provider: fakeProvider({ onlyEnrollment: true }), urlPolicy: POLICY,
-      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
-      externalCourseId: 'genesis-1', trigger: 'scheduled', operation: deadlineOperation,
-      now: () => NOW_EPOCH,
-      resolvePerson: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return { personId: 9012 };
-      },
-    });
-    const earlyTimeout = await Promise.race([
-      timedOut.catch((error: unknown) => error),
-      new Promise((resolve) => setTimeout(() => resolve('resolver_still_pending'), 30)),
-    ]);
-    expect(earlyTimeout).toMatchObject({ code: 'timeout', provider: 'canvas' });
-    await timedOut.catch(() => undefined);
+    } as never)).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
+    expect(providerCalls).toBe(0);
+    expect(resolverCalls).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
   });
 
   it('preserves bounded provider retry metadata for Task 10 without retrying or sleeping here', async () => {
@@ -519,7 +582,7 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider({ providerError: failure, onSyncCourse: () => { calls += 1; } }),
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
-      now: () => NOW_EPOCH, resolvePerson: async () => ({ personId: 9012 }),
+      now: () => NOW_EPOCH, preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({
       code: 'rate_limited', provider: 'canvas', httpStatus: 429, retryAfterSeconds: 17,
     });
@@ -553,7 +616,7 @@ describe('Learning provider orchestration', () => {
       operation: {
         ...operation(20, controller.signal), deadlineAt: new Date(deadline).toISOString(),
       },
-      now: () => clock, resolvePerson: async () => ({ personId: 9012 }),
+      now: () => clock, preResolvedPeople: PRE_RESOLVED_PEOPLE,
     });
     await expect(sync).rejects.toMatchObject({
       code: expectedCode, provider: 'canvas',
@@ -578,7 +641,7 @@ describe('Learning provider orchestration', () => {
       },
       connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
-      now: () => NOW_EPOCH, resolvePerson: async () => ({ personId: 9012 }),
+      now: () => NOW_EPOCH, preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
     expect(providerCalls).toBe(0);
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
@@ -602,25 +665,21 @@ describe('Learning provider orchestration', () => {
         },
       },
       now: () => Number.NaN,
-      resolvePerson: async () => null,
+      preResolvedPeople: NO_PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'invalid_request', provider: 'google_classroom' });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
   });
 
-  it('paginates an injected provider, resolves People at the app seam, and commits one complete generation', async () => {
+  it('paginates an injected provider and commits a separately pre-resolved People generation', async () => {
     const mapped = await seed();
-    const resolutions: unknown[] = [];
     const result = await synchronizeLearningCourse(env.DB, {
       provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
       courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
-      now: () => NOW_EPOCH,
-      resolvePerson: async (subject) => { resolutions.push(subject); return { personId: 9012 }; },
+      now: () => NOW_EPOCH, preResolvedPeople: PRE_RESOLVED_PEOPLE,
     });
     expect(result).toMatchObject({ status: 'succeeded', scannedCount: 5 });
-    expect(resolutions).toEqual([{
-      connectionId: 901, provider: 'canvas', externalCourseId: 'genesis-1',
-      externalUserId: 'opaque-user-1', externalEnrollmentId: ENROLLMENT.externalEnrollmentId,
-    }]);
+    expect(await env.DB.prepare(`SELECT i.person_id FROM learning_enrollments e
+      JOIN learning_identity_links i ON i.id=e.identity_link_id`).first()).toEqual({ person_id: 9012 });
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities`).first()).toEqual({ count: 2 });
     expect(await env.DB.prepare(`SELECT status FROM learning_submission_snapshots`).first()).toEqual({ status: 'submitted' });
     const databaseText = JSON.stringify((await env.DB.prepare(`SELECT * FROM learning_sync_runs`).all()).results);
@@ -632,7 +691,7 @@ describe('Learning provider orchestration', () => {
     const base = {
       urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas' as const,
       courseId: mapped.courseId, externalCourseId: 'genesis-1', operation: operation(), now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     };
     await synchronizeLearningCourse(env.DB, { ...base, provider: fakeProvider(), trigger: 'manual' });
     const failed = synchronizeLearningCourse(env.DB, {
@@ -650,7 +709,7 @@ describe('Learning provider orchestration', () => {
     await expect(synchronizeLearningCourse(env.DB, {
       provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
       courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(2),
-      now: () => NOW_EPOCH, resolvePerson: async () => ({ personId: 9012 }),
+      now: () => NOW_EPOCH, preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'pagination_limit' });
     expect(JSON.stringify((await env.DB.prepare(`SELECT * FROM learning_sync_runs`).all()).results))
       .not.toContain('next-secret-token');
@@ -665,7 +724,7 @@ describe('Learning provider orchestration', () => {
       provider: fakeProvider(), urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas',
       courseId: mapped.courseId, externalCourseId: 'genesis-1', trigger: 'manual',
       operation: operation(20, controller.signal), now: () => NOW_EPOCH,
-      resolvePerson: async () => ({ personId: 9012 }),
+      preResolvedPeople: PRE_RESOLVED_PEOPLE,
     })).rejects.toMatchObject({ code: 'cancelled' });
     expect(await env.DB.prepare(`SELECT status,error_code FROM learning_sync_runs`).first())
       .toEqual({ status: 'cancelled', error_code: null });

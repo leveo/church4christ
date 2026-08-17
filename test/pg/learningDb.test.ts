@@ -569,7 +569,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       provider: orchestrationProvider(true), urlPolicy: POLICY,
       connectionId: 801, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'manual', operation: pgOperation(undefined, 1),
-      now: () => Date.parse(NOW), resolvePerson: async () => null,
+      now: () => Date.parse(NOW), preResolvedPeople: Object.freeze([]),
     })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'canvas' });
     expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs ORDER BY id DESC LIMIT 1`))[0])
       .toEqual({ status: 'failed', error_code: 'pagination_limit' });
@@ -580,7 +580,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       provider: orchestrationProvider(), urlPolicy: POLICY,
       connectionId: 801, providerKind: 'canvas', courseId: mapped.courseId,
       externalCourseId: 'genesis-1', trigger: 'scheduled', operation: pgOperation(controller.signal),
-      now: () => Date.parse(NOW), resolvePerson: async () => null,
+      now: () => Date.parse(NOW), preResolvedPeople: Object.freeze([]),
     })).rejects.toMatchObject({ code: 'cancelled', provider: 'canvas' });
     expect((await sql.unsafe(`SELECT status,error_code FROM learning_sync_runs ORDER BY id DESC LIMIT 1`))[0])
       .toEqual({ status: 'cancelled', error_code: null });
@@ -618,7 +618,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       operation: {
         ...pgOperation(controller.signal), deadlineAt: new Date(deadline).toISOString(),
       },
-      now: () => clock, resolvePerson: async () => null,
+      now: () => clock, preResolvedPeople: Object.freeze([]),
     });
     const error = await sync.catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(LearningSynchronizationError);

@@ -1,5 +1,6 @@
 import type { AppDb } from './appDb';
 import {
+  LearningAtomicLimitError,
   LearningIdentityConflictError,
   LEARNING_MAX_ATOMIC_ENTITIES,
   LearningPersistenceError,
@@ -63,15 +64,17 @@ export class LearningSynchronizationError extends Error {
   }
 }
 
-export interface LearningIdentityResolutionSubject {
+/**
+ * Query-free People identity input prepared by the caller in a separate,
+ * explicitly budgeted phase. The containing array and every entry must be
+ * frozen before synchronization starts.
+ */
+export interface PreResolvedLearningPerson {
   readonly connectionId: number;
   readonly provider: LearningProviderKind;
   readonly externalCourseId: string;
   readonly externalUserId: string;
   readonly externalEnrollmentId: string;
-}
-
-export interface LearningIdentityResolution {
   readonly personId: number;
 }
 
@@ -85,9 +88,8 @@ export interface SynchronizeLearningCourseInput {
   readonly trigger: LearningSyncTrigger;
   readonly operation: LearningOperationContext;
   readonly now: () => number;
-  readonly resolvePerson: (
-    subject: LearningIdentityResolutionSubject,
-  ) => Promise<LearningIdentityResolution | null>;
+  /** Caller-preloaded, query-free People mappings; the array and entries must be frozen. */
+  readonly preResolvedPeople: readonly PreResolvedLearningPerson[];
 }
 
 interface GlobalBudget {
@@ -226,69 +228,82 @@ function subjectFor(operation: LearningOperationContext) {
   });
 }
 
-async function resolveEnrollments(
-  enrollments: readonly LearningProviderEnrollment[],
-  resolver: SynchronizeLearningCourseInput['resolvePerson'],
+function normalizePreResolvedPeople(
+  value: unknown,
   operation: LearningOperationContext,
-  now: () => number,
-): Promise<readonly ResolvedLearningEnrollment[]> {
-  const resolved: ResolvedLearningEnrollment[] = [];
-  for (const providerEnrollment of enrollments) {
-    let result: unknown;
-    try {
-      const resolution = Promise.resolve().then(() => resolver(Object.freeze({
-        connectionId: providerEnrollment.connectionId,
-        provider: providerEnrollment.provider,
-        externalCourseId: providerEnrollment.externalCourseId,
-        externalUserId: providerEnrollment.externalUserId,
-        externalEnrollmentId: providerEnrollment.externalEnrollmentId,
-      })));
-      result = await raceWithOperation(resolution, operation, now);
-    } catch (error) {
-      if (error instanceof LearningSynchronizationError) throw error;
-      throw new LearningSynchronizationError('provider_unavailable', operation.scope.provider);
-    }
-    if (result === null) continue;
-    try {
-      const row = learningValidation.exactRecord(result, ['personId']);
+): readonly PreResolvedLearningPerson[] {
+  try {
+    if (!Object.isFrozen(value)) throw new Error('invalid');
+    const candidates = learningValidation.dataArray(value, LEARNING_MAX_ATOMIC_ENTITIES);
+    if (candidates.length > operation.maxItems) throw new Error('invalid');
+    const externalUserIds = new Set<string>();
+    const externalEnrollmentIds = new Set<string>();
+    const personIds = new Set<number>();
+    const normalized: PreResolvedLearningPerson[] = [];
+    for (const candidate of candidates) {
+      if (!Object.isFrozen(candidate)) throw new Error('invalid');
+      const row = learningValidation.exactRecord(candidate, [
+        'connectionId', 'provider', 'externalCourseId', 'externalUserId',
+        'externalEnrollmentId', 'personId',
+      ]);
+      const connectionId = learningValidation.integer(row.connectionId, 1, LEARNING_LIMITS.databaseInteger);
+      const provider = learningValidation.oneOf(row.provider, ['google_classroom', 'canvas'] as const);
+      const externalCourseId = learningValidation.externalId(row.externalCourseId);
+      const externalUserId = learningValidation.externalId(row.externalUserId);
+      const externalEnrollmentId = learningValidation.externalId(row.externalEnrollmentId);
       const personId = learningValidation.integer(row.personId, 1, LEARNING_LIMITS.databaseInteger);
-      resolved.push(Object.freeze({ providerEnrollment, personId }));
-    } catch {
-      throw new LearningSynchronizationError('malformed_response', operation.scope.provider);
+      if (
+        connectionId !== operation.scope.connectionId
+        || provider !== operation.scope.provider
+        || externalCourseId !== operation.scope.externalCourseId
+        || externalUserIds.has(externalUserId)
+        || externalEnrollmentIds.has(externalEnrollmentId)
+        || personIds.has(personId)
+      ) throw new Error('invalid');
+      externalUserIds.add(externalUserId);
+      externalEnrollmentIds.add(externalEnrollmentId);
+      personIds.add(personId);
+      normalized.push(Object.freeze({
+        connectionId, provider, externalCourseId, externalUserId, externalEnrollmentId, personId,
+      }));
     }
+    return Object.freeze(normalized);
+  } catch {
+    throw new LearningSynchronizationError('invalid_request', operation.scope.provider);
   }
-  return Object.freeze(resolved);
 }
 
-async function raceWithOperation<T>(
-  action: Promise<T>,
+function resolvePreloadedEnrollments(
+  enrollments: readonly LearningProviderEnrollment[],
+  preResolvedPeople: readonly PreResolvedLearningPerson[],
   operation: LearningOperationContext,
   now: () => number,
-): Promise<T> {
-  checkActive(operation, now);
-  const remaining = Date.parse(operation.deadlineAt) - safeNow(now, operation.scope.provider);
-  if (remaining <= 0) throw new LearningSynchronizationError('timeout', operation.scope.provider);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let abortHandler: (() => void) | undefined;
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    abortHandler = () => reject(new LearningSynchronizationError('cancelled', operation.scope.provider));
-    operation.signal.addEventListener('abort', abortHandler, { once: true });
-    if (operation.signal.aborted) abortHandler();
-  });
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new LearningSynchronizationError('timeout', operation.scope.provider)),
-      remaining,
-    );
-  });
-  try {
-    const value = await Promise.race([action, cancelled, deadline]);
+): readonly ResolvedLearningEnrollment[] {
+  const byExternalUserId = new Map<string, PreResolvedLearningPerson>();
+  const byExternalEnrollmentId = new Map<string, PreResolvedLearningPerson>();
+  for (const person of preResolvedPeople) {
     checkActive(operation, now);
-    return value;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (abortHandler) operation.signal.removeEventListener('abort', abortHandler);
+    byExternalUserId.set(person.externalUserId, person);
+    byExternalEnrollmentId.set(person.externalEnrollmentId, person);
   }
+  const resolved: ResolvedLearningEnrollment[] = [];
+  for (const providerEnrollment of enrollments) {
+    checkActive(operation, now);
+    const byUser = byExternalUserId.get(providerEnrollment.externalUserId);
+    const byEnrollment = byExternalEnrollmentId.get(providerEnrollment.externalEnrollmentId);
+    if (byUser === undefined && byEnrollment === undefined) continue;
+    if (
+      byUser === undefined
+      || byEnrollment === undefined
+      || byUser !== byEnrollment
+      || byUser.externalUserId !== providerEnrollment.externalUserId
+      || byUser.externalEnrollmentId !== providerEnrollment.externalEnrollmentId
+    ) {
+      throw new LearningSynchronizationError('malformed_response', operation.scope.provider);
+    }
+    resolved.push(Object.freeze({ providerEnrollment, personId: byUser.personId }));
+  }
+  return Object.freeze(resolved);
 }
 
 function resolvedSubmissions(
@@ -316,6 +331,9 @@ function classify(error: unknown, providerKind: LearningProviderKind): LearningS
   if (error instanceof LearningProviderError) return new LearningSynchronizationError(error.code, providerKind, {
     httpStatus: error.httpStatus, retryAfterSeconds: error.retryAfterSeconds,
   });
+  if (error instanceof LearningAtomicLimitError) {
+    return new LearningSynchronizationError('pagination_limit', providerKind);
+  }
   if (error instanceof LearningIdentityConflictError) return new LearningSynchronizationError('malformed_response', providerKind);
   if (error instanceof LearningPersistenceError) return new LearningSynchronizationError('provider_unavailable', providerKind);
   if (error instanceof LearningSyncConflictError) return new LearningSynchronizationError('invalid_request', providerKind);
@@ -343,7 +361,7 @@ export async function synchronizeLearningCourse(
     try {
       input = learningValidation.exactRecord(rawInput, [
         'provider', 'urlPolicy', 'connectionId', 'providerKind', 'courseId', 'externalCourseId',
-        'trigger', 'operation', 'now', 'resolvePerson',
+        'trigger', 'operation', 'now', 'preResolvedPeople',
       ]);
     } catch {
       throw new LearningSynchronizationError('invalid_request', providerKind);
@@ -353,7 +371,7 @@ export async function synchronizeLearningCourse(
     const courseId = learningValidation.integer(input.courseId, 1, LEARNING_LIMITS.databaseInteger);
     const externalCourseId = learningValidation.externalId(input.externalCourseId);
     const trigger = learningValidation.oneOf(input.trigger, ['manual', 'scheduled', 'notification'] as const);
-    if (typeof input.now !== 'function' || typeof input.resolvePerson !== 'function') {
+    if (typeof input.now !== 'function') {
       throw new LearningSynchronizationError('invalid_request', providerKind);
     }
     now = input.now as () => number;
@@ -376,6 +394,7 @@ export async function synchronizeLearningCourse(
       || urlPolicy.connectionId !== connectionId
       || operation.maxItems > LEARNING_MAX_ATOMIC_ENTITIES
     ) throw new LearningSynchronizationError('invalid_request', providerKind);
+    const preResolvedPeople = normalizePreResolvedPeople(input.preResolvedPeople, operation);
 
     ownLease = await startLearningSync(db, {
       connectionId, provider: providerKind, courseId, externalCourseId,
@@ -436,8 +455,8 @@ export async function synchronizeLearningCourse(
         }));
       }
     }
-    const resolvedEnrollments = await resolveEnrollments(
-      enrollments, input.resolvePerson as SynchronizeLearningCourseInput['resolvePerson'], operation, now,
+    const resolvedEnrollments = resolvePreloadedEnrollments(
+      enrollments, preResolvedPeople, operation, now,
     );
     checkActive(operation, now);
     const resolvedSubmissionValues = resolvedSubmissions(submissions, resolvedEnrollments, providerKind);
