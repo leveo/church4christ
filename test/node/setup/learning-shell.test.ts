@@ -38,7 +38,7 @@ describe('Learning capability shell', () => {
     expect(rawCatalog.capabilities.learning).toMatchObject({
       order: 21,
       group: 'community',
-      publicPrefixes: ['/learn'],
+      publicPrefixes: ['/learn', '/api/learning'],
       adminPrefixes: ['/admin/learning'],
       navKeys: ['nav.learn'],
       dependsOn: ['people'],
@@ -55,7 +55,7 @@ describe('Learning capability shell', () => {
 
   it('owns learner/admin routes and contributes a module-gated bilingual top-nav link', () => {
     expect(MODULES.learning).toMatchObject({
-      publicPrefixes: ['/learn'],
+      publicPrefixes: ['/learn', '/api/learning'],
       adminPrefixes: ['/admin/learning'],
       navKeys: ['nav.learn'],
     });

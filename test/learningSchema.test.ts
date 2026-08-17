@@ -32,6 +32,8 @@ const LEARNING_INDEXES = [
   'idx_learning_events_enrollment_time',
   'idx_learning_events_person_time',
   'idx_learning_google_oauth_expiry',
+  'idx_learning_google_receipts_claim_marker',
+  'idx_learning_google_receipts_recovery',
   'idx_learning_google_receipts_retention',
   'idx_learning_google_registrations_renewal',
   'idx_learning_identities_person_status',
