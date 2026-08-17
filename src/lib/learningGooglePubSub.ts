@@ -45,6 +45,20 @@ function record(value: unknown): Record<string, unknown> {
   try { return learningValidation.dataRecord(value); } catch { return invalid(); }
 }
 
+function exactOptional(
+  value: unknown,
+  allowed: readonly string[],
+  required: readonly string[],
+): Record<string, unknown> {
+  const row = record(value);
+  const keys = Object.keys(row);
+  if (
+    keys.some((key) => !allowed.includes(key))
+    || required.some((key) => !Object.hasOwn(row, key))
+  ) invalid();
+  return row;
+}
+
 function bounded(value: unknown, minimum: number, maximum: number): string {
   try { return learningValidation.boundedString(value, minimum, maximum); } catch { return invalid(); }
 }
@@ -310,20 +324,30 @@ export function parseGooglePubSubPushBody(rawInput: {
   try {
     parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(input.rawBody as Uint8Array)) as unknown;
   } catch { return invalid(); }
-  const envelope = exact(parsed, ['message', 'subscription']);
+  const envelope = exactOptional(parsed, ['deliveryAttempt', 'message', 'subscription'], ['message', 'subscription']);
+  if (Object.hasOwn(envelope, 'deliveryAttempt')) {
+    try { learningValidation.integer(envelope.deliveryAttempt, 1); } catch { return invalid(); }
+  }
   const actualSubscription = subscriptionName(envelope.subscription);
   if (actualSubscription !== expectedSubscription) invalid();
-  const message = record(envelope.message);
-  const allowedMessageKeys = ['attributes', 'data', 'messageId', 'publishTime'];
-  const keys = Object.keys(message);
-  if (
-    keys.some((key) => !allowedMessageKeys.includes(key))
-    || !['attributes', 'data', 'messageId'].every((key) => Object.hasOwn(message, key))
-  ) invalid();
+  const message = exactOptional(envelope.message, [
+    'attributes', 'data', 'messageId', 'message_id', 'orderingKey', 'publishTime', 'publish_time',
+  ], ['attributes', 'data']);
+  if (Object.hasOwn(message, 'orderingKey')) {
+    try { learningValidation.boundedString(message.orderingKey, 0, 1_024, false); } catch { return invalid(); }
+  }
   const attributes = exact(message.attributes, ['registrationId']);
   const registrationId = externalId(attributes.registrationId);
-  const messageId = externalId(message.messageId);
-  const publishedAt = message.publishTime === undefined ? receivedAt : timestamp(message.publishTime);
+  const hasCamelId = Object.hasOwn(message, 'messageId');
+  const hasSnakeId = Object.hasOwn(message, 'message_id');
+  if (!hasCamelId && !hasSnakeId) invalid();
+  if (hasCamelId && hasSnakeId && message.messageId !== message.message_id) invalid();
+  const messageId = externalId(hasCamelId ? message.messageId : message.message_id);
+  const hasCamelTime = Object.hasOwn(message, 'publishTime');
+  const hasSnakeTime = Object.hasOwn(message, 'publish_time');
+  if (!hasCamelTime && !hasSnakeTime) invalid();
+  if (hasCamelTime && hasSnakeTime && message.publishTime !== message.publish_time) invalid();
+  const publishedAt = timestamp(hasCamelTime ? message.publishTime : message.publish_time);
   const classroom = exact(strictBase64Json(message.data), ['collection', 'resourceId']);
   const normalized = normalizeResourceId(classroom.collection, classroom.resourceId);
   return Object.freeze({
