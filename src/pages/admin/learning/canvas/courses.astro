@@ -1,7 +1,7 @@
 ---
 import Admin from '../../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
-import { btn, btnSecondary, card, lab, sel, tin } from '../../../../lib/adminUi';
+import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi';
 import { listCanvasCourseOptions } from '../../../../lib/learningCanvasAdmin';
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
 
@@ -56,7 +56,7 @@ const copy = lang === 'zh' ? {
             <input type="hidden" name="connection_id" value={connectionId} />
             <input type="hidden" name="revision" value={options.connectionRevision} />
             <input type="hidden" name="external_course_id" value={course.externalCourseId} />
-            <label class={lab}>{copy.program}<select class={sel} name="program_id" required>
+            <label class={lab}>{copy.program}<select class={tin} name="program_id" required>
               {options.programs.map((program) => <option value={program.programId}>{program.displayName}</option>)}
             </select></label>
             <label class={lab}>{copy.root}<input class={tin} name="root_account_id" required maxlength="255" /></label>

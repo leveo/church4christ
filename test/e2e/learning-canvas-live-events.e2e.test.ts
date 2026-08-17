@@ -36,7 +36,7 @@ describe('Canvas Live Events built-worker boundary', () => {
     await get.arrayBuffer();
 
     const media = await SELF.fetch(`${ORIGIN}${PATH}`, {
-      method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'not-a-jwt',
+      method: 'POST', headers: { 'content-type': 'text/plain', origin: ORIGIN }, body: 'not-a-jwt',
     });
     expect(await consume(media)).toEqual({ status: 415, body: '' });
 
