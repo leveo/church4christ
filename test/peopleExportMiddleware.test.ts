@@ -197,4 +197,42 @@ describe('People export central middleware gate', () => {
     expect(pulled).toBe(false);
     expect(context.request.body?.locked).toBe(false);
   });
+
+  it('lets only the exact Stripe webhook reach its signature-authenticated endpoint without browser provenance', async () => {
+    const exact = middlewareContext('/api/stripe/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'endpoint-verifies-this' },
+      body: '{}',
+    });
+    const exactNext = vi.fn(async () => new Response('endpoint reached', { status: 200 }));
+    const exactResponse = await onRequest(exact as never, exactNext);
+    expect(exactResponse?.status).toBe(200);
+    expect(await exactResponse?.text()).toBe('endpoint reached');
+    expect(exactNext).toHaveBeenCalledTimes(1);
+
+    for (const path of [
+      '/api/stripe/webhook-near',
+      '/api/stripe/Webhook',
+      '/api/stripe/webhook/',
+      '/api/stripe/%77ebhook',
+    ]) {
+      let pulled = false;
+      const context = middlewareContext(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'stripe-signature': 'must-not-exempt' },
+        body: new ReadableStream<Uint8Array>({
+          pull() {
+            pulled = true;
+            throw new Error('body must not be read');
+          },
+        }, { highWaterMark: 0 }),
+      });
+      const next = vi.fn(async () => new Response('must not reach route'));
+      const response = await onRequest(context as never, next);
+      expect.soft(response?.status, path).toBe(403);
+      expect.soft(next, path).not.toHaveBeenCalled();
+      expect.soft(pulled, path).toBe(false);
+      expect.soft(context.request.body?.locked, path).toBe(false);
+    }
+  });
 });

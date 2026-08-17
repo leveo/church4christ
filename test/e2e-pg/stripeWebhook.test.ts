@@ -34,35 +34,42 @@ async function withDb<T>(fn: (db: AppDb) => Promise<T>): Promise<T> {
   }
 }
 
-async function signedEvent(event: Record<string, unknown>): Promise<Response> {
+async function stripeEvent(
+  event: Record<string, unknown>,
+  options: { validSignature?: boolean; path?: string } = {},
+): Promise<Response> {
   const body = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(TEST_WEBHOOK_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const mac = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(`${timestamp}.${body}`),
-  );
-  const signature = [...new Uint8Array(mac)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-  return SELF.fetch(`${ORIGIN}/api/stripe/webhook`, {
+  let signature = '0'.repeat(64);
+  if (options.validSignature !== false) {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(TEST_WEBHOOK_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const mac = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode(`${timestamp}.${body}`),
+    );
+    signature = [...new Uint8Array(mac)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return SELF.fetch(`${ORIGIN}${options.path ?? '/api/stripe/webhook'}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      origin: ORIGIN,
       'stripe-signature': `t=${timestamp},v1=${signature}`,
     },
     body,
     redirect: 'manual',
   });
 }
+
+const signedEvent = (event: Record<string, unknown>): Promise<Response> => stripeEvent(event);
 
 async function eventRow(eventId: string): Promise<{
   status: string;
@@ -185,6 +192,42 @@ describe('Postgres-backed built worker: Stripe test-mode operations', () => {
     const row = await waitForTerminal(TEST_EVENT_ID);
     expect(row.status).toBe('ignored');
     expect(row.attempt_count).toBe(1);
+  });
+
+  it('lets the exact server-to-server webhook reach endpoint signature rejection without browser provenance', async () => {
+    const eventId = 'evt_test_e2e_invalid_signature_boundary';
+    const response = await stripeEvent({
+      id: eventId,
+      type: 'customer.created',
+      api_version: '2026-06-30',
+      created: Math.floor(Date.now() / 1000),
+      livemode: false,
+      data: { object: { id: 'cus_test_invalid_signature' } },
+    }, { validSignature: false });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('invalid_signature');
+    expect(await eventRow(eventId)).toBeNull();
+  });
+
+  it('does not exempt near-match, case-changed, trailing-slash, or encoded Stripe paths', async () => {
+    const event = {
+      id: 'evt_test_e2e_noncanonical_path',
+      type: 'customer.created',
+      api_version: '2026-06-30',
+      created: Math.floor(Date.now() / 1000),
+      livemode: false,
+      data: { object: { id: 'cus_test_noncanonical_path' } },
+    };
+    for (const path of [
+      '/api/stripe/webhook-near',
+      '/api/stripe/Webhook',
+      '/api/stripe/webhook/',
+      '/api/stripe/%77ebhook',
+    ]) {
+      const response = await stripeEvent(event, { path });
+      expect.soft(response.status, path).toBe(403);
+    }
+    expect(await eventRow(event.id)).toBeNull();
   });
 
   it('rejects a separately signed live event with the exact response and no receipt', async () => {

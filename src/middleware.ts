@@ -8,7 +8,7 @@ import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
-import { hasSameOriginProvenance } from './lib/csrf';
+import { hasValidMutationProvenance } from './lib/csrf';
 import { openDb, type DbEnv } from './lib/dbProvider';
 
 // Baseline security headers (spec §14) live in ./lib/securityHeaders; the route
@@ -175,21 +175,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return finish(res);
     }
 
-    // CSRF: reject state-changing requests without exact same-origin browser
-    // provenance. Origin is authoritative when present; otherwise Fetch Metadata
-    // must explicitly say same-origin. Missing/none/same-site/unknown values fail
-    // closed. SameSite=Lax on the session cookie remains a backstop. The 403 is
-    // hardened like every other early return (baseline headers + no-store).
-    const method = context.request.method;
-    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-      if (!hasSameOriginProvenance(context.request)) {
-        const res = new Response('Forbidden', {
-          status: 403,
-          headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-        });
-        applySecurityHeaders(res.headers);
-        return finish(res);
-      }
+    // CSRF: browser mutations need exact same-origin provenance. The one exact
+    // server-to-server Stripe POST is classified centrally and instead crosses
+    // the endpoint's raw-body HMAC boundary; no other current or future webhook
+    // inherits that exemption. SameSite=Lax remains a browser-session backstop.
+    if (!hasValidMutationProvenance(context.request)) {
+      const res = new Response('Forbidden', {
+        status: 403,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+      });
+      applySecurityHeaders(res.headers);
+      return finish(res);
     }
 
     // Session: reload the person row every request so deactivation / soft-delete /
