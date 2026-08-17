@@ -265,15 +265,17 @@ export interface GoogleClassroomCourseOptions {
 }
 
 export type GoogleClassroomHealthResult =
-  | { readonly ok: true; readonly errorCode: null }
-  | { readonly ok: false; readonly errorCode: LearningErrorCode };
+  | { readonly ok: true; readonly errorCode: null; readonly connectionRevision: number }
+  | { readonly ok: false; readonly errorCode: LearningErrorCode; readonly connectionRevision: number | null };
 
 export async function checkGoogleClassroomConnectionHealth(
   db: AppDb,
   rawInput: GoogleAdminEnvironment,
 ): Promise<GoogleClassroomHealthResult> {
+  let connectionRevision: number | null = null;
   try {
     const context = await providerContext(db, rawInput, true);
+    connectionRevision = context.access.revision;
     await invokeLearningProvider(context.provider, {
       method: 'healthCheck',
       request: {
@@ -282,12 +284,14 @@ export async function checkGoogleClassroomConnectionHealth(
       },
       now: () => context.input.nowEpochMs + 1,
     });
-    return Object.freeze({ ok: true, errorCode: null });
+    return Object.freeze({ ok: true, errorCode: null, connectionRevision });
   } catch (error) {
     if (error instanceof LearningProviderError) {
-      return Object.freeze({ ok: false, errorCode: error.code });
+      return Object.freeze({ ok: false, errorCode: error.code, connectionRevision });
     }
-    return Object.freeze({ ok: false, errorCode: 'authentication_required' });
+    return Object.freeze({
+      ok: false, errorCode: 'authentication_required', connectionRevision,
+    });
   }
 }
 

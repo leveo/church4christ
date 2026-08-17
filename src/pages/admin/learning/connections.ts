@@ -29,6 +29,7 @@ import type { AppDb } from '../../../lib/appDb';
 import { hasSameOriginProvenance } from '../../../lib/csrf';
 import {
   LEARNING_ERROR_CODES,
+  LEARNING_LIMITS,
   type LearningConnectionStatus,
   type LearningErrorCode,
   type LearningProviderKind,
@@ -46,8 +47,8 @@ const SAFE_HEADERS = {
 };
 
 type HealthResult =
-  | { readonly ok: true; readonly errorCode: null }
-  | { readonly ok: false; readonly errorCode: LearningErrorCode };
+  | { readonly ok: true; readonly errorCode: null; readonly connectionRevision?: number | null }
+  | { readonly ok: false; readonly errorCode: LearningErrorCode; readonly connectionRevision?: number | null };
 
 interface LearningConnectionActionDeps {
   readonly keySecret: string | undefined | (() => string | undefined);
@@ -186,16 +187,40 @@ function normalizedHealthResult(value: unknown): HealthResult {
     throw new LearningConnectionInvalidError();
   }
   const keys = Object.keys(value as object).sort();
-  if (keys.length !== 2 || keys[0] !== 'errorCode' || keys[1] !== 'ok') {
+  const expectedKeys = keys.length === 2
+    ? 'errorCode|ok'
+    : keys.length === 3
+      ? 'connectionRevision|errorCode|ok'
+      : '';
+  if (keys.join('|') !== expectedKeys) {
     throw new LearningConnectionInvalidError();
   }
-  const result = value as { readonly ok?: unknown; readonly errorCode?: unknown };
-  if (result.ok === true && result.errorCode === null) return { ok: true, errorCode: null };
+  const result = value as {
+    readonly ok?: unknown;
+    readonly errorCode?: unknown;
+    readonly connectionRevision?: unknown;
+  };
+  const connectionRevision = Object.hasOwn(result, 'connectionRevision')
+    ? result.connectionRevision
+    : null;
+  if (
+    connectionRevision !== null
+    && (!Number.isInteger(connectionRevision)
+      || (connectionRevision as number) < 0
+      || (connectionRevision as number) > LEARNING_LIMITS.databaseInteger)
+  ) throw new LearningConnectionInvalidError();
+  if (result.ok === true && result.errorCode === null) {
+    return { ok: true, errorCode: null, connectionRevision: connectionRevision as number | null };
+  }
   if (
     result.ok === false
     && typeof result.errorCode === 'string'
     && LEARNING_ERROR_CODES.includes(result.errorCode as LearningErrorCode)
-  ) return { ok: false, errorCode: result.errorCode as LearningErrorCode };
+  ) return {
+    ok: false,
+    errorCode: result.errorCode as LearningErrorCode,
+    connectionRevision: connectionRevision as number | null,
+  };
   throw new LearningConnectionInvalidError();
 }
 
@@ -290,9 +315,13 @@ export function createLearningConnectionActionHandler(
         provider: connection.provider,
         baseUrl: connection.baseUrl,
       }));
+      const healthRevision = health.connectionRevision ?? data.revision;
+      if (healthRevision !== data.revision && healthRevision !== data.revision + 1) {
+        throw new LearningConnectionInvalidError();
+      }
       await deps.updateHealth(locals.db, {
         connectionId: data.connectionId,
-        expectedRevision: data.revision,
+        expectedRevision: healthRevision,
         expectedProvider: data.provider,
         expectedStatus: data.status,
         ok: health.ok,
