@@ -28,6 +28,24 @@ function body(): string {
   });
 }
 
+function documentedWrappedBody(): string {
+  return JSON.stringify({
+    deliveryAttempt: 5,
+    message: {
+      attributes: { registrationId: 'registration-1' },
+      data: btoa(JSON.stringify({
+        collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+      })),
+      messageId: 'message-1',
+      message_id: 'message-1',
+      orderingKey: 'course-1',
+      publishTime: '2026-08-17T11:59:59.000Z',
+      publish_time: '2026-08-17T11:59:59.000Z',
+    },
+    subscription: SUBSCRIPTION,
+  });
+}
+
 const deps = () => ({
   audience: 'https://church.test/api/learning/google/pubsub',
   serviceAccountEmail: 'classroom-push@church-project.iam.gserviceaccount.com',
@@ -113,6 +131,18 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     expect(duplicate.status).toBe(204);
     expect(injected.reconcileCourse).toHaveBeenCalledTimes(1);
     expect(injected.finishDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the recorded official wrapped Pub/Sub envelope at the HTTP route', async () => {
+    const injected = deps();
+    const request = new Request('https://church.test/api/learning/google/pubsub', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' },
+      body: documentedWrappedBody(),
+    });
+    expect((await createGooglePubSubPushHandler(injected)(context(request))).status).toBe(204);
+    expect(injected.acceptDelivery).toHaveBeenCalledWith({}, expect.objectContaining({
+      messageId: 'message-1', registrationId: 'registration-1', publishedAt: '2026-08-17T11:59:59.000Z',
+    }));
   });
 
   it('marks failed reconciliation retryable and returns 503 for failed or concurrent pending work', async () => {

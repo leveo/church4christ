@@ -84,6 +84,58 @@ describe('Google Pub/Sub push authentication and envelope', () => {
     expect(JSON.stringify(delivery)).not.toMatch(/rawBody|encoded|submission-1.*private/iu);
   });
 
+  it('accepts the documented wrapped aliases and optional delivery metadata without retaining it', () => {
+    const data = btoa(JSON.stringify({
+      collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+    }));
+    const delivery = parseGooglePubSubPushBody({
+      rawBody: new TextEncoder().encode(JSON.stringify({
+        deliveryAttempt: 5,
+        message: {
+          attributes: { registrationId: 'registration-1' }, data,
+          messageId: 'message-1', message_id: 'message-1', orderingKey: 'course-1',
+          publishTime: '2026-08-17T11:59:59.000Z', publish_time: '2026-08-17T11:59:59.000Z',
+        },
+        subscription: 'projects/church-project/subscriptions/classroom',
+      })),
+      expectedSubscriptionName: 'projects/church-project/subscriptions/classroom',
+      receivedAt: '2026-08-17T12:00:00.000Z',
+    });
+    expect(delivery).toMatchObject({ messageId: 'message-1', publishedAt: '2026-08-17T11:59:59.000Z' });
+    expect(JSON.stringify(delivery)).not.toMatch(/deliveryAttempt|orderingKey|message_id|publish_time/u);
+  });
+
+  it('accepts a snake-only wrapped alias variant and rejects alias conflicts or unbounded delivery metadata', () => {
+    const data = btoa(JSON.stringify({
+      collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' },
+    }));
+    const envelope = (overrides: Record<string, unknown>, outer: Record<string, unknown> = {}) =>
+      new TextEncoder().encode(JSON.stringify({
+        message: {
+          attributes: { registrationId: 'registration-1' }, data,
+          message_id: 'message-1', publish_time: '2026-08-17T11:59:59.000Z',
+          ...overrides,
+        },
+        subscription: 'projects/church-project/subscriptions/classroom',
+        ...outer,
+      }));
+    expect(parseGooglePubSubPushBody({
+      rawBody: envelope({}), expectedSubscriptionName: 'projects/church-project/subscriptions/classroom',
+      receivedAt: '2026-08-17T12:00:00.000Z',
+    })).toMatchObject({ messageId: 'message-1', publishedAt: '2026-08-17T11:59:59.000Z' });
+    for (const rawBody of [
+      envelope({ messageId: 'other-message' }),
+      envelope({ publishTime: '2026-08-17T11:58:00.000Z' }),
+      envelope({ orderingKey: 'x'.repeat(1_025) }),
+      envelope({}, { deliveryAttempt: 0 }),
+      envelope({}, { deliveryAttempt: 1.5 }),
+      envelope({}, { delivery_attempt: 2 }),
+    ]) expect(() => parseGooglePubSubPushBody({
+      rawBody, expectedSubscriptionName: 'projects/church-project/subscriptions/classroom',
+      receivedAt: '2026-08-17T12:00:00.000Z',
+    })).toThrow(LearningGooglePubSubError);
+  });
+
   it('rejects wrong subscriptions, unknown fields, malformed base64/JSON, collection-resource mismatch, and oversized bodies', () => {
     const validData = { collection: 'courses.courseWork', resourceId: { courseId: 'course-1', id: 'work-1' } };
     const inputs = [
