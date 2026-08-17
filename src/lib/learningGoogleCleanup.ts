@@ -471,6 +471,8 @@ export async function listGoogleClassroomCleanupConnectionIds(
     JOIN learning_provider_connections c ON c.id=t.connection_id
     WHERE c.provider='google_classroom' AND c.status IN ('active','error','disabled')
       AND c.operation_marker IS NULL
-    GROUP BY t.connection_id ORDER BY MIN(t.id) LIMIT ?1`).bind(limit).all<Record<string, unknown>>();
+    GROUP BY t.connection_id
+    ORDER BY MAX(COALESCE(t.last_attempt_at,t.created_at)),MIN(t.id) LIMIT ?1`)
+    .bind(limit).all<Record<string, unknown>>();
   return Object.freeze(rows(result, limit).map((row) => integer(row.connection_id)));
 }
