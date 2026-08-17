@@ -1,0 +1,77 @@
+---
+import Admin from '../../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { btn, btnSecondary, card, lab, sel, tin } from '../../../../lib/adminUi';
+import { listCanvasCourseOptions } from '../../../../lib/learningCanvasAdmin';
+import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+
+export const prerender = false;
+if (!Astro.locals.modules.has('learning')) return new Response(null, { status: 404 });
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'learning')) return new Response(null, { status: 403 });
+if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
+  return new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } });
+}
+const connection = Astro.url.searchParams.get('connection_id');
+if (connection === null || !/^[1-9]\d{0,9}$/u.test(connection)) return new Response(null, { status: 400 });
+const connectionId = Number(connection);
+const vars = import.meta.env as Record<string, string | undefined>;
+if (
+  typeof vars.CANVAS_OAUTH_CLIENT_ID !== 'string'
+  || typeof vars.CANVAS_OAUTH_CLIENT_SECRET !== 'string'
+  || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+) return new Response(null, { status: 503 });
+let options;
+try {
+  options = await listCanvasCourseOptions(Astro.locals.db, {
+    connectionId,
+    clientId: vars.CANVAS_OAUTH_CLIENT_ID,
+    clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
+    keyRing: await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS),
+    fetcher: fetch,
+    nowEpochMs: Date.now(),
+  });
+} catch { return new Response(null, { status: 503 }); }
+const lang = user!.lang === 'zh' ? 'zh' : 'en';
+const copy = lang === 'zh' ? {
+  title: '选择 Canvas 课程', intro: '把 Canvas 课程映射到教会的学习事工。',
+  program: '学习事工', root: 'Canvas 根账号 ID', map: '映射课程', unmap: '取消映射', back: '返回学习设置',
+} : {
+  title: 'Select Canvas courses', intro: 'Map Canvas courses into a church Learning program.',
+  program: 'Learning program', root: 'Canvas root account ID', map: 'Map course', unmap: 'Unmap', back: 'Back to Learning settings',
+};
+---
+<Admin title={copy.title}>
+  <a class={btnSecondary} href="/admin/learning">{copy.back}</a>
+  <h1 class="mt-6 font-display text-heading-md font-bold">{copy.title}</h1>
+  <p class="mt-2 text-ink-muted">{copy.intro}</p>
+  <div class="mt-6 grid gap-4">
+    {options.courses.map(({ course, mappedProgramId }) => (
+      <article class={card}>
+        <h2 class="font-display text-lg font-bold">{course.displayName}</h2>
+        <p class="mt-1 text-sm text-ink-muted">Canvas course {course.externalCourseId}</p>
+        {mappedProgramId === null ? (
+          <form method="post" action="/admin/learning/canvas/map-course" class="mt-4 grid gap-3 md:grid-cols-3">
+            <input type="hidden" name="action" value="map" />
+            <input type="hidden" name="connection_id" value={connectionId} />
+            <input type="hidden" name="revision" value={options.connectionRevision} />
+            <input type="hidden" name="external_course_id" value={course.externalCourseId} />
+            <label class={lab}>{copy.program}<select class={sel} name="program_id" required>
+              {options.programs.map((program) => <option value={program.programId}>{program.displayName}</option>)}
+            </select></label>
+            <label class={lab}>{copy.root}<input class={tin} name="root_account_id" required maxlength="255" /></label>
+            <button class={btn} type="submit">{copy.map}</button>
+          </form>
+        ) : (
+          <form method="post" action="/admin/learning/canvas/map-course" class="mt-4">
+            <input type="hidden" name="action" value="unmap" />
+            <input type="hidden" name="connection_id" value={connectionId} />
+            <input type="hidden" name="revision" value={options.connectionRevision} />
+            <input type="hidden" name="external_course_id" value={course.externalCourseId} />
+            <button class={btnSecondary} type="submit">{copy.unmap}</button>
+          </form>
+        )}
+      </article>
+    ))}
+  </div>
+</Admin>

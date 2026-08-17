@@ -56,7 +56,7 @@ describe('Canvas mapped-course admin route', () => {
     ] as const) {
       const rejected = await createCanvasCourseMappingHandler(deps())(context(body, origin));
       expect(rejected.status).toBe(origin === 'https://evil.test' ? 403 : 303);
-      expect(rejected.headers.get('location')).not.toMatch(/private|token/iu);
+      expect(rejected.headers.get('location') ?? '').not.toMatch(/private|token/iu);
     }
   });
 });
