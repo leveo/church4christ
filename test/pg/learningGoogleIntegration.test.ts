@@ -224,6 +224,32 @@ describe.skipIf(!hasPg)('Google Classroom receipt and reconciliation parity (rea
     expect(refreshCalls).toBe(1);
   });
 
+  it('rejects an archived authoritative Classroom course without local or remote registration writes', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('GET');
+      return new Response(JSON.stringify({
+        id: 'pg-archived-course', name: 'PG archived', courseState: 'ARCHIVED',
+        alternateLink: 'https://classroom.google.com/c/pg-archived-course',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+    });
+    await expect(mapSelectedGoogleClassroomCourse(dbA, {
+      connectionId: 27512, expectedRevision: 1, externalCourseId: 'pg-archived-course',
+      programId: 27513, actorPersonId: 27501,
+      pushTopicName: 'projects/church-project/topics/classroom',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, nowEpochMs: NOW,
+    })).rejects.toBeInstanceOf(Error);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await sqlA.unsafe(`SELECT revision FROM learning_provider_connections WHERE id=27512`))
+      .toEqual([{ revision: 1 }]);
+    expect(await sqlA.unsafe(`SELECT COUNT(*)::int AS count FROM learning_courses
+      WHERE connection_id=27512 AND external_course_id='pg-archived-course'`)).toEqual([{ count: 0 }]);
+    expect(await sqlA.unsafe(`SELECT COUNT(*)::int AS count FROM learning_google_registrations
+      WHERE connection_id=27512`)).toEqual([{ count: 0 }]);
+  });
+
   it('has one exact-revision mapping winner with two feeds and cleans the losing registrations', async () => {
     const ring = await importLearningCredentialKeyRing(KEY_SECRET);
     let sequence = 0;

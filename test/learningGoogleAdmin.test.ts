@@ -100,6 +100,31 @@ describe('Google Classroom admin authoritative course selection', () => {
     expect(JSON.stringify(stored)).not.toMatch(/private-access|private-refresh|private-client-secret/iu);
   });
 
+  it('fails closed when the authoritative Classroom course is archived', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('GET');
+      return new Response(JSON.stringify({
+        id: 'archived-course', name: 'Archived class', courseState: 'ARCHIVED',
+        alternateLink: 'https://classroom.google.com/c/archived-course',
+        updateTime: '2026-08-17T11:00:00.000Z',
+      }));
+    });
+    await expect(mapSelectedGoogleClassroomCourse(env.DB as AppDb, {
+      connectionId: 27302, clientId: 'client.apps.googleusercontent.com',
+      clientSecret: 'private-client-secret', keyRing: ring, fetcher, nowEpochMs: NOW,
+      externalCourseId: 'archived-course', programId: 27303, actorPersonId: 27301,
+      expectedRevision: 1, pushTopicName: 'projects/church-project/topics/classroom',
+    })).rejects.toBeInstanceOf(Error);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_courses
+      WHERE connection_id=27302`).first<number>('count')).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_google_registrations
+      WHERE connection_id=27302`).first<number>('count')).toBe(0);
+    expect(await env.DB.prepare(`SELECT revision FROM learning_provider_connections
+      WHERE id=27302`).first<number>('revision')).toBe(1);
+  });
+
   it('checks health through the official Classroom endpoint with an encrypted credential only', async () => {
     const ring = await importLearningCredentialKeyRing(KEY_SECRET);
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
