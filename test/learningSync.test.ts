@@ -66,12 +66,12 @@ async function page<T extends object>(
   ) as Promise<LearningProviderPage<T>>;
 }
 
-function fakeProvider(options: { failActivityPage?: number } = {}): LearningProvider {
+function fakeProvider(options: { failActivityPage?: number; onSyncCourse?: () => void } = {}): LearningProvider {
   return {
     provider: 'canvas',
     async healthCheck() { return { connectionId: 901, provider: 'canvas', healthy: 1, checkedAt: new Date(NOW_EPOCH).toISOString(), errorCode: null }; },
     async listCourses(request) { return page<LearningCourse>([COURSE], request, { kind: 'courses', urlPolicy: POLICY }); },
-    async syncCourse() { return COURSE; },
+    async syncCourse() { options.onSyncCourse?.(); return COURSE; },
     async syncEnrollments(request) {
       return page<LearningProviderEnrollment>([ENROLLMENT], request, { kind: 'provider_enrollments' });
     },
@@ -148,6 +148,24 @@ beforeEach(async () => {
 });
 
 describe('Learning provider orchestration', () => {
+  it('rejects database connection URL-policy drift before any provider work or sync run', async () => {
+    const mapped = await seed();
+    let providerCalls = 0;
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onSyncCourse: () => { providerCalls += 1; } }),
+      urlPolicy: {
+        ...POLICY,
+        baseUrl: 'https://other-canvas.sync.test',
+        providerLaunchOrigins: ['https://other-canvas.sync.test'],
+      },
+      connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual', operation: operation(),
+      now: () => NOW_EPOCH, resolvePerson: async () => ({ personId: 9012 }),
+    })).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
+    expect(providerCalls).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
+  });
+
   it('attributes request-clock failures to the requested provider without touching persistence', async () => {
     await expect(synchronizeLearningCourse(env.DB, {
       provider: fakeProvider(),

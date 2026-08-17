@@ -34,6 +34,14 @@ export class LearningSyncConflictError extends Error {
   constructor() { super('learning_sync_conflict'); this.name = 'LearningSyncConflictError'; }
 }
 
+export class LearningAtomicLimitError extends Error {
+  readonly code = 'learning_limit_exceeded' as const;
+  constructor() { super('learning_limit_exceeded'); this.name = 'LearningAtomicLimitError'; }
+}
+
+/** Conservative ceiling for one portable D1/PostgreSQL atomic reconciliation. */
+export const LEARNING_MAX_ATOMIC_ENTITIES = 50;
+
 const persistenceFailure = (): never => { throw new LearningPersistenceError(); };
 const invalid = (): never => { throw new LearningPersistenceError(); };
 
@@ -179,12 +187,15 @@ export async function mapLearningCourse(
       FROM learning_programs p JOIN learning_provider_connections c ON c.id=?2
       WHERE p.id=?1 AND p.status='active' AND p.deleted_at IS NULL
         AND c.provider=?3 AND c.status='active' AND c.deleted_at IS NULL
+        AND ((?3='canvas' AND c.base_url=?10)
+          OR (?3='google_classroom' AND c.base_url IS NULL AND ?10 IS NULL))
       ON CONFLICT(connection_id,external_course_id) DO NOTHING
       RETURNING id AS course_id,program_id,connection_id,provider,external_course_id,
         display_name,lifecycle_state,last_synced_at`)
       .bind(
         programId, course.connectionId, course.provider, course.externalCourseId, course.displayName,
         course.launchUrl, course.lifecycleState, course.providerUpdatedAt, course.lastSyncedAt,
+        policy.baseUrl,
       ).run();
     const created = oneRow(result);
     if (!created) persistenceFailure();
@@ -243,7 +254,7 @@ export async function linkLearningIdentity(
     if (!Array.isArray(results) || results.length !== 2) persistenceFailure();
     const rows = resultRows(results[1], 2);
     const matching = rows.find((row) => row.external_user_id === externalUserId && row.person_id === personId);
-    if (matching && rows.length === 1) return identityRow(matching);
+    if (matching && rows.length === 1 && matching.status === 'active') return identityRow(matching);
     if (rows.length > 0) throw new LearningIdentityConflictError();
     return persistenceFailure();
   } catch (error) {
@@ -287,10 +298,11 @@ export async function startLearningSync(
     readonly externalCourseId: string;
     readonly trigger: LearningSyncTrigger;
     readonly startedAt: string;
+    readonly urlPolicy: LearningConnectionUrlPolicy;
   },
 ): Promise<LearningSyncLease> {
   const input = exact(rawInput, [
-    'connectionId', 'provider', 'courseId', 'externalCourseId', 'trigger', 'startedAt',
+    'connectionId', 'provider', 'courseId', 'externalCourseId', 'trigger', 'startedAt', 'urlPolicy',
   ]);
   const connectionId = integer(input.connectionId);
   const kind = provider(input.provider);
@@ -298,15 +310,20 @@ export async function startLearningSync(
   const courseExternalId = externalId(input.externalCourseId);
   const triggerType = trigger(input.trigger);
   const startedAt = timestamp(input.startedAt);
+  let policy: LearningConnectionUrlPolicy;
+  try { policy = normalizeLearningConnectionUrlPolicy(input.urlPolicy); } catch { return invalid(); }
+  if (policy.connectionId !== connectionId || policy.provider !== kind) invalid();
   const marker = crypto.randomUUID();
   try {
     const results = await db.batch([
       db.prepare(`UPDATE learning_provider_connections SET operation_marker=?1
         WHERE id=?2 AND provider=?3 AND status='active' AND deleted_at IS NULL
+          AND ((?3='canvas' AND base_url=?6)
+            OR (?3='google_classroom' AND base_url IS NULL AND ?6 IS NULL))
           AND operation_marker IS NULL AND EXISTS (
             SELECT 1 FROM learning_courses c WHERE c.id=?4 AND c.connection_id=?2
               AND c.provider=?3 AND c.external_course_id=?5 AND c.deleted_at IS NULL
-          )`).bind(marker, connectionId, kind, courseId, courseExternalId),
+          )`).bind(marker, connectionId, kind, courseId, courseExternalId, policy.baseUrl),
       db.prepare(`INSERT INTO learning_sync_runs
         (connection_id,course_id,trigger_type,status,started_at,attempt_count,
          scanned_count,changed_count,removed_count,event_count,error_code)
@@ -370,7 +387,8 @@ function normalizedSnapshot(rawValue: unknown, own: LearningSyncLease): Normaliz
   const rawActivities = array(value.activities, LEARNING_LIMITS.maxSyncItems);
   const rawResources = array(value.resources, LEARNING_LIMITS.maxSyncItems);
   const rawSubmissions = array(value.submissions, LEARNING_LIMITS.maxSyncItems);
-  if (rawEnrollments.length + rawActivities.length + rawResources.length + rawSubmissions.length > LEARNING_LIMITS.maxSyncItems) invalid();
+  if (rawEnrollments.length + rawActivities.length + rawResources.length + rawSubmissions.length
+    > LEARNING_MAX_ATOMIC_ENTITIES) throw new LearningAtomicLimitError();
 
   const externalUserIds = new Set<string>();
   const externalEnrollmentIds = new Set<string>();
@@ -470,23 +488,29 @@ async function eventsFor(snapshot: NormalizedSnapshot, own: LearningSyncLease): 
   const activityById = new Map(snapshot.activities.map((item) => [item.externalActivityId, item]));
   for (const item of snapshot.submissions) {
     const submission = item.providerSubmission;
-    if (submission.status !== 'submitted' && submission.status !== 'returned') continue;
     const candidateActivity = activityById.get(submission.externalActivityId);
     if (!candidateActivity || (candidateActivity.kind !== 'assignment' && candidateActivity.kind !== 'quiz')) invalid();
     const activity = candidateActivity as LearningActivity & { readonly kind: 'assignment' | 'quiz' };
-    const eventType = submission.status === 'returned' ? 'submission_returned'
-      : activity.kind === 'quiz' ? 'quiz_submitted' : 'assignment_submitted';
-    const occurredAt = submission.status === 'returned'
-      ? submission.returnedAt as string : submission.submittedAt as string;
-    const sourceEventId = await hashEvent([
-      own.provider, String(own.connectionId), own.externalCourseId,
-      submission.externalActivityId, submission.externalEnrollmentId,
-      eventType, submission.providerUpdatedAt ?? occurredAt,
-    ]);
-    events.push(Object.freeze({
-      sourceEventId, eventType, externalEnrollmentId: submission.externalEnrollmentId,
-      externalActivityId: submission.externalActivityId, activityKind: activity.kind, occurredAt,
-    }));
+    const append = async (
+      eventType: PendingEvent['eventType'],
+      occurredAt: string,
+    ): Promise<void> => {
+      const sourceEventId = await hashEvent([
+        own.provider, String(own.connectionId), own.externalCourseId,
+        submission.externalActivityId, submission.externalEnrollmentId,
+        eventType, String(submission.attemptNumber), occurredAt,
+      ]);
+      events.push(Object.freeze({
+        sourceEventId, eventType, externalEnrollmentId: submission.externalEnrollmentId,
+        externalActivityId: submission.externalActivityId, activityKind: activity.kind, occurredAt,
+      }));
+    };
+    if ((submission.status === 'submitted' || submission.status === 'returned') && submission.submittedAt) {
+      await append(activity.kind === 'quiz' ? 'quiz_submitted' : 'assignment_submitted', submission.submittedAt);
+    }
+    if (submission.status === 'returned' && submission.returnedAt) {
+      await append('submission_returned', submission.returnedAt);
+    }
   }
   return Object.freeze(events);
 }
@@ -516,12 +540,17 @@ async function assertIdentityMappings(
         ...chunk.map((item) => item.providerEnrollment.externalUserId),
         ...chunk.map((item) => item.personId),
       ];
-      const result = await db.prepare(`SELECT person_id,external_user_id FROM learning_identity_links
+      const result = await db.prepare(`SELECT person_id,external_user_id,status FROM learning_identity_links
         WHERE connection_id=?1 AND (
           external_user_id IN (${userPlaceholders}) OR person_id IN (${personPlaceholders})
         ) ORDER BY id`).bind(...values).all();
       const rows = resultRows(result, chunk.length * 2);
       for (const enrollment of chunk) {
+        const exactMatch = rows.find((row) => (
+          row.external_user_id === enrollment.providerEnrollment.externalUserId
+          && row.person_id === enrollment.personId
+        ));
+        if (exactMatch && exactMatch.status !== 'active') throw new LearningIdentityConflictError();
         const conflict = rows.find((row) => (
           row.external_user_id === enrollment.providerEnrollment.externalUserId
           || row.person_id === enrollment.personId
@@ -538,10 +567,78 @@ async function assertIdentityMappings(
   }
 }
 
+function removedCountStatement(
+  db: AppDb,
+  own: LearningSyncLease,
+  snapshot: NormalizedSnapshot,
+): AppStatement {
+  const values: unknown[] = [];
+  const bind = (value: unknown): string => {
+    values.push(value);
+    return '?';
+  };
+  const notIn = (column: string, ids: readonly string[]): string => ids.length === 0
+    ? '1=1'
+    : `${column} NOT IN (${ids.map((id) => bind(id)).join(',')})`;
+  const notPairs = (
+    left: string,
+    right: string,
+    pairs: readonly (readonly [string, string])[],
+  ): string => pairs.length === 0
+    ? '1=1'
+    : `NOT (${pairs.map(([first, second]) => (
+      `(${left}=${bind(first)} AND ${right}=${bind(second)})`
+    )).join(' OR ')})`;
+
+  const courseForEnrollments = bind(own.courseId);
+  const enrollmentAbsent = notIn(
+    'e.external_enrollment_id',
+    snapshot.enrollments.map((item) => item.providerEnrollment.externalEnrollmentId),
+  );
+  const courseForActivities = bind(own.courseId);
+  const activityAbsent = notIn(
+    'a.external_activity_id',
+    snapshot.activities.map((item) => item.externalActivityId),
+  );
+  const courseForResources = bind(own.courseId);
+  const resourceAbsent = notPairs(
+    'a.external_activity_id',
+    'r.external_resource_id',
+    snapshot.resources.map((item) => [item.externalActivityId, item.externalResourceId] as const),
+  );
+  const courseForSubmissions = bind(own.courseId);
+  const submissionAbsent = notPairs(
+    'a.external_activity_id',
+    'e.external_enrollment_id',
+    snapshot.submissions.map((item) => [
+      item.providerSubmission.externalActivityId,
+      item.providerSubmission.externalEnrollmentId,
+    ] as const),
+  );
+  const runId = bind(own.runId);
+  const connectionId = bind(own.connectionId);
+  const courseId = bind(own.courseId);
+  return db.prepare(`UPDATE learning_sync_runs SET removed_count=
+    (SELECT COUNT(*) FROM learning_enrollments e
+      WHERE e.course_id=${courseForEnrollments} AND e.state<>'inactive' AND ${enrollmentAbsent})
+    +(SELECT COUNT(*) FROM learning_activities a
+      WHERE a.course_id=${courseForActivities} AND a.lifecycle_state<>'deleted' AND ${activityAbsent})
+    +(SELECT COUNT(*) FROM learning_resources r JOIN learning_activities a ON a.id=r.activity_id
+      WHERE a.course_id=${courseForResources} AND ${resourceAbsent})
+    +(SELECT COUNT(*) FROM learning_submission_snapshots s
+      JOIN learning_activities a ON a.id=s.activity_id
+      JOIN learning_enrollments e ON e.id=s.enrollment_id
+      WHERE s.course_id=${courseForSubmissions} AND ${submissionAbsent})
+    WHERE id=${runId} AND connection_id=${connectionId} AND course_id=${courseId} AND status='running'`)
+    .bind(...values);
+}
+
 export interface LearningSyncCompletion {
   readonly runId: number;
   readonly status: 'succeeded';
   readonly scannedCount: number;
+  readonly changedCount: number;
+  readonly removedCount: number;
   readonly eventCount: number;
 }
 
@@ -554,18 +651,26 @@ export async function completeLearningCourseSync(
   const snapshot = normalizedSnapshot(rawSnapshot, own);
   await assertIdentityMappings(db, own, snapshot.enrollments);
   const events = await eventsFor(snapshot, own);
-  const statements: AppStatement[] = [leaseGuard(db, own)];
+  const statements: AppStatement[] = [leaseGuard(db, own), removedCountStatement(db, own, snapshot)];
 
   for (const resolved of snapshot.enrollments) {
     const enrollment = resolved.providerEnrollment;
     statements.push(
+      db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
+        WHERE id=?1 AND status='running' AND NOT EXISTS (
+          SELECT 1 FROM learning_enrollments e
+          JOIN learning_identity_links i ON i.id=e.identity_link_id AND i.connection_id=e.connection_id
+          WHERE e.course_id=?2 AND e.connection_id=?3 AND e.external_enrollment_id=?4
+            AND i.person_id=?5 AND i.external_user_id=?6 AND i.status='active'
+            AND e.role=?7 AND e.state=?8
+        )`).bind(
+          own.runId, own.courseId, own.connectionId, enrollment.externalEnrollmentId,
+          resolved.personId, enrollment.externalUserId, enrollment.role, enrollment.state,
+        ),
       db.prepare(`INSERT INTO learning_identity_links
         (connection_id,person_id,external_user_id,status,created_at,updated_at)
         VALUES (?1,?2,?3,'active',?4,?4)
         ON CONFLICT DO NOTHING`).bind(own.connectionId, resolved.personId, enrollment.externalUserId, snapshot.syncedAt),
-      db.prepare(`UPDATE learning_identity_links SET status='active',updated_at=?1
-        WHERE connection_id=?2 AND person_id=?3 AND external_user_id=?4`)
-        .bind(snapshot.syncedAt, own.connectionId, resolved.personId, enrollment.externalUserId),
       db.prepare(`UPDATE learning_enrollments SET connection_id=0
         WHERE course_id=?1 AND (
           external_enrollment_id=?2 OR identity_link_id=(SELECT id FROM learning_identity_links
@@ -580,7 +685,7 @@ export async function completeLearningCourseSync(
       db.prepare(`INSERT INTO learning_enrollments
         (connection_id,course_id,identity_link_id,external_enrollment_id,role,state,last_synced_at,created_at,updated_at)
         SELECT ?1,?2,i.id,?3,?4,?5,?6,?6,?6 FROM learning_identity_links i
-        WHERE i.connection_id=?1 AND i.person_id=?7 AND i.external_user_id=?8
+        WHERE i.connection_id=?1 AND i.person_id=?7 AND i.external_user_id=?8 AND i.status='active'
         ON CONFLICT(course_id,external_enrollment_id) DO UPDATE SET
           role=excluded.role,state=excluded.state,last_synced_at=excluded.last_synced_at,
           updated_at=excluded.updated_at`).bind(
@@ -593,6 +698,17 @@ export async function completeLearningCourseSync(
 
   for (const activity of snapshot.activities) {
     statements.push(
+      db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
+        WHERE id=?1 AND status='running' AND NOT EXISTS (
+          SELECT 1 FROM learning_activities a WHERE a.course_id=?2 AND a.external_activity_id=?3
+            AND a.title=?4 AND a.kind=?5 AND a.lifecycle_state=?6 AND a.launch_url=?7
+            AND a.due_at IS NOT DISTINCT FROM ?8 AND a.published_at IS NOT DISTINCT FROM ?9
+            AND a.provider_updated_at IS NOT DISTINCT FROM ?10
+        )`).bind(
+          own.runId, own.courseId, activity.externalActivityId, activity.title, activity.kind,
+          activity.lifecycleState, activity.launchUrl, activity.dueAt, activity.publishedAt,
+          activity.providerUpdatedAt,
+        ),
       db.prepare(`UPDATE learning_activities SET kind='__learning_kind_conflict__'
         WHERE course_id=?1 AND external_activity_id=?2 AND kind<>?3`)
         .bind(own.courseId, activity.externalActivityId, activity.kind),
@@ -613,7 +729,13 @@ export async function completeLearningCourseSync(
   }
 
   for (const event of events) {
-    statements.push(db.prepare(`INSERT INTO learning_activity_events
+    statements.push(
+      db.prepare(`UPDATE learning_sync_runs SET event_count=event_count+1
+        WHERE id=?1 AND connection_id=?2 AND status='running' AND NOT EXISTS (
+          SELECT 1 FROM learning_activity_events
+          WHERE connection_id=?2 AND source_event_id=?3
+        )`).bind(own.runId, own.connectionId, event.sourceEventId),
+      db.prepare(`INSERT INTO learning_activity_events
       (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
        enrollment_id,course_id,activity_id,activity_kind,occurred_at,ingested_at)
       SELECT ?1,?2,?3,?1,?4,i.person_id,i.id,e.id,?5,a.id,?6,?7,?8
@@ -626,42 +748,108 @@ export async function completeLearningCourseSync(
       event.sourceEventId, own.connectionId, own.provider, event.eventType, own.courseId,
       event.activityKind, event.occurredAt, snapshot.syncedAt, event.externalActivityId,
       event.externalEnrollmentId,
-    ));
+      ),
+    );
   }
 
-  statements.push(
-    db.prepare(`DELETE FROM learning_resources WHERE activity_id IN (
-      SELECT id FROM learning_activities WHERE course_id=?1
-    )`).bind(own.courseId),
-  );
   for (const resource of snapshot.resources) {
-    statements.push(db.prepare(`INSERT INTO learning_resources
-      (activity_id,external_resource_id,title,kind,launch_url,youtube_video_id,mime_type,
-       size_bytes,provider_updated_at,created_at,updated_at)
-      SELECT a.id,?1,?2,?3,?4,?5,?6,?7,?8,?9,?9 FROM learning_activities a
-      WHERE a.course_id=?10 AND a.external_activity_id=?11`).bind(
-      resource.externalResourceId, resource.title, resource.kind, resource.launchUrl,
-      resource.youtubeVideoId, resource.mimeType, resource.sizeBytes,
-      resource.providerUpdatedAt, snapshot.syncedAt, own.courseId, resource.externalActivityId,
-    ));
+    statements.push(
+      db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
+        WHERE id=?1 AND status='running' AND NOT EXISTS (
+          SELECT 1 FROM learning_resources r JOIN learning_activities a ON a.id=r.activity_id
+          WHERE a.course_id=?2 AND a.external_activity_id=?3 AND r.external_resource_id=?4
+            AND r.title=?5 AND r.kind=?6 AND r.launch_url=?7
+            AND r.youtube_video_id IS NOT DISTINCT FROM ?8
+            AND r.mime_type IS NOT DISTINCT FROM ?9
+            AND r.size_bytes IS NOT DISTINCT FROM ?10
+            AND r.provider_updated_at IS NOT DISTINCT FROM ?11
+        )`).bind(
+          own.runId, own.courseId, resource.externalActivityId, resource.externalResourceId,
+          resource.title, resource.kind, resource.launchUrl, resource.youtubeVideoId,
+          resource.mimeType, resource.sizeBytes, resource.providerUpdatedAt,
+        ),
+      db.prepare(`INSERT INTO learning_resources
+        (activity_id,external_resource_id,title,kind,launch_url,youtube_video_id,mime_type,
+         size_bytes,provider_updated_at,created_at,updated_at)
+        SELECT a.id,?1,?2,?3,?4,?5,?6,?7,?8,?9,?9 FROM learning_activities a
+        WHERE a.course_id=?10 AND a.external_activity_id=?11
+        ON CONFLICT(activity_id,external_resource_id) DO UPDATE SET
+          title=excluded.title,kind=excluded.kind,launch_url=excluded.launch_url,
+          youtube_video_id=excluded.youtube_video_id,mime_type=excluded.mime_type,
+          size_bytes=excluded.size_bytes,provider_updated_at=excluded.provider_updated_at,
+          updated_at=excluded.updated_at`).bind(
+        resource.externalResourceId, resource.title, resource.kind, resource.launchUrl,
+        resource.youtubeVideoId, resource.mimeType, resource.sizeBytes,
+        resource.providerUpdatedAt, snapshot.syncedAt, own.courseId, resource.externalActivityId,
+      ),
+    );
   }
+  const resourceKeepSql = snapshot.resources.length === 0 ? '' : ` AND NOT (${snapshot.resources
+    .map(() => `(r.activity_id=(SELECT a.id FROM learning_activities a
+      WHERE a.course_id=? AND a.external_activity_id=?) AND r.external_resource_id=?)`).join(' OR ')})`;
+  statements.push(db.prepare(`DELETE FROM learning_resources AS r WHERE r.activity_id IN (
+    SELECT a.id FROM learning_activities a WHERE a.course_id=?
+  )${resourceKeepSql}`).bind(
+    own.courseId,
+    ...snapshot.resources.flatMap((resource) => [
+      own.courseId, resource.externalActivityId, resource.externalResourceId,
+    ]),
+  ));
 
-  statements.push(db.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=?1`).bind(own.courseId));
   for (const resolved of snapshot.submissions) {
     const submission = resolved.providerSubmission;
-    statements.push(db.prepare(`INSERT INTO learning_submission_snapshots
-      (course_id,activity_id,activity_kind,enrollment_id,status,late,attempt_number,
-       submitted_at,returned_at,provider_updated_at,synced_at)
-      SELECT ?1,a.id,a.kind,e.id,?2,?3,?4,?5,?6,?7,?8
-      FROM learning_activities a JOIN learning_enrollments e ON e.course_id=a.course_id
-      JOIN learning_identity_links i ON i.id=e.identity_link_id
-      WHERE a.course_id=?1 AND a.external_activity_id=?9
-        AND a.kind IN ('assignment','quiz') AND e.external_enrollment_id=?10
-        AND i.person_id=?11 AND i.external_user_id=?12`).bind(
-      own.courseId, submission.status, submission.late, submission.attemptNumber,
-      submission.submittedAt, submission.returnedAt, submission.providerUpdatedAt,
-      snapshot.syncedAt, submission.externalActivityId, submission.externalEnrollmentId,
-      resolved.personId, submission.externalUserId,
+    statements.push(
+      db.prepare(`UPDATE learning_sync_runs SET changed_count=changed_count+1
+        WHERE id=?1 AND status='running' AND NOT EXISTS (
+          SELECT 1 FROM learning_submission_snapshots s
+          JOIN learning_activities a ON a.id=s.activity_id
+          JOIN learning_enrollments e ON e.id=s.enrollment_id
+          WHERE s.course_id=?2 AND a.external_activity_id=?3 AND e.external_enrollment_id=?4
+            AND s.status=?5 AND s.late=?6 AND s.attempt_number=?7
+            AND s.submitted_at IS NOT DISTINCT FROM ?8
+            AND s.returned_at IS NOT DISTINCT FROM ?9
+            AND s.provider_updated_at IS NOT DISTINCT FROM ?10
+        )`).bind(
+          own.runId, own.courseId, submission.externalActivityId, submission.externalEnrollmentId,
+          submission.status, submission.late, submission.attemptNumber, submission.submittedAt,
+          submission.returnedAt, submission.providerUpdatedAt,
+        ),
+      db.prepare(`INSERT INTO learning_submission_snapshots
+        (course_id,activity_id,activity_kind,enrollment_id,status,late,attempt_number,
+         submitted_at,returned_at,provider_updated_at,synced_at)
+        SELECT ?1,a.id,a.kind,e.id,?2,?3,?4,?5,?6,?7,?8
+        FROM learning_activities a JOIN learning_enrollments e ON e.course_id=a.course_id
+        JOIN learning_identity_links i ON i.id=e.identity_link_id
+        WHERE a.course_id=?1 AND a.external_activity_id=?9
+          AND a.kind IN ('assignment','quiz') AND e.external_enrollment_id=?10
+          AND i.person_id=?11 AND i.external_user_id=?12 AND i.status='active'
+        ON CONFLICT(activity_id,enrollment_id) DO UPDATE SET
+          activity_kind=excluded.activity_kind,status=excluded.status,late=excluded.late,
+          attempt_number=excluded.attempt_number,submitted_at=excluded.submitted_at,
+          returned_at=excluded.returned_at,provider_updated_at=excluded.provider_updated_at,
+          synced_at=excluded.synced_at`).bind(
+        own.courseId, submission.status, submission.late, submission.attemptNumber,
+        submission.submittedAt, submission.returnedAt, submission.providerUpdatedAt,
+        snapshot.syncedAt, submission.externalActivityId, submission.externalEnrollmentId,
+        resolved.personId, submission.externalUserId,
+      ),
+    );
+  }
+  if (snapshot.submissions.length === 0) {
+    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=?`).bind(own.courseId));
+  } else {
+    const keepPairs = snapshot.submissions
+      .map(() => '(a.external_activity_id=? AND e.external_enrollment_id=?)').join(' OR ');
+    statements.push(db.prepare(`DELETE FROM learning_submission_snapshots
+      WHERE course_id=? AND (activity_id,enrollment_id) NOT IN (
+        SELECT a.id,e.id FROM learning_activities a CROSS JOIN learning_enrollments e
+        WHERE a.course_id=? AND e.course_id=? AND (${keepPairs})
+      )`).bind(
+      own.courseId, own.courseId, own.courseId,
+      ...snapshot.submissions.flatMap((item) => [
+        item.providerSubmission.externalActivityId,
+        item.providerSubmission.externalEnrollmentId,
+      ]),
     ));
   }
 
@@ -681,11 +869,9 @@ export async function completeLearningCourseSync(
         own.connectionId, own.provider, own.externalCourseId,
       ),
     db.prepare(`UPDATE learning_sync_runs SET status='succeeded',finished_at=?1,
-      scanned_count=?2,changed_count=?2,removed_count=0,
-      event_count=(SELECT COUNT(*) FROM learning_activity_events
-        WHERE connection_id=?3 AND ingested_at=?1),error_code=NULL
+      scanned_count=?2,error_code=NULL
       WHERE id=?4 AND connection_id=?3 AND course_id=?5 AND status='running'
-      RETURNING id AS run_id,event_count`).bind(
+      RETURNING id AS run_id,changed_count,removed_count,event_count`).bind(
         snapshot.syncedAt, scannedCount, own.connectionId, own.runId, own.courseId,
       ),
     db.prepare(`UPDATE learning_provider_connections SET operation_marker=NULL,status='active',
@@ -701,6 +887,8 @@ export async function completeLearningCourseSync(
     if (!runResult || integer(runResult.run_id) !== own.runId) throw new LearningSyncConflictError();
     return Object.freeze({
       runId: own.runId, status: 'succeeded' as const, scannedCount,
+      changedCount: integer(runResult.changed_count, 0, LEARNING_MAX_ATOMIC_ENTITIES),
+      removedCount: integer(runResult.removed_count, 0, LEARNING_LIMITS.maxSyncItems),
       eventCount: integer(runResult.event_count, 0, LEARNING_LIMITS.maxSyncItems),
     });
   } catch (error) {
@@ -805,9 +993,10 @@ export async function listLearningEnrollmentsForPerson(
       FROM learning_enrollments e JOIN learning_identity_links i
         ON i.id=e.identity_link_id AND i.connection_id=e.connection_id
       JOIN learning_courses c ON c.id=e.course_id AND c.connection_id=e.connection_id
+      JOIN learning_provider_connections pc ON pc.id=c.connection_id AND pc.provider=c.provider
       WHERE e.course_id=?1 AND i.person_id=?2 AND i.status='active'
-        AND e.state IN ('active','invited','completed')
-        AND c.deleted_at IS NULL AND c.lifecycle_state<>'deleted'
+        AND e.state='active' AND c.deleted_at IS NULL AND c.lifecycle_state='active'
+        AND pc.status='active' AND pc.deleted_at IS NULL
       ORDER BY e.id LIMIT 100`).bind(courseId, personId).all();
     return Object.freeze(resultRows(result, 100).map((row) => {
       const role = row.role;

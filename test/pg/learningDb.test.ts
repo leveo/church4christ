@@ -8,7 +8,9 @@ import {
   completeLearningCourseSync,
   createLearningProgram,
   failLearningSync,
+  getLearningSyncRun,
   linkLearningIdentity,
+  listLearningEnrollmentsForPerson,
   mapLearningCourse,
   startLearningSync,
 } from '../../src/lib/learningDb';
@@ -72,7 +74,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     };
     const lease = await startLearningSync(db, {
       connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
     });
     await completeLearningCourseSync(db, lease, {
       course: course(), urlPolicy: POLICY, syncedAt: NOW,
@@ -82,16 +84,119 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
       JOIN learning_identity_links i ON i.id=e.identity_link_id`))[0]).toEqual({ state: 'active', person_id: 8012 });
   });
 
+  it('rejects URL-policy drift and exact disabled identities without mutating the PostgreSQL generation', async () => {
+    const mapped = await mappedCourse();
+    await expect(mapLearningCourse(db, {
+      programId: mapped.programId,
+      course: {
+        ...course(), externalCourseId: 'wrong-base',
+        launchUrl: 'https://other-canvas.learning.test/courses/wrong-base',
+      },
+      urlPolicy: {
+        ...POLICY, baseUrl: 'https://other-canvas.learning.test',
+        providerLaunchOrigins: ['https://other-canvas.learning.test'],
+      },
+    })).rejects.toBeInstanceOf(LearningPersistenceError);
+
+    await linkLearningIdentity(db, {
+      connectionId: 801, provider: 'canvas', externalUserId: 'disabled-user', personId: 8012,
+    });
+    await sql.unsafe(`UPDATE learning_identity_links SET status='disabled'
+      WHERE connection_id=801 AND external_user_id='disabled-user'`);
+    const providerEnrollment = {
+      connectionId: 801, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalUserId: 'disabled-user',
+      externalEnrollmentId: learningSyntheticEnrollmentId({ provider: 'canvas', externalCourseId: 'genesis-1', externalUserId: 'disabled-user' }),
+      role: 'student' as const, state: 'active' as const,
+    };
+    const lease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+    });
+    await expect(completeLearningCourseSync(db, lease, {
+      course: course(), urlPolicy: POLICY, syncedAt: NOW,
+      enrollments: [{ providerEnrollment, personId: 8012 }], activities: [], resources: [], submissions: [],
+    })).rejects.toBeInstanceOf(LearningIdentityConflictError);
+    expect((await sql.unsafe(`SELECT status FROM learning_identity_links
+      WHERE connection_id=801 AND external_user_id='disabled-user'`))[0]).toEqual({ status: 'disabled' });
+    expect((await sql.unsafe(`SELECT COUNT(*)::int AS count FROM learning_enrollments`))[0]).toEqual({ count: 0 });
+  });
+
+  it('matches D1 stable returned-event, actual-count, and active-only learner semantics', async () => {
+    const mapped = await mappedCourse();
+    const externalEnrollmentId = learningSyntheticEnrollmentId({
+      provider: 'canvas', externalCourseId: 'genesis-1', externalUserId: 'user-1',
+    });
+    const providerEnrollment = {
+      connectionId: 801, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalUserId: 'user-1',
+      externalEnrollmentId, role: 'student' as const, state: 'active' as const,
+    };
+    const quiz = {
+      connectionId: 801, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalActivityId: 'quiz-returned',
+      title: 'Returned quiz', kind: 'quiz' as const, lifecycleState: 'published' as const,
+      launchUrl: 'https://canvas.learning.test/courses/genesis-1/quizzes/quiz-returned', dueAt: null,
+      publishedAt: NOW, providerUpdatedAt: NOW, lastSyncedAt: null,
+    };
+    const returned = {
+      connectionId: 801, provider: 'canvas' as const, externalCourseId: 'genesis-1', externalActivityId: 'quiz-returned',
+      externalUserId: 'user-1', externalEnrollmentId, status: 'returned' as const, late: 0 as const,
+      attemptNumber: 1, submittedAt: NOW, returnedAt: '2026-08-17T12:05:00.000Z',
+      providerUpdatedAt: '2026-08-17T12:05:00.000Z',
+    };
+    const firstLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
+    });
+    const first = await completeLearningCourseSync(db, firstLease, {
+      course: course(), urlPolicy: POLICY, syncedAt: NOW,
+      enrollments: [{ providerEnrollment, personId: 8012 }], activities: [quiz], resources: [],
+      submissions: [{ providerSubmission: returned, personId: 8012 }],
+    });
+    expect(first).toMatchObject({ scannedCount: 3, changedCount: 3, removedCount: 0, eventCount: 3 });
+
+    const later = '2026-08-17T12:10:00.000Z';
+    const replayLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: later, urlPolicy: POLICY,
+    });
+    await completeLearningCourseSync(db, replayLease, {
+      course: { ...course(), lastSyncedAt: later }, urlPolicy: POLICY, syncedAt: later,
+      enrollments: [{ providerEnrollment, personId: 8012 }], activities: [quiz], resources: [],
+      submissions: [{ providerSubmission: { ...returned, providerUpdatedAt: later }, personId: 8012 }],
+    });
+    expect(await getLearningSyncRun(db, replayLease.runId)).toMatchObject({
+      scannedCount: 3, changedCount: 1, removedCount: 0, eventCount: 0,
+    });
+    expect((await sql.unsafe(`SELECT event_type FROM learning_activity_events ORDER BY occurred_at,event_type`))
+      .map((row) => row.event_type)).toEqual(['enrolled', 'quiz_submitted', 'submission_returned']);
+    const exactReplayAt = '2026-08-17T12:15:00.000Z';
+    const exactReplayLease = await startLearningSync(db, {
+      connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
+      trigger: 'scheduled', startedAt: exactReplayAt, urlPolicy: POLICY,
+    });
+    await completeLearningCourseSync(db, exactReplayLease, {
+      course: { ...course(), lastSyncedAt: exactReplayAt }, urlPolicy: POLICY, syncedAt: exactReplayAt,
+      enrollments: [{ providerEnrollment, personId: 8012 }], activities: [quiz], resources: [],
+      submissions: [{ providerSubmission: { ...returned, providerUpdatedAt: later }, personId: 8012 }],
+    });
+    expect(await getLearningSyncRun(db, exactReplayLease.runId)).toMatchObject({
+      scannedCount: 3, changedCount: 0, removedCount: 0, eventCount: 0,
+    });
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 }))
+      .toHaveLength(1);
+    await sql.unsafe(`UPDATE learning_enrollments SET state='invited' WHERE course_id=$1`, [mapped.courseId]);
+    expect(await listLearningEnrollmentsForPerson(db, { courseId: mapped.courseId, personId: 8012 })).toEqual([]);
+  });
+
   it('serializes concurrent leases with exactly one winner and one run', async () => {
     const mapped = await mappedCourse();
     const attempts = await Promise.allSettled([
       startLearningSync(db, {
         connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-        trigger: 'manual', startedAt: NOW,
+        trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
       }),
       startLearningSync(db, {
         connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-        trigger: 'scheduled', startedAt: NOW,
+        trigger: 'scheduled', startedAt: NOW, urlPolicy: POLICY,
       }),
     ]);
     expect(attempts.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
@@ -109,7 +214,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     };
     const first = await startLearningSync(db, {
       connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'manual', startedAt: NOW,
+      trigger: 'manual', startedAt: NOW, urlPolicy: POLICY,
     });
     await completeLearningCourseSync(db, first, {
       course: course(), urlPolicy: POLICY, syncedAt: NOW,
@@ -124,7 +229,7 @@ describe.skipIf(!hasPg)('Learning persistence parity (PostgreSQL)', () => {
     const later = '2026-08-17T12:05:00.000Z';
     const second = await startLearningSync(db, {
       connectionId: 801, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
-      trigger: 'scheduled', startedAt: later,
+      trigger: 'scheduled', startedAt: later, urlPolicy: POLICY,
     });
     await expect(completeLearningCourseSync(db, second, {
       course: { ...course(), displayName: 'Must roll back' }, urlPolicy: POLICY, syncedAt: later,
