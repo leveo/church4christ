@@ -5,6 +5,7 @@ import {
   refreshGoogleAccessToken,
   revokeGoogleRefreshToken,
   rotateGoogleCredentialForActiveOrError,
+  rotateGoogleCredentialForDisabledDisconnect,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
 import { deleteGoogleClassroomRegistration } from './learningGooglePubSub';
@@ -319,6 +320,7 @@ export async function recoverGoogleClassroomCleanup(
   const connectionId = integer(input.connectionId);
   const now = epoch(input.nowEpochMs);
   let loaded = await loadGoogleCredentialForCleanup(db, { connectionId, keyRing: input.keyRing });
+  const claimedRevision = loaded.revision;
   const disconnectMarker = loaded.status === 'disabled'
     ? await claimDisconnectTask(db, connectionId, freshEpoch(clock))
     : null;
@@ -328,9 +330,18 @@ export async function recoverGoogleClassroomCleanup(
   let accessToken = loaded.credential.accessToken;
   let refreshToken = loaded.credential.refreshToken;
   try {
+    if (disconnectMarker !== null) {
+      loaded = await loadGoogleCredentialForCleanup(db, { connectionId, keyRing: input.keyRing });
+      if (loaded.status !== 'disabled' || loaded.revision !== claimedRevision) {
+        throw new LearningGoogleCleanupConflictError();
+      }
+      accessToken = loaded.credential.accessToken;
+      refreshToken = loaded.credential.refreshToken;
+    }
     if (Date.parse(loaded.credential.accessTokenExpiresAt) <= now + REFRESH_SKEW_MS) {
+      let refreshed: Awaited<ReturnType<typeof refreshGoogleAccessToken>> | null = null;
       try {
-        const refreshed = await refreshGoogleAccessToken({
+        refreshed = await refreshGoogleAccessToken({
           clientId: input.clientId,
           clientSecret: input.clientSecret,
           refreshToken,
@@ -339,9 +350,60 @@ export async function recoverGoogleClassroomCleanup(
           signal: input.signal,
           nowEpochMs: now,
         });
+      } catch (error) {
+        if (disconnectMarker === null) throw error;
+        const winner = await loadGoogleCredentialForCleanup(db, {
+          connectionId, keyRing: input.keyRing,
+        });
+        if (
+          winner.status === 'disabled'
+          && winner.revision === loaded.revision
+          && winner.credential.refreshToken !== refreshToken
+        ) {
+          if (Date.parse(winner.credential.accessTokenExpiresAt) <= now) {
+            throw new LearningGoogleCleanupConflictError();
+          }
+          loaded = winner;
+          accessToken = winner.credential.accessToken;
+          refreshToken = winner.credential.refreshToken;
+        } else {
+          await revokeGoogleRefreshToken({ refreshToken, fetcher: input.fetcher, signal: input.signal });
+          await finalizeDisconnectTask(db, connectionId, disconnectMarker, true);
+          return Object.freeze({ selected: 0, cleaned: 0, pending: 0, finalizedDisconnect: true });
+        }
+      }
+      if (refreshed !== null) {
         if (loaded.status === 'disabled') {
-          accessToken = refreshed.accessToken;
-          refreshToken = refreshed.refreshToken;
+          if (
+            disconnectMarker === null
+            || !await heartbeatDisconnectTask(db, connectionId, disconnectMarker, freshEpoch(clock))
+          ) throw new LearningGoogleCleanupConflictError();
+          try {
+            await rotateGoogleCredentialForDisabledDisconnect(db, {
+              connectionId,
+              expectedRevision: loaded.revision,
+              credential: refreshed,
+              keyRing: input.keyRing,
+              nowEpochMs: freshEpoch(clock),
+              disconnectClaimMarker: disconnectMarker,
+            });
+            accessToken = refreshed.accessToken;
+            refreshToken = refreshed.refreshToken;
+          } catch (error) {
+            if (!(error instanceof LearningGoogleAuthConflictError)) throw error;
+            const winner = await loadGoogleCredentialForCleanup(db, {
+              connectionId, keyRing: input.keyRing,
+            });
+            if (
+              winner.status !== 'disabled'
+              || winner.revision !== loaded.revision
+              || winner.credential.refreshToken === refreshToken
+              || Date.parse(winner.credential.accessTokenExpiresAt) <= now
+            ) throw new LearningGoogleCleanupConflictError();
+            loaded = winner;
+            accessToken = winner.credential.accessToken;
+            refreshToken = winner.credential.refreshToken;
+          }
         } else {
           try {
             await rotateGoogleCredentialForActiveOrError(db, {
@@ -366,11 +428,6 @@ export async function recoverGoogleClassroomCleanup(
             refreshToken = loaded.credential.refreshToken;
           }
         }
-      } catch (error) {
-        if (disconnectMarker === null) throw error;
-        await revokeGoogleRefreshToken({ refreshToken, fetcher: input.fetcher, signal: input.signal });
-        await finalizeDisconnectTask(db, connectionId, disconnectMarker, true);
-        return Object.freeze({ selected: 0, cleaned: 0, pending: 0, finalizedDisconnect: true });
       }
     }
     const drained = await drainGoogleClassroomRegistrationCleanup(db, {

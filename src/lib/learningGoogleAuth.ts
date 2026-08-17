@@ -554,10 +554,15 @@ function sessionBinding(value: unknown): string {
   return value as string;
 }
 
+function uuidValue(value: unknown): string {
+  if (typeof value !== 'string') invalid();
+  const candidate = value as string;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(candidate)) invalid();
+  return candidate;
+}
+
 function uuid(): string {
-  const value = crypto.randomUUID();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)) invalid();
-  return value;
+  return uuidValue(crypto.randomUUID());
 }
 
 function resultRows(result: AppDbResult<unknown> | undefined, maximum = 1): Record<string, unknown>[] {
@@ -961,6 +966,10 @@ interface GoogleCredentialRotationInput {
   readonly nowEpochMs: number;
 }
 
+interface GoogleDisabledDisconnectCredentialRotationInput extends GoogleCredentialRotationInput {
+  readonly disconnectClaimMarker: string;
+}
+
 async function rotateGoogleCredentialForStatuses(
   db: AppDb,
   rawInput: GoogleCredentialRotationInput,
@@ -1032,4 +1041,43 @@ export async function rotateGoogleCredentialForActiveOrError(
   rawInput: GoogleCredentialRotationInput,
 ): Promise<{ readonly connectionId: number; readonly revision: number }> {
   return rotateGoogleCredentialForStatuses(db, rawInput, true);
+}
+
+export async function rotateGoogleCredentialForDisabledDisconnect(
+  db: AppDb,
+  rawInput: GoogleDisabledDisconnectCredentialRotationInput,
+): Promise<{ readonly connectionId: number; readonly revision: number }> {
+  const connectionId = databaseInteger(rawInput.connectionId);
+  const expectedRevision = databaseInteger(rawInput.expectedRevision);
+  const now = epoch(rawInput.nowEpochMs);
+  const disconnectClaimMarker = uuidValue(rawInput.disconnectClaimMarker);
+  const credential = normalizeGoogleCredential(rawInput.credential);
+  const envelope = await encryptLearningCredential(rawInput.keyRing, {
+    provider: 'google_classroom', connectionId,
+    plaintext: encodeGoogleCredential(credential), expiresAt: credential.refreshTokenExpiresAt,
+  });
+  try {
+    const result = await db.prepare(`UPDATE learning_provider_credentials SET
+      ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5,
+      expires_at=?6,updated_at=datetime('now')
+      WHERE connection_id=?7 AND EXISTS (SELECT 1 FROM learning_provider_connections c
+        WHERE c.id=?7 AND c.provider='google_classroom' AND c.status='disabled'
+          AND c.revision=?8 AND c.deleted_at IS NOT NULL AND c.operation_marker IS NULL)
+        AND EXISTS (SELECT 1 FROM learning_google_cleanup_tasks t
+          WHERE t.connection_id=?7 AND t.task_type='disconnect' AND t.claim_marker=?9
+            AND t.claim_expires_at>?10)
+      RETURNING connection_id`).bind(
+      envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion,
+      envelope.envelopeVersion, envelope.expiresAt, connectionId, expectedRevision,
+      disconnectClaimMarker, new Date(now).toISOString(),
+    ).run();
+    const rows = resultRows(result);
+    if (rows.length !== 1 || databaseInteger(rows[0].connection_id) !== connectionId) {
+      throw new LearningGoogleAuthConflictError();
+    }
+    return Object.freeze({ connectionId, revision: expectedRevision });
+  } catch (error) {
+    if (error instanceof LearningGoogleAuthConflictError || error instanceof LearningGoogleAuthError) throw error;
+    throw new LearningGoogleAuthConflictError();
+  }
 }
