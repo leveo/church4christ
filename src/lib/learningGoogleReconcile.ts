@@ -22,7 +22,13 @@ import {
 } from './learningSync';
 
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
-const RECONCILIATION_DEADLINE_MS = 30_000;
+// Leave five seconds inside the provider's 30-second per-request ceiling for
+// receipt finalization and bounded webhook cleanup.
+const RECONCILIATION_DEADLINE_MS = 25_000;
+// Worker Free allows 50 external subrequests. Reserve one each for an uncached
+// Pub/Sub JWKS fetch, a possible OAuth refresh, and the authoritative course
+// GET; every remaining provider request is represented by one collected page.
+const RECONCILIATION_MAX_PROVIDER_PAGES = 47;
 // Receipt claim (2), authoritative/identity/credential reads (3), refresh CAS
 // plus a losing-writer reload (4), and terminal receipt update (1).
 const GOOGLE_WEBHOOK_RESERVED_D1_QUERIES = 10;
@@ -220,7 +226,7 @@ export async function reconcileGoogleClassroomCourse(
       }),
       startedAt: new Date(startedAt).toISOString(),
       deadlineAt: new Date(startedAt + RECONCILIATION_DEADLINE_MS).toISOString(),
-      maxPages: LEARNING_LIMITS.maxPages,
+      maxPages: RECONCILIATION_MAX_PROVIDER_PAGES,
       maxItems: LEARNING_MAX_ATOMIC_ENTITIES,
       maxRawBytes: LEARNING_LIMITS.maxSyncBytes,
       maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes,
