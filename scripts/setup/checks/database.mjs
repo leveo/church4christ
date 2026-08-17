@@ -48,6 +48,12 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   registration: Object.freeze([
     'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
   ]),
+  learning: Object.freeze([
+    'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',
+    'learning_courses', 'learning_identity_links', 'learning_enrollments', 'learning_activities',
+    'learning_resources', 'learning_submission_snapshots', 'learning_activity_events',
+    'learning_sync_runs',
+  ]),
 });
 const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
   giving: Object.freeze(['church_private.stripe_webhook_events']),

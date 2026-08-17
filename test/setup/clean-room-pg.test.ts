@@ -66,8 +66,8 @@ suite('clean-room Supabase setup', () => {
       const firstRun = await workspace.execNode(flags, env, 300_000);
       const first = JSON.parse(firstRun.stdout);
       expect(first).toMatchObject({ schemaVersion: 1, kind: 'setup-result', backend: 'supabase' });
-      expect(first.enabledModules).toHaveLength(20);
-      expect(first.moduleRows).toBe(20);
+      expect(first.enabledModules).toHaveLength(21);
+      expect(first.moduleRows).toBe(21);
       expect(first.admin.status).toMatch(/created|already-admin/);
       expect(first.doctor.status).toBe('ready-with-limitations');
       expect(first.doctor.checks).toContainEqual(expect.objectContaining({ code: 'services.stripe-ok', severity: 'info' }));
@@ -75,7 +75,7 @@ suite('clean-room Supabase setup', () => {
       const expectedMigrations = (await readdir(join(workspace.root, 'migrations-supabase'))).filter((name) => name.endsWith('.sql')).sort();
       const migrations = await db<{ name: string }[]>`SELECT name FROM _migrations ORDER BY name`;
       expect(migrations.map(({ name }) => name)).toEqual(expectedMigrations);
-      expect((await db<{ total: number; enabled: number }[]>`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE value='1')::int AS enabled FROM settings WHERE key LIKE 'module.%'`)[0]).toEqual({ total: 20, enabled: 20 });
+      expect((await db<{ total: number; enabled: number }[]>`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE value='1')::int AS enabled FROM settings WHERE key LIKE 'module.%'`)[0]).toEqual({ total: 21, enabled: 21 });
       const owners = await db<{ id: number; email: string; role: string; active: number; deleted_at: string | null; session_epoch: number }[]>`SELECT id, lower(email) AS email, role, active, deleted_at, session_epoch FROM people WHERE lower(email)='owner@full-clean.invalid'`;
       expect(owners).toHaveLength(1);
       expect(owners[0]).toMatchObject({ email: 'owner@full-clean.invalid', role: 'admin', active: 1, deleted_at: null });

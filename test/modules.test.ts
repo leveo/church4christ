@@ -26,7 +26,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 20 module keys in display order', () => {
+  it('has all 21 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -48,6 +48,7 @@ describe('MODULES registry', () => {
       'portal',
       'giving',
       'registration',
+      'learning',
     ]);
   });
 
@@ -83,8 +84,9 @@ describe('MODULES registry', () => {
     expect(MODULES.groups.uses).toEqual(['people', 'registration']);
     expect(MODULES.portal.uses).toEqual(['serve', 'groups']);
     expect(MODULES['activity-score'].uses).toEqual(['groups', 'serve', 'registration']);
+    expect(MODULES.learning.uses).toEqual(['groups', 'portal', 'activity-score']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance' && key !== 'activity-score') {
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance' && key !== 'activity-score' && key !== 'learning') {
         expect(MODULES[key].uses).toEqual([]);
       }
     }
@@ -196,6 +198,8 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/register', 'registration'],
     ['/register/summer-camp', 'registration'],
     ['/api/register', 'registration'],
+    ['/learn', 'learning'],
+    ['/learn/42', 'learning'],
     // ── admin prefixes ──
     ['/admin/bulletins', 'bulletins'],
     ['/admin/sermons', 'sermons'],
@@ -210,6 +214,7 @@ describe('moduleForPath (longest-prefix wins)', () => {
     ['/admin/testimonies', 'testimonies'],
     ['/admin/giving', 'giving'],
     ['/admin/registration', 'registration'],
+    ['/admin/learning', 'learning'],
     ['/admin/children', 'children'],
     ['/admin/attendance', 'attendance'],
     ['/admin/attendance/report.csv', 'attendance'],

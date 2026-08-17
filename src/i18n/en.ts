@@ -16,6 +16,12 @@ export default {
   'nav.articles': 'Articles',
   'nav.fellowships': 'Fellowships',
   'nav.groups': 'Groups',
+  'nav.learn': 'Learning',
+
+  'learning.title': 'Learning',
+  'learning.intro': 'Continue learning between classes with the resources and activities your teachers prepare.',
+  'learning.emptyTitle': 'No courses to show',
+  'learning.emptyBody': 'When your church enrolls you in a Learning course, it will appear here.',
 
   'groups.title': 'Groups',
   'groups.intro': 'Find a small group to grow with — Bible study, prayer, or friendship.',
@@ -593,6 +599,7 @@ export default {
   'admin.nav.children': 'Children',
   'admin.nav.attendance': 'Service attendance',
   'admin.nav.activityScore': 'Activity score',
+  'admin.nav.learning': 'Learning',
   'admin.nav.settings': 'Settings',
   'admin.nav.navigation': 'Navigation',
   'admin.nav.viewSite': 'View site',
@@ -604,6 +611,12 @@ export default {
   'admin.dashboard.peopleCardBody': 'View and edit members, editors, and admins.',
   'admin.dashboard.attendance': 'Service attendance',
   'admin.dashboard.activityScore': 'Activity score',
+  'admin.dashboard.learning': 'Learning',
+
+  'admin.learning.title': 'Learning',
+  'admin.learning.intro': 'Manage the provider connections and mapped programs that power your church’s Learning hub.',
+  'admin.learning.emptyTitle': 'No Learning setup yet',
+  'admin.learning.emptyBody': 'Provider connections and mapped courses will appear here after they are configured.',
 
   'admin.attendance.title': 'Service attendance',
   'admin.attendance.intro': 'Record aggregate adult totals and review derived child check-in totals.',
@@ -2135,6 +2148,8 @@ export default {
   'modules.registration.desc': 'Event registration and attendee management.',
   'modules.portal.label': 'Member Portal',
   'modules.portal.desc': 'Member self-service: household profiles, events, serving, and the prayer wall. Requires Supabase.',
+  'modules.learning.label': 'Learning',
+  'modules.learning.desc': 'A signed-in hub for provider-linked courses, resources, assignments, and quizzes.',
 
   'register.title': 'Event registration',
   'register.intro': 'Sign up for upcoming events and gatherings.',

@@ -1,0 +1,32 @@
+---
+// Learning learner shell. Provider and enrollment reads arrive with the learner
+// experience slice; until then this route deliberately renders no sample data.
+import Base from '../../../layouts/Base.astro';
+import { card } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import { parseLocale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) return new Response(null, { status: 404 });
+const modules = Astro.locals.modules;
+if (!modules.has('learning')) {
+  return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+}
+const user = Astro.locals.user;
+if (!user) {
+  return new Response(null, { status: 401, headers: { 'cache-control': 'no-store' } });
+}
+---
+
+<Base title={t(locale, 'learning.title')} description={t(locale, 'learning.intro')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <h1 class="font-display text-heading-md font-bold">{t(locale, 'learning.title')}</h1>
+    <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'learning.intro')}</p>
+    <section class={`mt-8 ${card}`}>
+      <h2 class="font-display text-heading-sm font-bold">{t(locale, 'learning.emptyTitle')}</h2>
+      <p class="mt-2 text-ink-muted">{t(locale, 'learning.emptyBody')}</p>
+    </section>
+  </div>
+</Base>

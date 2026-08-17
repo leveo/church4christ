@@ -1,0 +1,36 @@
+---
+// Provider-neutral Learning administration shell. Connection and mapping reads
+// land in their own slices; this page never invents a configured provider.
+import Admin from '../../../layouts/Admin.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { card } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const modules = Astro.locals.modules;
+if (!modules.has('learning')) {
+  return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+}
+const user = Astro.locals.user;
+if (!hasAreaAccess(user, 'learning')) {
+  return new Response(null, { status: 403, headers: { 'cache-control': 'no-store' } });
+}
+if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
+  return new Response(null, {
+    status: 405,
+    headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
+  });
+}
+const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+---
+
+<Admin title={t(lang, 'admin.learning.title')}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.learning.title')}</h1>
+  <p class="mt-2 max-w-3xl text-ink-muted">{t(lang, 'admin.learning.intro')}</p>
+  <section class={`mt-8 max-w-3xl ${card}`}>
+    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.learning.emptyTitle')}</h2>
+    <p class="mt-2 text-ink-muted">{t(lang, 'admin.learning.emptyBody')}</p>
+  </section>
+</Admin>

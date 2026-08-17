@@ -15,6 +15,12 @@ export default {
   'nav.articles': '文章',
   'nav.fellowships': '团契',
   'nav.groups': '小组',
+  'nav.learn': '学习',
+
+  'learning.title': '学习',
+  'learning.intro': '在课堂之外，继续使用老师预备的资源和学习活动。',
+  'learning.emptyTitle': '暂无可显示的课程',
+  'learning.emptyBody': '当教会为你加入学习课程后，课程会显示在这里。',
 
   'groups.title': '小组',
   'groups.intro': '找到一个可以一起成长的小组——查经、代祷或团契。',
@@ -591,6 +597,7 @@ export default {
   'admin.nav.children': '儿童事工',
   'admin.nav.attendance': '崇拜出席',
   'admin.nav.activityScore': '活跃度评分',
+  'admin.nav.learning': '学习',
   'admin.nav.settings': '设置',
   'admin.nav.navigation': '导航',
   'admin.nav.viewSite': '查看网站',
@@ -602,6 +609,12 @@ export default {
   'admin.dashboard.peopleCardBody': '查看与编辑会员、编辑和管理员。',
   'admin.dashboard.attendance': '崇拜出席',
   'admin.dashboard.activityScore': '活跃度评分',
+  'admin.dashboard.learning': '学习',
+
+  'admin.learning.title': '学习',
+  'admin.learning.intro': '管理为教会学习中心提供内容的平台连接与课程映射。',
+  'admin.learning.emptyTitle': '尚未设置学习功能',
+  'admin.learning.emptyBody': '平台连接和已映射课程在完成设置后会显示在这里。',
 
   'admin.attendance.title': '崇拜出席',
   'admin.attendance.intro': '记录成人出席总数并查看由儿童报到汇总的人数。',
@@ -2130,6 +2143,8 @@ export default {
   'modules.registration.desc': '活动报名与报名者管理。',
   'modules.portal.label': '会友门户',
   'modules.portal.desc': '会友自助服务：家庭档案、活动、服事与祷告墙。需要 Supabase 数据库。',
+  'modules.learning.label': '学习',
+  'modules.learning.desc': '需登录的课程中心，用于查看外部平台课程、资源、作业与测验。',
 
   'register.title': '活动报名',
   'register.intro': '报名参加即将举行的活动与聚会。',

@@ -92,6 +92,7 @@ const ADMIN_ONLY = [
   '/admin/children',
   '/admin/attendance',
   '/admin/activity-score',
+  '/admin/learning',
   '/admin/onboarding',
 ];
 
@@ -160,6 +161,7 @@ export function classifyRoute(pathname: string): RouteClass {
   // Protected namespaces fail closed on unknown sub-paths. `under` is
   // segment-aware, so /mystery or /serveware do NOT match /my or /serve.
   if (under(p, '/my')) return 'authed';
+  if (under(p, '/learn')) return 'authed';
   if (p === '/profile') return 'authed';
   if (under(p, '/settings')) return 'authed';
   if (under(p, '/serve')) return 'team';

@@ -201,6 +201,16 @@ const visibleRevisions = revisions.filter((r) => user.isEditor || hasAreaAccess(
   }
 
   {
+    user.isAdmin && areaOk('learning') && modules.has('learning') && (
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        <a href="/admin/learning" class={`${card} flex items-center justify-between gap-4 hover:bg-surface-sunken`}>
+          <span class="font-semibold text-ink">{t(lang, 'admin.dashboard.learning')}</span>
+        </a>
+      </div>
+    )
+  }
+
+  {
     isStaff && (modules.has('prayer-wall') || (modules.has('testimonies') && areaOk('testimonies'))) && (
       <div class="mt-6 grid gap-4 sm:grid-cols-2">
         {modules.has('prayer-wall') && (

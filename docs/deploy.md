@@ -33,8 +33,8 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 17 D1-compatible
-modules), Full Church (all 20), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (all 18 D1-compatible
+modules), Full Church (all 21), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:

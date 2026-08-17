@@ -117,6 +117,7 @@ run on either of two databases:
 | `portal` | Member Portal | 会友平台 | Supabase |
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
+| `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
 
 **Which backend runs** is the `DB_BACKEND` var: `getBackend` (`src/lib/dbProvider.ts`) reads

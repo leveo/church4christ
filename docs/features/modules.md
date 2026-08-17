@@ -28,7 +28,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 20 modules:**
+**The 21 modules:**
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -53,6 +53,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `portal` | Member Portal | 会友平台 | Supabase |
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
+| `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
 
 **Three modules need the Supabase database.** Member Portal, Giving, and Registration run
@@ -91,8 +92,8 @@ never get a link to a page that no longer exists:
   **Children off** and Attendance hides its check-in link editor, while historical aggregate
   reports and CSV remain readable. See [Service attendance](service-attendance.md).
 
-The Full Church preset enables all 20 modules; Website enables 8; Website + Community
-enables all 17 modules that are compatible with D1. Custom setup can select individual
+The Full Church preset enables all 21 modules; Website enables 8; Website + Community
+enables all 18 modules that are compatible with D1. Custom setup can select individual
 modules.
 
 ## How it fits together
@@ -108,7 +109,7 @@ soft-degrade so an off module never leaves a dangling reference.
 ## For developers
 
 - **Registry:** `config/capabilities.json` is the canonical, validated catalog, adapted by
-  `src/lib/modules.ts` for runtime use. It maps each of the 20 keys to the locale-stripped
+  `src/lib/modules.ts` for runtime use. It maps each of the 21 keys to the locale-stripped
   route prefixes it owns (public and admin), its
   nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
   `requiresBackend: 'supabase'` for Portal, Giving, and Registration. `moduleForPath` is the
@@ -120,7 +121,7 @@ soft-degrade so an off module never leaves a dangling reference.
   page a church already built and published with the tool keeps rendering unchanged. Every
   other module gates a whole surface, public and admin together; this one deliberately
   gates authoring only, never already-published content.
-- **Enablement + cache:** new setup writes all 20 `module.<key>` rows explicitly. For legacy
+- **Enablement + cache:** new setup writes all 21 `module.<key>` rows explicitly. For legacy
   installs, an absent row remains on; only the exact string `'0'` disables. A shared
   `filterByBackend` helper then drops any
   module whose `requiresBackend` doesn't match the current database — so a Supabase-only
@@ -137,7 +138,7 @@ soft-degrade so an off module never leaves a dangling reference.
   serving reminder and digest crons on the `serve` module; `src/worker.ts` clears the module
   cache before each scheduled run so a warm isolate reads fresh state.
 - **Admin panel:** `src/pages/admin/settings/index.astro` renders the grouped checkboxes and
-  writes all 20 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
+  writes all 21 `module.<key>` rows explicitly (an unchecked box is written as `'0'`, not
   left partial), then calls `clearModuleCache()`.
 - **Tests:** `test/modules.test.ts` (registry, cache, `moduleForPath`) and
   `test/moduleGating.test.ts` (middleware 404s + hidden surfaces); module-off e2e assertions

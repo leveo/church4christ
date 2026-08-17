@@ -38,8 +38,8 @@ describe('activity score documentation', () => {
     expect(release).toMatch(/Files .*0001.* through\s+.*0016/);
     expect(changelog).toContain('0016_activity_score.sql');
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
-    expect(modules).toMatch(/The 20 modules/);
-    expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?17/);
-    expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?20/);
+    expect(modules).toMatch(/The 21 modules/);
+    expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
+    expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?21/);
   });
 });

@@ -78,15 +78,15 @@ describe('guided setup CLI', () => {
     const prompted = JSON.parse(interactiveDeps.output.mock.calls[0][0]).plan;
     expect(prompted).toEqual(flagged);
     expect(prompted.backend).toBe('d1');
-    expect(prompted.modules).toHaveLength(17);
+    expect(prompted.modules).toHaveLength(18);
   });
 
-  it('Full Church automatically selects Supabase and all 20 modules', async () => {
+  it('Full Church automatically selects Supabase and all 21 modules', async () => {
     const d = deps();
     await runSetup(['--mode', 'local', '--preset', 'full-church', '--site-slug', 'full', '--church-name', 'Full', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--dry-run', '--json'], d as any);
     const plan = JSON.parse(d.output.mock.calls[0][0]).plan;
     expect(plan.backend).toBe('supabase');
-    expect(plan.modules).toHaveLength(20);
+    expect(plan.modules).toHaveLength(21);
     expect(d.collectSupabaseSecret).not.toHaveBeenCalled();
   });
 

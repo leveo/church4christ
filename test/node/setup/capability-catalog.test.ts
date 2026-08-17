@@ -29,6 +29,7 @@ const EXPECTED_KEYS = [
   'portal',
   'giving',
   'registration',
+  'learning',
 ] as const;
 
 const cloneCatalog = (): any => structuredClone(catalogJson);
@@ -58,16 +59,16 @@ describe('canonical capability catalog', () => {
       'page-builder',
     ]);
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toEqual(
-      EXPECTED_KEYS.slice(0, 17),
+      [...EXPECTED_KEYS.slice(0, 17), 'learning'],
     );
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toEqual(EXPECTED_KEYS);
   });
 
   test('registers Newcomers on both providers with People as a hard dependency', () => {
-    expect(CAPABILITY_KEYS).toHaveLength(20);
+    expect(CAPABILITY_KEYS).toHaveLength(21);
     expect(CAPABILITY_CATALOG.presets.website.modules).toHaveLength(8);
-    expect(CAPABILITY_CATALOG.presets['website-community'].modules).toHaveLength(17);
-    expect(CAPABILITY_CATALOG.presets['full-church'].modules).toHaveLength(20);
+    expect(CAPABILITY_CATALOG.presets['website-community'].modules).toHaveLength(18);
+    expect(CAPABILITY_CATALOG.presets['full-church'].modules).toHaveLength(21);
     expect(CAPABILITIES.newcomers).toMatchObject({
       publicPrefixes: ['/new-here'],
       adminPrefixes: ['/admin/newcomers'],
