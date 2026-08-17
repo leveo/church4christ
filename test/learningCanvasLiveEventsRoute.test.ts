@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hasValidMutationProvenance } from '../src/lib/csrf';
+import type { AcceptedCanvasLiveEvent } from '../src/lib/learningCanvasLiveEvents';
 import { moduleForPath } from '../src/lib/modules';
 import { createCanvasLiveEventsHandler } from '../src/pages/api/learning/canvas/live-events';
 
@@ -27,7 +28,7 @@ const deps = () => ({
     eventName: 'assignment_updated', eventTime: '2026-08-17T11:59:59.000Z',
     receivedAt: '2026-08-17T12:00:00.000Z',
   })),
-  acceptEvent: vi.fn(async () => ({
+  acceptEvent: vi.fn(async (): Promise<AcceptedCanvasLiveEvent> => ({
     connectionId: 28202, sourceEventId: `sha256:${'a'.repeat(43)}`,
     externalCourseId: 'course-1', disposition: 'claimed' as const,
     claimMarker: '10000000-0000-4000-8000-000000000001', attemptCount: 1,

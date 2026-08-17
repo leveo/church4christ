@@ -20,6 +20,7 @@ export function hasValidMutationProvenance(request: Request): boolean {
   if (request.method === 'POST' && [
     '/api/stripe/webhook',
     '/api/learning/google/pubsub',
+    '/api/learning/canvas/live-events',
   ].includes(new URL(request.url).pathname)) return true;
   return hasSameOriginProvenance(request);
 }
