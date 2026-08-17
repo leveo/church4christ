@@ -14,11 +14,21 @@ import {
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
 import {
-  mapLearningCourse,
   type LearningMappedCourseRecord,
   type LearningProgramRecord,
 } from './learningDb';
 import { createGoogleClassroomProvider } from './learningGoogleProvider';
+import {
+  commitGoogleClassroomCourseMapping,
+  commitGoogleClassroomCourseUnmap,
+  LearningGoogleRegistrationLifecycleConflictError,
+} from './learningGoogleRegistrationLifecycle';
+import {
+  createGoogleClassroomRegistration,
+  deleteGoogleClassroomRegistration,
+  GOOGLE_CLASSROOM_FEED_TYPES,
+  type GoogleClassroomRegistration,
+} from './learningGooglePubSub';
 import {
   LEARNING_LIMITS,
   LearningProviderError,
@@ -130,12 +140,20 @@ function operation(
 async function activeAccessToken(
   db: AppDb,
   input: GoogleAdminEnvironment,
-): Promise<string> {
+): Promise<{
+  readonly accessToken: string;
+  readonly revision: number;
+  readonly refreshTokenExpiresAt: string | null;
+}> {
   const connection = await getLearningConnection(db, input.connectionId, { includeDeleted: false });
   if (!connection || connection.provider !== 'google_classroom' || connection.status !== 'active') invalid();
   let loaded = await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
   if (Date.parse(loaded.credential.accessTokenExpiresAt) > input.nowEpochMs + REFRESH_SKEW_MS) {
-    return loaded.credential.accessToken;
+    return Object.freeze({
+      accessToken: loaded.credential.accessToken,
+      revision: loaded.revision,
+      refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
+    });
   }
   const credential = await refreshGoogleAccessToken({
     clientId: input.clientId,
@@ -147,32 +165,41 @@ async function activeAccessToken(
     nowEpochMs: input.nowEpochMs,
   });
   try {
-    await rotateGoogleCredential(db, {
+    const rotated = await rotateGoogleCredential(db, {
       connectionId: input.connectionId,
       expectedRevision: loaded.revision,
       credential,
       keyRing: input.keyRing,
       nowEpochMs: input.nowEpochMs,
     });
-    return credential.accessToken;
+    return Object.freeze({
+      accessToken: credential.accessToken,
+      revision: rotated.revision,
+      refreshTokenExpiresAt: credential.refreshTokenExpiresAt,
+    });
   } catch (error) {
     if (!(error instanceof LearningGoogleAuthConflictError)) throw error;
     loaded = await loadGoogleCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
     if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs) invalid();
-    return loaded.credential.accessToken;
+    return Object.freeze({
+      accessToken: loaded.credential.accessToken,
+      revision: loaded.revision,
+      refreshTokenExpiresAt: loaded.credential.refreshTokenExpiresAt,
+    });
   }
 }
 
 async function providerContext(db: AppDb, rawInput: GoogleAdminEnvironment) {
   const input = environment(rawInput);
   const policy = urlPolicy(input.connectionId);
-  const accessToken = await activeAccessToken(db, input);
+  const access = await activeAccessToken(db, input);
   return Object.freeze({
     input,
     policy,
+    access,
     provider: createGoogleClassroomProvider({
       connectionId: input.connectionId,
-      accessToken,
+      accessToken: access.accessToken,
       urlPolicy: policy,
       fetcher: input.fetcher,
       now: () => input.nowEpochMs,
@@ -217,6 +244,8 @@ export interface GoogleClassroomCourseOption {
 export interface GoogleClassroomCourseOptions {
   readonly programs: readonly LearningProgramRecord[];
   readonly courses: readonly GoogleClassroomCourseOption[];
+  readonly connectionRevision: number;
+  readonly reconnectDeadline: string | null;
 }
 
 export type GoogleClassroomHealthResult =
@@ -314,6 +343,8 @@ export async function listGoogleClassroomCourseOptions(
     }
     return Object.freeze({
       programs,
+      connectionRevision: context.access.revision,
+      reconnectDeadline: context.access.refreshTokenExpiresAt,
       courses: Object.freeze(courses.map((course) => Object.freeze({
         course,
         mappedProgramId: mapped.get(course.externalCourseId) ?? null,
@@ -331,13 +362,15 @@ export async function mapSelectedGoogleClassroomCourse(
     readonly externalCourseId: string;
     readonly programId: number;
     readonly actorPersonId: number;
+    readonly expectedRevision: number;
+    readonly pushTopicName: string | null;
   },
 ): Promise<LearningMappedCourseRecord> {
   let input: Record<string, unknown>;
   try {
     input = learningValidation.exactRecord(rawInput, [
       'connectionId', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs',
-      'externalCourseId', 'programId', 'actorPersonId',
+      'externalCourseId', 'programId', 'actorPersonId', 'expectedRevision', 'pushTopicName',
     ]);
   } catch { return invalid(); }
   const adminEnvironment = environment({
@@ -350,9 +383,16 @@ export async function mapSelectedGoogleClassroomCourse(
   });
   const externalCourseId = externalId(input.externalCourseId);
   const programId = integer(input.programId);
-  integer(input.actorPersonId);
+  const actorPersonId = integer(input.actorPersonId);
+  const expectedRevision = learningValidation.integer(input.expectedRevision, 0, LEARNING_LIMITS.databaseInteger);
+  const pushTopicName = input.pushTopicName === null
+    ? null
+    : learningValidation.boundedString(input.pushTopicName, 20, 512);
   try {
     const context = await providerContext(db, adminEnvironment);
+    if (context.access.revision !== expectedRevision) {
+      throw new LearningGoogleRegistrationLifecycleConflictError();
+    }
     const course = await invokeLearningProvider(context.provider, {
       method: 'syncCourse',
       request: {
@@ -366,7 +406,113 @@ export async function mapSelectedGoogleClassroomCourse(
       urlPolicy: context.policy,
       now: () => adminEnvironment.nowEpochMs + 1,
     });
-    return await mapLearningCourse(db, { programId, course, urlPolicy: context.policy });
+    const registrations: GoogleClassroomRegistration[] = [];
+    try {
+      if (pushTopicName !== null) {
+        for (const feedType of GOOGLE_CLASSROOM_FEED_TYPES) {
+          registrations.push(await createGoogleClassroomRegistration({
+            accessToken: context.access.accessToken,
+            externalCourseId,
+            feedType,
+            topicName: pushTopicName,
+            fetcher: adminEnvironment.fetcher,
+            signal: new AbortController().signal,
+            nowEpochMs: adminEnvironment.nowEpochMs,
+          }));
+        }
+      }
+      const committed = await commitGoogleClassroomCourseMapping(db, {
+        connectionId: adminEnvironment.connectionId,
+        expectedRevision,
+        programId,
+        actorPersonId,
+        course,
+        urlPolicy: context.policy,
+        registrations,
+        nowEpochMs: adminEnvironment.nowEpochMs,
+      });
+      for (const registrationId of committed.replacedRegistrationIds) {
+        try {
+          await deleteGoogleClassroomRegistration({
+            accessToken: context.access.accessToken,
+            registrationId,
+            fetcher: adminEnvironment.fetcher,
+            signal: new AbortController().signal,
+          });
+        } catch { /* stale IDs are rejected locally and expire provider-side */ }
+      }
+      return committed.mappedCourse;
+    } catch (error) {
+      for (const registration of registrations) {
+        try {
+          await deleteGoogleClassroomRegistration({
+            accessToken: context.access.accessToken,
+            registrationId: registration.registrationId,
+            fetcher: adminEnvironment.fetcher,
+            signal: new AbortController().signal,
+          });
+        } catch { /* bounded provider expiry is the final cleanup fallback */ }
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof LearningGoogleAdminError) throw error;
+    return invalid();
+  }
+}
+
+export async function unmapSelectedGoogleClassroomCourse(
+  db: AppDb,
+  rawInput: GoogleAdminEnvironment & {
+    readonly externalCourseId: string;
+    readonly actorPersonId: number;
+    readonly expectedRevision: number;
+  },
+): Promise<{ readonly connectionId: number; readonly connectionRevision: number }> {
+  let input: Record<string, unknown>;
+  try {
+    input = learningValidation.exactRecord(rawInput, [
+      'connectionId', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs',
+      'externalCourseId', 'actorPersonId', 'expectedRevision',
+    ]);
+  } catch { return invalid(); }
+  const adminEnvironment = environment({
+    connectionId: input.connectionId as number,
+    clientId: input.clientId as string,
+    clientSecret: input.clientSecret as string,
+    keyRing: input.keyRing as LearningCredentialKeyRing,
+    fetcher: input.fetcher as AdminFetcher,
+    nowEpochMs: input.nowEpochMs as number,
+  });
+  const externalCourseId = externalId(input.externalCourseId);
+  const actorPersonId = integer(input.actorPersonId);
+  const expectedRevision = learningValidation.integer(input.expectedRevision, 0, LEARNING_LIMITS.databaseInteger);
+  try {
+    const context = await providerContext(db, adminEnvironment);
+    if (context.access.revision !== expectedRevision) {
+      throw new LearningGoogleRegistrationLifecycleConflictError();
+    }
+    const committed = await commitGoogleClassroomCourseUnmap(db, {
+      connectionId: adminEnvironment.connectionId,
+      expectedRevision,
+      actorPersonId,
+      externalCourseId,
+      nowEpochMs: adminEnvironment.nowEpochMs,
+    });
+    for (const registrationId of committed.removedRegistrationIds) {
+      try {
+        await deleteGoogleClassroomRegistration({
+          accessToken: context.access.accessToken,
+          registrationId,
+          fetcher: adminEnvironment.fetcher,
+          signal: new AbortController().signal,
+        });
+      } catch { /* stale IDs no longer pass local registration lookup */ }
+    }
+    return Object.freeze({
+      connectionId: committed.connectionId,
+      connectionRevision: committed.connectionRevision,
+    });
   } catch (error) {
     if (error instanceof LearningGoogleAdminError) throw error;
     return invalid();

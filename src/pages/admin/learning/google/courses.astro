@@ -5,6 +5,8 @@ import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi';
 import { listGoogleClassroomCourseOptions } from '../../../../lib/learningGoogleAdmin';
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+import { googleClassroomPushReadiness } from '../../../../lib/learningGoogleRegistrationLifecycle';
+import { t } from '../../../../lib/i18n';
 import type { Locale } from '../../../../lib/locales';
 
 export const prerender = false;
@@ -28,10 +30,12 @@ const copy = lang === 'zh' ? {
   program: '学习事工',
   map: '映射课程',
   mapped: '已映射',
+  unmap: '取消映射',
   noPrograms: '请先建立一个学习事工，然后再映射 Classroom 课程。',
   noCourses: '该 Classroom 账号没有可用课程。',
   loadedError: '暂时无法读取 Google Classroom 课程；请检查授权后重试。',
   saved: '课程映射已保存。',
+  unmapped: '课程映射已取消。',
   failed: '课程映射未能保存；请刷新后重试。',
 } : {
   title: 'Select Google Classroom courses',
@@ -40,10 +44,12 @@ const copy = lang === 'zh' ? {
   program: 'Learning ministry',
   map: 'Map course',
   mapped: 'Mapped',
+  unmap: 'Unmap',
   noPrograms: 'Create a Learning ministry before mapping a Classroom course.',
   noCourses: 'This Classroom account has no available courses.',
   loadedError: 'Google Classroom courses are temporarily unavailable. Check authorization and try again.',
   saved: 'The course mapping was saved.',
+  unmapped: 'The course mapping was removed.',
   failed: 'The course mapping could not be saved. Refresh and try again.',
 };
 const entries = [...Astro.url.searchParams.entries()];
@@ -56,15 +62,24 @@ if (!Number.isInteger(connectionId) || connectionId < 1 || connectionId > 2_147_
 const allowedQuery = entries.length <= 2 && entries.every(([key, value]) => (
   key === 'connection_id'
   || (key === 'saved' && value === 'course_mapped')
+  || (key === 'saved' && value === 'course_unmapped')
   || (key === 'error' && value === 'course_mapping_failed')
 ));
 if (!allowedQuery) return new Response(null, { status: 400, headers: { 'cache-control': 'no-store' } });
 type GoogleCourseEnv = {
   GOOGLE_CLASSROOM_CLIENT_ID?: string;
   GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+  GOOGLE_CLASSROOM_PUBSUB_TOPIC?: string;
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_PUBSUB_SUBSCRIPTION_NAME?: string;
   LEARNING_CREDENTIAL_KEYS?: string;
 };
 const vars = env as unknown as GoogleCourseEnv;
+const pushReadiness = googleClassroomPushReadiness({
+  topicName: vars.GOOGLE_CLASSROOM_PUBSUB_TOPIC,
+  subscriptionName: vars.GOOGLE_PUBSUB_SUBSCRIPTION_NAME,
+  serviceAccountEmail: vars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL,
+});
 let options: Awaited<ReturnType<typeof listGoogleClassroomCourseOptions>> | null = null;
 try {
   if (
@@ -86,6 +101,8 @@ try {
 }
 const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
   ? { tone: 'success', text: copy.saved }
+  : Astro.url.searchParams.get('saved') === 'course_unmapped'
+    ? { tone: 'success', text: copy.unmapped }
   : Astro.url.searchParams.get('error') === 'course_mapping_failed'
     ? { tone: 'danger', text: copy.failed }
     : null;
@@ -95,6 +112,21 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
   <a class={btnSecondary} href="/admin/learning">{copy.back}</a>
   <h1 class="mt-6 font-display text-heading-md font-bold">{copy.title}</h1>
   <p class="mt-2 max-w-3xl text-ink-muted">{copy.intro}</p>
+  <p class={`mt-4 max-w-3xl ${card} ${
+    pushReadiness.mode === 'misconfigured' ? 'text-danger' : 'text-ink-muted'
+  }`}>
+    {pushReadiness.mode === 'ready'
+      ? t(lang, 'admin.learning.google.pushReady')
+      : pushReadiness.mode === 'polling_only'
+        ? t(lang, 'admin.learning.google.pushPollingOnly')
+        : t(lang, 'admin.learning.google.pushMisconfigured')}
+  </p>
+  {options?.reconnectDeadline && (
+    <p class="mt-3 max-w-3xl text-sm text-ink-muted">
+      {t(lang, 'admin.learning.google.reconnectDeadline')}:{' '}
+      <time datetime={options.reconnectDeadline}>{options.reconnectDeadline}</time>
+    </p>
+  )}
   {banner && <p class={`mt-4 max-w-3xl rounded-card px-4 py-3 text-sm ${
     banner.tone === 'success' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
   }`}>{banner.text}</p>}
@@ -117,7 +149,9 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
             {mappedProgramId !== null && <span class="text-sm text-success">{copy.mapped}</span>}
           </div>
           <form method="post" action="/admin/learning/google/map-course" class="mt-4 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="action" value="map" />
             <input type="hidden" name="connection_id" value={connectionId} />
+            <input type="hidden" name="revision" value={options.connectionRevision} />
             <input type="hidden" name="external_course_id" value={course.externalCourseId} />
             <label class={lab}>{copy.program}
               <select class={tin} name="program_id" required>
@@ -126,8 +160,17 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
                 ))}
               </select>
             </label>
-            <button class={btn} type="submit">{copy.map}</button>
+            <button class={btn} type="submit" disabled={pushReadiness.mode === 'misconfigured'}>{copy.map}</button>
           </form>
+          {mappedProgramId !== null && (
+            <form method="post" action="/admin/learning/google/map-course" class="mt-3">
+              <input type="hidden" name="action" value="unmap" />
+              <input type="hidden" name="connection_id" value={connectionId} />
+              <input type="hidden" name="revision" value={options.connectionRevision} />
+              <input type="hidden" name="external_course_id" value={course.externalCourseId} />
+              <button class={btnSecondary} type="submit">{copy.unmap}</button>
+            </form>
+          )}
         </article>
       ))}
     </div>

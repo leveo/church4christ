@@ -26,7 +26,7 @@ describe('Learning connection administration page', () => {
       expect(page).toContain(`name="${name}"`);
     }
     expect(page).toContain('googleClassroomPushReadiness');
-    expect(page).toContain('refreshTokenExpiresAt');
+    expect(page).toContain('reconnectDeadline');
     expect(page).toContain('value="unmap"');
     expect(page).toContain("t(lang, 'admin.learning.google.pushReady')");
     expect(page).toContain("t(lang, 'admin.learning.google.reconnectDeadline')");

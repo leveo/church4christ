@@ -2420,4 +2420,8 @@ export default {
   'admin.newcomers.helpZh': 'Chinese help',
   'admin.newcomers.options': 'Options JSON',
   'admin.newcomers.optionsHelp': 'Select fields use a JSON array of value, sort, active, labelEn, and labelZh objects.',
+  'admin.learning.google.pushReady': 'Real-time Classroom updates are ready. Roster and course-work feeds will be registered when a course is mapped.',
+  'admin.learning.google.pushPollingOnly': 'Real-time updates are intentionally off. Courses can still be mapped for scheduled or manual synchronization.',
+  'admin.learning.google.pushMisconfigured': 'Real-time update bindings are incomplete or invalid. Fix the topic, subscription, and service-account settings before mapping.',
+  'admin.learning.google.reconnectDeadline': 'Google authorization reconnect deadline',
 } satisfies Record<string, string>;

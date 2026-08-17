@@ -226,7 +226,7 @@ describe('Google Classroom mapped-course registration lifecycle (D1)', () => {
     });
     expect(options).toMatchObject({
       connectionRevision: 1,
-      refreshTokenExpiresAt: '2026-09-17T12:00:00.000Z',
+      reconnectDeadline: '2026-09-17T12:00:00.000Z',
     });
     expect(JSON.stringify(options)).not.toMatch(/private-access|private-refresh|private-client-secret/iu);
   });

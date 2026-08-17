@@ -3,8 +3,12 @@ import { env } from 'cloudflare:workers';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
 import type { AppDb } from '../../../../lib/appDb';
 import { hasSameOriginProvenance } from '../../../../lib/csrf';
-import { mapSelectedGoogleClassroomCourse } from '../../../../lib/learningGoogleAdmin';
+import {
+  mapSelectedGoogleClassroomCourse,
+  unmapSelectedGoogleClassroomCourse,
+} from '../../../../lib/learningGoogleAdmin';
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+import { googleClassroomPushReadiness } from '../../../../lib/learningGoogleRegistrationLifecycle';
 
 export const prerender = false;
 
@@ -20,12 +24,22 @@ interface GoogleCourseMappingDeps {
     readonly externalCourseId: string;
     readonly programId: number;
     readonly actorPersonId: number;
+    readonly expectedRevision: number;
+  }) => Promise<unknown>;
+  readonly unmapSelectedCourse: (db: AppDb, input: {
+    readonly connectionId: number;
+    readonly externalCourseId: string;
+    readonly actorPersonId: number;
+    readonly expectedRevision: number;
   }) => Promise<unknown>;
 }
 
 type GoogleMappingEnv = {
   GOOGLE_CLASSROOM_CLIENT_ID?: string;
   GOOGLE_CLASSROOM_CLIENT_SECRET?: string;
+  GOOGLE_CLASSROOM_PUBSUB_TOPIC?: string;
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_PUBSUB_SUBSCRIPTION_NAME?: string;
   LEARNING_CREDENTIAL_KEYS?: string;
 };
 
@@ -37,8 +51,31 @@ const defaultDeps: GoogleCourseMappingDeps = {
       || typeof vars.GOOGLE_CLASSROOM_CLIENT_SECRET !== 'string'
       || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
     ) throw new Error('config');
+    const readiness = googleClassroomPushReadiness({
+      topicName: vars.GOOGLE_CLASSROOM_PUBSUB_TOPIC,
+      subscriptionName: vars.GOOGLE_PUBSUB_SUBSCRIPTION_NAME,
+      serviceAccountEmail: vars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL,
+    });
+    if (readiness.mode === 'misconfigured') throw new Error('config');
     const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
     return mapSelectedGoogleClassroomCourse(db, {
+      ...input,
+      clientId: vars.GOOGLE_CLASSROOM_CLIENT_ID,
+      clientSecret: vars.GOOGLE_CLASSROOM_CLIENT_SECRET,
+      keyRing,
+      fetcher: fetch,
+      nowEpochMs: Date.now(),
+      pushTopicName: readiness.topicName,
+    });
+  },
+  unmapSelectedCourse: async (db, input) => {
+    if (
+      typeof vars.GOOGLE_CLASSROOM_CLIENT_ID !== 'string'
+      || typeof vars.GOOGLE_CLASSROOM_CLIENT_SECRET !== 'string'
+      || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
+    ) throw new Error('config');
+    const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
+    return unmapSelectedGoogleClassroomCourse(db, {
       ...input,
       clientId: vars.GOOGLE_CLASSROOM_CLIENT_ID,
       clientSecret: vars.GOOGLE_CLASSROOM_CLIENT_SECRET,
@@ -117,19 +154,31 @@ export function createGoogleCourseMappingHandler(
     }
     const connectionId = positiveInteger(params.get('connection_id')) ?? 1;
     const entries = [...params.entries()];
-    const keys = ['connection_id', 'external_course_id', 'program_id'];
-    const strict = entries.length === 3 && new Set(entries.map(([key]) => key)).size === 3
-      && entries.every(([key]) => keys.includes(key));
+    const action = params.get('action');
+    const expectedRevision = positiveInteger(params.get('revision'));
+    const mapKeys = ['action', 'connection_id', 'revision', 'external_course_id', 'program_id'];
+    const unmapKeys = ['action', 'connection_id', 'revision', 'external_course_id'];
+    const expectedKeys = action === 'map' ? mapKeys : action === 'unmap' ? unmapKeys : [];
+    const strict = entries.length === expectedKeys.length
+      && new Set(entries.map(([key]) => key)).size === expectedKeys.length
+      && entries.every(([key]) => expectedKeys.includes(key));
     const programId = positiveInteger(params.get('program_id'));
     const externalCourseId = params.get('external_course_id');
     if (
-      !strict || programId === null || externalCourseId === null
+      !strict || expectedRevision === null || externalCourseId === null
       || externalCourseId.length < 1 || externalCourseId.length > 255
       || externalCourseId.trim() !== externalCourseId || /[\u0000-\u001f\u007f]/u.test(externalCourseId)
     ) return redirect(connectionId, 'error', 'course_mapping_failed');
     try {
+      if (action === 'unmap') {
+        await dependencies.unmapSelectedCourse(locals.db, {
+          connectionId, expectedRevision, externalCourseId, actorPersonId: user!.id,
+        });
+        return redirect(connectionId, 'saved', 'course_unmapped');
+      }
+      if (action !== 'map' || programId === null) throw new Error('form');
       await dependencies.mapSelectedCourse(locals.db, {
-        connectionId, externalCourseId, programId, actorPersonId: user!.id,
+        connectionId, expectedRevision, externalCourseId, programId, actorPersonId: user!.id,
       });
       return redirect(connectionId, 'saved', 'course_mapped');
     } catch {

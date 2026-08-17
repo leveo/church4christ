@@ -2415,4 +2415,8 @@ export default {
   'admin.newcomers.helpZh': '中文帮助文字',
   'admin.newcomers.options': '选项 JSON',
   'admin.newcomers.optionsHelp': '选择字段使用包含 value、sort、active、labelEn 与 labelZh 的 JSON 数组。',
+  'admin.learning.google.pushReady': 'Google Classroom 实时更新已就绪；映射课程时会同时注册名单和课业两个 feed。',
+  'admin.learning.google.pushPollingOnly': '实时更新已明确关闭；课程仍可通过定时或手动同步进行映射。',
+  'admin.learning.google.pushMisconfigured': '实时更新配置不完整或无效；请先修正 topic、subscription 和服务账号设置。',
+  'admin.learning.google.reconnectDeadline': 'Google 授权最晚重新连接时间',
 } satisfies Record<string, string>;
