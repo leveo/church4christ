@@ -136,7 +136,7 @@ function operation(maxPages = 20, signal = new AbortController().signal) {
       externalActivityId: null, externalEnrollmentId: null,
     },
     startedAt: '2026-08-17T12:00:00.000Z', deadlineAt: '2026-08-17T12:30:00.000Z',
-    maxPages, maxItems: 100, maxRawBytes: 100_000, maxNormalizedBytes: 100_000,
+    maxPages, maxItems: 50, maxRawBytes: 100_000, maxNormalizedBytes: 100_000,
     maxUniqueKeyBytes: 20_000, signal,
   };
 }
@@ -168,6 +168,20 @@ beforeEach(async () => {
 });
 
 describe('Learning provider orchestration', () => {
+  it('rejects an atomic entity budget above 50 before provider work or a sync run', async () => {
+    const mapped = await seed();
+    let providerCalls = 0;
+    await expect(synchronizeLearningCourse(env.DB, {
+      provider: fakeProvider({ onSyncCourse: () => { providerCalls += 1; } }),
+      urlPolicy: POLICY, connectionId: 901, providerKind: 'canvas', courseId: mapped.courseId,
+      externalCourseId: 'genesis-1', trigger: 'manual',
+      operation: { ...operation(), maxItems: 51 }, now: () => NOW_EPOCH,
+      resolvePerson: async () => ({ personId: 9012 }),
+    })).rejects.toMatchObject({ code: 'invalid_request', provider: 'canvas' });
+    expect(providerCalls).toBe(0);
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_sync_runs`).first()).toEqual({ count: 0 });
+  });
+
   it('extracts a legal Google provider hint before exact-shape rejection', async () => {
     await expect(synchronizeLearningCourse(env.DB, {
       provider: fakeProvider(),

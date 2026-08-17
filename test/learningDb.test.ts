@@ -332,7 +332,9 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     });
     await completeLearningCourseSync(env.DB, initialLease, {
       course: { ...course(), displayName: 'Stable generation', lastSyncedAt: NOW }, urlPolicy: POLICY, syncedAt: NOW,
-      enrollments: [], activities: [activity('stable', 'material')], resources: [], submissions: [],
+      enrollments: [],
+      activities: Array.from({ length: 50 }, (_, index) => activity(`stable-${index}`, 'material')),
+      resources: [], submissions: [],
     });
     const oversizedLease = await startLearningSync(env.DB, {
       connectionId: 701, provider: 'canvas', courseId: mapped.courseId, externalCourseId: 'genesis-1',
@@ -346,8 +348,10 @@ describe('Learning persistence and atomic reconciliation (D1)', () => {
     })).rejects.toThrow('learning_limit_exceeded');
     expect(await env.DB.prepare(`SELECT display_name FROM learning_courses WHERE id=?`).bind(mapped.courseId).first())
       .toEqual({ display_name: 'Stable generation' });
-    expect(await env.DB.prepare(`SELECT external_activity_id FROM learning_activities WHERE lifecycle_state<>'deleted'`).all())
-      .toMatchObject({ results: [{ external_activity_id: 'stable' }] });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities
+      WHERE lifecycle_state<>'deleted'`).first()).toEqual({ count: 50 });
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM learning_activities
+      WHERE external_activity_id LIKE 'oversized-%'`).first()).toEqual({ count: 0 });
   });
 
   it('allows only one concurrent lease per connection and leaves no losing run or mixed generation', async () => {

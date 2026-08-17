@@ -1,6 +1,7 @@
 import type { AppDb } from './appDb';
 import {
   LearningIdentityConflictError,
+  LEARNING_MAX_ATOMIC_ENTITIES,
   LearningPersistenceError,
   LearningSyncConflictError,
   completeLearningCourseSync,
@@ -372,6 +373,7 @@ export async function synchronizeLearningCourse(
       || operation.scope.externalEnrollmentId !== null
       || urlPolicy.provider !== providerKind
       || urlPolicy.connectionId !== connectionId
+      || operation.maxItems > LEARNING_MAX_ATOMIC_ENTITIES
     ) throw new LearningSynchronizationError('invalid_request', providerKind);
 
     ownLease = await startLearningSync(db, {
