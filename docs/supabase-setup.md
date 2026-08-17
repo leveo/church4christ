@@ -143,7 +143,7 @@ Now open `wrangler.jsonc` and make four changes:
 
    ```jsonc
    "triggers": {
-     "crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "15 * * * *", "*/5 * * * *"]
+     "crons": ["0 13 * * *", "0 14 * * 4", "0 * * * *", "15,45 * * * *", "*/5 * * * *"]
    },
    ```
 

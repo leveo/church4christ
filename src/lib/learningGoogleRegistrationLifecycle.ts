@@ -29,9 +29,9 @@ import {
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const MAPPING_CLAIM_MS = 2 * 60 * 1_000;
 const RENEWAL_HORIZON_MS = 48 * 60 * 60 * 1_000;
-// Twelve hourly replacements provide 2,016 feed slots per week, covering the
-// supported 2,000 feeds while remaining below the D1 Free query budget.
-const RENEWAL_LIMIT = 12;
+// Eight replacements on each twice-hourly pass provide 2,688 feed slots per
+// week while leaving room for the production cron's two prerequisite D1 reads.
+const RENEWAL_LIMIT = 8;
 
 type RegistrationFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 

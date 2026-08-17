@@ -16,7 +16,7 @@ const REMINDER_CRON = '0 13 * * *'; // daily serving reminders (remind7 / remind
 const DIGEST_CRON = '0 14 * * 4'; // weekly serving digest (Thursday)
 const BACKUP_CRON = '0 9 * * *'; // daily D1 export schedule (unused by Supabase)
 const ATTENDANCE_CRON = '0 * * * *'; // hourly group-attendance tracker emails
-const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15 * * * *'; // isolated Classroom cleanup + renewal budget
+const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15,45 * * * *'; // isolated Classroom cleanup + renewal budget
 const STRIPE_RECOVERY_CRON = '*/5 * * * *'; // Supabase durable inbox + Checkout recovery
 
 export default {
