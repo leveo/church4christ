@@ -46,8 +46,13 @@ describe('production Google Classroom registration renewal pass', () => {
   });
 
   it('does not renew registrations for a removed or incomplete current push binding', async () => {
-    const importKeyRing = vi.fn();
+    const keyRing = { currentVersion: 1, keys: new Map() } as never;
+    const importKeyRing = vi.fn(async () => keyRing);
     const renew = vi.fn();
+    const listCleanupConnectionIds = vi.fn(async () => [27302] as const);
+    const recoverCleanup = vi.fn(async () => ({
+      selected: 1, cleaned: 1, pending: 0, finalizedDisconnect: true,
+    }));
     await expect(runGoogleClassroomRegistrationRenewalPass({
       DB_BACKEND: 'd1',
       GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
@@ -55,9 +60,13 @@ describe('production Google Classroom registration renewal pass', () => {
       LEARNING_CREDENTIAL_KEYS: 'private-key-ring',
     }, env.DB as AppDb, {
       fetcher: vi.fn(), now: () => Date.parse('2026-08-17T12:00:00.000Z'),
-      importKeyRing, renew,
+      importKeyRing, renew, listCleanupConnectionIds, recoverCleanup,
     })).resolves.toEqual({ status: 'skipped', reason: 'not_configured' });
-    expect(importKeyRing).not.toHaveBeenCalled();
+    expect(importKeyRing).toHaveBeenCalledWith('private-key-ring');
+    expect(listCleanupConnectionIds).toHaveBeenCalledWith(env.DB, 1);
+    expect(recoverCleanup).toHaveBeenCalledWith(env.DB, expect.objectContaining({
+      connectionId: 27302, keyRing, limit: 1,
+    }));
     expect(renew).not.toHaveBeenCalled();
   });
 
@@ -85,20 +94,20 @@ describe('production Google Classroom registration renewal pass', () => {
     });
   });
 
-  it('drains one durable cleanup connection before renewal to preserve Worker and D1 budgets', async () => {
+  it('reserves one durable cleanup task and still renews when cleanup remains pending', async () => {
     const keyRing = { currentVersion: 1, keys: new Map() } as never;
     const importKeyRing = vi.fn(async () => keyRing);
-    const renew = vi.fn();
+    const renew = vi.fn(async () => ({ selected: 8, renewed: 8, conflicted: 0, failed: 0 }));
     const listCleanupConnectionIds = vi.fn(async (_db: AppDb, _limit: number) => [27302] as const);
     const recoverCleanup = vi.fn(async (_db: AppDb, _input: unknown) => ({
-      selected: 4, cleaned: 4, pending: 0, finalizedDisconnect: false,
+      selected: 1, cleaned: 0, pending: 1, finalizedDisconnect: false,
     }));
     const fetcher = vi.fn();
     await expect(runGoogleClassroomRegistrationRenewalPass(COMPLETE_ENV, env.DB as AppDb, {
       fetcher, now: () => Date.parse('2026-08-17T12:00:00.000Z'), importKeyRing, renew,
       listCleanupConnectionIds, recoverCleanup,
     })).resolves.toEqual({
-      status: 'completed', summary: { selected: 0, renewed: 0, conflicted: 0, failed: 0 },
+      status: 'completed', summary: { selected: 8, renewed: 8, conflicted: 0, failed: 0 },
     });
     expect(listCleanupConnectionIds).toHaveBeenCalledTimes(1);
     expect(listCleanupConnectionIds.mock.calls[0]?.[0] === env.DB).toBe(true);
@@ -109,8 +118,22 @@ describe('production Google Classroom registration renewal pass', () => {
       connectionId: 27302,
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing, fetcher, nowEpochMs: Date.parse('2026-08-17T12:00:00.000Z'),
-      signal: expect.any(AbortSignal), limit: 4,
+      signal: expect.any(AbortSignal), limit: 1,
     });
-    expect(renew).not.toHaveBeenCalled();
+    expect(renew).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues the reserved renewal drain when persistent cleanup throws safely', async () => {
+    const keyRing = { currentVersion: 1, keys: new Map() } as never;
+    const renew = vi.fn(async () => ({ selected: 2, renewed: 2, conflicted: 0, failed: 0 }));
+    await expect(runGoogleClassroomRegistrationRenewalPass(COMPLETE_ENV, env.DB as AppDb, {
+      fetcher: vi.fn(), now: () => Date.parse('2026-08-17T12:00:00.000Z'),
+      importKeyRing: vi.fn(async () => keyRing), renew,
+      listCleanupConnectionIds: vi.fn(async () => [27302] as const),
+      recoverCleanup: vi.fn(async () => { throw new Error('private provider failure'); }),
+    })).resolves.toEqual({
+      status: 'completed', summary: { selected: 2, renewed: 2, conflicted: 0, failed: 0 },
+    });
+    expect(renew).toHaveBeenCalledTimes(1);
   });
 });

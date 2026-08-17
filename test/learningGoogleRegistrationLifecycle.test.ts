@@ -12,9 +12,16 @@ import {
   renewGoogleClassroomRegistrations,
 } from '../src/lib/learningGoogleRegistrationLifecycle';
 import {
+  listGoogleClassroomCleanupConnectionIds,
+  recoverGoogleClassroomCleanup,
+} from '../src/lib/learningGoogleCleanup';
+import { runGoogleClassroomRegistrationRenewalPass } from '../src/lib/learningGoogleRegistrationCron';
+import {
   encryptLearningCredential,
   importLearningCredentialKeyRing,
 } from '../src/lib/learningCredentials';
+import { clearModuleCache } from '../src/lib/modules';
+import { setSetting } from '../src/lib/settings';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const TOPIC = 'projects/church-project/topics/classroom';
@@ -485,5 +492,69 @@ describe('Google Classroom bounded registration renewal (D1)', () => {
     expect(queries + 2).toBeLessThanOrEqual(50);
     expect(maxBinds).toBeLessThanOrEqual(100);
     expect(8 * 2 * 24 * 7).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it('reserves cleanup fairly while renewing expired, due, and topic-mismatched feeds within complete cron budgets', async () => {
+    await setSetting(env.DB, 'module.learning', '1');
+    clearModuleCache();
+    for (let course = 2; course <= 4; course += 1) {
+      await env.DB.prepare(`INSERT INTO learning_courses
+        (program_id,connection_id,provider,external_course_id,display_name,launch_url)
+        VALUES(27603,27602,'google_classroom',?1,?2,?3)`)
+        .bind(`course-${course}`, `Course ${course}`, `https://classroom.google.com/c/course-${course}`).run();
+      const expiry = course === 2 ? '2026-08-17T11:59:59.000Z' : '2026-08-18T12:00:00.000Z';
+      const topic = course === 3 ? 'projects/church-project/topics/removed' : TOPIC;
+      await env.DB.prepare(`INSERT INTO learning_google_registrations
+        (connection_id,external_course_id,feed_type,registration_id,topic_name,expiry_time) VALUES
+        (27602,?1,'COURSE_ROSTER_CHANGES',?2,?4,?5),
+        (27602,?1,'COURSE_WORK_CHANGES',?3,?4,?5)`)
+        .bind(`course-${course}`, `old-${course}-roster`, `old-${course}-work`, topic, expiry).run();
+    }
+    await env.DB.prepare(`INSERT INTO learning_google_cleanup_tasks
+      (connection_id,task_type,registration_id) VALUES(27602,'registration','persistently-failing')`).run();
+
+    let queries = 0;
+    let maxBinds = 0;
+    const wrapped: AppDb = {
+      prepare(sql: string): AppStatement {
+        queries += 1;
+        const statement = (env.DB as AppDb).prepare(sql);
+        return {
+          bind(...values: unknown[]) { maxBinds = Math.max(maxBinds, values.length); return statement.bind(...values); },
+          first: <T>(column?: string) => statement.first<T>(column),
+          all: <T>() => statement.all<T>(),
+          run: <T>() => statement.run<T>(),
+        };
+      },
+      batch: <T>(statements: AppStatement[]) => (env.DB as AppDb).batch<T>(statements),
+    };
+    const requests = registrationFetcher('fair');
+    const fetcher = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname === '/v1/registrations/persistently-failing' && init?.method === 'DELETE') {
+        return new Response(null, { status: 503 });
+      }
+      return requests.fetcher(request, init);
+    });
+    await expect(runGoogleClassroomRegistrationRenewalPass({
+      DB_BACKEND: 'd1',
+      GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
+      GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+      GOOGLE_CLASSROOM_PUBSUB_TOPIC: TOPIC,
+      GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: SERVICE_ACCOUNT,
+      GOOGLE_PUBSUB_SUBSCRIPTION_NAME: SUBSCRIPTION,
+      LEARNING_CREDENTIAL_KEYS: KEY_SECRET,
+    }, wrapped, {
+      fetcher, now: () => NOW, importKeyRing: importLearningCredentialKeyRing,
+      renew: renewGoogleClassroomRegistrations,
+      listCleanupConnectionIds: listGoogleClassroomCleanupConnectionIds,
+      recoverCleanup: recoverGoogleClassroomCleanup,
+    })).resolves.toEqual({
+      status: 'completed', summary: { selected: 8, renewed: 8, conflicted: 0, failed: 0 },
+    });
+    expect(queries).toBeLessThanOrEqual(50);
+    expect(maxBinds).toBeLessThanOrEqual(100);
+    expect(fetcher).toHaveBeenCalledTimes(17);
+    expect(fetcher.mock.calls.length).toBeLessThanOrEqual(20);
   });
 });
