@@ -32,6 +32,7 @@ import {
 
 const GOOGLE_CLASSROOM_API_ORIGIN = 'https://classroom.googleapis.com';
 const GOOGLE_CLASSROOM_LAUNCH_ORIGIN = 'https://classroom.google.com';
+const GOOGLE_REQUEST_TIMEOUT_MS = 30_000;
 const COURSE_FIELDS = 'courses(id,name,courseState,alternateLink,updateTime),nextPageToken';
 const ROSTER_TEACHER_FIELDS = 'teachers(courseId,userId),nextPageToken';
 const ROSTER_STUDENT_FIELDS = 'students(courseId,userId),nextPageToken';
@@ -534,21 +535,62 @@ export function createGoogleClassroomProvider(
     || typeof dependencies.now !== 'function'
   ) learningValidation.invalid();
 
-  const request = async (url: URL, signal: AbortSignal): Promise<Response> => {
+  const request = (url: URL, operation: LearningOperationContext): Promise<Response> => {
     if (url.origin !== GOOGLE_CLASSROOM_API_ORIGIN || url.protocol !== 'https:') {
       throw googleFailure('invalid_request');
     }
-    let response: Response;
-    try {
-      response = await dependencies.fetcher(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
-        signal,
-      });
-    } catch {
-      throw googleFailure(signal.aborted ? 'cancelled' : 'provider_unavailable');
+    if (operation.signal.aborted) return Promise.reject(googleFailure('cancelled'));
+    const operationRemaining = Date.parse(operation.deadlineAt) - dependencies.now();
+    if (!Number.isFinite(operationRemaining) || operationRemaining <= 0) {
+      return Promise.reject(googleFailure('timeout'));
     }
-    return requireSuccessfulResponse(response);
+    const controller = new AbortController();
+    const requestRemaining = Math.min(operationRemaining, GOOGLE_REQUEST_TIMEOUT_MS);
+    return new Promise<Response>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        operation.signal.removeEventListener('abort', abort);
+      };
+      const fail = (code: 'cancelled' | 'timeout'): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        controller.abort();
+        reject(googleFailure(code));
+      };
+      const abort = (): void => fail('cancelled');
+      const timer = setTimeout(() => fail('timeout'), requestRemaining);
+      operation.signal.addEventListener('abort', abort, { once: true });
+      let pending: Promise<Response>;
+      try {
+        pending = Promise.resolve(dependencies.fetcher(url, {
+          method: 'GET',
+          headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+          redirect: 'manual',
+          signal: controller.signal,
+        }));
+      } catch {
+        settled = true;
+        cleanup();
+        reject(googleFailure('provider_unavailable'));
+        return;
+      }
+      pending.then((rawResponse) => {
+        if (settled) {
+          if (rawResponse instanceof Response) cancelBody(rawResponse);
+          return;
+        }
+        settled = true;
+        cleanup();
+        try { resolve(requireSuccessfulResponse(rawResponse)); } catch (error) { reject(error); }
+      }, () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(googleFailure(operation.signal.aborted ? 'cancelled' : 'provider_unavailable'));
+      });
+    });
   };
 
   const adapter: LearningProvider = {
@@ -557,7 +599,7 @@ export function createGoogleClassroomProvider(
     async healthCheck(input: LearningHealthRequest): Promise<LearningProviderHealth> {
       const url = new URL('/v1/courses', GOOGLE_CLASSROOM_API_ORIGIN);
       addPageQuery(url, 1, null, 'nextPageToken');
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       cancelBody(response);
       return Object.freeze({
         connectionId, provider: 'google_classroom', healthy: 1,
@@ -570,7 +612,7 @@ export function createGoogleClassroomProvider(
       url.searchParams.append('courseStates', 'ACTIVE');
       url.searchParams.append('courseStates', 'ARCHIVED');
       addPageQuery(url, input.page.pageSize, input.page.pageToken, COURSE_FIELDS);
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const row = exactOptionalRecord(value, ['courses', 'nextPageToken']);
         return {
@@ -585,7 +627,7 @@ export function createGoogleClassroomProvider(
     async syncCourse(input: LearningSyncCourseRequest): Promise<LearningCourse> {
       const url = new URL(`/v1/courses/${encodeURIComponent(input.subject.externalCourseId)}`, GOOGLE_CLASSROOM_API_ORIGIN);
       url.searchParams.set('fields', 'id,name,courseState,alternateLink,updateTime');
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return mapCourse(await readBoundedJson(response, input.operation, dependencies.now), connectionId);
     },
 
@@ -599,7 +641,7 @@ export function createGoogleClassroomProvider(
         GOOGLE_CLASSROOM_API_ORIGIN,
       );
       addPageQuery(url, input.page.pageSize, phase.token, teachers ? ROSTER_TEACHER_FIELDS : ROSTER_STUDENT_FIELDS);
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const row = exactOptionalRecord(value, [collection, 'nextPageToken']);
         const next = optionalPageToken(row.nextPageToken);
@@ -626,7 +668,7 @@ export function createGoogleClassroomProvider(
         GOOGLE_CLASSROOM_API_ORIGIN,
       );
       addPageQuery(url, input.page.pageSize, phase.token, materials ? MATERIAL_LIST_FIELDS : COURSEWORK_LIST_FIELDS);
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const responseKey = materials ? 'courseWorkMaterial' : 'courseWork';
         const row = exactOptionalRecord(value, [responseKey, 'nextPageToken']);
@@ -660,7 +702,7 @@ export function createGoogleClassroomProvider(
         GOOGLE_CLASSROOM_API_ORIGIN,
       );
       url.searchParams.set('fields', RESOURCE_FIELDS);
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const row = exactOptionalRecord(value, [
           'id', 'title', 'state', 'alternateLink', 'creationTime', 'updateTime', 'materials',
@@ -689,7 +731,7 @@ export function createGoogleClassroomProvider(
       );
       addPageQuery(url, input.page.pageSize, input.page.pageToken, SUBMISSION_FIELDS);
       if (input.subject.externalEnrollmentId !== null) learningValidation.invalid();
-      const response = await request(url, input.operation.signal);
+      const response = await request(url, input.operation);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const row = exactOptionalRecord(value, ['studentSubmissions', 'nextPageToken']);
         return {
