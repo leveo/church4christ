@@ -80,7 +80,12 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from './lib/screenshot-validation.mjs';
+import {
+  assertExpectedScreenshotPage,
+  requireLocalScreenshotBase,
+  requireScreenshotOnly,
+  validateScreenshotManifest,
+} from './lib/screenshot-validation.mjs';
 import { mintScreenshotSession, requireScreenshotSessionEnvironment } from './lib/screenshot-session.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -482,7 +487,9 @@ async function main() {
   requireScreenshotOnly(process.argv);
 
   const baseIdx = process.argv.indexOf('--base');
-  const base = baseIdx !== -1 ? process.argv[baseIdx + 1] : 'http://localhost:4321';
+  const base = requireLocalScreenshotBase(
+    baseIdx !== -1 ? process.argv[baseIdx + 1] : 'http://localhost:4321',
+  );
 
   // `--only <substr[,substr...]>` captures just the rows whose `out` contains a
   // token — used to shoot the admin/member pages against a dev server booted for

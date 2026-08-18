@@ -6,6 +6,30 @@ export function requireScreenshotOnly(argv) {
   }
 }
 
+export function requireLocalScreenshotBase(rawBase) {
+  let base;
+  try {
+    base = new URL(rawBase);
+  } catch {
+    throw new Error('Screenshot sessions require an exact loopback screenshot origin');
+  }
+  const loopback = base.hostname === 'localhost'
+    || base.hostname === '127.0.0.1'
+    || base.hostname === '[::1]';
+  if (
+    !['http:', 'https:'].includes(base.protocol)
+    || !loopback
+    || base.username !== ''
+    || base.password !== ''
+    || base.pathname !== '/'
+    || base.search !== ''
+    || base.hash !== ''
+  ) {
+    throw new Error('Screenshot sessions require an exact loopback screenshot origin');
+  }
+  return base.origin;
+}
+
 export function assertExpectedScreenshotPage(row, snapshot) {
   if (!Number.isInteger(snapshot.status) || snapshot.status < 200 || snapshot.status >= 400) {
     throw new Error(`${row.out}: main document returned HTTP ${String(snapshot.status)}`);

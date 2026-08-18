@@ -178,7 +178,8 @@ npm run screenshots -- --only learning/genesis-1-en.png,learning/genesis-1-zh.pn
 ```
 
 The harness refuses an unfiltered capture, mints a five-minute session for each exact seeded
-identity, validates positive and rejection markers before writing, and requires every PNG to be
+identity, accepts only an exact `localhost`, `127.0.0.1`, or `[::1]` HTTP(S) origin, validates
+positive and rejection markers before writing, and requires every PNG to be
 exactly 1280×800 and larger than 20 KB. The secret and session token are never printed or written
 by the harness.
 
