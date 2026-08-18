@@ -12,6 +12,7 @@ import { reconcileCanvasCourse } from '../src/lib/learningCanvasReconcile';
 import { importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
 import { getLearningCourseForLearner, listLearningCoursesForLearner } from '../src/lib/learningLearnerDb';
 import type { AppDb } from '../src/lib/appDb';
+import { normalizeLearningResource } from '../src/lib/learningModel';
 
 // The seed file never uses ';' except to terminate statements and keeps every
 // comment on its own line, so we can strip comment lines and split on ';'.
@@ -428,6 +429,33 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
   });
 
   it('is available only through the exact live learner authorization chain', async () => {
+    const rawResources = await env.DB.prepare(`SELECT course.connection_id, course.provider,
+      course.external_course_id, activity.external_activity_id, resource.external_resource_id,
+      resource.title, resource.kind, resource.launch_url, resource.youtube_video_id,
+      resource.mime_type, resource.size_bytes, resource.provider_updated_at, resource.id
+      FROM learning_resources resource JOIN learning_activities activity ON activity.id=resource.activity_id
+      JOIN learning_courses course ON course.id=activity.course_id
+      WHERE course.id=?1 ORDER BY resource.id`).bind(courseId).all<Record<string, unknown>>();
+    const policy = {
+      connectionId, provider: 'canvas', baseUrl,
+      providerLaunchOrigins: [baseUrl], providerFileOrigins: [baseUrl], externalLinkOrigins: [baseUrl],
+    } as const;
+    for (const row of rawResources.results) {
+      expect(() => normalizeLearningResource({
+        connectionId: row.connection_id,
+        provider: row.provider,
+        externalCourseId: row.external_course_id,
+        externalActivityId: row.external_activity_id,
+        externalResourceId: row.external_resource_id,
+        title: row.title,
+        kind: row.kind,
+        launchUrl: row.launch_url,
+        youtubeVideoId: row.youtube_video_id,
+        mimeType: row.mime_type,
+        sizeBytes: row.size_bytes,
+        providerUpdatedAt: row.provider_updated_at,
+      }, policy), `resource ${String(row.id)}`).not.toThrow();
+    }
     const nowEpochMs = Date.now();
     const english = await getLearningCourseForLearner(env.DB as AppDb, { personId: 3, courseId, nowEpochMs });
     const chinese = await listLearningCoursesForLearner(env.DB as AppDb, { personId: 4, nowEpochMs });
@@ -459,7 +487,7 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
       fetcher,
       now: Date.now,
       signal: new AbortController().signal,
-    })).rejects.toThrow();
+    })).rejects.toMatchObject({ code: 'learning_canvas_reconcile_failed' });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

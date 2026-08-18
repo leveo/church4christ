@@ -46,6 +46,12 @@
 //     # member portal group-files (Ben Wu) pass
 //     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
 //     node scripts/screenshots.mjs --only portal/group-files.png
+//     # Learning demo English learner (Sarah Johnson) pass
+//     AUTH_DEV_BYPASS_EMAIL=sarah.johnson@example.com npm run dev &
+//     node scripts/screenshots.mjs --only learning/genesis-1-en.png
+//     # Learning demo Chinese learner (Grace Lin) pass
+//     AUTH_DEV_BYPASS_EMAIL=grace.lin@example.com npm run dev &
+//     node scripts/screenshots.mjs --only learning/genesis-1-zh.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.
 //   Prefer full output-path tokens for batches so short filenames do not select
 //   unrelated outputs that happen to contain the same substring.
@@ -118,8 +124,20 @@ export const RELEASE_SCREENSHOTS = validateScreenshotManifest([
   { path: '/en/groups/1/manage', out: 'docs/images/groups/member-checklist.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Members', rejectionTexts: ['Sign in', '404', 'Page not found'] },
 ]);
 
+// Seed-backed capture definitions only. The release documentation task owns
+// actual PNG generation and promotion into RELEASE_SCREENSHOTS.
+export const LEARNING_DEMO_SCREENSHOTS = validateScreenshotManifest([
+  { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation / 创世记第一章：创造', rejectionTexts: ['Sign in', '404', 'Page not found'] },
+  { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: '创世记第一章：创造', rejectionTexts: ['登录', '404', '页面未找到'] },
+]);
+
 const PAGES = [
   ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
+  ...LEARNING_DEMO_SCREENSHOTS.map((row) => ({
+    ...row,
+    bypass: row.locale === 'zh' ? 'grace.lin@example.com' : 'sarah.johnson@example.com',
+    anchor: 'Course activities',
+  })),
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
   { path: '/zh/', out: 'docs/images/public/home-zh.png' },

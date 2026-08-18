@@ -616,3 +616,61 @@ INSERT INTO custom_pages (id, slug, published, format, layout_json) VALUES
 INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES
   ('seedbuilderwelcome0000000000pb01', 'en', 'Welcome', ''),
   ('seedbuilderwelcome0000000000pb01', 'zh', '欢迎', '');
+
+-- Learning local demo snapshot. This active Canvas-shaped connection is wholly
+-- fictional, contains no credential row, and must never be treated as a live
+-- provider integration. Every Canvas launch uses the reserved .example.test
+-- domain and the made-up video id stays click-only behind the no-cookie facade.
+INSERT INTO learning_provider_connections
+  (id, provider, display_name, base_url, status, revision, last_successful_sync_at, created_by_person_id, updated_by_person_id) VALUES
+  (21000, 'canvas', 'Local fictional Canvas snapshot / 本地虚构 Canvas 快照', 'https://canvas-learning.example.test', 'active', 1, replace(datetime('now','-2 hours'),' ','T') || 'Z', 1, 1);
+
+INSERT INTO learning_programs
+  (id, slug, display_name, status, created_by_person_id, updated_by_person_id) VALUES
+  (21000, 'genesis-sunday-school', 'Genesis Sunday School / 创世记主日学', 'active', 1, 1);
+
+INSERT INTO learning_courses
+  (id, program_id, connection_id, provider, external_course_id, display_name, launch_url, lifecycle_state, provider_updated_at, last_synced_at) VALUES
+  (21000, 21000, 21000, 'canvas', 'genesis-1-creation', 'Genesis 1: Creation / 创世记第一章：创造', 'https://canvas-learning.example.test/courses/genesis-1-creation', 'active', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+
+INSERT INTO learning_identity_links
+  (id, connection_id, person_id, external_user_id, status) VALUES
+  (21303, 21000, 3, 'demo-genesis-learner-en', 'active'),
+  (21304, 21000, 4, 'demo-genesis-learner-zh', 'active');
+
+INSERT INTO learning_enrollments
+  (id, connection_id, course_id, identity_link_id, external_enrollment_id, role, state, last_synced_at) VALUES
+  (21303, 21000, 21000, 21303, 'demo-genesis-enrollment-en', 'student', 'active', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21304, 21000, 21000, 21304, 'demo-genesis-enrollment-zh', 'student', 'active', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+
+INSERT INTO learning_activities
+  (id, course_id, external_activity_id, title, kind, lifecycle_state, launch_url, due_at, published_at, provider_updated_at, last_synced_at) VALUES
+  (21101, 21000, 'genesis-opening', 'Opening: In the beginning / 开场：起初', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/opening', NULL, replace(datetime('now','-6 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21102, 21000, 'genesis-scripture-overview', 'Scripture overview: Genesis 1 / 经文概览：创世记第一章', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/scripture-overview', NULL, replace(datetime('now','-5 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21103, 21000, 'genesis-days-1-3', 'Days 1–3: Forming creation / 第1–3日：塑造创造', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-1-3', NULL, replace(datetime('now','-4 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21104, 21000, 'genesis-days-4-6', 'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-4-6', NULL, replace(datetime('now','-3 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21105, 21000, 'genesis-creation-care-assignment', 'Assignment: Creation care reflection / 作业：创造关怀反思', 'assignment', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/assignments/creation-care-reflection', replace(datetime('now','+2 days'),' ','T') || 'Z', replace(datetime('now','-2 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21106, 21000, 'genesis-1-review-quiz', 'Quiz: Genesis 1 review / 测验：创世记第一章复习', 'quiz', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/quizzes/genesis-1-review', replace(datetime('now','+5 days'),' ','T') || 'Z', replace(datetime('now','-1 day'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+
+INSERT INTO learning_resources
+  (id, activity_id, external_resource_id, title, kind, launch_url, youtube_video_id, mime_type, size_bytes, provider_updated_at) VALUES
+  (21201, 21101, 'genesis-1-video', 'Genesis 1 creation overview / 创世记第一章创造概览', 'youtube', 'https://www.youtube-nocookie.com/embed/DemoGen1Vid', 'DemoGen1Vid', NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21202, 21103, 'genesis-1-learner-handout', 'Genesis 1 learner handout / 创世记第一章学员讲义', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-learner-handout/download', NULL, 'application/pdf', 245760, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21203, 21104, 'genesis-1-teacher-guide', 'Genesis 1 teacher guide / 创世记第一章教师指南', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-teacher-guide/download', NULL, 'application/pdf', 368640, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21204, 21104, 'genesis-1-stewardship-link', 'Creation and stewardship reading / 创造与管家职分阅读', 'link', 'https://canvas-learning.example.test/courses/genesis-1-creation/pages/creation-and-stewardship', NULL, NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z');
+
+INSERT INTO learning_submission_snapshots
+  (course_id, activity_id, activity_kind, enrollment_id, status, late, attempt_number, submitted_at, returned_at, provider_updated_at, synced_at) VALUES
+  (21000, 21105, 'assignment', 21303, 'submitted', 0, 1, replace(datetime('now','-12 hours'),' ','T') || 'Z', NULL, replace(datetime('now','-11 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21000, 21106, 'quiz', 21303, 'not_submitted', 0, 0, NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21000, 21105, 'assignment', 21304, 'returned', 0, 1, replace(datetime('now','-2 days'),' ','T') || 'Z', replace(datetime('now','-1 day'),' ','T') || 'Z', replace(datetime('now','-1 day'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21000, 21106, 'quiz', 21304, 'submitted', 0, 1, replace(datetime('now','-12 hours'),' ','T') || 'Z', NULL, replace(datetime('now','-11 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+
+INSERT INTO learning_activity_events
+  (id, connection_id, provider, source_event_id, event_type, person_id, identity_link_id, enrollment_id, course_id, activity_id, activity_kind, occurred_at) VALUES
+  ('demo-genesis-enrolled-en', 21000, 'canvas', 'demo-genesis-enrolled-en', 'enrolled', 3, 21303, 21303, 21000, NULL, NULL, replace(datetime('now','-10 days'),' ','T') || 'Z'),
+  ('demo-genesis-enrolled-zh', 21000, 'canvas', 'demo-genesis-enrolled-zh', 'enrolled', 4, 21304, 21304, 21000, NULL, NULL, replace(datetime('now','-10 days'),' ','T') || 'Z'),
+  ('demo-genesis-assignment-en', 21000, 'canvas', 'demo-genesis-assignment-en', 'assignment_submitted', 3, 21303, 21303, 21000, 21105, 'assignment', replace(datetime('now','-12 hours'),' ','T') || 'Z'),
+  ('demo-genesis-assignment-zh', 21000, 'canvas', 'demo-genesis-assignment-zh', 'assignment_submitted', 4, 21304, 21304, 21000, 21105, 'assignment', replace(datetime('now','-2 days'),' ','T') || 'Z'),
+  ('demo-genesis-returned-zh', 21000, 'canvas', 'demo-genesis-returned-zh', 'submission_returned', 4, 21304, 21304, 21000, 21105, 'assignment', replace(datetime('now','-1 day'),' ','T') || 'Z'),
+  ('demo-genesis-quiz-zh', 21000, 'canvas', 'demo-genesis-quiz-zh', 'quiz_submitted', 4, 21304, 21304, 21000, 21106, 'quiz', replace(datetime('now','-12 hours'),' ','T') || 'Z');

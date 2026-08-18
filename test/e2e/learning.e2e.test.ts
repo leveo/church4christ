@@ -270,7 +270,10 @@ describe('Learning built-worker shell boundaries', () => {
     const learningPage = await get('/admin/learning', { cookie: learningAdmin });
     expect(learningPage.status).toBe(200);
     const learningHtml = await learningPage.text();
-    expect(learningHtml).toContain('No Google Classroom or Canvas connection has been configured.');
+    expect(learningHtml).toContain('Local fictional Canvas snapshot / 本地虚构 Canvas 快照');
+    expect(learningHtml).toContain('https://canvas-learning.example.test');
+    expect(learningHtml).toContain('Disconnected');
+    expect(learningHtml).toContain('Authorize Canvas with OAuth');
     expect(learningHtml).toContain('action="/admin/learning/connections"');
 
     const superAdmin = await sessionCookie(1, 'admin@example.com');

@@ -8,8 +8,13 @@ export async function verifyCanonicalDemoSeed(db) {
     const admin = await db.prepare('SELECT email, display_name, role FROM people WHERE id=?').bind(1).first();
     const ministry = await db.prepare('SELECT slug FROM ministries WHERE id=?').bind(10).first();
     const sermons = await db.prepare('SELECT COUNT(*) AS count FROM sermons').first();
+    const learningCourse = await db.prepare('SELECT display_name FROM learning_courses WHERE id=?').bind(21000).first();
+    const learningEnrollments = await db.prepare('SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?').bind(21000, 'active').first();
+    const learningCredentials = await db.prepare('SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?').bind(21000).first();
     return Number(people?.count) >= 10 && admin?.email === 'admin@example.com' &&
-      admin?.display_name === 'Alex Admin' && admin?.role === 'admin' && ministry?.slug === 'av-tech' && Number(sermons?.count) >= 1;
+      admin?.display_name === 'Alex Admin' && admin?.role === 'admin' && ministry?.slug === 'av-tech' && Number(sermons?.count) >= 1 &&
+      learningCourse?.display_name === 'Genesis 1: Creation / 创世记第一章：创造' &&
+      Number(learningEnrollments?.count) === 2 && Number(learningCredentials?.count) === 0;
   } catch { return false; }
 }
 
