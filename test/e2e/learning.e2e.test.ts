@@ -91,9 +91,9 @@ async function seedLearnerExperience(): Promise<void> {
       (id,activity_id,external_resource_id,title,kind,launch_url,youtube_video_id,mime_type,size_bytes,
        provider_updated_at)
       VALUES
-      (8901,8901,'video-fixture','Creation overview','youtube',
+      (8901,8901,'video-fixture','Creation $& overview','youtube',
         'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ','dQw4w9WgXcQ',NULL,NULL,?1),
-      (8902,8901,'file-fixture','Lesson & handout','provider_file',
+      (8902,8901,'file-fixture','Lesson & $& handout','provider_file',
         'https://canvas.learner.test/files/8902',NULL,'application/pdf',2048,?1),
       (8903,8901,'link-fixture','Further reading','link',
         'https://canvas.learner.test/courses/890/pages/further-reading',NULL,NULL,NULL,?1)`)
@@ -187,9 +187,11 @@ describe('Learning built-worker shell boundaries', () => {
     expect(html).not.toContain('autoplay=1');
     expect(html).not.toContain('<iframe');
     expect(html).not.toContain('i.ytimg.com');
+    expect(html).toContain('aria-label="Play Creation $&amp; overview"');
     expect(html).toContain('href="https://canvas.learner.test/files/8902"');
-    expect(html).toContain('aria-label="Open Lesson &amp; handout"');
-    expect(html).not.toContain('aria-label="Open Lesson &amp;amp; handout"');
+    expect(html).toContain('aria-label="Open Lesson &amp; $&amp; handout"');
+    expect(html).not.toMatch(/aria-label="(?:Open|Play)[^"]*\{title\}/u);
+    expect(html).not.toContain('aria-label="Open Lesson &amp;amp; $&amp; handout"');
     expect(html).toContain('href="https://canvas.learner.test/courses/890/pages/further-reading"');
     expect(html).toContain('href="https://canvas.learner.test/courses/890/assignments/2"');
     expect(html).not.toContain('<img src=x onerror="activityAttack()">');

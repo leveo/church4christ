@@ -58,7 +58,7 @@ const submissionName = (status: string | undefined) => status
   ? t(locale, `learning.submission.${status}`)
   : t(locale, 'learning.submission.unavailable');
 // Dynamic titles stay raw until Astro performs the attribute-context escape.
-const openResourceLabel = (title: string) => t(locale, 'learning.openResource').replace('{title}', title);
+const openResourceLabel = (title: string) => t(locale, 'learning.openResource').replace('{title}', () => title);
 ---
 
 <Base

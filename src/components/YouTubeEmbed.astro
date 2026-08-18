@@ -25,7 +25,7 @@ const embed = `https://www.youtube-nocookie.com/embed/${videoId}${autoplay ? '?a
 const watch = `https://www.youtube.com/watch?v=${videoId}`;
 // Leave provider text unescaped here: Astro performs the single required
 // attribute escape when rendering `playLabel`.
-const playLabel = t(locale, 'sermons.play').replace('{title}', title);
+const playLabel = t(locale, 'sermons.play').replace('{title}', () => title);
 ---
 
 <div
