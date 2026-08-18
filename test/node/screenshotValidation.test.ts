@@ -131,7 +131,7 @@ describe('v1 release screenshot manifest', () => {
 });
 
 describe('Learning demo screenshot harness rows', () => {
-  test('selects the seeded English and Chinese learner pages without capturing files', () => {
+  test('selects exact seeded English, Chinese, and admin identities without capturing files', () => {
     expect(validateScreenshotManifest(LEARNING_DEMO_SCREENSHOTS)).toBe(LEARNING_DEMO_SCREENSHOTS);
     expect(LEARNING_DEMO_SCREENSHOTS).toEqual([
       expect.objectContaining({
@@ -146,19 +146,52 @@ describe('Learning demo screenshot harness rows', () => {
         identity: 'member',
         expectedText: '创世记第一章：创造',
       }),
+      expect.objectContaining({
+        path: '/admin/learning',
+        out: 'docs/images/learning/admin-overview.png',
+        identity: 'admin',
+        expectedText: 'Learning provider connections',
+      }),
     ]);
     expect(LEARNING_DEMO_CAPTURE_ROWS).toEqual([
       expect.objectContaining({
         path: '/en/learn/21000',
         bypass: 'sarah.johnson@example.com',
         anchor: 'Course activities',
+        sessionIdentity: { personId: 3, email: 'sarah.johnson@example.com', sessionEpoch: 0 },
+        identityExpectedText: 'Not submitted',
+        identityRejectionTexts: ['Returned', '已退回'],
       }),
       expect.objectContaining({
         path: '/zh/learn/21000',
         bypass: 'grace.lin@example.com',
         anchor: '课程活动',
+        sessionIdentity: { personId: 4, email: 'grace.lin@example.com', sessionEpoch: 0 },
+        identityExpectedText: '已退回',
+        identityRejectionTexts: ['Not submitted', '未提交'],
+      }),
+      expect.objectContaining({
+        path: '/admin/learning',
+        admin: true,
+        sessionIdentity: { personId: 1, email: 'admin@example.com', sessionEpoch: 0 },
+        identityExpectedText: 'admin@example.com',
       }),
     ]);
+  });
+
+  test('rejects a page rendered for the wrong seeded identity', () => {
+    const row = {
+      ...LEARNING_DEMO_CAPTURE_ROWS[0],
+      identityExpectedText: 'Not submitted',
+      identityRejectionTexts: ['Returned'],
+    };
+    expect(() => assertExpectedScreenshotPage(row, {
+      url: 'http://localhost:4321/en/learn/21000',
+      status: 200,
+      title: row.expectedText,
+      headings: [row.expectedText, 'Course activities'],
+      body: 'Assignment Returned Quiz Submitted',
+    })).toThrow(/identity rejection marker.*Returned/i);
   });
 });
 
