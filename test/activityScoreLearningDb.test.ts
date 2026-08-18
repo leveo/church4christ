@@ -119,6 +119,25 @@ describe('Learning engagement Activity Score evidence (D1)', () => {
     expect(prepared).toHaveLength(1);
   });
 
+  it('uses the bounded submission-event index instead of scanning historical events', async () => {
+    const prepared: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        prepared.push(sql);
+        return env.DB.prepare(sql);
+      },
+    } as typeof env.DB;
+    await listLearningEngagementEvidence(db, '2026-06-01', '2026-06-30');
+    expect(prepared).toHaveLength(1);
+
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${prepared[0]}`)
+      .bind('2026-06-01', '2026-06-30', 5_001, 5_001)
+      .all<{ detail: string }>();
+    const details = plan.results.map((row) => row.detail).join('\n');
+    expect(details).toMatch(/SEARCH event USING INDEX idx_learning_events_activity_score/);
+    expect(details).not.toMatch(/\bSCAN event\b/);
+  });
+
   it('returns only person ids and bounded counts, never provider or private content fields', async () => {
     await seedLearningEvidence();
     const rows = await listLearningEngagementEvidence(env.DB, '2026-06-01', '2026-06-30');

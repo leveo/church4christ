@@ -42,6 +42,8 @@ describe('activity score documentation', () => {
     expect(feature).toMatch(/migrations\/0026_activity_score_learning\.sql/);
     expect(feature).toMatch(/migrations-supabase\/0026_activity_score_learning\.sql/);
     expect(upgrade).toContain('0016_activity_score.sql');
+    expect(upgrade).toMatch(/pre-Task-11[^\n]*schema-incompatible/i);
+    expect(upgrade).toMatch(/matched database (?:backup|restore)/i);
     expect(release).toMatch(/Files .*0001.* through\s+.*0016/);
     expect(changelog).toContain('0016_activity_score.sql');
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
