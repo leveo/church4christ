@@ -4,7 +4,7 @@ import { DEFAULT_LOCALE, parseLocale, pathWithoutLocale, pickLocaleFromHeader } 
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
 import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
-import { SESSION_COOKIE, verifySessionWithScreenshotFallback } from './lib/session';
+import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
@@ -191,20 +191,23 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // Session: reload the person row every request so deactivation / soft-delete /
     // epoch bumps take effect immediately. Fail closed — a missing SESSION_SECRET
     // (or any verify/load failure) simply leaves the user anonymous, never a 500.
-    // Local screenshot capture may supply a separate five-minute signing secret
-    // through the dev process environment. The statically false production branch
-    // never attempts it, and screenshot claims must match the freshly loaded email.
+    // Local screenshot capture may supply a separate five-minute signing secret.
+    // Its module is dynamically imported only inside the statically false
+    // production branch, and the build rejects any emitted dev-session marker.
     const cookie = context.cookies.get(SESSION_COOKIE)?.value;
-    if (cookie) {
-      const verified = await verifySessionWithScreenshotFallback({
-        jwt: cookie,
-        runtimeSecret: vars.SESSION_SECRET,
-        devMode: import.meta.env.DEV,
-        screenshotSecret: import.meta.env.DEV ? import.meta.env.SCREENSHOT_SESSION_SECRET : undefined,
-      });
-      if (verified) {
-        const user = await loadSessionUser(db, verified.claims.personId, verified.claims.epoch);
-        if (user && (verified.origin === 'runtime' || user.email === verified.claims.email)) context.locals.user = user;
+    if (cookie && vars.SESSION_SECRET) {
+      const claims = await verifySession(vars.SESSION_SECRET, cookie);
+      if (claims) context.locals.user = await loadSessionUser(db, claims.personId, claims.epoch);
+    }
+    if (!context.locals.user && cookie && import.meta.env.DEV) {
+      const screenshotSecret = import.meta.env.SCREENSHOT_SESSION_SECRET;
+      if (screenshotSecret && screenshotSecret !== vars.SESSION_SECRET) {
+        const { loadScreenshotSessionUser } = await import('./lib/screenshotSessionDev');
+        context.locals.user = await loadScreenshotSessionUser({
+          jwt: cookie,
+          secret: screenshotSecret,
+          loadUser: (personId, epoch) => loadSessionUser(db, personId, epoch),
+        });
       }
     }
     // Dev bypass: in `astro dev`, AUTH_DEV_BYPASS_EMAIL attaches that person with no

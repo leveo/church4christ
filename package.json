@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "npm run tokens && astro build",
+    "build": "npm run tokens && astro build && node scripts/check-production-bundle.mjs",
     "prepare": "npm run tokens",
     "preview": "npm run build && astro preview",
     "check": "astro check",

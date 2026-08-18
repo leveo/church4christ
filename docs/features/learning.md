@@ -111,12 +111,13 @@ application license.
 
 ## Demo capture and implementation notes
 
-The Genesis fixture is loaded only by the canonical local `--demo-data` path. Choose one strong,
-ephemeral `SCREENSHOT_SESSION_SECRET` of at least 32 non-whitespace characters and put the same
-value in the environment of both local processes. It is distinct from `SESSION_SECRET` and does
-not need to match it. Do not add it to `.dev.vars`, a shell command,
-or any file; enter or paste it without echo through your shell or password manager, and unset it
-after capture.
+Setup applies the Genesis fixture only when explicitly passed `--demo-data`.
+The screenshot runbook deliberately applies `seed/dev-seed.sql` directly through
+`npm run db:seed:local`. Choose one strong, ephemeral `SCREENSHOT_SESSION_SECRET` of at least 32
+non-whitespace characters and put the same value in the environment of both local processes. It
+is distinct from `SESSION_SECRET` and does not need to match it. Do not add it to `.dev.vars`, a
+shell command, or any file; enter or paste it without echo through your shell or password
+manager, and unset it after capture.
 
 ```bash
 npm run db:migrate:local
