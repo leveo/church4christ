@@ -15,7 +15,8 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # `npx wrangler secret put LEARNING_CREDENTIAL_KEYS`.
 # Rotation is add-first: keep every referenced old key, add the new version,
 # make it current, refresh/reconnect envelopes, supersede or explicitly remove
-# reviewed expired/unclaimed OAuth states, and drain cleanup rows,
+# reviewed expired OAuth states with the documented guarded predicates, and
+# drain cleanup rows,
 # then remove the old version only after its database reference count is zero.
 # There is no bulk automatic re-encryption command; see docs/deploy.md.
 # LEARNING_CREDENTIAL_KEYS=

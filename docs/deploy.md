@@ -191,7 +191,49 @@ WHERE connection_id = :connection_id AND key_version = :old_key_version
 
 On PostgreSQL, use the same exact connection/key predicates and `claim_marker IS NULL`, replacing
 the final time predicate with `expires_at::timestamptz <= CURRENT_TIMESTAMP`. Verify that exactly
-one approved row was affected. Do not delete a current, unexpired, or claimed OAuth state.
+one approved row was affected.
+
+A Google callback can claim a state immediately before an administrator disconnects the connection
+or another operation changes its revision. A claim has no independent expiry cleanup, and an
+expired claimed state cannot then be superseded or completed. Before retiring an old key, use this
+read-only detail inventory to identify only old-key claimed states whose connection is deleted or
+whose revision no longer matches:
+
+```sql
+SELECT s.connection_id, s.connection_revision,
+       c.revision AS current_connection_revision,
+       s.expires_at, s.claim_marker, s.key_version
+FROM learning_google_oauth_states AS s
+JOIN learning_provider_connections AS c ON c.id = s.connection_id
+WHERE s.key_version = :old_key_version
+  AND s.claim_marker IS NOT NULL
+  AND (c.deleted_at IS NOT NULL OR c.revision <> s.connection_revision)
+ORDER BY s.connection_id;
+```
+
+Record the reviewed detail result as change evidence without copying the encrypted verifier. For
+each approved result, bind its exact connection, old key version, and claim marker to this D1
+statement. It deletes no current-revision state and no unexpired state:
+
+```sql
+DELETE FROM learning_google_oauth_states
+WHERE connection_id = :connection_id
+  AND key_version = :old_key_version
+  AND claim_marker = :reviewed_claim_marker
+  AND datetime(expires_at) <= datetime('now')
+  AND EXISTS (
+    SELECT 1 FROM learning_provider_connections AS c
+    WHERE c.id = learning_google_oauth_states.connection_id
+      AND c.provider = 'google_classroom'
+      AND (c.deleted_at IS NOT NULL
+           OR c.revision <> learning_google_oauth_states.connection_revision)
+  );
+```
+
+For PostgreSQL, use the same exact predicates and replace the expiry line with
+`expires_at::timestamptz <= CURRENT_TIMESTAMP`. Run one reviewed connection at a time, verify that
+exactly one row was affected, and rerun both inventories. Never delete a current-revision,
+unexpired, unreviewed, or differently claimed state.
 
 Verify that no credential, OAuth-state, or cleanup envelope still references the old
 `key_version`; **do not remove an old key** before that inventory reaches zero and a rollback window

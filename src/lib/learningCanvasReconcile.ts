@@ -36,7 +36,7 @@ const RECONCILIATION_DEADLINE_MS = 25_000;
 // 23 normalized pages therefore consume at most 46 REST
 // subrequests; one Live Events JWK lookup, one token refresh, and syncCourse
 // keep the whole invocation below Workers Free's 50-subrequest limit.
-const RECONCILIATION_MAX_PROVIDER_PAGES = 23;
+export const CANVAS_RECONCILIATION_MAX_PROVIDER_PAGES = 23;
 // Receipt account/course preflight + claim/read (3), course/identity/credential
 // reads (3), refresh CAS with one losing-writer reload (4), terminal receipt
 // update (1), one conservative spare query, and cold request middleware
@@ -217,8 +217,8 @@ export async function reconcileCanvasCourse(
     const fetcher = input.fetcher as CanvasReconcileFetcher;
     const startedAt = safeNow(now);
     const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
-      ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
-      : RECONCILIATION_MAX_PROVIDER_PAGES;
+      ? learningValidation.integer(input.maxProviderPages, 1, CANVAS_RECONCILIATION_MAX_PROVIDER_PAGES)
+      : CANVAS_RECONCILIATION_MAX_PROVIDER_PAGES;
     const reservedInvocationQueries = Object.hasOwn(input, 'reservedInvocationQueries')
       ? learningValidation.integer(input.reservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES)
       : CANVAS_RECONCILIATION_RESERVED_D1_QUERIES;

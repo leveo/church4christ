@@ -72,9 +72,9 @@ Getting the code right is only half of it; a secure deployment also depends on y
       epoch signs them out everywhere; rotating `SESSION_SECRET` signs out everyone.
 - [ ] **Keep every referenced Learning credential key during rotation.** Add the new key first,
       make it current, refresh/reconnect credentials, supersede or explicitly delete only reviewed
-      expired and unclaimed OAuth states, finish cleanup tasks, and remove an old version only
-      after all database references reach zero. Never log or commit the
-      `LEARNING_CREDENTIAL_KEYS` value.
+      expired OAuth states under the documented unclaimed or stale-claim predicates, finish cleanup
+      tasks, and remove an old version only after all database references reach zero. Never log or
+      commit the `LEARNING_CREDENTIAL_KEYS` value.
 - [ ] **Verify Learning provider controls outside doctor.** Review Google OAuth consent/scopes,
       Pub/Sub authenticated-push identity/audience and Classroom publisher permission, Canvas
       allowed origins/scopes and signed Live Events, both cron halves, manual sync, disconnect

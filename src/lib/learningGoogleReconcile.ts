@@ -34,7 +34,7 @@ const RECONCILIATION_DEADLINE_MS = 25_000;
 // Worker Free allows 50 external subrequests. Reserve one each for an uncached
 // Pub/Sub JWKS fetch, a possible OAuth refresh, and the authoritative course
 // GET; every remaining provider request is represented by one collected page.
-const RECONCILIATION_MAX_PROVIDER_PAGES = 47;
+export const GOOGLE_RECONCILIATION_MAX_PROVIDER_PAGES = 47;
 // Receipt claim (2), authoritative/identity/credential reads (3), refresh CAS
 // plus a losing-writer reload (4), terminal receipt update (1), and cold
 // request middleware theme/module reads (2). Manual and scheduled entry points
@@ -215,8 +215,8 @@ export async function reconcileGoogleClassroomCourse(
     const signal = input.signal as AbortSignal;
     const startedAt = safeNow(now);
     const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
-      ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
-      : RECONCILIATION_MAX_PROVIDER_PAGES;
+      ? learningValidation.integer(input.maxProviderPages, 1, GOOGLE_RECONCILIATION_MAX_PROVIDER_PAGES)
+      : GOOGLE_RECONCILIATION_MAX_PROVIDER_PAGES;
     const reservedInvocationQueries = Object.hasOwn(input, 'reservedInvocationQueries')
       ? learningValidation.integer(input.reservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES)
       : GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES;
