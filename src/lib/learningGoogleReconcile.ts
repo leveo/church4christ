@@ -36,8 +36,10 @@ const RECONCILIATION_DEADLINE_MS = 25_000;
 // GET; every remaining provider request is represented by one collected page.
 const RECONCILIATION_MAX_PROVIDER_PAGES = 47;
 // Receipt claim (2), authoritative/identity/credential reads (3), refresh CAS
-// plus a losing-writer reload (4), and terminal receipt update (1).
-export const GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES = 10;
+// plus a losing-writer reload (4), terminal receipt update (1), and cold
+// request middleware theme/module reads (2). Manual and scheduled entry points
+// replace receipt work with their own bounded auth/target/scheduler reads.
+export const GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES = 12;
 const GOOGLE_POLICY = Object.freeze({
   providerLaunchOrigins: Object.freeze(['https://classroom.google.com']),
   providerFileOrigins: Object.freeze(['https://drive.google.com', 'https://docs.google.com']),

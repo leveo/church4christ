@@ -39,8 +39,10 @@ const RECONCILIATION_DEADLINE_MS = 25_000;
 const RECONCILIATION_MAX_PROVIDER_PAGES = 23;
 // Receipt account/course preflight + claim/read (3), course/identity/credential
 // reads (3), refresh CAS with one losing-writer reload (4), terminal receipt
-// update (1), and one conservative spare query.
-export const CANVAS_RECONCILIATION_RESERVED_D1_QUERIES = 12;
+// update (1), one conservative spare query, and cold request middleware
+// theme/module reads (2). Manual and scheduled entry points replace receipt
+// work with their bounded auth/target/scheduler reads.
+export const CANVAS_RECONCILIATION_RESERVED_D1_QUERIES = 14;
 
 type CanvasReconcileFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
