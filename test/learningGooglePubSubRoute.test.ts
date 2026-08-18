@@ -23,7 +23,12 @@ const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(61))) },
 });
 
-function context(request: Request, modules: string[] = ['learning'], db: object = {}, waitUntil = vi.fn()): never {
+function context(
+  request: Request,
+  modules: string[] = ['learning'],
+  db: object = {},
+  waitUntil: (promise: Promise<unknown>) => void = vi.fn(),
+): never {
   return {
     request,
     url: new URL(request.url),
@@ -76,8 +81,11 @@ const deps = () => ({
     attemptCount: 1,
   })),
   finishDelivery: vi.fn(async () => undefined),
-  reconcileCourse: vi.fn(async () => undefined),
-  openBackgroundDb: vi.fn(() => ({ db: { background: true }, end: vi.fn(async () => undefined) })),
+  reconcileCourse: vi.fn(async (): Promise<void> => undefined),
+  openBackgroundDb: vi.fn(() => ({
+    db: { background: true } as unknown as AppDb,
+    end: vi.fn(async () => undefined),
+  })),
 });
 
 describe('Google Pub/Sub HTTP push boundary', () => {
@@ -297,13 +305,17 @@ describe('Google Pub/Sub HTTP push boundary', () => {
         ...input, clientId: 'client.apps.googleusercontent.com',
         clientSecret: 'private-client-secret', keyRing, fetcher, now: () => NOW,
       }).then(() => undefined),
+      openBackgroundDb: () => ({ db: trackedDb, end: async () => undefined }),
     };
     const request = new Request('https://church.test/api/learning/google/pubsub', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' },
       body: body(),
     });
-    expect((await createGooglePubSubPushHandler(productionDeps)(context(request, ['learning'], trackedDb))).status)
-      .toBe(503);
+    let background: Promise<unknown> | undefined;
+    expect((await createGooglePubSubPushHandler(productionDeps)(context(
+      request, ['learning'], trackedDb, (promise) => { background = promise; },
+    ))).status).toBe(204);
+    await expect(background).resolves.toBeUndefined();
     expect(metrics.overQueryAttempts).toEqual([]);
     expect(metrics.queries).toBe(16);
     expect(metrics.maxBinds).toBeLessThanOrEqual(100);

@@ -139,7 +139,7 @@ describe('Google notification authoritative single-course reconciliation', () =>
       connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing: ring, fetcher, now: () => NOW, signal: new AbortController().signal,
-    })).rejects.toThrow('learning_google_reconcile_failed');
+    })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'google_classroom' });
     // One JWKS fetch, one possible OAuth refresh, and the course GET are
     // reserved outside the bounded provider-page loop: 47 + 3 = 50.
     expect(fetcher).toHaveBeenCalledTimes(48);
@@ -165,7 +165,7 @@ describe('Google notification authoritative single-course reconciliation', () =>
       connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing: ring, fetcher, now: () => current, signal: new AbortController().signal,
-    })).rejects.toThrow('learning_google_reconcile_failed');
+    })).rejects.toMatchObject({ code: 'timeout', provider: 'google_classroom' });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,8 +1,12 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import type { AppDb } from '../../../../lib/appDb';
-import { reconcileCanvasCourse } from '../../../../lib/learningCanvasReconcile';
-import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+import { openDb } from '../../../../lib/dbProvider';
+import {
+  LEARNING_SYNC_RUN_LIMITS,
+  reconcileLearningProviderCourse,
+  type LearningSynchronizationEnv,
+} from '../../../../lib/learningSyncOrchestration';
 import {
   acceptCanvasLiveEvent,
   finishCanvasLiveEvent,
@@ -10,7 +14,6 @@ import {
   type AcceptedCanvasLiveEvent,
   type CanvasLiveEvent,
 } from '../../../../lib/learningCanvasLiveEvents';
-import { readCanvasAllowedOrigins } from '../../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 
@@ -48,32 +51,21 @@ interface CanvasLiveEventsRouteDeps {
       readonly completedAt: string;
     },
   ) => Promise<void>;
+  readonly openBackgroundDb: () => { readonly db: AppDb; readonly end: () => Promise<void> };
 }
 
-const defaultVars = env as unknown as Record<string, string | undefined>;
+const defaultVars = env as unknown as Record<string, string | undefined> & LearningSynchronizationEnv;
 const defaultDeps: CanvasLiveEventsRouteDeps = {
   now: Date.now,
   verifyEvent: verifyCanvasLiveEventJwt,
   acceptEvent: acceptCanvasLiveEvent,
   finishEvent: finishCanvasLiveEvent,
+  openBackgroundDb: () => openDb(defaultVars),
   reconcileCourse: async (db, input) => {
-    const clientId = defaultVars.CANVAS_OAUTH_CLIENT_ID;
-    const clientSecret = defaultVars.CANVAS_OAUTH_CLIENT_SECRET;
-    const keySecret = defaultVars.LEARNING_CREDENTIAL_KEYS;
-    if (
-      typeof clientId !== 'string' || clientId.length < 1
-      || typeof clientSecret !== 'string' || clientSecret.length < 1
-      || typeof keySecret !== 'string' || keySecret.length < 1
-    ) throw new Error('learning_canvas_config_unavailable');
-    const keyRing = await importLearningCredentialKeyRing(keySecret);
-    await reconcileCanvasCourse(db, {
+    await reconcileLearningProviderCourse(defaultVars, db, {
       ...input,
-      allowedOrigins: readCanvasAllowedOrigins(defaultVars.CANVAS_ALLOWED_ORIGINS),
-      clientId,
-      clientSecret,
-      keyRing,
-      fetcher: fetch,
-      now: Date.now,
+      provider: 'canvas',
+      maxProviderPages: LEARNING_SYNC_RUN_LIMITS.canvasMaxPagesPerAttempt,
     });
   },
 };
@@ -208,13 +200,18 @@ export function createCanvasLiveEventsHandler(
       const accepted = await dependencies.acceptEvent(locals.db, event);
       if (accepted.disposition === 'succeeded') return response(204);
       if (accepted.disposition === 'in_progress') return response(503);
+      const waitUntil = locals.cfContext?.waitUntil?.bind(locals.cfContext);
+      if (!waitUntil) {
+        try {
+          await dependencies.finishEvent(locals.db, {
+            receipt: accepted, outcome: 'failed', completedAt: new Date(dependencies.now()).toISOString(),
+          });
+        } catch { /* stale-claim recovery remains available */ }
+        return response(503);
+      }
+      let backgroundDb: ReturnType<CanvasLiveEventsRouteDeps['openBackgroundDb']>;
       try {
-        await dependencies.reconcileCourse(locals.db, {
-          connectionId: accepted.connectionId,
-          externalCourseId: accepted.externalCourseId,
-          trigger: 'notification',
-          signal: request.signal,
-        });
+        backgroundDb = dependencies.openBackgroundDb();
       } catch {
         try {
           await dependencies.finishEvent(locals.db, {
@@ -222,14 +219,32 @@ export function createCanvasLiveEventsHandler(
             outcome: 'failed',
             completedAt: new Date(dependencies.now()).toISOString(),
           });
-        } catch { /* 503 preserves Canvas redelivery and stale-claim recovery */ }
+        } catch { /* stale-claim recovery remains available */ }
         return response(503);
       }
-      await dependencies.finishEvent(locals.db, {
-        receipt: accepted,
-        outcome: 'succeeded',
-        completedAt: new Date(dependencies.now()).toISOString(),
-      });
+      const background = (async () => {
+        let outcome: 'failed' | 'succeeded' = 'failed';
+        try {
+          await dependencies.reconcileCourse(backgroundDb.db, {
+            connectionId: accepted.connectionId,
+            externalCourseId: accepted.externalCourseId,
+            trigger: 'notification',
+            signal: new AbortController().signal,
+          });
+          outcome = 'succeeded';
+        } catch {
+          console.warn(JSON.stringify({
+            event: 'learning_notification_reconcile_failed', provider: 'canvas',
+            trigger: 'notification', status: 'failed',
+          }));
+        }
+        try {
+          await dependencies.finishEvent(backgroundDb.db, {
+            receipt: accepted, outcome, completedAt: new Date(dependencies.now()).toISOString(),
+          });
+        } catch { /* stale-claim recovery remains available */ }
+      })().catch(() => {}).finally(backgroundDb.end);
+      try { waitUntil(background); } catch { void background; }
       return response(204);
     } catch {
       return response(503);

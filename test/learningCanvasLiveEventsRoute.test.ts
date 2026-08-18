@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AppDb } from '../src/lib/appDb';
 import { hasValidMutationProvenance } from '../src/lib/csrf';
 import type { AcceptedCanvasLiveEvent } from '../src/lib/learningCanvasLiveEvents';
 import { moduleForPath } from '../src/lib/modules';
@@ -7,7 +8,12 @@ import { createCanvasLiveEventsHandler } from '../src/pages/api/learning/canvas/
 const PATH = '/api/learning/canvas/live-events';
 const TOKEN = 'eyJraWQiOiJrMSIsImFsZyI6IlJTMjU2In0.e30.signature';
 
-function context(request: Request, modules: string[] = ['learning'], db: object = {}, waitUntil = vi.fn()): never {
+function context(
+  request: Request,
+  modules: string[] = ['learning'],
+  db: object = {},
+  waitUntil: (promise: Promise<unknown>) => void = vi.fn(),
+): never {
   return {
     request, url: new URL(request.url),
     locals: { modules: new Set(modules), user: null, db, cfContext: { waitUntil } },
@@ -33,9 +39,12 @@ const deps = () => ({
     externalCourseId: 'course-1', disposition: 'claimed' as const,
     claimMarker: '10000000-0000-4000-8000-000000000001', attemptCount: 1,
   })),
-  reconcileCourse: vi.fn(async () => undefined),
+  reconcileCourse: vi.fn(async (): Promise<void> => undefined),
   finishEvent: vi.fn(async () => undefined),
-  openBackgroundDb: vi.fn(() => ({ db: { background: true }, end: vi.fn(async () => undefined) })),
+  openBackgroundDb: vi.fn(() => ({
+    db: { background: true } as unknown as AppDb,
+    end: vi.fn(async () => undefined),
+  })),
 });
 
 describe('Canvas signed Live Events HTTP boundary', () => {

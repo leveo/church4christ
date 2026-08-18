@@ -18,6 +18,7 @@ import {
 import type { LearningOperationContext } from './learningProvider';
 import {
   synchronizeLearningCourse,
+  LearningSynchronizationError,
   type PreResolvedLearningPerson,
 } from './learningSync';
 
@@ -182,16 +183,21 @@ export async function reconcileGoogleClassroomCourse(
     readonly fetcher: GoogleReconcileFetcher;
     readonly now: () => number;
     readonly signal: AbortSignal;
+    readonly maxProviderPages?: number;
   },
 ): Promise<LearningSyncCompletion> {
   try {
-    const input = learningValidation.exactRecord(rawInput, [
+    const allowed = Object.hasOwn(rawInput, 'maxProviderPages') ? [
+      'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
+      'keyRing', 'fetcher', 'now', 'signal', 'maxProviderPages',
+    ] : [
       'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
       'keyRing', 'fetcher', 'now', 'signal',
-    ]);
+    ];
+    const input = learningValidation.exactRecord(rawInput, allowed);
     const connectionId = integer(input.connectionId);
     const externalCourseId = externalId(input.externalCourseId);
-    if (input.trigger !== 'notification') failed();
+    if (!['manual', 'scheduled', 'notification'].includes(input.trigger as string)) failed();
     if (
       typeof input.clientId !== 'string' || typeof input.clientSecret !== 'string'
       || typeof input.fetcher !== 'function' || typeof input.now !== 'function'
@@ -201,6 +207,9 @@ export async function reconcileGoogleClassroomCourse(
     const now = input.now as () => number;
     const signal = input.signal as AbortSignal;
     const startedAt = safeNow(now);
+    const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
+      ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
+      : RECONCILIATION_MAX_PROVIDER_PAGES;
     const courseId = await authoritativeCourse(db, connectionId, externalCourseId);
     const preResolvedPeople = await preloadIdentities(db, connectionId, externalCourseId);
     const policy = urlPolicy(connectionId);
@@ -226,7 +235,7 @@ export async function reconcileGoogleClassroomCourse(
       }),
       startedAt: new Date(startedAt).toISOString(),
       deadlineAt: new Date(startedAt + RECONCILIATION_DEADLINE_MS).toISOString(),
-      maxPages: RECONCILIATION_MAX_PROVIDER_PAGES,
+      maxPages: maxProviderPages,
       maxItems: LEARNING_MAX_ATOMIC_ENTITIES,
       maxRawBytes: LEARNING_LIMITS.maxSyncBytes,
       maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes,
@@ -240,13 +249,14 @@ export async function reconcileGoogleClassroomCourse(
       providerKind: 'google_classroom',
       courseId,
       externalCourseId,
-      trigger: 'notification',
+      trigger: input.trigger as LearningSyncTrigger,
       operation,
       now: () => safeNow(now),
       preResolvedPeople,
       reservedInvocationQueries: GOOGLE_WEBHOOK_RESERVED_D1_QUERIES,
     });
   } catch (error) {
+    if (error instanceof LearningSynchronizationError) throw error;
     if (error instanceof LearningGoogleReconcileError) throw error;
     return failed();
   }

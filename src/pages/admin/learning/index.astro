@@ -5,6 +5,7 @@ import { hasAreaAccess } from '../../../lib/adminAreas';
 import { badge, btn, btnSecondary, card, lab, tin } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
 import { listLearningConnections } from '../../../lib/learningConnectionDb';
+import { listLearningAdminSyncCourses } from '../../../lib/learningSyncOrchestration';
 import type { Locale } from '../../../lib/locales';
 import type { LearningConnectionStatus, LearningErrorCode } from '../../../lib/learningModel';
 
@@ -26,6 +27,7 @@ if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
 }
 const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
 const connections = await listLearningConnections(Astro.locals.db, { includeDeleted: true, limit: 100 });
+const syncCourses = await listLearningAdminSyncCourses(Astro.locals.db);
 const copy = lang === 'zh' ? {
   providers: '学习平台连接',
   none: '尚未连接 Google Classroom 或 Canvas。',
@@ -49,6 +51,13 @@ const copy = lang === 'zh' ? {
   googleAuthorizationFailed: 'Google 授权未完成；请重新开始授权流程。',
   canvasAuthorizationFailed: 'Canvas 授权未完成；请重新开始授权流程。',
   error: '连接设置未能保存；请刷新后重试。',
+  syncHeading: '课程同步',
+  syncNow: '立即同步',
+  neverSynced: '尚未同步',
+  lastSynced: '上次同步',
+  syncStarted: '课程同步已在后台开始。',
+  syncUnavailable: '目前无法开始课程同步；请稍后重试。',
+  syncInvalid: '无法为所选课程开始同步；请刷新后重试。',
 } : {
   providers: 'Learning provider connections',
   none: 'No Google Classroom or Canvas connection has been configured.',
@@ -72,6 +81,13 @@ const copy = lang === 'zh' ? {
   googleAuthorizationFailed: 'Google authorization was not completed. Start the authorization flow again.',
   canvasAuthorizationFailed: 'Canvas authorization was not completed. Start the authorization flow again.',
   error: 'Connection settings could not be saved. Refresh and try again.',
+  syncHeading: 'Course synchronization',
+  syncNow: 'Sync now',
+  neverSynced: 'Never synchronized',
+  lastSynced: 'Last synchronized',
+  syncStarted: 'Course synchronization started in the background.',
+  syncUnavailable: 'Course synchronization could not be started. Try again later.',
+  syncInvalid: 'Synchronization could not be started for that course. Refresh and try again.',
 };
 type ConnectionErrorCode =
   | 'connection_conflict'
@@ -130,6 +146,7 @@ const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
 const savedCodes = new Set([
   'connection_created', 'connection_updated',
   'connection_disconnected', 'health_checked', 'google_connected', 'canvas_connected',
+  'sync_started',
 ]);
 const queryEntries = [...Astro.url.searchParams.entries()];
 let banner: { readonly tone: 'success' | 'danger'; readonly text: string } | null = null;
@@ -137,7 +154,14 @@ if (queryEntries.length === 1) {
   const [name, value] = queryEntries[0];
   if (name === 'saved' && savedCodes.has(value)) {
     banner = { tone: 'success', text: value === 'google_connected'
-      ? copy.googleConnected : value === 'canvas_connected' ? copy.canvasConnected : copy.saved };
+      ? copy.googleConnected : value === 'canvas_connected' ? copy.canvasConnected
+        : value === 'sync_started' ? copy.syncStarted : copy.saved };
+  }
+  if (name === 'error' && value === 'sync_unavailable') {
+    banner = { tone: 'danger', text: copy.syncUnavailable };
+  }
+  if (name === 'error' && value === 'sync_invalid') {
+    banner = { tone: 'danger', text: copy.syncInvalid };
   }
   if (name === 'error' && Object.hasOwn(errorMessages, value)) {
     banner = { tone: 'danger', text: errorMessages[value as ConnectionErrorCode] };
@@ -251,4 +275,28 @@ if (queryEntries.length === 1) {
       <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
     </form>
   </section>
+
+  {syncCourses.length > 0 && (
+    <section class="mt-8 max-w-4xl">
+      <h2 class="font-display text-heading-sm font-bold">{copy.syncHeading}</h2>
+      <div class="mt-4 grid gap-3">
+        {syncCourses.map((course) => (
+          <article class={`${card} flex flex-wrap items-center justify-between gap-4`}>
+            <div>
+              <h3 class="font-display font-bold">{course.displayName}</h3>
+              <p class="mt-1 text-sm text-ink-muted">
+                {course.provider === 'canvas' ? 'Canvas' : 'Google Classroom'} · {
+                  course.lastSyncedAt ? `${copy.lastSynced}: ${course.lastSyncedAt}` : copy.neverSynced
+                }
+              </p>
+            </div>
+            <form method="post" action="/admin/learning/sync">
+              <input type="hidden" name="course_id" value={course.courseId} />
+              <button class={btnSecondary} type="submit">{copy.syncNow}: {course.displayName}</button>
+            </form>
+          </article>
+        ))}
+      </div>
+    </section>
+  )}
 </Admin>

@@ -18,6 +18,7 @@ import {
 import type { LearningOperationContext } from './learningProvider';
 import {
   synchronizeLearningCourse,
+  LearningSynchronizationError,
   type PreResolvedLearningPerson,
 } from './learningSync';
 import { requireAllowedCanvasOrigin } from './learningCanvasOrigins';
@@ -183,16 +184,21 @@ export async function reconcileCanvasCourse(
     readonly fetcher: CanvasReconcileFetcher;
     readonly now: () => number;
     readonly signal: AbortSignal;
+    readonly maxProviderPages?: number;
   },
 ): Promise<LearningSyncCompletion> {
   try {
-    const input = learningValidation.exactRecord(rawInput, [
+    const allowed = Object.hasOwn(rawInput, 'maxProviderPages') ? [
+      'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
+      'keyRing', 'fetcher', 'now', 'signal', 'allowedOrigins', 'maxProviderPages',
+    ] : [
       'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
       'keyRing', 'fetcher', 'now', 'signal', 'allowedOrigins',
-    ]);
+    ];
+    const input = learningValidation.exactRecord(rawInput, allowed);
     const connectionId = integer(input.connectionId);
     const externalCourseId = externalId(input.externalCourseId);
-    if (input.trigger !== 'notification') failed();
+    if (!['manual', 'scheduled', 'notification'].includes(input.trigger as string)) failed();
     if (
       typeof input.clientId !== 'string' || input.clientId.length < 1
       || typeof input.clientSecret !== 'string' || input.clientSecret.length < 1
@@ -203,6 +209,9 @@ export async function reconcileCanvasCourse(
     const signal = input.signal as AbortSignal;
     const fetcher = input.fetcher as CanvasReconcileFetcher;
     const startedAt = safeNow(now);
+    const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
+      ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
+      : RECONCILIATION_MAX_PROVIDER_PAGES;
     const courseId = await authoritativeCourse(db, connectionId, externalCourseId);
     const preResolvedPeople = await preloadIdentities(db, connectionId, externalCourseId);
     const credentials = await access(db, {
@@ -234,7 +243,7 @@ export async function reconcileCanvasCourse(
       }),
       startedAt: new Date(startedAt).toISOString(),
       deadlineAt: new Date(startedAt + RECONCILIATION_DEADLINE_MS).toISOString(),
-      maxPages: RECONCILIATION_MAX_PROVIDER_PAGES,
+      maxPages: maxProviderPages,
       maxItems: LEARNING_MAX_ATOMIC_ENTITIES,
       maxRawBytes: LEARNING_LIMITS.maxSyncBytes,
       maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes,
@@ -248,13 +257,14 @@ export async function reconcileCanvasCourse(
       providerKind: 'canvas',
       courseId,
       externalCourseId,
-      trigger: 'notification',
+      trigger: input.trigger as LearningSyncTrigger,
       operation,
       now: () => safeNow(now),
       preResolvedPeople,
       reservedInvocationQueries: CANVAS_WEBHOOK_RESERVED_D1_QUERIES,
     });
   } catch (error) {
+    if (error instanceof LearningSynchronizationError) throw error;
     if (error instanceof LearningCanvasReconcileError) throw error;
     return failed();
   }

@@ -8,6 +8,7 @@ import { getBackend, openDb } from './lib/dbProvider';
 import { runStripeRecovery } from './lib/stripeRecovery';
 import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
 import { runCanvasDisconnectCleanupPass } from './lib/learningCanvasCleanupCron';
+import { runScheduledLearningSyncPass } from './lib/learningSyncOrchestration';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -51,6 +52,13 @@ export default {
       case GOOGLE_CLASSROOM_REGISTRATION_CRON: {
         const { db, end } = openDb(env as never);
         ctx.waitUntil((async () => {
+          // Reuse one cron trigger without combining two provider-heavy jobs in
+          // one Free-plan invocation: :15 is cleanup/registration readiness;
+          // :45 is one bounded authoritative course reconciliation.
+          if (new Date(controller.scheduledTime).getUTCMinutes() === 45) {
+            await runScheduledLearningSyncPass(env as never, db);
+            return;
+          }
           try { await runCanvasDisconnectCleanupPass(env as never, db); }
           catch { /* the durable Canvas task remains available to the next bounded pass */ }
           await runGoogleClassroomRegistrationRenewalPass(env as never, db);
