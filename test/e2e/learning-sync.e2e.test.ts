@@ -4,10 +4,13 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { attendanceSessionCookie as sessionCookie } from './attendanceHelpers';
 import { ORIGIN } from './helpers';
-// The e2e script always builds first; import the generated Worker entry so the
-// scheduled assertion exercises the same artifact deployed by Wrangler.
-// @ts-expect-error generated build artifact has no declaration file
-import builtWorker from '../../dist/server/entry.mjs';
+// The e2e script always builds first. A glob keeps pre-build type-checking free
+// of a hard dependency on ignored dist/, while Vite eagerly includes the exact
+// generated Worker entry for this built-artifact suite.
+const builtEntries = import.meta.glob('../../dist/server/entry.mjs', {
+  eager: true, import: 'default',
+});
+const builtWorker = Object.values(builtEntries)[0] as ExportedHandler<Cloudflare.Env> | undefined;
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -63,6 +66,7 @@ describe('Learning synchronization built-worker boundaries', () => {
       Date.parse('2026-08-18T12:45:00.000Z'),
     ]) {
       const waits: Promise<unknown>[] = [];
+      if (!builtWorker?.scheduled) throw new Error('built Worker scheduled handler is unavailable');
       builtWorker.scheduled({
         cron: '15,45 * * * *', scheduledTime: time, noRetry() {},
       } as ScheduledController, env as never, {

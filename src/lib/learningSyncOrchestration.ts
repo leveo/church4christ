@@ -159,7 +159,9 @@ export async function listLearningSyncTargets(
   const courseId = hasCourse
     ? learningValidation.integer(input.courseId, 1, LEARNING_LIMITS.databaseInteger)
     : null;
-  const result = await db.prepare(`SELECT course.id AS course_id,
+  const exactCourse = hasCourse ? 'AND course.id=?1' : '';
+  const limitPlaceholder = hasCourse ? '?2' : '?1';
+  const statement = db.prepare(`SELECT course.id AS course_id,
       course.connection_id AS connection_id, course.provider AS provider,
       course.external_course_id AS external_course_id
     FROM learning_courses course
@@ -169,10 +171,12 @@ export async function listLearningSyncTargets(
     WHERE course.lifecycle_state='active' AND course.deleted_at IS NULL
       AND program.status='active' AND program.deleted_at IS NULL
       AND connection.status='active' AND connection.deleted_at IS NULL
-      AND (?1 IS NULL OR course.id=?1)
+      ${exactCourse}
     ORDER BY CASE WHEN course.last_synced_at IS NULL THEN 0 ELSE 1 END,
       course.last_synced_at, course.id
-    LIMIT ?2`).bind(courseId, limit).all<Record<string, unknown>>();
+    LIMIT ${limitPlaceholder}`);
+  const result = await (hasCourse ? statement.bind(courseId, limit) : statement.bind(limit))
+    .all<Record<string, unknown>>();
   if (!result || !Array.isArray(result.results) || result.results.length > limit) {
     throw new LearningSynchronizationError('internal_error', 'google_classroom');
   }
