@@ -19,12 +19,12 @@ describe('final D1 schema parser', () => {
       'person_id is not null and removed_at is null',
     );
     expect(normalizeIndexPredicate('(lower(email) = \'member@example.test\')')).toBe(
-      "lower(email) = 'member@example.test'",
+      "lower(email)='member@example.test'",
     );
-    expect(normalizeIndexPredicate("status = 'P'")).toBe("status = 'P'");
+    expect(normalizeIndexPredicate("status = 'P'")).toBe("status='P'");
     expect(normalizeIndexPredicate("status = 'P'")).not.toBe(normalizeIndexPredicate("status = 'p'"));
     expect(normalizeIndexPredicate("note = '(x)'  AND  kind = 'a::text  b'")).toBe(
-      "note = '(x)' and kind = 'a::text  b'",
+      "note='(x)' and kind='a::text  b'",
     );
     expect(normalizeIndexPredicate("note = '(x)' ")).not.toBe(normalizeIndexPredicate("note = 'x'"));
   });

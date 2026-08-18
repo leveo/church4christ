@@ -37,6 +37,7 @@ const LEARNING_INDEXES = [
   'idx_learning_courses_sync_schedule',
   'idx_learning_enrollments_course_state',
   'idx_learning_enrollments_identity_state',
+  'idx_learning_events_activity_score',
   'idx_learning_events_activity_time',
   'idx_learning_events_connection_ingested',
   'idx_learning_events_course_time',
