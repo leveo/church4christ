@@ -7,10 +7,10 @@ import { createCanvasLiveEventsHandler } from '../src/pages/api/learning/canvas/
 const PATH = '/api/learning/canvas/live-events';
 const TOKEN = 'eyJraWQiOiJrMSIsImFsZyI6IlJTMjU2In0.e30.signature';
 
-function context(request: Request, modules: string[] = ['learning'], db: object = {}): never {
+function context(request: Request, modules: string[] = ['learning'], db: object = {}, waitUntil = vi.fn()): never {
   return {
     request, url: new URL(request.url),
-    locals: { modules: new Set(modules), user: null, db, cfContext: { waitUntil: vi.fn() } },
+    locals: { modules: new Set(modules), user: null, db, cfContext: { waitUntil } },
   } as never;
 }
 
@@ -35,6 +35,7 @@ const deps = () => ({
   })),
   reconcileCourse: vi.fn(async () => undefined),
   finishEvent: vi.fn(async () => undefined),
+  openBackgroundDb: vi.fn(() => ({ db: { background: true }, end: vi.fn(async () => undefined) })),
 });
 
 describe('Canvas signed Live Events HTTP boundary', () => {
@@ -65,9 +66,12 @@ describe('Canvas signed Live Events HTTP boundary', () => {
     expect(injected.verifyEvent).not.toHaveBeenCalled();
   });
 
-  it('verifies the bounded JWT before DB binding and authoritative reconcile', async () => {
+  it('verifies and deduplicates before fast ACK, then reconciles on an independently drained waitUntil DB', async () => {
     const injected = deps();
-    const response = await createCanvasLiveEventsHandler(injected)(context(request()));
+    let release!: () => void;
+    injected.reconcileCourse.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    let background: Promise<unknown> | undefined;
+    const response = await createCanvasLiveEventsHandler(injected)(context(request(), ['learning'], {}, (promise) => { background = promise; }));
     expect(response.status).toBe(204);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.text()).toBe('');
@@ -77,11 +81,14 @@ describe('Canvas signed Live Events HTTP boundary', () => {
     expect(injected.acceptEvent).toHaveBeenCalledWith({}, expect.objectContaining({
       sourceEventId: `sha256:${'a'.repeat(43)}`, externalCourseId: 'course-1',
     }));
-    expect(injected.reconcileCourse).toHaveBeenCalledWith({}, {
+    expect(injected.reconcileCourse).toHaveBeenCalledWith({ background: true }, {
       connectionId: 28202, externalCourseId: 'course-1', trigger: 'notification',
       signal: expect.any(AbortSignal),
     });
-    expect(injected.finishEvent).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'succeeded' }));
+    expect(injected.finishEvent).not.toHaveBeenCalled();
+    release();
+    await expect(background).resolves.toBeUndefined();
+    expect(injected.finishEvent).toHaveBeenCalledWith({ background: true }, expect.objectContaining({ outcome: 'succeeded' }));
   });
 
   it('returns no diagnostic body for invalid signatures, malformed streams, and oversized JWTs', async () => {
@@ -223,7 +230,9 @@ describe('Canvas signed Live Events HTTP boundary', () => {
 
     const failed = deps();
     failed.reconcileCourse.mockRejectedValueOnce(new Error('provider private response'));
-    expect((await createCanvasLiveEventsHandler(failed)(context(request()))).status).toBe(503);
-    expect(failed.finishEvent).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'failed' }));
+    let background: Promise<unknown> | undefined;
+    expect((await createCanvasLiveEventsHandler(failed)(context(request(), ['learning'], {}, (promise) => { background = promise; }))).status).toBe(204);
+    await expect(background).resolves.toBeUndefined();
+    expect(failed.finishEvent).toHaveBeenCalledWith({ background: true }, expect.objectContaining({ outcome: 'failed' }));
   });
 });

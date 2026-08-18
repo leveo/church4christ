@@ -23,11 +23,11 @@ const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(61))) },
 });
 
-function context(request: Request, modules: string[] = ['learning'], db: object = {}): never {
+function context(request: Request, modules: string[] = ['learning'], db: object = {}, waitUntil = vi.fn()): never {
   return {
     request,
     url: new URL(request.url),
-    locals: { modules: new Set(modules), user: null, db, cfContext: { waitUntil: vi.fn() } },
+    locals: { modules: new Set(modules), user: null, db, cfContext: { waitUntil } },
   } as never;
 }
 
@@ -77,6 +77,7 @@ const deps = () => ({
   })),
   finishDelivery: vi.fn(async () => undefined),
   reconcileCourse: vi.fn(async () => undefined),
+  openBackgroundDb: vi.fn(() => ({ db: { background: true }, end: vi.fn(async () => undefined) })),
 });
 
 describe('Google Pub/Sub HTTP push boundary', () => {
@@ -121,22 +122,28 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     }
   });
 
-  it('marks a claimed reconciliation succeeded and skips a terminal succeeded duplicate', async () => {
+  it('acknowledges a claimed delivery before authoritative reconciliation drains in waitUntil', async () => {
     const injected = deps();
+    let release!: () => void;
+    injected.reconcileCourse.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    let background: Promise<unknown> | undefined;
     const request = new Request('https://church.test/api/learning/google/pubsub', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
     });
-    const response = await createGooglePubSubPushHandler(injected)(context(request));
+    const response = await createGooglePubSubPushHandler(injected)(context(request, ['learning'], {}, (promise) => { background = promise; }));
     expect(response.status).toBe(204);
     expect(await response.text()).toBe('');
     expect(injected.acceptDelivery).toHaveBeenCalledWith({}, expect.objectContaining({
       messageId: 'message-1', registrationId: 'registration-1', externalCourseId: 'course-1',
     }));
-    expect(injected.reconcileCourse).toHaveBeenCalledWith({}, {
+    expect(injected.reconcileCourse).toHaveBeenCalledWith({ background: true }, {
       connectionId: 81, externalCourseId: 'course-1', trigger: 'notification',
       signal: expect.any(AbortSignal),
     });
-    expect(injected.finishDelivery).toHaveBeenCalledWith({}, expect.objectContaining({
+    expect(injected.finishDelivery).not.toHaveBeenCalled();
+    release();
+    await expect(background).resolves.toBeUndefined();
+    expect(injected.finishDelivery).toHaveBeenCalledWith({ background: true }, expect.objectContaining({
       outcome: 'succeeded', receipt: expect.objectContaining({ disposition: 'claimed' }),
     }));
     injected.acceptDelivery.mockResolvedValueOnce({
@@ -163,14 +170,16 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     }));
   });
 
-  it('marks failed reconciliation retryable and returns 503 for failed or concurrent pending work', async () => {
+  it('acknowledges claimed work while background failure stays retryable; concurrent work remains retryable', async () => {
     const injected = deps();
     injected.reconcileCourse.mockRejectedValueOnce(new Error('provider private body'));
     const request = () => new Request('https://church.test/api/learning/google/pubsub', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
     });
-    expect((await createGooglePubSubPushHandler(injected)(context(request()))).status).toBe(503);
-    expect(injected.finishDelivery).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'failed' }));
+    let background: Promise<unknown> | undefined;
+    expect((await createGooglePubSubPushHandler(injected)(context(request(), ['learning'], {}, (promise) => { background = promise; }))).status).toBe(204);
+    await expect(background).resolves.toBeUndefined();
+    expect(injected.finishDelivery).toHaveBeenCalledWith({ background: true }, expect.objectContaining({ outcome: 'failed' }));
     injected.acceptDelivery.mockResolvedValueOnce({
       connectionId: 81, externalCourseId: 'course-1', disposition: 'in_progress',
       subscriptionName: SUBSCRIPTION, messageId: 'message-1', claimMarker: null, attemptCount: 1,
