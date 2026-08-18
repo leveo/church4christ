@@ -245,14 +245,23 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     ).run();
     const methods: string[] = [];
     let revokes = 0;
+    let refreshes = 0;
     const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       methods.push(method);
       if (method === 'DELETE') {
         revokes += 1;
-        return new Response(null, { status: revokes === 1 ? 204 : 400 });
+        return new Response(null, { status: revokes === 1 ? 204 : revokes === 2 ? 401 : 400 });
       }
+      refreshes += 1;
       expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('pg-crash-refresh');
+      if (refreshes === 1) {
+        expect(new URLSearchParams(String(init?.body)).get('client_secret')).toBe('stale-secret');
+        return new Response(JSON.stringify({ error: 'invalid_client' }), {
+          status: 401, headers: { 'content-type': 'application/json' },
+        });
+      }
+      expect(new URLSearchParams(String(init?.body)).get('client_secret')).toBe('canvas-secret');
       return new Response(JSON.stringify({ error: 'invalid_grant' }), {
         status: 400, headers: { 'content-type': 'application/json' },
       });
@@ -267,12 +276,17 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
     expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
       FROM learning_canvas_cleanup_tasks WHERE connection_id=28602`)).toEqual([{ cleanup: 1 }]);
+    await expect(recoverCanvasDisconnectCleanup(dbA, {
+      ...cleanup, clientSecret: 'stale-secret',
+    })).resolves.toEqual({ selected: 1, cleaned: 0, pending: 1 });
+    expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
+      FROM learning_canvas_cleanup_tasks WHERE connection_id=28602`)).toEqual([{ cleanup: 1 }]);
     const recovered = await Promise.all([
       recoverCanvasDisconnectCleanup(dbA, cleanup), recoverCanvasDisconnectCleanup(dbB, cleanup),
     ]);
     expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
     expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
-    expect(methods).toEqual(['DELETE', 'DELETE', 'POST']);
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'DELETE', 'POST']);
     expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
       FROM learning_canvas_cleanup_tasks WHERE connection_id=28602`)).toEqual([{ cleanup: 0 }]);
     expect(await sqlA.unsafe(`SELECT count(*)::int AS credentials

@@ -172,8 +172,9 @@ state, and moves the encrypted token envelope into forward migration
 The twice-hourly Learning maintenance pass retries at most one encrypted Canvas revocation task,
 refreshing an expired access token when safe and persisting the rotated envelope before revoke. If
 a prior revoke succeeded but local task deletion crashed, a later Canvas `400`/`401` is followed by
-one bounded retained-refresh attempt: `invalid_grant`/authentication absence completes the task,
-while transport, timeout, and `5xx` failures retain it for retry.
+one bounded retained-refresh attempt. Only an exact bounded HTTP `400` JSON response whose `error`
+is `invalid_grant` completes the task; `401` responses such as `invalid_client`, transport failures,
+timeouts, and `5xx` responses retain it for retry after operator configuration is corrected.
 
 For D1 Free budgeting, the worst Canvas cleanup pass uses at most six database queries and three
 provider requests. It shares the `15,45 * * * *` invocation with the existing bounded Google

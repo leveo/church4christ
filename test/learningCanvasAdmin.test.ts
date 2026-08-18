@@ -345,31 +345,57 @@ describe('Canvas admin connection and course mapping', () => {
       WHERE connection_id=28302`).first('count')).toBe(0);
   });
 
-  it('retains cleanup for retry when an invalid access token is followed by a transient refresh failure', async () => {
+  it('retains cleanup on refresh 401 invalid_client and terminally cleans only exact 400 invalid_grant', async () => {
     const methods: string[] = [];
     let deletes = 0;
+    let posts = 0;
     const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       methods.push(method);
       if (method === 'DELETE') {
         deletes += 1;
-        return new Response(null, { status: deletes === 1 ? 503 : 401 });
+        return new Response(null, { status: deletes === 1 ? 503 : deletes === 2 ? 401 : 400 });
       }
+      posts += 1;
       expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('canvas-refresh');
-      return new Response(null, { status: 503 });
+      const clientSecret = new URLSearchParams(String(init?.body)).get('client_secret');
+      if (posts === 1) {
+        expect(clientSecret).toBe('stale-secret');
+        return new Response(JSON.stringify({ error: 'invalid_client' }), {
+          status: 401, headers: { 'content-type': 'application/json' },
+        });
+      }
+      expect(clientSecret).toBe('canvas-secret');
+      return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400, headers: { 'content-type': 'application/json' },
+      });
     });
     const admin = await input(fetcher as typeof fetch);
     await expect(disconnectCanvasConnection(env.DB as AppDb, {
       ...admin, expectedRevision: 1, actorPersonId: 28301,
     })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
-    await expect(recoverCanvasDisconnectCleanup(env.DB as AppDb, {
-      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+    const stale = await recoverCanvasDisconnectCleanup(env.DB as AppDb, {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: 'stale-secret',
       allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
       signal: new AbortController().signal, now: () => NOW + 1_000,
-    })).resolves.toEqual({ selected: 1, cleaned: 0, pending: 1 });
-    expect(methods).toEqual(['DELETE', 'DELETE', 'POST']);
+    });
+    expect(stale).toEqual({ selected: 1, cleaned: 0, pending: 1 });
     expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
       WHERE connection_id=28302`).first('count')).toBe(1);
+    const corrected = {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+      allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 2_000,
+    };
+    const recovered = await Promise.all([
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, corrected),
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, corrected),
+    ]);
+    expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'DELETE', 'POST']);
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(0);
   });
 
   it('persists a retained-refresh rotation before revoking the replacement access token', async () => {

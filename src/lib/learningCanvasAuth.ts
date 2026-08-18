@@ -493,10 +493,6 @@ export async function refreshCanvasAccessTokenForCleanup(rawInput: {
       ),
     });
   }
-  if (received.response.status === 401) {
-    cancelAuthBody(received.response);
-    return Object.freeze({ status: 'provider_absent' as const });
-  }
   if (received.response.status === 400) {
     const body = await readBoundedJson(received.response, rawInput.signal, received.deadlineAt);
     const error = exact(body, ['error'], ['error_description']);
