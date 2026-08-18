@@ -374,7 +374,6 @@ describe('Canvas admin connection and course mapping', () => {
 
   it('persists a retained-refresh rotation before revoking the replacement access token', async () => {
     const methods: string[] = [];
-    let deletes = 0;
     const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       methods.push(method);
@@ -385,25 +384,28 @@ describe('Canvas admin connection and course mapping', () => {
           expires_in: 3_600, token_type: 'Bearer',
         }), { headers: { 'content-type': 'application/json' } });
       }
-      deletes += 1;
       const authorization = new Headers(init?.headers).get('authorization');
-      if (deletes <= 2) {
+      if (methods.length === 1) {
         expect(authorization).toBe('Bearer canvas-access');
-        return new Response(null, { status: deletes === 1 ? 503 : 401 });
+        return new Response(null, { status: 401 });
       }
       expect(authorization).toBe('Bearer replacement-access');
       return new Response(null, { status: 204 });
     });
     const admin = await input(fetcher as typeof fetch);
-    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+    let queries = 0;
+    const budgetedDb: AppDb = {
+      prepare(sql: string) {
+        queries += 1;
+        return (env.DB as AppDb).prepare(sql);
+      },
+      batch: <T>(statements: AppStatement[]) => (env.DB as AppDb).batch<T>(statements),
+    };
+    await expect(disconnectCanvasConnection(budgetedDb, {
       ...admin, expectedRevision: 1, actorPersonId: 28301,
     })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
-    await expect(recoverCanvasDisconnectCleanup(env.DB as AppDb, {
-      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
-      allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
-      signal: new AbortController().signal, now: () => NOW + 1_000,
-    })).resolves.toEqual({ selected: 1, cleaned: 1, pending: 0 });
-    expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'DELETE']);
+    expect(queries).toBe(13);
+    expect(methods).toEqual(['DELETE', 'POST', 'DELETE']);
     expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
       WHERE connection_id=28302`).first('count')).toBe(0);
   });

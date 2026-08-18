@@ -179,7 +179,7 @@ For D1 Free budgeting, the worst Canvas cleanup pass uses at most six database q
 provider requests. It shares the `15,45 * * * *` invocation with the existing bounded Google
 Classroom pass, whose covered worst case is 43 database queries and 18 provider requests; the
 combined ceilings are therefore 49 D1 queries and 21 provider requests. Canvas admin disconnect is
-also bounded (about 12 application queries and at most three provider requests), and Canvas Live
+also bounded (at most 13 application queries and three provider requests), and Canvas Live
 Events reconciliation still caps normalized provider pages at 23. The new omitted-module-items
 phase consumes one Canvas request per normalized page; the existing two-request resource-detail
 case remains the worst case, so 23 pages use at most 46 Canvas requests before the reserved JWKS,
