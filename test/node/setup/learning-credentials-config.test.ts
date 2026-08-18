@@ -34,7 +34,7 @@ describe('Learning credential secret declaration', () => {
     expect(example).toContain('CANVAS_ALLOWED_ORIGINS is a bounded JSON array of exact HTTPS origins');
   });
 
-  it('isolates the bounded Classroom renewal pass in its own hourly Worker invocation', () => {
+  it('isolates bounded Learning provider maintenance in its own twice-hourly Worker invocation', () => {
     const worker = readFileSync('src/worker.ts', 'utf8');
     const attendanceCase = worker.slice(
       worker.indexOf('case ATTENDANCE_CRON:'),
@@ -47,7 +47,11 @@ describe('Learning credential secret declaration', () => {
     expect(worker).toContain("const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15,45 * * * *'");
     expect(attendanceCase).toContain('sendAttendanceEmails(vars, db).finally(end)');
     expect(attendanceCase).not.toContain('runGoogleClassroomRegistrationRenewalPass');
-    expect(googleCase).toContain('runGoogleClassroomRegistrationRenewalPass(env as never, db).finally(end)');
+    expect(googleCase).toContain('await runCanvasDisconnectCleanupPass(env as never, db)');
+    expect(googleCase).toContain('await runGoogleClassroomRegistrationRenewalPass(env as never, db)');
+    expect(googleCase).toContain('})().finally(end)');
+    expect(googleCase.indexOf('runCanvasDisconnectCleanupPass'))
+      .toBeLessThan(googleCase.indexOf('runGoogleClassroomRegistrationRenewalPass'));
     expect(googleCase).not.toContain('sendAttendanceEmails');
     expect(worker).not.toMatch(/learningGoogle[^\n]*(?:retry|backoff|setTimeout)/iu);
   });
