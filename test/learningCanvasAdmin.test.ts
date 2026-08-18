@@ -48,9 +48,26 @@ describe('Canvas admin connection and course mapping', () => {
   async function input(fetcher: typeof fetch) {
     return {
       connectionId: 28302, clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([BASE_URL]),
       keyRing: await importLearningCredentialKeyRing(KEY_SECRET), fetcher, nowEpochMs: NOW,
     };
   }
+
+  it('does not refresh, call, or revoke when an active issuer leaves the deployment allowlist', async () => {
+    const fetcher = vi.fn(async () => new Response('{}'));
+    const admin = {
+      ...await input(fetcher as typeof fetch),
+      allowedOrigins: Object.freeze(['https://replacement-canvas.example']),
+    };
+    await expect(checkCanvasConnectionHealth(env.DB as AppDb, admin as never)).resolves.toEqual({
+      ok: false, errorCode: 'authentication_required', connectionRevision: null,
+    });
+    await expect(listCanvasCourseOptions(env.DB as AppDb, admin as never)).rejects.toThrow();
+    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    } as never)).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 
   it('health-checks and lists only strict Canvas course metadata with mapping state', async () => {
     const fetcher = vi.fn(async (raw: RequestInfo | URL, init?: RequestInit) => {

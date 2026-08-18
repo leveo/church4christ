@@ -9,6 +9,7 @@ import {
 } from '../../../../lib/learningCanvasAdmin';
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
 import { LEARNING_LIMITS, learningValidation } from '../../../../lib/learningModel';
+import { readCanvasAllowedOrigins } from '../../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 
@@ -39,6 +40,7 @@ const vars = env as unknown as {
   CANVAS_OAUTH_CLIENT_ID?: string;
   CANVAS_OAUTH_CLIENT_SECRET?: string;
   LEARNING_CREDENTIAL_KEYS?: string;
+  CANVAS_ALLOWED_ORIGINS?: string;
 };
 
 async function adminEnvironment(connectionId: number) {
@@ -49,6 +51,7 @@ async function adminEnvironment(connectionId: number) {
   ) throw new Error('config');
   return {
     connectionId,
+    allowedOrigins: readCanvasAllowedOrigins(vars.CANVAS_ALLOWED_ORIGINS),
     clientId: vars.CANVAS_OAUTH_CLIENT_ID,
     clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
     keyRing: await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS),

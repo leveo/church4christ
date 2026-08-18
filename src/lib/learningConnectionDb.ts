@@ -209,7 +209,6 @@ export interface UpdateLearningConnectionInput {
   readonly expectedRevision: number;
   readonly provider: LearningProviderKind;
   readonly displayName: string;
-  readonly baseUrl: string | null;
   readonly actorPersonId: number;
 }
 
@@ -221,14 +220,13 @@ export async function updateLearningConnection(
   const expectedRevision = integer(input.expectedRevision, 0);
   const kind = provider(input.provider);
   const name = displayName(input.displayName);
-  const url = baseUrl(kind, input.baseUrl);
   const actor = integer(input.actorPersonId, 1);
   try {
     const result = await db.prepare(`UPDATE learning_provider_connections SET
-      display_name=?1,base_url=?2,revision=revision+1,updated_by_person_id=?3,updated_at=datetime('now')
-      WHERE id=?4 AND provider=?5 AND revision=?6 AND deleted_at IS NULL
+      display_name=?1,revision=revision+1,updated_by_person_id=?2,updated_at=datetime('now')
+      WHERE id=?3 AND provider=?4 AND revision=?5 AND deleted_at IS NULL
         AND operation_marker IS NULL ${RETURNING}`)
-      .bind(name, url, actor, connectionId, kind, expectedRevision).run();
+      .bind(name, actor, connectionId, kind, expectedRevision).run();
     const updated = returnedConnection(result);
     if (!updated) throw new LearningConnectionConflictError();
     return updated;
@@ -311,28 +309,28 @@ export async function reconnectLearningConnection(
       db.prepare(`UPDATE learning_provider_connections SET
         operation_marker=?1,revision=revision+1,updated_by_person_id=?2,updated_at=datetime('now')
         WHERE id=?3 AND provider='canvas' AND revision=?4 AND status='disabled'
-          AND deleted_at IS NOT NULL AND operation_marker IS NULL`)
-        .bind(marker, actor, connectionId, expectedRevision),
+          AND base_url=?5 AND deleted_at IS NOT NULL AND operation_marker IS NULL`)
+        .bind(marker, actor, connectionId, expectedRevision, url),
       db.prepare(`INSERT INTO learning_provider_credentials
         (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at,updated_at)
         SELECT ?1,?2,?3,?4,?5,?6,?7,datetime('now')
         WHERE EXISTS (SELECT 1 FROM learning_provider_connections
           WHERE id=?1 AND provider='canvas' AND revision=?8 AND status='disabled'
-            AND deleted_at IS NOT NULL AND operation_marker=?9)
+            AND base_url=?10 AND deleted_at IS NOT NULL AND operation_marker=?9)
         ON CONFLICT(connection_id) DO UPDATE SET
           ciphertext=excluded.ciphertext,nonce=excluded.nonce,algorithm=excluded.algorithm,
           key_version=excluded.key_version,envelope_version=excluded.envelope_version,
           expires_at=excluded.expires_at,updated_at=datetime('now')`)
         .bind(
           connectionId, credential.ciphertext, credential.nonce, credential.algorithm,
-          credential.keyVersion, credential.envelopeVersion, credential.expiresAt, claimedRevision, marker,
+          credential.keyVersion, credential.envelopeVersion, credential.expiresAt, claimedRevision, marker, url,
         ),
       db.prepare(`UPDATE learning_provider_connections SET
-        base_url=?1,status='active',operation_marker=NULL,last_error_code=NULL,
-        updated_by_person_id=?2,updated_at=datetime('now'),deleted_at=NULL
-        WHERE id=?3 AND provider='canvas' AND revision=?4 AND status='disabled'
-          AND deleted_at IS NOT NULL AND operation_marker=?5 ${RETURNING}`)
-        .bind(url, actor, connectionId, claimedRevision, marker),
+        status='active',operation_marker=NULL,last_error_code=NULL,
+        updated_by_person_id=?1,updated_at=datetime('now'),deleted_at=NULL
+        WHERE id=?2 AND provider='canvas' AND revision=?3 AND status='disabled'
+          AND base_url=?4 AND deleted_at IS NOT NULL AND operation_marker=?5 ${RETURNING}`)
+        .bind(actor, connectionId, claimedRevision, url, marker),
     ]);
     if (!Array.isArray(results) || results.length !== 3) failed();
     const reconnected = returnedConnection(results[2]);

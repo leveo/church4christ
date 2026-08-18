@@ -222,6 +222,29 @@ describe('Learning connection action HTTP boundary', () => {
     expect(injected.checkHealth).not.toHaveBeenCalled();
   });
 
+  it('does not health-check or revoke a Canvas token after its issuer leaves the allowlist', async () => {
+    for (const action of ['health_check', 'disconnect'] as const) {
+      const injected = {
+        ...deps(), canvasAllowedOrigins: JSON.stringify(['https://replacement-canvas.example']),
+      };
+      const handler = createLearningConnectionActionHandler(injected as never);
+      const body = action === 'health_check'
+        ? 'action=health_check&connection_id=401&revision=0&provider=canvas&status=active'
+        : 'action=disconnect&connection_id=401&revision=0';
+      const request = new Request('https://church.test/admin/learning/connections', {
+        method: 'POST', headers: {
+          'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+        }, body,
+      });
+      const response = await handler({ request, url: new URL(request.url), locals: {
+        modules: new Set(['learning']), user: user(), db: {},
+      } } as never);
+      expect(response.headers.get('location')).toBe('/admin/learning?error=connection_invalid');
+      expect(injected.checkHealth).not.toHaveBeenCalled();
+      expect(injected.disconnectCanvasConnection).not.toHaveBeenCalled();
+    }
+  });
+
   it('rejects stale health revision/provider/status before calling the provider', async () => {
     const cases = [
       { revision: 1, provider: 'canvas', status: 'active' },

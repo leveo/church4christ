@@ -14,6 +14,11 @@ import {
   type LearningCredentialKeyRing,
 } from '../../../../lib/learningCredentials';
 import { SESSION_COOKIE } from '../../../../lib/session';
+import {
+  readCanvasAllowedOrigins,
+  requireAllowedCanvasOrigin,
+  type CanvasAllowedOriginsSource,
+} from '../../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 
@@ -24,6 +29,7 @@ const SAFE_HEADERS = Object.freeze({
 
 interface CanvasOAuthCallbackDeps {
   readonly appOrigin: string | undefined | (() => string | undefined);
+  readonly canvasAllowedOrigins: CanvasAllowedOriginsSource;
   readonly clientId: string | undefined | (() => string | undefined);
   readonly clientSecret: string | undefined | (() => string | undefined);
   readonly keySecret: string | undefined | (() => string | undefined);
@@ -66,6 +72,7 @@ type CanvasOAuthEnv = {
 const defaultVars = env as unknown as CanvasOAuthEnv;
 const defaultDeps: CanvasOAuthCallbackDeps = {
   appOrigin: () => defaultVars.APP_ORIGIN,
+  canvasAllowedOrigins: () => (defaultVars as CanvasOAuthEnv & { CANVAS_ALLOWED_ORIGINS?: string }).CANVAS_ALLOWED_ORIGINS,
   clientId: () => defaultVars.CANVAS_OAUTH_CLIENT_ID,
   clientSecret: () => defaultVars.CANVAS_OAUTH_CLIENT_SECRET,
   keySecret: () => defaultVars.LEARNING_CREDENTIAL_KEYS,
@@ -123,6 +130,7 @@ export function createCanvasOAuthCallbackHandler(
       return redirect('error', 'canvas_authorization_failed');
     }
     try {
+      readCanvasAllowedOrigins(dependencies.canvasAllowedOrigins);
       const sessionBinding = cookies.get(SESSION_COOKIE)?.value;
       if (typeof sessionBinding !== 'string' || sessionBinding.length < 1 || sessionBinding.length > 4_096) {
         throw new Error('session');
@@ -140,6 +148,7 @@ export function createCanvasOAuthCallbackHandler(
         keyRing,
         nowEpochMs,
       });
+      requireAllowedCanvasOrigin(claim.baseUrl, readCanvasAllowedOrigins(dependencies.canvasAllowedOrigins));
       const credential = await dependencies.exchangeCode({
         baseUrl: claim.baseUrl,
         clientId: value(dependencies.clientId),

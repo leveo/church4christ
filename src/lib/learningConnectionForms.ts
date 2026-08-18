@@ -31,7 +31,6 @@ export type LearningConnectionFormData =
       readonly revision: number;
       readonly provider: LearningProviderKind;
       readonly displayName: string;
-      readonly baseUrl: string | null;
     }
   | {
       readonly action: 'health_check';
@@ -134,16 +133,14 @@ export function parseLearningConnectionForm(
   }
 
   if (action === 'update') {
-    if (!exactKeys(fields, ['action', 'connection_id', 'revision', 'provider', 'display_name', ...(fields.provider === 'canvas' ? ['base_url'] : [])])) return invalid();
+    if (!exactKeys(fields, ['action', 'connection_id', 'revision', 'provider', 'display_name'])) return invalid();
     const connectionId = integer(fields.connection_id ?? '', 1);
     const revision = integer(fields.revision ?? '', 0);
     const kind = provider(fields.provider ?? '');
     const name = displayName(fields.display_name ?? '');
     if (connectionId === null || revision === null || !kind || !name) return invalid();
-    const baseUrl = kind === 'canvas' ? canvasBaseUrl(fields.base_url ?? '') : null;
-    if (kind === 'canvas' && baseUrl === null) return invalid();
     return { ok: true, data: {
-      action, connectionId, revision, provider: kind, displayName: name, baseUrl,
+      action, connectionId, revision, provider: kind, displayName: name,
     } };
   }
 

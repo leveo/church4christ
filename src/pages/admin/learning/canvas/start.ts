@@ -12,6 +12,11 @@ import {
   type LearningCredentialKeyRing,
 } from '../../../../lib/learningCredentials';
 import { normalizeCanvasBaseUrl } from '../../../../lib/learningModel';
+import {
+  readCanvasAllowedOrigins,
+  requireAllowedCanvasOrigin,
+  type CanvasAllowedOriginsSource,
+} from '../../../../lib/learningCanvasOrigins';
 import { SESSION_COOKIE } from '../../../../lib/session';
 
 export const prerender = false;
@@ -24,6 +29,7 @@ const MAX_FORM_BYTES = 3_072;
 
 interface CanvasOAuthStartDeps {
   readonly appOrigin: string | undefined | (() => string | undefined);
+  readonly canvasAllowedOrigins: CanvasAllowedOriginsSource;
   readonly clientId: string | undefined | (() => string | undefined);
   readonly keySecret: string | undefined | (() => string | undefined);
   readonly importKeyRing: (secret: string) => Promise<unknown>;
@@ -50,6 +56,7 @@ type CanvasOAuthEnv = {
 const defaultVars = env as unknown as CanvasOAuthEnv;
 const defaultDeps: CanvasOAuthStartDeps = {
   appOrigin: () => defaultVars.APP_ORIGIN,
+  canvasAllowedOrigins: () => (defaultVars as CanvasOAuthEnv & { CANVAS_ALLOWED_ORIGINS?: string }).CANVAS_ALLOWED_ORIGINS,
   clientId: () => defaultVars.CANVAS_OAUTH_CLIENT_ID,
   keySecret: () => defaultVars.LEARNING_CREDENTIAL_KEYS,
   importKeyRing: importLearningCredentialKeyRing,
@@ -140,6 +147,7 @@ export function createCanvasOAuthStartHandler(
     let form: Awaited<ReturnType<typeof readStartForm>>;
     try { form = await readStartForm(request); } catch { return redirectError(); }
     try {
+      requireAllowedCanvasOrigin(form.baseUrl, readCanvasAllowedOrigins(dependencies.canvasAllowedOrigins));
       const sessionBinding = cookies.get(SESSION_COOKIE)?.value;
       if (typeof sessionBinding !== 'string' || sessionBinding.length < 1 || sessionBinding.length > 4_096) {
         throw new Error('session');

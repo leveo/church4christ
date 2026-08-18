@@ -121,6 +121,15 @@ Open `wrangler.jsonc` and:
 The placeholder IDs and the domain in this file are **safe to commit** — they are not
 secrets. (Secrets are set separately in step 4 and never go in this file.)
 
+Canvas is disabled until all three Canvas bindings are configured with `wrangler secret put`:
+`CANVAS_OAUTH_CLIENT_ID`, `CANVAS_OAUTH_CLIENT_SECRET`, and `CANVAS_ALLOWED_ORIGINS`.
+The allowlist value is non-secret configuration encoded as a JSON array of one to sixteen
+exact public HTTPS origins, for example `["https://canvas.example.org"]`; it is kept out of
+tracked configuration so no real institution URL is committed. The Worker rejects private,
+loopback, local-only, duplicate, non-canonical, and unlisted origins before any OAuth secret or
+provider token is sent. A Canvas connection's origin is immutable; moving to another Canvas
+instance requires a new pending connection and a new OAuth authorization.
+
 ## 3. Create the database tables
 
 Apply the migrations to your new remote database:

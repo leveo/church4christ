@@ -28,6 +28,7 @@ import {
   type LearningOperationContext,
   type LearningProviderPage,
 } from './learningProvider';
+import { requireAllowedCanvasOrigin } from './learningCanvasOrigins';
 
 const MAX_ADMIN_COURSES = 1_000;
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
@@ -47,6 +48,7 @@ const invalid = (): never => { throw new LearningCanvasAdminError(); };
 
 interface CanvasAdminEnvironment {
   readonly connectionId: number;
+  readonly allowedOrigins: readonly string[];
   readonly clientId: string;
   readonly clientSecret: string;
   readonly keyRing: LearningCredentialKeyRing;
@@ -66,7 +68,7 @@ function environment(value: CanvasAdminEnvironment): CanvasAdminEnvironment {
   let row: Record<string, unknown>;
   try {
     row = learningValidation.exactRecord(value, [
-      'connectionId', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs',
+      'connectionId', 'allowedOrigins', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs',
     ]);
   } catch { return invalid(); }
   if (
@@ -75,8 +77,10 @@ function environment(value: CanvasAdminEnvironment): CanvasAdminEnvironment {
     || typeof row.fetcher !== 'function'
     || !Number.isSafeInteger(row.nowEpochMs) || (row.nowEpochMs as number) < 0
   ) invalid();
+  if (!Array.isArray(row.allowedOrigins) || !Object.isFrozen(row.allowedOrigins)) invalid();
   return Object.freeze({
     connectionId: integer(row.connectionId),
+    allowedOrigins: row.allowedOrigins as readonly string[],
     clientId: row.clientId as string,
     clientSecret: row.clientSecret as string,
     keyRing: row.keyRing as LearningCredentialKeyRing,
@@ -125,6 +129,7 @@ async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allo
   let loaded = allowError
     ? await loadCanvasCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
     : await loadCanvasCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
+  requireAllowedCanvasOrigin(loaded.baseUrl, input.allowedOrigins);
   if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs + REFRESH_SKEW_MS) {
     const credential = await refreshCanvasAccessToken({
       baseUrl: loaded.baseUrl,
@@ -277,7 +282,7 @@ export async function mapSelectedCanvasCourse(
   },
 ): Promise<LearningMappedCourseRecord & { readonly connectionRevision: number }> {
   const input = environment({
-    connectionId: rawInput.connectionId, clientId: rawInput.clientId,
+    connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
     fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
   });
@@ -367,7 +372,7 @@ export async function unmapSelectedCanvasCourse(
   },
 ): Promise<{ readonly connectionId: number; readonly connectionRevision: number }> {
   const input = environment({
-    connectionId: rawInput.connectionId, clientId: rawInput.clientId,
+    connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
     fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
   });
@@ -412,7 +417,7 @@ export async function disconnectCanvasConnection(
   },
 ): Promise<LearningConnectionRecord> {
   const input = environment({
-    connectionId: rawInput.connectionId, clientId: rawInput.clientId,
+    connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
     fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
   });
@@ -427,6 +432,7 @@ export async function disconnectCanvasConnection(
     connectionId: input.connectionId, keyRing: input.keyRing,
   });
   if (loaded.revision !== expectedRevision) throw new LearningCanvasAdminConflictError();
+  requireAllowedCanvasOrigin(loaded.baseUrl, input.allowedOrigins);
   await revokeCanvasAccessToken({
     baseUrl: loaded.baseUrl,
     accessToken: loaded.credential.accessToken,

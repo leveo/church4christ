@@ -90,6 +90,7 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     });
     const admin = {
       connectionId: 28402, clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([BASE_URL]),
       keyRing, fetcher: fetcher as typeof fetch, nowEpochMs: NOW + 3,
     };
     await expect(mapSelectedCanvasCourse(dbA, {

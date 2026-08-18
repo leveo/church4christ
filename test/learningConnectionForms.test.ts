@@ -37,10 +37,10 @@ describe('Learning connection form parser', () => {
   it('parses revisioned update, health-check, and disconnect actions exactly', () => {
     expect(parseLearningConnectionForm({
       action: 'update', connection_id: '41', revision: '3', provider: 'canvas',
-      display_name: 'Updated Canvas', base_url: 'https://new-canvas.test',
+      display_name: 'Updated Canvas',
     })).toEqual({ ok: true, data: {
       action: 'update', connectionId: 41, revision: 3, provider: 'canvas',
-      displayName: 'Updated Canvas', baseUrl: 'https://new-canvas.test',
+      displayName: 'Updated Canvas',
     } });
     expect(parseLearningConnectionForm({
       action: 'health_check', connection_id: '41', revision: '5', provider: 'canvas', status: 'active',
@@ -57,6 +57,7 @@ describe('Learning connection form parser', () => {
       { action: 'health_check', connection_id: '1', revision: '1' },
       { action: 'health_check', connection_id: '1', revision: '1', provider: 'canvas', status: 'unknown' },
       { action: 'health_check', connection_id: '1', revision: '1', extra: 'x' },
+      { action: 'update', connection_id: '1', revision: '1', provider: 'canvas', display_name: 'Canvas', base_url: 'https://attacker.test' },
       { action: 'update', connection_id: '1', revision: '1', provider: 'google_classroom', display_name: 'Google', base_url: '' },
     ]) expect(parseLearningConnectionForm(invalid)).toEqual({ ok: false, code: 'learning_connection_invalid' });
   });

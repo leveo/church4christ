@@ -33,6 +33,7 @@ const copy = lang === 'zh' ? {
   createGoogle: '准备 Google Classroom',
   name: '显示名称',
   baseUrl: 'Canvas HTTPS 地址',
+  immutableCanvasUrl: 'Canvas 地址建立后不能修改；如需更换，请新建连接并重新 OAuth 授权。',
   create: '建立连接',
   update: '保存设置',
   health: '检查状态',
@@ -55,6 +56,7 @@ const copy = lang === 'zh' ? {
   createGoogle: 'Prepare Google Classroom',
   name: 'Display name',
   baseUrl: 'Canvas HTTPS address',
+  immutableCanvasUrl: 'Canvas address cannot be changed after creation. Create a new connection and authorize it with OAuth to move origins.',
   create: 'Create connection',
   update: 'Save settings',
   health: 'Check status',
@@ -179,7 +181,7 @@ if (queryEntries.length === 1) {
                 <input type="hidden" name="provider" value={connection.provider} />
                 <label class={lab}>{copy.name}<input class={tin} name="display_name" value={connection.displayName} required maxlength="120" /></label>
                 {connection.provider === 'canvas' && (
-                  <label class={lab}>{copy.baseUrl}<input class={tin} type="url" name="base_url" value={connection.baseUrl ?? ''} required maxlength="2048" /></label>
+                  <p class="text-sm text-ink-muted">{copy.immutableCanvasUrl}</p>
                 )}
                 <button class={btnSecondary} type="submit">{copy.update}</button>
               </form>

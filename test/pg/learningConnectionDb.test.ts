@@ -66,16 +66,16 @@ describe.skipIf(!hasPg)('Learning provider connection persistence (PostgreSQL)',
     expect(await updateLearningConnection(db, {
       connectionId: 201, expectedRevision: 0, provider: 'canvas', displayName: 'Updated',
       baseUrl: 'https://new-canvas.church.test', actorPersonId: actor,
-    })).toMatchObject({ revision: 1 });
+    } as never)).toMatchObject({ revision: 1, baseUrl: 'https://canvas.church.test' });
     await expect(updateLearningConnection(db, {
       connectionId: 201, expectedRevision: 0, provider: 'canvas', displayName: 'Stale',
       baseUrl: 'https://stale.test', actorPersonId: actor,
-    })).rejects.toBeInstanceOf(LearningConnectionConflictError);
+    } as never)).rejects.toBeInstanceOf(LearningConnectionConflictError);
     expect(await disconnectLearningConnection(db, {
       connectionId: 201, expectedRevision: 1, actorPersonId: actor,
     })).toMatchObject({ status: 'disabled', revision: 2 });
     expect(await reconnectLearningConnection(db, {
-      connectionId: 201, expectedRevision: 2, provider: 'canvas', baseUrl: 'https://new-canvas.church.test',
+      connectionId: 201, expectedRevision: 2, provider: 'canvas', baseUrl: 'https://canvas.church.test',
       actorPersonId: actor, credential: await envelope(201),
     })).toMatchObject({ status: 'active', revision: 3, deletedAt: null });
     expect(await getLearningConnection(db, 201, { includeDeleted: true })).toMatchObject({ revision: 3 });
@@ -101,7 +101,7 @@ describe.skipIf(!hasPg)('Learning provider connection persistence (PostgreSQL)',
       const update = updateLearningConnection(db, {
         connectionId: 211, expectedRevision: 0, provider: 'canvas', displayName: 'Update winner',
         baseUrl: 'https://updated.church.test', actorPersonId: actor,
-      });
+      } as never);
       const results = await Promise.allSettled([disconnect, update]);
       const winner = oneWinner(results);
       const connection = await getLearningConnection(db, 211, { includeDeleted: true });
@@ -111,7 +111,9 @@ describe.skipIf(!hasPg)('Learning provider connection persistence (PostgreSQL)',
         expect(connection).toMatchObject({ status: 'disabled', displayName: 'Canvas' });
         expect(credential).toHaveLength(0);
       } else {
-        expect(connection).toMatchObject({ status: 'active', displayName: 'Update winner', deletedAt: null });
+        expect(connection).toMatchObject({
+          status: 'active', displayName: 'Update winner', baseUrl: 'https://canvas.church.test', deletedAt: null,
+        });
         expect(credential).toHaveLength(1);
       }
       expect((await sql.unsafe('SELECT operation_marker FROM learning_provider_connections WHERE id=211'))[0])
@@ -135,12 +137,12 @@ describe.skipIf(!hasPg)('Learning provider connection persistence (PostgreSQL)',
       FOR EACH ROW EXECUTE FUNCTION learning_test_delay_upsert();`);
     try {
       const first = reconnectLearningConnection(db, {
-        connectionId: 221, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://a.church.test',
+        connectionId: 221, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://canvas.church.test',
         actorPersonId: actor, credential: envelopes[0],
       });
       await pause(25);
       const second = reconnectLearningConnection(db, {
-        connectionId: 221, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://b.church.test',
+        connectionId: 221, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://canvas.church.test',
         actorPersonId: actor, credential: envelopes[1],
       });
       const results = await Promise.allSettled([first, second]);
@@ -150,7 +152,7 @@ describe.skipIf(!hasPg)('Learning provider connection persistence (PostgreSQL)',
         'SELECT ciphertext FROM learning_provider_credentials WHERE connection_id=221',
       ))[0];
       expect(connection).toMatchObject({
-        revision: 2, status: 'active', baseUrl: winner === 0 ? 'https://a.church.test' : 'https://b.church.test',
+        revision: 2, status: 'active', baseUrl: 'https://canvas.church.test',
       });
       expect(bytes(stored?.ciphertext)).toEqual(bytes(envelopes[winner].ciphertext));
       expect((await sql.unsafe('SELECT operation_marker FROM learning_provider_connections WHERE id=221'))[0])

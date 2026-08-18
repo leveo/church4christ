@@ -20,6 +20,7 @@ import {
   synchronizeLearningCourse,
   type PreResolvedLearningPerson,
 } from './learningSync';
+import { requireAllowedCanvasOrigin } from './learningCanvasOrigins';
 
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const RECONCILIATION_DEADLINE_MS = 25_000;
@@ -75,6 +76,7 @@ async function access(
   db: AppDb,
   input: {
     readonly connectionId: number;
+    readonly allowedOrigins: readonly string[];
     readonly clientId: string;
     readonly clientSecret: string;
     readonly keyRing: LearningCredentialKeyRing;
@@ -86,6 +88,7 @@ async function access(
   let loaded = await loadCanvasCredential(db, {
     connectionId: input.connectionId, keyRing: input.keyRing,
   });
+  requireAllowedCanvasOrigin(loaded.baseUrl, input.allowedOrigins);
   if (Date.parse(loaded.credential.accessTokenExpiresAt) > input.nowEpochMs + REFRESH_SKEW_MS) {
     return Object.freeze({ baseUrl: loaded.baseUrl, accessToken: loaded.credential.accessToken });
   }
@@ -169,6 +172,7 @@ export async function reconcileCanvasCourse(
   db: AppDb,
   rawInput: {
     readonly connectionId: number;
+    readonly allowedOrigins: readonly string[];
     readonly externalCourseId: string;
     readonly trigger: LearningSyncTrigger;
     readonly clientId: string;
@@ -182,7 +186,7 @@ export async function reconcileCanvasCourse(
   try {
     const input = learningValidation.exactRecord(rawInput, [
       'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
-      'keyRing', 'fetcher', 'now', 'signal',
+      'keyRing', 'fetcher', 'now', 'signal', 'allowedOrigins',
     ]);
     const connectionId = integer(input.connectionId);
     const externalCourseId = externalId(input.externalCourseId);
@@ -201,6 +205,7 @@ export async function reconcileCanvasCourse(
     const preResolvedPeople = await preloadIdentities(db, connectionId, externalCourseId);
     const credentials = await access(db, {
       connectionId,
+      allowedOrigins: input.allowedOrigins as readonly string[],
       clientId: input.clientId as string,
       clientSecret: input.clientSecret as string,
       keyRing: input.keyRing as LearningCredentialKeyRing,

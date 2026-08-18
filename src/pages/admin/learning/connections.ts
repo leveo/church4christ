@@ -39,6 +39,11 @@ import {
   checkCanvasConnectionHealth,
   disconnectCanvasConnection,
 } from '../../../lib/learningCanvasAdmin';
+import {
+  readCanvasAllowedOrigins,
+  requireAllowedCanvasOrigin,
+  type CanvasAllowedOriginsSource,
+} from '../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 
@@ -52,6 +57,7 @@ type HealthResult =
   | { readonly ok: false; readonly errorCode: LearningErrorCode; readonly connectionRevision?: number | null };
 
 interface LearningConnectionActionDeps {
+  readonly canvasAllowedOrigins: CanvasAllowedOriginsSource;
   readonly nextConnectionId: () => number;
   readonly createConnection: (db: AppDb, input: CreateLearningConnectionInput) => Promise<unknown>;
   readonly updateConnection: (db: AppDb, input: UpdateLearningConnectionInput) => Promise<unknown>;
@@ -89,6 +95,7 @@ function nextConnectionId(): number {
 }
 
 const defaultDeps: LearningConnectionActionDeps = {
+  canvasAllowedOrigins: () => (env as unknown as { CANVAS_ALLOWED_ORIGINS?: string }).CANVAS_ALLOWED_ORIGINS,
   nextConnectionId,
   createConnection: createLearningConnection,
   updateConnection: updateLearningConnection,
@@ -96,6 +103,7 @@ const defaultDeps: LearningConnectionActionDeps = {
   disconnectCanvasConnection: async (db, input) => {
     const vars = env as unknown as {
       LEARNING_CREDENTIAL_KEYS?: string;
+      CANVAS_ALLOWED_ORIGINS?: string;
       CANVAS_OAUTH_CLIENT_ID?: string;
       CANVAS_OAUTH_CLIENT_SECRET?: string;
     };
@@ -107,6 +115,7 @@ const defaultDeps: LearningConnectionActionDeps = {
     const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
     return disconnectCanvasConnection(db, {
       ...input,
+      allowedOrigins: readCanvasAllowedOrigins(vars.CANVAS_ALLOWED_ORIGINS),
       clientId: vars.CANVAS_OAUTH_CLIENT_ID,
       clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
       keyRing,
@@ -153,6 +162,9 @@ const defaultDeps: LearningConnectionActionDeps = {
       const keyRing = await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS);
       return checkCanvasConnectionHealth(db, {
         connectionId: input.connectionId,
+        allowedOrigins: readCanvasAllowedOrigins(
+          (env as unknown as { CANVAS_ALLOWED_ORIGINS?: string }).CANVAS_ALLOWED_ORIGINS,
+        ),
         clientId: vars.CANVAS_OAUTH_CLIENT_ID,
         clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
         keyRing,
@@ -265,6 +277,11 @@ export function createLearningConnectionActionHandler(
     try {
       const data = parsed.data;
       if (data.action === 'create') {
+        if (data.provider === 'canvas') {
+          try {
+            requireAllowedCanvasOrigin(data.baseUrl, readCanvasAllowedOrigins(deps.canvasAllowedOrigins));
+          } catch { return redirect('error', 'connection_invalid'); }
+        }
         const connectionId = deps.nextConnectionId();
         await deps.createConnection(locals.db, {
           connectionId,
@@ -282,7 +299,6 @@ export function createLearningConnectionActionHandler(
           expectedRevision: data.revision,
           provider: data.provider,
           displayName: data.displayName,
-          baseUrl: data.baseUrl,
           actorPersonId: user!.id,
         });
         return redirect('saved', 'connection_updated');
@@ -296,6 +312,11 @@ export function createLearningConnectionActionHandler(
         const connection = await deps.loadConnection(locals.db, data.connectionId, { includeDeleted: false });
         if (!connection || connection.revision !== data.revision) {
           return redirect('error', 'connection_conflict');
+        }
+        if (connection.provider === 'canvas') {
+          try {
+            requireAllowedCanvasOrigin(connection.baseUrl, readCanvasAllowedOrigins(deps.canvasAllowedOrigins));
+          } catch { return redirect('error', 'connection_invalid'); }
         }
         if (connection.provider === 'google_classroom' && connection.status !== 'pending') {
           await deps.disconnectGoogleConnection(locals.db, disconnectInput);
@@ -314,6 +335,11 @@ export function createLearningConnectionActionHandler(
         || connection.provider !== data.provider
         || connection.status !== data.status
       ) return redirect('error', 'connection_conflict');
+      if (connection.provider === 'canvas') {
+        try {
+          requireAllowedCanvasOrigin(connection.baseUrl, readCanvasAllowedOrigins(deps.canvasAllowedOrigins));
+        } catch { return redirect('error', 'connection_invalid'); }
+      }
       const health = normalizedHealthResult(await deps.checkHealth(locals.db, {
         connectionId: data.connectionId,
         provider: connection.provider,

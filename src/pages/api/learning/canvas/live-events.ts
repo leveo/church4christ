@@ -10,6 +10,7 @@ import {
   type AcceptedCanvasLiveEvent,
   type CanvasLiveEvent,
 } from '../../../../lib/learningCanvasLiveEvents';
+import { readCanvasAllowedOrigins } from '../../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 
@@ -66,6 +67,7 @@ const defaultDeps: CanvasLiveEventsRouteDeps = {
     const keyRing = await importLearningCredentialKeyRing(keySecret);
     await reconcileCanvasCourse(db, {
       ...input,
+      allowedOrigins: readCanvasAllowedOrigins(defaultVars.CANVAS_ALLOWED_ORIGINS),
       clientId,
       clientSecret,
       keyRing,

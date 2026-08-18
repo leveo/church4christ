@@ -23,6 +23,17 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # `npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_SECRET`
 # GOOGLE_CLASSROOM_CLIENT_SECRET=
 
+# Canvas OAuth deployment bindings. CANVAS_ALLOWED_ORIGINS is a bounded JSON array of exact HTTPS origins,
+# for example ["https://canvas.example.org"]. It is configuration rather than a credential, but is stored
+# as a Worker secret binding so setup-generated Wrangler configuration never contains a real institution URL.
+# Private, loopback, local-only, duplicate, non-canonical, or more than 16 origins are rejected.
+# `npx wrangler secret put CANVAS_ALLOWED_ORIGINS`
+# CANVAS_ALLOWED_ORIGINS=
+# `npx wrangler secret put CANVAS_OAUTH_CLIENT_ID`
+# CANVAS_OAUTH_CLIENT_ID=
+# `npx wrangler secret put CANVAS_OAUTH_CLIENT_SECRET`
+# CANVAS_OAUTH_CLIENT_SECRET=
+
 # Pub/Sub push topic and identity/routing allowlists. These are identifiers
 # rather than credentials, but remain unset in the tracked example. Set all
 # three to enable real-time roster and course-work registrations; leave all

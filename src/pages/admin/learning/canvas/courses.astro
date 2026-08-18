@@ -4,6 +4,7 @@ import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi';
 import { listCanvasCourseOptions } from '../../../../lib/learningCanvasAdmin';
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
+import { readCanvasAllowedOrigins } from '../../../../lib/learningCanvasOrigins';
 
 export const prerender = false;
 if (!Astro.locals.modules.has('learning')) return new Response(null, { status: 404 });
@@ -19,12 +20,14 @@ const vars = import.meta.env as Record<string, string | undefined>;
 if (
   typeof vars.CANVAS_OAUTH_CLIENT_ID !== 'string'
   || typeof vars.CANVAS_OAUTH_CLIENT_SECRET !== 'string'
+  || typeof vars.CANVAS_ALLOWED_ORIGINS !== 'string'
   || typeof vars.LEARNING_CREDENTIAL_KEYS !== 'string'
 ) return new Response(null, { status: 503 });
 let options;
 try {
   options = await listCanvasCourseOptions(Astro.locals.db, {
     connectionId,
+    allowedOrigins: readCanvasAllowedOrigins(vars.CANVAS_ALLOWED_ORIGINS),
     clientId: vars.CANVAS_OAUTH_CLIENT_ID,
     clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
     keyRing: await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS),

@@ -16,7 +16,8 @@ describe('Learning connection administration page', () => {
       expect(page).toContain(`value="${action}"`);
     }
     expect(page).not.toContain('name="access_token"');
-    expect(page.match(/name="base_url"/g)).toHaveLength(1);
+    expect(page.match(/name="base_url"/g)).toHaveLength(2);
+    expect(page.match(/type="url" name="base_url"/g)).toHaveLength(1);
     expect(page).toContain('Canvas address cannot be changed');
     expect(page).toContain('Canvas 地址建立后不能修改');
     expect(page).not.toMatch(/\bciphertext\b|\bnonce\b|\bkeyVersion\b|\bclientSecret\b|\bkey_version\b|\bclient_secret\b/);
