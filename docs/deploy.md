@@ -130,6 +130,58 @@ loopback, local-only, duplicate, non-canonical, and unlisted origins before any 
 provider token is sent. A Canvas connection's origin is immutable; moving to another Canvas
 instance requires a new pending connection and a new OAuth authorization.
 
+Create the Canvas developer key with this exact OAuth redirect URI (replace the host with the
+canonical `APP_ORIGIN` host):
+
+```text
+https://church.example.org/admin/learning/canvas/callback
+```
+
+Grant only the API scopes the adapter calls. Canvas scope templates are literal; in particular,
+the single-course read is `:id`, while course-child endpoints use `:course_id`:
+
+```text
+url:GET|/api/v1/courses
+url:GET|/api/v1/courses/:id
+url:GET|/api/v1/courses/:course_id/enrollments
+url:GET|/api/v1/courses/:course_id/modules
+url:GET|/api/v1/courses/:course_id/modules/:module_id/items
+url:GET|/api/v1/courses/:course_id/modules/:module_id/items/:id
+url:GET|/api/v1/courses/:course_id/pages/:url_or_id
+url:GET|/api/v1/files/:id
+url:GET|/api/v1/courses/:course_id/assignments
+url:GET|/api/v1/courses/:course_id/quizzes
+url:GET|/api/v1/courses/:course_id/assignments/:assignment_id/submissions
+```
+
+For Canvas Live Events, configure the HTTPS delivery URL as
+`https://church.example.org/api/learning/canvas/live-events`. Church4Christ accepts only signed
+compact JWT requests verified as `RS256` against Instructure's fixed JWKS URL,
+`https://8axpcl50e4.execute-api.us-east-1.amazonaws.com/main/jwks`. Map a course before enabling
+its events: Church4Christ reads `root_account_id` from Canvas's authoritative
+`GET /api/v1/courses/:id` response and persists it as the account binding. There is deliberately
+no administrator-entered root-account field, and a later course whose authoritative root differs
+is rejected. Configure Live Events in that same Canvas root account; do not proxy the delivery URL
+or substitute another JWKS endpoint.
+
+Canvas OAuth/provider requests use a single ten-second deadline covering both response headers
+and the entire response body; the Live Events reconciliation pass has a 25-second parent deadline.
+Disconnect first commits a local disable, deletes the active credential envelope and Canvas private
+state, and moves the encrypted token envelope into forward migration
+`0024_learning_canvas_cleanup_saga.sql`. A Canvas outage therefore cannot keep a connection active.
+The twice-hourly Learning maintenance pass retries at most one encrypted Canvas revocation task,
+refreshing an expired access token when safe and persisting the rotated envelope before revoke.
+
+For D1 Free budgeting, the worst Canvas cleanup pass uses at most six database queries and two
+provider requests. It shares the `15,45 * * * *` invocation with the existing bounded Google
+Classroom pass, whose covered worst case is 43 database queries and 18 provider requests; the
+combined ceilings are therefore 49 D1 queries and 20 provider requests. Canvas admin disconnect is
+also bounded (about 12 application queries and at most two provider requests), and Canvas Live
+Events reconciliation still caps normalized provider pages at 23. The new omitted-module-items
+phase consumes one Canvas request per normalized page; the existing two-request resource-detail
+case remains the worst case, so 23 pages use at most 46 Canvas requests before the reserved JWKS,
+refresh, and course reads. Keep these constants and their budget tests in sync when adding endpoints.
+
 ## 3. Create the database tables
 
 Apply the migrations to your new remote database:

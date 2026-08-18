@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const LEARNING_TABLES = [
   'learning_activities',
   'learning_activity_events',
+  'learning_canvas_cleanup_tasks',
   'learning_canvas_event_receipts',
   'learning_canvas_oauth_states',
   'learning_canvas_webhook_configs',
@@ -25,6 +26,7 @@ const LEARNING_TABLES = [
 const LEARNING_INDEXES = [
   'idx_learning_activities_course_due',
   'idx_learning_activities_course_kind',
+  'idx_learning_canvas_cleanup_recovery',
   'idx_learning_canvas_oauth_expiry',
   'idx_learning_canvas_receipts_recovery',
   'idx_learning_canvas_receipts_retention',
@@ -180,6 +182,10 @@ describe('portable Learning schema (D1)', () => {
       'connection_id', 'source_event_id', 'external_course_id', 'event_name', 'received_at',
       'status', 'attempt_count', 'claim_marker', 'claim_expires_at', 'completed_at',
     ]);
+    expect(await columns('learning_canvas_cleanup_tasks')).toEqual([
+      'connection_id', 'ciphertext', 'nonce', 'algorithm', 'key_version', 'envelope_version',
+      'expires_at', 'attempt_count', 'claim_marker', 'claim_expires_at', 'last_attempt_at', 'created_at',
+    ]);
     expect(await columns('learning_canvas_webhook_configs')).toEqual([
       'connection_id', 'root_account_id', 'verification_mode', 'jwk_set_url', 'status', 'updated_at',
     ]);
@@ -194,6 +200,7 @@ describe('portable Learning schema (D1)', () => {
       'learning_submission_snapshots',
       'learning_activity_events',
       'learning_canvas_event_receipts',
+      'learning_canvas_cleanup_tasks',
     ]) {
       expect((await columns(table)).filter((column) => forbidden.test(column))).toEqual([]);
     }

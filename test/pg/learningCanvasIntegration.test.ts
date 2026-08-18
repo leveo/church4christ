@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
 import {
+  disconnectCanvasConnection,
   mapSelectedCanvasCourse,
   unmapSelectedCanvasCourse,
 } from '../../src/lib/learningCanvasAdmin';
@@ -9,20 +10,23 @@ import {
   beginCanvasOAuthState,
   claimCanvasOAuthState,
   completeCanvasOAuthState,
+  encodeCanvasCredential,
 } from '../../src/lib/learningCanvasAuth';
+import { recoverCanvasDisconnectCleanup } from '../../src/lib/learningCanvasCleanup';
 import {
   acceptCanvasLiveEvent,
   finishCanvasLiveEvent,
   type CanvasLiveEvent,
 } from '../../src/lib/learningCanvasLiveEvents';
 import { CANVAS_REQUIRED_SCOPES } from '../../src/lib/learningCanvasProvider';
-import { importLearningCredentialKeyRing } from '../../src/lib/learningCredentials';
+import { encryptLearningCredential, importLearningCredentialKeyRing } from '../../src/lib/learningCredentials';
 import { getLearningConnection, updateLearningConnection } from '../../src/lib/learningConnectionDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const BASE_URL = 'https://canvas-pg.church.example';
+const CLEANUP_BASE_URL = 'https://canvas-cleanup-pg.church.example';
 const REDIRECT = 'https://church.example.test/admin/learning/canvas/callback';
 const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(83))) },
@@ -122,8 +126,10 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
 
   it('keeps every Canvas private-state table RLS-enabled and browser-role inaccessible', async () => {
     expect(await sqlA.unsafe(`SELECT relname,relrowsecurity FROM pg_class
-      WHERE relname IN ('learning_canvas_oauth_states','learning_canvas_webhook_configs','learning_canvas_event_receipts')
+      WHERE relname IN ('learning_canvas_oauth_states','learning_canvas_webhook_configs',
+        'learning_canvas_event_receipts','learning_canvas_cleanup_tasks')
       ORDER BY relname`)).toEqual([
+      { relname: 'learning_canvas_cleanup_tasks', relrowsecurity: true },
       { relname: 'learning_canvas_event_receipts', relrowsecurity: true },
       { relname: 'learning_canvas_oauth_states', relrowsecurity: true },
       { relname: 'learning_canvas_webhook_configs', relrowsecurity: true },
@@ -146,5 +152,51 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     expect(await getLearningConnection(dbA, 28402, { includeDeleted: false })).toMatchObject({
       baseUrl: BASE_URL, revision: 5,
     });
+  });
+
+  it('keeps Postgres disconnect durable across provider outage and admits one concurrent recovery winner', async () => {
+    await sqlA.unsafe(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id)
+      VALUES(28502,'canvas','PG Canvas Cleanup','${CLEANUP_BASE_URL}','active',1,28401)`);
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const credential = await encryptLearningCredential(keyRing, {
+      provider: 'canvas', connectionId: 28502,
+      plaintext: encodeCanvasCredential({
+        version: 1, accessToken: 'pg-cleanup-access', refreshToken: 'pg-cleanup-refresh',
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', grantedScopes: CANVAS_REQUIRED_SCOPES,
+      }), expiresAt: null,
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(28502,?1,?2,?3,?4,?5,NULL)`).bind(
+      credential.ciphertext, credential.nonce, credential.algorithm,
+      credential.keyVersion, credential.envelopeVersion,
+    ).run();
+    const unavailable = vi.fn(async () => new Response(null, { status: 503 }));
+    await expect(disconnectCanvasConnection(dbA, {
+      connectionId: 28502, expectedRevision: 1, actorPersonId: 28401,
+      clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([CLEANUP_BASE_URL]), keyRing,
+      fetcher: unavailable as typeof fetch, signal: new AbortController().signal, now: () => NOW,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(await sqlA.unsafe(`SELECT
+      (SELECT count(*)::int FROM learning_provider_credentials WHERE connection_id=28502) AS credentials,
+      (SELECT count(*)::int FROM learning_canvas_cleanup_tasks WHERE connection_id=28502) AS cleanup`))
+      .toEqual([{ credentials: 0, cleanup: 1 }]);
+
+    const revoked = vi.fn(async () => new Response(null, { status: 204 }));
+    const input = {
+      connectionId: 28502, clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([CLEANUP_BASE_URL]), keyRing, fetcher: revoked as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    };
+    const recovered = await Promise.all([
+      recoverCanvasDisconnectCleanup(dbA, input), recoverCanvasDisconnectCleanup(dbB, input),
+    ]);
+    expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(revoked).toHaveBeenCalledOnce();
+    expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
+      FROM learning_canvas_cleanup_tasks WHERE connection_id=28502`)).toEqual([{ cleanup: 0 }]);
   });
 });

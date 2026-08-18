@@ -175,7 +175,7 @@ the provider-specific D1 backup or Supabase Stripe recovery job.
 | `0 13 * * *` | D1 and Supabase | Daily serving reminders; skips when Serve is disabled |
 | `0 14 * * 4` | D1 and Supabase | Weekly serving digest; skips when Serve is disabled |
 | `0 * * * *` | D1 and Supabase | Hourly group-attendance tracking email; skips when Groups is disabled |
-| `15,45 * * * *` | D1 and Supabase | Isolated twice-hourly Google Classroom registration cleanup and renewal; skips unless Learning and push configuration are ready |
+| `15,45 * * * *` | D1 and Supabase | Isolated twice-hourly Learning provider maintenance: one durable Canvas token-revocation retry, then Google Classroom registration cleanup and renewal; each provider skips safely when not configured |
 | `0 9 * * *` | D1 only | Export D1 → `backups/YYYY-MM-DD.sql` in R2 |
 | `*/5 * * * *` | Supabase only | Preview/test-only Stripe webhook inbox and Checkout recovery; processing honors enabled Giving and Registration modules |
 

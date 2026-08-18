@@ -46,6 +46,7 @@ const SUPABASE_MIGRATIONS = [
   '0021_learning_google_receipt_lifecycle.sql',
   '0022_learning_google_cleanup_saga.sql',
   '0023_learning_canvas.sql',
+  '0024_learning_canvas_cleanup_saga.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -69,6 +70,7 @@ const CANVAS_TABLES = Object.freeze([
   'learning_canvas_oauth_states',
   'learning_canvas_webhook_configs',
   'learning_canvas_event_receipts',
+  'learning_canvas_cleanup_tasks',
 ]);
 
 function relationRows(relations: string[]) {

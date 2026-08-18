@@ -7,6 +7,7 @@ import { clearModuleCache } from './lib/modules';
 import { getBackend, openDb } from './lib/dbProvider';
 import { runStripeRecovery } from './lib/stripeRecovery';
 import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
+import { runCanvasDisconnectCleanupPass } from './lib/learningCanvasCleanupCron';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -49,7 +50,11 @@ export default {
       }
       case GOOGLE_CLASSROOM_REGISTRATION_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(runGoogleClassroomRegistrationRenewalPass(env as never, db).finally(end));
+        ctx.waitUntil((async () => {
+          try { await runCanvasDisconnectCleanupPass(env as never, db); }
+          catch { /* the durable Canvas task remains available to the next bounded pass */ }
+          await runGoogleClassroomRegistrationRenewalPass(env as never, db);
+        })().finally(end));
         break;
       }
       case BACKUP_CRON:

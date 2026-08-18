@@ -9,6 +9,7 @@ import {
   mapSelectedCanvasCourse,
   unmapSelectedCanvasCourse,
 } from '../src/lib/learningCanvasAdmin';
+import { recoverCanvasDisconnectCleanup } from '../src/lib/learningCanvasCleanup';
 import { encryptLearningCredential, importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
@@ -224,5 +225,113 @@ describe('Canvas admin connection and course mapping', () => {
     expect(disconnected).toEqual(expect.objectContaining({ status: 'disabled', revision: 2 }));
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(await env.DB.prepare('SELECT count(*) AS count FROM learning_provider_credentials WHERE connection_id=28302').first('count')).toBe(0);
+  });
+
+  it('commits local disable and private-state deletion while revoke is unavailable, then one concurrent recovery wins', async () => {
+    await env.DB.prepare(`INSERT INTO learning_canvas_webhook_configs(connection_id,root_account_id)
+      VALUES(28302,'root-account-1')`).run();
+    await env.DB.prepare(`INSERT INTO learning_canvas_event_receipts
+      (connection_id,source_event_id,external_course_id,event_name,received_at,status,
+       attempt_count,claim_marker,claim_expires_at,completed_at)
+      VALUES(28302,'event-1','901','assignment_updated','2026-08-17T12:00:00.000Z',
+       'succeeded',1,NULL,NULL,'2026-08-17T12:00:01.000Z')`).run();
+    const unavailable = vi.fn(async () => new Response(null, { status: 503 }));
+    const admin = await input(unavailable as typeof fetch);
+    let queries = 0;
+    const budgetedDb: AppDb = {
+      prepare(sql: string) {
+        queries += 1;
+        return (env.DB as AppDb).prepare(sql);
+      },
+      batch: <T>(statements: Parameters<AppDb['batch']>[0]) => (env.DB as AppDb).batch<T>(statements),
+    };
+    await expect(disconnectCanvasConnection(budgetedDb, {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    // Connection read + seven-statement local transaction + claim, connection
+    // read, claim release, and terminal read stay inside the admin D1 budget.
+    expect(queries).toBe(12);
+    expect(unavailable).toHaveBeenCalledOnce();
+    expect(await env.DB.prepare(`SELECT status,deleted_at FROM learning_provider_connections
+      WHERE id=28302`).first()).toEqual({ status: 'disabled', deleted_at: expect.any(String) });
+    expect(await env.DB.prepare(`SELECT
+      (SELECT count(*) FROM learning_provider_credentials WHERE connection_id=28302) AS credentials,
+      (SELECT count(*) FROM learning_canvas_webhook_configs WHERE connection_id=28302) AS webhooks,
+      (SELECT count(*) FROM learning_canvas_event_receipts WHERE connection_id=28302) AS receipts,
+      (SELECT count(*) FROM learning_canvas_cleanup_tasks WHERE connection_id=28302) AS cleanup`).first())
+      .toEqual({ credentials: 0, webhooks: 0, receipts: 0, cleanup: 1 });
+
+    const revoked = vi.fn(async () => new Response(null, { status: 204 }));
+    const cleanup = {
+      connectionId: 28302, clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([BASE_URL]), keyRing: admin.keyRing,
+      fetcher: revoked as typeof fetch, signal: new AbortController().signal,
+      now: () => NOW + 1_000,
+    };
+    const recovered = await Promise.all([
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, cleanup),
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, cleanup),
+    ]);
+    expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(revoked).toHaveBeenCalledOnce();
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(0);
+  });
+
+  it('leaves no operation marker when an anomalous active connection has no credential to migrate', async () => {
+    await env.DB.prepare('DELETE FROM learning_provider_credentials WHERE connection_id=28302').run();
+    const fetcher = vi.fn(async () => { throw new Error('network must not run'); });
+    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+      ...await input(fetcher as typeof fetch), expectedRevision: 1, actorPersonId: 28301,
+    })).rejects.toThrow();
+    expect(await env.DB.prepare(`SELECT status,revision,operation_marker FROM learning_provider_connections
+      WHERE id=28302`).first()).toEqual({ status: 'active', revision: 1, operation_marker: null });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('persists a refreshed cleanup envelope before a failed revoke and resumes without refreshing twice', async () => {
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const expired = await encryptLearningCredential(keyRing, {
+      provider: 'canvas', connectionId: 28302,
+      plaintext: encodeCanvasCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'old-refresh',
+        accessTokenExpiresAt: '2026-08-17T11:00:00.000Z',
+        grantedScopes: (await import('../src/lib/learningCanvasProvider')).CANVAS_REQUIRED_SCOPES,
+      }), expiresAt: null,
+    });
+    await env.DB.prepare(`UPDATE learning_provider_credentials SET
+      ciphertext=?1,nonce=?2,algorithm=?3,key_version=?4,envelope_version=?5
+      WHERE connection_id=28302`).bind(
+      expired.ciphertext, expired.nonce, expired.algorithm, expired.keyVersion, expired.envelopeVersion,
+    ).run();
+    let refreshCalls = 0;
+    let revokeCalls = 0;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        refreshCalls += 1;
+        expect(new URLSearchParams(String(init.body)).get('refresh_token')).toBe('old-refresh');
+        return new Response(JSON.stringify({
+          access_token: 'rotated-access', refresh_token: 'rotated-refresh',
+          expires_in: 3_600, token_type: 'Bearer',
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+      revokeCalls += 1;
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer rotated-access');
+      return new Response(null, { status: revokeCalls === 1 ? 503 : 204 });
+    });
+    const admin = await input(fetcher as typeof fetch);
+    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(1);
+    await expect(recoverCanvasDisconnectCleanup(env.DB as AppDb, {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+      allowedOrigins: admin.allowedOrigins, keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    })).resolves.toEqual({ selected: 1, cleaned: 1, pending: 0 });
+    expect(refreshCalls).toBe(1);
+    expect(revokeCalls).toBe(2);
   });
 });

@@ -5,6 +5,7 @@ import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 const LEARNING_TABLES = [
   'learning_activities',
   'learning_activity_events',
+  'learning_canvas_cleanup_tasks',
   'learning_canvas_event_receipts',
   'learning_canvas_oauth_states',
   'learning_canvas_webhook_configs',
@@ -109,7 +110,7 @@ describe.skipIf(!hasPg)('portable Learning schema (real Postgres)', () => {
     await sql?.end();
   });
 
-  it('keeps all eighteen tables server-only while preserving owner CRUD', async () => {
+  it('keeps all nineteen tables server-only while preserving owner CRUD', async () => {
     const rls = await sql.unsafe<{ relname: string; relrowsecurity: boolean }[]>(`
       SELECT c.relname,c.relrowsecurity
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

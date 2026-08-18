@@ -24,8 +24,10 @@ import { requireAllowedCanvasOrigin } from './learningCanvasOrigins';
 
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const RECONCILIATION_DEADLINE_MS = 25_000;
-// A Canvas resource page may require both a module-item request and a page/file
-// metadata request. 23 normalized pages therefore consume at most 46 REST
+// Each omitted-inline-items module phase consumes one request per normalized
+// page. A Canvas resource page may still require both its module-item request
+// and a page/file metadata request, so that remains the two-request worst case.
+// 23 normalized pages therefore consume at most 46 REST
 // subrequests; one Live Events JWK lookup, one token refresh, and syncCourse
 // keep the whole invocation below Workers Free's 50-subrequest limit.
 const RECONCILIATION_MAX_PROVIDER_PAGES = 23;

@@ -4,16 +4,12 @@ import {
   loadCanvasCredential,
   loadCanvasCredentialForAdmin,
   refreshCanvasAccessToken,
-  revokeCanvasAccessToken,
   rotateCanvasCredential,
 } from './learningCanvasAuth';
+import { commitCanvasDisconnect, recoverCanvasDisconnectCleanup } from './learningCanvasCleanup';
 import { createCanvasProvider, fetchCanvasAuthoritativeCourse } from './learningCanvasProvider';
 import type { LearningCredentialKeyRing } from './learningCredentials';
-import {
-  disconnectLearningConnection,
-  getLearningConnection,
-  type LearningConnectionRecord,
-} from './learningConnectionDb';
+import { getLearningConnection, type LearningConnectionRecord } from './learningConnectionDb';
 import type { LearningMappedCourseRecord, LearningProgramRecord } from './learningDb';
 import {
   LEARNING_LIMITS,
@@ -456,18 +452,19 @@ export async function disconnectCanvasConnection(
     connection.provider !== 'canvas' || connection.revision !== expectedRevision
     || (connection.status !== 'active' && connection.status !== 'error')
   ) throw new LearningCanvasAdminConflictError();
-  const loaded = await loadCanvasCredentialForAdmin(db, {
-    connectionId: input.connectionId, keyRing: input.keyRing,
+  const baseUrl = requireAllowedCanvasOrigin(connection.baseUrl, input.allowedOrigins);
+  void baseUrl;
+  await commitCanvasDisconnect(db, {
+    connectionId: input.connectionId, expectedRevision, actorPersonId, nowEpochMs: epoch(input.now()),
   });
-  if (loaded.revision !== expectedRevision) throw new LearningCanvasAdminConflictError();
-  requireAllowedCanvasOrigin(loaded.baseUrl, input.allowedOrigins);
-  await revokeCanvasAccessToken({
-    baseUrl: loaded.baseUrl,
-    accessToken: loaded.credential.accessToken,
-    fetcher: input.fetcher,
-    signal: input.signal,
-  });
-  return disconnectLearningConnection(db, {
-    connectionId: input.connectionId, expectedRevision, actorPersonId,
-  });
+  try {
+    await recoverCanvasDisconnectCleanup(db, {
+      connectionId: input.connectionId, clientId: input.clientId, clientSecret: input.clientSecret,
+      allowedOrigins: input.allowedOrigins, keyRing: input.keyRing, fetcher: input.fetcher,
+      signal: input.signal, now: input.now,
+    });
+  } catch { /* the durable outbox remains available to the scheduled recovery pass */ }
+  const disconnected = (await getLearningConnection(db, input.connectionId, { includeDeleted: true })) ?? invalid();
+  if (disconnected.status !== 'disabled' || disconnected.revision !== expectedRevision + 1) invalid();
+  return disconnected;
 }
