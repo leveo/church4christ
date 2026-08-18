@@ -2,7 +2,9 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppDb, AppStatement } from '../src/lib/appDb';
 import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../src/lib/learningGoogleAuth';
+import { CANVAS_RECONCILIATION_RESERVED_D1_QUERIES } from '../src/lib/learningCanvasReconcile';
 import { encryptLearningCredential, importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
+import { GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES } from '../src/lib/learningGoogleReconcile';
 import {
   LEARNING_SYNC_RUN_LIMITS,
   listLearningSyncTargets,
@@ -96,6 +98,15 @@ describe('bounded Learning synchronization orchestration', () => {
       expect.objectContaining({ event: 'learning_sync_complete', attempts: 2, status: 'succeeded' }),
     ]));
     expect(JSON.stringify(logs)).not.toMatch(/course-old|https:|token|Orchestration Admin|3100/);
+  });
+
+  it('reserves cold middleware and route queries before either provider finalizes a snapshot', () => {
+    expect(GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES).toBeGreaterThanOrEqual(12);
+    expect(CANVAS_RECONCILIATION_RESERVED_D1_QUERIES).toBeGreaterThanOrEqual(14);
+    expect(GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES * LEARNING_SYNC_RUN_LIMITS.maxAttempts)
+      .toBeLessThanOrEqual(43);
+    expect(CANVAS_RECONCILIATION_RESERVED_D1_QUERIES * LEARNING_SYNC_RUN_LIMITS.maxAttempts)
+      .toBeLessThanOrEqual(43);
   });
 
   it.each([
