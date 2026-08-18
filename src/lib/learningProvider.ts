@@ -1236,10 +1236,17 @@ async function guardedRead(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   operation: LearningOperationContext,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   const current = now();
   activeProviderOperation(operation, current);
-  const remaining = Date.parse(operation.deadlineAt) - current;
+  const deadlineAt = absoluteDeadlineAt === undefined
+    ? Date.parse(operation.deadlineAt)
+    : Math.min(Date.parse(operation.deadlineAt), absoluteDeadlineAt);
+  const remaining = deadlineAt - current;
+  if (!Number.isSafeInteger(deadlineAt) || remaining <= 0) {
+    throw providerFailure('timeout', operation.scope.provider);
+  }
   return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
     let settled = false;
     const finish = (run: () => void): void => {
@@ -1281,6 +1288,7 @@ async function readDecodedLearningPageCandidate(
   rawOperation: LearningOperationContext,
   decode: (value: unknown) => unknown,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<DecodedLearningPageCandidate> {
   let operation: LearningOperationContext;
   let provider: LearningProviderKind = 'canvas';
@@ -1301,7 +1309,12 @@ async function readDecodedLearningPageCandidate(
       throw providerFailure('cancelled', provider);
     }
     const rawDeadline = learningValidation.timestamp(rawOperationRow.deadlineAt);
-    if (initialNow >= Date.parse(rawDeadline)) {
+    if (
+      initialNow >= Date.parse(rawDeadline)
+      || (absoluteDeadlineAt !== undefined && (
+        !Number.isSafeInteger(absoluteDeadlineAt) || initialNow >= absoluteDeadlineAt
+      ))
+    ) {
       cancelReader(reader);
       throw providerFailure('timeout', provider);
     }
@@ -1327,7 +1340,7 @@ async function readDecodedLearningPageCandidate(
     while (true) {
       let result: ReadableStreamReadResult<Uint8Array>;
       try {
-        result = await guardedRead(reader, operation, now);
+        result = await guardedRead(reader, operation, now, absoluteDeadlineAt);
       } catch (error) {
         cancelReader(reader);
         throw error;
@@ -1388,6 +1401,7 @@ export function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningCoursesPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningProviderPage<LearningCourse>>;
 export function readAndNormalizeLearningPage(
   response: Response,
@@ -1395,6 +1409,7 @@ export function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningProviderEnrollmentsPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningProviderPage<LearningProviderEnrollment>>;
 export function readAndNormalizeLearningPage(
   response: Response,
@@ -1402,6 +1417,7 @@ export function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningActivitiesPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningProviderPage<LearningActivity>>;
 export function readAndNormalizeLearningPage(
   response: Response,
@@ -1409,6 +1425,7 @@ export function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningResourcesPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningProviderPage<LearningResource>>;
 export function readAndNormalizeLearningPage(
   response: Response,
@@ -1416,6 +1433,7 @@ export function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningProviderSubmissionsPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningProviderPage<LearningProviderSubmission>>;
 export async function readAndNormalizeLearningPage(
   response: Response,
@@ -1423,11 +1441,12 @@ export async function readAndNormalizeLearningPage(
   decode: (value: unknown) => unknown,
   contract: LearningPageResponseContract,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<LearningStrictProviderPage> {
   let decoded: DecodedLearningPageCandidate | null = null;
   let provider: LearningProviderKind = 'canvas';
   try {
-    decoded = await readDecodedLearningPageCandidate(response, operation, decode, now);
+    decoded = await readDecodedLearningPageCandidate(response, operation, decode, now, absoluteDeadlineAt);
     provider = decoded.operation.scope.provider;
     const selected = closedPageContract(contract);
     const expected = expectedPageProof(decoded.operation, selected);

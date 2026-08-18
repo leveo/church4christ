@@ -16,6 +16,75 @@ const BASE_URL = 'https://canvas.church.example';
 const REDIRECT = 'https://church.example.test/admin/learning/canvas/callback';
 
 describe('Canvas OAuth protocol', () => {
+  it('uses one absolute token-request deadline across delayed headers and a stalled body', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const cancelled = vi.fn();
+    try {
+      const pending = exchangeCanvasAuthorizationCode({
+        baseUrl: BASE_URL, clientId: 'client', clientSecret: 'secret', code: 'one-time-code',
+        codeVerifier: 'a'.repeat(64), redirectUri: REDIRECT,
+        fetcher: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 8_000));
+          return new Response(new ReadableStream<Uint8Array>({
+            pull: () => new Promise(() => undefined),
+            cancel: cancelled,
+          }));
+        },
+        signal: new AbortController().signal, nowEpochMs: NOW,
+      });
+      const outcome = pending.then(() => 'resolved', () => 'rejected');
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await Promise.race([outcome, Promise.resolve('pending')])).toBe('rejected');
+      expect(cancelled).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates parent cancellation into an OAuth response body reader', async () => {
+    const parent = new AbortController();
+    const cancelled = vi.fn();
+    const pending = exchangeCanvasAuthorizationCode({
+      baseUrl: BASE_URL, clientId: 'client', clientSecret: 'secret', code: 'one-time-code',
+      codeVerifier: 'a'.repeat(64), redirectUri: REDIRECT,
+      fetcher: async () => new Response(new ReadableStream<Uint8Array>({
+        pull: () => new Promise(() => undefined),
+        cancel: cancelled,
+      })),
+      signal: parent.signal, nowEpochMs: NOW,
+    });
+    const outcome = pending.then(() => 'resolved', () => 'rejected');
+    await Promise.resolve();
+    parent.abort();
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    expect(await outcome).toBe('rejected');
+  });
+
+  it('cancels a late OAuth response when the fetcher ignores abort', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const cancelled = vi.fn();
+    try {
+      const pending = exchangeCanvasAuthorizationCode({
+        baseUrl: BASE_URL, clientId: 'client', clientSecret: 'secret', code: 'one-time-code',
+        codeVerifier: 'a'.repeat(64), redirectUri: REDIRECT,
+        fetcher: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+          return new Response(new ReadableStream<Uint8Array>({ cancel: cancelled }));
+        },
+        signal: new AbortController().signal, nowEpochMs: NOW,
+      });
+      const outcome = pending.then(() => 'resolved', () => 'rejected');
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await outcome).toBe('rejected');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('builds exact-origin authorization-code OAuth with S256 PKCE and minimum URL scopes', async () => {
     const result = await createCanvasOAuthAuthorizationRequest({
       baseUrl: BASE_URL,

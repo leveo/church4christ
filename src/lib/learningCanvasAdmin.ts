@@ -53,7 +53,8 @@ interface CanvasAdminEnvironment {
   readonly clientSecret: string;
   readonly keyRing: LearningCredentialKeyRing;
   readonly fetcher: AdminFetcher;
-  readonly nowEpochMs: number;
+  readonly signal: AbortSignal;
+  readonly now: () => number;
 }
 
 function integer(value: unknown, minimum = 1): number {
@@ -68,14 +69,15 @@ function environment(value: CanvasAdminEnvironment): CanvasAdminEnvironment {
   let row: Record<string, unknown>;
   try {
     row = learningValidation.exactRecord(value, [
-      'connectionId', 'allowedOrigins', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'nowEpochMs',
+      'connectionId', 'allowedOrigins', 'clientId', 'clientSecret', 'keyRing', 'fetcher', 'signal', 'now',
     ]);
   } catch { return invalid(); }
   if (
     typeof row.clientId !== 'string' || row.clientId.length < 1
     || typeof row.clientSecret !== 'string' || row.clientSecret.length < 1
     || typeof row.fetcher !== 'function'
-    || !Number.isSafeInteger(row.nowEpochMs) || (row.nowEpochMs as number) < 0
+    || !(row.signal instanceof AbortSignal)
+    || typeof row.now !== 'function'
   ) invalid();
   if (!Array.isArray(row.allowedOrigins) || !Object.isFrozen(row.allowedOrigins)) invalid();
   return Object.freeze({
@@ -85,8 +87,14 @@ function environment(value: CanvasAdminEnvironment): CanvasAdminEnvironment {
     clientSecret: row.clientSecret as string,
     keyRing: row.keyRing as LearningCredentialKeyRing,
     fetcher: row.fetcher as AdminFetcher,
-    nowEpochMs: row.nowEpochMs as number,
+    signal: row.signal as AbortSignal,
+    now: row.now as () => number,
   });
+}
+
+function epoch(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) invalid();
+  return value as number;
 }
 
 function urlPolicy(connectionId: number, baseUrl: string): LearningConnectionUrlPolicy {
@@ -102,6 +110,7 @@ function operation(
   connectionId: number,
   nowEpochMs: number,
   externalCourseId: string | null,
+  signal: AbortSignal,
 ): LearningOperationContext {
   return Object.freeze({
     scope: Object.freeze({
@@ -115,12 +124,14 @@ function operation(
     maxRawBytes: LEARNING_LIMITS.maxSyncBytes,
     maxNormalizedBytes: LEARNING_LIMITS.maxSyncBytes,
     maxUniqueKeyBytes: LEARNING_LIMITS.maxSyncBytes,
-    signal: new AbortController().signal,
+    signal,
   });
 }
 
 async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allowError = false) {
   const input = environment(rawInput);
+  if (input.signal.aborted) invalid();
+  const nowEpochMs = epoch(input.now());
   const connection = (await getLearningConnection(db, input.connectionId, { includeDeleted: false })) ?? invalid();
   if (
     connection.provider !== 'canvas'
@@ -130,20 +141,20 @@ async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allo
     ? await loadCanvasCredentialForAdmin(db, { connectionId: input.connectionId, keyRing: input.keyRing })
     : await loadCanvasCredential(db, { connectionId: input.connectionId, keyRing: input.keyRing });
   requireAllowedCanvasOrigin(loaded.baseUrl, input.allowedOrigins);
-  if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs + REFRESH_SKEW_MS) {
+  if (Date.parse(loaded.credential.accessTokenExpiresAt) <= nowEpochMs + REFRESH_SKEW_MS) {
     const credential = await refreshCanvasAccessToken({
       baseUrl: loaded.baseUrl,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
       refreshToken: loaded.credential.refreshToken,
       fetcher: input.fetcher,
-      signal: new AbortController().signal,
-      nowEpochMs: input.nowEpochMs,
+      signal: input.signal,
+      nowEpochMs,
     });
     try {
       const rotated = await rotateCanvasCredential(db, {
         connectionId: input.connectionId, expectedRevision: loaded.revision,
-        credential, keyRing: input.keyRing, nowEpochMs: input.nowEpochMs,
+        credential, keyRing: input.keyRing, nowEpochMs,
         allowErrorStatus: connection.status === 'error',
       });
       loaded = Object.freeze({ ...loaded, revision: rotated.revision, credential });
@@ -156,19 +167,19 @@ async function providerContext(db: AppDb, rawInput: CanvasAdminEnvironment, allo
         : await loadCanvasCredential(db, {
           connectionId: input.connectionId, keyRing: input.keyRing,
         });
-      if (Date.parse(loaded.credential.accessTokenExpiresAt) <= input.nowEpochMs) invalid();
+      if (Date.parse(loaded.credential.accessTokenExpiresAt) <= epoch(input.now())) invalid();
     }
   }
   const policy = urlPolicy(input.connectionId, loaded.baseUrl);
   return Object.freeze({
-    input, connection, loaded, policy,
+    input, connection, loaded, policy, nowEpochMs,
     provider: createCanvasProvider({
       connectionId: input.connectionId,
       baseUrl: loaded.baseUrl,
       accessToken: loaded.credential.accessToken,
       urlPolicy: policy,
       fetcher: input.fetcher,
-      now: () => input.nowEpochMs,
+      now: input.now,
     }),
   });
 }
@@ -202,9 +213,9 @@ export async function checkCanvasConnectionHealth(
       method: 'healthCheck',
       request: {
         subject: { connectionId: context.input.connectionId, provider: 'canvas' },
-        operation: operation(context.input.connectionId, context.input.nowEpochMs, null),
+        operation: operation(context.input.connectionId, context.nowEpochMs, null, context.input.signal),
       },
-      now: () => context.input.nowEpochMs + 1,
+      now: context.input.now,
     });
     return Object.freeze({ ok: true, errorCode: null, connectionRevision });
   } catch (error) {
@@ -242,10 +253,10 @@ export async function listCanvasCourseOptions(db: AppDb, rawInput: CanvasAdminEn
         request: {
           subject: { connectionId: context.input.connectionId, provider: 'canvas' },
           page: { pageSize: 100, pageNumber, pageToken },
-          operation: operation(context.input.connectionId, context.input.nowEpochMs, null),
+          operation: operation(context.input.connectionId, context.nowEpochMs, null, context.input.signal),
         },
         urlPolicy: context.policy,
-        now: () => context.input.nowEpochMs + 1,
+        now: context.input.now,
       });
       courses.push(...page.items);
       if (courses.length > MAX_ADMIN_COURSES) invalid();
@@ -283,7 +294,7 @@ export async function mapSelectedCanvasCourse(
   const input = environment({
     connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
-    fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
+    fetcher: rawInput.fetcher, signal: rawInput.signal, now: rawInput.now,
   });
   const externalCourseId = externalId(rawInput.externalCourseId);
   const programId = integer(rawInput.programId);
@@ -297,10 +308,10 @@ export async function mapSelectedCanvasCourse(
     accessToken: context.loaded.credential.accessToken,
     urlPolicy: context.policy,
     fetcher: input.fetcher,
-    now: () => input.nowEpochMs + 1,
+    now: input.now,
   }, {
     externalCourseId,
-    operation: operation(input.connectionId, input.nowEpochMs, externalCourseId),
+    operation: operation(input.connectionId, context.nowEpochMs, externalCourseId, input.signal),
   });
   const { course, rootAccountId } = authoritative;
   const configuredRoots = resultRows(await db.prepare(`SELECT root_account_id
@@ -317,7 +328,7 @@ export async function mapSelectedCanvasCourse(
       operation_expires_at=?2,revision=revision+1,updated_by_person_id=?3,updated_at=datetime('now')
       WHERE id=?4 AND provider='canvas' AND status='active' AND revision=?5
         AND deleted_at IS NULL AND operation_marker IS NULL`)
-      .bind(marker, new Date(input.nowEpochMs + 30_000).toISOString(), actorPersonId, input.connectionId, expectedRevision),
+      .bind(marker, new Date(context.nowEpochMs + 30_000).toISOString(), actorPersonId, input.connectionId, expectedRevision),
     db.prepare(`INSERT INTO learning_courses
       (program_id,connection_id,provider,external_course_id,display_name,launch_url,lifecycle_state,
        provider_updated_at,last_synced_at,created_at,updated_at)
@@ -390,11 +401,12 @@ export async function unmapSelectedCanvasCourse(
   const input = environment({
     connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
-    fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
+    fetcher: rawInput.fetcher, signal: rawInput.signal, now: rawInput.now,
   });
   const externalCourseId = externalId(rawInput.externalCourseId);
   const actorPersonId = integer(rawInput.actorPersonId);
   const expectedRevision = integer(rawInput.expectedRevision, 0);
+  const nowEpochMs = epoch(input.now());
   const marker = crypto.randomUUID();
   const nextRevision = expectedRevision + 1;
   try {
@@ -403,7 +415,7 @@ export async function unmapSelectedCanvasCourse(
         operation_expires_at=?2,revision=revision+1,updated_by_person_id=?3,updated_at=datetime('now')
         WHERE id=?4 AND provider='canvas' AND status='active' AND revision=?5
           AND deleted_at IS NULL AND operation_marker IS NULL`)
-        .bind(marker, new Date(input.nowEpochMs + 30_000).toISOString(), actorPersonId, input.connectionId, expectedRevision),
+        .bind(marker, new Date(nowEpochMs + 30_000).toISOString(), actorPersonId, input.connectionId, expectedRevision),
       db.prepare(`DELETE FROM learning_courses WHERE connection_id=?1 AND provider='canvas'
         AND external_course_id=?2 AND EXISTS (SELECT 1 FROM learning_provider_connections c
           WHERE c.id=?1 AND c.revision=?3 AND c.operation_marker=?4)
@@ -435,7 +447,7 @@ export async function disconnectCanvasConnection(
   const input = environment({
     connectionId: rawInput.connectionId, allowedOrigins: rawInput.allowedOrigins, clientId: rawInput.clientId,
     clientSecret: rawInput.clientSecret, keyRing: rawInput.keyRing,
-    fetcher: rawInput.fetcher, nowEpochMs: rawInput.nowEpochMs,
+    fetcher: rawInput.fetcher, signal: rawInput.signal, now: rawInput.now,
   });
   const expectedRevision = integer(rawInput.expectedRevision, 0);
   const actorPersonId = integer(rawInput.actorPersonId);
@@ -453,7 +465,7 @@ export async function disconnectCanvasConnection(
     baseUrl: loaded.baseUrl,
     accessToken: loaded.credential.accessToken,
     fetcher: input.fetcher,
-    signal: new AbortController().signal,
+    signal: input.signal,
   });
   return disconnectLearningConnection(db, {
     connectionId: input.connectionId, expectedRevision, actorPersonId,

@@ -264,13 +264,21 @@ export function decodeCanvasCredential(value: Uint8Array): CanvasCredential {
 
 type CanvasAuthFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+interface BoundedCanvasAuthResponse {
+  readonly response: Response;
+  readonly deadlineAt: number;
+}
+
 async function boundedFetch(
   url: URL,
   init: RequestInit,
   fetcher: CanvasAuthFetcher,
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<BoundedCanvasAuthResponse> {
   if (signal.aborted) invalid();
+  const startedAt = Date.now();
+  if (!Number.isSafeInteger(startedAt) || startedAt < 0) invalid();
+  const deadlineAt = startedAt + TOKEN_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -279,10 +287,10 @@ async function boundedFetch(
       signal.removeEventListener('abort', abort);
     };
     const fail = (): void => {
-      if (settled) return;
+      controller.abort();
+      if (settled) { cleanup(); return; }
       settled = true;
       cleanup();
-      controller.abort();
       reject(new LearningCanvasAuthError());
     };
     const abort = (): void => fail();
@@ -299,20 +307,54 @@ async function boundedFetch(
         return;
       }
       settled = true;
-      cleanup();
       if (!(response instanceof Response) || response.status < 200 || response.status >= 300) {
+        cleanup();
         if (response instanceof Response && response.body !== null) {
           try { void response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
         }
         reject(new LearningCanvasAuthError());
         return;
       }
-      resolve(response);
+      resolve(Object.freeze({ response, deadlineAt }));
     }, fail);
   });
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
+async function guardedAuthRead(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  deadlineAt: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted) invalid();
+  const remaining = deadlineAt - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) invalid();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+    };
+    const finish = (run: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      run();
+    };
+    const abort = (): void => finish(() => reject(new LearningCanvasAuthError()));
+    const timer = setTimeout(() => finish(() => reject(new LearningCanvasAuthError())), remaining);
+    signal.addEventListener('abort', abort, { once: true });
+    reader.read().then(
+      (part) => finish(() => resolve(part)),
+      () => finish(() => reject(new LearningCanvasAuthError())),
+    );
+  });
+}
+
+async function readBoundedJson(
+  response: Response,
+  signal: AbortSignal,
+  deadlineAt: number,
+): Promise<unknown> {
   const body = response.body ?? invalid();
   const rawLength = response.headers.get('Content-Length');
   if (rawLength !== null) {
@@ -325,7 +367,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   let total = 0;
   try {
     while (true) {
-      const part = await reader.read();
+      const part = await guardedAuthRead(reader, signal, deadlineAt);
       if (part.done) break;
       if (!(part.value instanceof Uint8Array)) invalid();
       total += part.value.byteLength;
@@ -356,7 +398,7 @@ async function tokenRequest(input: {
     headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: input.fields,
   }, input.fetcher, input.signal);
-  return readBoundedJson(response);
+  return readBoundedJson(response.response, input.signal, response.deadlineAt);
 }
 
 export async function exchangeCanvasAuthorizationCode(rawInput: {
@@ -416,8 +458,8 @@ export async function revokeCanvasAccessToken(rawInput: {
     method: 'DELETE',
     headers: { Accept: 'application/json', Authorization: `Bearer ${asciiToken(rawInput.accessToken, 8_192)}` },
   }, rawInput.fetcher, rawInput.signal);
-  if (response.body !== null) {
-    try { void response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
+  if (response.response.body !== null) {
+    try { void response.response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
   }
 }
 

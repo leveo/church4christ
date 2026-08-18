@@ -85,17 +85,19 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
       expect(new URL(String(raw)).pathname).toBe('/api/v1/courses/901');
       return new Response(JSON.stringify({
         id: 901, name: 'Genesis 1', workflow_state: 'available',
+        root_account_id: 'pg-root-1',
         created_at: '2026-08-01T00:00:00.000Z', updated_at: '2026-08-17T11:00:00.000Z',
       }));
     });
     const admin = {
       connectionId: 28402, clientId: 'canvas-client', clientSecret: 'canvas-secret',
       allowedOrigins: Object.freeze([BASE_URL]),
-      keyRing, fetcher: fetcher as typeof fetch, nowEpochMs: NOW + 3,
+      keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 3,
     };
     await expect(mapSelectedCanvasCourse(dbA, {
       ...admin, externalCourseId: '901', programId: 28403, actorPersonId: 28401,
-      expectedRevision: 2, rootAccountId: 'pg-root-1',
+      expectedRevision: 2,
     })).resolves.toMatchObject({ connectionRevision: 3, externalCourseId: '901' });
 
     const event: CanvasLiveEvent = Object.freeze({

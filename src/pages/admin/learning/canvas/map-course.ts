@@ -26,12 +26,14 @@ interface CanvasCourseMappingDeps {
     readonly externalCourseId: string;
     readonly programId: number;
     readonly actorPersonId: number;
+    readonly signal: AbortSignal;
   }) => Promise<unknown>;
   readonly unmapCourse: (db: AppDb, input: {
     readonly connectionId: number;
     readonly expectedRevision: number;
     readonly externalCourseId: string;
     readonly actorPersonId: number;
+    readonly signal: AbortSignal;
   }) => Promise<unknown>;
 }
 
@@ -42,7 +44,7 @@ const vars = env as unknown as {
   CANVAS_ALLOWED_ORIGINS?: string;
 };
 
-async function adminEnvironment(connectionId: number) {
+async function adminEnvironment(connectionId: number, signal: AbortSignal) {
   if (
     typeof vars.CANVAS_OAUTH_CLIENT_ID !== 'string'
     || typeof vars.CANVAS_OAUTH_CLIENT_SECRET !== 'string'
@@ -55,16 +57,17 @@ async function adminEnvironment(connectionId: number) {
     clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
     keyRing: await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS),
     fetcher: fetch,
-    nowEpochMs: Date.now(),
+    signal,
+    now: Date.now,
   };
 }
 
 const defaultDeps: CanvasCourseMappingDeps = {
   mapCourse: async (db, input) => mapSelectedCanvasCourse(db, {
-    ...await adminEnvironment(input.connectionId), ...input,
+    ...await adminEnvironment(input.connectionId, input.signal), ...input,
   }),
   unmapCourse: async (db, input) => unmapSelectedCanvasCourse(db, {
-    ...await adminEnvironment(input.connectionId), ...input,
+    ...await adminEnvironment(input.connectionId, input.signal), ...input,
   }),
 };
 
@@ -153,6 +156,7 @@ export function createCanvasCourseMappingHandler(
           connectionId, expectedRevision, externalCourseId,
           programId: number(fields.program_id, 1),
           actorPersonId: user!.id,
+          signal: request.signal,
         });
         return redirect(connectionId, 'saved', 'course_mapped');
       }
@@ -160,6 +164,7 @@ export function createCanvasCourseMappingHandler(
         exact(fields, ['action', 'connection_id', 'revision', 'external_course_id']);
         await dependencies.unmapCourse(locals.db, {
           connectionId, expectedRevision, externalCourseId, actorPersonId: user!.id,
+          signal: request.signal,
         });
         return redirect(connectionId, 'saved', 'course_unmapped');
       }

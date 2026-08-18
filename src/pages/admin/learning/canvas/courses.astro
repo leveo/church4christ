@@ -32,7 +32,8 @@ try {
     clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
     keyRing: await importLearningCredentialKeyRing(vars.LEARNING_CREDENTIAL_KEYS),
     fetcher: fetch,
-    nowEpochMs: Date.now(),
+    signal: Astro.request.signal,
+    now: Date.now,
   });
 } catch { return new Response(null, { status: 503 }); }
 const lang = user!.lang === 'zh' ? 'zh' : 'en';

@@ -71,6 +71,88 @@ function provider(fetcher: CanvasProviderDependencies['fetcher']) {
 }
 
 describe('Canvas provider adapter', () => {
+  it('uses one absolute provider deadline across delayed headers and a slow response body', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const cancelled = vi.fn();
+    try {
+      const adapter = createCanvasProvider({
+        connectionId: CONNECTION_ID,
+        baseUrl: BASE_URL,
+        accessToken: 'private-canvas-token',
+        urlPolicy: POLICY,
+        now: Date.now,
+        fetcher: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 8_000));
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              setTimeout(() => controller.enqueue(new TextEncoder().encode('[')), 1_000);
+              setTimeout(() => controller.enqueue(new TextEncoder().encode(']')), 3_000);
+              setTimeout(() => controller.close(), 3_001);
+            },
+            cancel: cancelled,
+          }));
+        },
+      });
+      const pending = invokeLearningProvider(adapter, {
+        method: 'listCourses',
+        request: {
+          subject: { connectionId: CONNECTION_ID, provider: 'canvas' },
+          page: { pageSize: 100, pageNumber: 1, pageToken: null },
+          operation: operation(null),
+        },
+        urlPolicy: POLICY,
+        now: Date.now,
+      });
+      const outcome = pending.then(() => 'resolved', (error: unknown) => (
+        error instanceof LearningProviderError ? error.code : 'other'
+      ));
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await Promise.race([outcome, Promise.resolve('pending')])).toBe('timeout');
+      expect(cancelled).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a late provider response when the fetcher ignores abort', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const cancelled = vi.fn();
+    try {
+      const adapter = createCanvasProvider({
+        connectionId: CONNECTION_ID,
+        baseUrl: BASE_URL,
+        accessToken: 'private-canvas-token',
+        urlPolicy: POLICY,
+        now: Date.now,
+        fetcher: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+          return new Response(new ReadableStream<Uint8Array>({ cancel: cancelled }));
+        },
+      });
+      const pending = invokeLearningProvider(adapter, {
+        method: 'listCourses',
+        request: {
+          subject: { connectionId: CONNECTION_ID, provider: 'canvas' },
+          page: { pageSize: 100, pageNumber: 1, pageToken: null },
+          operation: operation(null),
+        },
+        urlPolicy: POLICY,
+        now: Date.now,
+      });
+      const outcome = pending.then(() => 'resolved', (error: unknown) => (
+        error instanceof LearningProviderError ? error.code : 'other'
+      ));
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await outcome).toBe('timeout');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('declares only the documented read scopes used by the adapter', () => {
     expect(CANVAS_REQUIRED_SCOPES).toEqual([
       'url:GET|/api/v1/courses',

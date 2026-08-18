@@ -132,13 +132,22 @@ function successful(response: unknown): Response {
   throw failure('invalid_request', status);
 }
 
-function operationRemaining(operation: LearningOperationContext, now: () => number): number {
+interface BoundedCanvasResponse {
+  readonly response: Response;
+  readonly deadlineAt: number;
+}
+
+function requestDeadline(operation: LearningOperationContext, now: () => number): {
+  readonly remaining: number;
+  readonly deadlineAt: number;
+} {
   const current = now();
-  const remaining = Date.parse(operation.deadlineAt) - current;
+  const deadlineAt = Math.min(Date.parse(operation.deadlineAt), current + REQUEST_TIMEOUT_MS);
+  const remaining = deadlineAt - current;
   if (!Number.isSafeInteger(current) || current < 0 || !Number.isFinite(remaining) || remaining <= 0) {
     throw failure('timeout');
   }
-  return Math.min(remaining, REQUEST_TIMEOUT_MS);
+  return Object.freeze({ remaining, deadlineAt });
 }
 
 function boundedRequest(
@@ -146,7 +155,7 @@ function boundedRequest(
   baseUrl: string,
   url: URL,
   operation: LearningOperationContext,
-): Promise<Response> {
+): Promise<BoundedCanvasResponse> {
   if (
     url.origin !== baseUrl
     || url.protocol !== 'https:'
@@ -157,23 +166,23 @@ function boundedRequest(
     || url.searchParams.has('access_token')
   ) throw failure('invalid_request');
   if (operation.signal.aborted) return Promise.reject(failure('cancelled'));
-  const remaining = operationRemaining(operation, dependencies.now);
+  const deadline = requestDeadline(operation, dependencies.now);
   const controller = new AbortController();
-  return new Promise<Response>((resolve, reject) => {
+  return new Promise<BoundedCanvasResponse>((resolve, reject) => {
     let settled = false;
     const cleanup = (): void => {
       clearTimeout(timer);
       operation.signal.removeEventListener('abort', abort);
     };
     const finishFailure = (code: 'cancelled' | 'timeout'): void => {
-      if (settled) return;
+      controller.abort();
+      if (settled) { cleanup(); return; }
       settled = true;
       cleanup();
-      controller.abort();
       reject(failure(code));
     };
     const abort = (): void => finishFailure('cancelled');
-    const timer = setTimeout(() => finishFailure('timeout'), remaining);
+    const timer = setTimeout(() => finishFailure('timeout'), deadline.remaining);
     operation.signal.addEventListener('abort', abort, { once: true });
     let pending: Promise<Response>;
     try {
@@ -195,8 +204,9 @@ function boundedRequest(
         return;
       }
       settled = true;
-      cleanup();
-      try { resolve(successful(response)); } catch (error) { reject(error); }
+      try {
+        resolve(Object.freeze({ response: successful(response), deadlineAt: deadline.deadlineAt }));
+      } catch (error) { cleanup(); reject(error); }
     }, () => {
       if (settled) return;
       settled = true;
@@ -210,9 +220,13 @@ async function guardedRead(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   operation: LearningOperationContext,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   if (operation.signal.aborted) throw failure('cancelled');
-  const remaining = Date.parse(operation.deadlineAt) - now();
+  const deadlineAt = absoluteDeadlineAt === undefined
+    ? Date.parse(operation.deadlineAt)
+    : Math.min(Date.parse(operation.deadlineAt), absoluteDeadlineAt);
+  const remaining = deadlineAt - now();
   if (!Number.isFinite(remaining) || remaining <= 0) throw failure('timeout');
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -240,6 +254,7 @@ async function readBoundedJson(
   response: Response,
   operation: LearningOperationContext,
   now: () => number,
+  absoluteDeadlineAt?: number,
 ): Promise<unknown> {
   if (response.body === null) throw failure('malformed_response');
   const limit = Math.min(operation.maxRawBytes, LEARNING_LIMITS.maxPageBytes);
@@ -255,7 +270,7 @@ async function readBoundedJson(
   let total = 0;
   try {
     while (true) {
-      const part = await guardedRead(reader, operation, now);
+      const part = await guardedRead(reader, operation, now, absoluteDeadlineAt);
       if (part.done) break;
       if (!(part.value instanceof Uint8Array)) throw failure('malformed_response');
       total += part.value.byteLength;
@@ -636,13 +651,15 @@ export async function fetchCanvasAuthoritativeCourse(
     operation: rawInput.operation,
   }, dependencies.now());
   const courseId = request.subject.externalCourseId;
-  const response = await boundedRequest(
+  const received = await boundedRequest(
     dependencies,
     dependencies.baseUrl,
     endpoint(dependencies.baseUrl, `/api/v1/courses/${encodeURIComponent(courseId)}`),
     request.operation,
   );
-  const row = data(await readBoundedJson(response, request.operation, dependencies.now));
+  const row = data(await readBoundedJson(
+    received.response, request.operation, dependencies.now, received.deadlineAt,
+  ));
   if (externalId(row.id) !== courseId) learningValidation.invalid();
   return Object.freeze({
     course: normalizeLearningCourse(
@@ -665,8 +682,8 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
     async healthCheck(input: LearningHealthRequest): Promise<LearningProviderHealth> {
       const url = endpoint(baseUrl, '/api/v1/courses');
       url.searchParams.set('per_page', '1');
-      const response = await request(url, input.operation);
-      cancelBody(response);
+      const received = await request(url, input.operation);
+      cancelBody(received.response);
       return Object.freeze({
         connectionId, provider: 'canvas', healthy: 1,
         checkedAt: new Date(dependencies.now()).toISOString(), errorCode: null,
@@ -676,21 +693,23 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
     async listCourses(input: LearningListCoursesRequest) {
       const path = '/api/v1/courses';
       const url = pageUrl(baseUrl, path, input.page.pageSize, input.page.pageToken);
-      const response = await request(url, input.operation);
-      const next = nextLink(response, baseUrl, path);
-      return readAndNormalizeLearningPage(response, input.operation, (value) => ({
+      const received = await request(url, input.operation);
+      const next = nextLink(received.response, baseUrl, path);
+      return readAndNormalizeLearningPage(received.response, input.operation, (value) => ({
         items: learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems)
           .map((item) => mapCourse(item, connectionId, baseUrl)),
         requestPageToken: input.page.pageToken,
         nextPageToken: next,
         pageNumber: input.page.pageNumber,
-      }), { kind: 'courses', urlPolicy: dependencies.urlPolicy }, dependencies.now);
+      }), { kind: 'courses', urlPolicy: dependencies.urlPolicy }, dependencies.now, received.deadlineAt);
     },
 
     async syncCourse(input: LearningSyncCourseRequest): Promise<LearningCourse> {
       const id = encodeURIComponent(input.subject.externalCourseId);
-      const response = await request(endpoint(baseUrl, `/api/v1/courses/${id}`), input.operation);
-      const value = await readBoundedJson(response, input.operation, dependencies.now);
+      const received = await request(endpoint(baseUrl, `/api/v1/courses/${id}`), input.operation);
+      const value = await readBoundedJson(
+        received.response, input.operation, dependencies.now, received.deadlineAt,
+      );
       return mapCourse(value, connectionId, baseUrl);
     },
 
@@ -703,14 +722,14 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
           url.searchParams.append('state[]', state);
         }
       }
-      const response = await request(url, input.operation);
-      const next = nextLink(response, baseUrl, path);
-      return readAndNormalizeLearningPage(response, input.operation, (value) => ({
+      const received = await request(url, input.operation);
+      const next = nextLink(received.response, baseUrl, path);
+      return readAndNormalizeLearningPage(received.response, input.operation, (value) => ({
         items: mapEnrollments(value, connectionId, courseId),
         requestPageToken: input.page.pageToken,
         nextPageToken: next,
         pageNumber: input.page.pageNumber,
-      }), { kind: 'provider_enrollments' }, dependencies.now);
+      }), { kind: 'provider_enrollments' }, dependencies.now, received.deadlineAt);
     },
 
     async syncActivities(input: LearningSyncActivitiesRequest) {
@@ -720,9 +739,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
         const moduleId = phase.moduleIds[0];
         const path = `/api/v1/courses/${encodeURIComponent(courseId)}/modules/${encodeURIComponent(moduleId)}/items`;
         const url = pageUrl(baseUrl, path, input.page.pageSize, phase.itemToken);
-        const response = await request(url, input.operation);
-        const next = nextLink(response, baseUrl, path);
-        return readAndNormalizeLearningPage(response, input.operation, (value) => {
+        const received = await request(url, input.operation);
+        const next = nextLink(received.response, baseUrl, path);
+        return readAndNormalizeLearningPage(received.response, input.operation, (value) => {
           let nextPageToken: string | null;
           if (next !== null) {
             nextPageToken = moduleItemsPhaseToken({ ...phase, itemToken: next });
@@ -743,14 +762,14 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
             nextPageToken,
             pageNumber: input.page.pageNumber,
           };
-        }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now);
+        }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now, received.deadlineAt);
       }
       const path = `/api/v1/courses/${encodeURIComponent(courseId)}/${phase.phase}`;
       const url = pageUrl(baseUrl, path, input.page.pageSize, phase.token);
       if (phase.token === null && phase.phase === 'modules') url.searchParams.append('include[]', 'items');
-      const response = await request(url, input.operation);
-      const next = nextLink(response, baseUrl, path);
-      return readAndNormalizeLearningPage(response, input.operation, (value) => {
+      const received = await request(url, input.operation);
+      const next = nextLink(received.response, baseUrl, path);
+      return readAndNormalizeLearningPage(received.response, input.operation, (value) => {
         const rows = learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems);
         const missingModuleIds = phase.phase === 'modules'
           ? rows.filter((item) => data(item).items === undefined).map((item) => externalId(data(item).id))
@@ -770,7 +789,7 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
             : nextActivityToken(phase.phase, next),
           pageNumber: input.page.pageNumber,
         };
-      }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now);
+      }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now, received.deadlineAt);
     },
 
     async syncResources(input: LearningSyncResourcesRequest) {
@@ -789,7 +808,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
         baseUrl,
         `/api/v1/courses/${encodeURIComponent(courseId)}/modules/${encodeURIComponent(ids.moduleId)}/items/${encodeURIComponent(ids.itemId)}`,
       ), input.operation);
-      const item = data(await readBoundedJson(itemResponse, input.operation, dependencies.now));
+      const item = data(await readBoundedJson(
+        itemResponse.response, input.operation, dependencies.now, itemResponse.deadlineAt,
+      ));
       if (externalId(item.id) !== ids.itemId) learningValidation.invalid();
       const type = string(item.type, 64);
       const title = string(item.title, LEARNING_LIMITS.titleBytes);
@@ -825,7 +846,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
           baseUrl,
           `/api/v1/courses/${encodeURIComponent(courseId)}/pages/${encodeURIComponent(pageUrlValue)}`,
         ), input.operation);
-        const detail = data(await readBoundedJson(detailResponse, input.operation, dependencies.now));
+        const detail = data(await readBoundedJson(
+          detailResponse.response, input.operation, dependencies.now, detailResponse.deadlineAt,
+        ));
         if (string(detail.url, LEARNING_LIMITS.externalIdBytes) !== pageUrlValue) learningValidation.invalid();
         resource = linkResource(connectionId, courseId, activityId,
           string(detail.title, LEARNING_LIMITS.titleBytes),
@@ -833,7 +856,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
       } else if (type === 'File') {
         const fileId = externalId(item.content_id);
         const detailResponse = await request(endpoint(baseUrl, `/api/v1/files/${encodeURIComponent(fileId)}`), input.operation);
-        const detail = data(await readBoundedJson(detailResponse, input.operation, dependencies.now));
+        const detail = data(await readBoundedJson(
+          detailResponse.response, input.operation, dependencies.now, detailResponse.deadlineAt,
+        ));
         if (externalId(detail.id) !== fileId) learningValidation.invalid();
         resource = Object.freeze({
           connectionId, provider: 'canvas', externalCourseId: courseId, externalActivityId: activityId,
@@ -864,15 +889,15 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
       const assignmentId = assignmentIdFromActivity(activityId);
       const path = `/api/v1/courses/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/submissions`;
       const url = pageUrl(baseUrl, path, input.page.pageSize, input.page.pageToken);
-      const response = await request(url, input.operation);
-      const next = nextLink(response, baseUrl, path);
-      return readAndNormalizeLearningPage(response, input.operation, (value) => ({
+      const received = await request(url, input.operation);
+      const next = nextLink(received.response, baseUrl, path);
+      return readAndNormalizeLearningPage(received.response, input.operation, (value) => ({
         items: learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems)
           .map((item) => mapSubmission(item, connectionId, courseId, activityId)),
         requestPageToken: input.page.pageToken,
         nextPageToken: next,
         pageNumber: input.page.pageNumber,
-      }), { kind: 'provider_submissions' }, dependencies.now);
+      }), { kind: 'provider_submissions' }, dependencies.now, received.deadlineAt);
     },
 
     async buildLaunchUrl(input: LearningBuildLaunchRequest) {

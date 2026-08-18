@@ -64,7 +64,7 @@ interface LearningConnectionActionDeps {
   readonly disconnectConnection: (db: AppDb, input: DisconnectLearningConnectionInput) => Promise<unknown>;
   readonly disconnectCanvasConnection: (
     db: AppDb,
-    input: DisconnectLearningConnectionInput,
+    input: DisconnectLearningConnectionInput & { readonly signal: AbortSignal },
   ) => Promise<unknown>;
   readonly disconnectGoogleConnection: (
     db: AppDb,
@@ -84,6 +84,7 @@ interface LearningConnectionActionDeps {
     readonly connectionId: number;
     readonly provider: LearningProviderKind;
     readonly baseUrl: string | null;
+    readonly signal: AbortSignal;
   }) => Promise<HealthResult>;
   readonly updateHealth: (db: AppDb, input: UpdateLearningConnectionHealthInput) => Promise<unknown>;
 }
@@ -120,7 +121,8 @@ const defaultDeps: LearningConnectionActionDeps = {
       clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
       keyRing,
       fetcher: fetch,
-      nowEpochMs: Date.now(),
+      signal: input.signal,
+      now: Date.now,
     });
   },
   disconnectGoogleConnection: async (db, input) => {
@@ -169,7 +171,8 @@ const defaultDeps: LearningConnectionActionDeps = {
         clientSecret: vars.CANVAS_OAUTH_CLIENT_SECRET,
         keyRing,
         fetcher: fetch,
-        nowEpochMs: Date.now(),
+        signal: input.signal,
+        now: Date.now,
       });
     }
     if (
@@ -321,7 +324,7 @@ export function createLearningConnectionActionHandler(
         if (connection.provider === 'google_classroom' && connection.status !== 'pending') {
           await deps.disconnectGoogleConnection(locals.db, disconnectInput);
         } else if (connection.provider === 'canvas' && connection.status !== 'pending') {
-          await deps.disconnectCanvasConnection(locals.db, disconnectInput);
+          await deps.disconnectCanvasConnection(locals.db, { ...disconnectInput, signal: request.signal });
         } else {
           await deps.disconnectConnection(locals.db, disconnectInput);
         }
@@ -344,6 +347,7 @@ export function createLearningConnectionActionHandler(
         connectionId: data.connectionId,
         provider: connection.provider,
         baseUrl: connection.baseUrl,
+        signal: request.signal,
       }));
       const healthRevision = health.connectionRevision ?? data.revision;
       if (healthRevision !== data.revision && healthRevision !== data.revision + 1) {

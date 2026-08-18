@@ -49,9 +49,31 @@ describe('Canvas admin connection and course mapping', () => {
     return {
       connectionId: 28302, clientId: 'canvas-client', clientSecret: 'canvas-secret',
       allowedOrigins: Object.freeze([BASE_URL]),
-      keyRing: await importLearningCredentialKeyRing(KEY_SECRET), fetcher, nowEpochMs: NOW,
+      keyRing: await importLearningCredentialKeyRing(KEY_SECRET), fetcher,
+      now: () => NOW, signal: new AbortController().signal,
     };
   }
+
+  it('propagates the parent request signal into stalled Canvas admin response bodies', async () => {
+    const parent = new AbortController();
+    const cancelled = vi.fn();
+    let providerSignal: AbortSignal | undefined;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      providerSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull: () => new Promise(() => undefined),
+        cancel: cancelled,
+      }));
+    });
+    const pending = listCanvasCourseOptions(env.DB as AppDb, {
+      ...await input(fetcher as typeof fetch), signal: parent.signal, now: Date.now,
+    } as never);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    parent.abort();
+    await expect(pending).rejects.toThrow();
+    expect(providerSignal?.aborted).toBe(true);
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
 
   it('does not refresh, call, or revoke when an active issuer leaves the deployment allowlist', async () => {
     const fetcher = vi.fn(async () => new Response('{}'));

@@ -400,6 +400,7 @@ describe('Learning connection action HTTP boundary', () => {
     expect(response.headers.get('location')).toBe('/admin/learning?saved=connection_disconnected');
     expect(injected.disconnectCanvasConnection).toHaveBeenCalledWith({}, {
       connectionId: 401, expectedRevision: 0, actorPersonId: 7,
+      signal: expect.any(AbortSignal),
     });
     expect(injected.disconnectConnection).not.toHaveBeenCalled();
   });
