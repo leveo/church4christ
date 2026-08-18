@@ -96,7 +96,7 @@ describe('canonical capability catalog', () => {
     expect(CAPABILITIES['activity-score']).toMatchObject({
       publicPrefixes: [],
       adminPrefixes: ['/admin/activity-score'],
-      uses: ['groups', 'serve', 'registration'],
+      uses: ['groups', 'serve', 'registration', 'learning'],
       dependsOn: ['people'],
     });
     expect(CAPABILITIES['activity-score']).not.toHaveProperty('requiresBackend');

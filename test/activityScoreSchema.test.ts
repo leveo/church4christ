@@ -28,6 +28,7 @@ describe('activity score schema', () => {
     `).all();
     expect(dimensions.results).toEqual([
       { dimension_key: 'group_attendance', enabled: 1, weight: 50, target_count: null },
+      { dimension_key: 'learning_engagement', enabled: 0, weight: 0, target_count: 3 },
       { dimension_key: 'registration', enabled: 0, weight: 0, target_count: 2 },
       { dimension_key: 'serving', enabled: 1, weight: 50, target_count: 3 },
     ]);
@@ -49,6 +50,11 @@ describe('activity score schema', () => {
     await expect(env.DB.prepare('UPDATE activity_score_config SET watch_threshold = 70 WHERE id = 1').run()).rejects.toThrow();
     await expect(env.DB.prepare('UPDATE activity_score_config SET revision = -1 WHERE id = 1').run()).rejects.toThrow();
     await expect(env.DB.prepare('UPDATE activity_score_config SET updated_by_person_id = 999999 WHERE id = 1').run()).rejects.toThrow();
+  });
+
+  it('indexes only submission event evidence for bounded window reads', async () => {
+    const indexes = await env.DB.prepare(`PRAGMA index_list('learning_activity_events')`).all<{ name: string }>();
+    expect(indexes.results.map((row) => row.name)).toContain('idx_learning_events_activity_score');
   });
 
   it('enforces the dimension allowlist and coherent enabled, weight, and target values', async () => {
@@ -75,6 +81,10 @@ describe('activity score schema', () => {
     await expect(env.DB.prepare(`
       UPDATE activity_score_dimensions SET target_count = NULL
       WHERE dimension_key = 'registration'
+    `).run()).rejects.toThrow();
+    await expect(env.DB.prepare(`
+      UPDATE activity_score_dimensions SET target_count = 0
+      WHERE dimension_key = 'learning_engagement'
     `).run()).rejects.toThrow();
   });
 });

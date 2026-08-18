@@ -32,7 +32,8 @@ describe('Activity Score built worker on PostgreSQL', () => {
     const body = new URLSearchParams({
       action: 'save_config', revision: '0', window_days: '30',
       weight_group_attendance: '50', weight_serving: '50', weight_registration: '0',
-      target_serving: '3', target_registration: '2', active_threshold: '70', watch_threshold: '40',
+      weight_learning_engagement: '0', target_serving: '3', target_registration: '2',
+      target_learning_engagement: '3', active_threshold: '70', watch_threshold: '40',
     });
     body.append('membership_status', 'regular');
     body.append('membership_status', 'member');

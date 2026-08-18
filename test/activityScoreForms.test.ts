@@ -11,8 +11,10 @@ function form(overrides: Record<string, string | readonly string[] | null> = {})
     weight_group_attendance: '50',
     weight_serving: '50',
     weight_registration: '0',
+    weight_learning_engagement: '0',
     target_serving: '3',
     target_registration: '2',
+    target_learning_engagement: '3',
     active_threshold: '70',
     watch_threshold: '40',
     ...overrides,
@@ -41,6 +43,7 @@ describe('parseActivityScoreConfigForm', () => {
             group_attendance: { enabled: true, weight: 50, targetCount: null },
             serving: { enabled: true, weight: 50, targetCount: 3 },
             registration: { enabled: false, weight: 0, targetCount: 2 },
+            learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
           },
         },
       },
@@ -66,6 +69,7 @@ describe('parseActivityScoreConfigForm', () => {
     ['dimension', { dimension: ['serving', 'serving'] }, 'activityScoreDimensionsInvalid'],
     ['weight_serving', { weight_serving: '1.5' }, 'activityScoreWeightInvalid'],
     ['target_serving', { target_serving: '101' }, 'activityScoreTargetInvalid'],
+    ['target_learning_engagement', { target_learning_engagement: '0' }, 'activityScoreTargetInvalid'],
     ['active_threshold', { active_threshold: '40', watch_threshold: '40' }, 'activityScoreThresholdInvalid'],
   ] as const)('rejects invalid %s with a fixed non-echoing code', (field, overrides, code) => {
     const result = parseActivityScoreConfigForm(form(overrides));
@@ -83,6 +87,20 @@ describe('parseActivityScoreConfigForm', () => {
     expect(parseActivityScoreConfigForm(form({ weight_group_attendance: '40' }))).toEqual({
       ok: false,
       errors: { config: 'activityScoreConfigInvalid' },
+    });
+  });
+
+  it('accepts Learning as a configurable count dimension while requiring weights to total 100', () => {
+    expect(parseActivityScoreConfigForm(form({
+      dimension: ['learning_engagement'],
+      weight_group_attendance: '0',
+      weight_serving: '0',
+      weight_registration: '0',
+      weight_learning_engagement: '100',
+      target_learning_engagement: '4',
+    }))).toMatchObject({
+      ok: true,
+      data: { config: { dimensions: { learning_engagement: { enabled: true, weight: 100, targetCount: 4 } } } },
     });
   });
 });

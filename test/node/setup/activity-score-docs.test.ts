@@ -17,14 +17,19 @@ describe('activity score documentation', () => {
     expect(feature).toMatch(/group attendance/i);
     expect(feature).toMatch(/confirmed serving/i);
     expect(feature).toMatch(/registration engagement/i);
+    expect(feature).toMatch(/learning engagement/i);
+    expect(feature).toMatch(/assignment[\s/]quiz submissions/i);
     expect(feature).toMatch(/5,000 eligible people/i);
     expect(feature).toMatch(/100\s+filtered\s+rows/i);
     expect(feature).toMatch(/giving[\s\S]{0,160}excluded/i);
     expect(feature).toMatch(/membership status[^\n]*(filter|eligib)/i);
+    expect(feature).toMatch(/grade[\s\S]{0,180}(excluded|never)/i);
+    expect(feature).toMatch(/5,000[^\n]*learning[^\n]*events/i);
   });
 
   it('documents source-off behavior and the dedicated admin grant', () => {
     expect(feature).toMatch(/source[^\n]*disabled[\s\S]{0,220}renormal/i);
+    expect(feature).toMatch(/Learning[^\n]*(disconnected|unavailable)[\s\S]{0,180}renormal/i);
     expect(feature).toMatch(/super admin[\s\S]{0,100}(edit|configuration)/i);
     expect(feature).toMatch(/Activity Score[^\n]*grant/i);
     expect(permissions).toMatch(/activity.score/i);
@@ -34,6 +39,8 @@ describe('activity score documentation', () => {
   it('records migration 0016 and the expanded capability counts', () => {
     expect(feature).toMatch(/migrations\/0016_activity_score\.sql/);
     expect(feature).toMatch(/migrations-supabase\/0016_activity_score\.sql/);
+    expect(feature).toMatch(/migrations\/0026_activity_score_learning\.sql/);
+    expect(feature).toMatch(/migrations-supabase\/0026_activity_score_learning\.sql/);
     expect(upgrade).toContain('0016_activity_score.sql');
     expect(release).toMatch(/Files .*0001.* through\s+.*0016/);
     expect(changelog).toContain('0016_activity_score.sql');

@@ -20,6 +20,7 @@ const defaults: ActivityScoreConfig = {
     group_attendance: { enabled: true, weight: 50, targetCount: null },
     serving: { enabled: true, weight: 50, targetCount: 3 },
     registration: { enabled: false, weight: 0, targetCount: 2 },
+    learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
   },
 };
 
@@ -51,6 +52,7 @@ async function reset(): Promise<void> {
     env.DB.prepare(`UPDATE activity_score_dimensions SET enabled=1, weight=50, target_count=NULL WHERE dimension_key='group_attendance'`),
     env.DB.prepare(`UPDATE activity_score_dimensions SET enabled=1, weight=50, target_count=3 WHERE dimension_key='serving'`),
     env.DB.prepare(`UPDATE activity_score_dimensions SET enabled=0, weight=0, target_count=2 WHERE dimension_key='registration'`),
+    env.DB.prepare(`UPDATE activity_score_dimensions SET enabled=0, weight=0, target_count=3 WHERE dimension_key='learning_engagement'`),
   ]);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO people (id, display_name, email, active, membership_status) VALUES (9101, 'Actor', 'score-actor@example.com', 1, 'member')`),
@@ -79,6 +81,7 @@ describe('activity score configuration persistence', () => {
         group_attendance: { enabled: true, weight: 40, targetCount: null },
         serving: { enabled: true, weight: 40, targetCount: 4 },
         registration: { enabled: true, weight: 20, targetCount: 2 },
+        learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
       },
     };
     const saved = await saveActivityScoreConfig(env.DB, next, 0, 9101);
@@ -90,6 +93,7 @@ describe('activity score configuration persistence', () => {
         group_attendance: { enabled: false, weight: 0, targetCount: null },
         serving: { enabled: true, weight: 100, targetCount: 9 },
         registration: { enabled: false, weight: 0, targetCount: 2 },
+        learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
       },
     };
     await expect(saveActivityScoreConfig(env.DB, stale, 0, 9101)).rejects.toBeInstanceOf(ActivityScoreConflictError);

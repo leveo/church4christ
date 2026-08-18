@@ -4,8 +4,10 @@ import type { AppDb } from '../../src/lib/appDb';
 import {
   ActivityScoreConflictError,
   getActivityScoreConfig,
+  isLearningActivitySourceAvailable,
   listGroupAttendanceEvidence,
   listRegistrationEvidence,
+  listLearningEngagementEvidence,
   listServingEvidence,
   saveActivityScoreConfig,
 } from '../../src/lib/activityScoreDb';
@@ -44,6 +46,8 @@ describe.skipIf(!hasPg)('activity score DB (PostgreSQL)', () => {
         WHERE dimension_key='serving';
       UPDATE activity_score_dimensions SET enabled=0, weight=0, target_count=2
         WHERE dimension_key='registration';
+      UPDATE activity_score_dimensions SET enabled=0, weight=0, target_count=3
+        WHERE dimension_key='learning_engagement';
       INSERT INTO people (id, display_name, email, membership_status) VALUES
         (1, 'Actor', 'pg-score-actor@example.com', 'member'),
         (2, 'Member', 'pg-score-member@example.com', 'member');
@@ -61,6 +65,7 @@ describe.skipIf(!hasPg)('activity score DB (PostgreSQL)', () => {
         group_attendance: { enabled: true, weight: 25, targetCount: null },
         serving: { enabled: true, weight: 50, targetCount: 4 },
         registration: { enabled: true, weight: 25, targetCount: 2 },
+        learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
       },
     };
     expect(await saveActivityScoreConfig(db, next, 0, 1)).toMatchObject({ revision: 1, windowDays: 60 });
@@ -98,5 +103,40 @@ describe.skipIf(!hasPg)('activity score DB (PostgreSQL)', () => {
     ]);
     expect(await listServingEvidence(db, '2026-06-01', '2026-06-30')).toEqual([{ personId: 2, count: 1 }]);
     expect(await listRegistrationEvidence(db, '2026-06-01', '2026-06-30')).toEqual([{ personId: 2, count: 1 }]);
+  });
+
+  it('matches D1 Learning submission evidence and active-provider availability', async () => {
+    await sql.unsafe(`
+      INSERT INTO learning_provider_connections
+        (id,provider,display_name,status) VALUES (100,'google_classroom','PG score source','active');
+      INSERT INTO learning_programs (id,slug,display_name,status)
+        VALUES (101,'pg-score-learning','PG score program','active');
+      INSERT INTO learning_courses
+        (id,program_id,connection_id,provider,external_course_id,display_name,launch_url,lifecycle_state)
+        VALUES (102,101,100,'google_classroom','pg-score-course','PG score course',
+          'https://classroom.google.com/c/pg-score','active');
+      INSERT INTO learning_identity_links
+        (id,connection_id,person_id,external_user_id,status)
+        VALUES (103,100,2,'pg-score-user','active');
+      INSERT INTO learning_enrollments
+        (id,connection_id,course_id,identity_link_id,external_enrollment_id,role,state)
+        VALUES (104,100,102,103,'pg-score-enrollment','student','completed');
+      INSERT INTO learning_activities
+        (id,course_id,external_activity_id,title,kind,lifecycle_state,launch_url) VALUES
+        (105,102,'pg-score-assignment','Private title','assignment','published',
+          'https://classroom.google.com/a/pg-score'),
+        (106,102,'pg-score-quiz','Private quiz','quiz','published',
+          'https://classroom.google.com/q/pg-score');
+      INSERT INTO learning_activity_events
+        (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
+         enrollment_id,course_id,activity_id,activity_kind,occurred_at) VALUES
+        ('pg-score-a',100,'google_classroom','pg-score-a','assignment_submitted',2,103,104,102,105,'assignment','2026-06-01T00:00:00Z'),
+        ('pg-score-q',100,'google_classroom','pg-score-q','quiz_submitted',2,103,104,102,106,'quiz','2026-06-30T23:59:59Z'),
+        ('pg-score-return',100,'google_classroom','pg-score-return','submission_returned',2,103,104,102,105,'assignment','2026-06-15T00:00:00Z');
+    `);
+    expect(await isLearningActivitySourceAvailable(db)).toBe(true);
+    expect(await listLearningEngagementEvidence(db, '2026-06-01', '2026-06-30')).toEqual([
+      { personId: 2, count: 2 },
+    ]);
   });
 });

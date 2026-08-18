@@ -19,6 +19,7 @@ const config: ActivityScoreConfig = {
     group_attendance: { enabled: true, weight: 50, targetCount: null },
     serving: { enabled: true, weight: 50, targetCount: 3 },
     registration: { enabled: false, weight: 0, targetCount: 2 },
+    learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
   },
 };
 
@@ -112,6 +113,7 @@ describe('scorePerson', () => {
       group_attendance: { enabled: true, weight: 100, targetCount: null },
       serving: { enabled: false, weight: 0, targetCount: 3 },
       registration: { enabled: false, weight: 0, targetCount: 2 },
+      learning_engagement: { enabled: false, weight: 0, targetCount: 3 },
     } } satisfies ActivityScoreConfig;
     expect(scorePerson(watchConfig, {
       ...evidence, current: { group_attendance: { present: 2, opportunities: 5 } }, previous: {},
@@ -119,6 +121,29 @@ describe('scorePerson', () => {
     expect(scorePerson(watchConfig, {
       ...evidence, current: { group_attendance: { present: 7, opportunities: 10 } }, previous: {},
     }, new Set(['group_attendance'])).band).toBe('active');
+  });
+
+  it('scores bounded Learning submissions with deterministic target rounding', () => {
+    const learningConfig = {
+      ...config,
+      dimensions: {
+        group_attendance: { enabled: false, weight: 0, targetCount: null },
+        serving: { enabled: false, weight: 0, targetCount: 3 },
+        registration: { enabled: false, weight: 0, targetCount: 2 },
+        learning_engagement: { enabled: true, weight: 100, targetCount: 3 },
+      },
+    } as never;
+    const result = scorePerson(learningConfig, {
+      ...evidence,
+      current: { learning_engagement: { count: 2 } } as never,
+      previous: { learning_engagement: { count: 1 } } as never,
+    }, new Set(['learning_engagement'] as never));
+    expect(result).toMatchObject({ score: 67, previousScore: 33, trend: 34, band: 'watch' });
+    expect(result.dimensions).toMatchObject({
+      learning_engagement: {
+        numerator: 2, denominator: 3, score: 67, previousScore: 33, weight: 100, observed: true,
+      },
+    });
   });
 
   it('rejects unavailable-all, unsafe ids/counts, impossible attendance, and ineligible status', () => {

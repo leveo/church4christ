@@ -38,12 +38,15 @@ describe('activity score admin source boundaries', () => {
     expect(page).toContain('dimension.numerator');
     expect(page).toContain('dimension.denominator');
     expect(page).toContain('dimension.weight');
+    expect(page).toContain("admin.activityScore.dimension.learning");
+    expect(page).toContain('target_learning_engagement');
+    expect(page).toContain('report.sourceAvailability[key]');
   });
 
   it('does not introduce sensitive activity sources or person fields', () => {
     const page = readFileSync(pagePath, 'utf8');
     expect(page).not.toMatch(/giving|prayer|pastoral_notes|service_attendance/i);
-    expect(page).not.toMatch(/person\.email|row\.email|group_name|position_name|event_name/i);
+    expect(page).not.toMatch(/person\.email|row\.email|group_name|position_name|event_name|grade|late|answer|comment|file_bytes/i);
   });
 
   it('registers the page in admin navigation and the dashboard', () => {
