@@ -28,9 +28,10 @@ Do not edit, rename, delete, or reorder a migration once it is merged into `main
 a persistent, shared, or deployed installation; waiting for a tag or GitHub Release is too
 late. Before merge, a proposed migration applied only to disposable local or CI databases may
 still change after those databases are reset or rebuilt. Merge to `main` establishes the
-permanent boundary even when no deployed installation has applied it. The 1.0.0 boundary froze
-Files `0001` through `0016` in both migration directories. Version 1.1.0 adds forward files
-`0017` through `0026`; review both backends for exact name/order parity, and treat those files as
+permanent boundary even when no deployed installation has applied it.
+The 1.0.0 boundary froze files `0001` through `0016` in both migration directories. Version 1.1.0
+adds forward files `0017` through `0026`; review both backends for exact name/order parity, and treat
+those files as
 frozen once merged or applied. Create a new, numbered, forward migration for every correction.
 Never manufacture migration history by editing D1's `d1_migrations` table or
 Supabase/Postgres's `_migrations` table.

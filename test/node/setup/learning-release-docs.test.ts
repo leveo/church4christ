@@ -27,6 +27,16 @@ const capabilitiesCatalog = JSON.parse(read('config/capabilities.json')) as {
   order: string[];
   capabilities: Record<string, { requiresBackend?: string }>;
 };
+const keyRotationSection = deploy.slice(
+  deploy.indexOf('### Learning module and shared credential key ring'),
+  deploy.indexOf('### Google Classroom OAuth and optional Pub/Sub'),
+);
+const googleRunbook = deploy.slice(
+  deploy.indexOf('### Google Classroom OAuth and optional Pub/Sub'),
+  deploy.indexOf('### Canvas OAuth and signed Live Events'),
+);
+const syncBudgetSection = deploy.slice(deploy.indexOf('Manual sync is an authenticated'), deploy.indexOf('## 3. Create the database tables'));
+const retentionSection = learning.slice(learning.indexOf('## Retention, deletion'), learning.indexOf('## Canvas provenance'));
 
 describe('v1.1.0 Learning release contract', () => {
   it('keeps private package metadata at exactly 1.1.0 and preserves 1.0.0 history', () => {
@@ -169,5 +179,47 @@ describe('v1.1.0 Learning release contract', () => {
     );
     expect(d1Capable).toHaveLength(18);
     expect(cloudflareSetup).toContain(`default for ${d1Capable.length} modules`);
+  });
+
+  it('gives a complete, non-destructive Learning key-rotation inventory and stale-state procedure', () => {
+    for (const table of [
+      'learning_provider_credentials',
+      'learning_google_oauth_states',
+      'learning_canvas_oauth_states',
+      'learning_canvas_cleanup_tasks',
+    ]) {
+      expect(keyRotationSection, table).toMatch(
+        new RegExp(`SELECT key_version, COUNT\\(\\*\\) AS envelope_count\\s+FROM ${table}`, 'i'),
+      );
+    }
+    expect(keyRotationSection).toMatch(/expir(?:y|ation)[^\n]*(does not|never)[^\n]*delet/i);
+    expect(keyRotationSection).toMatch(/replacement OAuth[\s\S]{0,220}supersed/i);
+    expect(keyRotationSection).toMatch(/DELETE FROM learning_google_oauth_states[\s\S]{0,260}claim_marker IS NULL/i);
+    expect(keyRotationSection).toMatch(/DELETE FROM learning_canvas_oauth_states[\s\S]{0,260}claim_marker IS NULL/i);
+  });
+
+  it('describes the actual Google disconnect credential and retained-state lifecycle', () => {
+    expect(googleRunbook).not.toMatch(/disconnect[^\n]*removes the active encrypted envelope/i);
+    expect(googleRunbook).toMatch(/disconnect[\s\S]{0,420}disabled[^\n]*active use[\s\S]{0,420}learning_provider_credentials/i);
+    expect(googleRunbook).toMatch(/finaliz[\s\S]{0,220}deletes?[^\n]*encrypted credential/i);
+    expect(retentionSection).toMatch(/Google OAuth state[\s\S]{0,220}notification\s+receipts?[\s\S]{0,220}retention/i);
+  });
+
+  it('distinguishes production trigger caps from provider-library hard maxima', () => {
+    expect(syncBudgetSection).toMatch(
+      /manual[^\n]*scheduled[^\n]*Google Pub\/Sub[^\n]*Canvas Live Events[\s\S]{0,260}21 Google[^\n]*10 Canvas/i,
+    );
+    expect(syncBudgetSection).toMatch(/47[^\n]*Google[\s\S]{0,180}23[^\n]*Canvas[\s\S]{0,220}(library|internal)[^\n]*hard max/i);
+  });
+
+  it('names the complete normalized activity-event retention shape', () => {
+    expect(retentionSection).toMatch(/activity events retain[\s\S]{0,220}provider[^\n]*event type/i);
+    expect(retentionSection).toMatch(/Person[\s\S]{0,180}identity[\s\S]{0,180}enrollment[\s\S]{0,180}course[\s\S]{0,180}activity/i);
+    expect(retentionSection).toMatch(/occurrence[^\n]*ingestion[^\n]*timestamps/i);
+  });
+
+  it('keeps release prose natural instead of satisfying a case-sensitive test artifact', () => {
+    expect(release).toMatch(/boundary froze\s+files\s+`0001`/i);
+    expect(release).not.toMatch(/boundary froze\s+Files/);
   });
 });

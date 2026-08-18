@@ -44,7 +44,7 @@ describe('activity score documentation', () => {
     expect(upgrade).toContain('0016_activity_score.sql');
     expect(upgrade).toMatch(/pre-Task-11[^\n]*schema-incompatible/i);
     expect(upgrade).toMatch(/matched database (?:backup|restore)/i);
-    expect(release).toMatch(/Files .*0001.* through\s+.*0016/);
+    expect(release).toMatch(/files\s+.*0001.* through\s+.*0016/i);
     expect(changelog).toContain('0016_activity_score.sql');
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
     expect(modules).toMatch(/The 21 modules/);

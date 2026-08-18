@@ -148,11 +148,55 @@ npx wrangler secret put LEARNING_CREDENTIAL_KEYS
 
 For key rotation, add a new version/key while retaining every old key, set `currentVersion` to the
 new version, and deploy the expanded ring. New or refreshed envelopes use the current version.
-Reconnect or successfully refresh each provider connection as needed, let pending OAuth states
-expire, and let Google/Canvas cleanup tasks finish. Verify that no credential, OAuth-state, or
-cleanup envelope still references the old `key_version`; **do not remove an old key** before that
-inventory reaches zero and a rollback window has passed. Removing a referenced key fails closed
-and can prevent refresh or cleanup; there is no bulk automatic re-encryption command in 1.1.0.
+Reconnect or successfully refresh each provider connection as needed and let Google/Canvas cleanup
+tasks finish. OAuth-state expiration does not delete or re-encrypt a stored envelope. Starting a
+replacement OAuth flow for the same connection supersedes its pending state under the current key;
+successfully completing the flow deletes that state.
+
+Use these read-only inventories before and after rotation. They expose only key versions and
+counts, not encrypted values:
+
+```sql
+SELECT key_version, COUNT(*) AS envelope_count
+FROM learning_provider_credentials
+GROUP BY key_version ORDER BY key_version;
+
+SELECT key_version, COUNT(*) AS envelope_count
+FROM learning_google_oauth_states
+GROUP BY key_version ORDER BY key_version;
+
+SELECT key_version, COUNT(*) AS envelope_count
+FROM learning_canvas_oauth_states
+GROUP BY key_version ORDER BY key_version;
+
+SELECT key_version, COUNT(*) AS envelope_count
+FROM learning_canvas_cleanup_tasks
+GROUP BY key_version ORDER BY key_version;
+```
+
+For an abandoned state that will not be superseded, take a backup, obtain change approval, and
+delete only the reviewed connection row after confirming that it is expired and unclaimed. Use a
+bound `:connection_id` and `:old_key_version`; never substitute untrusted text or run a blanket
+delete. D1 uses these guarded statements:
+
+```sql
+DELETE FROM learning_google_oauth_states
+WHERE connection_id = :connection_id AND key_version = :old_key_version
+  AND claim_marker IS NULL AND datetime(expires_at) <= datetime('now');
+
+DELETE FROM learning_canvas_oauth_states
+WHERE connection_id = :connection_id AND key_version = :old_key_version
+  AND claim_marker IS NULL AND datetime(expires_at) <= datetime('now');
+```
+
+On PostgreSQL, use the same exact connection/key predicates and `claim_marker IS NULL`, replacing
+the final time predicate with `expires_at::timestamptz <= CURRENT_TIMESTAMP`. Verify that exactly
+one approved row was affected. Do not delete a current, unexpired, or claimed OAuth state.
+
+Verify that no credential, OAuth-state, or cleanup envelope still references the old
+`key_version`; **do not remove an old key** before that inventory reaches zero and a rollback window
+has passed. Removing a referenced key fails closed and can prevent refresh or cleanup; there is no
+bulk automatic re-encryption command in 1.1.0.
 
 ### Google Classroom OAuth and optional Pub/Sub
 
@@ -213,10 +257,14 @@ See Google's official [Classroom push-notification guide](https://developers.goo
 [authenticated Pub/Sub push guide](https://cloud.google.com/pubsub/docs/authenticate-push-subscriptions).
 Classroom registrations last one week; the `:15` maintenance pass renews registrations nearing
 expiry and cleans replaced registrations. Notifications only schedule authoritative reconciliation.
-Disconnect first disables the local connection, removes the active encrypted envelope and live
-registrations, then the durable `0022_learning_google_cleanup_saga.sql` path calls
-`registrations.delete()` and revokes the Google refresh token with bounded retry. Do not delete a
-pending cleanup row or old credential key just to hide an error.
+On disconnect, the local connection and its credential are disabled from active use, and live
+registration rows are removed. The encrypted row in `learning_provider_credentials` remains
+available only so the durable
+`0022_learning_google_cleanup_saga.sql` path can call `registrations.delete()` and revoke the
+Google refresh token with bounded retry. Successful finalization deletes the encrypted credential
+and cleanup tasks. Google OAuth states and notification receipts are not removed by disconnect;
+they remain subject to the documented retention policy and reviewed key-rotation procedure. Do not
+delete a pending cleanup row or old credential key just to hide an error.
 
 ### Canvas OAuth and signed Live Events
 
@@ -303,12 +351,12 @@ Cloudflare D1 Free permits 50 queries per Worker invocation.
 Workers Free permits 50 external subrequests per invocation as of this release. The reconciliation
 planner reserves cold middleware, route/receipt, identity, credential-refresh, and finalization
 work. Google reserves 12 D1 queries per attempt and Canvas 14; the two-attempt invocation tests
-remain at or below 50. The Google provider loop caps at 47 pages plus three reserved
-provider/JWKS/refresh requests;
-Canvas caps it at 23 normalized pages where a page may cost two provider requests, plus the
-reserved Live Events JWK/refresh/course reads. Scheduled runs use the lower orchestration caps of
-21 Google pages or 10 Canvas pages. Do not raise page, item, byte, elapsed-time, retry, query, or
-subrequest constants without rerunning boundary tests against current
+remain at or below 50. The 47 Google pages plus three reserved provider/JWKS/refresh requests and
+23 Canvas normalized pages plus reserved Live Events JWK/refresh/course reads are provider-library
+internal hard maxima; a Canvas page may cost two provider requests. Every production sync
+trigger—manual, scheduled, Google Pub/Sub, and Canvas Live Events—uses the lower orchestration caps
+of 21 Google pages or 10 Canvas pages per attempt. Do not raise page, item, byte, elapsed-time,
+retry, query, or subrequest constants without rerunning boundary tests against current
 [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) and
 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
 

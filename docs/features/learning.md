@@ -98,12 +98,20 @@ the remaining available dimensions without deleting Learning events or changing 
 ## Retention, deletion, and operator verification
 
 Version 1.1.0 intentionally has **no automatic time-based Learning retention/TTL job**. A provider
-disconnect disables the connection and synchronization, removes the active credential envelope,
-and cleans provider-private OAuth/notification state through the durable provider cleanup saga.
+disconnect disables the connection and synchronization, but the two provider cleanup sagas retain
+different minimum state. Canvas moves its encrypted credential into a cleanup task and deletes the
+active credential row, Canvas OAuth state, event receipts, and webhook configuration. Google
+disables its credential from active use and retains the encrypted provider credential until cleanup
+finalization; it removes live registration rows locally, but Google OAuth state and notification
+receipts are not removed by disconnect and remain subject to the retention policy.
+
 Normalized courses, activities, identity links, enrollments, submission status snapshots, bounded
-sync facts, and append-only activity-event identifiers may remain as explicitly retained history.
-They contain no grades, answers, comments, assignment bodies, uploaded file bytes, or raw provider
-payloads, but they are still congregation data and need an operator-approved retention period.
+sync facts, and append-only activity events may remain as explicitly retained history.
+Activity events retain stable source/event identifiers, provider and event type, Person, identity,
+enrollment, course, and activity references, activity kind, and occurrence and ingestion timestamps.
+Those references and timestamps are sensitive congregation engagement facts even though the rows
+contain no grades, answers, comments, assignment bodies, uploaded file bytes, or raw provider
+payloads. All retained Learning rows therefore need an operator-approved retention period.
 
 Document the church's purpose, retention duration, deletion approver, backup impact, and legal or
 pastoral hold process before production. Person deletion cascades the Person-scoped Learning graph;
