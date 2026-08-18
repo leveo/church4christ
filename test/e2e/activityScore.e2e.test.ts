@@ -16,8 +16,8 @@ beforeEach(async () => {
       VALUES (71, 'Nora', 'Score', 'Nora Score', 'nora.score@example.com', 'admin', 0, '')
       ON CONFLICT(id) DO UPDATE SET admin_areas=''`),
     env.DB.prepare(`INSERT INTO people (id, first_name, last_name, display_name, email, role, super_admin, admin_areas, lang)
-      VALUES (72, 'Lin', 'Score', 'Lin Score', 'lin.score@example.com', 'admin', 0, 'activity-score', 'zh')
-      ON CONFLICT(id) DO UPDATE SET admin_areas='activity-score', lang='zh'`),
+      VALUES (72, 'Lin', 'Score', 'Lin Score', 'lin.score@example.com', 'admin', 1, 'activity-score', 'zh')
+      ON CONFLICT(id) DO UPDATE SET super_admin=1, admin_areas='activity-score', lang='zh'`),
   ]);
 });
 
@@ -47,9 +47,9 @@ function configBody(revision = 0): string {
   return body.toString();
 }
 
-function learningConfigBody(): string {
+function learningConfigBody(revision: number): string {
   const body = new URLSearchParams({
-    action: 'save_config', revision: '0', window_days: '60',
+    action: 'save_config', revision: String(revision), window_days: '60',
     weight_group_attendance: '0', weight_serving: '0', weight_registration: '0',
     weight_learning_engagement: '100', target_serving: '3', target_registration: '2',
     target_learning_engagement: '3', active_threshold: '70', watch_threshold: '40',
@@ -147,7 +147,10 @@ describe('Activity Score built-worker access and rendering', () => {
           1,19640,19650,19630,19660,'assignment','2026-08-18T12:00:00Z')`),
     ]);
     const admin = await sessionCookie(1, 'admin@example.com');
-    const saved = await post('/admin/activity-score', learningConfigBody(), { cookie: admin });
+    const revision = await env.DB.prepare(
+      `SELECT revision FROM activity_score_config WHERE id=1`,
+    ).first<number>('revision');
+    const saved = await post('/admin/activity-score', learningConfigBody(revision ?? 0), { cookie: admin });
     expect(saved.status).toBe(303);
     await saved.arrayBuffer();
 

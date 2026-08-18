@@ -2,7 +2,7 @@
 import Admin from '../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { badge, badgeActive, badgeInactive, btn, btnSecondary, card, noticeErr, noticeOk, td, th, tin, lab } from '../../../lib/adminUi';
-import { ActivityScoreConflictError, saveActivityScoreConfig } from '../../../lib/activityScoreDb';
+import { ActivityScoreConflictError, isLearningActivitySourceAvailable, saveActivityScoreConfig } from '../../../lib/activityScoreDb';
 import { parseActivityScoreConfigForm } from '../../../lib/activityScoreForms';
 import {
   ACTIVITY_DIMENSIONS,
@@ -32,7 +32,13 @@ const sourceModules: Record<ActivityDimensionKey, string> = {
   group_attendance: 'groups',
   serving: 'serve',
   registration: 'registration',
+  learning_engagement: 'learning',
 };
+const countTargetNames = {
+  serving: 'target_serving',
+  registration: 'target_registration',
+  learning_engagement: 'target_learning_engagement',
+} as const;
 let formError: 'invalid' | 'unavailable' | 'conflict' | 'failed' | null = null;
 
 if (method === 'POST') {
@@ -42,9 +48,14 @@ if (method === 'POST') {
     if (!parsed.ok) {
       formError = 'invalid';
     } else {
-      const selectedSourcesAvailable = ACTIVITY_DIMENSIONS.every((key) =>
+      let selectedSourcesAvailable = ACTIVITY_DIMENSIONS.every((key) =>
         !parsed.data.config.dimensions[key].enabled || modules.has(sourceModules[key]),
       );
+      if (
+        selectedSourcesAvailable
+        && parsed.data.config.dimensions.learning_engagement.enabled
+        && !await isLearningActivitySourceAvailable(Astro.locals.db)
+      ) selectedSourcesAvailable = false;
       if (!selectedSourcesAvailable) {
         formError = 'unavailable';
       } else {
@@ -84,7 +95,8 @@ const filteredCount = report ? filterActivityScores(report.rows, filters).length
 function dimensionLabel(key: ActivityDimensionKey): string {
   if (key === 'group_attendance') return t(lang, 'admin.activityScore.dimension.group');
   if (key === 'serving') return t(lang, 'admin.activityScore.dimension.serving');
-  return t(lang, 'admin.activityScore.dimension.registration');
+  if (key === 'registration') return t(lang, 'admin.activityScore.dimension.registration');
+  return t(lang, 'admin.activityScore.dimension.learning');
 }
 function bandLabel(value: ActivityScoreBand): string {
   if (value === 'active') return t(lang, 'admin.activityScore.band.active');
@@ -148,7 +160,7 @@ const formMessage = formError === 'conflict'
 
       <section class={`mt-6 ${card}`}>
         <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.coverage')}</h2>
-        <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {report.availableDimensions.map((key) => {
             const value = report!.summary.coverage[key]!;
             return <div class="rounded-lg border border-border p-4">
@@ -245,15 +257,15 @@ const formMessage = formError === 'conflict'
             </fieldset>
             <fieldset>
               <legend class="font-semibold">{t(lang, 'admin.activityScore.dimensions')}</legend>
-              <div class="mt-3 grid gap-4 lg:grid-cols-3">
+              <div class="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {ACTIVITY_DIMENSIONS.map((key) => {
                   const setting = report!.config.dimensions[key];
-                  const sourceAvailable = modules.has(sourceModules[key]);
+                  const sourceAvailable = report.sourceAvailability[key];
                   return <div class="rounded-lg border border-border p-4">
                     <label class="flex items-center gap-2 font-semibold"><input type="checkbox" name="dimension" value={key} checked={sourceAvailable && setting.enabled} disabled={!sourceAvailable} /> {dimensionLabel(key)}</label>
                     {!sourceAvailable && <p class="mt-1 text-xs text-danger">{t(lang, 'admin.activityScore.sourceOff')}</p>}
                     <label class="mt-3 block"><span class={lab}>{t(lang, 'admin.activityScore.weight')}</span><input class={tin} type="number" min="0" max="100" name={`weight_${key}`} value={sourceAvailable ? setting.weight : 0} readonly={!sourceAvailable} required /></label>
-                    {key !== 'group_attendance' && <label class="mt-3 block"><span class={lab}>{t(lang, 'admin.activityScore.target')}</span><input class={tin} type="number" min="1" max="100" name={`target_${key}`} value={setting.targetCount} required /></label>}
+                    {key !== 'group_attendance' && <label class="mt-3 block"><span class={lab}>{t(lang, 'admin.activityScore.target')}</span><input class={tin} type="number" min="1" max="100" name={countTargetNames[key]} value={setting.targetCount} required /></label>}
                   </div>;
                 })}
               </div>

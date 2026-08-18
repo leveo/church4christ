@@ -66,7 +66,8 @@ try {
     INSERT INTO activity_score_dimensions (dimension_key, enabled, weight, target_count) VALUES
       ('group_attendance', 1, 50, NULL),
       ('serving', 1, 50, 3),
-      ('registration', 0, 0, 2)
+      ('registration', 0, 0, 2),
+      ('learning_engagement', 0, 0, 3)
   `);
 
   // The seed inserts explicit ids, which never advances the identity sequences

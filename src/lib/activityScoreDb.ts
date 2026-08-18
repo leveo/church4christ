@@ -10,6 +10,7 @@ import {
 } from './activityScoreModel';
 
 export const MAX_ACTIVITY_SCORE_PEOPLE = 5_000;
+export const MAX_ACTIVITY_SCORE_EVENTS = 5_000;
 
 export class ActivityScoreConflictError extends Error {
   readonly code = 'activity_score_conflict' as const;
@@ -110,7 +111,7 @@ export async function getActivityScoreConfig(db: AppDb): Promise<ActivityScoreCo
     if (!Array.isArray(results) || results.length !== 2) persistenceError();
     const configRows = results[0]?.results;
     const dimensionRows = results[1]?.results;
-    if (!Array.isArray(configRows) || configRows.length !== 1 || !Array.isArray(dimensionRows) || dimensionRows.length !== 3) {
+    if (!Array.isArray(configRows) || configRows.length !== 1 || !Array.isArray(dimensionRows) || dimensionRows.length !== ACTIVITY_DIMENSIONS.length) {
       persistenceError();
     }
     const configRow = dataRow(configRows[0], [
@@ -212,7 +213,7 @@ export async function saveActivityScoreConfig(
       }),
     ];
     const results = await db.batch(statements);
-    if (!Array.isArray(results) || results.length !== 4) persistenceError();
+    if (!Array.isArray(results) || results.length !== ACTIVITY_DIMENSIONS.length + 1) persistenceError();
     if (changes(results[0]) === 0) throw new ActivityScoreConflictError();
     if (changes(results[0]) !== 1 || results.slice(1).some((result) => changes(result) !== 1)) persistenceError();
     const saved = await getActivityScoreConfig(db);
@@ -380,4 +381,99 @@ export function listRegistrationEvidence(
     GROUP BY registrations.person_id
     ORDER BY registrations.person_id LIMIT ?
   `, from, to, limit);
+}
+
+export async function isLearningActivitySourceAvailable(db: AppDb): Promise<boolean> {
+  try {
+    const value = await db.prepare(`
+      SELECT 1 AS available
+      FROM learning_provider_connections
+      WHERE status='active' AND deleted_at IS NULL
+      ORDER BY id LIMIT 1
+    `).first<unknown>();
+    if (value === null) return false;
+    const row = dataRow(value, ['available']);
+    if (!row || dbInteger(row.available, 1, 1) !== 1) persistenceError();
+    return true;
+  } catch (error) {
+    if (error instanceof ActivityScorePersistenceError) throw error;
+    throw new ActivityScorePersistenceError();
+  }
+}
+
+function validateEventLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ACTIVITY_SCORE_EVENTS) {
+    throw new ActivityScoreConfigurationError();
+  }
+}
+
+export async function listLearningEngagementEvidence(
+  db: AppDb,
+  from: string,
+  to: string,
+  personLimit = MAX_ACTIVITY_SCORE_PEOPLE,
+  eventLimit = MAX_ACTIVITY_SCORE_EVENTS,
+): Promise<ActivityCountEvidenceRow[]> {
+  validateWindow(from, to, personLimit);
+  validateEventLimit(eventLimit);
+  try {
+    const result = await db.prepare(`
+      WITH bounded_events AS (
+        SELECT DISTINCT event.id, event.person_id, event.occurred_at
+        FROM learning_activity_events event
+        JOIN people person ON person.id=event.person_id
+          AND person.active=1 AND person.deleted_at IS NULL
+        JOIN learning_provider_connections connection
+          ON connection.id=event.connection_id
+          AND connection.status='active' AND connection.deleted_at IS NULL
+        JOIN learning_courses course
+          ON course.id=event.course_id AND course.connection_id=event.connection_id
+          AND course.deleted_at IS NULL AND course.lifecycle_state<>'deleted'
+        JOIN learning_programs program ON program.id=course.program_id
+          AND program.deleted_at IS NULL
+        JOIN learning_identity_links identity_link
+          ON identity_link.id=event.identity_link_id
+          AND identity_link.connection_id=event.connection_id
+          AND identity_link.person_id=event.person_id AND identity_link.status='active'
+        JOIN learning_enrollments enrollment
+          ON enrollment.id=event.enrollment_id AND enrollment.course_id=event.course_id
+          AND enrollment.connection_id=event.connection_id
+          AND enrollment.identity_link_id=event.identity_link_id
+          AND enrollment.state IN ('active','completed')
+        WHERE event.event_type IN ('assignment_submitted','quiz_submitted')
+          AND substr(event.occurred_at,1,10) >= ?
+          AND substr(event.occurred_at,1,10) <= ?
+        ORDER BY event.occurred_at,event.person_id,event.id
+        LIMIT ?
+      ), person_counts AS (
+        SELECT person_id, COUNT(*) AS activity_count
+        FROM bounded_events GROUP BY person_id
+      )
+      SELECT person_id, activity_count,
+        (SELECT COUNT(*) FROM bounded_events) AS total_event_count
+      FROM person_counts ORDER BY person_id LIMIT ?
+    `).bind(from, to, eventLimit + 1, personLimit + 1).all<unknown>();
+    if (!Array.isArray(result.results)) persistenceError();
+    if (result.results.length > personLimit) throw new ActivityScoreLimitError();
+    const rows: ActivityCountEvidenceRow[] = [];
+    let expectedTotal: number | null = null;
+    for (const value of result.results) {
+      const row = dataRow(value, ['person_id', 'activity_count', 'total_event_count']);
+      const personId = row ? dbInteger(row.person_id, 1) : null;
+      const count = row ? dbInteger(row.activity_count, 1, eventLimit + 1) : null;
+      const total = row ? dbInteger(row.total_event_count, 1, eventLimit + 1) : null;
+      if (
+        personId === null || count === null || total === null || count > total
+        || (expectedTotal !== null && total !== expectedTotal)
+        || (rows.length > 0 && personId <= rows[rows.length - 1].personId)
+      ) persistenceError();
+      expectedTotal = total;
+      rows.push({ personId, count });
+    }
+    if (expectedTotal !== null && expectedTotal > eventLimit) throw new ActivityScoreLimitError();
+    return rows;
+  } catch (error) {
+    if (error instanceof ActivityScoreLimitError || error instanceof ActivityScorePersistenceError) throw error;
+    throw new ActivityScorePersistenceError();
+  }
 }

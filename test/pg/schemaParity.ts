@@ -141,6 +141,7 @@ export function normalizeIndexPredicate(value: string | null): string | null {
     (segment) => segment
       .replaceAll(/::(?:text|character varying)/gi, '')
       .replace(/\s+/g, ' ')
+      .replace(/\s*=\s*/g, '=')
       .toLowerCase(),
   );
   while (hasSingleOuterPair(normalized)) normalized = normalized.slice(1, -1).trim();

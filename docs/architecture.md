@@ -74,7 +74,9 @@ per-person attendance remains a separate data model and authorization surface. S
 
 Activity Score computes explainable member and church-wide results live from bounded,
 person-linked evidence. It stores only one scoring configuration, never calculated score
-snapshots, and excludes sensitive or non-attributable sources. See
+snapshots, and excludes sensitive or non-attributable sources. Its optional Learning bridge
+reads only bounded, deduplicated assignment/quiz submission events; provider content, grades,
+answers, files, comments, and lateness remain outside the scoring boundary. See
 [`docs/features/activity-score.md`](features/activity-score.md).
 
 ## The database seam: D1 or Postgres

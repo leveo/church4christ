@@ -207,6 +207,13 @@ providers. Apply it before deploying `/admin/activity-score` or enabling the
 scores are calculated live. A code rollback does not remove the model, and operators must
 not rewrite `0016` after this frozen boundary.
 
+Migration `0026_activity_score_learning.sql` adds the optional Learning engagement dimension
+on both providers without rewriting frozen `0016`. Apply it only after the Learning schema
+migrations. It preserves the existing model and all three earlier dimension rows, adds Learning
+disabled with weight zero and target three, and creates the bounded submission-event index.
+Code rollback must tolerate this extra disabled configuration row; do not delete historical
+Learning events merely because the module or provider connection is unavailable.
+
 ## 5. Recovery boundaries
 
 Code rollback and data recovery are different operations:

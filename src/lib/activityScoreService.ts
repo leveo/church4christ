@@ -1,11 +1,14 @@
 import type { AppDb } from './appDb';
 import {
   MAX_ACTIVITY_SCORE_PEOPLE,
+  MAX_ACTIVITY_SCORE_EVENTS,
   getActivityScoreConfig,
   listEligibleActivityPeople,
   listGroupAttendanceEvidence,
   listRegistrationEvidence,
   listServingEvidence,
+  isLearningActivitySourceAvailable,
+  listLearningEngagementEvidence,
   type ActivityCountEvidenceRow,
   type EligibleActivityPerson,
   type GroupAttendanceEvidenceRow,
@@ -44,6 +47,7 @@ export interface ActivityScoreReport {
   windows: { current: ActivityScoreWindow; previous: ActivityScoreWindow };
   availableDimensions: ActivityDimensionKey[];
   unavailableDimensions: ActivityDimensionKey[];
+  sourceAvailability: Record<ActivityDimensionKey, boolean>;
   rows: PersonActivityScore[];
   summary: ActivityScoreSummary;
 }
@@ -54,6 +58,8 @@ export interface ActivityScoreReaders {
   listGroup(db: AppDb, from: string, to: string, limit: number): Promise<GroupAttendanceEvidenceRow[]>;
   listServing(db: AppDb, from: string, to: string, limit: number): Promise<ActivityCountEvidenceRow[]>;
   listRegistration(db: AppDb, from: string, to: string, limit: number): Promise<ActivityCountEvidenceRow[]>;
+  hasLearningSource(db: AppDb): Promise<boolean>;
+  listLearning(db: AppDb, from: string, to: string, personLimit: number, eventLimit: number): Promise<ActivityCountEvidenceRow[]>;
 }
 
 const DEFAULT_READERS: ActivityScoreReaders = {
@@ -62,12 +68,15 @@ const DEFAULT_READERS: ActivityScoreReaders = {
   listGroup: listGroupAttendanceEvidence,
   listServing: listServingEvidence,
   listRegistration: listRegistrationEvidence,
+  hasLearningSource: isLearningActivitySourceAvailable,
+  listLearning: listLearningEngagementEvidence,
 };
 
 const SOURCE_MODULE: Record<ActivityDimensionKey, string> = {
   group_attendance: 'groups',
   serving: 'serve',
   registration: 'registration',
+  learning_engagement: 'learning',
 };
 
 function reportError(): never {
@@ -115,7 +124,7 @@ function addGroupRows(
 function addCountRows(
   target: Map<number, PersonActivityEvidence>,
   period: 'current' | 'previous',
-  key: 'serving' | 'registration',
+  key: 'serving' | 'registration' | 'learning_engagement',
   rows: ActivityCountEvidenceRow[],
 ): void {
   if (!Array.isArray(rows) || rows.length > MAX_ACTIVITY_SCORE_PEOPLE) reportError();
@@ -156,9 +165,18 @@ export async function buildActivityScoreReport(
       to: addDays(current.from, -1),
       from: addDays(current.from, -config.windowDays),
     };
+    const sourceAvailability: Record<ActivityDimensionKey, boolean> = {
+      group_attendance: modules.has(SOURCE_MODULE.group_attendance),
+      serving: modules.has(SOURCE_MODULE.serving),
+      registration: modules.has(SOURCE_MODULE.registration),
+      learning_engagement: false,
+    };
+    if (modules.has(SOURCE_MODULE.learning_engagement)) {
+      sourceAvailability.learning_engagement = await readers.hasLearningSource(db);
+    }
     const configured = ACTIVITY_DIMENSIONS.filter((key) => config.dimensions[key].enabled);
-    const availableDimensions = configured.filter((key) => modules.has(SOURCE_MODULE[key]));
-    const unavailableDimensions = configured.filter((key) => !modules.has(SOURCE_MODULE[key]));
+    const availableDimensions = configured.filter((key) => sourceAvailability[key]);
+    const unavailableDimensions = configured.filter((key) => !sourceAvailability[key]);
     const people = await readers.listPeople(db, config.includedStatuses, MAX_ACTIVITY_SCORE_PEOPLE);
     const evidence = validatePeople(people, config);
     if (availableDimensions.length === 0) {
@@ -167,6 +185,7 @@ export async function buildActivityScoreReport(
         windows: { current, previous },
         availableDimensions,
         unavailableDimensions,
+        sourceAvailability,
         rows: [],
         summary: unscoredSummary(people.length),
       };
@@ -179,9 +198,20 @@ export async function buildActivityScoreReport(
         addGroupRows(evidence, 'current', currentRows);
         addGroupRows(evidence, 'previous', previousRows);
       } else {
-        const reader = key === 'serving' ? readers.listServing : readers.listRegistration;
-        const currentRows = await reader(db, current.from, current.to, MAX_ACTIVITY_SCORE_PEOPLE);
-        const previousRows = await reader(db, previous.from, previous.to, MAX_ACTIVITY_SCORE_PEOPLE);
+        let currentRows: ActivityCountEvidenceRow[];
+        let previousRows: ActivityCountEvidenceRow[];
+        if (key === 'learning_engagement') {
+          currentRows = await readers.listLearning(
+            db, current.from, current.to, MAX_ACTIVITY_SCORE_PEOPLE, MAX_ACTIVITY_SCORE_EVENTS,
+          );
+          previousRows = await readers.listLearning(
+            db, previous.from, previous.to, MAX_ACTIVITY_SCORE_PEOPLE, MAX_ACTIVITY_SCORE_EVENTS,
+          );
+        } else {
+          const reader = key === 'serving' ? readers.listServing : readers.listRegistration;
+          currentRows = await reader(db, current.from, current.to, MAX_ACTIVITY_SCORE_PEOPLE);
+          previousRows = await reader(db, previous.from, previous.to, MAX_ACTIVITY_SCORE_PEOPLE);
+        }
         addCountRows(evidence, 'current', key, currentRows);
         addCountRows(evidence, 'previous', key, previousRows);
       }
@@ -194,6 +224,7 @@ export async function buildActivityScoreReport(
       windows: { current, previous },
       availableDimensions,
       unavailableDimensions,
+      sourceAvailability,
       rows,
       summary: buildActivitySummary(rows, availableDimensions),
     };

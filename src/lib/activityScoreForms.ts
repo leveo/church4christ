@@ -79,8 +79,10 @@ export function parseActivityScoreConfigForm(form: FormData): FormResult<Activit
   }
   const servingTarget = integer(scalar(form, 'target_serving'), 1, 100);
   const registrationTarget = integer(scalar(form, 'target_registration'), 1, 100);
+  const learningTarget = integer(scalar(form, 'target_learning_engagement'), 1, 100);
   if (servingTarget === null) errors.target_serving = 'activityScoreTargetInvalid';
   if (registrationTarget === null) errors.target_registration = 'activityScoreTargetInvalid';
+  if (learningTarget === null) errors.target_learning_engagement = 'activityScoreTargetInvalid';
 
   const activeThreshold = integer(scalar(form, 'active_threshold'), 1, 100);
   const watchThreshold = integer(scalar(form, 'watch_threshold'), 0, 99);
@@ -111,6 +113,11 @@ export function parseActivityScoreConfigForm(form: FormData): FormResult<Activit
         enabled: dimensionSet.has('registration'),
         weight: weights.registration,
         targetCount: registrationTarget!,
+      },
+      learning_engagement: {
+        enabled: dimensionSet.has('learning_engagement'),
+        weight: weights.learning_engagement,
+        targetCount: learningTarget!,
       },
     },
   };

@@ -240,6 +240,10 @@ before enabling `activity-score` or deploying `/admin/activity-score`; it stores
 church-wide model while scores remain live calculations. See
 [`features/activity-score.md`](./features/activity-score.md).
 
+After the Learning schema is present, apply `0026_activity_score_learning.sql` on both
+backends before exposing Learning as an Activity Score source. It preserves the existing
+model and adds Learning disabled with weight zero; grades and provider content are not copied.
+
 ## 4. Set the session secret
 
 Sessions are signed with `SESSION_SECRET`. Generate a strong random value (32+ bytes) and

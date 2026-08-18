@@ -18,6 +18,7 @@ describe('Activity Score 0016 to 0026 D1 history upgrade', () => {
       sqlite(database, readFileSync('migrations/0001_init.sql', 'utf8'));
       sqlite(database, readFileSync('migrations/0003_people.sql', 'utf8'));
       sqlite(database, readFileSync('migrations/0016_activity_score.sql', 'utf8'));
+      sqlite(database, readFileSync('migrations/0017_learning.sql', 'utf8'));
       sqlite(database, `
         INSERT INTO people (id,display_name,email) VALUES (26,'Config owner','owner-26@example.test');
         UPDATE activity_score_config SET window_days=60, active_threshold=80,

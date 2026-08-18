@@ -1,4 +1,6 @@
-export const ACTIVITY_DIMENSIONS = ['group_attendance', 'serving', 'registration'] as const;
+export const ACTIVITY_DIMENSIONS = [
+  'group_attendance', 'serving', 'registration', 'learning_engagement',
+] as const;
 export type ActivityDimensionKey = (typeof ACTIVITY_DIMENSIONS)[number];
 
 export const ACTIVITY_MEMBERSHIP_STATUSES = ['visitor', 'regular', 'member', 'inactive'] as const;
@@ -24,6 +26,7 @@ export interface ActivityPeriodEvidence {
   group_attendance?: { present: number; opportunities: number };
   serving?: { count: number };
   registration?: { count: number };
+  learning_engagement?: { count: number };
 }
 
 export interface PersonActivityEvidence {
