@@ -4,6 +4,7 @@ import {
   learningSyntheticEnrollmentId,
   type LearningActivity,
   type LearningConnectionUrlPolicy,
+  type LearningProviderEnrollment,
 } from '../src/lib/learningModel';
 import {
   invokeLearningProvider,
@@ -263,6 +264,114 @@ describe('Canvas provider adapter', () => {
       state: 'active',
     }]);
     expect(JSON.stringify(result)).not.toMatch(/name|email|grades|scores|avatar/iu);
+  });
+
+  it('aggregates coherent Canvas enrollment tuples across distant provider pages before emitting a user', async () => {
+    const next = `${BASE_URL}/api/v1/courses/42/enrollments?per_page=100&page=2`;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get('page') === '2') return json([
+        { id: 503, user_id: 99, course_id: 42, type: 'TeacherEnrollment', enrollment_state: 'active' },
+        { id: 504, user_id: 100, course_id: 42, type: 'TeacherEnrollment', enrollment_state: 'completed' },
+      ]);
+      return json([
+        { id: 501, user_id: 99, course_id: 42, type: 'StudentEnrollment', enrollment_state: 'completed' },
+        { id: 502, user_id: 100, course_id: 42, type: 'StudentEnrollment', enrollment_state: 'active' },
+      ], 200, { link: `<${next}>; rel="next"` });
+    });
+    const adapter = provider(fetcher);
+    const first = await invokeLearningProvider(adapter, {
+      method: 'syncEnrollments',
+      request: {
+        subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+        page: { pageSize: 100, pageNumber: 1, pageToken: null },
+        operation: operation('42'),
+      },
+      now: () => NOW + 1,
+    });
+    expect(first.items).toEqual([]);
+    expect(first.nextPageToken).toBe(next);
+    const second = await invokeLearningProvider(adapter, {
+      method: 'syncEnrollments',
+      request: {
+        subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+        page: { pageSize: 100, pageNumber: 2, pageToken: next },
+        operation: operation('42'),
+      },
+      now: () => NOW + 1,
+    });
+    expect(second.nextPageToken).toBeNull();
+    expect(second.items).toHaveLength(2);
+    expect(second.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ externalUserId: '99', role: 'teacher', state: 'active' }),
+      expect.objectContaining({ externalUserId: '100', role: 'student', state: 'active' }),
+    ]));
+    expect(new Set(second.items.map((item) => item.externalEnrollmentId))).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('chunks a fully aggregated roster without repeating Canvas subrequests or users', async () => {
+    const next = `${BASE_URL}/api/v1/courses/42/enrollments?per_page=100&page=2`;
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: 1_000 + index, user_id: 10_000 + index, course_id: 42,
+      type: 'StudentEnrollment', enrollment_state: 'active',
+    }));
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => (
+      new URL(String(input)).searchParams.get('page') === '2'
+        ? json([{ id: 2_000, user_id: 20_000, course_id: 42, type: 'TeacherEnrollment', enrollment_state: 'active' }])
+        : json(firstPage, 200, { link: `<${next}>; rel="next"` })
+    ));
+    const adapter = provider(fetcher);
+    const all = [];
+    let pageToken: string | null = null;
+    for (let pageNumber = 1; pageNumber <= 3; pageNumber += 1) {
+      const page: LearningProviderPage<LearningProviderEnrollment> = await invokeLearningProvider(adapter, {
+        method: 'syncEnrollments',
+        request: {
+          subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+          page: { pageSize: 100, pageNumber, pageToken },
+          operation: operation('42'),
+        },
+        now: () => NOW + 1,
+      });
+      all.push(...page.items);
+      pageToken = page.nextPageToken;
+    }
+    expect(pageToken).toBeNull();
+    expect(all).toHaveLength(101);
+    expect(new Set(all.map((item) => item.externalEnrollmentId))).toHaveLength(101);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a cross-page Canvas roster whose raw record count exceeds the operation item limit', async () => {
+    const next = `${BASE_URL}/api/v1/courses/42/enrollments?per_page=100&page=2`;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => (
+      new URL(String(input)).searchParams.get('page') === '2'
+        ? json([{ id: 502, user_id: 100, course_id: 42, type: 'TeacherEnrollment', enrollment_state: 'active' }])
+        : json([
+          { id: 501, user_id: 99, course_id: 42, type: 'StudentEnrollment', enrollment_state: 'active' },
+        ], 200, { link: `<${next}>; rel="next"` })
+    ));
+    const adapter = provider(fetcher);
+    const limited = Object.freeze({ ...operation('42'), maxItems: 1 });
+    await invokeLearningProvider(adapter, {
+      method: 'syncEnrollments',
+      request: {
+        subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+        page: { pageSize: 100, pageNumber: 1, pageToken: null },
+        operation: limited,
+      },
+      now: () => NOW + 1,
+    });
+    await expect(invokeLearningProvider(adapter, {
+      method: 'syncEnrollments',
+      request: {
+        subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+        page: { pageSize: 100, pageNumber: 2, pageToken: next },
+        operation: limited,
+      },
+      now: () => NOW + 1,
+    })).rejects.toMatchObject({ code: 'pagination_limit' });
   });
 
   it('resumes omitted module items through the bounded module-items phase before assignments', async () => {

@@ -8,6 +8,7 @@ import {
   normalizeLearningCourse,
   normalizeYouTube,
   type LearningActivity,
+  type CanvasEnrollmentRecord,
   type LearningConnectionUrlPolicy,
   type LearningCourse,
   type LearningLaunchContract,
@@ -358,30 +359,59 @@ function mapCourse(value: unknown, connectionId: number, baseUrl: string): Learn
   });
 }
 
-function mapEnrollments(
+function canvasEnrollmentRecords(
   value: unknown,
   connectionId: number,
   courseId: string,
-): readonly LearningProviderEnrollment[] {
+): readonly CanvasEnrollmentRecord[] {
   const rows = learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems);
-  const byUser = new Map<string, Array<Record<string, unknown>>>();
-  for (const value of rows) {
+  return Object.freeze(rows.map((value) => {
     const enrollment = data(value);
     externalId(enrollment.id);
     if (externalId(enrollment.course_id) !== courseId) learningValidation.invalid();
     const userId = externalId(enrollment.user_id);
-    const records = byUser.get(userId) ?? [];
-    records.push({
+    return Object.freeze({
       connectionId,
-      provider: 'canvas',
+      provider: 'canvas' as const,
       externalCourseId: courseId,
       externalUserId: userId,
-      type: string(enrollment.type, 64),
-      state: string(enrollment.enrollment_state, 64),
+      type: learningValidation.oneOf(enrollment.type, [
+        'StudentEnrollment', 'TeacherEnrollment', 'TaEnrollment',
+        'DesignerEnrollment', 'ObserverEnrollment',
+      ] as const),
+      state: learningValidation.oneOf(enrollment.enrollment_state, [
+        'active', 'invited', 'creation_pending', 'completed',
+        'inactive', 'deleted', 'rejected',
+      ] as const),
     });
-    byUser.set(userId, records);
+  }));
+}
+
+function aggregateEnrollments(records: readonly CanvasEnrollmentRecord[]): readonly LearningProviderEnrollment[] {
+  const byUser = new Map<string, CanvasEnrollmentRecord[]>();
+  for (const record of records) {
+    const grouped = byUser.get(record.externalUserId) ?? [];
+    if (grouped.length >= LEARNING_LIMITS.maxPageItems) throw failure('pagination_limit');
+    grouped.push(record);
+    byUser.set(record.externalUserId, grouped);
   }
   return Object.freeze([...byUser.values()].map((records) => aggregateCanvasEnrollmentRecords(records)));
+}
+
+function enrollmentOutputToken(offset: number): string {
+  return `canvas-enrollment-aggregate:v1:${learningValidation.integer(
+    offset, 1, LEARNING_LIMITS.maxSyncItems,
+  )}`;
+}
+
+interface CanvasEnrollmentAggregationState {
+  readonly courseId: string;
+  readonly expectedPageNumber: number;
+  readonly expectedPageToken: string;
+  readonly records: readonly CanvasEnrollmentRecord[];
+  readonly output: readonly LearningProviderEnrollment[] | null;
+  readonly outputOffset: number;
+  readonly rawBytes: number;
 }
 
 function activityCommon(
@@ -675,6 +705,7 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
   const request = (url: URL, operation: LearningOperationContext) => boundedRequest(
     safeDependencies, baseUrl, url, operation,
   );
+  let enrollmentAggregation: CanvasEnrollmentAggregationState | null = null;
 
   const adapter: LearningProvider = {
     provider: 'canvas',
@@ -716,20 +747,129 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
     async syncEnrollments(input: LearningSyncEnrollmentsRequest) {
       const courseId = input.subject.externalCourseId;
       const path = `/api/v1/courses/${encodeURIComponent(courseId)}/enrollments`;
-      const url = pageUrl(baseUrl, path, input.page.pageSize, input.page.pageToken);
       if (input.page.pageToken === null) {
-        for (const state of ['active', 'invited', 'creation_pending', 'completed', 'inactive']) {
-          url.searchParams.append('state[]', state);
-        }
+        if (input.page.pageNumber !== 1 || enrollmentAggregation !== null) learningValidation.invalid();
+        enrollmentAggregation = Object.freeze({
+          courseId, expectedPageNumber: 1, expectedPageToken: '', records: Object.freeze([]),
+          output: null, outputOffset: 0, rawBytes: 0,
+        });
       }
-      const received = await request(url, input.operation);
-      const next = nextLink(received.response, baseUrl, path);
-      return readAndNormalizeLearningPage(received.response, input.operation, (value) => ({
-        items: mapEnrollments(value, connectionId, courseId),
-        requestPageToken: input.page.pageToken,
-        nextPageToken: next,
-        pageNumber: input.page.pageNumber,
-      }), { kind: 'provider_enrollments' }, dependencies.now, received.deadlineAt);
+      const currentAggregation = enrollmentAggregation;
+      if (currentAggregation === null) return learningValidation.invalid();
+      const state: CanvasEnrollmentAggregationState = currentAggregation;
+      if (
+        state.courseId !== courseId
+        || state.expectedPageNumber !== input.page.pageNumber
+        || (input.page.pageToken ?? '') !== state.expectedPageToken
+      ) learningValidation.invalid();
+      try {
+        if (state.output !== null) {
+          const end = Math.min(state.outputOffset + input.page.pageSize, state.output.length);
+          const items = Object.freeze(state.output.slice(state.outputOffset, end));
+          const next = end < state.output.length ? enrollmentOutputToken(end) : null;
+          if (next !== null && input.page.pageNumber >= input.operation.maxPages) {
+            throw failure('pagination_limit');
+          }
+          const response = new Response(JSON.stringify(items), {
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          });
+          const page = await readAndNormalizeLearningPage(response, input.operation, (value) => ({
+            items: learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems),
+            requestPageToken: input.page.pageToken,
+            nextPageToken: next,
+            pageNumber: input.page.pageNumber,
+          }), { kind: 'provider_enrollments' }, dependencies.now);
+          const rawBytes = state.rawBytes + page.responseBytes;
+          if (rawBytes > input.operation.maxRawBytes) throw failure('pagination_limit');
+          enrollmentAggregation = next === null ? null : Object.freeze({
+            ...state,
+            expectedPageNumber: input.page.pageNumber + 1,
+            expectedPageToken: next,
+            outputOffset: end,
+            rawBytes,
+          });
+          return page;
+        }
+
+        const url = pageUrl(baseUrl, path, input.page.pageSize, input.page.pageToken);
+        if (input.page.pageToken === null) {
+          for (const enrollmentState of ['active', 'invited', 'creation_pending', 'completed', 'inactive']) {
+            url.searchParams.append('state[]', enrollmentState);
+          }
+        }
+        const received = await request(url, input.operation);
+        const remoteNext = nextLink(received.response, baseUrl, path);
+        let parsed: readonly CanvasEnrollmentRecord[] = Object.freeze([]);
+        let aggregated: readonly LearningProviderEnrollment[] | null = null;
+        let combined: readonly CanvasEnrollmentRecord[] = state.records;
+        let limitExceeded = false;
+        const page = await readAndNormalizeLearningPage(received.response, input.operation, (value) => {
+          parsed = canvasEnrollmentRecords(value, connectionId, courseId);
+          combined = Object.freeze([...state.records, ...parsed]);
+          if (combined.length > input.operation.maxItems) limitExceeded = true;
+          if (remoteNext !== null) {
+            if (input.page.pageNumber >= input.operation.maxPages) limitExceeded = true;
+            return {
+              items: [], requestPageToken: input.page.pageToken,
+              nextPageToken: remoteNext, pageNumber: input.page.pageNumber,
+            };
+          }
+          if (!limitExceeded) {
+            try { aggregated = aggregateEnrollments(combined); }
+            catch { limitExceeded = true; }
+          }
+          if (limitExceeded || aggregated === null) {
+            return {
+              items: [], requestPageToken: input.page.pageToken,
+              nextPageToken: null, pageNumber: input.page.pageNumber,
+            };
+          }
+          const outputPages = Math.max(1, Math.ceil(aggregated.length / input.page.pageSize));
+          if (input.page.pageNumber + outputPages - 1 > input.operation.maxPages) {
+            limitExceeded = true;
+            return {
+              items: [], requestPageToken: input.page.pageToken,
+              nextPageToken: null, pageNumber: input.page.pageNumber,
+            };
+          }
+          const end = Math.min(input.page.pageSize, aggregated.length);
+          return {
+            items: aggregated.slice(0, end),
+            requestPageToken: input.page.pageToken,
+            nextPageToken: end < aggregated.length ? enrollmentOutputToken(end) : null,
+            pageNumber: input.page.pageNumber,
+          };
+        }, { kind: 'provider_enrollments' }, dependencies.now, received.deadlineAt);
+        if (limitExceeded) throw failure('pagination_limit');
+        const rawBytes = state.rawBytes + page.responseBytes;
+        if (rawBytes > input.operation.maxRawBytes) throw failure('pagination_limit');
+        if (remoteNext !== null) {
+          enrollmentAggregation = Object.freeze({
+            ...state,
+            expectedPageNumber: input.page.pageNumber + 1,
+            expectedPageToken: remoteNext,
+            records: combined,
+            rawBytes,
+          });
+        } else if (page.nextPageToken !== null && aggregated !== null) {
+          const output = aggregated as readonly LearningProviderEnrollment[];
+          enrollmentAggregation = Object.freeze({
+            courseId,
+            expectedPageNumber: input.page.pageNumber + 1,
+            expectedPageToken: page.nextPageToken,
+            records: Object.freeze([]),
+            output,
+            outputOffset: Math.min(input.page.pageSize, output.length),
+            rawBytes,
+          });
+        } else {
+          enrollmentAggregation = null;
+        }
+        return page;
+      } catch (error) {
+        enrollmentAggregation = null;
+        throw error;
+      }
     },
 
     async syncActivities(input: LearningSyncActivitiesRequest) {
