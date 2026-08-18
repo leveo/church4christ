@@ -20,6 +20,7 @@ before choosing a production setup.
 |---|---|---|
 | ![The English home page](docs/images/public/home-en.png) | ![The Chinese home page](docs/images/public/home-zh.png) | ![The prayer wall board](docs/images/admin/prayer-wall.png) |
 | ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Member Portal dashboard](docs/images/portal/dashboard.png) |
+| ![The English Genesis 1 learner course](docs/images/learning/genesis-1-en.png) | ![The Chinese Genesis 1 learner course](docs/images/learning/genesis-1-zh.png) | ![The Learning provider administration page](docs/images/learning/admin-overview.png) |
 
 Two languages are included out of the box (English and Chinese), along with three
 ready-made looks and a modular starting point for further customization.
@@ -163,6 +164,30 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
+
+### Learning beyond Sunday / 主日之后继续学习
+
+Version 1.1.0 adds the optional **Learning** module for Sunday school,
+discipleship, and other ministries that continue between meetings. Learners get
+a bilingual, privacy-bounded course view for unlisted YouTube videos, files,
+assignments, and quizzes. Submission stays provider-authoritative: the site
+links learners to the configured provider instead of collecting homework,
+answers, comments, grades, or file contents itself.
+
+Administrators can connect Google Classroom through its official APIs or a
+separately operated Church4Christ Canvas derivative. Course mapping, encrypted
+OAuth credentials, signed provider notifications, manual sync, and bounded
+scheduled reconciliation feed only the activity metadata Church4Christ needs.
+
+![Google Classroom and Church4Christ Canvas feed privacy-bounded course metadata into the bilingual learner experience](docs/images/learning/learning-flow-gpt-image-2.png)
+
+| English learner view | 中文学员页面 | Provider administration |
+|---|---|---|
+| [![Genesis 1 course in English](docs/images/learning/genesis-1-en.png)](docs/images/learning/genesis-1-en.png) | [![中文《创世记第一章》课程](docs/images/learning/genesis-1-zh.png)](docs/images/learning/genesis-1-zh.png) | [![Google Classroom and Canvas connection administration](docs/images/learning/admin-overview.png)](docs/images/learning/admin-overview.png) |
+
+See the **[Learning feature guide](docs/features/learning.md)** for provider
+setup, privacy boundaries, synchronization budgets, the Genesis 1 demo, and the
+separate Canvas operations and corresponding-source requirements.
 
 ### A home for your members
 
