@@ -157,7 +157,7 @@ describe('Activity Score built-worker access and rendering', () => {
     const html = await (await get('/admin/activity-score', { cookie: admin })).text();
     expect(html).toContain('Learning engagement');
     expect(html).toContain('1/3');
-    expect(html).toContain('1 of');
+    expect(html).toContain('3 of 7 eligible people had recorded activity.');
     expect(html).not.toMatch(/Secret course name|Secret assignment title|grade|answer|comment/i);
   });
 });
