@@ -211,8 +211,11 @@ Migration `0026_activity_score_learning.sql` adds the optional Learning engageme
 on both providers without rewriting frozen `0016`. Apply it only after the Learning schema
 migrations. It preserves the existing model and all three earlier dimension rows, adds Learning
 disabled with weight zero and target three, and creates the bounded submission-event index.
-Code rollback must tolerate this extra disabled configuration row; do not delete historical
-Learning events merely because the module or provider connection is unavailable.
+A pre-Task-11 Worker revision is schema-incompatible because it rejects this fourth
+configuration row. Do not roll back code alone after applying `0026`: recover a matched database backup
+from before the migration, or deploy a specifically forward-compatible Worker revision.
+Do not delete historical Learning events merely because the module or provider connection is
+unavailable.
 
 ## 5. Recovery boundaries
 

@@ -419,7 +419,7 @@ export async function listLearningEngagementEvidence(
   try {
     const result = await db.prepare(`
       WITH bounded_events AS (
-        SELECT DISTINCT event.id, event.person_id, event.occurred_at
+        SELECT event.id, event.person_id, event.occurred_at
         FROM learning_activity_events event
         JOIN people person ON person.id=event.person_id
           AND person.active=1 AND person.deleted_at IS NULL
@@ -440,9 +440,9 @@ export async function listLearningEngagementEvidence(
           AND enrollment.connection_id=event.connection_id
           AND enrollment.identity_link_id=event.identity_link_id
           AND enrollment.state IN ('active','completed')
-        WHERE event.event_type IN ('assignment_submitted','quiz_submitted')
-          AND substr(event.occurred_at,1,10) >= ?
-          AND substr(event.occurred_at,1,10) <= ?
+        WHERE (event.event_type='assignment_submitted' OR event.event_type='quiz_submitted')
+          AND event.occurred_at >= ?
+          AND event.occurred_at <= ?
         ORDER BY event.occurred_at,event.person_id,event.id
         LIMIT ?
       ), person_counts AS (
@@ -452,7 +452,10 @@ export async function listLearningEngagementEvidence(
       SELECT person_id, activity_count,
         (SELECT COUNT(*) FROM bounded_events) AS total_event_count
       FROM person_counts ORDER BY person_id LIMIT ?
-    `).bind(from, to, eventLimit + 1, personLimit + 1).all<unknown>();
+    `).bind(
+      `${from}T00:00:00`, `${to}T23:59:59Z`,
+      eventLimit + 1, personLimit + 1,
+    ).all<unknown>();
     if (!Array.isArray(result.results)) persistenceError();
     if (result.results.length > personLimit) throw new ActivityScoreLimitError();
     const rows: ActivityCountEvidenceRow[] = [];
