@@ -29,9 +29,9 @@ CREATE TABLE learning_google_cleanup_tasks (
 );
 
 CREATE UNIQUE INDEX idx_learning_google_cleanup_registration
-  ON learning_google_cleanup_tasks(registration_id) WHERE task_type='registration';
+  ON learning_google_cleanup_tasks(registration_id) WHERE task_type = 'registration';
 CREATE UNIQUE INDEX idx_learning_google_cleanup_disconnect
-  ON learning_google_cleanup_tasks(connection_id) WHERE task_type='disconnect';
+  ON learning_google_cleanup_tasks(connection_id) WHERE task_type = 'disconnect';
 CREATE INDEX idx_learning_google_cleanup_drain
   ON learning_google_cleanup_tasks(connection_id,task_type,id);
 CREATE UNIQUE INDEX idx_learning_google_cleanup_claim
