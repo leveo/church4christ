@@ -48,6 +48,14 @@ Church4Christ is built to be safe by default. The main controls:
 - **Formula-injection-safe CSV.** Exported CSV cells that begin with `=`, `+`, `-`, `@`, or a
   control character are prefixed with a quote, so a crafted field (like a display name) cannot
   become a live formula when opened in Excel or Google Sheets.
+- **Learning provider isolation.** Google Classroom and Canvas remain authoritative; learners
+  submit in the provider. OAuth credentials use the server-only, versioned AES-256-GCM
+  `LEARNING_CREDENTIAL_KEYS` envelope. Exact HTTPS origins/callbacks, minimal scopes, signed
+  notifications, bounded response/page/item/query/subrequest work, and server-first Person plus
+  enrollment authorization fail closed. Grades, answers, comments, assignment bodies, raw
+  payloads, continuation tokens, uploaded files, and file bytes are not stored by Learning.
+  Learning has no automatic retention TTL in 1.1.0: operators must define deletion/retention,
+  include it in backup erasure, and verify provider cleanup and Person deletion separately.
 
 ## Deployment security checklist
 
@@ -62,6 +70,15 @@ Getting the code right is only half of it; a secure deployment also depends on y
       `wrangler secret put`.
 - [ ] **Rotate secrets when a staff member with access leaves.** Bumping a person's session
       epoch signs them out everywhere; rotating `SESSION_SECRET` signs out everyone.
+- [ ] **Keep every referenced Learning credential key during rotation.** Add the new key first,
+      make it current, refresh/reconnect credentials, expire OAuth state, finish cleanup tasks,
+      and remove an old version only after all database references reach zero. Never log or
+      commit the `LEARNING_CREDENTIAL_KEYS` value.
+- [ ] **Verify Learning provider controls outside doctor.** Review Google OAuth consent/scopes,
+      Pub/Sub authenticated-push identity/audience and Classroom publisher permission, Canvas
+      allowed origins/scopes and signed Live Events, both cron halves, manual sync, disconnect
+      cleanup, retention execution, and restore behavior. `doctor --strict` cannot perform those
+      external proofs.
 - [ ] **(Optional) Put Cloudflare Access in front of `/admin`** for defense in depth on top
       of the app's own auth.
 - [ ] **Keep dependencies updated** and run `npm audit` periodically.
@@ -75,7 +92,8 @@ Getting the code right is only half of it; a secure deployment also depends on y
 
 To be explicit, these must **never** be committed to the repository:
 
-- **Secrets** of any kind — `SESSION_SECRET`, `D1_EXPORT_TOKEN`, API tokens.
+- **Secrets** of any kind — `SESSION_SECRET`, `D1_EXPORT_TOKEN`,
+  `LEARNING_CREDENTIAL_KEYS`, Google/Canvas OAuth secrets, or API tokens.
 - **`.dev.vars`** (or any local env file with real values).
 - **Real member data** — a seed or fixture must use fictional people only.
 - **Real emails or phone numbers** in the seed — the demo seed uses `@example.com` addresses

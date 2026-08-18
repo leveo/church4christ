@@ -10,17 +10,57 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-18
+
 ### Added
 
+- Added the optional Learning module on D1 and PostgreSQL for Sunday school, discipleship,
+  and similar ministries. Its bilingual authenticated learner pages show provider-authoritative
+  course/activity metadata, click-to-load privacy-enhanced YouTube, safe provider files and
+  links, due dates, and submitted/returned state; assignments and quizzes remain in the provider.
+- Added official Google Classroom OAuth/API support with minimal read-only and notification
+  scopes, course mapping, renewable Pub/Sub registrations, authenticated notification receipts,
+  bounded scheduled/manual/notification sync, and durable disconnect cleanup.
+- Added Church4Christ Learning — Canvas Edition integration through scoped Canvas OAuth/REST and
+  signed Live Events. The separately operated derivative is based on Canvas LMS by
+  **Instructure, Inc.**, pinned to upstream commit
+  `1c9f0bb8013ed69c4f2efe11fd483025469b7e6c`, licensed under GNU AGPL v3, and is not endorsed by
+  Instructure, Inc.
+- Added bounded provider retry/backoff, fair scheduled scans, fail-closed reconnect state, and
+  PII-free structural synchronization logs while preserving the last complete learner snapshot.
 - Added an optional Activity Score module on D1 and PostgreSQL with configurable group
-  attendance, confirmed serving, and registration-engagement dimensions; explainable member
-  calculations; source coverage; comparison trends; and a church-wide summary.
+  attendance, confirmed serving, registration engagement, and default-disabled Learning
+  engagement dimensions; explainable member calculations, coverage, trends, and summary.
+- Added the fictional local Genesis 1 Sunday-school demo, bilingual learner/admin screenshots,
+  and the gpt-image-2-generated Learning workflow diagram and provenance.
+
+### Security
+
+- Provider credentials use a versioned AES-256-GCM server-side envelope; OAuth state, callbacks,
+  notification identity, allowed provider origins, URLs, response sizes, pages, items, elapsed
+  time, D1 queries, and provider subrequests fail closed at bounded limits.
+- Learning stores only the normalized metadata needed for the hub. Grades and answers are not
+  stored; comments, assignment bodies, uploaded files, file bytes, raw provider bodies,
+  continuation tokens, and provider credentials never enter learner HTML or Activity Score.
+- Google Classroom and Canvas remain provider authoritative. Church4Christ launches provider
+  submission UI and never acts as a second gradebook, quiz engine, or file proxy.
 
 ### Upgrade notes
 
-- Apply forward migration `0016_activity_score.sql` before enabling Activity Score. It creates
-  the singleton scoring configuration and dimension rows on both D1 and
-  Supabase/PostgreSQL; calculated member scores are not stored.
+- Upgrade 1.0.0 installations by backing up and rehearsing the matched Worker/database/R2 and
+  provider configuration in staging, then apply forward migrations `0017_learning.sql` through
+  `0026_activity_score_learning.sql` in numeric order on D1 or Supabase/PostgreSQL before
+  deploying 1.1.0. Do not rewrite frozen migration history or roll code back alone after `0026`.
+- Existing installations must already have `0016_activity_score.sql`; 1.1.0 preserves that
+  configuration and extends it only through forward migration `0026_activity_score_learning.sql`.
+- Migrations `0017`–`0019` add the provider-neutral Learning graph, bounded sync leases, and URL
+  policy fingerprint; `0020`–`0022` add Google OAuth/Pub/Sub receipt lifecycle and cleanup saga;
+  `0023`–`0024` add Canvas OAuth/Live Events and cleanup saga; `0025` adds fair scheduling; and
+  `0026` adds default-disabled Learning engagement to Activity Score without rewriting `0016`.
+- Configure `LEARNING_CREDENTIAL_KEYS` before authorizing either provider. Google and Canvas
+  credentials, Pub/Sub resources, Canvas allowed origins, cron verification, retention policy,
+  provider disconnect, and the separate Canvas service/source obligations require operator work;
+  `npm run doctor -- --strict` does not prove a successful provider round trip.
 
 ## [1.0.0] - 2026-08-12
 

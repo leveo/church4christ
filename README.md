@@ -9,8 +9,9 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-Church4Christ **1.0.0 is the initial open-source release**, not a turnkey managed service. Local evaluation
-is free, and some deployments can fit within provider free allowances, but production
+The **current source release is 1.1.0**. Church4Christ **1.0.0 is the initial open-source release**,
+not a turnkey managed service. Local evaluation is free, and some deployments
+can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
 configuration and usage. See [Deployment profiles and costs](#deployment-profiles-and-costs)
 before choosing a production setup.

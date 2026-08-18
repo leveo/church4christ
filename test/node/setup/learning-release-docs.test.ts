@@ -116,6 +116,10 @@ describe('v1.1.0 Learning release contract', () => {
     expect(learning).toContain('https://github.com/instructure/canvas-lms');
     expect(learning).toContain('https://github.com/leveo/canvas-lms');
     expect(learning).toContain('1c9f0bb8013ed69c4f2efe11fd483025469b7e6c');
+    expect(learning).toContain('57c5ad2505cf69c95faead538995fc59c6c38fe8');
+    expect(learning).toContain(
+      'https://github.com/leveo/canvas-lms/blob/57c5ad2505cf69c95faead538995fc59c6c38fe8/CHURCH4CHRIST_NOTICE.md',
+    );
     expect(learning).toMatch(/Instructure, Inc\./);
     expect(learning).toMatch(/AGPL v3/i);
     expect(learning).toMatch(/not affiliated[^\n]*(sponsored|endorsed)/i);

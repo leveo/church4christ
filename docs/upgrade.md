@@ -184,6 +184,46 @@ deployment has used it. Files `0001` through `0016` in `migrations/` and
 D1's `d1_migrations` table or the Supabase runner's `_migrations` table. Investigate a mismatch
 and add a new numbered forward migration when correction is needed.
 
+### Church4Christ 1.0.0 → 1.1.0 Learning sequence
+
+The 1.1.0 Worker expects the complete Learning schema. From a 1.0.0 installation, rehearse the
+exact production topology in staging first: restore a fresh database and R2 backup, copy only the
+required secret *names/inventory* through the approved secret manager, apply the ten migrations
+below, deploy the candidate, run `npm run doctor -- --strict`, and exercise Learning-off plus each
+provider path the church plans to enable. Perform a separate restore drill with the pre-upgrade
+backup and 1.0.0 code before accepting the production window. Do not seed Genesis or use real
+production provider credentials in an automated rehearsal.
+
+Apply these forward files in numeric order on exactly one backend; D1 uses `migrations/` and
+Supabase/PostgreSQL uses the identically named files in `migrations-supabase/`:
+
+1. `0017_learning.sql` creates the provider-neutral control-plane graph and privacy-bounded
+   metadata/events.
+2. `0018_learning_sync_leases.sql` adds bounded crash-recovery/finalization leases.
+3. `0019_learning_sync_policy_fingerprint.sql` binds a run to its canonical URL policy.
+4. `0020_learning_google.sql` adds Google OAuth state, registrations, and Pub/Sub receipts.
+5. `0021_learning_google_receipt_lifecycle.sql` adds reclaimable receipt claims.
+6. `0022_learning_google_cleanup_saga.sql` adds durable registration/disconnect cleanup.
+7. `0023_learning_canvas.sql` adds Canvas OAuth, signed-event binding, and receipt lifecycle.
+8. `0024_learning_canvas_cleanup_saga.sql` adds durable encrypted Canvas revocation cleanup.
+9. `0025_learning_sync_schedule.sql` adds the fair scheduled-attempt cursor/index.
+10. `0026_activity_score_learning.sql` adds default-disabled Learning engagement without
+    rewriting frozen `0016_activity_score.sql`.
+
+Back up immediately before the production migration, verify the exact target identifiers, apply
+all ten files, deploy 1.1.0, run strict doctor, then verify module-off 404 behavior, authorized
+admin/learner pages, a manual sync, the `:15` maintenance branch, the `:45` scheduled branch, and
+authenticated notification delivery when configured. Keep Google/Canvas provider changes in the
+same approved change record; Canvas remains a separate deployment with separate service/source and
+backup/restore work.
+
+There is no down migration. Migrations `0017`–`0025` add durable state and `0026` changes the
+Activity Score dimension allowlist. **Do not roll back code alone.** If the prior Worker is not
+forward-compatible, stop writes and recover the matched 1.0.0 application, database backup, R2
+objects, configuration, schedules, and secrets. Restoring only the database does not undo provider
+OAuth grants, Pub/Sub resources, registrations, Canvas Live Events, or external token revocation;
+reconcile those explicitly before reopening traffic.
+
 Migration `0011_people_exports.sql` creates `audit_events` for sensitive pastoral-notes
 export auditing on both D1 and Supabase/PostgreSQL. Apply it before deploying code that
 exposes `/admin/people/export-notes`; the standard People/Household export is read-only,

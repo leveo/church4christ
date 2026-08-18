@@ -121,6 +121,105 @@ Open `wrangler.jsonc` and:
 The placeholder IDs and the domain in this file are **safe to commit** — they are not
 secrets. (Secrets are set separately in step 4 and never go in this file.)
 
+### Learning module and shared credential key ring
+
+Learning works on D1 or Supabase/PostgreSQL and depends on the `people` capability for the
+live Person-to-provider identity chain. The Website + Community and Full Church presets enable
+it; Website does not. Custom setup must select both People and Learning. Turning Learning off
+makes learner/admin/API routes return 404 and skips provider work without deleting the saved
+graph. Provider configuration is still operator work: setup and doctor verify schema/catalog
+state, not a real OAuth grant, notification delivery, provider round trip, or restore.
+
+Before authorizing either provider, create an AES-256-GCM key and store a canonical compact JSON
+key ring as the `LEARNING_CREDENTIAL_KEYS` Worker secret. `LEARNING_CREDENTIAL_KEYS` rotation is
+add-first; the old key remains present until no envelope references it:
+
+```text
+{"currentVersion":1,"keys":{"1":"<canonical base64 for exactly 32 random bytes>"}}
+```
+
+Generate the random bytes through the church's approved secret manager or cryptographic tooling;
+do not paste a real key into a shell command, Git, tickets, logs, fixtures, or screenshots. Store
+the complete JSON value through the interactive prompt:
+
+```bash
+npx wrangler secret put LEARNING_CREDENTIAL_KEYS
+```
+
+For key rotation, add a new version/key while retaining every old key, set `currentVersion` to the
+new version, and deploy the expanded ring. New or refreshed envelopes use the current version.
+Reconnect or successfully refresh each provider connection as needed, let pending OAuth states
+expire, and let Google/Canvas cleanup tasks finish. Verify that no credential, OAuth-state, or
+cleanup envelope still references the old `key_version`; **do not remove an old key** before that
+inventory reaches zero and a rollback window has passed. Removing a referenced key fails closed
+and can prevent refresh or cleanup; there is no bulk automatic re-encryption command in 1.1.0.
+
+### Google Classroom OAuth and optional Pub/Sub
+
+In the Google Cloud project that will own the integration, enable the Google Classroom API and
+configure an OAuth consent screen with the church's reviewed name, support contact, authorized
+domain, privacy policy, and only the scopes below. Create a Web application OAuth client with the
+canonical `APP_ORIGIN` callback (replace the example host; do not add alternates):
+
+```text
+https://church.example.org/admin/learning/google/callback
+```
+
+Store both OAuth values only through Worker secrets:
+
+```bash
+npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_ID
+npx wrangler secret put GOOGLE_CLASSROOM_CLIENT_SECRET
+```
+
+The implementation requests exactly these scopes; review Google's consent/verification rules for
+the selected deployment and do not grant broader write, Drive, profile-email, or domain-wide
+delegation access:
+
+```text
+https://www.googleapis.com/auth/classroom.courses.readonly
+https://www.googleapis.com/auth/classroom.coursework.students.readonly
+https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly
+https://www.googleapis.com/auth/classroom.push-notifications
+https://www.googleapis.com/auth/classroom.rosters.readonly
+```
+
+Domain-wide delegation is not supported for Google Classroom notification registrations; the
+authorizing administrator/teacher must retain the OAuth grant and access to each mapped course.
+For scheduled/manual polling only, leave all three Pub/Sub identifiers below absent. To enable
+notifications, create one Pub/Sub topic and grant
+`classroom-notifications@system.gserviceaccount.com` permission to publish to it. Create a push
+subscription for that topic with this exact HTTPS endpoint:
+
+```text
+https://church.example.org/api/learning/google/pubsub
+```
+
+Enable authenticated push. Attach a user-managed service account in the same Google Cloud project,
+set the OIDC audience to that exact endpoint URL, and grant the Pub/Sub service agent the documented
+permission to mint OIDC tokens for that service account. Church4Christ verifies the Google issuer,
+RS256 signature, exact audience, service-account email, verified-email claim, token lifetime, and
+exact subscription name. Set all three non-secret identifiers together in Worker vars (or the
+equivalent reviewed environment configuration); partial configuration fails closed:
+
+```text
+GOOGLE_CLASSROOM_PUBSUB_TOPIC=projects/<project>/topics/<topic>
+GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL=<push-identity>@<project>.iam.gserviceaccount.com
+GOOGLE_PUBSUB_SUBSCRIPTION_NAME=projects/<project>/subscriptions/<subscription>
+```
+
+See Google's official [Classroom push-notification guide](https://developers.google.com/workspace/classroom/best-practices/push-notifications),
+[OAuth scope catalog](https://developers.google.com/identity/protocols/oauth2/scopes), and
+[authenticated Pub/Sub push guide](https://cloud.google.com/pubsub/docs/authenticate-push-subscriptions).
+Classroom registrations last one week; the `:15` maintenance pass renews registrations nearing
+expiry and cleans replaced registrations. Notifications only schedule authoritative reconciliation.
+Disconnect first disables the local connection, removes the active encrypted envelope and live
+registrations, then the durable `0022_learning_google_cleanup_saga.sql` path calls
+`registrations.delete()` and revokes the Google refresh token with bounded retry. Do not delete a
+pending cleanup row or old credential key just to hide an error.
+
+### Canvas OAuth and signed Live Events
+
 Canvas is disabled until all three Canvas bindings are configured with `wrangler secret put`:
 `CANVAS_OAUTH_CLIENT_ID`, `CANVAS_OAUTH_CLIENT_SECRET`, and `CANVAS_ALLOWED_ORIGINS`.
 The allowlist value is non-secret configuration encoded as a JSON array of one to sixteen
@@ -155,8 +254,8 @@ url:GET|/api/v1/courses/:course_id/assignments/:assignment_id/submissions
 ```
 
 For Canvas Live Events, configure the HTTPS delivery URL as
-`https://church.example.org/api/learning/canvas/live-events`. Church4Christ accepts only signed
-compact JWT requests verified as `RS256` against Instructure's fixed JWKS URL,
+`https://church.example.org/api/learning/canvas/live-events`. Church4Christ accepts only signed compact
+JWT requests verified as `RS256` against Instructure's fixed JWKS URL,
 `https://8axpcl50e4.execute-api.us-east-1.amazonaws.com/main/jwks`. Map a course before enabling
 its events: Church4Christ reads `root_account_id` from Canvas's authoritative
 `GET /api/v1/courses/:id` response and persists it as the account binding. There is deliberately
@@ -169,6 +268,8 @@ and the entire response body; the Live Events reconciliation pass has a 25-secon
 Disconnect first commits a local disable, deletes the active credential envelope and Canvas private
 state, and moves the encrypted token envelope into forward migration
 `0024_learning_canvas_cleanup_saga.sql`. A Canvas outage therefore cannot keep a connection active.
+This local disable is committed before the bounded cleanup retry, so provider downtime cannot
+reactivate the connection.
 The twice-hourly Learning maintenance pass retries at most one encrypted Canvas revocation task,
 refreshing an expired access token when safe and persisting the rotated envelope before revoke. If
 a prior revoke succeeded but local task deletion crashed, a later Canvas `400`/`401` is followed by
@@ -188,6 +289,28 @@ refresh, and course reads. Enrollment records are collected across bounded remot
 coherent tuple per Canvas user is emitted; cached output pages consume the same page/item/byte
 budgets but no additional Canvas subrequests. Keep these constants and their budget tests in sync
 when adding endpoints.
+
+Manual sync is an authenticated Learning-admin action. Scheduled sync scans one fair active mapped
+course; `:45` reconciliation runs that bounded sync. Authenticated Google Pub/Sub or Canvas Live
+Events notifications deduplicate and acknowledge promptly, then schedule the same authoritative
+reconciliation through `ctx.waitUntil`; a notification payload is never treated as the snapshot.
+At `:15`, the separate bounded maintenance half handles one Canvas disconnect cleanup and Google
+registration cleanup/renewal. Transient provider `429`/`5xx` results use at most two attempts with
+bounded backoff; permanent auth or permission failures require reconnect and preserve the last
+complete snapshot.
+
+Cloudflare D1 Free permits 50 queries per Worker invocation.
+Workers Free permits 50 external subrequests per invocation as of this release. The reconciliation
+planner reserves cold middleware, route/receipt, identity, credential-refresh, and finalization
+work. Google reserves 12 D1 queries per attempt and Canvas 14; the two-attempt invocation tests
+remain at or below 50. The Google provider loop caps at 47 pages plus three reserved
+provider/JWKS/refresh requests;
+Canvas caps it at 23 normalized pages where a page may cost two provider requests, plus the
+reserved Live Events JWK/refresh/course reads. Scheduled runs use the lower orchestration caps of
+21 Google pages or 10 Canvas pages. Do not raise page, item, byte, elapsed-time, retry, query, or
+subrequest constants without rerunning boundary tests against current
+[D1 limits](https://developers.cloudflare.com/d1/platform/limits/) and
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
 
 ## 3. Create the database tables
 
@@ -243,6 +366,24 @@ church-wide model while scores remain live calculations. See
 After the Learning schema is present, apply `0026_activity_score_learning.sql` on both
 backends before exposing Learning as an Activity Score source. It preserves the existing
 model and adds Learning disabled with weight zero; grades and provider content are not copied.
+
+For Learning 1.1.0, the portable forward sequence is identical on both backends and must remain
+in this exact numeric order:
+
+1. `0017_learning.sql` — provider-neutral connections, programs, courses, identities,
+   enrollments, metadata snapshots/events, and bounded sync runs.
+2. `0018_learning_sync_leases.sql` — crash-recovery and finalization leases.
+3. `0019_learning_sync_policy_fingerprint.sql` — URL-policy fingerprint on each run.
+4. `0020_learning_google.sql` — Google OAuth, registration, and receipt metadata.
+5. `0021_learning_google_receipt_lifecycle.sql` — reclaimable Pub/Sub receipt lifecycle.
+6. `0022_learning_google_cleanup_saga.sql` — durable registration/disconnect cleanup.
+7. `0023_learning_canvas.sql` — Canvas OAuth, account binding, Live Events receipts.
+8. `0024_learning_canvas_cleanup_saga.sql` — durable encrypted token-revocation cleanup.
+9. `0025_learning_sync_schedule.sql` — fair scheduled-attempt timestamp/index.
+10. `0026_activity_score_learning.sql` — default-disabled Learning engagement dimension.
+
+Never load the Genesis fixture in production. It is a local fictional snapshot, has no provider
+credential or network dependency, and all of its Canvas/provider launch URLs use `.example.test`.
 
 ## 4. Set the session secret
 

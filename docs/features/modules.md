@@ -56,7 +56,12 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
 
-For the `learning` module's provider boundary, learner experience, privacy model, screenshots, and Canvas attribution, see **[Learning](learning.md)**.
+The `learning` module depends on `people`, works on either database, and is enabled by the
+Website + Community and Full Church presets (not Website). Custom setup must select People with
+Learning. Enabling the checkbox only opens the feature boundary: an operator must still configure
+the credential key ring, authorize Google Classroom or Canvas, map courses, and verify sync.
+For the `learning` provider/privacy boundary and screenshots, see **[Learning](learning.md)** and
+the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
 
 **Three modules need the Supabase database.** Member Portal, Giving, and Registration run
 only on the optional **Supabase** backend (see

@@ -154,6 +154,12 @@ Stripe schedule.
 
 - **Changing your site** is one command: `npm run deploy`. Edit content in the admin area;
   redeploy only when you change the code or design.
+- **Learning needs provider setup after infrastructure setup.** Enabling the module does not
+  create a Google Classroom or Canvas connection. Follow
+  [`deploy.md`'s Learning runbook](./deploy.md#learning-module-and-shared-credential-key-ring)
+  for the credential key ring, exact callbacks/scopes, Pub/Sub or signed Live Events, split
+  `15,45 * * * *` schedule, manual verification, retention, and disconnect cleanup. Doctor
+  checks local configuration/schema readiness but cannot prove an external provider flow.
 - **Keep control of your code and data.** Data lives in the Cloudflare D1 or Supabase
   account you select. Export it periodically; D1's optional nightly export is described in
   `deploy.md`, and Supabase needs the backup plan described in `supabase-setup.md`.

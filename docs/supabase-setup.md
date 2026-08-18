@@ -173,6 +173,15 @@ creates every table — the same content tables as D1, **plus** the Portal, Givi
 Registration tables. It does **not** load any content; a real deployment starts empty and
 you add your church's content through the admin area.
 
+Learning works on this backend with the same provider/privacy boundary as D1. Version 1.1.0
+requires the complete portable `0017_learning.sql` through
+`0026_activity_score_learning.sql` sequence and the shared `15,45 * * * *` cron shown above.
+Enabling Learning does not authorize Google Classroom or Canvas; complete the exact credential
+key, OAuth, notification, budget, retention, and disconnect runbook in
+[`deploy.md`](./deploy.md#learning-module-and-shared-credential-key-ring). Church4Christ Learning
+— Canvas Edition remains a separate service/deployment and is not stored inside this Supabase
+project.
+
 > The script reads `SUPABASE_DB_URL` (or `DATABASE_URL` if you prefer that name). If it
 > prints `set SUPABASE_DB_URL (or DATABASE_URL)`, you forgot the variable. If it reports an
 > SSL error, append `?sslmode=require` to the end of the connection string.

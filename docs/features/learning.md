@@ -74,8 +74,9 @@ credential envelope according to the documented cleanup path.
   OAuth. Pub/Sub notifications, when configured, schedule authoritative reconciliation.
 - **Church4Christ Learning — Canvas Edition:** an independently deployed Canvas LMS derivative
   communicates with Church4Christ through the Canvas REST API and, optionally, Live Events. It
-  has its own PostgreSQL/Redis/services, deployment, backups, and source-publication obligations;
-  it is not vendored into this Astro/Workers repository.
+  has its own PostgreSQL database, Redis, background-job workers, web/application services,
+  object/file storage, deployment, backups, and source-publication obligations; it is not
+  vendored into this Astro/Workers repository.
 
 Provider choice is per program or course, so a church may operate Google Classroom for one
 ministry and Canvas for another.
@@ -94,6 +95,30 @@ events inside the selected window. Grades, lateness, course/activity titles, ans
 comments never contribute. If Learning is disabled or disconnected, Activity Score renormalizes
 the remaining available dimensions without deleting Learning events or changing the saved model.
 
+## Retention, deletion, and operator verification
+
+Version 1.1.0 intentionally has **no automatic time-based Learning retention/TTL job**. A provider
+disconnect disables the connection and synchronization, removes the active credential envelope,
+and cleans provider-private OAuth/notification state through the durable provider cleanup saga.
+Normalized courses, activities, identity links, enrollments, submission status snapshots, bounded
+sync facts, and append-only activity-event identifiers may remain as explicitly retained history.
+They contain no grades, answers, comments, assignment bodies, uploaded file bytes, or raw provider
+payloads, but they are still congregation data and need an operator-approved retention period.
+
+Document the church's purpose, retention duration, deletion approver, backup impact, and legal or
+pastoral hold process before production. Person deletion cascades the Person-scoped Learning graph;
+provider/course history can be purged only through a reviewed lifecycle after its connection is
+disabled/deleted or course is soft-deleted. Do not bypass the active-parent and append-only database
+guards with ad-hoc migration-history edits. A restore can reintroduce deleted rows, so include
+Learning in backup-retention and restore-erasure procedures. Disabling the module alone is not a
+deletion request and does not alter saved provider or Activity Score configuration.
+
+`npm run doctor -- --strict` verifies the selected module catalog and required tables/schedules it
+can inspect. It cannot prove OAuth consent, provider scopes, Pub/Sub/Live Events delivery, manual or
+scheduled sync, credential revocation, retention execution, or a restore. Before go-live, capture
+separate evidence for a real authorized connection, mapping, manual sync, `:15` maintenance, `:45`
+reconciliation, authenticated notification (if configured), disconnect cleanup, and matched restore.
+
 ## Canvas provenance and credit
 
 Church4Christ Learning — Canvas Edition is based on the official
@@ -104,10 +129,24 @@ upstream `LICENSE` and `COPYRIGHT` notices preserved. Church4Christ Learning —
 not affiliated with, sponsored by, or endorsed by Instructure, Inc.
 
 The derivative lives in a separate repository/checkout and deployment. Its
-`CHURCH4CHRIST_NOTICE.md` records the pinned upstream, modification history, no-endorsement
-notice, and the obligation for deployed modified versions to prominently offer corresponding
-source to remote users. That legal/source boundary is separate from Church4Christ's GPLv3
+[`CHURCH4CHRIST_NOTICE.md`](https://github.com/leveo/canvas-lms/blob/57c5ad2505cf69c95faead538995fc59c6c38fe8/CHURCH4CHRIST_NOTICE.md)
+records the pinned upstream, modification history, no-endorsement notice, and the obligation for
+deployed modified versions to prominently offer corresponding source to remote users. This 1.1.0
+documentation was audited against published derivative revision
+[`57c5ad2505cf69c95faead538995fc59c6c38fe8`](https://github.com/leveo/canvas-lms/tree/57c5ad2505cf69c95faead538995fc59c6c38fe8)
+in the [Church4Christ Canvas derivative source repository](https://github.com/leveo/canvas-lms).
+A deployment must link to the exact corresponding source for its own build, not merely to an
+unrelated or moving branch. That legal/source boundary is separate from Church4Christ's GPLv3
 application license.
+
+Operate Canvas as a separate service boundary. Back up and restore-test its PostgreSQL database,
+Redis/job state as appropriate, uploaded/object files, configuration/secrets, and deployed source
+together; the Church4Christ D1/Postgres and R2 backup does not cover Canvas. For an upstream update,
+fetch the official `instructure/canvas-lms` remote, review release/security notes and the full
+pinned-commit diff, merge or rebase in an isolated branch, preserve `LICENSE`/`COPYRIGHT` and
+`CHURCH4CHRIST_NOTICE.md`, rerun Canvas's own tests and restore rehearsal, update the pinned commit
+and modification log, publish exact corresponding source, then update the deployment. Never treat
+this Astro/Worker release as an automatic Canvas upgrade.
 
 ## Demo capture and implementation notes
 

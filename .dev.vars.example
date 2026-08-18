@@ -13,6 +13,10 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # Generate keys outside the repository and never paste the value into
 # wrangler.jsonc, logs, fixtures, or screenshots. Production uses
 # `npx wrangler secret put LEARNING_CREDENTIAL_KEYS`.
+# Rotation is add-first: keep every referenced old key, add the new version,
+# make it current, refresh/reconnect envelopes and drain OAuth/cleanup rows,
+# then remove the old version only after its database reference count is zero.
+# There is no bulk automatic re-encryption command; see docs/deploy.md.
 # LEARNING_CREDENTIAL_KEYS=
 
 # Google OAuth web-server credentials. Keep both value-free in source control;
@@ -38,6 +42,9 @@ NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 # rather than credentials, but remain unset in the tracked example. Set all
 # three to enable real-time roster and course-work registrations; leave all
 # three unset for explicit scheduled/manual polling-only operation.
+# The Pub/Sub push endpoint and OIDC audience are exactly
+# APP_ORIGIN plus /api/learning/google/pubsub. The service-account email and
+# subscription full name are both verified by the Worker.
 # GOOGLE_CLASSROOM_PUBSUB_TOPIC=
 # GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL=
 # GOOGLE_PUBSUB_SUBSCRIPTION_NAME=
