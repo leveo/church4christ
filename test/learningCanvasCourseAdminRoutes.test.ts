@@ -36,7 +36,7 @@ describe('Canvas mapped-course admin route', () => {
     expect(response.headers.get('location')).toBe('/admin/learning/canvas/courses?connection_id=81&saved=course_mapped');
     expect(injected.mapCourse).toHaveBeenCalledWith({}, {
       connectionId: 81, expectedRevision: 4, externalCourseId: '901',
-      programId: 33, actorPersonId: 71,
+      programId: 33, actorPersonId: 71, signal: expect.any(AbortSignal),
     });
   });
 
@@ -48,6 +48,7 @@ describe('Canvas mapped-course admin route', () => {
     expect(response.headers.get('location')).toBe('/admin/learning/canvas/courses?connection_id=81&saved=course_unmapped');
     expect(injected.unmapCourse).toHaveBeenCalledWith({}, {
       connectionId: 81, expectedRevision: 5, externalCourseId: '901', actorPersonId: 71,
+      signal: expect.any(AbortSignal),
     });
     for (const [body, origin] of [
       [new URLSearchParams({ action: 'unmap', connection_id: '81', revision: '5', external_course_id: '901' }), 'https://evil.test'],
