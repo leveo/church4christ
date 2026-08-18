@@ -50,8 +50,9 @@
 //   Learning captures do not depend on that global bypass. Supply one ephemeral
 //   secret to both the dev-server and harness environments without printing or
 //   writing it; each fresh CDP target receives only its exact seeded identity's
-//   short-lived HttpOnly cookie:
-//     SCREENSHOT_SESSION_SECRET='<same local SESSION_SECRET>' node scripts/screenshots.mjs \
+//   short-lived HttpOnly cookie. After setting the same ephemeral variable in
+//   this capture shell without echoing its value, run:
+//     node scripts/screenshots.mjs \
 //       --only learning/genesis-1-en.png,learning/genesis-1-zh.png,learning/admin-overview.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.
 //   Prefer full output-path tokens for batches so short filenames do not select

@@ -87,5 +87,6 @@ describe('Learning module introduction documentation', () => {
     expect(feature).toMatch(/distinct from[^\n]*SESSION_SECRET/i);
     expect(harness).toMatch(/same ephemeral SCREENSHOT_SESSION_SECRET[^\n]*both[^\n]*processes/i);
     expect(harness).not.toMatch(/SCREENSHOT_SESSION_SECRET[^\n]*match[^\n]*SESSION_SECRET/i);
+    expect(harness).not.toContain("SCREENSHOT_SESSION_SECRET='<same local SESSION_SECRET>'");
   });
 });
