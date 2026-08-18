@@ -244,4 +244,20 @@ describe('Canvas signed Live Events HTTP boundary', () => {
     await expect(background).resolves.toBeUndefined();
     expect(failed.finishEvent).toHaveBeenCalledWith({ background: true }, expect.objectContaining({ outcome: 'failed' }));
   });
+
+  it('does not acknowledge claimed work when waitUntil registration fails', async () => {
+    const injected = deps();
+    const ended = vi.fn(async () => undefined);
+    injected.openBackgroundDb.mockReturnValueOnce({
+      db: { background: true } as unknown as AppDb,
+      end: ended,
+    });
+    const result = await createCanvasLiveEventsHandler(injected)(context(
+      request(), ['learning'], {}, () => { throw new Error('execution_context_unavailable'); },
+    ));
+    expect(result.status).toBe(503);
+    expect(injected.reconcileCourse).not.toHaveBeenCalled();
+    expect(injected.finishEvent).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'failed' }));
+    expect(ended).toHaveBeenCalledOnce();
+  });
 });

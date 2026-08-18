@@ -196,6 +196,27 @@ describe('Google Pub/Sub HTTP push boundary', () => {
     expect(injected.reconcileCourse).toHaveBeenCalledTimes(1);
   });
 
+  it('does not acknowledge claimed work when waitUntil registration fails', async () => {
+    const injected = deps();
+    const ended = vi.fn(async () => undefined);
+    injected.openBackgroundDb.mockReturnValueOnce({
+      db: { background: true } as unknown as AppDb,
+      end: ended,
+    });
+    const result = await createGooglePubSubPushHandler(injected)(context(
+      new Request('https://church.test/api/learning/google/pubsub', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer token' }, body: body(),
+      }),
+      ['learning'],
+      {},
+      () => { throw new Error('execution_context_unavailable'); },
+    ));
+    expect(result.status).toBe(503);
+    expect(injected.reconcileCourse).not.toHaveBeenCalled();
+    expect(injected.finishDelivery).toHaveBeenCalledWith({}, expect.objectContaining({ outcome: 'failed' }));
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
   it('reserves the whole D1 webhook budget through refresh, sync rejection, and failed receipt finalization', async () => {
     await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id=27802').run();
     await env.DB.prepare('DELETE FROM learning_programs WHERE id=27803').run();

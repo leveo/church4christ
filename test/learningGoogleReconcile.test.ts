@@ -18,6 +18,23 @@ const ENROLLMENT_ID = learningSyntheticEnrollmentId({
 });
 
 describe('Google notification authoritative single-course reconciliation', () => {
+  async function replaceCredential(input: { readonly accessTokenExpiresAt: string }): Promise<void> {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const envelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 27402,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'private-refresh',
+        accessTokenExpiresAt: input.accessTokenExpiresAt, refreshTokenExpiresAt: null,
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: null,
+    });
+    await env.DB.prepare('DELETE FROM learning_provider_credentials WHERE connection_id=27402').run();
+    await env.DB.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(27402,?1,?2,?3,?4,?5,NULL)`)
+      .bind(envelope.ciphertext, envelope.nonce, envelope.algorithm, envelope.keyVersion, envelope.envelopeVersion).run();
+  }
+
   beforeEach(async () => {
     await env.DB.prepare('DELETE FROM learning_sync_runs WHERE connection_id=27402').run();
     await env.DB.prepare('DELETE FROM learning_courses WHERE connection_id=27402').run();
@@ -167,5 +184,55 @@ describe('Google notification authoritative single-course reconciliation', () =>
       keyRing: ring, fetcher, now: () => current, signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'timeout', provider: 'google_classroom' });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [429, '7', 'rate_limited', 7],
+    [503, null, 'provider_unavailable', null],
+    [400, null, 'authentication_required', null],
+    [403, null, 'permission_denied', null],
+  ] as const)('preserves production OAuth refresh status %s for Task 10 retry/reconnect', async (
+    status, retryAfter, code, retryAfterSeconds,
+  ) => {
+    await replaceCredential({ accessTokenExpiresAt: '2026-08-17T11:00:00.000Z' });
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('https://oauth2.googleapis.com/token');
+      return new Response(null, {
+        status,
+        headers: retryAfter === null ? undefined : { 'Retry-After': retryAfter },
+      });
+    });
+    await expect(reconcileGoogleClassroomCourse(env.DB as AppDb, {
+      connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, now: () => NOW, signal: new AbortController().signal,
+    })).rejects.toMatchObject({
+      code, provider: 'google_classroom', httpStatus: status, retryAfterSeconds,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('accepts the cumulative prior-attempt D1 reservation and rejects an unsafe finalization plan', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/courses/course-1') return new Response(JSON.stringify({
+        id: 'course-1', name: 'Genesis 1', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/course-1',
+        updateTime: '2026-08-17T11:55:00.000Z',
+      }));
+      if (
+        url.pathname.endsWith('/teachers') || url.pathname.endsWith('/students')
+        || url.pathname.endsWith('/courseWorkMaterials') || url.pathname.endsWith('/courseWork')
+      ) return new Response('{}');
+      throw new Error(`unexpected ${url.pathname}`);
+    });
+    await expect(reconcileGoogleClassroomCourse(env.DB as AppDb, {
+      connectionId: 27402, externalCourseId: 'course-1', trigger: 'notification',
+      clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
+      keyRing: ring, fetcher, now: () => NOW, signal: new AbortController().signal,
+      reservedInvocationQueries: 43,
+    })).rejects.toMatchObject({ code: 'limit_exceeded', provider: 'google_classroom' });
   });
 });

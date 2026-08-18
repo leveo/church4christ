@@ -62,6 +62,8 @@ describe('bounded Learning synchronization orchestration', () => {
     }, { now: () => current, reconcile, sleep, log: (entry) => logs.push(entry) }))
       .resolves.toMatchObject({ attempts: 2, status: 'succeeded' });
     expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(reconcile).toHaveBeenNthCalledWith(1, expect.any(AbortSignal), 1);
+    expect(reconcile).toHaveBeenNthCalledWith(2, expect.any(AbortSignal), 2);
     expect(sleep).toHaveBeenCalledWith(LEARNING_SYNC_RUN_LIMITS.maxBackoffMs, expect.any(AbortSignal));
     expect(logs).toEqual(expect.arrayContaining([
       expect.objectContaining({ event: 'learning_sync_retry', provider: 'google_classroom', trigger: 'scheduled', attempt: 1, errorCode: 'rate_limited', httpStatus: 429 }),
@@ -125,5 +127,32 @@ describe('bounded Learning synchronization orchestration', () => {
       learningEnabled: vi.fn(async () => false), reconcileTarget,
     })).toEqual({ scanned: 0, attempted: 0, succeeded: 0, failed: 0 });
     expect(reconcileTarget).not.toHaveBeenCalled();
+  });
+
+  it('records every scheduled attempt so one failing oldest course cannot starve the next course', async () => {
+    const attempted: number[] = [];
+    let current = NOW;
+    const reconcileTarget = vi.fn(async (input: { readonly courseId: number }) => {
+      attempted.push(input.courseId);
+      throw new LearningSynchronizationError('provider_unavailable', 'google_classroom', {
+        httpStatus: 503, retryAfterSeconds: null,
+      });
+    });
+    const dependencies = {
+      learningEnabled: vi.fn(async () => true),
+      reconcileTarget,
+      now: () => current,
+    };
+    await expect(runScheduledLearningSyncPass({} as never, env.DB as AppDb, dependencies))
+      .resolves.toEqual({ scanned: 1, attempted: 1, succeeded: 0, failed: 1 });
+    current += 60_000;
+    await expect(runScheduledLearningSyncPass({} as never, env.DB as AppDb, dependencies))
+      .resolves.toEqual({ scanned: 1, attempted: 1, succeeded: 0, failed: 1 });
+    expect(attempted).toEqual([31002, 31003]);
+    expect(await env.DB.prepare(`SELECT id,last_sync_attempt_at FROM learning_courses
+      WHERE id IN (31002,31003) ORDER BY id`).all()).toMatchObject({ results: [
+      { id: 31002, last_sync_attempt_at: '2026-08-18T12:00:00.000Z' },
+      { id: 31003, last_sync_attempt_at: '2026-08-18T12:01:00.000Z' },
+    ] });
   });
 });

@@ -1,7 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AppDb } from '../../src/lib/appDb';
-import { listLearningSyncTargets } from '../../src/lib/learningSyncOrchestration';
+import {
+  listLearningSyncTargets,
+  markLearningConnectionReconnectRequired,
+  runScheduledLearningSyncPass,
+} from '../../src/lib/learningSyncOrchestration';
+import { LearningSynchronizationError } from '../../src/lib/learningSync';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
@@ -29,7 +34,8 @@ describe.skipIf(!hasPg)('Learning synchronization target parity (PostgreSQL)', (
         (id,program_id,connection_id,provider,external_course_id,display_name,launch_url,lifecycle_state,last_synced_at) VALUES
         (9301,9301,9301,'google_classroom','pg-course','PG Course','https://classroom.google.com/c/pg','active',NULL),
         (9302,9301,9302,'canvas','pg-off','PG Off','https://pg-canvas-sync.test/courses/2','active',NULL),
-        (9303,9302,9301,'google_classroom','pg-program-off','PG Program Off','https://classroom.google.com/c/off','active',NULL);
+        (9303,9302,9301,'google_classroom','pg-program-off','PG Program Off','https://classroom.google.com/c/off','active',NULL),
+        (9304,9301,9301,'google_classroom','pg-course-next','PG Course Next','https://classroom.google.com/c/next','active','2026-08-18T11:00:00.000Z');
     `);
   });
 
@@ -40,7 +46,33 @@ describe.skipIf(!hasPg)('Learning synchronization target parity (PostgreSQL)', (
       courseId: 9301, connectionId: 9301, provider: 'google_classroom', externalCourseId: 'pg-course',
     }]);
     expect(await listLearningSyncTargets(db, { courseId: 9302, limit: 1 })).toEqual([]);
-    await sql.unsafe("UPDATE learning_provider_connections SET status='disabled' WHERE id=9301");
+  });
+
+  it('persists fair scheduled attempts and reconnect state through the AppDb PostgreSQL path', async () => {
+    const attempted: number[] = [];
+    let current = Date.parse('2026-08-18T12:00:00.000Z');
+    const dependencies = {
+      learningEnabled: async () => true,
+      now: () => current,
+      reconcileTarget: async (input: { readonly courseId: number }) => {
+        attempted.push(input.courseId);
+        throw new LearningSynchronizationError('provider_unavailable', 'google_classroom', {
+          httpStatus: 503, retryAfterSeconds: null,
+        });
+      },
+    };
+    await runScheduledLearningSyncPass({} as never, db, dependencies);
+    current += 60_000;
+    await runScheduledLearningSyncPass({} as never, db, dependencies);
+    expect(attempted).toEqual([9301, 9304]);
+    expect(await sql.unsafe(`SELECT id,last_sync_attempt_at FROM learning_courses
+      WHERE id IN (9301,9304) ORDER BY id`)).toEqual([
+      { id: 9301, last_sync_attempt_at: '2026-08-18T12:00:00.000Z' },
+      { id: 9304, last_sync_attempt_at: '2026-08-18T12:01:00.000Z' },
+    ]);
+    await markLearningConnectionReconnectRequired(db, {
+      connectionId: 9301, provider: 'google_classroom', errorCode: 'authentication_required',
+    });
     expect(await listLearningSyncTargets(db, { courseId: 9301, limit: 1 })).toEqual([]);
   });
 });

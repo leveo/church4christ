@@ -190,6 +190,7 @@ describe('portable Learning schema (D1)', () => {
       'connection_id', 'root_account_id', 'verification_mode', 'jwk_set_url', 'status', 'updated_at',
     ]);
     expect(await columns('learning_provider_connections')).toContain('operation_expires_at');
+    expect(await columns('learning_courses')).toContain('last_sync_attempt_at');
     expect(await columns('learning_sync_runs')).toEqual(expect.arrayContaining([
       'lease_marker', 'lease_expires_at', 'finalization_marker', 'url_policy_fingerprint',
     ]));
