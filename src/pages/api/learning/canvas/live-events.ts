@@ -15,6 +15,7 @@ import { readCanvasAllowedOrigins } from '../../../../lib/learningCanvasOrigins'
 export const prerender = false;
 
 const MAX_BODY_BYTES = 65_536;
+const BODY_READ_TIMEOUT_MS = 10_000;
 const SAFE_HEADERS = Object.freeze({
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
@@ -81,23 +82,88 @@ function response(status: number): Response {
   return new Response(null, { status, headers: SAFE_HEADERS });
 }
 
+class CanvasLiveEventsBodyTimeoutError extends Error {
+  constructor() { super('body_timeout'); this.name = 'CanvasLiveEventsBodyTimeoutError'; }
+}
+
+function cancelBodyReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+}
+
+function guardedBodyRead(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  abortError: () => Error,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => signal.removeEventListener('abort', abort);
+    const finish = (run: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      run();
+    };
+    const abort = (): void => finish(() => reject(abortError()));
+    signal.addEventListener('abort', abort, { once: true });
+    let pending: Promise<ReadableStreamReadResult<Uint8Array>>;
+    try { pending = reader.read(); }
+    catch { finish(() => reject(new Error('invalid_body'))); return; }
+    pending.then(
+      (part) => finish(() => resolve(part)),
+      () => finish(() => reject(new Error('invalid_body'))),
+    );
+  });
+}
+
 async function readBoundedJwt(request: Request): Promise<string> {
   const body = request.body;
   if (body === null) throw new Error('invalid_body');
   const reader = body.getReader();
+  const controller = new AbortController();
+  let abortKind: 'invalid' | 'parent' | 'timeout' = 'invalid';
+  let cancelled = false;
+  const cancel = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    cancelBodyReader(reader);
+  };
+  const abort = (kind: typeof abortKind): void => {
+    abortKind = kind;
+    if (!controller.signal.aborted) controller.abort();
+    cancel();
+  };
+  const parentAbort = (): void => abort('parent');
+  request.signal.addEventListener('abort', parentAbort, { once: true });
+  const deadlineAt = Date.now() + BODY_READ_TIMEOUT_MS;
+  const timer = setTimeout(() => abort('timeout'), Math.max(0, deadlineAt - Date.now()));
+  if (request.signal.aborted) abort('parent');
   const chunks: Uint8Array[] = [];
   let length = 0;
-  while (true) {
-    let part: ReadableStreamReadResult<Uint8Array>;
-    try { part = await reader.read(); } catch { throw new Error('invalid_body'); }
-    if (part.done) break;
-    if (!(part.value instanceof Uint8Array)) throw new Error('invalid_body');
-    length += part.value.byteLength;
-    if (length > MAX_BODY_BYTES) {
-      try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
-      throw new RangeError('body_too_large');
+  try {
+    while (true) {
+      const part = await guardedBodyRead(reader, controller.signal, () => (
+        abortKind === 'timeout' ? new CanvasLiveEventsBodyTimeoutError() : new Error('invalid_body')
+      ));
+      if (part.done) break;
+      if (!(part.value instanceof Uint8Array)) {
+        abort('invalid');
+        throw new Error('invalid_body');
+      }
+      length += part.value.byteLength;
+      if (length > MAX_BODY_BYTES) {
+        abort('invalid');
+        throw new RangeError('body_too_large');
+      }
+      chunks.push(part.value);
     }
-    chunks.push(part.value);
+  } catch (error) {
+    if (!controller.signal.aborted) abort('invalid');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    request.signal.removeEventListener('abort', parentAbort);
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
@@ -106,6 +172,7 @@ async function readBoundedJwt(request: Request): Promise<string> {
     offset += chunk.byteLength;
   }
   try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch {
+    abort('invalid');
     throw new Error('invalid_body');
   }
 }
@@ -129,7 +196,8 @@ export function createCanvasLiveEventsHandler(
     }
     let compactJwt: string;
     try { compactJwt = await readBoundedJwt(request); } catch (error) {
-      return response(error instanceof RangeError ? 413 : 400);
+      return response(error instanceof RangeError
+        ? 413 : error instanceof CanvasLiveEventsBodyTimeoutError ? 408 : 400);
     }
     const receivedAt = new Date(dependencies.now()).toISOString();
     let event: CanvasLiveEvent;

@@ -89,9 +89,119 @@ describe('Canvas signed Live Events HTTP boundary', () => {
     injected.verifyEvent.mockRejectedValueOnce(new Error('signature details'));
     expect((await createCanvasLiveEventsHandler(injected)(context(request()))).status).toBe(401);
     expect((await createCanvasLiveEventsHandler(deps())(context(request('x'.repeat(65_537))))).status).toBe(413);
+    const brokenCancel = vi.fn(async () => undefined);
     const broken = request();
-    Object.defineProperty(broken, 'body', { value: new ReadableStream({ pull() { throw new Error('private raw'); } }) });
+    Object.defineProperty(broken, 'body', { value: {
+      getReader: () => ({
+        read: () => Promise.reject(new Error('private raw')),
+        cancel: brokenCancel,
+      }),
+    } });
     expect((await createCanvasLiveEventsHandler(deps())(context(broken))).status).toBe(400);
+    expect(brokenCancel).toHaveBeenCalledOnce();
+
+    const oversizedCancel = vi.fn();
+    const oversized = new Request(`https://church.test${PATH}`, {
+      method: 'POST', headers: { 'content-type': 'application/jwt' },
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(65_537));
+          return new Promise(() => undefined);
+        },
+        cancel: oversizedCancel,
+      }),
+    });
+    expect((await createCanvasLiveEventsHandler(deps())(context(oversized))).status).toBe(413);
+    expect(oversizedCancel).toHaveBeenCalledOnce();
+  });
+
+  it('times out and cancels a never-resolving body without Content-Length before verification or DB', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-08-17T12:00:00.000Z'));
+    const cancelled = vi.fn();
+    const injected = deps();
+    try {
+      const stalled = new Request(`https://church.test${PATH}`, {
+        method: 'POST', headers: { 'content-type': 'application/jwt' },
+        body: new ReadableStream<Uint8Array>({
+          pull: () => new Promise(() => undefined),
+          cancel: cancelled,
+        }),
+      });
+      expect(stalled.headers.get('content-length')).toBeNull();
+      const outcome = Promise.resolve(createCanvasLiveEventsHandler(injected)(context(stalled)));
+      await vi.advanceTimersByTimeAsync(10_001);
+      const result = await Promise.race([outcome, Promise.resolve('pending')]);
+      if (!(result instanceof Response)) throw new Error('body deadline did not settle');
+      expect(result.status).toBe(408);
+      expect(result.headers.get('cache-control')).toBe('no-store');
+      expect(result.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(await result.text()).toBe('');
+      expect(cancelled).toHaveBeenCalledOnce();
+      expect(injected.verifyEvent).not.toHaveBeenCalled();
+      expect(injected.acceptEvent).not.toHaveBeenCalled();
+      expect(injected.reconcileCourse).not.toHaveBeenCalled();
+      expect(injected.finishEvent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses one absolute body deadline across a slow drip and handles the late pull without rejection', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-08-17T12:00:00.000Z'));
+    const cancelled = vi.fn();
+    const injected = deps();
+    let stopped = false;
+    try {
+      const drip = new Request(`https://church.test${PATH}`, {
+        method: 'POST', headers: { 'content-type': 'application/jwt' },
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            return new Promise<void>((resolve) => setTimeout(() => {
+              if (!stopped) controller.enqueue(new TextEncoder().encode('jwt.'));
+              resolve();
+            }, 6_000));
+          },
+          cancel() { stopped = true; cancelled(); },
+        }),
+      });
+      const pending = Promise.resolve(createCanvasLiveEventsHandler(injected)(context(drip)));
+      const outcome = pending.then((result) => result.status);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await Promise.race([outcome, Promise.resolve('pending')])).toBe(408);
+      expect(cancelled).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(injected.verifyEvent).not.toHaveBeenCalled();
+      expect(injected.acceptEvent).not.toHaveBeenCalled();
+      expect(injected.reconcileCourse).not.toHaveBeenCalled();
+      expect(injected.finishEvent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('combines parent abort with the owned body reader and cancels before verification or DB', async () => {
+    const parent = new AbortController();
+    const cancelled = vi.fn();
+    const injected = deps();
+    const stalled = new Request(`https://church.test${PATH}`, {
+      method: 'POST', headers: { 'content-type': 'application/jwt' }, signal: parent.signal,
+      body: new ReadableStream<Uint8Array>({
+        pull: () => new Promise(() => undefined),
+        cancel: cancelled,
+      }),
+    });
+    const pending = Promise.resolve(createCanvasLiveEventsHandler(injected)(context(stalled)));
+    const outcome = pending.then((result) => result.status);
+    await Promise.resolve();
+    parent.abort();
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    expect(await outcome).toBe(400);
+    expect(injected.verifyEvent).not.toHaveBeenCalled();
+    expect(injected.acceptEvent).not.toHaveBeenCalled();
+    expect(injected.reconcileCourse).not.toHaveBeenCalled();
+    expect(injected.finishEvent).not.toHaveBeenCalled();
   });
 
   it('deduplicates success and keeps failed or concurrent reconciliation retryable', async () => {
