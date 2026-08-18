@@ -16,6 +16,7 @@ const NODE_ONLY = [
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
   'test/node/screenshotValidation.test.ts',
+  'test/node/screenshotSession.test.ts',
   'test/node/setup/**/*.test.ts',
   'test/node/serviceAttendancePageSource.test.ts',
   'test/node/activityScorePageSource.test.ts',

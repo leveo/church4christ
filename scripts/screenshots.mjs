@@ -17,9 +17,10 @@
 //        npm run db:migrate:local && npm run db:seed:local
 //        npm run db:seed-media:local
 //        npm run dev                       # astro dev on http://localhost:4321
-//      Admin rows additionally need the server started with
-//      AUTH_DEV_BYPASS_EMAIL=admin@example.com. Member identities and Supabase
-//      prerequisites are documented under AUTH'D SHOTS and `backend` below.
+//      Existing admin/member rows may use AUTH_DEV_BYPASS_EMAIL as documented
+//      below. Learning rows use an exact, five-minute screenshot session whose
+//      signing secret is supplied only as SCREENSHOT_SESSION_SECRET and must
+//      match the dev server's local SESSION_SECRET.
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
@@ -28,7 +29,7 @@
 //   node scripts/screenshots.mjs --only public/events.png,public/ministries.png
 //
 // AUTH'D SHOTS (admin + member)
-//   The dev bypass is a single global env (AUTH_DEV_BYPASS_EMAIL) the dev server
+//   The legacy dev bypass is a single global env (AUTH_DEV_BYPASS_EMAIL) the dev server
 //   reads at boot, so a page needing a *different* identity than the running
 //   server can't be shot in the same pass. Each authed PAGES row carries a
 //   `bypass` email documenting whose session it needs (admin rows imply
@@ -46,12 +47,11 @@
 //     # member portal group-files (Ben Wu) pass
 //     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
 //     node scripts/screenshots.mjs --only portal/group-files.png
-//     # Learning demo English learner (Sarah Johnson) pass
-//     AUTH_DEV_BYPASS_EMAIL=sarah.johnson@example.com npm run dev &
-//     node scripts/screenshots.mjs --only learning/genesis-1-en.png
-//     # Learning demo Chinese learner (Grace Lin) pass
-//     AUTH_DEV_BYPASS_EMAIL=grace.lin@example.com npm run dev &
-//     node scripts/screenshots.mjs --only learning/genesis-1-zh.png
+//   Learning captures do not depend on that global bypass. Supply the same
+//   local secret to the harness without printing or writing it; each fresh CDP
+//   target receives only its exact seeded identity's short-lived HttpOnly cookie:
+//     SCREENSHOT_SESSION_SECRET='<same local SESSION_SECRET>' node scripts/screenshots.mjs \
+//       --only learning/genesis-1-en.png,learning/genesis-1-zh.png,learning/admin-overview.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.
 //   Prefer full output-path tokens for batches so short filenames do not select
 //   unrelated outputs that happen to contain the same substring.
@@ -79,6 +79,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from './lib/screenshot-validation.mjs';
+import { mintScreenshotSession, requireScreenshotSessionEnvironment } from './lib/screenshot-session.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VIEWPORT = { width: 1280, height: 800 };
@@ -129,12 +130,35 @@ export const RELEASE_SCREENSHOTS = validateScreenshotManifest([
 export const LEARNING_DEMO_SCREENSHOTS = validateScreenshotManifest([
   { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation / 创世记第一章：创造', rejectionTexts: ['Sign in', '404', 'Page not found'] },
   { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: '创世记第一章：创造', rejectionTexts: ['登录', '404', '页面未找到'] },
+  { path: '/admin/learning', out: 'docs/images/learning/admin-overview.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Learning provider connections', rejectionTexts: ['Sign in', '403', 'Page not found'] },
 ]);
 
 export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOTS.map((row) => Object.freeze({
   ...row,
-  bypass: row.locale === 'zh' ? 'grace.lin@example.com' : 'sarah.johnson@example.com',
-  anchor: row.locale === 'zh' ? '课程活动' : 'Course activities',
+  ...(row.identity === 'admin' ? {
+    admin: true,
+    bypass: 'admin@example.com',
+    anchor: 'Course synchronization',
+    anchorMargin: 600,
+    sessionIdentity: Object.freeze({ personId: 1, email: 'admin@example.com', sessionEpoch: 0 }),
+    identityExpectedText: 'admin@example.com',
+    requiredTexts: Object.freeze([
+      'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+      'https://canvas-learning.example.test',
+    ]),
+  } : row.locale === 'zh' ? {
+    bypass: 'grace.lin@example.com',
+    anchor: '课程活动',
+    sessionIdentity: Object.freeze({ personId: 4, email: 'grace.lin@example.com', sessionEpoch: 0 }),
+    identityExpectedText: '已退回',
+    identityRejectionTexts: Object.freeze(['Not submitted', '未提交']),
+  } : {
+    bypass: 'sarah.johnson@example.com',
+    anchor: 'Course activities',
+    sessionIdentity: Object.freeze({ personId: 3, email: 'sarah.johnson@example.com', sessionEpoch: 0 }),
+    identityExpectedText: 'Not submitted',
+    identityRejectionTexts: Object.freeze(['Returned', '已退回']),
+  }),
 })));
 
 const PAGES = [
@@ -337,6 +361,20 @@ async function capture(cdp, base, row) {
     await send('Emulation.setDeviceMetricsOverride',
       { width: VIEWPORT.width, height: VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sessionId);
 
+    if (row.sessionIdentity) {
+      const value = await mintScreenshotSession(process.env, row.sessionIdentity);
+      const cookie = await send('Network.setCookie', {
+        name: 'c4c_session',
+        value,
+        url: new URL(base).origin,
+        path: '/',
+        httpOnly: true,
+        secure: new URL(base).protocol === 'https:',
+        sameSite: 'Lax',
+      }, sessionId);
+      if (cookie.success !== true) throw new Error(`${row.out}: screenshot session cookie was rejected`);
+    }
+
     // Document-start baseline: deterministically set the localStorage state this
     // shot needs (c4c-hant on/off, c4c-mode cleared) before any page script runs.
     const hantExpr = row.hant ? "localStorage.setItem('c4c-hant','1');" : "localStorage.removeItem('c4c-hant');";
@@ -411,7 +449,7 @@ async function capture(cdp, base, row) {
     }
 
     const { result: pageState } = await send('Runtime.evaluate', {
-      expression: `({url:location.href,status:${Number(mainResponse.response.status)},title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||''})`,
+      expression: `({url:location.href,status:${Number(mainResponse.response.status)},title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||'',links:[...document.querySelectorAll('a[href]')].map((e)=>e.href)})`,
       returnByValue: true,
     }, sessionId);
     assertExpectedScreenshotPage(row, pageState.value);
@@ -451,6 +489,7 @@ async function main() {
   const onlyTokens = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] ?? '').split(',').filter(Boolean) : null;
   const pages = onlyTokens ? PAGES.filter((p) => onlyTokens.some((tok) => p.out.includes(tok))) : PAGES;
   if (pages.length === 0) throw new Error(`--only matched no pages (tokens: ${onlyTokens?.join(', ')})`);
+  if (pages.some((row) => row.sessionIdentity)) requireScreenshotSessionEnvironment(process.env);
 
   // Fail fast if the dev server is not up.
   try {

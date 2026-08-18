@@ -56,6 +56,8 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
 
+For the `learning` module's provider boundary, learner experience, privacy model, screenshots, and Canvas attribution, see **[Learning](learning.md)**.
+
 **Three modules need the Supabase database.** Member Portal, Giving, and Registration run
 only on the optional **Supabase** backend (see
 [`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**

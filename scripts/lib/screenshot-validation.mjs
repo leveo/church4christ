@@ -33,6 +33,20 @@ export function assertExpectedScreenshotPage(row, snapshot) {
   for (const marker of row.rejectionTexts ?? []) {
     if (text.includes(marker)) throw new Error(`${row.out}: rejection marker ${JSON.stringify(marker)} was found`);
   }
+  for (const marker of row.identityRejectionTexts ?? []) {
+    if (text.includes(marker)) {
+      throw new Error(`${row.out}: identity rejection marker ${JSON.stringify(marker)} was found`);
+    }
+  }
+  if (row.identityExpectedText && !text.includes(row.identityExpectedText)) {
+    throw new Error(`${row.out}: identity marker ${JSON.stringify(row.identityExpectedText)} was not found`);
+  }
+  const searchable = normalize([text, ...(snapshot.links ?? [])].join('\n'));
+  for (const marker of row.requiredTexts ?? []) {
+    if (!searchable.includes(marker)) {
+      throw new Error(`${row.out}: required capture marker ${JSON.stringify(marker)} was not found`);
+    }
+  }
 }
 
 export function validateScreenshotManifest(rows) {

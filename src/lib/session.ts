@@ -48,6 +48,37 @@ export async function verifySession(
   }
 }
 
+export interface VerifiedRequestSession {
+  readonly origin: 'runtime' | 'screenshot';
+  readonly claims: { readonly personId: number; readonly email: string; readonly epoch: number };
+}
+
+/**
+ * Verify the normal runtime session first. In local development only, permit a
+ * second short-lived secret used by the screenshot harness. The caller must
+ * bind screenshot claims back to the freshly loaded Person email; production
+ * never attempts the fallback even if a value is supplied accidentally.
+ */
+export async function verifySessionWithScreenshotFallback(input: {
+  readonly jwt: string;
+  readonly runtimeSecret?: string;
+  readonly devMode: boolean;
+  readonly screenshotSecret?: string;
+}): Promise<VerifiedRequestSession | null> {
+  if (input.runtimeSecret) {
+    const claims = await verifySession(input.runtimeSecret, input.jwt);
+    if (claims) return { origin: 'runtime', claims };
+  }
+  if (
+    !input.devMode
+    || typeof input.screenshotSecret !== 'string'
+    || input.screenshotSecret.length < 32
+    || /\s/u.test(input.screenshotSecret)
+  ) return null;
+  const claims = await verifySession(input.screenshotSecret, input.jwt);
+  return claims ? { origin: 'screenshot', claims } : null;
+}
+
 /** Build the Set-Cookie header for a fresh session. Secure only when isProd. */
 export function sessionCookie(jwt: string, isProd: boolean): string {
   const attrs = [

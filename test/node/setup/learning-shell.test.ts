@@ -105,7 +105,7 @@ describe('Learning capability shell', () => {
     const middleware = read('src/middleware.ts');
     expect(middleware.indexOf('const mod = moduleForPath(rest)')).toBeGreaterThan(-1);
     expect(middleware.indexOf('const mod = moduleForPath(rest)')).toBeLessThan(
-      middleware.indexOf('verifySession(vars.SESSION_SECRET'),
+      middleware.indexOf('verifySessionWithScreenshotFallback({'),
     );
     expect(middleware.indexOf('if (hasInvalidLearningLocale(')).toBeLessThan(
       middleware.indexOf('openDb(env as unknown as DbEnv)'),

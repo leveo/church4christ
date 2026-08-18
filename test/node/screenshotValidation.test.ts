@@ -173,8 +173,14 @@ describe('Learning demo screenshot harness rows', () => {
       expect.objectContaining({
         path: '/admin/learning',
         admin: true,
+        anchor: 'Course synchronization',
+        anchorMargin: 600,
         sessionIdentity: { personId: 1, email: 'admin@example.com', sessionEpoch: 0 },
         identityExpectedText: 'admin@example.com',
+        requiredTexts: [
+          'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+          'https://canvas-learning.example.test',
+        ],
       }),
     ]);
   });
