@@ -131,13 +131,15 @@ export const LEARNING_DEMO_SCREENSHOTS = validateScreenshotManifest([
   { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: '创世记第一章：创造', rejectionTexts: ['登录', '404', '页面未找到'] },
 ]);
 
+export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOTS.map((row) => Object.freeze({
+  ...row,
+  bypass: row.locale === 'zh' ? 'grace.lin@example.com' : 'sarah.johnson@example.com',
+  anchor: row.locale === 'zh' ? '课程活动' : 'Course activities',
+})));
+
 const PAGES = [
   ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
-  ...LEARNING_DEMO_SCREENSHOTS.map((row) => ({
-    ...row,
-    bypass: row.locale === 'zh' ? 'grace.lin@example.com' : 'sarah.johnson@example.com',
-    anchor: 'Course activities',
-  })),
+  ...LEARNING_DEMO_CAPTURE_ROWS,
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
   { path: '/zh/', out: 'docs/images/public/home-zh.png' },

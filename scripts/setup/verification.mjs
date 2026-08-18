@@ -4,17 +4,22 @@ import { missingRequiredTables, qualifiedBaseTableNames } from './checks/databas
 
 export async function verifyCanonicalDemoSeed(db) {
   try {
-    const people = await db.prepare('SELECT COUNT(*) AS count FROM people').first();
-    const admin = await db.prepare('SELECT email, display_name, role FROM people WHERE id=?').bind(1).first();
-    const ministry = await db.prepare('SELECT slug FROM ministries WHERE id=?').bind(10).first();
-    const sermons = await db.prepare('SELECT COUNT(*) AS count FROM sermons').first();
-    const learningCourse = await db.prepare('SELECT display_name FROM learning_courses WHERE id=?').bind(21000).first();
-    const learningEnrollments = await db.prepare('SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?').bind(21000, 'active').first();
-    const learningCredentials = await db.prepare('SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?').bind(21000).first();
-    return Number(people?.count) >= 10 && admin?.email === 'admin@example.com' &&
-      admin?.display_name === 'Alex Admin' && admin?.role === 'admin' && ministry?.slug === 'av-tech' && Number(sermons?.count) >= 1 &&
-      learningCourse?.display_name === 'Genesis 1: Creation / 创世记第一章：创造' &&
-      Number(learningEnrollments?.count) === 2 && Number(learningCredentials?.count) === 0;
+    const state = await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM people) AS people_count,
+      (SELECT email FROM people WHERE id=?) AS admin_email,
+      (SELECT display_name FROM people WHERE id=?) AS admin_display_name,
+      (SELECT role FROM people WHERE id=?) AS admin_role,
+      (SELECT slug FROM ministries WHERE id=?) AS ministry_slug,
+      (SELECT COUNT(*) FROM sermons) AS sermon_count,
+      (SELECT display_name FROM learning_courses WHERE id=?) AS learning_course_name,
+      (SELECT COUNT(*) FROM learning_enrollments WHERE course_id=? AND state=?) AS learning_enrollment_count,
+      (SELECT COUNT(*) FROM learning_provider_credentials WHERE connection_id=?) AS learning_credential_count`)
+      .bind(1, 1, 1, 10, 21000, 21000, 'active', 21000).first();
+    return Number(state?.people_count) >= 10 && state?.admin_email === 'admin@example.com' &&
+      state?.admin_display_name === 'Alex Admin' && state?.admin_role === 'admin' &&
+      state?.ministry_slug === 'av-tech' && Number(state?.sermon_count) >= 1 &&
+      state?.learning_course_name === 'Genesis 1: Creation / 创世记第一章：创造' &&
+      Number(state?.learning_enrollment_count) === 2 && Number(state?.learning_credential_count) === 0;
   } catch { return false; }
 }
 
