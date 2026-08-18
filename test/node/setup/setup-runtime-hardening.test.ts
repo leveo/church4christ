@@ -103,36 +103,35 @@ describe('runtime setup hardening', () => {
   });
 
   it('requires multiple canonical demo sentinels, not an unrelated admin email', async () => {
-    const complete = statementDb({
-      'SELECT COUNT(*) AS count FROM people': { count: 10 },
-      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Alex Admin', role: 'admin' },
-      'SELECT slug FROM ministries WHERE id=?': { slug: 'av-tech' },
-      'SELECT COUNT(*) AS count FROM sermons': { count: 5 },
-      'SELECT display_name FROM learning_courses WHERE id=?': { display_name: 'Genesis 1: Creation / 创世记第一章：创造' },
-      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 2 },
-      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 0 },
+    const complete = {
+      people_count: 10,
+      admin_email: 'admin@example.com', admin_display_name: 'Alex Admin', admin_role: 'admin',
+      ministry_slug: 'av-tech', sermon_count: 5,
+      learning_course_name: 'Genesis 1: Creation / 创世记第一章：创造',
+      learning_enrollment_count: 2, learning_credential_count: 0,
+    };
+    const database = (row: Record<string, unknown>) => {
+      const first = vi.fn(async () => row);
+      const prepare = vi.fn(() => ({ bind() { return this; }, first }));
+      return { db: { prepare }, prepare, first };
+    };
+    const ready = database(complete);
+    await expect(verifyCanonicalDemoSeed(ready.db as any)).resolves.toBe(true);
+    expect(ready.prepare).toHaveBeenCalledOnce();
+    expect(ready.first).toHaveBeenCalledOnce();
+
+    const missingLearning = database({ ...complete, learning_course_name: null, learning_enrollment_count: 0 });
+    await expect(verifyCanonicalDemoSeed(missingLearning.db as any)).resolves.toBe(false);
+    expect(missingLearning.prepare).toHaveBeenCalledOnce();
+
+    const unrelated = database({
+      ...complete,
+      people_count: 1, admin_display_name: 'Someone', ministry_slug: null,
+      sermon_count: 0, learning_course_name: null, learning_enrollment_count: 0,
+      learning_credential_count: 1,
     });
-    await expect(verifyCanonicalDemoSeed(complete as any)).resolves.toBe(true);
-    const missingLearning = statementDb({
-      'SELECT COUNT(*) AS count FROM people': { count: 10 },
-      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Alex Admin', role: 'admin' },
-      'SELECT slug FROM ministries WHERE id=?': { slug: 'av-tech' },
-      'SELECT COUNT(*) AS count FROM sermons': { count: 5 },
-      'SELECT display_name FROM learning_courses WHERE id=?': null,
-      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 0 },
-      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 0 },
-    });
-    await expect(verifyCanonicalDemoSeed(missingLearning as any)).resolves.toBe(false);
-    const unrelated = statementDb({
-      'SELECT COUNT(*) AS count FROM people': { count: 1 },
-      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Someone', role: 'admin' },
-      'SELECT slug FROM ministries WHERE id=?': null,
-      'SELECT COUNT(*) AS count FROM sermons': { count: 0 },
-      'SELECT display_name FROM learning_courses WHERE id=?': null,
-      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 0 },
-      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 1 },
-    });
-    await expect(verifyCanonicalDemoSeed(unrelated as any)).resolves.toBe(false);
+    await expect(verifyCanonicalDemoSeed(unrelated.db as any)).resolves.toBe(false);
+    expect(unrelated.prepare).toHaveBeenCalledOnce();
   });
 
   it('detects a missing later migration table', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from '../../scripts/lib/screenshot-validation.mjs';
-import { LEARNING_DEMO_SCREENSHOTS, RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
+import { LEARNING_DEMO_CAPTURE_ROWS, LEARNING_DEMO_SCREENSHOTS, RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
@@ -145,6 +145,18 @@ describe('Learning demo screenshot harness rows', () => {
         out: 'docs/images/learning/genesis-1-zh.png',
         identity: 'member',
         expectedText: '创世记第一章：创造',
+      }),
+    ]);
+    expect(LEARNING_DEMO_CAPTURE_ROWS).toEqual([
+      expect.objectContaining({
+        path: '/en/learn/21000',
+        bypass: 'sarah.johnson@example.com',
+        anchor: 'Course activities',
+      }),
+      expect.objectContaining({
+        path: '/zh/learn/21000',
+        bypass: 'grace.lin@example.com',
+        anchor: '课程活动',
       }),
     ]);
   });
