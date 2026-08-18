@@ -32,4 +32,28 @@ describe('onboarding acknowledgements', () => {
     expect(rows.find((row) => row.checkId === 'routes-jobs')?.status).not.toBe('pass');
     expect(rows.find((row) => row.checkId === 'backups')?.status).not.toBe('pass');
   });
+
+  it('gates the bilingual Learning provider checklist by the Learning capability', async () => {
+    const disabled = await listOnboardingReadiness(env.DB, new Set(['people']), '2026-08-18 12:00:00');
+    expect(disabled.find((row) => row.checkId === 'learning-provider-operations')).toMatchObject({
+      status: 'not_applicable', acknowledged: false,
+    });
+
+    const enabled = await listOnboardingReadiness(env.DB, new Set(['people', 'learning']), '2026-08-18 12:00:00');
+    expect(enabled.find((row) => row.checkId === 'learning-provider-operations')).toMatchObject({
+      status: 'manual', acknowledged: false,
+      title: { en: 'Learning provider operations', zh: '学习平台供应商运维' },
+      adminPath: '/admin/learning',
+    });
+
+    await acknowledgeOnboardingCheck(env.DB, {
+      checkId: 'learning-provider-operations', actorPersonId: 1, now: '2026-08-18 12:00:00',
+    });
+    const acknowledged = await listOnboardingReadiness(
+      env.DB, new Set(['people', 'learning']), '2026-08-18 12:00:01',
+    );
+    expect(acknowledged.find((row) => row.checkId === 'learning-provider-operations')).toMatchObject({
+      status: 'pass', acknowledged: true, acknowledgedAt: '2026-08-18 12:00:00',
+    });
+  });
 });

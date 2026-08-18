@@ -80,6 +80,14 @@
       "legacyCodes": ["config.invalid", "config.generated-marker", "config.placeholder", "config.backend", "config.binding", "config.stripe-mode", "config.render", "config.drift", "config.worker-crons", "config.hyperdrive-env-deprecated", "config.ok", "config.exception"]
     },
     {
+      "id": "learning-provider-operations", "category": "operations", "severity": "warning",
+      "selectors": { "capabilities": ["learning"], "services": [] }, "surfaces": ["admin"],
+      "title": { "en": "Learning provider operations", "zh": "学习平台供应商运维" },
+      "description": { "en": "Verify Google Classroom or Canvas OAuth and scopes, authenticated notifications, manual sync, :15 maintenance, :45 reconciliation, credential rotation, disconnect deletion, retention, and matched restore.", "zh": "验证 Google Classroom 或 Canvas 的 OAuth 与权限、认证通知、手动同步、:15 维护、:45 对账、凭据轮换、断开删除、保留及配套恢复。" },
+      "remediation": { "en": "Follow the Learning runbook and record provider mapping/sync, Pub/Sub or signed Live Events, cleanup, retention/deletion, and restore evidence.", "zh": "依照学习模块运维手册，记录供应商映射与同步、Pub/Sub 或签名 Live Events、清理、保留或删除及恢复证据。" },
+      "adminPath": "/admin/learning", "manualVersion": 1, "legacyCodes": []
+    },
+    {
       "id": "database-schema", "category": "operations", "severity": "error",
       "selectors": { "capabilities": [], "services": ["d1", "hyperdrive"] }, "surfaces": ["cli", "admin"],
       "title": { "en": "Database schema", "zh": "数据库结构" },

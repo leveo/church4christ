@@ -19,6 +19,14 @@ const release = read('docs/release-process.md');
 const security = read('SECURITY.md');
 const readiness = read('docs/features/onboarding-readiness.md');
 const devVars = read('.dev.vars.example');
+const cloudflareSetup = read('docs/cloudflare-setup.md');
+const readinessCatalog = JSON.parse(read('config/readiness.json')) as {
+  checks: Array<Record<string, unknown>>;
+};
+const capabilitiesCatalog = JSON.parse(read('config/capabilities.json')) as {
+  order: string[];
+  capabilities: Record<string, { requiresBackend?: string }>;
+};
 
 describe('v1.1.0 Learning release contract', () => {
   it('keeps private package metadata at exactly 1.1.0 and preserves 1.0.0 history', () => {
@@ -133,5 +141,33 @@ describe('v1.1.0 Learning release contract', () => {
     expect(release).toMatch(/0017[\s\S]{0,160}0026/);
     expect(release).toMatch(/no release is created|does not authorize/i);
     expect(release).toMatch(/do not (?:push|create)[^\n]*(?:tag|release)|never[^\n]*force-push/i);
+  });
+
+  it('adds Learning to the canonical bilingual manual-readiness checklist', () => {
+    const check = readinessCatalog.checks.find((entry) => entry.id === 'learning-provider-operations');
+    expect(check).toMatchObject({
+      category: 'operations',
+      severity: 'warning',
+      selectors: { capabilities: ['learning'], services: [] },
+      surfaces: ['admin'],
+      adminPath: '/admin/learning',
+      manualVersion: 1,
+      legacyCodes: [],
+      title: { en: expect.any(String), zh: expect.any(String) },
+      description: { en: expect.any(String), zh: expect.any(String) },
+      remediation: { en: expect.any(String), zh: expect.any(String) },
+    });
+    expect(JSON.stringify(check)).toMatch(/OAuth|provider/i);
+    expect(JSON.stringify(check)).toMatch(/Canvas|Live Events/i);
+    expect(JSON.stringify(check)).toMatch(/Google|Pub\/Sub/i);
+    expect(JSON.stringify(check)).toMatch(/保留|删除|retention|deletion/i);
+  });
+
+  it('keeps the Cloudflare operator guide tied to the canonical D1-capable count', () => {
+    const d1Capable = capabilitiesCatalog.order.filter(
+      (key) => capabilitiesCatalog.capabilities[key]?.requiresBackend !== 'supabase',
+    );
+    expect(d1Capable).toHaveLength(18);
+    expect(cloudflareSetup).toContain(`default for ${d1Capable.length} modules`);
   });
 });

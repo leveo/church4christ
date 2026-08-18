@@ -17,13 +17,19 @@ describe('built onboarding checklist', () => {
     const response = await get('/admin/onboarding', { cookie: limited });
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(await response.text()).toContain('data-screenshot-marker="admin-onboarding"');
+    const html = await response.text();
+    expect(html).toContain('data-screenshot-marker="admin-onboarding"');
+    expect(html).toContain('data-check-id="learning-provider-operations"');
+    expect(html).toContain('学习平台供应商运维');
   });
 
   it('allows only the super admin to acknowledge an allowlisted manual check', async () => {
     const limited = await sessionCookie(11, 'lydia.kwan@example.com');
     expect((await post('/admin/onboarding', 'check_id=restore-drill', { cookie: limited })).status).toBe(403);
     const admin = await sessionCookie(1, 'admin@example.com');
+    const english = await get('/admin/onboarding', { cookie: admin });
+    expect(english.status).toBe(200);
+    expect(await english.text()).toContain('Learning provider operations');
     expect((await post('/admin/onboarding', 'check_id=database-schema', { cookie: admin })).status).toBe(400);
     expect((await post('/admin/onboarding', 'check_id=restore-drill&extra=1', { cookie: admin })).status).toBe(400);
     expect((await post('/admin/onboarding', 'check_id=restore-drill', { cookie: admin })).status).toBe(303);

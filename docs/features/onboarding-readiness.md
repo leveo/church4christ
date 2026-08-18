@@ -23,7 +23,9 @@ consent and minimal scopes, Google Pub/Sub or Canvas Live Events delivery, real 
 manual/`:45` sync, `:15` cleanup/renewal, disconnect revocation, credential rotation, retention,
 and matched restore are external/manual evidence. Setup, the admin checklist, and doctor do not
 make provider calls or reveal provider configuration, so an operator must record those proofs in
-the church's approved runbook before launch.
+the church's approved runbook before launch. When Learning is enabled, the canonical
+`learning-provider-operations` manual item exposes that work in the admin checklist; a super-admin
+acknowledgement records review of the external evidence, not proof that Church4Christ performed it.
 
 Doctor JSON uses schema version 2. Every item has exactly `checkId`, `status`, `severity`,
 legacy `code`, `message`, and `remediation`. Normal mode fails only an error-level required
