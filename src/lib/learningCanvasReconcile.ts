@@ -1,13 +1,18 @@
 import type { AppDb } from './appDb';
 import {
   LearningCanvasAuthConflictError,
+  LearningCanvasAuthError,
   loadCanvasCredential,
   refreshCanvasAccessToken,
   rotateCanvasCredential,
 } from './learningCanvasAuth';
 import { createCanvasProvider } from './learningCanvasProvider';
 import type { LearningCredentialKeyRing } from './learningCredentials';
-import { LEARNING_MAX_ATOMIC_ENTITIES, type LearningSyncCompletion } from './learningDb';
+import {
+  LEARNING_MAX_ATOMIC_ENTITIES,
+  LEARNING_MAX_RESERVED_D1_QUERIES,
+  type LearningSyncCompletion,
+} from './learningDb';
 import {
   LEARNING_LIMITS,
   learningSyntheticEnrollmentId,
@@ -35,7 +40,7 @@ const RECONCILIATION_MAX_PROVIDER_PAGES = 23;
 // Receipt account/course preflight + claim/read (3), course/identity/credential
 // reads (3), refresh CAS with one losing-writer reload (4), terminal receipt
 // update (1), and one conservative spare query.
-const CANVAS_WEBHOOK_RESERVED_D1_QUERIES = 12;
+export const CANVAS_RECONCILIATION_RESERVED_D1_QUERIES = 12;
 
 type CanvasReconcileFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -185,15 +190,15 @@ export async function reconcileCanvasCourse(
     readonly now: () => number;
     readonly signal: AbortSignal;
     readonly maxProviderPages?: number;
+    readonly reservedInvocationQueries?: number;
   },
 ): Promise<LearningSyncCompletion> {
   try {
-    const allowed = Object.hasOwn(rawInput, 'maxProviderPages') ? [
-      'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
-      'keyRing', 'fetcher', 'now', 'signal', 'allowedOrigins', 'maxProviderPages',
-    ] : [
+    const allowed = [
       'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
       'keyRing', 'fetcher', 'now', 'signal', 'allowedOrigins',
+      ...(Object.hasOwn(rawInput, 'maxProviderPages') ? ['maxProviderPages'] : []),
+      ...(Object.hasOwn(rawInput, 'reservedInvocationQueries') ? ['reservedInvocationQueries'] : []),
     ];
     const input = learningValidation.exactRecord(rawInput, allowed);
     const connectionId = integer(input.connectionId);
@@ -212,6 +217,9 @@ export async function reconcileCanvasCourse(
     const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
       ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
       : RECONCILIATION_MAX_PROVIDER_PAGES;
+    const reservedInvocationQueries = Object.hasOwn(input, 'reservedInvocationQueries')
+      ? learningValidation.integer(input.reservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES)
+      : CANVAS_RECONCILIATION_RESERVED_D1_QUERIES;
     const courseId = await authoritativeCourse(db, connectionId, externalCourseId);
     const preResolvedPeople = await preloadIdentities(db, connectionId, externalCourseId);
     const credentials = await access(db, {
@@ -261,10 +269,24 @@ export async function reconcileCanvasCourse(
       operation,
       now: () => safeNow(now),
       preResolvedPeople,
-      reservedInvocationQueries: CANVAS_WEBHOOK_RESERVED_D1_QUERIES,
+      reservedInvocationQueries,
     });
   } catch (error) {
     if (error instanceof LearningSynchronizationError) throw error;
+    if (error instanceof LearningCanvasAuthError && error.httpStatus !== null) {
+      const code = error.httpStatus === 400 || error.httpStatus === 401
+        ? 'authentication_required'
+        : error.httpStatus === 403
+          ? 'permission_denied'
+          : error.httpStatus === 429
+            ? 'rate_limited'
+            : error.httpStatus >= 500
+              ? 'provider_unavailable'
+              : 'invalid_request';
+      throw new LearningSynchronizationError(code, 'canvas', {
+        httpStatus: error.httpStatus, retryAfterSeconds: error.retryAfterSeconds,
+      });
+    }
     if (error instanceof LearningCanvasReconcileError) throw error;
     return failed();
   }

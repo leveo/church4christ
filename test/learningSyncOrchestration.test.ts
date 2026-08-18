@@ -1,18 +1,44 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppDb } from '../src/lib/appDb';
+import type { AppDb, AppStatement } from '../src/lib/appDb';
+import { encodeGoogleCredential, GOOGLE_CLASSROOM_SCOPES } from '../src/lib/learningGoogleAuth';
+import { encryptLearningCredential, importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
 import {
   LEARNING_SYNC_RUN_LIMITS,
   listLearningSyncTargets,
+  reconcileLearningProviderCourse,
   runLearningSyncWithRetry,
   runScheduledLearningSyncPass,
 } from '../src/lib/learningSyncOrchestration';
 import { LearningSynchronizationError } from '../src/lib/learningSync';
 
 const NOW = Date.parse('2026-08-18T12:00:00.000Z');
+const KEY_SECRET = JSON.stringify({
+  currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(87))) },
+});
 
 describe('bounded Learning synchronization orchestration', () => {
+  async function storeExpiredGoogleCredential(): Promise<void> {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const envelope = await encryptLearningCredential(ring, {
+      provider: 'google_classroom', connectionId: 31002,
+      plaintext: encodeGoogleCredential({
+        version: 1, accessToken: 'expired-access', refreshToken: 'private-refresh',
+        accessTokenExpiresAt: '2020-08-18T11:00:00.000Z',
+        refreshTokenExpiresAt: '2030-08-18T12:00:00.000Z',
+        grantedScopes: GOOGLE_CLASSROOM_SCOPES,
+      }), expiresAt: '2030-08-18T12:00:00.000Z',
+    });
+    await env.DB.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(31002,?1,?2,?3,?4,?5,?6)`).bind(
+      envelope.ciphertext, envelope.nonce, envelope.algorithm,
+      envelope.keyVersion, envelope.envelopeVersion, envelope.expiresAt,
+    ).run();
+  }
+
   beforeEach(async () => {
+    await env.DB.prepare('DELETE FROM learning_sync_runs WHERE course_id BETWEEN 31001 AND 31009').run();
     await env.DB.prepare('DELETE FROM learning_courses WHERE id BETWEEN 31001 AND 31009').run();
     await env.DB.prepare('DELETE FROM learning_programs WHERE id BETWEEN 31001 AND 31009').run();
     await env.DB.prepare('DELETE FROM learning_provider_connections WHERE id BETWEEN 31001 AND 31009').run();
@@ -154,5 +180,88 @@ describe('bounded Learning synchronization orchestration', () => {
       { id: 31002, last_sync_attempt_at: '2026-08-18T12:00:00.000Z' },
       { id: 31003, last_sync_attempt_at: '2026-08-18T12:01:00.000Z' },
     ] });
+  });
+
+  it('retries a real OAuth refresh path within one cumulative D1 invocation budget', async () => {
+    await storeExpiredGoogleCredential();
+    let queries = 0;
+    interface TrackedStatement extends AppStatement { readonly inner: D1PreparedStatement }
+    const wrap = (inner: D1PreparedStatement): TrackedStatement => ({
+      inner,
+      bind(...values: unknown[]) { return wrap(inner.bind(...values)); },
+      async first<T = unknown>(column?: string) {
+        queries += 1;
+        return column === undefined ? inner.first<T>() : inner.first<T>(column);
+      },
+      async all<T = unknown>() { queries += 1; return inner.all<T>(); },
+      async run<T = unknown>() { queries += 1; return inner.run<T>(); },
+    });
+    const trackedDb: AppDb = {
+      prepare: (sql) => wrap(env.DB.prepare(sql)),
+      async batch<T = unknown>(statements: AppStatement[]) {
+        queries += statements.length;
+        return env.DB.batch<T>(statements.map((statement) => (statement as TrackedStatement).inner));
+      },
+    };
+    let tokenAttempts = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.toString() === 'https://oauth2.googleapis.com/token') {
+        tokenAttempts += 1;
+        if (tokenAttempts === 1) return new Response(null, { status: 429, headers: { 'Retry-After': '0' } });
+        return new Response(JSON.stringify({
+          access_token: 'rotated-access', expires_in: 3_600,
+          refresh_token: 'rotated-refresh', refresh_token_expires_in: 604_800,
+          scope: GOOGLE_CLASSROOM_SCOPES.join(' '), token_type: 'Bearer',
+        }));
+      }
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer rotated-access');
+      if (url.pathname === '/v1/courses/course-old') return new Response(JSON.stringify({
+        id: 'course-old', name: 'Old course', courseState: 'ACTIVE',
+        alternateLink: 'https://classroom.google.com/c/old',
+        updateTime: '2026-08-18T11:55:00.000Z',
+      }));
+      if (
+        url.pathname.endsWith('/teachers') || url.pathname.endsWith('/students')
+        || url.pathname.endsWith('/courseWorkMaterials') || url.pathname.endsWith('/courseWork')
+      ) return new Response('{}');
+      throw new Error(`unexpected ${url.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(reconcileLearningProviderCourse({
+        LEARNING_CREDENTIAL_KEYS: KEY_SECRET,
+        GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
+        GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+      }, trackedDb, {
+        connectionId: 31002, provider: 'google_classroom', externalCourseId: 'course-old',
+        trigger: 'notification', maxProviderPages: LEARNING_SYNC_RUN_LIMITS.googleMaxPagesPerAttempt,
+      })).resolves.toEqual({ status: 'succeeded', attempts: 2 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(tokenAttempts).toBe(2);
+    expect(queries).toBeLessThanOrEqual(50);
+  });
+
+  it('marks a real revoked refresh credential as reconnect-required without retrying', async () => {
+    await storeExpiredGoogleCredential();
+    const fetcher = vi.fn(async () => new Response(null, { status: 400 }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(reconcileLearningProviderCourse({
+        LEARNING_CREDENTIAL_KEYS: KEY_SECRET,
+        GOOGLE_CLASSROOM_CLIENT_ID: 'client.apps.googleusercontent.com',
+        GOOGLE_CLASSROOM_CLIENT_SECRET: 'private-client-secret',
+      }, env.DB as AppDb, {
+        connectionId: 31002, provider: 'google_classroom', externalCourseId: 'course-old',
+        trigger: 'scheduled', maxProviderPages: LEARNING_SYNC_RUN_LIMITS.googleMaxPagesPerAttempt,
+      })).rejects.toMatchObject({ code: 'authentication_required', httpStatus: 400 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await env.DB.prepare(`SELECT status,last_error_code FROM learning_provider_connections
+      WHERE id=31002`).first()).toEqual({ status: 'error', last_error_code: 'authentication_required' });
   });
 });

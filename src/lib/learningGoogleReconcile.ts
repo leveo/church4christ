@@ -1,12 +1,17 @@
 import type { AppDb } from './appDb';
 import {
   LearningGoogleAuthConflictError,
+  LearningGoogleAuthError,
   loadGoogleCredential,
   refreshGoogleAccessToken,
   rotateGoogleCredential,
 } from './learningGoogleAuth';
 import type { LearningCredentialKeyRing } from './learningCredentials';
-import { LEARNING_MAX_ATOMIC_ENTITIES, type LearningSyncCompletion } from './learningDb';
+import {
+  LEARNING_MAX_ATOMIC_ENTITIES,
+  LEARNING_MAX_RESERVED_D1_QUERIES,
+  type LearningSyncCompletion,
+} from './learningDb';
 import { createGoogleClassroomProvider } from './learningGoogleProvider';
 import {
   LEARNING_LIMITS,
@@ -32,7 +37,7 @@ const RECONCILIATION_DEADLINE_MS = 25_000;
 const RECONCILIATION_MAX_PROVIDER_PAGES = 47;
 // Receipt claim (2), authoritative/identity/credential reads (3), refresh CAS
 // plus a losing-writer reload (4), and terminal receipt update (1).
-const GOOGLE_WEBHOOK_RESERVED_D1_QUERIES = 10;
+export const GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES = 10;
 const GOOGLE_POLICY = Object.freeze({
   providerLaunchOrigins: Object.freeze(['https://classroom.google.com']),
   providerFileOrigins: Object.freeze(['https://drive.google.com', 'https://docs.google.com']),
@@ -184,15 +189,15 @@ export async function reconcileGoogleClassroomCourse(
     readonly now: () => number;
     readonly signal: AbortSignal;
     readonly maxProviderPages?: number;
+    readonly reservedInvocationQueries?: number;
   },
 ): Promise<LearningSyncCompletion> {
   try {
-    const allowed = Object.hasOwn(rawInput, 'maxProviderPages') ? [
-      'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
-      'keyRing', 'fetcher', 'now', 'signal', 'maxProviderPages',
-    ] : [
+    const allowed = [
       'connectionId', 'externalCourseId', 'trigger', 'clientId', 'clientSecret',
       'keyRing', 'fetcher', 'now', 'signal',
+      ...(Object.hasOwn(rawInput, 'maxProviderPages') ? ['maxProviderPages'] : []),
+      ...(Object.hasOwn(rawInput, 'reservedInvocationQueries') ? ['reservedInvocationQueries'] : []),
     ];
     const input = learningValidation.exactRecord(rawInput, allowed);
     const connectionId = integer(input.connectionId);
@@ -210,6 +215,9 @@ export async function reconcileGoogleClassroomCourse(
     const maxProviderPages = Object.hasOwn(input, 'maxProviderPages')
       ? learningValidation.integer(input.maxProviderPages, 1, RECONCILIATION_MAX_PROVIDER_PAGES)
       : RECONCILIATION_MAX_PROVIDER_PAGES;
+    const reservedInvocationQueries = Object.hasOwn(input, 'reservedInvocationQueries')
+      ? learningValidation.integer(input.reservedInvocationQueries, 0, LEARNING_MAX_RESERVED_D1_QUERIES)
+      : GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES;
     const courseId = await authoritativeCourse(db, connectionId, externalCourseId);
     const preResolvedPeople = await preloadIdentities(db, connectionId, externalCourseId);
     const policy = urlPolicy(connectionId);
@@ -253,10 +261,24 @@ export async function reconcileGoogleClassroomCourse(
       operation,
       now: () => safeNow(now),
       preResolvedPeople,
-      reservedInvocationQueries: GOOGLE_WEBHOOK_RESERVED_D1_QUERIES,
+      reservedInvocationQueries,
     });
   } catch (error) {
     if (error instanceof LearningSynchronizationError) throw error;
+    if (error instanceof LearningGoogleAuthError && error.httpStatus !== null) {
+      const code = error.httpStatus === 400 || error.httpStatus === 401
+        ? 'authentication_required'
+        : error.httpStatus === 403
+          ? 'permission_denied'
+          : error.httpStatus === 429
+            ? 'rate_limited'
+            : error.httpStatus >= 500
+              ? 'provider_unavailable'
+              : 'invalid_request';
+      throw new LearningSynchronizationError(code, 'google_classroom', {
+        httpStatus: error.httpStatus, retryAfterSeconds: error.retryAfterSeconds,
+      });
+    }
     if (error instanceof LearningGoogleReconcileError) throw error;
     return failed();
   }

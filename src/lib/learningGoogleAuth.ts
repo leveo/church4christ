@@ -28,9 +28,13 @@ const GOOGLE_REVOCATION_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 
 export class LearningGoogleAuthError extends Error {
   readonly code = 'learning_google_auth_invalid' as const;
-  constructor() {
+  readonly httpStatus: number | null;
+  readonly retryAfterSeconds: number | null;
+  constructor(metadata: { readonly httpStatus?: number | null; readonly retryAfterSeconds?: number | null } = {}) {
     super('learning_google_auth_invalid');
     this.name = 'LearningGoogleAuthError';
+    this.httpStatus = metadata.httpStatus ?? null;
+    this.retryAfterSeconds = metadata.retryAfterSeconds ?? null;
   }
 }
 
@@ -421,8 +425,15 @@ async function boundedGoogleJson(response: Response, signal: AbortSignal): Promi
 
 async function boundedGoogleTokenJson(response: Response, signal: AbortSignal): Promise<unknown> {
   if (!response.ok) {
+    const rawRetryAfter = response.headers.get('Retry-After');
+    const retryAfterSeconds = rawRetryAfter !== null && /^(?:0|[1-9]\d{0,5})$/u.test(rawRetryAfter)
+      ? Number(rawRetryAfter) : null;
     try { void response.body?.cancel().catch(() => undefined); } catch { /* best effort */ }
-    invalid();
+    throw new LearningGoogleAuthError({
+      httpStatus: response.status >= 400 && response.status <= 599 ? response.status : null,
+      retryAfterSeconds: retryAfterSeconds !== null
+        && retryAfterSeconds <= LEARNING_LIMITS.maxRetryAfterSeconds ? retryAfterSeconds : null,
+    });
   }
   return boundedGoogleJson(response, signal);
 }

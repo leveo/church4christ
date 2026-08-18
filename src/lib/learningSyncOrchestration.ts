@@ -1,9 +1,15 @@
 import type { AppDb } from './appDb';
 import { getBackend, type DbEnv } from './dbProvider';
-import { reconcileCanvasCourse } from './learningCanvasReconcile';
+import {
+  CANVAS_RECONCILIATION_RESERVED_D1_QUERIES,
+  reconcileCanvasCourse,
+} from './learningCanvasReconcile';
 import { readCanvasAllowedOrigins } from './learningCanvasOrigins';
 import { importLearningCredentialKeyRing } from './learningCredentials';
-import { reconcileGoogleClassroomCourse } from './learningGoogleReconcile';
+import {
+  GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES,
+  reconcileGoogleClassroomCourse,
+} from './learningGoogleReconcile';
 import {
   LEARNING_ERROR_CODES,
   LEARNING_LIMITS,
@@ -52,7 +58,7 @@ export interface LearningSyncLogEntry {
 
 interface RetryDeps {
   readonly now: () => number;
-  readonly reconcile: (signal: AbortSignal) => Promise<unknown>;
+  readonly reconcile: (signal: AbortSignal, attempt: number) => Promise<unknown>;
   readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly markReconnectRequired?: (errorCode: 'authentication_required' | 'permission_denied') => Promise<void>;
   readonly log: (entry: LearningSyncLogEntry) => void;
@@ -61,6 +67,7 @@ interface RetryDeps {
 interface ScheduledDeps {
   readonly learningEnabled: (environment: DbEnv, db: AppDb) => Promise<boolean>;
   readonly reconcileTarget: (input: LearningTargetSyncInput) => Promise<LearningSyncRunResult>;
+  readonly now: () => number;
 }
 
 export interface LearningTargetSyncInput extends LearningSyncTarget {
@@ -172,7 +179,9 @@ export async function listLearningSyncTargets(
       AND program.status='active' AND program.deleted_at IS NULL
       AND connection.status='active' AND connection.deleted_at IS NULL
       ${exactCourse}
-    ORDER BY CASE WHEN course.last_synced_at IS NULL THEN 0 ELSE 1 END,
+    ORDER BY CASE WHEN course.last_sync_attempt_at IS NULL THEN 0 ELSE 1 END,
+      course.last_sync_attempt_at,
+      CASE WHEN course.last_synced_at IS NULL THEN 0 ELSE 1 END,
       course.last_synced_at, course.id
     LIMIT ${limitPlaceholder}`);
   const result = await (hasCourse ? statement.bind(courseId, limit) : statement.bind(limit))
@@ -236,6 +245,26 @@ export async function markLearningConnectionReconnectRequired(
   if (!result || result.success !== true) throw new LearningSynchronizationError('internal_error', provider);
 }
 
+export async function markLearningCourseSyncAttempt(
+  db: AppDb,
+  input: { readonly courseId: number; readonly attemptedAt: string },
+): Promise<void> {
+  const courseId = learningValidation.integer(input.courseId, 1, LEARNING_LIMITS.databaseInteger);
+  const attemptedAt = learningValidation.timestamp(input.attemptedAt);
+  const result = await db.prepare(`UPDATE learning_courses AS course
+    SET last_sync_attempt_at=?1
+    WHERE course.id=?2 AND course.lifecycle_state='active' AND course.deleted_at IS NULL
+      AND EXISTS (SELECT 1 FROM learning_programs program
+        WHERE program.id=course.program_id AND program.status='active' AND program.deleted_at IS NULL)
+      AND EXISTS (SELECT 1 FROM learning_provider_connections connection
+        WHERE connection.id=course.connection_id AND connection.provider=course.provider
+          AND connection.status='active' AND connection.deleted_at IS NULL)`)
+    .bind(attemptedAt, courseId).run();
+  if (!result || result.success !== true || result.meta.changes !== 1) {
+    throw new LearningSynchronizationError('not_found', 'google_classroom');
+  }
+}
+
 export async function runLearningSyncWithRetry(
   input: {
     readonly provider: LearningProviderKind;
@@ -259,7 +288,7 @@ export async function runLearningSyncWithRetry(
         throw new LearningSynchronizationError('timeout', provider);
       }
       try {
-        await dependencies.reconcile(linked.signal);
+        await dependencies.reconcile(linked.signal, attempt);
         const elapsedMs = Math.max(0, safeEpoch(dependencies.now, provider) - started);
         if (linked.deadline.signal.aborted || elapsedMs >= LEARNING_SYNC_RUN_LIMITS.maxElapsedMs) {
           throw new LearningSynchronizationError('timeout', provider);
@@ -326,7 +355,7 @@ export async function reconcileLearningProviderCourse(
     markReconnectRequired: (errorCode) => markLearningConnectionReconnectRequired(db, {
       connectionId: input.connectionId, provider: input.provider, errorCode,
     }),
-    reconcile: async (signal) => {
+    reconcile: async (signal, attempt) => {
       if (input.provider === 'google_classroom') {
         if (!configured(environment.GOOGLE_CLASSROOM_CLIENT_ID, 512)
           || !configured(environment.GOOGLE_CLASSROOM_CLIENT_SECRET, 2_048)) {
@@ -337,6 +366,7 @@ export async function reconcileLearningProviderCourse(
           trigger: input.trigger, clientId: environment.GOOGLE_CLASSROOM_CLIENT_ID,
           clientSecret: environment.GOOGLE_CLASSROOM_CLIENT_SECRET, keyRing, fetcher: fetch,
           now: Date.now, signal, maxProviderPages: input.maxProviderPages,
+          reservedInvocationQueries: GOOGLE_RECONCILIATION_RESERVED_D1_QUERIES * attempt,
         });
         return;
       }
@@ -350,6 +380,7 @@ export async function reconcileLearningProviderCourse(
         clientSecret: environment.CANVAS_OAUTH_CLIENT_SECRET,
         allowedOrigins: readCanvasAllowedOrigins(environment.CANVAS_ALLOWED_ORIGINS),
         keyRing, fetcher: fetch, now: Date.now, signal, maxProviderPages: input.maxProviderPages,
+        reservedInvocationQueries: CANVAS_RECONCILIATION_RESERVED_D1_QUERIES * attempt,
       });
     },
   });
@@ -360,6 +391,7 @@ const DEFAULT_SCHEDULED_DEPS: ScheduledDeps = Object.freeze({
     await getEnabledModules(db, getBackend(environment))
   ).has('learning'),
   reconcileTarget: async () => { throw new Error('default_reconcile_requires_environment'); },
+  now: Date.now,
 });
 
 export async function runScheduledLearningSyncPass(
@@ -376,7 +408,12 @@ export async function runScheduledLearningSyncPass(
   if (!target) return Object.freeze({ scanned: 0, attempted: 0, succeeded: 0, failed: 0 });
   const reconcileTarget = dependencies?.reconcileTarget
     ?? ((input: LearningTargetSyncInput) => reconcileLearningSyncTarget(environment, db, input));
+  const now = dependencies?.now ?? DEFAULT_SCHEDULED_DEPS.now;
   try {
+    await markLearningCourseSyncAttempt(db, {
+      courseId: target.courseId,
+      attemptedAt: new Date(safeEpoch(now, target.provider)).toISOString(),
+    });
     await reconcileTarget({
       ...target,
       trigger: 'scheduled',

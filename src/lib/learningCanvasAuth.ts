@@ -19,9 +19,13 @@ const encoder = new TextEncoder();
 
 export class LearningCanvasAuthError extends Error {
   readonly code = 'learning_canvas_auth_invalid' as const;
-  constructor() {
+  readonly httpStatus: number | null;
+  readonly retryAfterSeconds: number | null;
+  constructor(metadata: { readonly httpStatus?: number | null; readonly retryAfterSeconds?: number | null } = {}) {
     super('learning_canvas_auth_invalid');
     this.name = 'LearningCanvasAuthError';
+    this.httpStatus = metadata.httpStatus ?? null;
+    this.retryAfterSeconds = metadata.retryAfterSeconds ?? null;
   }
 }
 
@@ -313,10 +317,18 @@ async function boundedFetch(
         || (!allowErrorResponse && (response.status < 200 || response.status >= 300))
       ) {
         cleanup();
+        const rawRetryAfter = response instanceof Response ? response.headers.get('Retry-After') : null;
+        const retryAfterSeconds = rawRetryAfter !== null && /^(?:0|[1-9]\d{0,5})$/u.test(rawRetryAfter)
+          ? Number(rawRetryAfter) : null;
         if (response instanceof Response && response.body !== null) {
           try { void response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
         }
-        reject(new LearningCanvasAuthError());
+        reject(new LearningCanvasAuthError({
+          httpStatus: response instanceof Response && response.status >= 400 && response.status <= 599
+            ? response.status : null,
+          retryAfterSeconds: retryAfterSeconds !== null
+            && retryAfterSeconds <= LEARNING_LIMITS.maxRetryAfterSeconds ? retryAfterSeconds : null,
+        }));
         return;
       }
       resolve(Object.freeze({ response, deadlineAt }));

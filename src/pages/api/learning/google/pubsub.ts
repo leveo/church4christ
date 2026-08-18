@@ -184,7 +184,11 @@ export function createGooglePubSubPushHandler(
         } catch { /* stale-claim recovery remains available */ }
         return response(503);
       }
-      const background = (async () => {
+      let registered = false;
+      let releaseRegistration!: () => void;
+      const registration = new Promise<void>((resolve) => { releaseRegistration = resolve; });
+      const background = registration.then(async () => {
+        if (!registered) return;
         let outcome: 'failed' | 'succeeded' = 'failed';
         try {
           await dependencies.reconcileCourse(backgroundDb.db, {
@@ -205,8 +209,23 @@ export function createGooglePubSubPushHandler(
             receipt: accepted, outcome, completedAt: new Date(dependencies.now()).toISOString(),
           });
         } catch { /* stale-claim recovery remains available */ }
-      })().catch(() => {}).finally(backgroundDb.end);
-      try { waitUntil(background); } catch { void background; }
+      }).catch(() => {}).finally(async () => {
+        try { await backgroundDb.end(); } catch { /* independent drainer cleanup is best effort */ }
+      });
+      try {
+        waitUntil(background);
+        registered = true;
+        releaseRegistration();
+      } catch {
+        releaseRegistration();
+        await background;
+        try {
+          await dependencies.finishDelivery(locals.db, {
+            receipt: accepted, outcome: 'failed', completedAt: new Date(dependencies.now()).toISOString(),
+          });
+        } catch { /* stale-claim recovery remains available */ }
+        return response(503);
+      }
       return response(204);
     } catch {
       return response(503);

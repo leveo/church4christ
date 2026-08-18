@@ -42,9 +42,10 @@ describe.skipIf(!hasPg)('Learning synchronization target parity (PostgreSQL)', (
   afterAll(async () => { await sql?.end(); });
 
   it('matches D1 active-graph authorization and exact manual scope', async () => {
-    expect(await listLearningSyncTargets(db, { limit: 2 })).toEqual([{
-      courseId: 9301, connectionId: 9301, provider: 'google_classroom', externalCourseId: 'pg-course',
-    }]);
+    expect(await listLearningSyncTargets(db, { limit: 2 })).toEqual([
+      { courseId: 9301, connectionId: 9301, provider: 'google_classroom', externalCourseId: 'pg-course' },
+      { courseId: 9304, connectionId: 9301, provider: 'google_classroom', externalCourseId: 'pg-course-next' },
+    ]);
     expect(await listLearningSyncTargets(db, { courseId: 9302, limit: 1 })).toEqual([]);
   });
 

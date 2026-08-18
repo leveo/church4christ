@@ -233,6 +233,6 @@ describe('Google notification authoritative single-course reconciliation', () =>
       clientId: 'client.apps.googleusercontent.com', clientSecret: 'private-client-secret',
       keyRing: ring, fetcher, now: () => NOW, signal: new AbortController().signal,
       reservedInvocationQueries: 43,
-    })).rejects.toMatchObject({ code: 'limit_exceeded', provider: 'google_classroom' });
+    })).rejects.toMatchObject({ code: 'pagination_limit', provider: 'google_classroom' });
   });
 });
