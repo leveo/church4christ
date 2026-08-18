@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from '../../scripts/lib/screenshot-validation.mjs';
-import { RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
+import { LEARNING_DEMO_SCREENSHOTS, RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
@@ -127,6 +127,26 @@ describe('v1 release screenshot manifest', () => {
     const row = RELEASE_SCREENSHOTS[0];
     expect(() => assertExpectedScreenshotPage(row, { url: `http://localhost:4321${row.path}`, status: 500, title: '', headings: [], body: row.expectedText })).toThrow(/HTTP 500/);
     expect(() => assertExpectedScreenshotPage(row, { url: `http://localhost:4321${row.path}`, status: 200, title: row.expectedText, headings: [], body: 'Sign in' })).toThrow(/rejection marker/i);
+  });
+});
+
+describe('Learning demo screenshot harness rows', () => {
+  test('selects the seeded English and Chinese learner pages without capturing files', () => {
+    expect(validateScreenshotManifest(LEARNING_DEMO_SCREENSHOTS)).toBe(LEARNING_DEMO_SCREENSHOTS);
+    expect(LEARNING_DEMO_SCREENSHOTS).toEqual([
+      expect.objectContaining({
+        path: '/en/learn/21000',
+        out: 'docs/images/learning/genesis-1-en.png',
+        identity: 'member',
+        expectedText: 'Genesis 1: Creation / 创世记第一章：创造',
+      }),
+      expect.objectContaining({
+        path: '/zh/learn/21000',
+        out: 'docs/images/learning/genesis-1-zh.png',
+        identity: 'member',
+        expectedText: '创世记第一章：创造',
+      }),
+    ]);
   });
 });
 

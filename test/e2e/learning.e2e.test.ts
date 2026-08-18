@@ -128,7 +128,7 @@ describe('Learning built-worker shell boundaries', () => {
     expect(await status(await get('/admin/learning', { cookie: superAdmin }))).toBe(404);
   });
 
-  it('redirects an anonymous learner and renders the honest index for a member', async () => {
+  it('redirects an anonymous learner and renders the canonical Genesis demo for both seeded learners', async () => {
     const anonymous = await get('/en/learn');
     expect(anonymous.status).toBe(303);
     expect(anonymous.headers.get('location')).toBe('/en/signin?next=%2Fen%2Flearn');
@@ -138,8 +138,44 @@ describe('Learning built-worker shell boundaries', () => {
     const response = await get('/en/learn', { cookie: member });
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('No courses to show');
-    expect(html).not.toMatch(/Google Classroom|Canvas LMS|Genesis/i);
+    expect(html).toContain('Genesis Sunday School / 创世记主日学');
+    expect(html).toContain('Genesis 1: Creation / 创世记第一章：创造');
+    expect(html).toContain('/en/learn/21000');
+    expect(html).toContain('Assignment: Creation care reflection / 作业：创造关怀反思');
+    expect(html).toContain('Quiz: Genesis 1 review / 测验：创世记第一章复习');
+    expect(html).not.toContain('No courses to show');
+
+    const englishDetail = await get('/en/learn/21000', { cookie: member });
+    expect(englishDetail.status).toBe(200);
+    const englishHtml = await englishDetail.text();
+    for (const marker of [
+      'Opening: In the beginning / 开场：起初',
+      'Scripture overview: Genesis 1 / 经文概览：创世记第一章',
+      'Days 1–3: Forming creation / 第1–3日：塑造创造',
+      'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分',
+      'Submitted',
+      'Not submitted',
+    ]) expect(englishHtml).toContain(marker);
+    expect(englishHtml).toContain('data-embed="https://www.youtube-nocookie.com/embed/DemoGen1Vid"');
+    expect(englishHtml).not.toContain('<iframe');
+    expect(englishHtml).not.toContain('autoplay=1');
+    expect(englishHtml).toContain('href="https://canvas-learning.example.test/files/genesis-1-learner-handout/download"');
+    expect(englishHtml).toContain('href="https://canvas-learning.example.test/files/genesis-1-teacher-guide/download"');
+    expect(englishHtml).toContain('href="https://canvas-learning.example.test/courses/genesis-1-creation/pages/creation-and-stewardship"');
+    expect(englishHtml).not.toMatch(/access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|provider_credentials/i);
+
+    const chineseMember = await sessionCookie(4, 'grace.lin@example.com');
+    const chinese = await get('/zh/learn/21000', { cookie: chineseMember });
+    expect(chinese.status).toBe(200);
+    const chineseHtml = await chinese.text();
+    expect(chineseHtml).toContain('课程活动');
+    expect(chineseHtml).toContain('已退回');
+    expect(chineseHtml).toContain('已提交');
+
+    const notEnrolled = await sessionCookie(5, 'mark.liu@example.com');
+    const denied = await get('/en/learn/21000', { cookie: notEnrolled });
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).not.toContain('Genesis');
   });
 
   it('keeps every course id non-disclosing for a signed-in non-enrolled member', async () => {
@@ -214,7 +250,7 @@ describe('Learning built-worker shell boundaries', () => {
     expect(chineseHtml).toContain('已提交');
 
     await env.DB.prepare(`UPDATE learning_provider_connections
-      SET status='disabled' WHERE id=890`).run();
+      SET status='disabled' WHERE id IN (890,21000)`).run();
     const hiddenDetail = await get('/en/learn/890', { cookie: member });
     expect(hiddenDetail.status).toBe(404);
     await hiddenDetail.arrayBuffer();

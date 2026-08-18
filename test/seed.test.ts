@@ -3,11 +3,15 @@
 // import, executes it statement-by-statement, then asserts the demo seed is
 // internally consistent and exercises the public readers (settings, ministries).
 import { env } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import seedSql from '../seed/dev-seed.sql?raw';
 import manifest from '../seed/media/manifest.json';
 import { listServiceAttendanceReport } from '../src/lib/serviceAttendanceDb';
 import { getSiteIdentity, getTheme } from '../src/lib/settings';
+import { reconcileCanvasCourse } from '../src/lib/learningCanvasReconcile';
+import { importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
+import { getLearningCourseForLearner, listLearningCoursesForLearner } from '../src/lib/learningLearnerDb';
+import type { AppDb } from '../src/lib/appDb';
 
 // The seed file never uses ';' except to terminate statements and keeps every
 // comment on its own line, so we can strip comment lines and split on ';'.
@@ -320,6 +324,143 @@ describe('demo seed: member portal shared fixtures', () => {
       kind: 'sunday_school',
       term_label: 'Foundations of Faith 信仰基础',
     });
+  });
+});
+
+describe('demo seed: fictional Genesis 1 Learning course', () => {
+  const courseId = 21000;
+  const connectionId = 21000;
+  const baseUrl = 'https://canvas-learning.example.test';
+
+  it('seeds one explicitly local fictional Canvas snapshot without credentials', async () => {
+    const connection = await env.DB.prepare(`SELECT provider, display_name, base_url, status,
+      last_successful_sync_at FROM learning_provider_connections WHERE id=?1`)
+      .bind(connectionId).first<Record<string, unknown>>();
+    expect(connection).toMatchObject({
+      provider: 'canvas',
+      display_name: 'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+      base_url: baseUrl,
+      status: 'active',
+    });
+    expect(Date.now() - Date.parse(String(connection?.last_successful_sync_at))).toBeLessThan(24 * 60 * 60 * 1_000);
+    const credentials = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM learning_provider_credentials WHERE connection_id=?1',
+    ).bind(connectionId).first<{ n: number }>();
+    expect(credentials?.n).toBe(0);
+  });
+
+  it('seeds the exact bilingual Sunday-school sequence and safe resource metadata', async () => {
+    const course = await env.DB.prepare(`SELECT program.display_name AS program_name,
+      course.display_name, course.launch_url, course.last_synced_at
+      FROM learning_courses course JOIN learning_programs program ON program.id=course.program_id
+      WHERE course.id=?1`).bind(courseId).first<Record<string, unknown>>();
+    expect(course).toMatchObject({
+      program_name: 'Genesis Sunday School / 创世记主日学',
+      display_name: 'Genesis 1: Creation / 创世记第一章：创造',
+      launch_url: `${baseUrl}/courses/genesis-1-creation`,
+    });
+    expect(Date.now() - Date.parse(String(course?.last_synced_at))).toBeLessThan(24 * 60 * 60 * 1_000);
+
+    const activities = await env.DB.prepare(`SELECT id, title, kind, launch_url, due_at
+      FROM learning_activities WHERE course_id=?1 ORDER BY id`).bind(courseId)
+      .all<{ id: number; title: string; kind: string; launch_url: string; due_at: string | null }>();
+    expect(activities.results.map(({ id, title, kind }) => ({ id, title, kind }))).toEqual([
+      { id: 21101, title: 'Opening: In the beginning / 开场：起初', kind: 'material' },
+      { id: 21102, title: 'Scripture overview: Genesis 1 / 经文概览：创世记第一章', kind: 'material' },
+      { id: 21103, title: 'Days 1–3: Forming creation / 第1–3日：塑造创造', kind: 'material' },
+      { id: 21104, title: 'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分', kind: 'material' },
+      { id: 21105, title: 'Assignment: Creation care reflection / 作业：创造关怀反思', kind: 'assignment' },
+      { id: 21106, title: 'Quiz: Genesis 1 review / 测验：创世记第一章复习', kind: 'quiz' },
+    ]);
+    expect(activities.results.slice(0, 4).every((row) => row.due_at === null)).toBe(true);
+    expect(Date.parse(activities.results[4].due_at!) - Date.now()).toBeGreaterThan(24 * 60 * 60 * 1_000);
+    expect(Date.parse(activities.results[5].due_at!) - Date.now()).toBeGreaterThan(4 * 24 * 60 * 60 * 1_000);
+    expect(activities.results.every((row) => row.launch_url.startsWith(`${baseUrl}/`))).toBe(true);
+
+    const resources = await env.DB.prepare(`SELECT id, title, kind, launch_url,
+      youtube_video_id, mime_type, size_bytes FROM learning_resources
+      WHERE activity_id BETWEEN 21101 AND 21106 ORDER BY id`).all<Record<string, unknown>>();
+    expect(resources.results).toEqual([
+      expect.objectContaining({ id: 21201, kind: 'youtube', launch_url: 'https://www.youtube-nocookie.com/embed/DemoGen1Vid', youtube_video_id: 'DemoGen1Vid' }),
+      expect.objectContaining({ id: 21202, kind: 'provider_file', launch_url: `${baseUrl}/files/genesis-1-learner-handout/download`, mime_type: 'application/pdf' }),
+      expect.objectContaining({ id: 21203, kind: 'provider_file', launch_url: `${baseUrl}/files/genesis-1-teacher-guide/download`, mime_type: 'application/pdf' }),
+      expect.objectContaining({ id: 21204, kind: 'link', launch_url: `${baseUrl}/courses/genesis-1-creation/pages/creation-and-stewardship` }),
+    ]);
+    expect(resources.results.every((row) => {
+      const url = new URL(String(row.launch_url));
+      return url.origin === baseUrl || url.origin === 'https://www.youtube-nocookie.com';
+    })).toBe(true);
+  });
+
+  it('enrolls an English and a Chinese @example.com learner with useful privacy-minimal states', async () => {
+    const learners = await env.DB.prepare(`SELECT person.id AS person_id, person.email, person.lang,
+      enrollment.id AS enrollment_id, identity.status, enrollment.state
+      FROM learning_enrollments enrollment
+      JOIN learning_identity_links identity ON identity.id=enrollment.identity_link_id
+      JOIN people person ON person.id=identity.person_id
+      WHERE enrollment.course_id=?1 ORDER BY person.id`).bind(courseId).all<Record<string, unknown>>();
+    expect(learners.results).toEqual([
+      { person_id: 3, email: 'sarah.johnson@example.com', lang: 'en', enrollment_id: 21303, status: 'active', state: 'active' },
+      { person_id: 4, email: 'grace.lin@example.com', lang: 'zh', enrollment_id: 21304, status: 'active', state: 'active' },
+    ]);
+
+    const snapshots = await env.DB.prepare(`SELECT enrollment_id, activity_id, status, late,
+      attempt_number, submitted_at IS NOT NULL AS has_submitted_at,
+      returned_at IS NOT NULL AS has_returned_at
+      FROM learning_submission_snapshots WHERE course_id=?1 ORDER BY enrollment_id, activity_id`)
+      .bind(courseId).all<Record<string, unknown>>();
+    expect(snapshots.results).toEqual([
+      { enrollment_id: 21303, activity_id: 21105, status: 'submitted', late: 0, attempt_number: 1, has_submitted_at: 1, has_returned_at: 0 },
+      { enrollment_id: 21303, activity_id: 21106, status: 'not_submitted', late: 0, attempt_number: 0, has_submitted_at: 0, has_returned_at: 0 },
+      { enrollment_id: 21304, activity_id: 21105, status: 'returned', late: 0, attempt_number: 1, has_submitted_at: 1, has_returned_at: 1 },
+      { enrollment_id: 21304, activity_id: 21106, status: 'submitted', late: 0, attempt_number: 1, has_submitted_at: 1, has_returned_at: 0 },
+    ]);
+
+    const events = await env.DB.prepare(`SELECT event_type, COUNT(*) AS n
+      FROM learning_activity_events WHERE course_id=?1 GROUP BY event_type ORDER BY event_type`)
+      .bind(courseId).all<Record<string, unknown>>();
+    expect(events.results).toEqual([
+      { event_type: 'assignment_submitted', n: 2 },
+      { event_type: 'enrolled', n: 2 },
+      { event_type: 'quiz_submitted', n: 1 },
+      { event_type: 'submission_returned', n: 1 },
+    ]);
+  });
+
+  it('is available only through the exact live learner authorization chain', async () => {
+    const nowEpochMs = Date.now();
+    const english = await getLearningCourseForLearner(env.DB as AppDb, { personId: 3, courseId, nowEpochMs });
+    const chinese = await listLearningCoursesForLearner(env.DB as AppDb, { personId: 4, nowEpochMs });
+    expect(english).toMatchObject({
+      courseId,
+      displayName: 'Genesis 1: Creation / 创世记第一章：创造',
+      provider: 'canvas',
+      isStale: false,
+    });
+    expect(english?.activities).toHaveLength(6);
+    expect(chinese.map((course) => course.courseId)).toEqual([courseId]);
+    await expect(getLearningCourseForLearner(env.DB as AppDb, { personId: 5, courseId, nowEpochMs })).resolves.toBeNull();
+  });
+
+  it('does not assume provider network access for the credential-free local snapshot', async () => {
+    const keyRing = await importLearningCredentialKeyRing(JSON.stringify({
+      currentVersion: 1,
+      keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(71))) },
+    }));
+    const fetcher = vi.fn(async () => new Response(null, { status: 500 }));
+    await expect(reconcileCanvasCourse(env.DB as AppDb, {
+      connectionId,
+      allowedOrigins: [baseUrl],
+      externalCourseId: 'genesis-1-creation',
+      trigger: 'manual',
+      clientId: 'fictional-client-id',
+      clientSecret: 'fictional-client-secret',
+      keyRing,
+      fetcher,
+      now: Date.now,
+      signal: new AbortController().signal,
+    })).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 

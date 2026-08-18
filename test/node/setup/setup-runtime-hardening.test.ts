@@ -108,13 +108,29 @@ describe('runtime setup hardening', () => {
       'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Alex Admin', role: 'admin' },
       'SELECT slug FROM ministries WHERE id=?': { slug: 'av-tech' },
       'SELECT COUNT(*) AS count FROM sermons': { count: 5 },
+      'SELECT display_name FROM learning_courses WHERE id=?': { display_name: 'Genesis 1: Creation / 创世记第一章：创造' },
+      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 2 },
+      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 0 },
     });
     await expect(verifyCanonicalDemoSeed(complete as any)).resolves.toBe(true);
+    const missingLearning = statementDb({
+      'SELECT COUNT(*) AS count FROM people': { count: 10 },
+      'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Alex Admin', role: 'admin' },
+      'SELECT slug FROM ministries WHERE id=?': { slug: 'av-tech' },
+      'SELECT COUNT(*) AS count FROM sermons': { count: 5 },
+      'SELECT display_name FROM learning_courses WHERE id=?': null,
+      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 0 },
+      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 0 },
+    });
+    await expect(verifyCanonicalDemoSeed(missingLearning as any)).resolves.toBe(false);
     const unrelated = statementDb({
       'SELECT COUNT(*) AS count FROM people': { count: 1 },
       'SELECT email, display_name, role FROM people WHERE id=?': { email: 'admin@example.com', display_name: 'Someone', role: 'admin' },
       'SELECT slug FROM ministries WHERE id=?': null,
       'SELECT COUNT(*) AS count FROM sermons': { count: 0 },
+      'SELECT display_name FROM learning_courses WHERE id=?': null,
+      'SELECT COUNT(*) AS count FROM learning_enrollments WHERE course_id=? AND state=?': { count: 0 },
+      'SELECT COUNT(*) AS count FROM learning_provider_credentials WHERE connection_id=?': { count: 1 },
     });
     await expect(verifyCanonicalDemoSeed(unrelated as any)).resolves.toBe(false);
   });

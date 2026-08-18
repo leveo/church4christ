@@ -51,6 +51,15 @@ describe('buildSetupPlan', () => {
     expect(plan.services).toEqual(['hyperdrive', 'r2', 'worker']);
   });
 
+  it('includes Learning in the canonical demo profile and the D1 community demo setup', () => {
+    expect(raw.capabilities.learning.seedProfiles).toContain('demo');
+    const plan = buildSetupPlan({ ...base, preset: 'website-community' }, raw);
+    expect(plan.backend).toBe('d1');
+    expect(plan.demoData).toBe(true);
+    expect(plan.moduleSettings['module.learning']).toBe('1');
+    expect(plan.actions).toContain('seed');
+  });
+
   it('builds a no-demo custom plan and honors a compatible provider override', () => {
     const plan = buildSetupPlan(
       { ...base, preset: undefined, modules: ['sermons'], backendOverride: 'supabase', demoData: false },
