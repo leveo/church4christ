@@ -17,6 +17,7 @@ import {
 } from '../../src/lib/learningCanvasLiveEvents';
 import { CANVAS_REQUIRED_SCOPES } from '../../src/lib/learningCanvasProvider';
 import { importLearningCredentialKeyRing } from '../../src/lib/learningCredentials';
+import { getLearningConnection, updateLearningConnection } from '../../src/lib/learningConnectionDb';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 
@@ -130,5 +131,17 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     expect(await sqlA.unsafe(`SELECT column_name FROM information_schema.columns
       WHERE table_name='learning_canvas_event_receipts'
         AND column_name IN ('payload','body','grade','answer','comment','file_bytes')`)).toEqual([]);
+  });
+
+  it('keeps a Canvas issuer origin immutable through the real PostgreSQL adapter', async () => {
+    await expect(updateLearningConnection(dbA, {
+      connectionId: 28402, expectedRevision: 4, provider: 'canvas', displayName: 'PG Canvas renamed',
+      baseUrl: 'https://attacker.example', actorPersonId: 28401,
+    } as never)).resolves.toMatchObject({
+      displayName: 'PG Canvas renamed', baseUrl: BASE_URL, revision: 5,
+    });
+    expect(await getLearningConnection(dbA, 28402, { includeDeleted: false })).toMatchObject({
+      baseUrl: BASE_URL, revision: 5,
+    });
   });
 });

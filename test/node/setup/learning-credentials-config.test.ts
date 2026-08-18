@@ -9,6 +9,7 @@ describe('Learning credential secret declaration', () => {
     expect(config).toContain('"secrets": { "required": [');
     for (const name of [
       'LEARNING_CREDENTIAL_KEYS', 'GOOGLE_CLASSROOM_CLIENT_ID', 'GOOGLE_CLASSROOM_CLIENT_SECRET',
+      'CANVAS_ALLOWED_ORIGINS', 'CANVAS_OAUTH_CLIENT_ID', 'CANVAS_OAUTH_CLIENT_SECRET',
     ]) {
       expect(config).toContain(`"${name}"`);
       expect(template).toContain(`"${name}"`);
@@ -30,6 +31,7 @@ describe('Learning credential secret declaration', () => {
     const requiredSecrets = config.slice(config.indexOf('"secrets"'), config.indexOf('"triggers"'));
     expect(requiredSecrets).not.toMatch(/GOOGLE_(?:CLASSROOM_PUBSUB_TOPIC|PUBSUB_)/u);
     expect(example).toContain('AES-256-GCM');
+    expect(example).toContain('CANVAS_ALLOWED_ORIGINS is a bounded JSON array of exact HTTPS origins');
   });
 
   it('isolates the bounded Classroom renewal pass in its own hourly Worker invocation', () => {

@@ -41,6 +41,7 @@ function unprovenPoisonedContext(headers: HeadersInit = {}): { context: never; w
 }
 
 const deps = () => ({
+  canvasAllowedOrigins: JSON.stringify(['https://canvas.test']),
   keySecret: JSON.stringify({ currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(4))) } }),
   nextConnectionId: vi.fn(() => 401),
   createConnection: vi.fn(async () => ({ connectionId: 401 })),
@@ -159,6 +160,66 @@ describe('Learning connection action HTTP boundary', () => {
       connectionId: 401, expectedRevision: 0, ok: true, actorPersonId: 7,
       expectedProvider: 'canvas', expectedStatus: 'active',
     }));
+  });
+
+  it('rejects an unallowlisted or unsafe Canvas origin before creating a connection', async () => {
+    for (const canvasAllowedOrigins of [
+      JSON.stringify(['https://approved-canvas.test']),
+      JSON.stringify(['https://127.0.0.1']),
+    ]) {
+      const injected = { ...deps(), canvasAllowedOrigins };
+      const handler = createLearningConnectionActionHandler(injected as never);
+      const request = new Request('https://church.test/admin/learning/connections', {
+        method: 'POST', headers: {
+          'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+        }, body: 'action=create&provider=canvas&display_name=Canvas&base_url=https%3A%2F%2Fcanvas.test',
+      });
+      const response = await handler({ request, url: new URL(request.url), locals: {
+        modules: new Set(['learning']), user: user(), db: {},
+      } } as never);
+      expect(response.headers.get('location')).toBe('/admin/learning?error=connection_invalid');
+      expect(injected.createConnection).not.toHaveBeenCalled();
+    }
+  });
+
+  it('fails closed on malformed, duplicate, empty, oversized, or non-public Canvas allowlists', async () => {
+    const invalidConfigs = [
+      '', 'not-json', '[]', JSON.stringify(['https://canvas.test', 'https://canvas.test']),
+      JSON.stringify(Array.from({ length: 17 }, (_, index) => `https://canvas-${index}.example`)),
+      JSON.stringify(['http://canvas.test']), JSON.stringify(['https://localhost']),
+      JSON.stringify(['https://2130706433']), JSON.stringify(['https://[::1]']),
+    ];
+    for (const canvasAllowedOrigins of invalidConfigs) {
+      const injected = { ...deps(), canvasAllowedOrigins };
+      const handler = createLearningConnectionActionHandler(injected as never);
+      const request = new Request('https://church.test/admin/learning/connections', {
+        method: 'POST', headers: {
+          'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+        }, body: 'action=create&provider=canvas&display_name=Canvas&base_url=https%3A%2F%2Fcanvas.test',
+      });
+      const response = await handler({ request, url: new URL(request.url), locals: {
+        modules: new Set(['learning']), user: user(), db: {},
+      } } as never);
+      expect.soft(response.headers.get('location'), canvasAllowedOrigins)
+        .toBe('/admin/learning?error=connection_invalid');
+      expect.soft(injected.createConnection, canvasAllowedOrigins).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects a Canvas URL retargeting form before persistence or provider access', async () => {
+    const injected = deps();
+    const handler = createLearningConnectionActionHandler(injected as never);
+    const request = new Request('https://church.test/admin/learning/connections', {
+      method: 'POST', headers: {
+        'content-type': 'application/x-www-form-urlencoded', origin: 'https://church.test',
+      }, body: 'action=update&connection_id=401&revision=0&provider=canvas&display_name=Canvas&base_url=https%3A%2F%2Fattacker.test',
+    });
+    const response = await handler({ request, url: new URL(request.url), locals: {
+      modules: new Set(['learning']), user: user(), db: {},
+    } } as never);
+    expect(response.headers.get('location')).toBe('/admin/learning?error=connection_invalid');
+    expect(injected.updateConnection).not.toHaveBeenCalled();
+    expect(injected.checkHealth).not.toHaveBeenCalled();
   });
 
   it('rejects stale health revision/provider/status before calling the provider', async () => {

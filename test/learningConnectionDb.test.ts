@@ -86,7 +86,7 @@ describe('Learning provider connection persistence (D1)', () => {
     expect(await env.DB.prepare('SELECT 1 FROM learning_provider_connections WHERE id=103').first()).toBeNull();
   });
 
-  it('updates with optimistic concurrency and never partially applies a stale write', async () => {
+  it('updates metadata with optimistic concurrency without retargeting a Canvas credential origin', async () => {
     await createLearningConnection(env.DB, {
       connectionId: 111, provider: 'canvas', displayName: 'Canvas', baseUrl: 'https://canvas.church.test',
       actorPersonId: actor, credential: await canvasEnvelope(111),
@@ -94,15 +94,35 @@ describe('Learning provider connection persistence (D1)', () => {
     expect(await updateLearningConnection(env.DB, {
       connectionId: 111, expectedRevision: 0, provider: 'canvas', displayName: 'Canvas Updated',
       baseUrl: 'https://canvas-new.church.test', actorPersonId: actor,
-    })).toMatchObject({ revision: 1, displayName: 'Canvas Updated', baseUrl: 'https://canvas-new.church.test' });
+    } as never)).toMatchObject({ revision: 1, displayName: 'Canvas Updated', baseUrl: 'https://canvas.church.test' });
     await expect(updateLearningConnection(env.DB, {
       connectionId: 111, expectedRevision: 0, provider: 'canvas', displayName: 'Stale',
       baseUrl: 'https://stale.test', actorPersonId: actor,
-    })).rejects.toBeInstanceOf(LearningConnectionConflictError);
+    } as never)).rejects.toBeInstanceOf(LearningConnectionConflictError);
     expect(await getLearningConnection(env.DB, 111, { includeDeleted: true })).toMatchObject({
-      revision: 1, displayName: 'Canvas Updated', baseUrl: 'https://canvas-new.church.test',
+      revision: 1, displayName: 'Canvas Updated', baseUrl: 'https://canvas.church.test',
     });
   });
+
+  it.each(['pending', 'active', 'error'] as const)(
+    'keeps a Canvas base URL immutable while status is %s',
+    async (status) => {
+      const connectionId = status === 'pending' ? 112 : status === 'active' ? 113 : 114;
+      await createLearningConnection(env.DB, {
+        connectionId, provider: 'canvas', displayName: 'Canvas', baseUrl: 'https://issuer.church.test',
+        actorPersonId: actor, credential: status === 'active' ? await canvasEnvelope(connectionId) : null,
+      });
+      if (status === 'error') await env.DB.prepare(
+        "UPDATE learning_provider_connections SET status='error' WHERE id=?",
+      ).bind(connectionId).run();
+      await expect(updateLearningConnection(env.DB, {
+        connectionId, expectedRevision: 0, provider: 'canvas', displayName: 'Renamed',
+        baseUrl: 'https://attacker.test', actorPersonId: actor,
+      } as never)).resolves.toMatchObject({
+        displayName: 'Renamed', baseUrl: 'https://issuer.church.test', status,
+      });
+    },
+  );
 
   it('disconnects softly while atomically deleting the credential and reconnects only at the exact revision', async () => {
     await createLearningConnection(env.DB, {
@@ -187,7 +207,7 @@ describe('Learning provider connection persistence (D1)', () => {
       updateLearningConnection(env.DB, {
         connectionId: 151, expectedRevision: 0, provider: 'canvas', displayName: 'Update winner',
         baseUrl: 'https://updated.church.test', actorPersonId: actor,
-      }),
+      } as never),
       disconnectLearningConnection(env.DB, { connectionId: 151, expectedRevision: 0, actorPersonId: actor }),
     ]);
     const winner = oneWinner(results);
@@ -197,7 +217,9 @@ describe('Learning provider connection persistence (D1)', () => {
     ).bind(151).first();
     expect(connection?.revision).toBe(1);
     if (winner === 0) {
-      expect(connection).toMatchObject({ status: 'active', displayName: 'Update winner', deletedAt: null });
+      expect(connection).toMatchObject({
+        status: 'active', displayName: 'Update winner', baseUrl: 'https://canvas.church.test', deletedAt: null,
+      });
       expect(credential).not.toBeNull();
     } else {
       expect(connection).toMatchObject({ status: 'disabled', displayName: 'Canvas' });
@@ -217,11 +239,11 @@ describe('Learning provider connection persistence (D1)', () => {
     const envelopes = [await canvasEnvelope(161, 'winner-a'), await canvasEnvelope(161, 'winner-b')] as const;
     const results = await Promise.allSettled([
       reconnectLearningConnection(env.DB, {
-        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://a.church.test',
+        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://canvas.church.test',
         actorPersonId: actor, credential: envelopes[0],
       }),
       reconnectLearningConnection(env.DB, {
-        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://b.church.test',
+        connectionId: 161, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://canvas.church.test',
         actorPersonId: actor, credential: envelopes[1],
       }),
     ]);
@@ -231,12 +253,28 @@ describe('Learning provider connection persistence (D1)', () => {
       'SELECT ciphertext FROM learning_provider_credentials WHERE connection_id=?',
     ).bind(161).first<{ ciphertext: ArrayBuffer }>();
     expect(connection).toMatchObject({
-      revision: 2, status: 'active', baseUrl: winner === 0 ? 'https://a.church.test' : 'https://b.church.test',
+      revision: 2, status: 'active', baseUrl: 'https://canvas.church.test',
     });
     expect(stored).not.toBeNull();
     expect(stored?.ciphertext).toBeDefined();
     expect(bytes(stored?.ciphertext)).toEqual(bytes(envelopes[winner].ciphertext));
     expect(await env.DB.prepare('SELECT operation_marker FROM learning_provider_connections WHERE id=?')
       .bind(161).first()).toEqual({ operation_marker: null });
+  });
+
+  it('rejects reconnecting a disabled Canvas connection at a different origin', async () => {
+    await createLearningConnection(env.DB, {
+      connectionId: 162, provider: 'canvas', displayName: 'Canvas', baseUrl: 'https://issuer.church.test',
+      actorPersonId: actor, credential: await canvasEnvelope(162),
+    });
+    await disconnectLearningConnection(env.DB, { connectionId: 162, expectedRevision: 0, actorPersonId: actor });
+    await expect(reconnectLearningConnection(env.DB, {
+      connectionId: 162, expectedRevision: 1, provider: 'canvas', baseUrl: 'https://attacker.test',
+      actorPersonId: actor, credential: await canvasEnvelope(162, 'replacement-private-token'),
+    })).rejects.toBeInstanceOf(LearningConnectionConflictError);
+    expect(await getLearningConnection(env.DB, 162, { includeDeleted: true })).toMatchObject({
+      status: 'disabled', baseUrl: 'https://issuer.church.test', revision: 1,
+    });
+    expect(await env.DB.prepare('SELECT 1 FROM learning_provider_credentials WHERE connection_id=162').first()).toBeNull();
   });
 });

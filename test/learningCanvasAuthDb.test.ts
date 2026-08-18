@@ -14,6 +14,7 @@ import {
   rotateCanvasCredential,
 } from '../src/lib/learningCanvasAuth';
 import { importLearningCredentialKeyRing } from '../src/lib/learningCredentials';
+import { getLearningConnection, updateLearningConnection } from '../src/lib/learningConnectionDb';
 
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const BASE_URL = 'https://canvas.church.example';
@@ -81,6 +82,27 @@ describe('Canvas OAuth one-time persistence and credential rotation', () => {
       redirectUri: REDIRECT, baseUrl: BASE_URL,
     });
     expect(claimed.codeVerifier).toMatch(/^[A-Za-z0-9_-]{86}$/u);
+  });
+
+  it('never retargets a pending connection while OAuth state is outstanding', async () => {
+    const ring = await importLearningCredentialKeyRing(KEY_SECRET);
+    const begun = await beginCanvasOAuthState(env.DB as AppDb, {
+      connectionId: 28101, expectedRevision: 0, actorPersonId: 28100,
+      sessionBinding: SESSION, baseUrl: BASE_URL, clientId: 'client', redirectUri: REDIRECT,
+      keyRing: ring, nowEpochMs: NOW,
+      randomBytes: (size) => new Uint8Array(size).fill(size === 32 ? 21 : 23),
+    });
+    await updateLearningConnection(env.DB as AppDb, {
+      connectionId: 28101, expectedRevision: begun.connectionRevision, provider: 'canvas',
+      displayName: 'Renamed during OAuth', baseUrl: 'https://attacker.example', actorPersonId: 28100,
+    } as never);
+    expect(await getLearningConnection(env.DB as AppDb, 28101, { includeDeleted: false })).toMatchObject({
+      baseUrl: BASE_URL, displayName: 'Renamed during OAuth', revision: begun.connectionRevision + 1,
+    });
+    await expect(claimCanvasOAuthState(env.DB as AppDb, {
+      state: begun.state, sessionBinding: SESSION, actorPersonId: 28100,
+      redirectUri: REDIRECT, baseUrl: BASE_URL, keyRing: ring, nowEpochMs: NOW + 1,
+    })).rejects.toBeInstanceOf(LearningCanvasAuthError);
   });
 
   it('atomically activates, consumes state, encrypts tokens, and CAS-rotates one writer', async () => {
