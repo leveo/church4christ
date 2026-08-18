@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { assertExpectedScreenshotPage, requireScreenshotOnly, validateScreenshotManifest } from '../../scripts/lib/screenshot-validation.mjs';
+import {
+  assertExpectedScreenshotPage,
+  requireLocalScreenshotBase,
+  requireScreenshotOnly,
+  validateScreenshotManifest,
+} from '../../scripts/lib/screenshot-validation.mjs';
 import { LEARNING_DEMO_CAPTURE_ROWS, LEARNING_DEMO_SCREENSHOTS, RELEASE_SCREENSHOTS } from '../../scripts/screenshots.mjs';
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
@@ -205,5 +210,23 @@ describe('screenshot capture selection', () => {
   test('rejects an unfiltered run before capture can start', () => {
     expect(() => requireScreenshotOnly(['node', 'scripts/screenshots.mjs']))
       .toThrow(/refusing unfiltered screenshot capture.*--only.*no files were written/i);
+  });
+
+  test('binds identity-bearing captures to an exact loopback origin', () => {
+    expect(requireLocalScreenshotBase('http://localhost:4321')).toBe('http://localhost:4321');
+    expect(requireLocalScreenshotBase('https://127.0.0.1:8443/')).toBe('https://127.0.0.1:8443');
+    expect(requireLocalScreenshotBase('http://[::1]:4321')).toBe('http://[::1]:4321');
+
+    for (const base of [
+      'https://captures.example.test',
+      'http://localhost.example.test:4321',
+      'http://user:password@localhost:4321',
+      'http://localhost:4321/dev',
+      'http://localhost:4321/?target=remote',
+      'file:///tmp/capture.html',
+      'not-a-url',
+    ]) {
+      expect(() => requireLocalScreenshotBase(base)).toThrow(/loopback screenshot origin/i);
+    }
   });
 });
