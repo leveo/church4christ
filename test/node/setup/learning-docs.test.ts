@@ -89,4 +89,10 @@ describe('Learning module introduction documentation', () => {
     expect(harness).not.toMatch(/SCREENSHOT_SESSION_SECRET[^\n]*match[^\n]*SESSION_SECRET/i);
     expect(harness).not.toContain("SCREENSHOT_SESSION_SECRET='<same local SESSION_SECRET>'");
   });
+
+  it('distinguishes setup demo gating from the direct local screenshot seed command', () => {
+    expect(feature).toMatch(/setup[^\n]*--demo-data/i);
+    expect(feature).toMatch(/screenshot runbook[^\n]*(directly|deliberately)[^\n]*(dev-seed|same seed)/i);
+    expect(feature).not.toMatch(/Genesis fixture is loaded only by[^\n]*--demo-data/i);
+  });
 });

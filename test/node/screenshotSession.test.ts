@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { mintSession, verifySession, verifySessionWithScreenshotFallback } from '../../src/lib/session';
+import { mintSession, verifySession } from '../../src/lib/session';
+import { loadScreenshotSessionUser } from '../../src/lib/screenshotSessionDev';
 import { mintScreenshotSession } from '../../scripts/lib/screenshot-session.mjs';
 
 const SECRET = 'screenshot-only-secret-at-least-32-characters';
@@ -49,7 +50,7 @@ describe('screenshot-only session minting', () => {
     expect(source).not.toContain(SECRET);
   });
 
-  it('accepts the screenshot signing secret only in development and reports its origin', async () => {
+  it('keeps regular sessions unchanged and attaches only an exact screenshot identity', async () => {
     const regularSecret = 'regular-session-secret-at-least-32-characters';
     const identity = { id: 3, email: 'sarah.johnson@example.com', sessionEpoch: 0 };
     const regular = await mintSession(regularSecret, identity);
@@ -58,33 +59,41 @@ describe('screenshot-only session minting', () => {
       { personId: identity.id, email: identity.email, sessionEpoch: identity.sessionEpoch },
     );
 
-    await expect(verifySessionWithScreenshotFallback({
-      jwt: regular,
-      runtimeSecret: regularSecret,
-      devMode: false,
-      screenshotSecret: SECRET,
-    })).resolves.toMatchObject({ origin: 'runtime', claims: { personId: 3 } });
-    await expect(verifySessionWithScreenshotFallback({
-      jwt: screenshot,
-      runtimeSecret: regularSecret,
-      devMode: false,
-      screenshotSecret: SECRET,
-    })).resolves.toBeNull();
-    await expect(verifySessionWithScreenshotFallback({
-      jwt: screenshot,
-      runtimeSecret: undefined,
-      devMode: true,
-      screenshotSecret: SECRET,
-    })).resolves.toEqual({
-      origin: 'screenshot',
-      claims: { personId: 3, email: 'sarah.johnson@example.com', epoch: 0 },
+    await expect(verifySession(regularSecret, regular)).resolves.toEqual({
+      personId: 3,
+      email: identity.email,
+      epoch: 0,
     });
+
+    const user = { id: 3, email: identity.email, displayName: 'Sarah Johnson' };
+    await expect(loadScreenshotSessionUser({
+      jwt: screenshot,
+      secret: SECRET,
+      loadUser: async (personId, epoch) => personId === 3 && epoch === 0 ? user : null,
+    })).resolves.toBe(user);
   });
 
-  it('requires middleware to bind screenshot claims to the loaded Person email', () => {
-    const middleware = readFileSync('src/middleware.ts', 'utf8');
-    expect(middleware).toContain('import.meta.env.DEV');
-    expect(middleware).toContain('import.meta.env.SCREENSHOT_SESSION_SECRET');
-    expect(middleware).toMatch(/origin === 'runtime'[^\n]*user\.email === verified\.claims\.email/);
+  it('rejects a mismatched Person email and a stale session epoch through executable loading', async () => {
+    const screenshot = await mintScreenshotSession(
+      { SCREENSHOT_SESSION_SECRET: SECRET },
+      { personId: 4, email: 'grace.lin@example.com', sessionEpoch: 0 },
+    );
+    const wrongEmail = { id: 4, email: 'sarah.johnson@example.com' };
+    await expect(loadScreenshotSessionUser({
+      jwt: screenshot,
+      secret: SECRET,
+      loadUser: async () => wrongEmail,
+    })).resolves.toBeNull();
+
+    let requestedEpoch: number | undefined;
+    await expect(loadScreenshotSessionUser({
+      jwt: screenshot,
+      secret: SECRET,
+      loadUser: async (_personId, epoch) => {
+        requestedEpoch = epoch;
+        return epoch === 1 ? { id: 4, email: 'grace.lin@example.com' } : null;
+      },
+    })).resolves.toBeNull();
+    expect(requestedEpoch).toBe(0);
   });
 });
