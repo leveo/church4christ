@@ -74,9 +74,10 @@ describe('Canvas provider adapter', () => {
   it('declares only the documented read scopes used by the adapter', () => {
     expect(CANVAS_REQUIRED_SCOPES).toEqual([
       'url:GET|/api/v1/courses',
-      'url:GET|/api/v1/courses/:course_id',
-      'url:GET|/api/v1/courses/:course_id/users',
+      'url:GET|/api/v1/courses/:id',
+      'url:GET|/api/v1/courses/:course_id/enrollments',
       'url:GET|/api/v1/courses/:course_id/modules',
+      'url:GET|/api/v1/courses/:course_id/modules/:module_id/items',
       'url:GET|/api/v1/courses/:course_id/modules/:module_id/items/:id',
       'url:GET|/api/v1/courses/:course_id/pages/:url_or_id',
       'url:GET|/api/v1/files/:id',
@@ -149,18 +150,15 @@ describe('Canvas provider adapter', () => {
     }
   });
 
-  it('aggregates a unique Canvas user enrollment without profiles, emails, or grades', async () => {
+  it('uses the official enrollments endpoint and aggregates records by user without include options', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      expect(url.pathname).toBe('/api/v1/courses/42/users');
-      expect(url.searchParams.getAll('include[]')).toEqual(['enrollments']);
-      return json([{
-        id: 99,
-        enrollments: [
-          { type: 'StudentEnrollment', enrollment_state: 'completed' },
-          { type: 'TeacherEnrollment', enrollment_state: 'active' },
-        ],
-      }]);
+      expect(url.pathname).toBe('/api/v1/courses/42/enrollments');
+      expect(url.searchParams.has('include[]')).toBe(false);
+      return json([
+        { id: 501, user_id: 99, course_id: 42, type: 'StudentEnrollment', enrollment_state: 'completed' },
+        { id: 502, user_id: 99, course_id: 42, type: 'TeacherEnrollment', enrollment_state: 'active' },
+      ]);
     });
     const result = await invokeLearningProvider(provider(fetcher), {
       method: 'syncEnrollments',
@@ -183,6 +181,50 @@ describe('Canvas provider adapter', () => {
       state: 'active',
     }]);
     expect(JSON.stringify(result)).not.toMatch(/name|email|grades|scores|avatar/iu);
+  });
+
+  it('resumes omitted module items through the bounded module-items phase before assignments', async () => {
+    const paths: string[] = [];
+    const adapter = provider(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      paths.push(url.pathname);
+      if (url.pathname.endsWith('/modules')) return json([{ id: 7, name: 'Creation' }]);
+      if (url.pathname.endsWith('/modules/7/items')) return json([{
+        id: 8,
+        title: 'Read Genesis 1',
+        type: 'Page',
+        html_url: `${BASE_URL}/courses/42/pages/genesis-1`,
+        published: true,
+      }]);
+      if (url.pathname.endsWith('/assignments')) return json([]);
+      if (url.pathname.endsWith('/quizzes')) return json([]);
+      throw new Error(`unexpected Canvas path ${url.pathname}`);
+    });
+    const activities: LearningActivity[] = [];
+    let pageToken: string | null = null;
+    for (let pageNumber = 1; pageNumber <= 4; pageNumber += 1) {
+      const page: LearningProviderPage<LearningActivity> = await invokeLearningProvider(adapter, {
+        method: 'syncActivities',
+        request: {
+          subject: { connectionId: CONNECTION_ID, provider: 'canvas', externalCourseId: '42' },
+          page: { pageSize: 100, pageNumber, pageToken },
+          operation: operation('42'),
+        },
+        urlPolicy: POLICY,
+        now: () => NOW + 1,
+      });
+      activities.push(...page.items);
+      pageToken = page.nextPageToken;
+      if (pageToken === null) break;
+    }
+    expect(paths).toEqual([
+      '/api/v1/courses/42/modules',
+      '/api/v1/courses/42/modules/7/items',
+      '/api/v1/courses/42/assignments',
+      '/api/v1/courses/42/quizzes',
+    ]);
+    expect(activities.map((item) => item.externalActivityId)).toEqual(['module:7:item:8']);
+    expect(pageToken).toBeNull();
   });
 
   it('paginates modules, assignments, then quizzes and retains metadata only', async () => {
@@ -262,6 +304,14 @@ describe('Canvas provider adapter', () => {
         item: { id: 10, title: 'Reading', type: 'ExternalUrl', external_url: 'https://resources.church.example/genesis', html_url: `${BASE_URL}/courses/42/modules/items/10` },
         detail: null,
         kind: 'link',
+        launchUrl: `${BASE_URL}/courses/42/modules/items/10`,
+      },
+      {
+        activityId: 'module:7:item:11',
+        item: { id: 11, title: 'Video', type: 'ExternalUrl', external_url: 'https://youtu.be/dQw4w9WgXcQ', html_url: `${BASE_URL}/courses/42/modules/items/11` },
+        detail: null,
+        kind: 'youtube',
+        launchUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
       },
     ] as const;
     for (const fixture of resources) {
@@ -288,6 +338,7 @@ describe('Canvas provider adapter', () => {
       });
       expect(result.items).toHaveLength(1);
       expect(result.items[0]?.kind).toBe(fixture.kind);
+      if ('launchUrl' in fixture) expect(result.items[0]?.launchUrl).toBe(fixture.launchUrl);
       expect(JSON.stringify(result)).not.toMatch(/body|description|lock_info|file_bytes|verifier/iu);
     }
   });

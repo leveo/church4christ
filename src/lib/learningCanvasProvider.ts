@@ -34,9 +34,10 @@ import {
 
 export const CANVAS_REQUIRED_SCOPES = Object.freeze([
   'url:GET|/api/v1/courses',
-  'url:GET|/api/v1/courses/:course_id',
-  'url:GET|/api/v1/courses/:course_id/users',
+  'url:GET|/api/v1/courses/:id',
+  'url:GET|/api/v1/courses/:course_id/enrollments',
   'url:GET|/api/v1/courses/:course_id/modules',
+  'url:GET|/api/v1/courses/:course_id/modules/:module_id/items',
   'url:GET|/api/v1/courses/:course_id/modules/:module_id/items/:id',
   'url:GET|/api/v1/courses/:course_id/pages/:url_or_id',
   'url:GET|/api/v1/files/:id',
@@ -335,22 +336,30 @@ function mapCourse(value: unknown, connectionId: number, baseUrl: string): Learn
   });
 }
 
-function mapEnrollment(value: unknown, connectionId: number, courseId: string): LearningProviderEnrollment {
-  const row = data(value);
-  const userId = externalId(row.id);
-  const enrollments = array(row.enrollments);
-  if (enrollments.length < 1) learningValidation.invalid();
-  return aggregateCanvasEnrollmentRecords(enrollments.map((item) => {
-    const enrollment = data(item);
-    return {
+function mapEnrollments(
+  value: unknown,
+  connectionId: number,
+  courseId: string,
+): readonly LearningProviderEnrollment[] {
+  const rows = learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems);
+  const byUser = new Map<string, Array<Record<string, unknown>>>();
+  for (const value of rows) {
+    const enrollment = data(value);
+    externalId(enrollment.id);
+    if (externalId(enrollment.course_id) !== courseId) learningValidation.invalid();
+    const userId = externalId(enrollment.user_id);
+    const records = byUser.get(userId) ?? [];
+    records.push({
       connectionId,
       provider: 'canvas',
       externalCourseId: courseId,
       externalUserId: userId,
       type: string(enrollment.type, 64),
       state: string(enrollment.enrollment_state, 64),
-    };
-  }));
+    });
+    byUser.set(userId, records);
+  }
+  return Object.freeze([...byUser.values()].map((records) => aggregateCanvasEnrollmentRecords(records)));
 }
 
 function activityCommon(
@@ -388,8 +397,8 @@ function moduleActivities(
 ): readonly LearningActivity[] {
   const module = data(value);
   const moduleId = externalId(module.id);
+  if (module.items === undefined) return Object.freeze([]);
   const items = array(module.items);
-  if (module.items === undefined) throw failure('pagination_limit');
   const result: LearningActivity[] = [];
   for (const rawItem of items) {
     const item = data(rawItem);
@@ -434,15 +443,39 @@ function quizActivity(value: unknown, connectionId: number, courseId: string): L
   );
 }
 
-type ActivityPhase = 'modules' | 'assignments' | 'quizzes';
+type RegularActivityPhase = 'modules' | 'assignments' | 'quizzes';
+type ActivityPhase =
+  | { readonly phase: RegularActivityPhase; readonly token: string | null }
+  | {
+    readonly phase: 'module_items';
+    readonly moduleIds: readonly string[];
+    readonly itemToken: string | null;
+    readonly modulesToken: string | null;
+  };
 
-function phaseToken(phase: ActivityPhase, token: string): string {
+function phaseToken(phase: RegularActivityPhase, token: string): string {
   const result = `${phase}|${encodeURIComponent(token)}`;
   if (utf8.encode(result).byteLength > LEARNING_LIMITS.paginationTokenBytes) throw failure('pagination_limit');
   return result;
 }
 
-function parsePhaseToken(value: string | null): { readonly phase: ActivityPhase; readonly token: string | null } {
+function moduleItemsPhaseToken(input: {
+  readonly moduleIds: readonly string[];
+  readonly itemToken: string | null;
+  readonly modulesToken: string | null;
+}): string {
+  if (input.moduleIds.length < 1 || input.moduleIds.length > LEARNING_LIMITS.maxPageItems) {
+    throw failure('pagination_limit');
+  }
+  const payload = JSON.stringify({
+    moduleIds: input.moduleIds.map(externalId),
+    itemToken: input.itemToken,
+    modulesToken: input.modulesToken,
+  });
+  return phaseToken('modules', `items:${payload}`);
+}
+
+function parsePhaseToken(value: string | null): ActivityPhase {
   if (value === null) return Object.freeze({ phase: 'modules', token: null });
   const separator = value.indexOf('|');
   if (separator < 1) throw failure('malformed_response');
@@ -450,10 +483,20 @@ function parsePhaseToken(value: string | null): { readonly phase: ActivityPhase;
   if (phase !== 'modules' && phase !== 'assignments' && phase !== 'quizzes') throw failure('malformed_response');
   let token: string;
   try { token = decodeURIComponent(value.slice(separator + 1)); } catch { throw failure('malformed_response'); }
+  if (phase === 'modules' && token.startsWith('items:')) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(token.slice('items:'.length)) as unknown; } catch { throw failure('malformed_response'); }
+    const row = learningValidation.exactRecord(parsed, ['moduleIds', 'itemToken', 'modulesToken']);
+    const moduleIds = learningValidation.dataArray(row.moduleIds, LEARNING_LIMITS.maxPageItems).map(externalId);
+    if (moduleIds.length < 1 || new Set(moduleIds).size !== moduleIds.length) throw failure('malformed_response');
+    const itemToken = row.itemToken === null ? null : string(row.itemToken, LEARNING_LIMITS.paginationTokenBytes);
+    const modulesToken = row.modulesToken === null ? null : string(row.modulesToken, LEARNING_LIMITS.paginationTokenBytes);
+    return Object.freeze({ phase: 'module_items', moduleIds: Object.freeze(moduleIds), itemToken, modulesToken });
+  }
   return Object.freeze({ phase, token: token === '' ? null : token });
 }
 
-function nextActivityToken(phase: ActivityPhase, next: string | null): string | null {
+function nextActivityToken(phase: RegularActivityPhase, next: string | null): string | null {
   if (next !== null) return phaseToken(phase, next);
   if (phase === 'modules') return phaseToken('assignments', '');
   if (phase === 'assignments') return phaseToken('quizzes', '');
@@ -611,19 +654,17 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
 
     async syncEnrollments(input: LearningSyncEnrollmentsRequest) {
       const courseId = input.subject.externalCourseId;
-      const path = `/api/v1/courses/${encodeURIComponent(courseId)}/users`;
+      const path = `/api/v1/courses/${encodeURIComponent(courseId)}/enrollments`;
       const url = pageUrl(baseUrl, path, input.page.pageSize, input.page.pageToken);
       if (input.page.pageToken === null) {
-        url.searchParams.append('include[]', 'enrollments');
         for (const state of ['active', 'invited', 'creation_pending', 'completed', 'inactive']) {
-          url.searchParams.append('enrollment_state[]', state);
+          url.searchParams.append('state[]', state);
         }
       }
       const response = await request(url, input.operation);
       const next = nextLink(response, baseUrl, path);
       return readAndNormalizeLearningPage(response, input.operation, (value) => ({
-        items: learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems)
-          .map((item) => mapEnrollment(item, connectionId, courseId)),
+        items: mapEnrollments(value, connectionId, courseId),
         requestPageToken: input.page.pageToken,
         nextPageToken: next,
         pageNumber: input.page.pageNumber,
@@ -633,6 +674,35 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
     async syncActivities(input: LearningSyncActivitiesRequest) {
       const courseId = input.subject.externalCourseId;
       const phase = parsePhaseToken(input.page.pageToken);
+      if (phase.phase === 'module_items') {
+        const moduleId = phase.moduleIds[0];
+        const path = `/api/v1/courses/${encodeURIComponent(courseId)}/modules/${encodeURIComponent(moduleId)}/items`;
+        const url = pageUrl(baseUrl, path, input.page.pageSize, phase.itemToken);
+        const response = await request(url, input.operation);
+        const next = nextLink(response, baseUrl, path);
+        return readAndNormalizeLearningPage(response, input.operation, (value) => {
+          let nextPageToken: string | null;
+          if (next !== null) {
+            nextPageToken = moduleItemsPhaseToken({ ...phase, itemToken: next });
+          } else if (phase.moduleIds.length > 1) {
+            nextPageToken = moduleItemsPhaseToken({
+              moduleIds: phase.moduleIds.slice(1), itemToken: null, modulesToken: phase.modulesToken,
+            });
+          } else {
+            nextPageToken = phase.modulesToken === null
+              ? phaseToken('assignments', '')
+              : phaseToken('modules', phase.modulesToken);
+          }
+          return {
+            items: learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems).flatMap((item) => moduleActivities({
+              id: moduleId, items: [item],
+            }, connectionId, courseId)),
+            requestPageToken: input.page.pageToken,
+            nextPageToken,
+            pageNumber: input.page.pageNumber,
+          };
+        }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now);
+      }
       const path = `/api/v1/courses/${encodeURIComponent(courseId)}/${phase.phase}`;
       const url = pageUrl(baseUrl, path, input.page.pageSize, phase.token);
       if (phase.token === null && phase.phase === 'modules') url.searchParams.append('include[]', 'items');
@@ -640,6 +710,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
       const next = nextLink(response, baseUrl, path);
       return readAndNormalizeLearningPage(response, input.operation, (value) => {
         const rows = learningValidation.dataArray(value, LEARNING_LIMITS.maxPageItems);
+        const missingModuleIds = phase.phase === 'modules'
+          ? rows.filter((item) => data(item).items === undefined).map((item) => externalId(data(item).id))
+          : [];
         const items = phase.phase === 'modules'
           ? rows.flatMap((item) => moduleActivities(item, connectionId, courseId))
           : phase.phase === 'assignments'
@@ -650,7 +723,9 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
         return {
           items,
           requestPageToken: input.page.pageToken,
-          nextPageToken: nextActivityToken(phase.phase, next),
+          nextPageToken: missingModuleIds.length > 0
+            ? moduleItemsPhaseToken({ moduleIds: missingModuleIds, itemToken: null, modulesToken: next })
+            : nextActivityToken(phase.phase, next),
           pageNumber: input.page.pageNumber,
         };
       }, { kind: 'activities', urlPolicy: dependencies.urlPolicy }, dependencies.now);
@@ -678,8 +753,23 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
       const title = string(item.title, LEARNING_LIMITS.titleBytes);
       let resource: LearningResource;
       if (type === 'ExternalUrl') {
-        resource = linkResource(connectionId, courseId, activityId, title,
-          string(item.external_url, LEARNING_LIMITS.urlBytes), null);
+        const canvasLaunchUrl = string(item.html_url, LEARNING_LIMITS.urlBytes);
+        const externalLaunchUrl = string(item.external_url, LEARNING_LIMITS.urlBytes);
+        try {
+          const youtube = normalizeYouTube(externalLaunchUrl);
+          resource = Object.freeze({
+            connectionId, provider: 'canvas', externalCourseId: courseId, externalActivityId: activityId,
+            externalResourceId: `youtube:${youtube.videoId}`, title, kind: 'youtube', launchUrl: youtube.embedUrl,
+            youtubeVideoId: youtube.videoId, mimeType: null, sizeBytes: null, providerUpdatedAt: null,
+          });
+        } catch {
+          resource = Object.freeze({
+            connectionId, provider: 'canvas', externalCourseId: courseId, externalActivityId: activityId,
+            externalResourceId: stableResourceId('link', canvasLaunchUrl), title, kind: 'link',
+            launchUrl: canvasLaunchUrl, youtubeVideoId: null, mimeType: null, sizeBytes: null,
+            providerUpdatedAt: null,
+          });
+        }
       } else if (type === 'ExternalTool') {
         resource = Object.freeze({
           connectionId, provider: 'canvas', externalCourseId: courseId, externalActivityId: activityId,
