@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppDb } from '../src/lib/appDb';
+import type { AppDb, AppStatement } from '../src/lib/appDb';
 import { encodeCanvasCredential } from '../src/lib/learningCanvasAuth';
 import {
   checkCanvasConnectionHealth,
@@ -17,6 +17,30 @@ const BASE_URL = 'https://canvas.church.example';
 const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(73))) },
 });
+
+function failFirstCanvasCleanupDelete(db: AppDb): AppDb {
+  let mustFail = true;
+  const wrap = (statement: AppStatement, cleanupDelete: boolean): AppStatement => ({
+    bind(...values: unknown[]) { return wrap(statement.bind(...values), cleanupDelete); },
+    first: <T = unknown>(column?: string) => statement.first<T>(column),
+    all: <T = unknown>() => statement.all<T>(),
+    async run<T = unknown>() {
+      if (cleanupDelete && mustFail) {
+        mustFail = false;
+        throw new Error('injected_cleanup_delete_crash');
+      }
+      return statement.run<T>();
+    },
+  });
+  return {
+    prepare(sql: string) {
+      const statement = db.prepare(sql);
+      return /^DELETE FROM learning_canvas_cleanup_tasks\b/u.test(sql.trim())
+        ? wrap(statement, true) : statement;
+    },
+    batch: <T>(statements: AppStatement[]) => db.batch<T>(statements),
+  };
+}
 
 describe('Canvas admin connection and course mapping', () => {
   beforeEach(async () => {
@@ -275,6 +299,111 @@ describe('Canvas admin connection and course mapping', () => {
     expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
     expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
     expect(revoked).toHaveBeenCalledOnce();
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(0);
+  });
+
+  it('finishes a crashed disconnect when Canvas reports the old access and retained refresh tokens invalid', async () => {
+    const methods: string[] = [];
+    let revokeCalls = 0;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      methods.push(method);
+      if (method === 'DELETE') {
+        revokeCalls += 1;
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer canvas-access');
+        return new Response(null, { status: revokeCalls === 1 ? 204 : 401 });
+      }
+      expect(method).toBe('POST');
+      expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('canvas-refresh');
+      return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400, headers: { 'content-type': 'application/json' },
+      });
+    });
+    const admin = await input(fetcher as typeof fetch);
+    await expect(disconnectCanvasConnection(failFirstCanvasCleanupDelete(env.DB as AppDb), {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(1);
+
+    const cleanup = {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+      allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    };
+    const recovered = await Promise.all([
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, cleanup),
+      recoverCanvasDisconnectCleanup(env.DB as AppDb, cleanup),
+    ]);
+    expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST']);
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(0);
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_provider_credentials
+      WHERE connection_id=28302`).first('count')).toBe(0);
+  });
+
+  it('retains cleanup for retry when an invalid access token is followed by a transient refresh failure', async () => {
+    const methods: string[] = [];
+    let deletes = 0;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      methods.push(method);
+      if (method === 'DELETE') {
+        deletes += 1;
+        return new Response(null, { status: deletes === 1 ? 503 : 401 });
+      }
+      expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('canvas-refresh');
+      return new Response(null, { status: 503 });
+    });
+    const admin = await input(fetcher as typeof fetch);
+    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    await expect(recoverCanvasDisconnectCleanup(env.DB as AppDb, {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+      allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    })).resolves.toEqual({ selected: 1, cleaned: 0, pending: 1 });
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST']);
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
+      WHERE connection_id=28302`).first('count')).toBe(1);
+  });
+
+  it('persists a retained-refresh rotation before revoking the replacement access token', async () => {
+    const methods: string[] = [];
+    let deletes = 0;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      methods.push(method);
+      if (method === 'POST') {
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('canvas-refresh');
+        return new Response(JSON.stringify({
+          access_token: 'replacement-access', refresh_token: 'replacement-refresh',
+          expires_in: 3_600, token_type: 'Bearer',
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+      deletes += 1;
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (deletes <= 2) {
+        expect(authorization).toBe('Bearer canvas-access');
+        return new Response(null, { status: deletes === 1 ? 503 : 401 });
+      }
+      expect(authorization).toBe('Bearer replacement-access');
+      return new Response(null, { status: 204 });
+    });
+    const admin = await input(fetcher as typeof fetch);
+    await expect(disconnectCanvasConnection(env.DB as AppDb, {
+      ...admin, expectedRevision: 1, actorPersonId: 28301,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    await expect(recoverCanvasDisconnectCleanup(env.DB as AppDb, {
+      connectionId: 28302, clientId: admin.clientId, clientSecret: admin.clientSecret,
+      allowedOrigins: admin.allowedOrigins, keyRing: admin.keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    })).resolves.toEqual({ selected: 1, cleaned: 1, pending: 0 });
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'DELETE']);
     expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_canvas_cleanup_tasks
       WHERE connection_id=28302`).first('count')).toBe(0);
   });

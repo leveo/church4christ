@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AppDb } from '../../src/lib/appDb';
+import type { AppDb, AppStatement } from '../../src/lib/appDb';
 import {
   disconnectCanvasConnection,
   mapSelectedCanvasCourse,
@@ -27,10 +27,35 @@ import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 const NOW = Date.parse('2026-08-17T12:00:00.000Z');
 const BASE_URL = 'https://canvas-pg.church.example';
 const CLEANUP_BASE_URL = 'https://canvas-cleanup-pg.church.example';
+const CRASH_CLEANUP_BASE_URL = 'https://canvas-crash-cleanup-pg.church.example';
 const REDIRECT = 'https://church.example.test/admin/learning/canvas/callback';
 const KEY_SECRET = JSON.stringify({
   currentVersion: 1, keys: { 1: btoa(String.fromCharCode(...new Uint8Array(32).fill(83))) },
 });
+
+function failFirstCanvasCleanupDelete(db: AppDb): AppDb {
+  let mustFail = true;
+  const wrap = (statement: AppStatement, cleanupDelete: boolean): AppStatement => ({
+    bind(...values: unknown[]) { return wrap(statement.bind(...values), cleanupDelete); },
+    first: <T = unknown>(column?: string) => statement.first<T>(column),
+    all: <T = unknown>() => statement.all<T>(),
+    async run<T = unknown>() {
+      if (cleanupDelete && mustFail) {
+        mustFail = false;
+        throw new Error('injected_cleanup_delete_crash');
+      }
+      return statement.run<T>();
+    },
+  });
+  return {
+    prepare(sql: string) {
+      const statement = db.prepare(sql);
+      return /^DELETE FROM learning_canvas_cleanup_tasks\b/u.test(sql.trim())
+        ? wrap(statement, true) : statement;
+    },
+    batch: <T>(statements: AppStatement[]) => db.batch<T>(statements),
+  };
+}
 
 describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Postgres)', () => {
   const sqlA = hasPg ? pgClient() : (null as never);
@@ -198,5 +223,59 @@ describe.skipIf(!hasPg)('Canvas OAuth, mapping, and Live Events parity (real Pos
     expect(revoked).toHaveBeenCalledOnce();
     expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
       FROM learning_canvas_cleanup_tasks WHERE connection_id=28502`)).toEqual([{ cleanup: 0 }]);
+  });
+
+  it('finishes Postgres cleanup after revoke succeeds and deleting the outbox crashes', async () => {
+    await sqlA.unsafe(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,created_by_person_id)
+      VALUES(28602,'canvas','PG Canvas Crash Cleanup','${CRASH_CLEANUP_BASE_URL}','active',1,28401)`);
+    const keyRing = await importLearningCredentialKeyRing(KEY_SECRET);
+    const credential = await encryptLearningCredential(keyRing, {
+      provider: 'canvas', connectionId: 28602,
+      plaintext: encodeCanvasCredential({
+        version: 1, accessToken: 'pg-crash-access', refreshToken: 'pg-crash-refresh',
+        accessTokenExpiresAt: '2026-08-17T13:00:00.000Z', grantedScopes: CANVAS_REQUIRED_SCOPES,
+      }), expiresAt: null,
+    });
+    await dbA.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES(28602,?1,?2,?3,?4,?5,NULL)`).bind(
+      credential.ciphertext, credential.nonce, credential.algorithm,
+      credential.keyVersion, credential.envelopeVersion,
+    ).run();
+    const methods: string[] = [];
+    let revokes = 0;
+    const fetcher = vi.fn(async (_raw: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      methods.push(method);
+      if (method === 'DELETE') {
+        revokes += 1;
+        return new Response(null, { status: revokes === 1 ? 204 : 400 });
+      }
+      expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('pg-crash-refresh');
+      return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400, headers: { 'content-type': 'application/json' },
+      });
+    });
+    const cleanup = {
+      connectionId: 28602, clientId: 'canvas-client', clientSecret: 'canvas-secret',
+      allowedOrigins: Object.freeze([CRASH_CLEANUP_BASE_URL]), keyRing, fetcher: fetcher as typeof fetch,
+      signal: new AbortController().signal, now: () => NOW + 1_000,
+    };
+    await expect(disconnectCanvasConnection(failFirstCanvasCleanupDelete(dbA), {
+      ...cleanup, expectedRevision: 1, actorPersonId: 28401, now: () => NOW,
+    })).resolves.toMatchObject({ status: 'disabled', revision: 2 });
+    expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
+      FROM learning_canvas_cleanup_tasks WHERE connection_id=28602`)).toEqual([{ cleanup: 1 }]);
+    const recovered = await Promise.all([
+      recoverCanvasDisconnectCleanup(dbA, cleanup), recoverCanvasDisconnectCleanup(dbB, cleanup),
+    ]);
+    expect(recovered.reduce((sum, result) => sum + result.selected, 0)).toBe(1);
+    expect(recovered.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(methods).toEqual(['DELETE', 'DELETE', 'POST']);
+    expect(await sqlA.unsafe(`SELECT count(*)::int AS cleanup
+      FROM learning_canvas_cleanup_tasks WHERE connection_id=28602`)).toEqual([{ cleanup: 0 }]);
+    expect(await sqlA.unsafe(`SELECT count(*)::int AS credentials
+      FROM learning_provider_credentials WHERE connection_id=28602`)).toEqual([{ credentials: 0 }]);
   });
 });

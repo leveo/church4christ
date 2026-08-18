@@ -2,8 +2,8 @@ import type { AppDb, AppDbResult } from './appDb';
 import {
   decodeCanvasCredential,
   encodeCanvasCredential,
-  refreshCanvasAccessToken,
-  revokeCanvasAccessToken,
+  refreshCanvasAccessTokenForCleanup,
+  revokeCanvasAccessTokenForCleanup,
 } from './learningCanvasAuth';
 import {
   decryptLearningCredential,
@@ -208,12 +208,15 @@ export async function recoverCanvasDisconnectCleanup(
     let credential = decodeCanvasCredential(await decryptLearningCredential(input.keyRing, {
       provider: 'canvas', connectionId, envelope: envelope(claimedRows[0]),
     }));
-    if (Date.parse(credential.accessTokenExpiresAt) <= now + REFRESH_SKEW_MS) {
-      credential = await refreshCanvasAccessToken({
+    let refreshed = false;
+    const refreshCredential = async (): Promise<boolean> => {
+      const result = await refreshCanvasAccessTokenForCleanup({
         baseUrl, clientId: input.clientId, clientSecret: input.clientSecret,
         refreshToken: credential.refreshToken, fetcher: input.fetcher,
         signal: input.signal, nowEpochMs: now,
       });
+      if (result.status === 'provider_absent') return false;
+      credential = result.credential;
       const rotated = await encryptLearningCredential(input.keyRing, {
         provider: 'canvas', connectionId, plaintext: encodeCanvasCredential(credential), expiresAt: null,
       });
@@ -225,10 +228,28 @@ export async function recoverCanvasDisconnectCleanup(
         rotated.envelopeVersion, rotated.expiresAt, connectionId, marker, new Date(epoch(input.now())).toISOString(),
       ).run();
       if (rows(saved, 1).length !== 1) throw new LearningCanvasCleanupConflictError();
+      refreshed = true;
+      return true;
+    };
+    let providerAbsent = false;
+    if (Date.parse(credential.accessTokenExpiresAt) <= now + REFRESH_SKEW_MS) {
+      providerAbsent = !(await refreshCredential());
     }
-    await revokeCanvasAccessToken({
-      baseUrl, accessToken: credential.accessToken, fetcher: input.fetcher, signal: input.signal,
-    });
+    if (!providerAbsent) {
+      let revoked = await revokeCanvasAccessTokenForCleanup({
+        baseUrl, accessToken: credential.accessToken, fetcher: input.fetcher, signal: input.signal,
+      });
+      if (revoked === 'access_token_invalid') {
+        if (refreshed) throw new LearningCanvasCleanupConflictError();
+        providerAbsent = !(await refreshCredential());
+        if (!providerAbsent) {
+          revoked = await revokeCanvasAccessTokenForCleanup({
+            baseUrl, accessToken: credential.accessToken, fetcher: input.fetcher, signal: input.signal,
+          });
+          if (revoked !== 'revoked') throw new LearningCanvasCleanupConflictError();
+        }
+      }
+    }
     const deleted = await db.prepare(`DELETE FROM learning_canvas_cleanup_tasks
       WHERE connection_id=?1 AND claim_marker=?2`).bind(connectionId, marker).run();
     if (changes(deleted) !== 1) throw new LearningCanvasCleanupConflictError();

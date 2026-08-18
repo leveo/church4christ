@@ -274,6 +274,7 @@ async function boundedFetch(
   init: RequestInit,
   fetcher: CanvasAuthFetcher,
   signal: AbortSignal,
+  allowErrorResponse = false,
 ): Promise<BoundedCanvasAuthResponse> {
   if (signal.aborted) invalid();
   const startedAt = Date.now();
@@ -307,7 +308,10 @@ async function boundedFetch(
         return;
       }
       settled = true;
-      if (!(response instanceof Response) || response.status < 200 || response.status >= 300) {
+      if (
+        !(response instanceof Response)
+        || (!allowErrorResponse && (response.status < 200 || response.status >= 300))
+      ) {
         cleanup();
         if (response instanceof Response && response.body !== null) {
           try { void response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
@@ -447,6 +451,84 @@ export async function refreshCanvasAccessToken(rawInput: {
   }), { nowEpochMs: rawInput.nowEpochMs, requireRefreshToken: false, retainedRefreshToken: refreshToken });
 }
 
+export type CanvasCleanupRefreshResult =
+  | { readonly status: 'refreshed'; readonly credential: CanvasCredential }
+  | { readonly status: 'provider_absent' };
+
+function cancelAuthBody(response: Response): void {
+  if (response.body !== null) {
+    try { void response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
+  }
+}
+
+export async function refreshCanvasAccessTokenForCleanup(rawInput: {
+  readonly baseUrl: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly refreshToken: string;
+  readonly fetcher: CanvasAuthFetcher;
+  readonly signal: AbortSignal;
+  readonly nowEpochMs: number;
+}): Promise<CanvasCleanupRefreshResult> {
+  const refreshToken = asciiToken(rawInput.refreshToken, 8_192);
+  const fields = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: asciiToken(rawInput.clientId, 512),
+    client_secret: asciiToken(rawInput.clientSecret, 8_192),
+    refresh_token: refreshToken,
+  });
+  const received = await boundedFetch(new URL(
+    '/login/oauth2/token', normalizeCanvasBaseUrl(rawInput.baseUrl),
+  ), {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: fields,
+  }, rawInput.fetcher, rawInput.signal, true);
+  if (received.response.status >= 200 && received.response.status < 300) {
+    return Object.freeze({
+      status: 'refreshed' as const,
+      credential: normalizeCanvasTokenResponse(
+        await readBoundedJson(received.response, rawInput.signal, received.deadlineAt),
+        { nowEpochMs: rawInput.nowEpochMs, requireRefreshToken: false, retainedRefreshToken: refreshToken },
+      ),
+    });
+  }
+  if (received.response.status === 401) {
+    cancelAuthBody(received.response);
+    return Object.freeze({ status: 'provider_absent' as const });
+  }
+  if (received.response.status === 400) {
+    const body = await readBoundedJson(received.response, rawInput.signal, received.deadlineAt);
+    const error = exact(body, ['error'], ['error_description']);
+    if (error.error === 'invalid_grant') {
+      if (error.error_description !== undefined) bounded(error.error_description, 1_024);
+      return Object.freeze({ status: 'provider_absent' as const });
+    }
+  } else {
+    cancelAuthBody(received.response);
+  }
+  return invalid();
+}
+
+export type CanvasCleanupRevokeResult = 'revoked' | 'access_token_invalid';
+
+export async function revokeCanvasAccessTokenForCleanup(rawInput: {
+  readonly baseUrl: string;
+  readonly accessToken: string;
+  readonly fetcher: CanvasAuthFetcher;
+  readonly signal: AbortSignal;
+}): Promise<CanvasCleanupRevokeResult> {
+  const baseUrl = normalizeCanvasBaseUrl(rawInput.baseUrl);
+  const response = await boundedFetch(new URL('/login/oauth2/token', baseUrl), {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${asciiToken(rawInput.accessToken, 8_192)}` },
+  }, rawInput.fetcher, rawInput.signal, true);
+  cancelAuthBody(response.response);
+  if (response.response.status >= 200 && response.response.status < 300) return 'revoked';
+  if (response.response.status === 400 || response.response.status === 401) return 'access_token_invalid';
+  return invalid();
+}
+
 export async function revokeCanvasAccessToken(rawInput: {
   readonly baseUrl: string;
   readonly accessToken: string;
@@ -458,9 +540,7 @@ export async function revokeCanvasAccessToken(rawInput: {
     method: 'DELETE',
     headers: { Accept: 'application/json', Authorization: `Bearer ${asciiToken(rawInput.accessToken, 8_192)}` },
   }, rawInput.fetcher, rawInput.signal);
-  if (response.response.body !== null) {
-    try { void response.response.body.cancel().catch(() => undefined); } catch { /* best effort */ }
-  }
+  cancelAuthBody(response.response);
 }
 
 function envelopeFromRow(row: Record<string, unknown>, prefix: string): LearningCredentialEnvelope {

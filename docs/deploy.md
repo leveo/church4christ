@@ -170,17 +170,23 @@ Disconnect first commits a local disable, deletes the active credential envelope
 state, and moves the encrypted token envelope into forward migration
 `0024_learning_canvas_cleanup_saga.sql`. A Canvas outage therefore cannot keep a connection active.
 The twice-hourly Learning maintenance pass retries at most one encrypted Canvas revocation task,
-refreshing an expired access token when safe and persisting the rotated envelope before revoke.
+refreshing an expired access token when safe and persisting the rotated envelope before revoke. If
+a prior revoke succeeded but local task deletion crashed, a later Canvas `400`/`401` is followed by
+one bounded retained-refresh attempt: `invalid_grant`/authentication absence completes the task,
+while transport, timeout, and `5xx` failures retain it for retry.
 
-For D1 Free budgeting, the worst Canvas cleanup pass uses at most six database queries and two
+For D1 Free budgeting, the worst Canvas cleanup pass uses at most six database queries and three
 provider requests. It shares the `15,45 * * * *` invocation with the existing bounded Google
 Classroom pass, whose covered worst case is 43 database queries and 18 provider requests; the
-combined ceilings are therefore 49 D1 queries and 20 provider requests. Canvas admin disconnect is
-also bounded (about 12 application queries and at most two provider requests), and Canvas Live
+combined ceilings are therefore 49 D1 queries and 21 provider requests. Canvas admin disconnect is
+also bounded (about 12 application queries and at most three provider requests), and Canvas Live
 Events reconciliation still caps normalized provider pages at 23. The new omitted-module-items
 phase consumes one Canvas request per normalized page; the existing two-request resource-detail
 case remains the worst case, so 23 pages use at most 46 Canvas requests before the reserved JWKS,
-refresh, and course reads. Keep these constants and their budget tests in sync when adding endpoints.
+refresh, and course reads. Enrollment records are collected across bounded remote pages before one
+coherent tuple per Canvas user is emitted; cached output pages consume the same page/item/byte
+budgets but no additional Canvas subrequests. Keep these constants and their budget tests in sync
+when adding endpoints.
 
 ## 3. Create the database tables
 
