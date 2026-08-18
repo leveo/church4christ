@@ -1,24 +1,190 @@
 ---
-// The course shell fails non-disclosing while enrollment-scoped persistence is
-// not present. Task 9 replaces this response with a person-scoped SQL lookup.
-import { parseLocale } from '../../../lib/locales';
+import Base from '../../../layouts/Base.astro';
+import YouTubeEmbed from '../../../components/YouTubeEmbed.astro';
+import { card } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { getLearningCourseForLearner, type LearningLearnerCourseView } from '../../../lib/learningLearnerDb';
+import {
+  LEARNING_LEARNER_CONTENT_SECURITY_POLICY,
+  applyLearningLearnerResponseHeaders,
+  formatLearningDateTime,
+  formatLearningFileSize,
+} from '../../../lib/learningLearnerUi';
 
 export const prerender = false;
 
 const notFound = () => new Response('Not Found', {
   status: 404,
-  headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  headers: {
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-security-policy': LEARNING_LEARNER_CONTENT_SECURITY_POLICY,
+  },
 });
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) return notFound();
-const modules = Astro.locals.modules;
-if (!modules.has('learning')) {
-  return notFound();
-}
+if (!Astro.locals.modules.has('learning')) return notFound();
 const user = Astro.locals.user;
-if (!user) {
-  return new Response(null, { status: 401, headers: { 'cache-control': 'no-store' } });
+if (!user) return new Response(null, { status: 401, headers: { 'cache-control': 'no-store' } });
+
+const rawCourseId = Astro.params.courseId ?? '';
+if (!/^[1-9]\d{0,9}$/u.test(rawCourseId)) return notFound();
+const courseId = Number(rawCourseId);
+if (!Number.isSafeInteger(courseId) || courseId > 2_147_483_647) return notFound();
+
+applyLearningLearnerResponseHeaders(Astro.response.headers);
+let course: LearningLearnerCourseView | null = null;
+let loadFailed = false;
+try {
+  course = await getLearningCourseForLearner(Astro.locals.db, {
+    courseId,
+    personId: user.id,
+    nowEpochMs: Date.now(),
+  });
+} catch {
+  loadFailed = true;
+  Astro.response.status = 503;
+  console.error('learning_learner_course_load_failed');
 }
-return notFound();
+if (!loadFailed && !course) return notFound();
+
+const providerName = course
+  ? t(locale, course.provider === 'canvas' ? 'learning.provider.canvas' : 'learning.provider.google')
+  : '';
+const kindName = (kind: 'material' | 'assignment' | 'quiz') => t(locale, `learning.kind.${kind}`);
+const submissionName = (status: string | undefined) => status
+  ? t(locale, `learning.submission.${status}`)
+  : t(locale, 'learning.submission.unavailable');
 ---
+
+<Base
+  title={course?.displayName ?? t(locale, 'learning.loadErrorTitle')}
+  description={course ? t(locale, 'learning.authoritativeNotice', { provider: providerName }) : t(locale, 'learning.loadErrorBody')}
+  locale={locale}
+  noindex
+>
+  <div class="container-content max-w-content py-10">
+    <nav aria-label={t(locale, 'learning.title')}>
+      <a href={localePath(locale, '/learn')} class="rounded-sm text-sm font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
+        {t(locale, 'learning.courseBack')}
+      </a>
+    </nav>
+
+    {loadFailed || !course ? (
+      <section class={`mt-6 ${card}`} role="alert">
+        <h1 class="font-display text-heading-md font-bold">{t(locale, 'learning.loadErrorTitle')}</h1>
+        <p class="mt-2 text-ink-muted">{t(locale, 'learning.loadErrorBody')}</p>
+      </section>
+    ) : (
+      <>
+        <header class="mt-6">
+          <p class="text-sm font-semibold text-primary">{course.programName}</p>
+          <div class="mt-1 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 class="font-display text-heading-md font-bold">{course.displayName}</h1>
+              <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.providerLine', { provider: providerName })}</p>
+              <p class="mt-2 inline-flex rounded-full bg-success-soft px-3 py-1 text-xs font-semibold text-success">
+                {t(locale, 'learning.providerActive')}
+              </p>
+            </div>
+            <a
+              href={course.launchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
+            >{t(locale, 'learning.openCourse', { provider: providerName })}</a>
+          </div>
+          <p class="mt-4 max-w-3xl text-sm text-ink-muted">{t(locale, 'learning.authoritativeNotice', { provider: providerName })}</p>
+        </header>
+
+        {course.isStale ? (
+          <section class="mt-6 rounded-lg border border-warning bg-warning-soft p-4 text-warning" role="status">
+            <h2 class="font-semibold">{t(locale, 'learning.staleTitle')}</h2>
+            <p class="mt-1 text-sm">
+              {course.lastSyncedAt
+                ? t(locale, 'learning.staleBody', { date: formatLearningDateTime(course.lastSyncedAt, locale) })
+                : t(locale, 'learning.neverSynced')}
+            </p>
+          </section>
+        ) : course.lastSyncedAt && (
+          <p class="mt-5 text-xs text-ink-subtle">{t(locale, 'learning.lastSynced', { date: formatLearningDateTime(course.lastSyncedAt, locale) })}</p>
+        )}
+
+        <section class="mt-10" aria-labelledby="learning-activities-title">
+          <h2 id="learning-activities-title" class="font-display text-heading-sm font-bold">{t(locale, 'learning.activitiesTitle')}</h2>
+          {course.activities.length === 0 ? (
+            <p class="mt-3 text-ink-muted">{t(locale, 'learning.activitiesEmpty')}</p>
+          ) : (
+            <div class="mt-5 grid gap-6">
+              {course.activities.map((activity) => (
+                <article id={`activity-${activity.activityId}`} class={card} aria-labelledby={`activity-title-${activity.activityId}`}>
+                  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{kindName(activity.kind)}</p>
+                      <h3 id={`activity-title-${activity.activityId}`} class="mt-1 font-display text-xl font-bold">{activity.title}</h3>
+                      {(activity.kind === 'assignment' || activity.kind === 'quiz') && (
+                        <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                          <span class="inline-flex rounded-full bg-primary-soft px-3 py-1 font-semibold text-on-primary-soft">
+                            {submissionName(activity.submission?.status)}
+                          </span>
+                          {activity.dueAt
+                            ? <span class="text-ink-muted">{t(locale, 'learning.due', { date: formatLearningDateTime(activity.dueAt, locale) })}</span>
+                            : <span class="text-ink-muted">{t(locale, 'learning.noDueDate')}</span>}
+                          {activity.submission?.late === 1 && <span class="text-warning">{t(locale, 'learning.submission.late')}</span>}
+                        </div>
+                      )}
+                      {activity.submission && (
+                        <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-subtle">
+                          <span>{t(locale, 'learning.submission.attempt', { number: activity.submission.attemptNumber })}</span>
+                          {activity.submission.submittedAt && <span>{t(locale, 'learning.submission.submittedAt', { date: formatLearningDateTime(activity.submission.submittedAt, locale) })}</span>}
+                          {activity.submission.returnedAt && <span>{t(locale, 'learning.submission.returnedAt', { date: formatLearningDateTime(activity.submission.returnedAt, locale) })}</span>}
+                        </div>
+                      )}
+                    </div>
+                    <a
+                      href={activity.launchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
+                    >{t(locale, 'learning.openActivity', { kind: kindName(activity.kind), provider: providerName })}</a>
+                  </div>
+
+                  {activity.resources.length > 0 && (
+                    <section class="mt-6 border-t border-border pt-5" aria-labelledby={`activity-resources-${activity.activityId}`}>
+                      <h4 id={`activity-resources-${activity.activityId}`} class="font-semibold">{t(locale, 'learning.resourcesTitle')}</h4>
+                      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                        {activity.resources.map((resource) => resource.kind === 'youtube' && resource.youtubeVideoId ? (
+                          <div class="sm:col-span-2">
+                            <YouTubeEmbed videoId={resource.youtubeVideoId} title={resource.title} locale={locale} autoplay={false} loadThumbnail={false} />
+                            <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.youtubeDisclaimer')}</p>
+                          </div>
+                        ) : (
+                          <a
+                            href={resource.launchUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="block min-h-11 rounded-lg border border-border p-4 hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
+                            aria-label={t(locale, 'learning.openResource', { title: resource.title })}
+                          >
+                            <span class="block font-semibold">{resource.title}</span>
+                            <span class="mt-1 block text-sm text-ink-muted">
+                              {resource.kind === 'provider_file' && resource.mimeType
+                                ? t(locale, 'learning.fileMeta', { type: resource.mimeType, size: formatLearningFileSize(resource.sizeBytes, locale) })
+                                : t(locale, `learning.resource.${resource.kind}`)}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </>
+    )}
+  </div>
+</Base>

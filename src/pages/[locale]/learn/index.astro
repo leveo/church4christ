@@ -1,32 +1,149 @@
 ---
-// Learning learner shell. Provider and enrollment reads arrive with the learner
-// experience slice; until then this route deliberately renders no sample data.
 import Base from '../../../layouts/Base.astro';
 import { card } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
-import { parseLocale } from '../../../lib/locales';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { listLearningCoursesForLearner, type LearningLearnerCourseView } from '../../../lib/learningLearnerDb';
+import { applyLearningLearnerResponseHeaders, formatLearningDateTime } from '../../../lib/learningLearnerUi';
 
 export const prerender = false;
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) return new Response(null, { status: 404 });
-const modules = Astro.locals.modules;
-if (!modules.has('learning')) {
+if (!Astro.locals.modules.has('learning')) {
   return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
 }
 const user = Astro.locals.user;
 if (!user) {
   return new Response(null, { status: 401, headers: { 'cache-control': 'no-store' } });
 }
+applyLearningLearnerResponseHeaders(Astro.response.headers);
+
+let courses: readonly LearningLearnerCourseView[] = [];
+let loadFailed = false;
+try {
+  courses = await listLearningCoursesForLearner(Astro.locals.db, {
+    personId: user.id,
+    nowEpochMs: Date.now(),
+  });
+} catch {
+  loadFailed = true;
+  Astro.response.status = 503;
+  console.error('learning_learner_index_load_failed');
+}
+
+const providerName = (course: LearningLearnerCourseView) => t(
+  locale,
+  course.provider === 'canvas' ? 'learning.provider.canvas' : 'learning.provider.google',
+);
+const kindName = (kind: 'material' | 'assignment' | 'quiz') => t(locale, `learning.kind.${kind}`);
+const submissionName = (status: string | undefined) => status
+  ? t(locale, `learning.submission.${status}`)
+  : t(locale, 'learning.submission.unavailable');
 ---
 
 <Base title={t(locale, 'learning.title')} description={t(locale, 'learning.intro')} locale={locale} noindex>
   <div class="container-content max-w-content py-12">
     <h1 class="font-display text-heading-md font-bold">{t(locale, 'learning.title')}</h1>
     <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'learning.intro')}</p>
-    <section class={`mt-8 ${card}`}>
-      <h2 class="font-display text-heading-sm font-bold">{t(locale, 'learning.emptyTitle')}</h2>
-      <p class="mt-2 text-ink-muted">{t(locale, 'learning.emptyBody')}</p>
-    </section>
+    {loadFailed ? (
+      <section class={`mt-8 ${card}`} role="alert">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'learning.loadErrorTitle')}</h2>
+        <p class="mt-2 text-ink-muted">{t(locale, 'learning.loadErrorBody')}</p>
+      </section>
+    ) : courses.length === 0 ? (
+      <section class={`mt-8 ${card}`}>
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'learning.emptyTitle')}</h2>
+        <p class="mt-2 text-ink-muted">{t(locale, 'learning.emptyBody')}</p>
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.emptyDisconnected')}</p>
+      </section>
+    ) : (
+      <div class="mt-8 grid gap-6">
+        {courses.map((course) => (
+          <article class={card} aria-labelledby={`learning-course-${course.courseId}`}>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-sm font-semibold text-primary">{course.programName}</p>
+                <h2 id={`learning-course-${course.courseId}`} class="mt-1 font-display text-heading-sm font-bold">
+                  <a href={localePath(locale, `/learn/${course.courseId}`)} class="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
+                    {course.displayName}
+                  </a>
+                </h2>
+                <p class="mt-2 text-sm text-ink-muted">
+                  {t(locale, 'learning.providerLine', { provider: providerName(course) })}
+                </p>
+                <p class="mt-2 inline-flex rounded-full bg-success-soft px-3 py-1 text-xs font-semibold text-success">
+                  {t(locale, 'learning.providerActive')}
+                </p>
+              </div>
+              <a
+                href={course.launchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
+              >{t(locale, 'learning.openCourse', { provider: providerName(course) })}</a>
+            </div>
+
+            {course.isStale && (
+              <div class="mt-5 rounded-lg border border-warning bg-warning-soft p-4 text-warning" role="status">
+                <h3 class="font-semibold">{t(locale, 'learning.staleTitle')}</h3>
+                <p class="mt-1 text-sm">
+                  {course.lastSyncedAt
+                    ? t(locale, 'learning.staleBody', { date: formatLearningDateTime(course.lastSyncedAt, locale) })
+                    : t(locale, 'learning.neverSynced')}
+                </p>
+              </div>
+            )}
+            {!course.isStale && course.lastSyncedAt && (
+              <p class="mt-4 text-xs text-ink-subtle">
+                {t(locale, 'learning.lastSynced', { date: formatLearningDateTime(course.lastSyncedAt, locale) })}
+              </p>
+            )}
+
+            <div class="mt-6 grid gap-6 lg:grid-cols-2">
+              <section aria-labelledby={`learning-upcoming-${course.courseId}`}>
+                <h3 id={`learning-upcoming-${course.courseId}`} class="font-display text-lg font-bold">{t(locale, 'learning.upcomingTitle')}</h3>
+                {course.upcomingActivities.length === 0 ? (
+                  <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.upcomingEmpty')}</p>
+                ) : (
+                  <ul class="mt-3 space-y-3">
+                    {course.upcomingActivities.slice(0, 3).map((activity) => (
+                      <li class="rounded-lg border border-border p-4">
+                        <div class="flex flex-wrap items-center gap-2 text-xs text-ink-subtle">
+                          <span>{kindName(activity.kind)}</span><span aria-hidden="true">·</span>
+                          <span>{submissionName(activity.submission?.status)}</span>
+                        </div>
+                        <p class="mt-1 font-semibold">{activity.title}</p>
+                        {activity.dueAt && <p class="mt-1 text-sm text-ink-muted">
+                          {t(locale, 'learning.due', { date: formatLearningDateTime(activity.dueAt, locale) })}
+                        </p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section aria-labelledby={`learning-recent-${course.courseId}`}>
+                <h3 id={`learning-recent-${course.courseId}`} class="font-display text-lg font-bold">{t(locale, 'learning.recentTitle')}</h3>
+                {course.recentMaterials.length === 0 ? (
+                  <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.recentEmpty')}</p>
+                ) : (
+                  <ul class="mt-3 space-y-3">
+                    {course.recentMaterials.slice(0, 3).map((activity) => (
+                      <li class="rounded-lg border border-border p-4">
+                        <a href={localePath(locale, `/learn/${course.courseId}#activity-${activity.activityId}`)} class="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                          {activity.title}
+                        </a>
+                        <p class="mt-1 text-sm text-ink-muted">{kindName(activity.kind)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </article>
+        ))}
+      </div>
+    )}
   </div>
 </Base>

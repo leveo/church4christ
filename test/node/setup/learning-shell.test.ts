@@ -116,7 +116,7 @@ describe('Learning capability shell', () => {
     const admin = read('src/pages/admin/learning/index.astro');
     for (const source of [learnerIndex, course, admin]) expect(source).not.toBe('');
 
-    const learnerModule = learnerIndex.indexOf("if (!modules.has('learning'))");
+    const learnerModule = learnerIndex.indexOf("if (!Astro.locals.modules.has('learning'))");
     const learnerUser = learnerIndex.indexOf('if (!user)');
     expect(learnerModule).toBeGreaterThan(-1);
     expect(learnerUser).toBeGreaterThan(learnerModule);
@@ -124,7 +124,7 @@ describe('Learning capability shell', () => {
     expect(learnerIndex).toContain("t(locale, 'learning.emptyBody')");
 
     const courseLocale = course.indexOf("parseLocale(Astro.params.locale ?? '')");
-    const courseModule = course.indexOf("if (!modules.has('learning'))");
+    const courseModule = course.indexOf("if (!Astro.locals.modules.has('learning'))");
     const courseUser = course.indexOf('if (!user)');
     const nonEnrolled = course.indexOf('return notFound();', courseUser);
     expect(courseLocale).toBeGreaterThan(-1);

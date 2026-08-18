@@ -24,7 +24,86 @@ beforeEach(async () => {
 afterEach(async () => {
   const superAdmin = await sessionCookie(1, 'admin@example.com');
   await status(await post('/admin/settings', modulesBody([]), { cookie: superAdmin }));
+  await cleanupLearnerExperience();
 });
+
+async function cleanupLearnerExperience(): Promise<void> {
+  const deletedAt = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE learning_provider_connections SET status='disabled',
+      deleted_at=COALESCE(deleted_at,?1) WHERE id=890`).bind(deletedAt),
+    env.DB.prepare(`UPDATE learning_courses SET lifecycle_state='archived',
+      deleted_at=COALESCE(deleted_at,?1) WHERE id=890`).bind(deletedAt),
+    env.DB.prepare(`DELETE FROM learning_submission_snapshots WHERE course_id=890`),
+    env.DB.prepare(`DELETE FROM learning_resources WHERE activity_id BETWEEN 8900 AND 8999`),
+    env.DB.prepare(`DELETE FROM learning_activities WHERE course_id=890`),
+    env.DB.prepare(`DELETE FROM learning_enrollments WHERE course_id=890`),
+    env.DB.prepare(`DELETE FROM learning_identity_links WHERE id=890`),
+    env.DB.prepare(`DELETE FROM learning_courses WHERE id=890`),
+    env.DB.prepare(`DELETE FROM learning_programs WHERE id=890`),
+    env.DB.prepare(`DELETE FROM learning_provider_credentials WHERE connection_id=890`),
+    env.DB.prepare(`DELETE FROM learning_provider_connections WHERE id=890`),
+  ]);
+}
+
+async function seedLearnerExperience(): Promise<void> {
+  const now = Date.now();
+  const stale = new Date(now - 3 * 24 * 60 * 60 * 1_000).toISOString();
+  const published = new Date(now - 2 * 60 * 60 * 1_000).toISOString();
+  const dueSoon = new Date(now + 24 * 60 * 60 * 1_000).toISOString();
+  const dueLater = new Date(now + 2 * 24 * 60 * 60 * 1_000).toISOString();
+  await cleanupLearnerExperience();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO learning_provider_connections
+      (id,provider,display_name,base_url,status,revision,last_successful_sync_at,
+       created_by_person_id,updated_by_person_id)
+      VALUES (890,'canvas','Private connection label','https://canvas.learner.test',
+        'active',1,?1,1,1)`).bind(stale),
+    env.DB.prepare(`INSERT INTO learning_provider_credentials
+      (connection_id,ciphertext,nonce,algorithm,key_version,envelope_version,expires_at)
+      VALUES (890,CAST('hidden-credential-890' AS BLOB),randomblob(12),'AES-256-GCM',1,2,NULL)`),
+    env.DB.prepare(`INSERT INTO learning_programs
+      (id,slug,display_name,status,created_by_person_id,updated_by_person_id)
+      VALUES (890,'learner-fixture','Learner Fixture Program','active',1,1)`),
+    env.DB.prepare(`INSERT INTO learning_courses
+      (id,program_id,connection_id,provider,external_course_id,display_name,launch_url,
+       lifecycle_state,provider_updated_at,last_synced_at)
+      VALUES (890,890,890,'canvas','fixture-course',
+        '<script id="course-xss">Course attack</script>',
+        'https://canvas.learner.test/courses/890','active',?1,?1)`).bind(stale),
+    env.DB.prepare(`INSERT INTO learning_identity_links
+      (id,connection_id,person_id,external_user_id,status)
+      VALUES (890,890,3,'private-external-user-890','active')`),
+    env.DB.prepare(`INSERT INTO learning_enrollments
+      (id,connection_id,course_id,identity_link_id,external_enrollment_id,role,state,last_synced_at)
+      VALUES (890,890,890,890,'private-external-enrollment-890','student','active',?1)`).bind(stale),
+    env.DB.prepare(`INSERT INTO learning_activities
+      (id,course_id,external_activity_id,title,kind,lifecycle_state,launch_url,due_at,
+       published_at,provider_updated_at,last_synced_at)
+      VALUES
+      (8901,890,'material-fixture','Prepared lesson video','material','published',
+        'https://canvas.learner.test/courses/890/modules/items/1',NULL,?1,?1,?1),
+      (8902,890,'assignment-fixture','<img src=x onerror="activityAttack()">','assignment','published',
+        'https://canvas.learner.test/courses/890/assignments/2',?2,?1,?1,?1),
+      (8903,890,'quiz-fixture','Review quiz','quiz','published',
+        'https://canvas.learner.test/courses/890/quizzes/3',?3,?1,?1,?1)`).bind(published, dueSoon, dueLater),
+    env.DB.prepare(`INSERT INTO learning_resources
+      (id,activity_id,external_resource_id,title,kind,launch_url,youtube_video_id,mime_type,size_bytes,
+       provider_updated_at)
+      VALUES
+      (8901,8901,'video-fixture','Creation overview','youtube',
+        'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ','dQw4w9WgXcQ',NULL,NULL,?1),
+      (8902,8901,'file-fixture','Lesson handout','provider_file',
+        'https://canvas.learner.test/files/8902',NULL,'application/pdf',2048,?1),
+      (8903,8901,'link-fixture','Further reading','link',
+        'https://canvas.learner.test/courses/890/pages/further-reading',NULL,NULL,NULL,?1)`)
+      .bind(published),
+    env.DB.prepare(`INSERT INTO learning_submission_snapshots
+      (course_id,activity_id,activity_kind,enrollment_id,status,late,attempt_number,
+       submitted_at,returned_at,provider_updated_at,synced_at)
+      VALUES (890,8902,'assignment',890,'submitted',0,1,?1,NULL,?1,?1)`).bind(published),
+  ]);
+}
 
 describe('Learning built-worker shell boundaries', () => {
   it.each([
@@ -68,6 +147,75 @@ describe('Learning built-worker shell boundaries', () => {
       expect(response.status, courseId).toBe(404);
       expect(await response.text(), courseId).not.toContain(courseId);
     }
+  });
+
+  it('renders a privacy-safe English learner dashboard from authorized snapshots only', async () => {
+    await seedLearnerExperience();
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    const response = await get('/en/learn', { cookie: member });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-security-policy')).toContain("frame-src https://www.youtube-nocookie.com");
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    const html = await response.text();
+    expect(html).toContain('Learner Fixture Program');
+    expect(html).toContain('Provider connection active');
+    expect(html).toContain('/en/learn/890');
+    expect(html).toContain('Course data may be out of date');
+    expect(html).toContain('Upcoming work');
+    expect(html.indexOf('&lt;img src=x onerror=&quot;activityAttack()&quot;&gt;'))
+      .toBeLessThan(html.indexOf('Review quiz'));
+    expect(html).toContain('Submitted');
+    expect(html).toContain('Recent materials');
+    expect(html).not.toContain('<script id="course-xss">');
+    expect(html).not.toMatch(/private-external|hidden-credential|Private connection label/);
+  });
+
+  it('renders an authorized course with click-only no-autoplay video and safe provider links', async () => {
+    await seedLearnerExperience();
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    const response = await get('/en/learn/890', { cookie: member });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-security-policy')).toContain("default-src 'self'");
+    const html = await response.text();
+    expect(html).toContain('Prepared lesson video');
+    expect(html).toContain('Unlisted YouTube links are not private');
+    expect(html).toContain('data-embed="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"');
+    expect(html).not.toContain('autoplay=1');
+    expect(html).not.toContain('<iframe');
+    expect(html).not.toContain('i.ytimg.com');
+    expect(html).toContain('href="https://canvas.learner.test/files/8902"');
+    expect(html).toContain('href="https://canvas.learner.test/courses/890/pages/further-reading"');
+    expect(html).toContain('href="https://canvas.learner.test/courses/890/assignments/2"');
+    expect(html).not.toContain('<img src=x onerror="activityAttack()">');
+    expect(html).not.toMatch(/private-external|hidden-credential|Private connection label/);
+
+    const other = await sessionCookie(4, 'michael.chen@example.com');
+    const denied = await get('/en/learn/890', { cookie: other });
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).not.toContain('890');
+  });
+
+  it('renders bilingual learner copy and hides a course immediately after provider disconnect', async () => {
+    await seedLearnerExperience();
+    const member = await sessionCookie(3, 'sarah.johnson@example.com');
+    const chinese = await get('/zh/learn/890', { cookie: member });
+    expect(chinese.status).toBe(200);
+    const chineseHtml = await chinese.text();
+    expect(chineseHtml).toContain('课程数据可能已过期');
+    expect(chineseHtml).toContain('课程活动');
+    expect(chineseHtml).toContain('已提交');
+
+    await env.DB.prepare(`UPDATE learning_provider_connections
+      SET status='disabled' WHERE id=890`).run();
+    const hiddenDetail = await get('/en/learn/890', { cookie: member });
+    expect(hiddenDetail.status).toBe(404);
+    await hiddenDetail.arrayBuffer();
+    const dashboard = await get('/en/learn', { cookie: member });
+    const disconnectedHtml = await dashboard.text();
+    expect(disconnectedHtml).not.toContain('Learner Fixture Program');
+    expect(disconnectedHtml).toContain('provider is disconnected');
   });
 
   it('denies members and wrong-grant admins, but renders for Learning and super admins', async () => {
