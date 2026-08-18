@@ -29,9 +29,12 @@ describe('Learning connection administration page', () => {
     expect(page).not.toMatch(/\bsel\b/u);
     expect(page).toContain('listCanvasCourseOptions');
     expect(page).toContain('action="/admin/learning/canvas/map-course"');
-    for (const name of [
-      'action', 'connection_id', 'revision', 'external_course_id', 'program_id', 'root_account_id',
-    ]) expect(page).toContain(`name="${name}"`);
+    for (const name of ['action', 'connection_id', 'revision', 'external_course_id', 'program_id']) {
+      expect(page).toContain(`name="${name}"`);
+    }
+    expect(page).not.toContain('name="root_account_id"');
+    expect(page).toContain("course: 'Canvas 课程'");
+    expect(page).toContain("course: 'Canvas course'");
     expect(page).toContain('value="unmap"');
     const markup = page.split('---').slice(2).join('---');
     expect(markup).not.toMatch(/accessToken|refreshToken|clientSecret|ciphertext|CLIENT_SECRET|CREDENTIAL_KEYS/iu);

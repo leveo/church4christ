@@ -139,13 +139,14 @@ describe('Canvas admin connection and course mapping', () => {
       expect(url.pathname).toBe('/api/v1/courses/901');
       return new Response(JSON.stringify({
         id: 901, name: 'Genesis 1', workflow_state: 'available',
+        root_account_id: 'root-account-1',
         created_at: '2026-08-01T00:00:00.000Z', updated_at: '2026-08-17T11:00:00.000Z',
       }));
     });
     const admin = await input(fetcher as typeof fetch);
     const mapped = await mapSelectedCanvasCourse(env.DB as AppDb, {
       ...admin, externalCourseId: '901', programId: 28303, actorPersonId: 28301,
-      expectedRevision: 1, rootAccountId: 'root-account-1',
+      expectedRevision: 1,
     });
     expect(mapped).toEqual(expect.objectContaining({
       connectionId: 28302, externalCourseId: '901', programId: 28303,
@@ -160,6 +161,29 @@ describe('Canvas admin connection and course mapping', () => {
       ...admin, externalCourseId: '901', actorPersonId: 28301, expectedRevision: 2,
     })).resolves.toEqual({ connectionId: 28302, connectionRevision: 3 });
     expect(await env.DB.prepare("SELECT count(*) AS count FROM learning_courses WHERE connection_id=28302 AND external_course_id='901'").first('count')).toBe(0);
+  });
+
+  it('rejects a missing or changed authoritative Canvas root account without mapping the course', async () => {
+    const admin = await input((async (raw: RequestInfo | URL) => {
+      const url = new URL(String(raw));
+      const id = url.pathname.split('/').at(-1);
+      return new Response(JSON.stringify({
+        id, name: `Course ${id}`, workflow_state: 'available',
+        ...(id === '902' ? {} : { root_account_id: 'different-root' }),
+      }));
+    }) as typeof fetch);
+    await env.DB.prepare(`INSERT INTO learning_canvas_webhook_configs(connection_id,root_account_id)
+      VALUES(28302,'root-account-1')`).run();
+    await expect(mapSelectedCanvasCourse(env.DB as AppDb, {
+      ...admin, externalCourseId: '902', programId: 28303, actorPersonId: 28301, expectedRevision: 1,
+    })).rejects.toThrow();
+    await expect(mapSelectedCanvasCourse(env.DB as AppDb, {
+      ...admin, externalCourseId: '903', programId: 28303, actorPersonId: 28301, expectedRevision: 1,
+    })).rejects.toThrow();
+    expect(await env.DB.prepare(`SELECT count(*) AS count FROM learning_courses
+      WHERE connection_id=28302`).first('count')).toBe(0);
+    expect((await env.DB.prepare(`SELECT revision,operation_marker FROM learning_provider_connections
+      WHERE id=28302`).first()) as unknown).toEqual({ revision: 1, operation_marker: null });
   });
 
   it('revokes the Canvas token before a revisioned disconnect and never sends it in a URL', async () => {

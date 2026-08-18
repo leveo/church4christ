@@ -5,6 +5,7 @@ import {
   learningSyntheticEnrollmentId,
   learningValidation,
   normalizeCanvasBaseUrl,
+  normalizeLearningCourse,
   normalizeYouTube,
   type LearningActivity,
   type LearningConnectionUrlPolicy,
@@ -17,6 +18,7 @@ import {
 } from './learningModel';
 import {
   readAndNormalizeLearningPage,
+  normalizeLearningSyncCourseRequest,
   type LearningBuildLaunchRequest,
   type LearningHealthRequest,
   type LearningListCoursesRequest,
@@ -53,6 +55,11 @@ export interface CanvasProviderDependencies {
   readonly urlPolicy: LearningConnectionUrlPolicy;
   readonly fetcher: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readonly now: () => number;
+}
+
+export interface CanvasAuthoritativeCourse {
+  readonly course: LearningCourse;
+  readonly rootAccountId: string;
 }
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -599,7 +606,7 @@ function activityLaunch(baseUrl: string, courseId: string, activityId: string | 
   return `${course}/modules/items/${encodeURIComponent(module.itemId)}`;
 }
 
-export function createCanvasProvider(dependencies: CanvasProviderDependencies): LearningProvider {
+function providerDependencies(dependencies: CanvasProviderDependencies): Readonly<CanvasProviderDependencies> {
   const connectionId = learningValidation.integer(dependencies.connectionId, 1, LEARNING_LIMITS.databaseInteger);
   const baseUrl = normalizeCanvasBaseUrl(dependencies.baseUrl, dependencies.urlPolicy);
   const accessToken = string(dependencies.accessToken, 8_192);
@@ -612,7 +619,42 @@ export function createCanvasProvider(dependencies: CanvasProviderDependencies): 
     || typeof dependencies.fetcher !== 'function'
     || typeof dependencies.now !== 'function'
   ) learningValidation.invalid();
-  const safeDependencies = Object.freeze({ ...dependencies, accessToken });
+  return Object.freeze({ ...dependencies, connectionId, baseUrl, accessToken });
+}
+
+export async function fetchCanvasAuthoritativeCourse(
+  rawDependencies: CanvasProviderDependencies,
+  rawInput: { readonly externalCourseId: string; readonly operation: LearningOperationContext },
+): Promise<CanvasAuthoritativeCourse> {
+  const dependencies = providerDependencies(rawDependencies);
+  const request = normalizeLearningSyncCourseRequest({
+    subject: {
+      connectionId: dependencies.connectionId,
+      provider: 'canvas',
+      externalCourseId: rawInput.externalCourseId,
+    },
+    operation: rawInput.operation,
+  }, dependencies.now());
+  const courseId = request.subject.externalCourseId;
+  const response = await boundedRequest(
+    dependencies,
+    dependencies.baseUrl,
+    endpoint(dependencies.baseUrl, `/api/v1/courses/${encodeURIComponent(courseId)}`),
+    request.operation,
+  );
+  const row = data(await readBoundedJson(response, request.operation, dependencies.now));
+  if (externalId(row.id) !== courseId) learningValidation.invalid();
+  return Object.freeze({
+    course: normalizeLearningCourse(
+      mapCourse(row, dependencies.connectionId, dependencies.baseUrl), dependencies.urlPolicy,
+    ),
+    rootAccountId: externalId(row.root_account_id),
+  });
+}
+
+export function createCanvasProvider(dependencies: CanvasProviderDependencies): LearningProvider {
+  const safeDependencies = providerDependencies(dependencies);
+  const { connectionId, baseUrl } = safeDependencies;
   const request = (url: URL, operation: LearningOperationContext) => boundedRequest(
     safeDependencies, baseUrl, url, operation,
   );

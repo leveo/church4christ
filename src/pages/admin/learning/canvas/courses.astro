@@ -38,10 +38,10 @@ try {
 const lang = user!.lang === 'zh' ? 'zh' : 'en';
 const copy = lang === 'zh' ? {
   title: '选择 Canvas 课程', intro: '把 Canvas 课程映射到教会的学习事工。',
-  program: '学习事工', root: 'Canvas 根账号 ID', map: '映射课程', unmap: '取消映射', back: '返回学习设置',
+  program: '学习事工', course: 'Canvas 课程', map: '映射课程', unmap: '取消映射', back: '返回学习设置',
 } : {
   title: 'Select Canvas courses', intro: 'Map Canvas courses into a church Learning program.',
-  program: 'Learning program', root: 'Canvas root account ID', map: 'Map course', unmap: 'Unmap', back: 'Back to Learning settings',
+  program: 'Learning program', course: 'Canvas course', map: 'Map course', unmap: 'Unmap', back: 'Back to Learning settings',
 };
 ---
 <Admin title={copy.title}>
@@ -52,7 +52,7 @@ const copy = lang === 'zh' ? {
     {options.courses.map(({ course, mappedProgramId }) => (
       <article class={card}>
         <h2 class="font-display text-lg font-bold">{course.displayName}</h2>
-        <p class="mt-1 text-sm text-ink-muted">Canvas course {course.externalCourseId}</p>
+        <p class="mt-1 text-sm text-ink-muted">{copy.course} {course.externalCourseId}</p>
         {mappedProgramId === null ? (
           <form method="post" action="/admin/learning/canvas/map-course" class="mt-4 grid gap-3 md:grid-cols-3">
             <input type="hidden" name="action" value="map" />
@@ -62,7 +62,6 @@ const copy = lang === 'zh' ? {
             <label class={lab}>{copy.program}<select class={tin} name="program_id" required>
               {options.programs.map((program) => <option value={program.programId}>{program.displayName}</option>)}
             </select></label>
-            <label class={lab}>{copy.root}<input class={tin} name="root_account_id" required maxlength="255" /></label>
             <button class={btn} type="submit">{copy.map}</button>
           </form>
         ) : (

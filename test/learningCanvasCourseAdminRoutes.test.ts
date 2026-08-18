@@ -26,17 +26,17 @@ const deps = () => ({
 });
 
 describe('Canvas mapped-course admin route', () => {
-  it('maps with exact revision, program, course, and root-account allowlist fields', async () => {
+  it('maps with exact revision, program, and course fields while deriving the root account from Canvas', async () => {
     const injected = deps();
     const response = await createCanvasCourseMappingHandler(injected)(context(new URLSearchParams({
       action: 'map', connection_id: '81', revision: '4', external_course_id: '901',
-      program_id: '33', root_account_id: 'root-account-1',
+      program_id: '33',
     })));
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe('/admin/learning/canvas/courses?connection_id=81&saved=course_mapped');
     expect(injected.mapCourse).toHaveBeenCalledWith({}, {
       connectionId: 81, expectedRevision: 4, externalCourseId: '901',
-      programId: 33, rootAccountId: 'root-account-1', actorPersonId: 71,
+      programId: 33, actorPersonId: 71,
     });
   });
 

@@ -25,7 +25,6 @@ interface CanvasCourseMappingDeps {
     readonly expectedRevision: number;
     readonly externalCourseId: string;
     readonly programId: number;
-    readonly rootAccountId: string;
     readonly actorPersonId: number;
   }) => Promise<unknown>;
   readonly unmapCourse: (db: AppDb, input: {
@@ -149,11 +148,10 @@ export function createCanvasCourseMappingHandler(
       const expectedRevision = number(fields.revision, 0);
       const externalCourseId = learningValidation.externalId(fields.external_course_id);
       if (fields.action === 'map') {
-        exact(fields, ['action', 'connection_id', 'revision', 'external_course_id', 'program_id', 'root_account_id']);
+        exact(fields, ['action', 'connection_id', 'revision', 'external_course_id', 'program_id']);
         await dependencies.mapCourse(locals.db, {
           connectionId, expectedRevision, externalCourseId,
           programId: number(fields.program_id, 1),
-          rootAccountId: learningValidation.externalId(fields.root_account_id),
           actorPersonId: user!.id,
         });
         return redirect(connectionId, 'saved', 'course_mapped');

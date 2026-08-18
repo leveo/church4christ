@@ -7,7 +7,7 @@ import {
   revokeCanvasAccessToken,
   rotateCanvasCredential,
 } from './learningCanvasAuth';
-import { createCanvasProvider } from './learningCanvasProvider';
+import { createCanvasProvider, fetchCanvasAuthoritativeCourse } from './learningCanvasProvider';
 import type { LearningCredentialKeyRing } from './learningCredentials';
 import {
   disconnectLearningConnection,
@@ -278,7 +278,6 @@ export async function mapSelectedCanvasCourse(
     readonly programId: number;
     readonly actorPersonId: number;
     readonly expectedRevision: number;
-    readonly rootAccountId: string;
   },
 ): Promise<LearningMappedCourseRecord & { readonly connectionRevision: number }> {
   const input = environment({
@@ -290,18 +289,27 @@ export async function mapSelectedCanvasCourse(
   const programId = integer(rawInput.programId);
   const actorPersonId = integer(rawInput.actorPersonId);
   const expectedRevision = integer(rawInput.expectedRevision, 0);
-  const rootAccountId = externalId(rawInput.rootAccountId);
   const context = await providerContext(db, input);
   if (context.loaded.revision !== expectedRevision) throw new LearningCanvasAdminConflictError();
-  const course = await invokeLearningProvider(context.provider, {
-    method: 'syncCourse',
-    request: {
-      subject: { connectionId: input.connectionId, provider: 'canvas', externalCourseId },
-      operation: operation(input.connectionId, input.nowEpochMs, externalCourseId),
-    },
+  const authoritative = await fetchCanvasAuthoritativeCourse({
+    connectionId: input.connectionId,
+    baseUrl: context.loaded.baseUrl,
+    accessToken: context.loaded.credential.accessToken,
     urlPolicy: context.policy,
+    fetcher: input.fetcher,
     now: () => input.nowEpochMs + 1,
+  }, {
+    externalCourseId,
+    operation: operation(input.connectionId, input.nowEpochMs, externalCourseId),
   });
+  const { course, rootAccountId } = authoritative;
+  const configuredRoots = resultRows(await db.prepare(`SELECT root_account_id
+    FROM learning_canvas_webhook_configs WHERE connection_id=?1 LIMIT 2`)
+    .bind(input.connectionId).all<Record<string, unknown>>());
+  if (configuredRoots.length > 1) invalid();
+  if (configuredRoots.length === 1 && externalId(configuredRoots[0].root_account_id) !== rootAccountId) {
+    throw new LearningCanvasAdminConflictError();
+  }
   const marker = crypto.randomUUID();
   const nextRevision = expectedRevision + 1;
   const statements: AppStatement[] = [
@@ -333,19 +341,27 @@ export async function mapSelectedCanvasCourse(
         'https://8axpcl50e4.execute-api.us-east-1.amazonaws.com/main/jwks','active',datetime('now')
       FROM learning_provider_connections WHERE id=?2 AND revision=?3 AND operation_marker=?4
       ON CONFLICT(connection_id) DO UPDATE SET root_account_id=excluded.root_account_id,
-        status='active',updated_at=datetime('now')`)
+        status='active',updated_at=datetime('now')
+      WHERE learning_canvas_webhook_configs.root_account_id=excluded.root_account_id
+      RETURNING connection_id`)
       .bind(rootAccountId, input.connectionId, nextRevision, marker),
     db.prepare(`UPDATE learning_provider_connections SET operation_marker=NULL,
       operation_expires_at=NULL,updated_at=datetime('now')
       WHERE id=?1 AND revision=?2 AND operation_marker=?3
+        AND EXISTS (SELECT 1 FROM learning_canvas_webhook_configs w
+          WHERE w.connection_id=?1 AND w.root_account_id=?4)
       RETURNING id AS connection_id,revision`)
-      .bind(input.connectionId, nextRevision, marker),
+      .bind(input.connectionId, nextRevision, marker, rootAccountId),
   ];
   try {
     const results = await db.batch(statements);
     const mappedRows = resultRows(results[1]);
     const connectionRows = resultRows(results[3]);
-    if (mappedRows.length !== 1 || connectionRows.length !== 1) throw new LearningCanvasAdminConflictError();
+    if (
+      mappedRows.length !== 1
+      || resultRows(results[2]).length !== 1
+      || connectionRows.length !== 1
+    ) throw new LearningCanvasAdminConflictError();
     const row = mappedRows[0];
     return Object.freeze({
       courseId: integer(row.course_id), programId: integer(row.program_id),
