@@ -57,6 +57,8 @@ const kindName = (kind: 'material' | 'assignment' | 'quiz') => t(locale, `learni
 const submissionName = (status: string | undefined) => status
   ? t(locale, `learning.submission.${status}`)
   : t(locale, 'learning.submission.unavailable');
+// Dynamic titles stay raw until Astro performs the attribute-context escape.
+const openResourceLabel = (title: string) => t(locale, 'learning.openResource').replace('{title}', title);
 ---
 
 <Base
@@ -166,7 +168,7 @@ const submissionName = (status: string | undefined) => status
                             target="_blank"
                             rel="noopener noreferrer"
                             class="block min-h-11 rounded-lg border border-border p-4 hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none"
-                            aria-label={t(locale, 'learning.openResource', { title: resource.title })}
+                            aria-label={openResourceLabel(resource.title)}
                           >
                             <span class="block font-semibold">{resource.title}</span>
                             <span class="mt-1 block text-sm text-ink-muted">

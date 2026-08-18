@@ -107,14 +107,15 @@ describe('Learning capability shell', () => {
     expect(middleware.indexOf('const mod = moduleForPath(rest)')).toBeLessThan(
       middleware.indexOf('verifySession(vars.SESSION_SECRET'),
     );
-    expect(middleware.indexOf('if (hasInvalidLearningCourseLocale(')).toBeLessThan(
+    expect(middleware.indexOf('if (hasInvalidLearningLocale(')).toBeLessThan(
       middleware.indexOf('openDb(env as unknown as DbEnv)'),
     );
 
     const learnerIndex = read('src/pages/[locale]/learn/index.astro');
     const course = read('src/pages/[locale]/learn/[courseId].astro');
+    const youtubeFacade = read('src/components/YouTubeEmbed.astro');
     const admin = read('src/pages/admin/learning/index.astro');
-    for (const source of [learnerIndex, course, admin]) expect(source).not.toBe('');
+    for (const source of [learnerIndex, course, youtubeFacade, admin]) expect(source).not.toBe('');
 
     const learnerModule = learnerIndex.indexOf("if (!Astro.locals.modules.has('learning'))");
     const learnerUser = learnerIndex.indexOf('if (!user)');
@@ -131,6 +132,11 @@ describe('Learning capability shell', () => {
     expect(courseModule).toBeGreaterThan(courseLocale);
     expect(courseUser).toBeGreaterThan(courseModule);
     expect(nonEnrolled).toBeGreaterThan(courseUser);
+
+    const replaceFacade = youtubeFacade.indexOf('el.replaceChildren(iframe)');
+    const focusPlayer = youtubeFacade.indexOf('iframe.focus()', replaceFacade);
+    expect(replaceFacade).toBeGreaterThan(-1);
+    expect(focusPlayer).toBeGreaterThan(replaceFacade);
 
     const adminModule = admin.indexOf("if (!modules.has('learning'))");
     const adminArea = admin.indexOf("if (!hasAreaAccess(user, 'learning'))");

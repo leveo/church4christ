@@ -23,6 +23,9 @@ const { videoId, title, locale, autoplay = true, loadThumbnail = true } = Astro.
 const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 const embed = `https://www.youtube-nocookie.com/embed/${videoId}${autoplay ? '?autoplay=1' : ''}`;
 const watch = `https://www.youtube.com/watch?v=${videoId}`;
+// Leave provider text unescaped here: Astro performs the single required
+// attribute escape when rendering `playLabel`.
+const playLabel = t(locale, 'sermons.play').replace('{title}', title);
 ---
 
 <div
@@ -31,7 +34,7 @@ const watch = `https://www.youtube.com/watch?v=${videoId}`;
   data-autoplay={autoplay ? 'true' : 'false'}
   data-title={title}
 >
-  <a href={watch} target="_blank" rel="noopener noreferrer" class="absolute inset-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" aria-label={t(locale, 'sermons.play', { title })}>
+  <a href={watch} target="_blank" rel="noopener noreferrer" class="absolute inset-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" aria-label={playLabel}>
     {loadThumbnail && <img
         src={thumb}
         alt=""
@@ -88,8 +91,10 @@ const watch = `https://www.youtube.com/watch?v=${videoId}`;
         'picture-in-picture',
       ].join('; ');
       iframe.allowFullscreen = true;
+      iframe.tabIndex = 0;
       iframe.className = 'absolute inset-0 h-full w-full border-0';
       el.replaceChildren(iframe);
+      iframe.focus();
     });
   });
 </script>

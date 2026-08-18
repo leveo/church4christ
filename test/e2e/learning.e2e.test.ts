@@ -93,7 +93,7 @@ async function seedLearnerExperience(): Promise<void> {
       VALUES
       (8901,8901,'video-fixture','Creation overview','youtube',
         'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ','dQw4w9WgXcQ',NULL,NULL,?1),
-      (8902,8901,'file-fixture','Lesson handout','provider_file',
+      (8902,8901,'file-fixture','Lesson & handout','provider_file',
         'https://canvas.learner.test/files/8902',NULL,'application/pdf',2048,?1),
       (8903,8901,'link-fixture','Further reading','link',
         'https://canvas.learner.test/courses/890/pages/further-reading',NULL,NULL,NULL,?1)`)
@@ -112,9 +112,11 @@ describe('Learning built-worker shell boundaries', () => {
     ['encoded', '%65n'],
   ])('returns a stable non-reflecting 404 for a %s locale', async (_label, locale) => {
     const marker = 'private-course-marker-9Z';
-    const response = await get(`/${locale}/learn/${marker}`);
-    expect(response.status).toBe(404);
-    expect(await response.text()).not.toContain(marker);
+    for (const path of [`/${locale}/learn`, `/${locale}/learn/${marker}`]) {
+      const response = await get(path);
+      expect(response.status, path).toBe(404);
+      expect(await response.text(), path).not.toContain(marker);
+    }
   });
 
   it('returns module-off 404s before anonymous auth and admin grant handling', async () => {
@@ -186,6 +188,8 @@ describe('Learning built-worker shell boundaries', () => {
     expect(html).not.toContain('<iframe');
     expect(html).not.toContain('i.ytimg.com');
     expect(html).toContain('href="https://canvas.learner.test/files/8902"');
+    expect(html).toContain('aria-label="Open Lesson &amp; handout"');
+    expect(html).not.toContain('aria-label="Open Lesson &amp;amp; handout"');
     expect(html).toContain('href="https://canvas.learner.test/courses/890/pages/further-reading"');
     expect(html).toContain('href="https://canvas.learner.test/courses/890/assignments/2"');
     expect(html).not.toContain('<img src=x onerror="activityAttack()">');

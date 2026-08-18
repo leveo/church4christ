@@ -21,9 +21,13 @@ export function applyLearningLearnerResponseHeaders(headers: Headers): void {
 
 export function formatLearningDateTime(timestamp: string, locale: Locale): string {
   return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/Chicago',
+    timeZoneName: 'short',
   }).format(new Date(timestamp));
 }
 

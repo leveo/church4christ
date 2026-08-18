@@ -41,12 +41,12 @@ function forbidden(locale: string): Response {
 }
 
 /**
- * Reject a non-canonical locale on the private Learning course shell before
- * opening the database or reading a session. Use the request URL's raw pathname
- * so percent-encoded locale aliases cannot normalize into a supported locale.
+ * Reject a non-canonical locale on private Learning routes before opening the
+ * database or reading a session. Use the request URL's raw pathname so
+ * percent-encoded locale aliases cannot normalize into a supported locale.
  */
-function hasInvalidLearningCourseLocale(rawPathname: string): boolean {
-  const match = rawPathname.match(/^\/([^/]+)\/learn\/[^/]+\/?$/);
+function hasInvalidLearningLocale(rawPathname: string): boolean {
+  const match = rawPathname.match(/^\/([^/]+)\/learn(?:\/[^/]+)?\/?$/);
   return match !== null && parseLocale(match[1]) === null;
 }
 
@@ -62,7 +62,7 @@ function opaqueNotFound(): Response {
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
-  if (hasInvalidLearningCourseLocale(new URL(context.request.url).pathname)) {
+  if (hasInvalidLearningLocale(new URL(context.request.url).pathname)) {
     return opaqueNotFound();
   }
 
