@@ -18,9 +18,9 @@
 //        npm run db:seed-media:local
 //        npm run dev                       # astro dev on http://localhost:4321
 //      Existing admin/member rows may use AUTH_DEV_BYPASS_EMAIL as documented
-//      below. Learning rows use an exact, five-minute screenshot session whose
-//      signing secret is supplied only as SCREENSHOT_SESSION_SECRET and must
-//      match the dev server's local SESSION_SECRET.
+//      below. Learning rows use an exact, five-minute screenshot session. Set the
+//      same ephemeral SCREENSHOT_SESSION_SECRET in both local processes; it is
+//      independent of SESSION_SECRET and must never be persisted or logged.
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
@@ -47,9 +47,10 @@
 //     # member portal group-files (Ben Wu) pass
 //     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
 //     node scripts/screenshots.mjs --only portal/group-files.png
-//   Learning captures do not depend on that global bypass. Supply the same
-//   local secret to the harness without printing or writing it; each fresh CDP
-//   target receives only its exact seeded identity's short-lived HttpOnly cookie:
+//   Learning captures do not depend on that global bypass. Supply one ephemeral
+//   secret to both the dev-server and harness environments without printing or
+//   writing it; each fresh CDP target receives only its exact seeded identity's
+//   short-lived HttpOnly cookie:
 //     SCREENSHOT_SESSION_SECRET='<same local SESSION_SECRET>' node scripts/screenshots.mjs \
 //       --only learning/genesis-1-en.png,learning/genesis-1-zh.png,learning/admin-overview.png
 //   `--only <substr[,substr...]>` keeps only rows whose `out` contains a token.

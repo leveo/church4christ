@@ -79,4 +79,13 @@ describe('Learning module introduction documentation', () => {
     expect(readme).toContain('docs/images/learning/genesis-1-en.png');
     expect(modules).toMatch(/`learning`[^\n]*\[Learning\]\(learning\.md\)/);
   });
+
+  it('requires one ephemeral screenshot secret in both local processes without persisting it', () => {
+    const harness = read('scripts/screenshots.mjs');
+    expect(feature).toMatch(/dev-server shell[\s\S]*SCREENSHOT_SESSION_SECRET[\s\S]*npm run dev/i);
+    expect(feature).toMatch(/capture shell[\s\S]*same SCREENSHOT_SESSION_SECRET[\s\S]*npm run screenshots/i);
+    expect(feature).toMatch(/distinct from[^\n]*SESSION_SECRET/i);
+    expect(harness).toMatch(/same ephemeral SCREENSHOT_SESSION_SECRET[^\n]*both[^\n]*processes/i);
+    expect(harness).not.toMatch(/SCREENSHOT_SESSION_SECRET[^\n]*match[^\n]*SESSION_SECRET/i);
+  });
 });

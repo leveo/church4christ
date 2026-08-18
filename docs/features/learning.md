@@ -111,17 +111,21 @@ application license.
 
 ## Demo capture and implementation notes
 
-The Genesis fixture is loaded only by the canonical local `--demo-data` path. After migrating
-and seeding local D1, start the app with the ignored local `.dev.vars`. Supply the matching
-session secret to the screenshot process only through `SCREENSHOT_SESSION_SECRET`; do not print,
-log, or check it in:
+The Genesis fixture is loaded only by the canonical local `--demo-data` path. Choose one strong,
+ephemeral `SCREENSHOT_SESSION_SECRET` of at least 32 non-whitespace characters and put the same
+value in the environment of both local processes. It is distinct from `SESSION_SECRET` and does
+not need to match it. Do not add it to `.dev.vars`, a shell command,
+or any file; enter or paste it without echo through your shell or password manager, and unset it
+after capture.
 
 ```bash
 npm run db:migrate:local
 npm run db:seed:local
+
+# Dev-server shell: set SCREENSHOT_SESSION_SECRET in this process, then start Astro.
 npm run dev
 
-# In a second shell, with SCREENSHOT_SESSION_SECRET set to the same local SESSION_SECRET:
+# Capture shell: set the same SCREENSHOT_SESSION_SECRET in this process, then capture.
 npm run screenshots -- --only learning/genesis-1-en.png,learning/genesis-1-zh.png,learning/admin-overview.png
 ```
 
