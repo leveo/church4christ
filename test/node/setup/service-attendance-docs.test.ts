@@ -59,7 +59,7 @@ describe('aggregate service attendance documentation', () => {
     expect(attendance).toMatch(/migrations-supabase\/0013_service_attendance\.sql/);
     expect(deploy).toMatch(/0013_service_attendance\.sql/);
     expect(upgrade).toMatch(/Migration `0013_service_attendance\.sql`/);
-    expect(release).toMatch(/Files `0001` through\s+`0016`/);
+    expect(release).toMatch(/files `0001` through\s+`0016`/i);
     expect(changelog).toMatch(/Migration files `0001` through `0015`/);
     expect(changelog).toMatch(/aggregate service attendance/i);
 

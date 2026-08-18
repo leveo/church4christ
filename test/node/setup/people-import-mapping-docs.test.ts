@@ -30,7 +30,7 @@ describe('create-only People mapping documentation', () => {
     expect(deploy).toMatch(/0012_people_import_mappings\.sql/i);
     expect(upgrade).toMatch(/0012_people_import_mappings\.sql/i);
     expect(upgrade).toMatch(/Files `0001` through `0016`/);
-    expect(release).toMatch(/Files `0001` through\s+`0016`/);
+    expect(release).toMatch(/files `0001` through\s+`0016`/i);
     expect(changelog).toMatch(/Migration files `0001` through `0015`/);
     expect(changelog).toMatch(/create-only[^\n]*mapping/i);
     expect(changelog).toMatch(/people_import_mappings/i);

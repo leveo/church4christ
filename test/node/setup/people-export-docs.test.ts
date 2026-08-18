@@ -45,7 +45,7 @@ describe('portable People export documentation', () => {
   it('records migration 0011 as the export forward step and 0016 as the current frozen baseline', () => {
     expect(people).toMatch(/migration[^\n]*0011_people_exports\.sql/i);
     expect(upgrade).toMatch(/Files `0001` through `0016`/);
-    expect(release).toMatch(/Files `0001` through\s+`0016`/);
+    expect(release).toMatch(/files `0001` through\s+`0016`/i);
     expect(changelog).toMatch(/Migration files `0001` through `0015`/);
     expect(changelog).toMatch(/canonical People\/Household export/i);
     expect(changelog).toMatch(/pastoral.notes export/i);

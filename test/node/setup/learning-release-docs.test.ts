@@ -2,7 +2,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CANVAS_LIVE_EVENTS_JWKS_URL } from '../../../src/lib/learningCanvasLiveEvents';
 import { CANVAS_REQUIRED_SCOPES } from '../../../src/lib/learningCanvasProvider';
+import { CANVAS_RECONCILIATION_MAX_PROVIDER_PAGES } from '../../../src/lib/learningCanvasReconcile';
 import { GOOGLE_CLASSROOM_SCOPES } from '../../../src/lib/learningGoogleAuth';
+import { GOOGLE_RECONCILIATION_MAX_PROVIDER_PAGES } from '../../../src/lib/learningGoogleReconcile';
+import { LEARNING_SYNC_RUN_LIMITS } from '../../../src/lib/learningSyncOrchestration';
 
 const read = (path: string): string => readFileSync(path, 'utf8');
 const packageMetadata = JSON.parse(read('package.json')) as { version: string; private: boolean };
@@ -196,6 +199,12 @@ describe('v1.1.0 Learning release contract', () => {
     expect(keyRotationSection).toMatch(/replacement OAuth[\s\S]{0,220}supersed/i);
     expect(keyRotationSection).toMatch(/DELETE FROM learning_google_oauth_states[\s\S]{0,260}claim_marker IS NULL/i);
     expect(keyRotationSection).toMatch(/DELETE FROM learning_canvas_oauth_states[\s\S]{0,260}claim_marker IS NULL/i);
+    expect(keyRotationSection).toMatch(
+      /SELECT s\.connection_id[\s\S]{0,320}s\.connection_revision[\s\S]{0,320}current_connection_revision[\s\S]{0,320}s\.expires_at[\s\S]{0,320}s\.claim_marker[\s\S]{0,320}s\.key_version/i,
+    );
+    expect(keyRotationSection).toMatch(
+      /DELETE FROM learning_google_oauth_states[\s\S]{0,480}claim_marker\s*=\s*:reviewed_claim_marker[\s\S]{0,480}deleted_at IS NOT NULL[\s\S]{0,180}revision\s*<>\s*learning_google_oauth_states\.connection_revision/i,
+    );
   });
 
   it('describes the actual Google disconnect credential and retained-state lifecycle', () => {
@@ -207,9 +216,21 @@ describe('v1.1.0 Learning release contract', () => {
 
   it('distinguishes production trigger caps from provider-library hard maxima', () => {
     expect(syncBudgetSection).toMatch(
-      /manual[^\n]*scheduled[^\n]*Google Pub\/Sub[^\n]*Canvas Live Events[\s\S]{0,260}21 Google[^\n]*10 Canvas/i,
+      new RegExp(
+        `manual[^\\n]*scheduled[^\\n]*Google Pub\\/Sub[^\\n]*Canvas Live Events[\\s\\S]{0,260}`
+          + `${LEARNING_SYNC_RUN_LIMITS.googleMaxPagesPerAttempt} Google[^\\n]*`
+          + `${LEARNING_SYNC_RUN_LIMITS.canvasMaxPagesPerAttempt} Canvas`,
+        'i',
+      ),
     );
-    expect(syncBudgetSection).toMatch(/47[^\n]*Google[\s\S]{0,180}23[^\n]*Canvas[\s\S]{0,220}(library|internal)[^\n]*hard max/i);
+    expect(syncBudgetSection).toMatch(
+      new RegExp(
+        `${GOOGLE_RECONCILIATION_MAX_PROVIDER_PAGES} Google[\\s\\S]{0,180}`
+          + `${CANVAS_RECONCILIATION_MAX_PROVIDER_PAGES} Canvas[\\s\\S]{0,220}`
+          + '(library|internal)[^\\n]*hard max',
+        'i',
+      ),
+    );
   });
 
   it('names the complete normalized activity-event retention shape', () => {
