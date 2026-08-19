@@ -9,7 +9,7 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-The **current source release is 1.1.0**. Church4Christ **1.0.0 is the initial open-source release**,
+The **current source release is 1.1**. Church4Christ is an open-source foundation,
 not a turnkey managed service. Local evaluation is free, and some deployments
 can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
@@ -167,7 +167,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 
 ### Learning beyond Sunday / 主日之后继续学习
 
-Version 1.1.0 adds the optional **Learning** module for Sunday school,
+Version 1.1 adds the optional **Learning** module for Sunday school,
 discipleship, and other ministries that continue between meetings. Learners get
 a bilingual, privacy-bounded course view for unlisted YouTube videos, files,
 assignments, and quizzes. Submission stays provider-authoritative: the site
@@ -179,7 +179,7 @@ separately operated Church4Christ Canvas derivative. Course mapping, encrypted
 OAuth credentials, signed provider notifications, manual sync, and bounded
 scheduled reconciliation feed only the activity metadata Church4Christ needs.
 
-![Google Classroom and Church4Christ Canvas feed privacy-bounded course metadata into the bilingual learner experience](docs/images/learning/learning-flow-gpt-image-2.png)
+![Google Classroom and Church4Christ Canvas feed privacy-bounded course metadata into the bilingual learner experience](docs/images/learning/learning-flow.png)
 
 | English learner view | 中文学员页面 | Provider administration |
 |---|---|---|

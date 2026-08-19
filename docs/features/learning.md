@@ -12,17 +12,7 @@ Classroom or Canvas remains provider authoritative. Learners submit assignments 
 that provider's supported interface. Church4Christ then reconciles a bounded status snapshot—it
 does not become a second gradebook or quiz engine.
 
-![Bilingual workflow diagram showing Google Classroom and Church4Christ Canvas feeding Church4Christ secure synchronization, followed by connection and mapping, verification and synchronization, privacy-bounded metadata, learner videos/files/assignments/quizzes, submission in the provider, reconciled status, and optional Activity Score](../images/learning/learning-flow-gpt-image-2.png)
-
-**Diagram provenance.** Generated with OpenAI **gpt-image-2** on **2026-08-18**.
-Prompt summary: create a polished bilingual English/Chinese workflow diagram showing Google
-Classroom and Church4Christ Canvas as separate provider lanes; Church4Christ secure
-synchronization; connect/map, verify/sync, privacy-bounded metadata, learner resources,
-provider-side submission, status reconciliation, and an optional Activity Score branch.
-Alt text: Google Classroom or Church4Christ Canvas enters a six-step, privacy-bounded Learning
-flow through Church4Christ, ending in provider submission, reconciled status, and optional
-Activity Score. The checked-in 2048×1152 PNG has SHA-256
-`876a2adf737721297383ceaf8d15c223e9c937814d4fbb543b502c55ea377356`.
+![Bilingual workflow diagram showing Google Classroom and Church4Christ Canvas feeding Church4Christ secure synchronization, followed by connection and mapping, verification and synchronization, privacy-bounded metadata, learner videos/files/assignments/quizzes, submission in the provider, reconciled status, and optional Activity Score](../images/learning/learning-flow.png)
 
 ## Learner experience
 
