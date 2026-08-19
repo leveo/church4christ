@@ -42,13 +42,27 @@ const syncBudgetSection = deploy.slice(deploy.indexOf('Manual sync is an authent
 const retentionSection = learning.slice(learning.indexOf('## Retention, deletion'), learning.indexOf('## Canvas provenance'));
 
 describe('v1.1.0 Learning release contract', () => {
-  it('keeps private package metadata at exactly 1.1.0 and preserves 1.0.0 history', () => {
+  it('keeps package metadata exact while presenting README release copy as 1.1 only', () => {
     expect(packageMetadata).toMatchObject({ version: '1.1.0', private: true });
     expect(lockMetadata.version).toBe('1.1.0');
     expect(lockMetadata.packages['']?.version).toBe('1.1.0');
-    expect(readme).toMatch(/current (?:source )?release[^\n]*1\.1\.0/i);
-    expect(readme).toMatch(/1\.0\.0[^\n]*initial open-source release/i);
+    expect(readme).toContain('The **current source release is 1.1**.');
+    expect(readme).not.toMatch(/\b1\.0(?:\.0)?\b/);
     expect(changelog.indexOf('## [Unreleased]')).toBeLessThan(changelog.indexOf('## [1.1.0] - 2026-08-18'));
+  });
+
+  it('keeps image-generation provenance out of the public Learning documentation', () => {
+    for (const internalDetail of [
+      'Diagram provenance',
+      'Generated with OpenAI',
+      'Prompt summary',
+      'gpt-image-2',
+      'SHA-256',
+      '876a2adf737721297383ceaf8d15c223e9c937814d4fbb543b502c55ea377356',
+    ]) {
+      expect(readme, internalDetail).not.toContain(internalDetail);
+      expect(learning, internalDetail).not.toContain(internalDetail);
+    }
   });
 
   it('records the complete dated Learning release without collapsing privacy boundaries', () => {

@@ -20,19 +20,17 @@ function png(path: string): { readonly width: number; readonly height: number; r
 }
 
 describe('Learning module introduction documentation', () => {
-  it('preserves and embeds the exact gpt-image-2 workflow diagram with useful provenance', () => {
-    expect(png('docs/images/learning/learning-flow-gpt-image-2.png')).toEqual({
+  it('preserves and embeds the workflow diagram with descriptive alt text', () => {
+    expect(png('docs/images/learning/learning-flow.png')).toEqual({
       width: 2048,
       height: 1152,
       bytes: 2_037_983,
       sha256: '876a2adf737721297383ceaf8d15c223e9c937814d4fbb543b502c55ea377356',
     });
-    expect(feature).toContain('../images/learning/learning-flow-gpt-image-2.png');
-    expect(feature).toMatch(/alt text[^\n]*(Google Classroom|provider)[^\n]*Canvas/i);
-    expect(feature).toMatch(/gpt-image-2/i);
-    expect(feature).toMatch(/2026-08-18/);
-    expect(feature).toMatch(/prompt summary/i);
-    expect(feature).toContain('876a2adf737721297383ceaf8d15c223e9c937814d4fbb543b502c55ea377356');
+    expect(feature).toContain('../images/learning/learning-flow.png');
+    expect(feature).toMatch(
+      /!\[Bilingual workflow diagram showing Google Classroom[^\]]*Church4Christ Canvas[^\]]*\]\(\.\.\/images\/learning\/learning-flow\.png\)/i,
+    );
   });
 
   it('embeds complete real Genesis learner and admin screenshots at the release viewport', () => {
