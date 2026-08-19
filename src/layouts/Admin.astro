@@ -18,6 +18,7 @@ import { mediaPath } from '../lib/mediaRef';
 import { paymentOperationsEnabled, type ModuleKey } from '../lib/modules';
 import type { Locale } from '../lib/locales';
 import { hasAreaAccess, type AdminAreaKey } from '../lib/adminAreas';
+import { listCampusesForUser, type CampusRow } from '../lib/campusDb';
 
 interface Props {
   title?: string;
@@ -80,6 +81,18 @@ const hasPaymentOperations = paymentOperationsEnabled(modules);
 const areaOn = (a?: AdminAreaKey) => !a || !user?.isAdmin || hasAreaAccess(user, a);
 const isSuper = !!user?.isSuperAdmin;
 const isNewcomerStaff = hasAreaAccess(user, 'newcomers');
+let campusChoices: CampusRow[] = [];
+if (user) {
+  try {
+    campusChoices = (await listCampusesForUser(Astro.locals.rawDb, user.id, isSuper))
+      .filter(({ active }) => active === 1);
+  } catch {
+    /* A migration-in-progress keeps the shell usable without a selector. */
+  }
+}
+const switchUrl = new URL(Astro.url);
+switchUrl.searchParams.delete('campus');
+const campusSwitchNext = switchUrl.pathname + switchUrl.search;
 
 type NavItem = { label: string; href: string; module?: ModuleKey; area?: AdminAreaKey };
 type NavSection = {
@@ -150,6 +163,7 @@ const rawSections: NavSection[] = [
   },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isSuper },
   { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isSuper },
+  { label: t(lang, 'admin.nav.campuses'), href: '/admin/campuses', show: isSuper },
 ];
 
 const sections: NavSection[] = rawSections
@@ -240,6 +254,17 @@ const itemClass = (href: string) =>
         {
           user && (
             <div class="mt-3 border-t border-footer-ink/10 pt-3 space-y-2">
+              {(campusChoices.length > 1 || isSuper) && (
+                <form method="post" action="/campus/switch" class="px-3 space-y-2">
+                  <input type="hidden" name="next" value={campusSwitchNext} />
+                  <label class="block text-xs text-footer-ink/70" for="campus-switch-mobile">{t(lang, 'admin.campuses.campus')}</label>
+                  <select id="campus-switch-mobile" name="campus" class="w-full rounded border border-footer-ink/30 bg-footer-bg px-2 py-1.5 text-sm">
+                    {isSuper && <option value="all" selected={user.campusMode === 'all'}>{t(lang, 'admin.campuses.all')}</option>}
+                    {campusChoices.map((campus) => <option value={campus.slug} selected={user.campus?.id === campus.id}>{campus.name}</option>)}
+                  </select>
+                  <button type="submit" class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10">{t(lang, 'admin.campuses.switch')}</button>
+                </form>
+              )}
               <p class="px-3 text-xs text-footer-ink/70 truncate">{user.email}</p>
               <a href="/" class="block rounded-md px-3 py-2 text-sm hover:bg-footer-ink/10">
                 {t(lang, 'admin.nav.viewSite')}
@@ -288,6 +313,17 @@ const itemClass = (href: string) =>
       {
         user && (
           <div class="mt-auto border-t border-footer-ink/10 px-4 py-4 space-y-2">
+            {(campusChoices.length > 1 || isSuper) && (
+              <form method="post" action="/campus/switch" class="space-y-2">
+                <input type="hidden" name="next" value={campusSwitchNext} />
+                <label class="block text-xs text-footer-ink/70" for="campus-switch-desktop">{t(lang, 'admin.campuses.campus')}</label>
+                <select id="campus-switch-desktop" name="campus" class="w-full rounded border border-footer-ink/30 bg-footer-bg px-2 py-1.5 text-sm">
+                  {isSuper && <option value="all" selected={user.campusMode === 'all'}>{t(lang, 'admin.campuses.all')}</option>}
+                  {campusChoices.map((campus) => <option value={campus.slug} selected={user.campus?.id === campus.id}>{campus.name}</option>)}
+                </select>
+                <button type="submit" class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10">{t(lang, 'admin.campuses.switch')}</button>
+              </form>
+            )}
             <p class="text-xs text-footer-ink/70 truncate">{user.email}</p>
             <a href="/" class="block text-sm hover:underline">
               {t(lang, 'admin.nav.viewSite')}

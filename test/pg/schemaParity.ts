@@ -266,6 +266,25 @@ function parseTrigger(statement: string): D1Trigger {
   );
   if (!parsed) throw new Error(`unsupported trigger definition: ${statement}`);
   const when = parsed[5] ? normalizeTriggerExpression(parsed[5]) : null;
+  // This lifecycle trigger performs an INSERT rather than rejecting a write.
+  // It has dedicated D1/Postgres behavior tests and is excluded from the
+  // abort-trigger parity comparison, whose model intentionally describes only
+  // RAISE/EXCEPTION guards.
+  if (identifier(parsed[1]) === 'campus_membership_after_person_insert') {
+    if (!/^INSERT\s+OR\s+IGNORE\s+INTO\s+campus_memberships\b/i.test(parsed[6].trim())) {
+      throw new Error(`unsupported campus membership trigger body: ${parsed[6].trim()}`);
+    }
+    return {
+      name: identifier(parsed[1]),
+      table: identifier(parsed[4]),
+      timing: parsed[2].toLowerCase() as D1Trigger['timing'],
+      event: parsed[3].toLowerCase() as D1Trigger['event'],
+      when,
+      bodyGuard: null,
+      semanticGuard: 'campus membership side effect',
+      abortMessage: 'campus membership side effect',
+    };
+  }
   const effect = triggerAbort(parsed[6]);
   const conditions = [when, effect.bodyGuard]
     .filter((condition): condition is string => condition !== null)

@@ -144,6 +144,7 @@ describe('portable export migration', () => {
       'action_kind',
       'structural_counts_json',
       'created_at',
+      'campus_id',
     ]);
     for (const forbidden of ['email', 'name', 'body', 'filename', 'csv', 'note']) {
       expect(columns.some((column) => column.name.includes(forbidden))).toBe(false);

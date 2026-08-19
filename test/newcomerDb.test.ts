@@ -515,14 +515,14 @@ describe('newcomer localized configuration reads', () => {
   it('reads one bounded snapshot with requested, English, then stable fallback labels', async () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9701,1)"),
-      env.DB.prepare("INSERT INTO service_type_i18n VALUES (9701,'en','Welcome Service')"),
-      env.DB.prepare("INSERT INTO newcomer_statuses VALUES (6,'awaiting_host','open',6,1,0)"),
-      env.DB.prepare("INSERT INTO newcomer_status_i18n VALUES (6,'en','Awaiting host')"),
-      env.DB.prepare("INSERT INTO newcomer_fields VALUES (8,'connection_path','select',1,1,8,0)"),
-      env.DB.prepare("INSERT INTO newcomer_field_i18n VALUES (8,'en','Connection path',NULL)"),
-      env.DB.prepare("INSERT INTO newcomer_field_options VALUES (8,'group',1,1)"),
-      env.DB.prepare("INSERT INTO newcomer_field_options VALUES (8,'serve',2,1)"),
-      env.DB.prepare("INSERT INTO newcomer_field_option_i18n VALUES (8,'group','en','Small group')"),
+      env.DB.prepare("INSERT INTO service_type_i18n (service_type_id,locale,name) VALUES (9701,'en','Welcome Service')"),
+      env.DB.prepare("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (6,'awaiting_host','open',6,1,0)"),
+      env.DB.prepare("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (6,'en','Awaiting host')"),
+      env.DB.prepare("INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (8,'connection_path','select',1,1,8,0)"),
+      env.DB.prepare("INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (8,'en','Connection path',NULL)"),
+      env.DB.prepare("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (8,'group',1,1)"),
+      env.DB.prepare("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (8,'serve',2,1)"),
+      env.DB.prepare("INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label) VALUES (8,'group','en','Small group')"),
     ]);
     const form = await listNewcomerFormDefinition(env.DB, 'd1', 'zh');
     expect(form).toEqual({
@@ -604,9 +604,9 @@ describe('newcomer queue, detail, and duplicate hints', () => {
         (9703,'Worker','worker@example.test',NULL,NULL),
         (9704,'Invalid raw','invalid-phone@example.test','+1/312/555/0104',NULL)`),
       env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9701,1),(9702,2)"),
-      env.DB.prepare("INSERT INTO service_type_i18n VALUES (9701,'en','Welcome')"),
-      env.DB.prepare("INSERT INTO newcomer_fields VALUES (8,'story','textarea',0,1,8,0)"),
-      env.DB.prepare("INSERT INTO newcomer_field_i18n VALUES (8,'en','Story',NULL)"),
+      env.DB.prepare("INSERT INTO service_type_i18n (service_type_id,locale,name) VALUES (9701,'en','Welcome')"),
+      env.DB.prepare("INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed) VALUES (8,'story','textarea',0,1,8,0)"),
+      env.DB.prepare("INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (8,'en','Story',NULL)"),
       env.DB.prepare(`INSERT INTO newcomer_submissions
         (id,name,email,phone,locale,visit_date,service_type_id,contact_consent_at,source,status_id,
          assignee_person_id,next_follow_up_date,created_at,updated_at)
@@ -615,7 +615,7 @@ describe('newcomer queue, detail, and duplicate hints', () => {
           '2026-08-10 10:00:00','public',1,9703,'2026-08-11','2026-08-10 10:00:00','2026-08-12 10:00:00'),
         ('10000000-0000-4000-8000-000000000002','Second',NULL,'+13125550102','zh','2026-08-11',9702,
           NULL,'staff',2,NULL,NULL,'2026-08-11 10:00:00','2026-08-12 11:00:00')`),
-      env.DB.prepare(`INSERT INTO newcomer_answers VALUES
+      env.DB.prepare(`INSERT INTO newcomer_answers (submission_id,field_id,value) VALUES
         ('10000000-0000-4000-8000-000000000001',8,'Private answer')`),
       env.DB.prepare(`INSERT INTO newcomer_notes
         (id,submission_id,author_person_id,body,created_at) VALUES

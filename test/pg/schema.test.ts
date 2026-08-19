@@ -614,10 +614,14 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
       WHERE namespace.nspname = 'public' AND NOT trigger.tgisinternal
       ORDER BY trigger.tgname
     `);
-    const actual = new Set(rows.map((row) => pgTriggerSignature(row)));
-    const expected = new Set([...d1.triggers.values()].map((trigger) => [
+    const actual = new Set(rows
+      .filter((row) => String(row.tgname).toLowerCase() !== 'campus_membership_after_person_insert')
+      .map((row) => pgTriggerSignature(row)));
+    const expected = new Set([...d1.triggers.values()]
+      .filter((trigger) => trigger.name !== 'campus_membership_after_person_insert')
+      .map((trigger) => [
       trigger.name, trigger.table, trigger.timing, trigger.event, trigger.semanticGuard, trigger.abortMessage,
-    ].join(':')));
+      ].join(':')));
     expect({
       missing: [...expected].filter((signature) => !actual.has(signature)).sort(),
       unexpectedSharedDrift: [...actual].filter((signature) => !expected.has(signature)).sort(),

@@ -367,7 +367,24 @@ export async function setPersonFlags(
   // status (see KEEPS_A_SUPER_ADMIN); a write that can't lose super status can't
   // race the invariant, so it skips the extra correlated-subquery cost.
   const where = losesSuper ? `id = ? AND ${KEEPS_A_SUPER_ADMIN}` : 'id = ?';
-  await db.prepare(`UPDATE people SET ${sets.join(', ')} WHERE ${where}`).bind(...binds).run();
+  const update = db.prepare(`UPDATE people SET ${sets.join(', ')} WHERE ${where}`).bind(...binds);
+  // The pre-campus permission fields remain the source of truth for the
+  // upgraded default campus. Keep its membership synchronized so existing
+  // permission screens and API callers cannot create two conflicting roles.
+  const syncDefaultCampus = db.prepare(
+    `INSERT INTO campus_memberships
+       (campus_id, person_id, role, finance, admin_areas, active)
+     SELECT c.id, p.id, p.role, p.finance, p.admin_areas, p.active
+     FROM campuses c JOIN people p ON p.id = ?1
+     WHERE c.is_default = 1
+     ON CONFLICT(campus_id, person_id) DO UPDATE SET
+       role = excluded.role,
+       finance = excluded.finance,
+       admin_areas = excluded.admin_areas,
+       active = excluded.active,
+       updated_at = datetime('now')`,
+  ).bind(id);
+  await db.batch([update, syncDefaultCampus]);
 }
 
 /** Soft-delete: hides the person from listPeople and revokes their session

@@ -49,6 +49,7 @@ const SUPABASE_MIGRATIONS = [
   '0024_learning_canvas_cleanup_saga.sql',
   '0025_learning_sync_schedule.sql',
   '0026_activity_score_learning.sql',
+  '0027_multi_campus.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

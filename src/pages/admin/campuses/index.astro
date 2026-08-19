@@ -1,0 +1,230 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import { GRANTABLE_AREAS } from '../../../lib/adminAreas';
+import { listPeople } from '../../../lib/adminDb';
+import {
+  createCampus,
+  getEffectiveCampusModules,
+  listCampusMemberships,
+  listCampusesForUser,
+  setCampusModules,
+  upsertCampusMembership,
+  type CampusRole,
+} from '../../../lib/campusDb';
+import { MODULE_GROUPS, MODULE_KEYS, getEnabledModules } from '../../../lib/modules';
+import { btn, card, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.rawDb;
+
+const positiveId = (value: FormDataEntryValue | null): number | null => {
+  const id = typeof value === 'string' ? Number(value) : NaN;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+};
+
+if (Astro.request.method === 'POST') {
+  let form: FormData;
+  try {
+    form = await Astro.request.formData();
+  } catch {
+    return Astro.redirect('/admin/campuses?error=1', 303);
+  }
+  const action = form.get('action');
+  try {
+    if (action === 'create') {
+      await createCampus(db, {
+        name: String(form.get('name') ?? ''),
+        slug: String(form.get('slug') ?? ''),
+      });
+      return Astro.redirect('/admin/campuses?saved=create', 303);
+    }
+
+    const campusId = positiveId(form.get('campusId'));
+    if (!campusId) throw new Error('invalid_campus_id');
+    if (action === 'membership') {
+      const personId = positiveId(form.get('personId'));
+      const role = String(form.get('role') ?? '') as CampusRole;
+      if (!personId || !(['member', 'editor', 'admin'] as const).includes(role)) {
+        throw new Error('invalid_campus_membership');
+      }
+      await upsertCampusMembership(db, {
+        campusId,
+        personId,
+        role,
+        finance: form.has('finance'),
+        adminAreas: form.getAll('area').map(String),
+        active: form.has('active'),
+      });
+      return Astro.redirect(`/admin/campuses?manageCampus=${campusId}&saved=membership`, 303);
+    }
+    if (action === 'modules') {
+      await setCampusModules(db, campusId, new Set(form.getAll('module').map(String)));
+      return Astro.redirect(`/admin/campuses?manageCampus=${campusId}&saved=modules`, 303);
+    }
+    throw new Error('invalid_campus_action');
+  } catch {
+    const campusId = positiveId(form.get('campusId'));
+    return Astro.redirect(`/admin/campuses?${campusId ? `manageCampus=${campusId}&` : ''}error=1`, 303);
+  }
+}
+
+const campuses = await listCampusesForUser(db, user.id, true);
+const requestedId = Number(Astro.url.searchParams.get('manageCampus'));
+const selected = campuses.find(({ id }) => id === requestedId) ?? campuses.find(({ active }) => active === 1) ?? campuses[0];
+const memberships = selected ? await listCampusMemberships(db, selected.id) : [];
+const people = await listPeople(db);
+const globalModules = await getEnabledModules(db, Astro.locals.dbBackend);
+const enabledModules = selected
+  ? await getEffectiveCampusModules(db, selected.id, globalModules)
+  : new Set<string>();
+const saved = Astro.url.searchParams.has('saved');
+const failed = Astro.url.searchParams.has('error');
+---
+
+<Admin title={t(lang, 'admin.campuses.title')}>
+  <div class="space-y-6">
+    <header>
+      <h1 class="font-display text-3xl font-bold text-ink">{t(lang, 'admin.campuses.title')}</h1>
+      <p class="mt-2 text-ink-muted">{t(lang, 'admin.campuses.intro')}</p>
+    </header>
+
+    {saved && <p class={noticeOk}>{t(lang, 'admin.campuses.saved')}</p>}
+    {failed && <p class={noticeErr}>{t(lang, 'admin.campuses.error')}</p>}
+
+    <section class={`${card} space-y-4`}>
+      <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.create')}</h2>
+      <form method="post" class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <input type="hidden" name="action" value="create" />
+        <label>
+          <span class={lab}>{t(lang, 'admin.campuses.name')}</span>
+          <input class={tin} name="name" required maxlength="120" />
+        </label>
+        <label>
+          <span class={lab}>{t(lang, 'admin.campuses.slug')}</span>
+          <input class={tin} name="slug" required maxlength="64" pattern="[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*" />
+          <span class="mt-1 block text-xs text-ink-muted">{t(lang, 'admin.campuses.slugHelp')}</span>
+        </label>
+        <button class={btn} type="submit">{t(lang, 'admin.campuses.create')}</button>
+      </form>
+    </section>
+
+    <section class={`${card} space-y-4`}>
+      <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.campus')}</h2>
+      <div class="flex flex-wrap gap-2">
+        {campuses.map((campus) => (
+          <a
+            href={`/admin/campuses?manageCampus=${campus.id}`}
+            class={`rounded-full border px-3 py-1.5 text-sm ${selected?.id === campus.id ? 'border-accent bg-accent text-accent-contrast' : 'border-border'}`}
+          >
+            {campus.name}{campus.active !== 1 ? ' · inactive' : ''}
+          </a>
+        ))}
+      </div>
+      {selected && (
+        <form method="post" action="/campus/switch" class="flex items-center gap-3">
+          <input type="hidden" name="campus" value={selected.slug} />
+          <input type="hidden" name="next" value="/admin" />
+          <button class={btn} type="submit">{t(lang, 'admin.campuses.switch')}</button>
+          <span class="text-sm text-ink-muted">{selected.name}</span>
+        </form>
+      )}
+    </section>
+
+    {selected && (
+      <>
+        <section class={`${card} space-y-5`}>
+          <div>
+            <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.memberships')}</h2>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.campuses.memberIntro')}</p>
+          </div>
+          <form method="post" class="space-y-4">
+            <input type="hidden" name="action" value="membership" />
+            <input type="hidden" name="campusId" value={selected.id} />
+            <div class="grid gap-4 sm:grid-cols-3">
+              <label>
+                <span class={lab}>{t(lang, 'admin.campuses.person')}</span>
+                <select class={tin} name="personId" required>
+                  {people.map((person) => <option value={person.id}>{person.display_name} · {person.email}</option>)}
+                </select>
+              </label>
+              <label>
+                <span class={lab}>{t(lang, 'admin.campuses.role')}</span>
+                <select class={tin} name="role">
+                  <option value="member">{t(lang, 'admin.campuses.role.member')}</option>
+                  <option value="editor">{t(lang, 'admin.campuses.role.editor')}</option>
+                  <option value="admin">{t(lang, 'admin.campuses.role.admin')}</option>
+                </select>
+              </label>
+              <div class="space-y-2 pt-6">
+                <label class="flex items-center gap-2"><input type="checkbox" name="active" checked /> {t(lang, 'admin.campuses.active')}</label>
+                <label class="flex items-center gap-2"><input type="checkbox" name="finance" /> {t(lang, 'admin.campuses.finance')}</label>
+              </div>
+            </div>
+            <fieldset>
+              <legend class={lab}>{t(lang, 'admin.campuses.areas')}</legend>
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {GRANTABLE_AREAS.map((area) => (
+                  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="area" value={area} /> {area}</label>
+                ))}
+              </div>
+            </fieldset>
+            <button class={btn} type="submit">{t(lang, 'admin.campuses.saveMembership')}</button>
+          </form>
+
+          <div>
+            <h3 class="font-semibold">{t(lang, 'admin.campuses.currentMemberships')}</h3>
+            {memberships.length === 0 ? (
+              <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.campuses.emptyMemberships')}</p>
+            ) : (
+              <div class="mt-2 overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                  <thead><tr class="border-b border-border"><th class="py-2">{t(lang, 'admin.campuses.person')}</th><th>{t(lang, 'admin.campuses.role')}</th><th>{t(lang, 'admin.campuses.areas')}</th></tr></thead>
+                  <tbody>
+                    {memberships.map((membership) => (
+                      <tr class="border-b border-border/60">
+                        <td class="py-2"><span class="font-medium">{membership.displayName}</span><br /><span class="text-ink-muted">{membership.email}</span></td>
+                        <td>{membership.role}{membership.active !== 1 ? ' · inactive' : ''}{membership.finance === 1 ? ' · finance' : ''}</td>
+                        <td>{membership.adminAreas.join(', ') || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section class={`${card} space-y-4`}>
+          <div>
+            <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.modules')}</h2>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.campuses.modulesIntro')}</p>
+          </div>
+          <form method="post" class="space-y-5">
+            <input type="hidden" name="action" value="modules" />
+            <input type="hidden" name="campusId" value={selected.id} />
+            {MODULE_GROUPS.map((group) => (
+              <fieldset>
+                <legend class="mb-2 font-semibold">{t(lang, group.titleKey)}</legend>
+                <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {group.keys.map((key) => (
+                    <label class="flex items-start gap-2 text-sm">
+                      <input class="mt-1" type="checkbox" name="module" value={key} checked={enabledModules.has(key)} disabled={!globalModules.has(key)} />
+                      <span>{t(lang, `modules.${key}.label`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ))}
+            <button class={btn} type="submit">{t(lang, 'admin.campuses.saveModules')}</button>
+          </form>
+        </section>
+      </>
+    )}
+  </div>
+</Admin>

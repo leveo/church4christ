@@ -25,6 +25,7 @@ describe('service attendance schema', () => {
       ['updated_by_person_id', 'INTEGER', 1, 0],
       ['created_at', 'TEXT', 1, 0],
       ['updated_at', 'TEXT', 1, 0],
+      ['campus_id', 'INTEGER', 1, 0],
     ]);
     expect(columns.results.map((column) => column.name).join(' ')).not.toMatch(/child|member|roster|newcomer|visitor|adult_person/i);
 
@@ -78,6 +79,7 @@ describe('service attendance schema', () => {
       'created_at',
       'closed_by_person_id',
       'closed_at',
+      'campus_id',
     ]);
     const indexes = await env.DB.prepare(`
       SELECT name, sql FROM sqlite_master

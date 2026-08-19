@@ -209,6 +209,10 @@ describe('sidebar and dashboard reflect grants', () => {
   // beforeEach-seeded baseline ('bulletins' only) before each case here.
   beforeEach(async () => {
     await env.DB.prepare(`UPDATE people SET admin_areas = 'bulletins' WHERE id = 50`).run();
+    await env.DB.prepare(
+      `UPDATE campus_memberships SET admin_areas = 'bulletins'
+       WHERE campus_id = 1 AND person_id = 50`,
+    ).run();
   });
 
   it('limited admin sidebar: granted + default links only; no settings/navigation', async () => {

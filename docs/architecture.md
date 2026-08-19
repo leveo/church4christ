@@ -24,6 +24,11 @@ architecture, but its deployment integration is Cloudflare-specific.
    - **Session** — the session cookie (a signed JWT) is verified and the person row is
      **reloaded from the database every request**, so a deactivation or a
      "sign out everywhere" takes effect on the very next page load.
+   - **Campus context** — URL/cookie selection is validated against the signed-in person's
+     campus membership, their role and grants are derived for that campus, and `locals.db`
+     is wrapped so feature data and settings are campus-scoped. Only a master admin may use
+     the unscoped all-campus context. See
+     [`docs/features/multi-campus.md`](features/multi-campus.md).
    - **Route policy** — `src/lib/routePolicy.ts` classifies the path and enforces the
      required role. It **fails closed**: an unknown `/admin/*` path is denied, not
      allowed. Anonymous users hitting a protected page are redirected to sign in;
@@ -45,6 +50,7 @@ updates, secret handling, backups, or monitoring.
 |---|---|---|
 | **Worker entry** | `fetch` (Astro handler) + `scheduled` (cron dispatch) | `src/worker.ts` |
 | **Middleware** | Auth, CSRF, route policy, locale, theme, headers | `src/middleware.ts` |
+| **Campus boundary** | Campus selection, per-campus authority, modules/settings, and scoped SQL | `src/lib/campusDb.ts`, `src/lib/campusAuth.ts`, `src/lib/campusScope.ts` |
 | **Pages & API** | Public site under `[locale]/`, admin under `/admin`, JSON under `/api` | `src/pages/**` |
 | **Data helpers** | One module per domain (admin, plans, prayer, email, …) | `src/lib/*Db.ts` |
 | **Database** | D1 or Supabase Postgres content, people, schedules, check-ins, revisions, logs | binding `DB` or `HYPERDRIVE` |
@@ -61,6 +67,11 @@ export, transformation/migration, validation, and cutover. Translatable content 
 companion `*_i18n`
 tables joined with a `COALESCE` fallback to the default language (see
 [`docs/i18n.md`](i18n.md)), so adding a language never changes a table's shape.
+
+Both backends also support multiple campuses in one shared database. Shared identities live
+in `people`; operational rows, settings, modules, and permissions are partitioned by campus.
+Only a master admin can request an unscoped all-campus view. See
+[`docs/features/multi-campus.md`](features/multi-campus.md).
 
 Editable content (bulletins, sermons, announcements, events, prayer sheets) is written
 with a **full-snapshot revision** in the same `db.batch`, which is what powers the
