@@ -6,14 +6,6 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": "./dist", "binding": "ASSETS" },
-  "secrets": { "required": [
-    "LEARNING_CREDENTIAL_KEYS",
-    "GOOGLE_CLASSROOM_CLIENT_ID",
-    "GOOGLE_CLASSROOM_CLIENT_SECRET",
-    "CANVAS_ALLOWED_ORIGINS",
-    "CANVAS_OAUTH_CLIENT_ID",
-    "CANVAS_OAUTH_CLIENT_SECRET"
-  ] },
   "triggers": { "crons": @@CRON_LIST@@ },
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["@@EMAIL_FROM@@"] }],
   "vars": {

@@ -1,19 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-describe('Learning credential secret declaration', () => {
-  it('declares only the secret name in Wrangler and a value-free local example', () => {
+describe('Learning credential local configuration', () => {
+  it('does not require secrets to build the open-source Wrangler configuration', () => {
     const config = readFileSync('wrangler.jsonc', 'utf8');
     const template = readFileSync('config/wrangler.template.jsonc', 'utf8');
     const example = readFileSync('.dev.vars.example', 'utf8');
-    expect(config).toContain('"secrets": { "required": [');
+    expect(config).not.toContain('"secrets"');
+    expect(template).not.toContain('"secrets"');
     for (const name of [
       'LEARNING_CREDENTIAL_KEYS', 'GOOGLE_CLASSROOM_CLIENT_ID', 'GOOGLE_CLASSROOM_CLIENT_SECRET',
       'CANVAS_ALLOWED_ORIGINS', 'CANVAS_OAUTH_CLIENT_ID', 'CANVAS_OAUTH_CLIENT_SECRET',
     ]) {
-      expect(config).toContain(`"${name}"`);
-      expect(template).toContain(`"${name}"`);
-      expect(config).not.toMatch(new RegExp(`${name}\\s*[:=]\\s*["'][A-Za-z0-9+/={]`));
+      expect(config).not.toContain(`"${name}"`);
+      expect(template).not.toContain(`"${name}"`);
       expect(example).toContain(`# ${name}=`);
       expect(example).not.toMatch(new RegExp(`^${name}=.+$`, 'm'));
       expect(example).toContain(`wrangler secret put ${name}`);
@@ -28,8 +28,6 @@ describe('Learning credential secret declaration', () => {
       expect(example).toContain(`# ${name}=`);
       expect(example).not.toMatch(new RegExp(`^${name}=.+$`, 'm'));
     }
-    const requiredSecrets = config.slice(config.indexOf('"secrets"'), config.indexOf('"triggers"'));
-    expect(requiredSecrets).not.toMatch(/GOOGLE_(?:CLASSROOM_PUBSUB_TOPIC|PUBSUB_)/u);
     expect(example).toContain('AES-256-GCM');
     expect(example).toContain('CANVAS_ALLOWED_ORIGINS is a bounded JSON array of exact HTTPS origins');
   });
