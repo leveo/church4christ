@@ -171,6 +171,10 @@ export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOT
 const PAGES = [
   ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
   ...LEARNING_DEMO_CAPTURE_ROWS,
+  // Multi-campus core capability — top-level management and the below-the-fold
+  // campus-local role form, both captured as the seeded master administrator.
+  { path: '/admin/campuses', out: 'docs/images/admin/campuses-overview.png', admin: true, expectedText: 'Campus management' },
+  { path: '/admin/campuses', out: 'docs/images/admin/campus-roles.png', admin: true, anchor: 'Campus roles', expectedText: 'Campus roles' },
   // Public tour — sanctuary theme, light mode (the shipped default), /en/ unless noted.
   { path: '/en/', out: 'docs/images/public/home-en.png' },
   { path: '/zh/', out: 'docs/images/public/home-zh.png' },

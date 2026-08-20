@@ -1,13 +1,28 @@
 # Multiple campuses on one backend
 
-Church4Christ can run several campuses from one D1 or Supabase/Postgres backend. Each
+Church4Christ can run several campuses on one shared D1 or Supabase/Postgres backend. Each
 request resolves one campus before authorization and data access. Feature rows, settings,
 enabled modules, and administrative grants are then limited to that campus.
 
-The existing `super_admin` account flag is the **master-admin** boundary. A master admin
-can select **All campuses**, create campuses, assign campus memberships, and inspect the
+This is a core tenancy capability rather than another optional feature toggle: each campus
+can choose from the installation's available modules while keeping its operational records
+and campus-specific admin roles separate.
+
+The existing `super_admin` account flag is the **master-admin** boundary. Only a master admin can select **All campuses**,
+create campuses, assign campus memberships, and inspect the
 combined backend. No other role can enter all-campus mode. An ordinary user, editor, finance
 helper, or campus admin can select only a campus where they have an active membership.
+
+![Campus management showing campus creation, switching, and the start of campus-local role controls](../images/admin/campuses-overview.png)
+
+## At a glance
+
+| Person | What they can see and manage |
+|---|---|
+| Master admin | Every campus, the **All campuses** combined view, campus creation, memberships, and campus feature controls. |
+| Campus admin | Only active campuses where they have a membership, with the role and admin-area grants assigned there. |
+| Editor, finance helper, or member | Only their active campus memberships and the features allowed by their campus-local permissions. |
+| Public visitor | The requested active campus, or the installation's default campus when none is selected. |
 
 ## Administration
 
@@ -18,6 +33,12 @@ Master admins use **Admin → Campuses** to:
 - assign that campus's `member`, `editor`, or `admin` role;
 - grant finance and bounded admin-area access for that campus; and
 - enable or disable modules for that campus.
+
+![Assigning a person a campus-local role, finance access, and bounded admin areas](../images/admin/campus-roles.png)
+
+A single person can therefore be an administrator at one campus, an editor at another, and
+an ordinary member at a third. Master-admin status is global and deliberately cannot be
+granted from this page.
 
 Campus module controls can only narrow the backend-wide module set. They cannot enable a
 Supabase-only module on D1 or override a module disabled globally. The selector in the admin
@@ -52,6 +73,11 @@ unauthorized selection returns 403. Only a master admin may request the reserved
 
 Master admins default to all-campus mode. They can deliberately switch into one campus to
 preview exactly what that campus sees. This is the only unscoped application context.
+
+For day-to-day work, the admin shell posts campus changes to `/campus/switch` and then keeps
+the selected campus in an HTTP-only cookie. Switching changes the authorization context,
+effective modules, settings, theme, and database scope together; it is not just a visual
+filter.
 
 ## Deployment and verification
 
