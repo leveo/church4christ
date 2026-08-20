@@ -77,6 +77,7 @@ describe.skipIf(!hasPg)('people import mapping profiles (PostgreSQL)', () => {
       'enum_translations_json',
       'created_by_person_id',
       'created_at',
+      'campus_id',
     ]);
     expect(columns[0]).toMatchObject({ data_type: 'integer', is_identity: 'NO' });
 

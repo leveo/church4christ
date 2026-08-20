@@ -397,12 +397,30 @@ describe.skipIf(!hasPg)('newcomer read and settings models (PostgreSQL)', () => 
   it('maps concurrent MAX(id) and initial-switch races to safe conflicts without zero/multiple initials', async () => {
     const clientA = pgClient();
     const clientB = pgClient();
+    let snapshotArrivals = 0;
+    let releaseSnapshots = () => {};
+    const snapshotGate = new Promise<void>((resolve) => { releaseSnapshots = resolve; });
+    const concurrentSnapshotClient = (client: ReturnType<typeof pgClient>) => ({
+      begin: async (callback: (transaction: { unsafe: typeof client.unsafe }) => Promise<unknown>) => client.begin(
+        'isolation level repeatable read',
+        async (transaction) => {
+          // Establish both snapshots before either MAX(id) allocation runs. The
+          // old timing-only test sometimes serialized both calls and exercised
+          // no race at all, which made CI nondeterministic.
+          await transaction.unsafe('SELECT COUNT(*) FROM newcomer_statuses');
+          snapshotArrivals += 1;
+          if (snapshotArrivals === 2) releaseSnapshots();
+          await snapshotGate;
+          return callback(transaction);
+        },
+      ),
+    });
     try {
       const createResults = await Promise.allSettled([
-        createNewcomerStatus(new PgAdapter(clientA), superAdmin, {
+        createNewcomerStatus(new PgAdapter(concurrentSnapshotClient(clientA) as never), superAdmin, {
           key: 'race_a', category: 'open', sort: 6, active: true, labelEn: 'A', labelZh: '甲',
         }),
-        createNewcomerStatus(new PgAdapter(clientB), superAdmin, {
+        createNewcomerStatus(new PgAdapter(concurrentSnapshotClient(clientB) as never), superAdmin, {
           key: 'race_b', category: 'open', sort: 7, active: true, labelEn: 'B', labelZh: '乙',
         }),
       ]);

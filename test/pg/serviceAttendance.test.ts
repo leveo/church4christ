@@ -57,7 +57,7 @@ describe.skipIf(!hasPg)('service attendance schema and DB (PostgreSQL)', () => {
       ORDER BY table_name, ordinal_position
     `);
     expect(columns.filter((column) => column.table_name === 'service_attendance').map((column) => column.column_name))
-      .toEqual(['service_type_id', 'attendance_date', 'adult_count', 'recorded_by_person_id', 'updated_by_person_id', 'created_at', 'updated_at']);
+      .toEqual(['service_type_id', 'attendance_date', 'adult_count', 'recorded_by_person_id', 'updated_by_person_id', 'created_at', 'updated_at', 'campus_id']);
     expect(columns.find((column) => column.table_name === 'service_type_checkin_events' && column.column_name === 'id'))
       .toMatchObject({ is_identity: 'YES' });
     expect(columns.find((column) => column.table_name === 'service_type_checkin_events' && column.column_name === 'ends_on'))

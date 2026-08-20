@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const d1Path = 'migrations/0027_multi_campus.sql';
 const pgPath = 'migrations-supabase/0027_multi_campus.sql';
+const pgE2eSetupPath = 'test/e2e-pg/setup.ts';
 
 const stableAlterTables = (sql: string): string[] => [...sql.matchAll(
   /ALTER TABLE\s+((?:church_private\.)?[a-z_][a-z0-9_]*)\s+ADD COLUMN campus_id/gi,
@@ -55,9 +56,16 @@ describe('multi-campus D1 / Supabase schema parity', () => {
     expect(d1).toContain('campus_membership_after_person_insert');
     expect(pg).toContain('campus_membership_after_person_insert');
     expect(d1).toMatch(/ALTER TABLE people ADD COLUMN home_campus_id INTEGER NOT NULL DEFAULT 1/);
-    expect(pg).toMatch(/ALTER TABLE people\s+ADD COLUMN home_campus_id INTEGER NOT NULL DEFAULT 1 REFERENCES campuses\(id\)/);
+    expect(pg).toMatch(/ALTER TABLE people\s+ADD COLUMN home_campus_id INTEGER NOT NULL DEFAULT 1;/);
+    expect(pg).not.toMatch(/home_campus_id[^;]*REFERENCES campuses/i);
     expect(d1).toContain('WHERE id = NEW.home_campus_id');
     expect(pg).toContain('WHERE id = NEW.home_campus_id');
     expect(pg).toMatch(/ON DELETE CASCADE/);
+  });
+
+  it('preserves the migration-owned default campus across each Postgres e2e reseed', () => {
+    const setup = readFileSync(pgE2eSetupPath, 'utf8');
+    const resetExclusions = setup.match(/tablename NOT IN \(([\s\S]*?)\)/)?.[1] ?? '';
+    expect(resetExclusions).toMatch(/['"]campuses['"]/);
   });
 });

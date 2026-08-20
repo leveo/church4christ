@@ -111,8 +111,12 @@ async function financeValue(personId: number): Promise<number | null> {
 
 beforeAll(async () => {
   await withDb(async (db) => {
-    await db.prepare('UPDATE people SET finance=1 WHERE id=4').run();
-    await db.prepare("UPDATE people SET admin_areas='payment-operations' WHERE id=11").run();
+    await db.batch([
+      db.prepare('UPDATE people SET finance=1 WHERE id=4'),
+      db.prepare('UPDATE campus_memberships SET finance=1 WHERE campus_id=1 AND person_id=4'),
+      db.prepare("UPDATE people SET admin_areas='payment-operations' WHERE id=11"),
+      db.prepare("UPDATE campus_memberships SET admin_areas='payment-operations' WHERE campus_id=1 AND person_id=11"),
+    ]);
     const event = await db.prepare(`
       INSERT INTO reg_events (starts_at,price_cents,currency)
       VALUES (datetime('now','+1 day'),2500,'usd') RETURNING id
@@ -140,8 +144,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await withDb(async (db) => {
-    await db.prepare('UPDATE people SET finance=0 WHERE id=4').run();
-    await db.prepare("UPDATE people SET admin_areas='groups,events' WHERE id=11").run();
+    await db.batch([
+      db.prepare('UPDATE people SET finance=0 WHERE id=4'),
+      db.prepare('UPDATE campus_memberships SET finance=0 WHERE campus_id=1 AND person_id=4'),
+      db.prepare("UPDATE people SET admin_areas='groups,events' WHERE id=11"),
+      db.prepare("UPDATE campus_memberships SET admin_areas='groups,events' WHERE campus_id=1 AND person_id=11"),
+    ]);
     if (recoveryEventId !== null) await db.prepare('DELETE FROM reg_events WHERE id=?1').bind(recoveryEventId).run();
   });
 });

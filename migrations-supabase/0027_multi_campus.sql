@@ -23,7 +23,7 @@ SELECT setval(
 );
 
 ALTER TABLE people
-  ADD COLUMN home_campus_id INTEGER NOT NULL DEFAULT 1 REFERENCES campuses(id);
+  ADD COLUMN home_campus_id INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE campus_memberships (
   campus_id INTEGER NOT NULL REFERENCES campuses(id) ON DELETE CASCADE,
