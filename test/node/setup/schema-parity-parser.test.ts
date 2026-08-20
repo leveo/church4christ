@@ -267,6 +267,7 @@ describe('final D1 schema parser', () => {
       'learning_activities_no_delete',
       'learning_activity_events_no_update',
       'learning_activity_events_no_delete',
+      'campus_membership_after_person_insert',
     ]);
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')).toMatchObject({
       table: 'service_type_checkin_events',

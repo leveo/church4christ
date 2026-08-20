@@ -18,6 +18,25 @@ const superCount = async () =>
   (await db.prepare(`SELECT COUNT(*) AS n FROM people WHERE role='admin' AND super_admin=1 AND active=1 AND deleted_at IS NULL`).first<{ n: number }>())!.n;
 
 describe('setPersonFlags: permission writes', () => {
+  it('keeps legacy permission edits synchronized with the default-campus role', async () => {
+    await setPersonFlags(db, 2, {
+      role: 'editor',
+      active: false,
+      finance: true,
+      adminAreas: ['groups', 'newcomers'],
+    });
+    const membership = await db.prepare(
+      `SELECT role, active, finance, admin_areas
+       FROM campus_memberships WHERE campus_id = 1 AND person_id = 2`,
+    ).first();
+    expect(membership).toEqual({
+      role: 'editor',
+      active: 0,
+      finance: 1,
+      admin_areas: 'newcomers',
+    });
+  });
+
   it('writes superAdmin and filters grants against the target member role', async () => {
     await setPersonFlags(db, 2, { superAdmin: true });
     await setPersonFlags(db, 3, { adminAreas: ['groups', 'newcomers', 'junk', 'settings', 'events'] });

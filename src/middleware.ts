@@ -10,6 +10,13 @@ import { canAccess, classifyRoute } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
 import { hasValidMutationProvenance } from './lib/csrf';
 import { openDb, type DbEnv } from './lib/dbProvider';
+import {
+  CAMPUS_COOKIE,
+  getEffectiveCampusModules,
+  resolveCampusContext,
+} from './lib/campusDb';
+import { applyCampusContextToUser } from './lib/campusAuth';
+import { scopeDatabase } from './lib/campusScope';
 
 // Baseline security headers (spec §14) live in ./lib/securityHeaders; the route
 // authorization policy lives in ./lib/routePolicy (both dependency-free +
@@ -90,6 +97,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // bottom) — drains that client exactly once via the idempotent release().
   const { db, backend, end } = openDb(env as unknown as DbEnv);
   context.locals.db = db;
+  context.locals.rawDb = db;
   context.locals.dbBackend = backend;
   // Defer draining the db client until after the response is handed off, without
   // blocking the streamed body. cfContext is the adapter's ExecutionContext
@@ -215,6 +223,56 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // env.DEV` is statically false in the production build, so this is tree-shaken.
     if (!context.locals.user && import.meta.env.DEV && vars.AUTH_DEV_BYPASS_EMAIL) {
       context.locals.user = await loadSessionUserByEmail(db, vars.AUTH_DEV_BYPASS_EMAIL);
+    }
+
+    // Resolve one request-wide campus before any role or route decision. The URL
+    // selector intentionally wins over the cookie so switch links take effect on
+    // their first request. Anonymous visitors may choose an active public campus;
+    // authenticated non-masters must hold an active membership. Only a master
+    // admin can resolve the explicit aggregate `all` context.
+    const requestedCampus = context.url.searchParams.get('campus')
+      ?? context.cookies.get(CAMPUS_COOKIE)?.value
+      ?? null;
+    const baseUser = context.locals.user;
+    const campusContext = await resolveCampusContext(
+      db,
+      requestedCampus,
+      baseUser ? { personId: baseUser.id, isMasterAdmin: baseUser.isSuperAdmin } : null,
+    );
+    if (!campusContext) {
+      return finish(baseUser ? forbidden(context.locals.locale) : opaqueNotFound());
+    }
+    if (baseUser) {
+      const campusUser = await applyCampusContextToUser(db, baseUser, campusContext);
+      if (!campusUser) return finish(forbidden(context.locals.locale));
+      context.locals.user = campusUser;
+    }
+    context.locals.campusMode = campusContext.mode;
+    context.locals.campus = campusContext.campus;
+    context.locals.db = scopeDatabase(
+      db,
+      campusContext.mode === 'campus' ? campusContext.campus!.id : null,
+    );
+    // Identity/theme settings are campus-local too. Re-evaluate after the
+    // request database is scoped; getActiveTheme maintains an independent cache
+    // entry per campus so one campus cannot visually rebrand another.
+    try {
+      context.locals.theme = (await getActiveTheme(context.locals.db)).theme;
+    } catch {
+      context.locals.theme = THEME_DEFAULT;
+    }
+
+    // Global/backend gates are the ceiling; a campus may turn additional modules
+    // off but can never enable a globally disabled or backend-incompatible one.
+    if (campusContext.mode === 'campus') {
+      modules = await getEffectiveCampusModules(db, campusContext.campus!.id, modules);
+      context.locals.modules = modules;
+      if (mod && !modules.has(mod)) {
+        const rendered = await context.rewrite('/404');
+        const res = new Response(rendered.body, { status: 404, headers: rendered.headers });
+        applySecurityHeaders(res.headers);
+        return finish(res);
+      }
     }
 
     // Route policy gate: the policy classifies BEFORE route existence, so a

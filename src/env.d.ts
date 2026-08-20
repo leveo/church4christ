@@ -16,6 +16,11 @@ declare namespace App {
     // the D1 binding on the default backend (zero-copy) or a request-scoped
     // postgres.js AppDb on supabase; `dbBackend` names which one.
     db: import('./lib/appDb').AppDb;
+    // Raw shared backend for master-only campus management. Feature routes use
+    // the campus-scoped `db` above and must not reach through this seam.
+    rawDb: import('./lib/appDb').AppDb;
     dbBackend: 'd1' | 'supabase';
+    campusMode: 'all' | 'campus';
+    campus: import('./lib/campusDb').CampusRow | null;
   }
 }

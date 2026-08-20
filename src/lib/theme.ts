@@ -2,6 +2,7 @@
 // below); tokens.generated.css ships all three theme blocks, so flipping the
 // stored theme.name restyles the whole site.
 import type { AppDb } from './appDb';
+import { campusIdForDatabase } from './campusScope';
 import { getTheme } from './settings';
 
 export const THEMES = ['sanctuary', 'harvest', 'midnight'] as const;
@@ -34,11 +35,11 @@ function isTheme(value: string): value is Theme {
 // (task 4 calls clearThemeCache) so a switch takes effect on the next render in
 // the writing isolate; other isolates catch up within the TTL.
 const CACHE_TTL_MS = 60_000;
-let cache: { value: ActiveTheme; expiresAt: number } | null = null;
+const cache = new Map<string, { value: ActiveTheme; expiresAt: number }>();
 
 /** Drop the cached active theme (tests + settings save after a theme change). */
 export function clearThemeCache(): void {
-  cache = null;
+  cache.clear();
 }
 
 /**
@@ -50,7 +51,10 @@ export function clearThemeCache(): void {
  */
 export async function getActiveTheme(db: AppDb): Promise<ActiveTheme> {
   const now = Date.now();
-  if (cache && cache.expiresAt > now) return cache.value;
+  const campusId = campusIdForDatabase(db);
+  const cacheKey = campusId === null ? 'global' : `campus:${campusId}`;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.value;
   const stored = await getTheme(db);
   const theme = isTheme(stored.theme) ? stored.theme : THEME_DEFAULT;
   const defaultMode =
@@ -58,6 +62,6 @@ export async function getActiveTheme(db: AppDb): Promise<ActiveTheme> {
       ? stored.defaultMode
       : THEME_DEFAULT_MODE[theme];
   const value: ActiveTheme = { theme, defaultMode };
-  cache = { value, expiresAt: now + CACHE_TTL_MS };
+  cache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
   return value;
 }

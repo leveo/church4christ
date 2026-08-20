@@ -10,7 +10,7 @@ const TABLES = [
 
 async function columns(table: string): Promise<string[]> {
   const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
-  return result.results.map((row) => row.name);
+  return result.results.map((row) => row.name).filter((name) => name !== 'campus_id');
 }
 
 describe('Google Classroom forward schema', () => {

@@ -32,6 +32,7 @@ const LEARNING_INDEXES = [
   'idx_learning_canvas_receipts_retention',
   'idx_learning_canvas_webhook_account',
   'idx_learning_connections_active_sync',
+  'idx_learning_connections_campus',
   'idx_learning_courses_connection_sync',
   'idx_learning_courses_program_state',
   'idx_learning_courses_sync_schedule',
@@ -54,6 +55,7 @@ const LEARNING_INDEXES = [
   'idx_learning_google_registrations_renewal',
   'idx_learning_identities_person_status',
   'idx_learning_programs_active_name',
+  'idx_learning_programs_campus',
   'idx_learning_resources_activity_kind',
   'idx_learning_snapshots_course_state',
   'idx_learning_snapshots_enrollment_state',
@@ -70,7 +72,7 @@ async function reject(statement: string): Promise<void> {
 
 async function columns(table: string): Promise<string[]> {
   const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
-  return result.results.map((column) => column.name);
+  return result.results.map((column) => column.name).filter((name) => name !== 'campus_id');
 }
 
 type SeededGraph = {

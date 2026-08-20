@@ -57,6 +57,7 @@ describe('people import mapping profile schema', () => {
         ['enum_translations_json', 'TEXT', 1, 0],
         ['created_by_person_id', 'INTEGER', 1, 0],
         ['created_at', 'TEXT', 1, 0],
+        ['campus_id', 'INTEGER', 1, 0],
       ]);
 
     const table = await env.DB.prepare(

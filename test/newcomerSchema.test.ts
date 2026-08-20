@@ -61,6 +61,7 @@ describe('newcomer foundation schema (D1)', () => {
       ['sort', 'INTEGER', 1, 0],
       ['active', 'INTEGER', 1, 0],
       ['is_initial', 'INTEGER', 1, 0],
+      ['campus_id', 'INTEGER', 1, 0],
     ]);
 
     const submissionFks = await env.DB.prepare('PRAGMA foreign_key_list(newcomer_submissions)')
@@ -496,14 +497,14 @@ describe('newcomer foundation schema (D1)', () => {
     await env.DB.prepare("INSERT INTO service_types (id,sort) VALUES (9861,9861)").run();
     await env.DB.prepare(`INSERT INTO newcomer_fields (id,key,type,required,active,sort,fixed)
       VALUES (195,'fk_lifecycle','select',0,1,195,0)`).run();
-    await env.DB.prepare("INSERT INTO newcomer_field_i18n VALUES (195,'en','FK lifecycle',NULL)").run();
-    await env.DB.prepare("INSERT INTO newcomer_field_options VALUES (195,'keep',1,1)").run();
-    await env.DB.prepare("INSERT INTO newcomer_field_option_i18n VALUES (195,'keep','en','Keep')").run();
+    await env.DB.prepare("INSERT INTO newcomer_field_i18n (field_id,locale,label,help) VALUES (195,'en','FK lifecycle',NULL)").run();
+    await env.DB.prepare("INSERT INTO newcomer_field_options (field_id,value,sort,active) VALUES (195,'keep',1,1)").run();
+    await env.DB.prepare("INSERT INTO newcomer_field_option_i18n (field_id,value,locale,label) VALUES (195,'keep','en','Keep')").run();
     await env.DB.prepare(`INSERT INTO newcomer_submissions
       (id,name,locale,visit_date,service_type_id,source,status_id,assignee_person_id,linked_person_id)
       VALUES ('76000000-0000-4000-8000-000000000001','FK lifecycle','en','2026-08-12',9861,
         'staff',3,9861,9862)`).run();
-    await env.DB.prepare("INSERT INTO newcomer_answers VALUES ('76000000-0000-4000-8000-000000000001',195,'keep')").run();
+    await env.DB.prepare("INSERT INTO newcomer_answers (submission_id,field_id,value) VALUES ('76000000-0000-4000-8000-000000000001',195,'keep')").run();
     await env.DB.prepare(`INSERT INTO newcomer_notes (id,submission_id,author_person_id,body)
       VALUES ('76100000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000001',9863,'Private')`).run();
     await env.DB.prepare(`INSERT INTO newcomer_activity (id,submission_id,actor_person_id,kind)

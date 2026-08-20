@@ -100,6 +100,7 @@ describe('demo seed: aggregate service attendance', () => {
     expect(attendanceColumns.results.map((column) => column.name)).toEqual([
       'service_type_id', 'attendance_date', 'adult_count',
       'recorded_by_person_id', 'updated_by_person_id', 'created_at', 'updated_at',
+      'campus_id',
     ]);
 
     const anchor = await env.DB.prepare("SELECT date('now','weekday 0','-7 days') AS d").first<{ d: string }>();

@@ -23,4 +23,8 @@ export type SessionUser = {
   // authority. Loaded fresh each request, so revocation is immediate.
   isSuperAdmin: boolean;
   adminAreas: GrantableArea[];
+  // Present after middleware resolves the active campus. A master admin may use
+  // `all`; every other authenticated request receives one concrete campus.
+  campusMode?: 'all' | 'campus';
+  campus?: { id: number; slug: string; name: string } | null;
 };

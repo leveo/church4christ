@@ -84,6 +84,7 @@ describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
       ['stripe_checkout_requests', 'last_action_by', 'integer', 'YES', null],
       ['stripe_checkout_requests', 'created_at', 'text', 'NO', 'utc-now'],
       ['stripe_checkout_requests', 'updated_at', 'text', 'NO', 'utc-now'],
+      ['stripe_checkout_requests', 'campus_id', 'integer', 'NO', '1'],
       ['stripe_webhook_events', 'event_id', 'text', 'NO', null],
       ['stripe_webhook_events', 'payload_json', 'text', 'YES', null],
       ['stripe_webhook_events', 'payload_sha256', 'text', 'NO', null],
@@ -105,6 +106,7 @@ describe.skipIf(!hasPg)('private Stripe reliability schema', () => {
       ['stripe_webhook_events', 'last_attempt_at', 'text', 'YES', null],
       ['stripe_webhook_events', 'completed_at', 'text', 'YES', null],
       ['stripe_webhook_events', 'updated_at', 'text', 'NO', 'utc-now'],
+      ['stripe_webhook_events', 'campus_id', 'integer', 'NO', '1'],
     ]);
   });
 
