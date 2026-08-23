@@ -7,6 +7,7 @@ import {
   BUILTIN_NAV,
   DEFAULT_NAV,
   NAV_SETTING_KEY,
+  groupNavLinks,
   parseNavItems,
   resolveNav,
   serializeNavItems,
@@ -86,6 +87,46 @@ describe('parseNavItems', () => {
       { type: 'link', url: 'https://example.com', label: { en: 'External', zh: '外部' } },
     ];
     expect(parseNavItems(serializeNavItems(items))).toEqual(items);
+  });
+});
+
+describe('groupNavLinks', () => {
+  it('condenses the default bilingual navigation into four ordered audience groups', () => {
+    const groups = groupNavLinks(
+      BUILTIN_NAV.map((item) => ({ label: t('en', item.key), href: localePath('en', item.path) })),
+      'en',
+    );
+
+    expect(groups.map(({ key, label }) => ({ key, label }))).toEqual([
+      { key: 'welcome', label: 'Welcome' },
+      { key: 'explore', label: 'Explore' },
+      { key: 'connect', label: 'Connect' },
+      { key: 'participate', label: 'Get Involved' },
+    ]);
+    expect(groups.find(({ key }) => key === 'welcome')?.links.map(({ href }) => href)).toEqual([
+      '/en/visit',
+      '/en/new-here',
+      '/en/about',
+    ]);
+    expect(groups.find(({ key }) => key === 'participate')?.links.map(({ href }) => href)).toEqual([
+      '/en/register',
+      '/en/serve',
+      '/en/serve/opportunities',
+    ]);
+  });
+
+  it('keeps custom links in order under a localized More group and omits empty groups', () => {
+    expect(groupNavLinks([
+      { label: 'Our Story', href: '/zh/p/our-story' },
+      { label: 'Partner', href: 'https://example.test' },
+    ], 'zh')).toEqual([{
+      key: 'more',
+      label: '更多',
+      links: [
+        { label: 'Our Story', href: '/zh/p/our-story' },
+        { label: 'Partner', href: 'https://example.test' },
+      ],
+    }]);
   });
 });
 
