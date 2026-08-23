@@ -17,6 +17,11 @@ export default {
   'nav.fellowships': 'Fellowships',
   'nav.groups': 'Groups',
   'nav.learn': 'Learning',
+  'nav.group.welcome': 'Welcome',
+  'nav.group.explore': 'Explore',
+  'nav.group.connect': 'Connect',
+  'nav.group.participate': 'Get Involved',
+  'nav.group.more': 'More',
 
   'learning.title': 'Learning',
   'learning.intro': 'Continue learning between classes with the resources and activities your teachers prepare.',

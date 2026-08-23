@@ -1,11 +1,12 @@
 ---
-// Sticky site header. Desktop nav + Give CTA + LocaleSwitch inline; on small
-// screens a checkbox-hack disclosure menu (no JS required for open/close).
+// Sticky site header. The admin-ordered links are condensed into audience
+// groups on desktop and mobile so a fully enabled installation stays calm.
+// Both layers use native disclosures and need no navigation JavaScript.
 import { localePath } from '../lib/locales';
 import { t } from '../lib/i18n';
 import { getSiteIdentity, getLogoImageKey } from '../lib/settings';
 import { mediaPath } from '../lib/mediaRef';
-import { resolveDefaultNav, resolveNav } from '../lib/nav';
+import { groupNavLinks, resolveDefaultNav, resolveNav } from '../lib/nav';
 import LocaleSwitch from './LocaleSwitch.astro';
 
 const locale = Astro.locals.locale;
@@ -30,6 +31,7 @@ try {
 } catch {
   /* keep the hardcoded site name, no logo, and the default nav when settings are unavailable */
 }
+const groups = groupNavLinks(links, locale);
 ---
 
 <header class="sticky top-0 z-40 bg-header-bg text-header-ink border-b border-border">
@@ -44,10 +46,20 @@ try {
       aria-label={t(locale, 'common.menu')}
     >
       {
-        links.map((link) => (
-          <a href={link.href} class="px-3 py-2 rounded-md hover:bg-surface-raised">
-            {link.label}
-          </a>
+        groups.map((group) => (
+          <details class="group relative">
+            <summary class="flex cursor-pointer list-none items-center gap-1 rounded-md px-3 py-2 font-semibold hover:bg-surface-raised [&::-webkit-details-marker]:hidden">
+              {group.label}
+              <span aria-hidden="true" class="text-xs text-ink-muted transition-transform group-open:rotate-180">⌄</span>
+            </summary>
+            <div class="absolute left-1/2 top-[calc(100%+0.5rem)] z-50 min-w-56 -translate-x-1/2 rounded-xl border border-border bg-surface p-2 text-header-ink shadow-xl">
+              {group.links.map((link) => (
+                <a href={link.href} class="block rounded-lg px-3 py-2.5 font-medium hover:bg-surface-raised">
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </details>
         ))
       }
     </nav>
@@ -90,12 +102,19 @@ try {
       class="hidden peer-checked:block absolute top-16 inset-x-0 bg-header-bg text-header-ink border-b border-border shadow-lg lg:hidden max-h-[80vh] overflow-y-auto"
       aria-label={t(locale, 'common.menu')}
     >
-      <div class="container-wide py-4 flex flex-col gap-1">
+      <div class="container-wide py-4 flex flex-col gap-3">
         {
-          links.map((link) => (
-            <a href={link.href} class="block py-2.5">
-              {link.label}
-            </a>
+          groups.map((group) => (
+            <section class="rounded-xl border border-border bg-surface px-4 py-3">
+              <h2 class="text-xs font-bold uppercase tracking-wider text-ink-muted">{group.label}</h2>
+              <div class="mt-1 grid gap-0.5 sm:grid-cols-2">
+                {group.links.map((link) => (
+                  <a href={link.href} class="block rounded-md py-2 font-medium hover:text-primary">
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            </section>
           ))
         }
         <a

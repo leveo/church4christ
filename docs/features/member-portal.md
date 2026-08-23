@@ -53,6 +53,8 @@ enrolments, leadership roles, and pending or approved applications remain visibl
 the open choices, so members do not need to search separate directories. The page links
 leaders to `/{locale}/manage` when they have resources they may administer.
 
+![The opportunity hub keeps current participation and open choices together](../images/portal/member-opportunities.png)
+
 ### Let ministry leaders manage their own work
 
 `/{locale}/manage` is an application-authenticated leader panel. Group administrators,
@@ -60,6 +62,15 @@ team leaders, and ministry leaders see only the groups, teams, schedules, and mi
 details assigned to them. Every read and write is checked again against the signed-in
 person's resource-level authority. The optional Cloudflare Zero Trust policy may remain
 limited to `/admin`; ministry leaders do not need a Zero Trust account to use this panel.
+
+![The leader panel exposes only the signed-in person's assigned resources](../images/portal/leader-panel.png)
+
+The workflow below shows the boundary end to end: enabled modules contribute discoverable
+opportunities, app authentication opens member and leader surfaces, resource-level checks
+protect each management action, and the separate `/admin` area can keep its Zero Trust
+policy.
+
+![Member opportunity and leader authorization workflow](../images/diagrams/member-opportunity-workflow.png)
 
 ### Manage a household with clear responsibilities
 

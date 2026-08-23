@@ -74,6 +74,50 @@ export interface ResolvedNavLink {
   href: string;
 }
 
+export type NavGroupKey = 'welcome' | 'explore' | 'connect' | 'participate' | 'more';
+
+export interface ResolvedNavGroup {
+  key: NavGroupKey;
+  label: string;
+  links: ResolvedNavLink[];
+}
+
+const NAV_GROUPS: readonly {
+  key: NavGroupKey;
+  labelKey: string;
+  paths?: readonly string[];
+}[] = [
+  { key: 'welcome', labelKey: 'nav.group.welcome', paths: ['/visit', '/new-here', '/about'] },
+  { key: 'explore', labelKey: 'nav.group.explore', paths: ['/sermons', '/bulletin', '/events', '/articles'] },
+  { key: 'connect', labelKey: 'nav.group.connect', paths: ['/ministries', '/fellowships', '/groups', '/learn'] },
+  { key: 'participate', labelKey: 'nav.group.participate', paths: ['/register', '/serve', '/serve/opportunities'] },
+  { key: 'more', labelKey: 'nav.group.more' },
+] as const;
+
+function navPath(href: string): string | null {
+  const match = href.match(/^\/(?:en|zh)(\/[^?#]*)?(?:[?#]|$)/u);
+  if (!match) return null;
+  const path = match[1] || '/';
+  return path.length > 1 ? path.replace(/\/$/u, '') : path;
+}
+
+/** Condense the resolved, admin-ordered links into a small set of audience
+ *  groups. Built-in destinations use stable paths; custom pages and external
+ *  links fall into More. Empty groups disappear while order inside each group
+ *  remains exactly as configured in Admin → Navigation. */
+export function groupNavLinks(links: readonly ResolvedNavLink[], locale: Locale): ResolvedNavGroup[] {
+  const buckets = new Map<NavGroupKey, ResolvedNavLink[]>(NAV_GROUPS.map(({ key }) => [key, []]));
+  for (const link of links) {
+    const path = navPath(link.href);
+    const group = NAV_GROUPS.find(({ paths }) => path !== null && paths?.includes(path))?.key ?? 'more';
+    buckets.get(group)!.push(link);
+  }
+  return NAV_GROUPS.flatMap(({ key, labelKey }) => {
+    const groupedLinks = buckets.get(key)!;
+    return groupedLinks.length ? [{ key, label: t(locale, labelKey), links: groupedLinks }] : [];
+  });
+}
+
 // navKey → owning module, e.g. 'nav.sermons' → 'sermons'. Built fresh per call
 // (cheap: MODULE_KEYS.length iterations over short arrays) rather than cached
 // module-level state, keeping this file free of the isolate-lifetime caches

@@ -33,6 +33,14 @@ weekly bulletin, events, ministries, staff bios, articles, and pages like "Plan 
 Visit." These surfaces are covered together in this guide and share the same header,
 footer, language controls, and theme.
 
+When many modules are enabled, the desktop header groups destinations into **Welcome**,
+**Explore**, **Connect**, and **Get Involved** dropdowns instead of adding one top-level
+item per feature. Custom pages and external links fall under **More**. Empty groups are
+omitted, while the order chosen in Admin → Navigation remains intact inside each group.
+On mobile, the same groups become easy-to-scan sections in the menu.
+
+![The grouped desktop navigation with Connect expanded](../images/public/grouped-navigation.png)
+
 ![The sermon archive](../images/public/sermons.png)
 
 | Events | Ministries | Staff |
@@ -89,5 +97,9 @@ right language, and how the one saved theme restyles the entire site.
   `text-ink-muted`), wired up in `src/styles/base.css`.
 - **Locale routing:** `src/lib/locales.ts` (`pickLocaleFromHeader`, `localePath`) and the
   redirect in `src/middleware.ts`.
+- **Navigation grouping:** `src/lib/nav.ts` assigns built-in localized paths to stable
+  audience groups and sends custom or external links to More; `src/components/Header.astro`
+  renders the desktop disclosures and mobile sections.
 - **Tests:** `test/theme.test.ts`, `test/themeMeta.test.ts`, `test/tokens.test.ts`,
-  `test/locales.test.ts`; the end-to-end home-render checks live in `test/e2e/`.
+  `test/locales.test.ts`, `test/nav.test.ts`, and `test/headerNavigation.test.ts`; the
+  end-to-end home-render checks live in `test/e2e/`.
