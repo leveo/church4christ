@@ -8,7 +8,7 @@
 import { localePath, type Locale } from '../lib/locales';
 import { t } from '../lib/i18n';
 
-export type PortalNavTab = 'dashboard' | 'opportunities' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer';
+export type PortalNavTab = 'dashboard' | 'opportunities' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer' | 'security';
 
 interface Props {
   locale: Locale;
@@ -26,6 +26,7 @@ const tabs: { key: PortalNavTab; href: string; label: string }[] = [
   ...(modules.has('portal')
     ? [{ key: 'household' as const, href: localePath(locale, '/my/household'), label: t(locale, 'portal.nav.household') }]
     : []),
+  { key: 'security', href: localePath(locale, '/settings/security'), label: t(locale, 'security.title') },
   ...(modules.has('giving')
     ? [{ key: 'giving' as const, href: localePath(locale, '/my/giving'), label: t(locale, 'portal.nav.giving') }]
     : []),

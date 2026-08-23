@@ -35,7 +35,7 @@ export async function sendMagicLink(
   locale: Locale,
 ): Promise<boolean> {
   const token = await createLoginToken(db, person.id);
-  if ('rateLimited' in token) return false;
+  if ('rateLimited' in token || 'notEligible' in token) return false;
 
   const link = `${env.APP_ORIGIN ?? ''}/auth/${token.raw}`;
   const langs: Locale[] =

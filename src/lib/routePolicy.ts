@@ -30,7 +30,9 @@ const PUBLIC_EXACT = new Set([
   '/serve/opportunities',
   '/serve/testimonies',
   '/signin',
+  '/recover',
   '/api/prayer-request',
+  '/api/health/identity-verification',
   '/api/learning/google/pubsub',
   '/healthz',
   '/404',
@@ -53,6 +55,7 @@ const PUBLIC_PREFIXES = [
   // session — the epoch bump on confirm has already revoked the member's
   // session, so they land here signed out. Mirrors /auth and /respond.
   '/email-change/',
+  '/recovery-veto/',
   '/cal/',
   '/media/',
   // Giving: the public give sub-pages (`/give/thanks`, `/give/checkout`) and the
@@ -64,6 +67,7 @@ const PUBLIC_PREFIXES = [
   // owned by no module, so the middleware never module-gates it (the endpoint
   // does its own giving||registration check).
   '/api/stripe/webhook',
+  '/api/planning-center/webhook',
   // Registration lands its public prefixes now (Phase 3 builds the pages) so the
   // policy is not re-touched later; harmless while the module is disabled.
   '/register',
@@ -162,6 +166,7 @@ export function classifyRoute(pathname: string): RouteClass {
   // Protected namespaces fail closed on unknown sub-paths. `under` is
   // segment-aware, so /mystery or /serveware do NOT match /my or /serve.
   if (under(p, '/my')) return 'authed';
+  if (p === '/reauth') return 'authed';
   if (under(p, '/manage')) return 'authed';
   if (under(p, '/learn')) return 'authed';
   if (p === '/profile') return 'authed';

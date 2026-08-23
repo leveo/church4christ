@@ -35,11 +35,14 @@ describe('classifyRoute', () => {
     ['/serve/opportunities', 'public'],
     ['/serve/testimonies', 'public'],
     ['/signin', 'public'],
+    ['/recover', 'public'],
     ['/auth/abc123', 'public'],
     ['/respond/tok', 'public'],
+    ['/recovery-veto/tok', 'public'],
     ['/cal/feed.ics', 'public'],
     ['/media/covers/x.jpg', 'public'],
     ['/api/prayer-request', 'public'],
+    ['/api/health/identity-verification', 'public'],
     ['/healthz', 'public'],
     ['/404', 'public'],
     // ── giving/registration public surfaces (T4) ──
@@ -80,6 +83,8 @@ describe('classifyRoute', () => {
     ['/profile', 'authed'],
     ['/settings/language', 'authed'],
     ['/settings/notifications', 'authed'],
+    ['/settings/security', 'authed'],
+    ['/reauth', 'authed'],
     // ── team ──
     ['/serve/plans', 'team'],
     ['/serve/plans/7', 'team'],

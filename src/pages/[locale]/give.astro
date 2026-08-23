@@ -80,8 +80,10 @@ try {
       </div>
 
       <div class="container-content max-w-xl py-10">
-        <form method="post" action="/api/giving/checkout" class="mt-6 space-y-4">
+        <form method="post" action={user ? "/api/giving/checkout" : "/api/identity/continuation/start"} class="mt-6 space-y-4">
           <input type="hidden" name="locale" value={locale} />
+          {user && <input type="hidden" name="identitySource" value="1" />}
+          {!user && <input type="hidden" name="flow" value="giving" />}
           <input type="hidden" name="checkoutRequestId" value={checkoutIdentity.requestId} />
           <input type="hidden" name="checkoutRequestProof" value={checkoutIdentity.proof} />
 

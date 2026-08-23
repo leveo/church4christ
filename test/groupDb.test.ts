@@ -93,33 +93,20 @@ describe('membership', () => {
     expect((await listMembers(env.DB, id))).toHaveLength(1);
   });
 
-  it('addMemberInline creates a name-only member when no email is given', async () => {
+  it('addMemberInline creates a name-only member when no contact is given', async () => {
     const id = await createGroup(env.DB, G);
-    const memberId = await addMemberInline(env.DB, id, { firstName: 'Hannah', lastName: 'Guest', email: null, phone: '555' });
+    const memberId = await addMemberInline(env.DB, id, { firstName: 'Hannah', lastName: 'Guest', email: null, phone: null });
     const member = (await listMembers(env.DB, id)).find((m) => m.id === memberId)!;
-    expect(member).toMatchObject({ person_id: null, display_name: 'Hannah Guest', phone: '555' });
+    expect(member).toMatchObject({ person_id: null, display_name: 'Hannah Guest', phone: null });
   });
 
-  it('addMemberInline REUSES an existing person by (lowercased) email', async () => {
+  it('requires the identity observation gateway for inline contact details', async () => {
     const id = await createGroup(env.DB, G);
-    const memberId = await addMemberInline(env.DB, id, { firstName: 'Person', lastName: '3', email: 'P3@Example.com', phone: null });
-    const member = (await listMembers(env.DB, id)).find((m) => m.id === memberId)!;
-    expect(member.person_id).toBe(3); // reused, no new people row
-    const people = await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<{ n: number }>();
-    expect(people?.n).toBe(4);
-  });
-
-  it('addMemberInline CREATES a new person when the email is unknown', async () => {
-    const id = await createGroup(env.DB, G);
-    const memberId = await addMemberInline(env.DB, id, { firstName: 'New', lastName: 'Bie', email: 'newbie@example.com', phone: null });
-    const member = (await listMembers(env.DB, id)).find((m) => m.id === memberId)!;
-    const created = await env.DB.prepare("SELECT id, role, membership_status FROM people WHERE email = 'newbie@example.com'").first<{
-      id: number;
-      role: string;
-      membership_status: string;
-    }>();
-    expect(created).toMatchObject({ role: 'member', membership_status: 'visitor' });
-    expect(member.person_id).toBe(created!.id);
+    await expect(addMemberInline(env.DB, id, { firstName: 'Person', lastName: '3', email: 'P3@Example.com', phone: null }))
+      .rejects.toThrow(/group_identity_gateway_required/);
+    await expect(addMemberInline(env.DB, id, { firstName: 'Person', lastName: '4', email: null, phone: '+12125550199' }))
+      .rejects.toThrow(/group_identity_gateway_required/);
+    expect(await env.DB.prepare('SELECT count(*) n FROM group_members WHERE group_id=?1').bind(id).first<number>('n')).toBe(0);
   });
 
   it('removeMember hides the row; a person can be re-added afterward', async () => {

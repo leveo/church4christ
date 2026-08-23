@@ -117,6 +117,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
 | [![](docs/images/admin/people-export.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Profiles and households plus canonical create-only CSV export and reusable source-column mapping for migrations. |
+| [![](docs/images/identity/merge-review-queue.jpg)](docs/features/member-identity.md) | **[Member identity safety](docs/features/member-identity.md)** | Proof-bound identity across Giving, Registration, Groups, Teams, Newcomer, imports, and Planning Center; ambiguous duplicates go to review instead of name-only merging, with OTP-bound approval and a guarded 24-hour rollback. |
 | [![](docs/images/groups/member-checklist.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, member checklist, join requests, events, and per-person email-link attendance. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
 | [![](docs/images/admin/attendance-report.png)](docs/features/service-attendance.md) | **[Service attendance](docs/features/service-attendance.md)** | Record aggregate adult totals, derive optional child totals from check-ins, correct history, and download identity-free CSV reports. |
@@ -303,6 +304,11 @@ It creates or imports the required resources, writes the generated configuration
 migrations, records all 21 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
+Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning
+Center integration share a proof-bound, review-first identity gateway. It never auto-merges
+people by name or an unverified contact. See [Member identity](docs/features/member-identity.md)
+for the workflow, fraud controls, current migration boundary, and provider verification gap;
+secret setup and rotation rules remain in the [deployment runbook](docs/deploy.md#stable-identity-source-key).
 Deployment is intentionally manual: repository automation tests changes but does not
 publish them or migrate production data for you.
 

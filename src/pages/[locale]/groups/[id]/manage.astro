@@ -61,6 +61,8 @@ import {
 } from '../../../../lib/groupRegDb';
 import { btn, btnSecondary, card, errorText, lab, noticeErr, noticeOk, rowBtn, tin, td, badge } from '../../../../lib/adminUi';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { createGroupMemberObservation } from '../../../../lib/identityBusinessIntent';
+import type { IdentitySourceKeyEnv } from '../../../../lib/identityGateway';
 
 const TZ = 'America/Chicago';
 
@@ -174,7 +176,12 @@ if (Astro.request.method === 'POST') {
     const parsed = parseInlineMemberForm(fd);
     if (!parsed.ok) inlineErrors = parsed.errors;
     else {
-      await addMemberInline(db, group.id, parsed.data);
+      if (parsed.data.email || parsed.data.phone) {
+        if (Astro.locals.campusMode !== 'campus' || !Astro.locals.campus) throw new Error('group_identity_campus_required');
+        await createGroupMemberObservation(Astro.locals.rawDb, env as unknown as IdentitySourceKeyEnv, {
+          campusId: Astro.locals.campus.id, operationId: crypto.randomUUID(), groupId: group.id, member: parsed.data,
+        });
+      } else await addMemberInline(db, group.id, parsed.data);
       return savedRedirect();
     }
   } else if (action === 'remove-member') {

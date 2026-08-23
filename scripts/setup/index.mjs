@@ -19,13 +19,16 @@ import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps, Set
 import { buildSetupRerunCommand } from './failure.mjs';
 import { D1CliDb } from './providers/d1.mjs';
 import { openPostgresSetupDb } from './providers/postgres.mjs';
-import { createStateStore } from './state.mjs';
+import { createStateStore, identityVerificationAttestationIsFresh } from './state.mjs';
 import { acquireApprovedContentLease, classifyConfig, writeAtomic } from './files.mjs';
 import { manifestFromPlan, renderManifest, validateManifest } from './manifest.mjs';
 import { renderWrangler } from './render-wrangler.mjs';
-import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets, readLocalSecretNames, readLocalSecretsStatus, readLocalStripeClassification, readLocalStripeModeOverride } from './secrets.mjs';
+import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets,
+  readLocalIdentityRecoveryKeyStatus, readLocalIdentitySourceKeyStatus, readLocalIdentityVerificationSecretStatus, readLocalSecretNames,
+  readLocalSecretsStatus, readLocalStripeClassification, readLocalStripeModeOverride } from './secrets.mjs';
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
+import { probeIdentityVerificationRuntime } from './identity-verification-probe.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 import { resolveLocalPersistence } from './persistence.mjs';
 import { inspectBaselineLocalD1Installation, inspectLegacyInstallation } from './import-existing.mjs';
@@ -279,6 +282,28 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
   const newcomerRateLimitSecret = manifest?.mode === 'deploy'
     ? remoteSecrets.has('NEWCOMER_RATE_LIMIT_SECRET')
     : localSecrets.has('NEWCOMER_RATE_LIMIT_SECRET');
+  const identityRuntimeStatus = probeOptions.identityVerificationRuntimeStatus;
+  const identityVerificationSecretStatus = manifest?.mode === 'deploy'
+    ? (identityRuntimeStatus === 'valid'
+      ? remoteSecrets.has('IDENTITY_VERIFICATION_SECRET') ? 'valid' : 'unverifiable'
+      : identityRuntimeStatus === 'invalid'
+        ? 'invalid'
+      : identityRuntimeStatus === 'unverifiable' && remoteSecrets.has('IDENTITY_VERIFICATION_SECRET') && identityVerificationAttestationIsFresh(probeOptions.identityVerificationSecretAttestation)
+        ? 'valid'
+        : !remoteSecrets.has('IDENTITY_VERIFICATION_SECRET') ? 'missing' : 'unverifiable')
+    : probeOptions.localIdentityVerificationSecretValid === true ? 'valid' : 'missing';
+  const identitySourceKeyStatus = manifest?.mode === 'deploy'
+    ? (identityRuntimeStatus === 'valid'
+      ? remoteSecrets.has('IDENTITY_SOURCE_KEY_SECRET') ? 'valid' : 'unverifiable'
+      : identityRuntimeStatus === 'invalid' ? 'invalid'
+        : !remoteSecrets.has('IDENTITY_SOURCE_KEY_SECRET') ? 'missing' : 'unverifiable')
+    : probeOptions.localIdentitySourceKeyValid === true ? 'valid' : 'missing';
+  const identityRecoveryKeyStatus = manifest?.mode === 'deploy'
+    ? (identityRuntimeStatus === 'valid'
+      ? remoteSecrets.has('IDENTITY_RECOVERY_KEY_SECRET') ? 'valid' : 'unverifiable'
+      : identityRuntimeStatus === 'invalid' ? 'invalid'
+        : !remoteSecrets.has('IDENTITY_RECOVERY_KEY_SECRET') ? 'missing' : 'unverifiable')
+    : probeOptions.localIdentityRecoveryKeyValid === true ? 'valid' : 'missing';
   return {
     worker: live.worker,
     r2: live.r2,
@@ -287,6 +312,9 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
     email: false,
     emailConfigured: manifest?.mode === 'deploy' && Boolean(manifest?.site?.emailFrom),
     emailDevLog: manifest?.mode === 'local' && probeOptions.localSecretsValid === true,
+    identityVerificationSecretStatus,
+    identitySourceKeyStatus,
+    identityRecoveryKeyStatus,
     stripeSecretKey,
     stripeWebhookSecret,
     newcomerRateLimitSecret,
@@ -334,6 +362,11 @@ async function applyDefaultSetup(plan, options, catalog) {
   let providerProofComplete = false;
   let providerConfigRoot = null;
   let providerConfigPath = configPath;
+  let identityVerificationSecretAttestation = null;
+  const identityVerificationProbe = options.identityVerificationProbe ?? probeIdentityVerificationRuntime;
+  const identityRuntime = async (activePlan) => activePlan.mode === 'deploy'
+    ? identityVerificationProbe({ appOrigin: activePlan.site.appOrigin, fetch: options.fetchIdentityVerificationRuntime })
+    : { status: 'unverifiable' };
 
   const verify = {
     migrate: () => verifyMigrationCompleteness({ db, backend: plan.backend, catalog, root }),
@@ -372,11 +405,12 @@ async function applyDefaultSetup(plan, options, catalog) {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     const config = await readFile(configPath, 'utf8');
     const workerSource = await readFile(resolve(root, 'src/worker.ts'), 'utf8');
+    const runtime = await identityRuntime(activePlan);
     return runDoctor({
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: effectiveStripeTestMode(config, manifest.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localIdentityVerificationSecretValid: await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')), localIdentitySourceKeyValid: await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')), localIdentityRecoveryKeyValid: await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')), identityVerificationSecretAttestation, identityVerificationRuntimeStatus: runtime.status, localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: effectiveStripeTestMode(config, manifest.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
     }, { strict: false });
   };
 
@@ -419,16 +453,48 @@ async function applyDefaultSetup(plan, options, catalog) {
       }
       return verified;
     }),
-    'configure-secrets': step(async ({ plan: activePlan }) => configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath, stripeSecrets: activePlan.backend === 'supabase' ? options.secretContext?.stripeSecrets : null }), async ({ plan: activePlan }) => {
+    'configure-secrets': step(async ({ plan: activePlan }) => {
+      let sourceKeyBootstrap = false;
+      let recoveryKeyBootstrap = false;
       if (activePlan.mode === 'deploy') {
+        const existing = await listDeploySecrets({ runner, wranglerBin, configPath });
+        sourceKeyBootstrap = !existing.has('IDENTITY_SOURCE_KEY_SECRET');
+        recoveryKeyBootstrap = !existing.has('IDENTITY_RECOVERY_KEY_SECRET');
+        if (existing.has('IDENTITY_VERIFICATION_SECRET') && !sourceKeyBootstrap && !recoveryKeyBootstrap
+          && !identityVerificationAttestationIsFresh(identityVerificationSecretAttestation)) {
+          throw new Error('The existing remote IDENTITY_VERIFICATION_SECRET cannot be verified from metadata; rotate or reconfigure it, then run a runtime verification canary.');
+        }
+      }
+      const configured = await configureSecrets({ mode: activePlan.mode, adminEmail: activePlan.adminEmail, path: resolve(root, '.dev.vars'), runner, wranglerBin, configPath, stripeSecrets: activePlan.backend === 'supabase' ? options.secretContext?.stripeSecrets : null });
+      if (activePlan.mode === 'deploy') {
+        if (!configured.configured.includes('IDENTITY_VERIFICATION_SECRET') && !sourceKeyBootstrap && !recoveryKeyBootstrap) {
+          throw new Error('The existing remote IDENTITY_VERIFICATION_SECRET cannot be verified from metadata; rotate or reconfigure it, then run a runtime verification canary.');
+        }
+      }
+      if (activePlan.mode !== 'deploy') return configured;
+      const generatedAt = new Date();
+      identityVerificationSecretAttestation = { generatedAt: generatedAt.toISOString(), expiresAt: new Date(generatedAt.getTime() + 15 * 60_000).toISOString() };
+      return { ...configured, evidence: identityVerificationSecretAttestation };
+    }, async ({ plan: activePlan, evidence }) => {
+      if (activePlan.mode === 'deploy' && identityVerificationAttestationIsFresh(evidence)) identityVerificationSecretAttestation = evidence;
+      if (activePlan.mode === 'deploy') {
+        const runtime = await identityRuntime(activePlan);
         const names = await listDeploySecrets({ runner, wranglerBin, configPath });
-        return names.has('SESSION_SECRET') && names.has('NEWCOMER_RATE_LIMIT_SECRET') && (!options.secretContext?.stripeSecrets ||
+        const status = runtime.status === 'valid' || runtime.status === 'unverifiable' && identityVerificationAttestationIsFresh(identityVerificationSecretAttestation) ? 'valid' : runtime.status;
+        return status === 'valid' && names.has('SESSION_SECRET') && names.has('NEWCOMER_RATE_LIMIT_SECRET')
+          && names.has('IDENTITY_VERIFICATION_SECRET') && names.has('IDENTITY_SOURCE_KEY_SECRET')
+          && names.has('IDENTITY_RECOVERY_KEY_SECRET') && (!options.secretContext?.stripeSecrets ||
           (names.has('STRIPE_SECRET_KEY') && names.has('STRIPE_WEBHOOK_SECRET')));
       }
       const baseReady = await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail);
       const newcomerReady = (await readLocalSecretNames(resolve(root, '.dev.vars'))).includes('NEWCOMER_RATE_LIMIT_SECRET');
+      const identityReady = await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars'));
+      const sourceKeyReady = await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars'));
+      const recoveryKeyReady = await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars'));
       if ((await readLocalStripeModeOverride(resolve(root, '.dev.vars'))).present) return false;
-      if (!baseReady || !newcomerReady || !options.secretContext?.stripeSecrets) return baseReady && newcomerReady;
+      if (!baseReady || !newcomerReady || !identityReady || !sourceKeyReady || !recoveryKeyReady || !options.secretContext?.stripeSecrets) {
+        return baseReady && newcomerReady && identityReady && sourceKeyReady && recoveryKeyReady;
+      }
       return (await readLocalStripeClassification(resolve(root, '.dev.vars'))).classification === 'test';
     }),
     ...providerSteps,
@@ -782,7 +848,12 @@ async function createDefaultDeps() {
           if (!db) throw new Error('database connection is unavailable');
           return checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(runner ? { runner, wranglerBin, configPath } : {}), secrets: doctorDbUrl ? [doctorDbUrl] : [] });
         },
-        checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: effectiveStripeTestMode(config, manifest?.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
+        checkServices: async () => {
+          const runtime = manifest?.mode === 'deploy'
+            ? await probeIdentityVerificationRuntime({ appOrigin: manifest.site?.appOrigin, fetch: globalThis.fetch })
+            : { status: 'unverifiable' };
+          return checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localIdentityVerificationSecretValid: manifest?.mode === 'local' ? await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')) : false, localIdentitySourceKeyValid: manifest?.mode === 'local' ? await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')) : false, localIdentityRecoveryKeyValid: manifest?.mode === 'local' ? await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')) : false, identityVerificationRuntimeStatus: runtime.status, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: effectiveStripeTestMode(config, manifest?.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) });
+        },
       }, { strict });
     } finally {
       await connection?.close();

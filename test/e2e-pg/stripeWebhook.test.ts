@@ -21,7 +21,11 @@ const CHECKOUT_REQUEST_ID = '00000000-0000-4000-8000-000000000777';
 let recoveryEventId: number | null = null;
 
 async function cookie(id: number, email: string): Promise<string> {
-  const jwt = await mintSession(E2E_ENV.SESSION_SECRET, { id, email, sessionEpoch: 0 });
+  const jwt = await mintSession(
+    E2E_ENV.SESSION_SECRET,
+    { id, email, sessionEpoch: 0 },
+    { authMethod: 'email_otp', authTime: Math.floor(Date.now() / 1000) },
+  );
   return `${SESSION_COOKIE}=${jwt}`;
 }
 

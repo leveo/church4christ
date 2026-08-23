@@ -14,7 +14,15 @@ import GroupActivity from '../../../components/GroupActivity.astro';
 import { t } from '../../../lib/i18n';
 import { listPersonGroupActivity, type PersonGroupActivity } from '../../../lib/groupDb';
 import { listRegistrationActivityForPerson, type PersonRegistration } from '../../../lib/groupRegDb';
-import { getPerson, savePerson, setPersonAvatar, setPersonFlags, softDeletePerson } from '../../../lib/adminDb';
+import {
+  canPerformSensitivePersonAction,
+  getPerson,
+  listVerifiedAuthContacts,
+  savePerson,
+  setPersonAvatar,
+  setPersonFlags,
+  softDeletePerson,
+} from '../../../lib/adminDb';
 import {
   GRANTABLE_AREAS,
   hasAreaAccess,
@@ -93,6 +101,10 @@ const canRegistration = hasAreaAccess(user, 'registration');
 // there regardless of the area grant — no givingDb query ever runs on D1.
 const canGiving = hasGiving && hasAreaAccess(user, 'giving');
 const isSuper = user.isSuperAdmin;
+// Re-check both the actor row and cryptographic session evidence. `isSuper`
+// alone is insufficient for privilege or identity mutations.
+const canSensitivePeopleAction = isSuper
+  && await canPerformSensitivePersonAction(db, user.id, Astro.locals.assurance);
 // Per-module grant labels for the areas fieldset — reuses each area's existing
 // nav/section title so there is no new translated string per area.
 const AREA_LABEL_KEYS: Record<GrantableArea, string> = {
@@ -155,9 +167,7 @@ if (Astro.request.method === 'POST') {
   const action = fd.get('action');
 
   if (action === 'delete' && id !== null) {
-    // Deleting a person requires the 'people' area grant, not just reaching this
-    // page (people-basic — GET only — is always-on for every admin).
-    if (!canManagePeople) return new Response(null, { status: 403 });
+    if (!canSensitivePeopleAction) return new Response(null, { status: 403 });
     try {
       await softDeletePerson(db, id);
     } catch (e) {
@@ -171,9 +181,13 @@ if (Astro.request.method === 'POST') {
   if (action === 'flags' && id !== null) {
     // Only a super admin may touch roles / grants — closes the pre-permissions
     // hole where any admin could promote anyone to admin.
-    if (!isSuper) return new Response(null, { status: 403 });
+    if (!canSensitivePeopleAction) return new Response(null, { status: 403 });
     const roleRaw = String(fd.get('role') ?? '');
     const role = ROLES.find((r) => r === roleRaw);
+    // Fail closed before interpreting any dependent checkbox. Otherwise a
+    // missing/forged role silently derives nextSuper=false and can demote a
+    // privileged target while appearing to be a partial update.
+    if (!role) return new Response(null, { status: 400 });
     const nextSuper = role === 'admin' && fd.get('super_admin') !== null;
     const areas = fd.getAll('areas').map(String);
     // The finance flag grants payment operations for Giving or Registration. A
@@ -235,6 +249,7 @@ if (Astro.request.method === 'POST') {
       if (memberId !== null && householdId !== null) await setPrimary(db, householdId, memberId);
       return back();
     } else if (action === 'setOwner' || action === 'unsetOwner') {
+      if (!canSensitivePeopleAction) return new Response(null, { status: 403 });
       const memberId = idOf(fd.get('member_id'));
       const householdId = idOf(fd.get('household_id'));
       if (memberId !== null && householdId !== null) {
@@ -283,6 +298,15 @@ if (Astro.request.method === 'POST') {
     // Saving identity fields requires the people area grant, regardless of
     // whether this is a new person or an edit (isNew already 403s above).
     if (!canManagePeople) return new Response(null, { status: 403 });
+    if (person) {
+      // Replace untrusted identity/privilege fields before validation. This is
+      // true ignoring (even malformed forged values cannot block an otherwise
+      // valid demographic save), with savePerson as the database backstop.
+      fd.set('email', person.email);
+      fd.set('role', person.role);
+      if (person.active === 1) fd.set('active', 'on');
+      else fd.delete('active');
+    }
     for (const [k, val] of fd.entries()) if (typeof val === 'string') values[k] = val;
     // The membership-depth fields only render (and are only parsed/persisted) when
     // the people module is on; while off, a core save leaves them untouched.
@@ -295,8 +319,16 @@ if (Astro.request.method === 'POST') {
       // to the stored values on edit. (New people are created by the people grant
       // as-is; a super admin elevates them afterward via the flags form.)
       if (person) {
+        // Existing authentication/reachability identity is read-only here.
+        // `savePerson` repeats this invariant for non-route callers.
+        parsed.data.email = person.email;
         parsed.data.role = person.role;
         parsed.data.active = person.active === 1;
+      } else {
+        // Creating a profile must not be an implicit privilege grant. A super
+        // admin can explicitly grant access later through a stepped-up action.
+        parsed.data.role = 'member';
+        parsed.data.active = true;
       }
       const avatarFile = fd.get('avatar');
       let avatarKey: string | null = null;
@@ -332,7 +364,7 @@ const v = {
   first_name: values.first_name ?? person?.first_name ?? '',
   last_name: values.last_name ?? person?.last_name ?? '',
   display_name: values.display_name ?? person?.display_name ?? '',
-  email: values.email ?? person?.email ?? '',
+  email: person?.email ?? values.email ?? '',
   phone: values.phone ?? person?.phone ?? '',
   role: values.role ?? person?.role ?? 'member',
   lang: values.lang ?? person?.lang ?? '',
@@ -343,6 +375,7 @@ const v = {
   joined_on: values.joined_on ?? person?.joined_on ?? '',
 };
 const avatarUrl = normalizeAvatarUrl(person?.avatar_url);
+const verifiedAuthContacts = person ? await listVerifiedAuthContacts(db, person.id) : [];
 
 // People-module panel data (household / notes / applications / invite targets).
 let household: HouseholdWithMembers | null = null;
@@ -475,11 +508,20 @@ const summaryErrors = Object.entries(errors)
       <input type="text" name="last_name" value={v.last_name} class={tin} />
     </label>
 
-    <label class="block">
-      <span class={lab}>{t(lang, 'admin.person.email')} *</span>
-      <input type="email" name="email" value={v.email} class={tin} />
-      {errors.email && <span class={errorText}>{t(lang, errors.email)}</span>}
-    </label>
+    {isNew ? (
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.person.email')} *</span>
+        <input type="email" name="email" value={v.email} class={tin} />
+        {errors.email && <span class={errorText}>{t(lang, errors.email)}</span>}
+      </label>
+    ) : (
+      <label class="block">
+        <span class={lab}>{t(lang, 'admin.person.email')}</span>
+        <input type="hidden" name="email" value={person?.email ?? ''} />
+        <input type="email" value={person?.email ?? ''} class={tin} readonly disabled />
+        <span class="mt-1 block text-xs text-ink-muted">{t(lang, 'admin.person.identityReadOnlyHint')}</span>
+      </label>
+    )}
     <label class="block">
       <span class={lab}>{t(lang, 'admin.person.phone')}</span>
       <input type="text" name="phone" value={v.phone} class={tin} />
@@ -525,18 +567,9 @@ const summaryErrors = Object.entries(errors)
     {
       isNew && (
         <>
-          <label class="block">
-            <span class={lab}>{t(lang, 'admin.person.role')}</span>
-            <select name="role" class={tin}>
-              {ROLES.map((r) => (
-                <option value={r} selected={v.role === r}>{t(lang, `admin.role.${r}`)}</option>
-              ))}
-            </select>
-          </label>
-          <label class="flex items-center gap-2 sm:col-span-2">
-            <input type="checkbox" name="active" checked={v.active} />
-            <span class="text-sm">{t(lang, 'admin.person.activeLabel')}</span>
-          </label>
+          <input type="hidden" name="role" value="member" />
+          <input type="hidden" name="active" value="1" />
+          <p class="text-xs text-ink-muted sm:col-span-2">{t(lang, 'admin.person.provisionalHint')}</p>
         </>
       )
     }
@@ -549,6 +582,25 @@ const summaryErrors = Object.entries(errors)
     )}
   </form>
 
+  {!isNew && person && (
+    <section class={`mt-6 ${card} max-w-2xl`} aria-labelledby="person-security-heading">
+      <h2 id="person-security-heading" class="font-semibold">{t(lang, 'admin.person.securityTitle')}</h2>
+      <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.person.securityHint')}</p>
+      {verifiedAuthContacts.length === 0 ? (
+        <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.person.noVerifiedAuthContacts')}</p>
+      ) : (
+        <ul class="mt-3 space-y-2 text-sm">
+          {verifiedAuthContacts.map((contact) => (
+            <li class="rounded-md border border-border px-3 py-2">
+              <span class="font-semibold">{t(lang, 'admin.person.verifiedAuthContact')}</span>
+              <span class="ml-2">{contact.displayValue}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )}
+
   {
     !isNew && person && (
       <>
@@ -557,7 +609,7 @@ const summaryErrors = Object.entries(errors)
             privilege, so only a super admin gets a form for them — every other
             admin (this page is reachable by all of them via the always-on
             people-basic area) sees a read-only summary instead. */}
-        {isSuper && (
+        {canSensitivePeopleAction && (
           <form method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
             <input type="hidden" name="action" value="flags" />
             <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
@@ -613,7 +665,7 @@ const summaryErrors = Object.entries(errors)
             <button type="submit" class={btn}>{t(lang, 'admin.person.updateFlags')}</button>
           </form>
         )}
-        {!isSuper && (
+        {!canSensitivePeopleAction && (
           <div class={`mt-6 ${card} max-w-2xl`}>
             <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
             <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-sm">
@@ -888,7 +940,7 @@ const summaryErrors = Object.entries(errors)
           </section>
         )}
 
-        {canManagePeople && (
+        {canSensitivePeopleAction && (
           <form
             method="post"
             class="mt-6 max-w-2xl"

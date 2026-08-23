@@ -160,6 +160,9 @@ const householdPrimaryRecord = (
 
 async function reset(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM verified_contact_owners'),
+    env.DB.prepare('DELETE FROM person_contact_links'),
+    env.DB.prepare('DELETE FROM contact_points'),
     env.DB.prepare('DELETE FROM household_members'),
     env.DB.prepare('DELETE FROM households'),
     env.DB.prepare('DELETE FROM people'),
@@ -301,6 +304,20 @@ describe('shared people import fixture', () => {
 });
 
 describe('preflightPeopleImport email collisions', () => {
+  it('reports a canonical notification-only contact collision as identity review required', async () => {
+    const parsed = parsePeopleImportRecords([personRecord(1, { email: 'shared@example.com' })]);
+    const contact = await env.DB.prepare(`INSERT INTO contact_points(kind,normalized_value,display_value)
+      VALUES('email','shared@example.com','Shared@Example.com') RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO people(display_name,email) VALUES('Reachable Person','other@example.com')`).run();
+    const person = await env.DB.prepare(`SELECT id FROM people WHERE email='other@example.com'`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO person_contact_links(person_id,contact_point_id,kind,source,notification_enabled)
+      VALUES(?1,?2,'email','admin_people',1)`).bind(person!.id, contact!.id).run();
+
+    expect(await preflightPeopleImport(env.DB, parsed)).toEqual({
+      errors: [{ severity: 'error', code: 'identity_review_required', row: 2, field: 'email' }],
+      warnings: [],
+    });
+  });
   it('blocks live, inactive, soft-deleted, trimmed, and mixed-case existing emails once per import row', async () => {
     const parsed = parsePeopleImportRecords([
       personRecord(1, { email: 'live@example.com' }),
@@ -321,7 +338,7 @@ describe('preflightPeopleImport email collisions', () => {
     expect(result).toEqual({
       errors: [2, 3, 4, 5].map((row) => ({
         severity: 'error',
-        code: 'email_exists',
+        code: 'identity_review_required',
         row,
         field: 'email',
       })),
@@ -430,7 +447,7 @@ describe('preflightPeopleImport bounded canonical scans', () => {
     const result = await preflightPeopleImport(db, parsed);
 
     expect(result).toEqual({
-      errors: [{ severity: 'error', code: 'email_exists', row: 2, field: 'email' }],
+      errors: [{ severity: 'error', code: 'identity_review_required', row: 2, field: 'email' }],
       warnings: [{ severity: 'warning', code: 'household_name_exists', row: 2, field: 'household_name' }],
     });
     const emailPages = db.prepared.filter((call) => call.sql.includes('FROM people'));
@@ -465,7 +482,7 @@ describe('preflightPeopleImport bounded canonical scans', () => {
     const result = await preflightPeopleImport(db, parsed);
 
     expect(result.errors).toEqual([
-      { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
+      { severity: 'error', code: 'identity_review_required', row: 2, field: 'email' },
     ]);
     expect(db.prepared.filter((call) => call.sql.includes('FROM people'))).toEqual([
       expect.objectContaining({
@@ -505,7 +522,7 @@ describe('preflightPeopleImport Unicode parity scan', () => {
     const result = await preflightPeopleImport(db, parsed);
 
     expect(result.errors).toEqual([2, 3].map((row) => ({
-      severity: 'error', code: 'email_exists', row, field: 'email',
+      severity: 'error', code: 'identity_review_required', row, field: 'email',
     })));
     expect(db.prepared).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -550,7 +567,7 @@ describe('preflightPeopleImport Unicode parity scan', () => {
     const result = await preflightPeopleImport(env.DB, parsed);
 
     expect(result.errors).toEqual([
-      { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
+      { severity: 'error', code: 'identity_review_required', row: 2, field: 'email' },
     ]);
   });
 
@@ -626,7 +643,7 @@ describe('preflightPeopleImport issue bounds and ordering', () => {
     expect(result.errors.slice(0, 99)).toEqual(
       Array.from({ length: 99 }, (_, index) => ({
         severity: 'error',
-        code: 'email_exists',
+        code: 'identity_review_required',
         row: index + 2,
         field: 'email',
       })),
@@ -787,6 +804,16 @@ describe('commitPeopleImport person persistence', () => {
         membership_status: 'member',
         joined_on: '2024-05-04',
       },
+    ]);
+    const identityRows = await env.DB.prepare(`SELECT p.email,p.identity_state,p.auth_disabled_at,l.notification_enabled,
+      CASE WHEN o.person_id IS NULL THEN 0 ELSE 1 END has_owner
+      FROM people p JOIN person_contact_links l ON l.person_id=p.id AND l.ended_at IS NULL
+      JOIN contact_points c ON c.id=l.contact_point_id AND c.kind='email'
+      LEFT JOIN verified_contact_owners o ON o.contact_point_id=c.id
+      ORDER BY p.id`).all<{ email: string; identity_state: string; auth_disabled_at: string | null; notification_enabled: number; has_owner: number }>();
+    expect(identityRows.results).toEqual([
+      { email: 'blank@example.com', identity_state: 'provisional', auth_disabled_at: expect.any(String), notification_enabled: 1, has_owner: 0 },
+      { email: 'profile@example.com', identity_state: 'provisional', auth_disabled_at: expect.any(String), notification_enabled: 1, has_owner: 0 },
     ]);
   });
 
@@ -1237,7 +1264,7 @@ describe('commitPeopleImport SQL safety and maximum model', () => {
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM household_members').first<number>('n')).toBe(5);
   });
 
-  it('executes the 200-person, 100-household model as one 500-statement D1 batch', async () => {
+  it('executes the 200-person, 100-household identity-safe model as one D1 batch', async () => {
     const records: Array<Partial<Record<PeopleImportHeader, string>>> = [];
     for (let family = 0; family < 100; family += 1) {
       const primary = family * 2;
@@ -1261,7 +1288,7 @@ describe('commitPeopleImport SQL safety and maximum model', () => {
       dependents: 0,
     });
     expect(db.batchCalls).toBe(1);
-    expect(db.lastBatchSize).toBe(500);
+    expect(db.lastBatchSize).toBe(900);
     expect(await importTableCounts()).toEqual({ people: 200, households: 100, members: 200 });
     const { results } = await env.DB.prepare(`
       SELECT h.name, COUNT(*) AS member_count,

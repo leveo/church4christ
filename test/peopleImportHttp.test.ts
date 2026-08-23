@@ -138,6 +138,9 @@ const routeContext = (
 
 async function resetImportTables(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM verified_contact_owners'),
+    env.DB.prepare('DELETE FROM person_contact_links'),
+    env.DB.prepare('DELETE FROM contact_points'),
     env.DB.prepare('DELETE FROM household_members'),
     env.DB.prepare('DELETE FROM households'),
     env.DB.prepare('DELETE FROM email_log'),

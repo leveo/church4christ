@@ -156,6 +156,13 @@ afterEach(async () => {
   const admin = await sessionCookie(1, 'admin@example.com');
   await post('/admin/settings', modulesBody([]), { cookie: admin });
   await env.DB.prepare('DROP TRIGGER IF EXISTS mapping_test_abort_people').run();
+  // Imports now create notification-only identity contacts. Clear the identity
+  // children before fixture people so FK enforcement remains meaningful.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM verified_contact_owners'),
+    env.DB.prepare('DELETE FROM person_contact_links'),
+    env.DB.prepare('DELETE FROM contact_points'),
+  ]);
   await env.DB.prepare(`DELETE FROM household_members WHERE household_id IN
     (SELECT id FROM households WHERE name = 'Mapping Collision Household')`).run();
   await env.DB.prepare("DELETE FROM households WHERE name = 'Mapping Collision Household'").run();
@@ -495,6 +502,14 @@ describe('canonical export to identity mapping round trip', () => {
 
     await env.DB.prepare("UPDATE people SET email = 'retarget-' || id || '@example.com'").run();
     await env.DB.prepare("UPDATE households SET name = 'retarget-household-' || id").run();
+    // This round-trip test intentionally simulates migration into a fresh
+    // identity store. Retargeting only the deprecated legacy carrier must not
+    // free historical contacts in production, so explicitly clear them here.
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM verified_contact_owners'),
+      env.DB.prepare('DELETE FROM person_contact_links'),
+      env.DB.prepare('DELETE FROM contact_points'),
+    ]);
     const before = await counts();
     let importedRows = 0;
     for (const csv of parts) {

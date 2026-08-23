@@ -1,108 +1,100 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
+import type { EmailEnv } from '../../lib/email';
+import { beginSignin } from '../../lib/identityAccount';
+import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../lib/identityAuth';
+import { scheduleIdentityDelivery } from '../../lib/identityDelivery';
+import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../lib/identityDeviceCookie';
+import { sendIdentitySigninLink } from '../../lib/identityNotify';
 import { t } from '../../lib/i18n';
 import { localePath, parseLocale } from '../../lib/locales';
-import { getPersonByEmail } from '../../lib/db';
-import { sendMagicLink } from '../../lib/notify';
-import type { EmailEnv } from '../../lib/email';
 
-// `[locale]` matches any single segment; reject non-locales so `/foo/signin`
-// 404s instead of rendering the form under a bogus locale.
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');
 }
 
-const vars = env as unknown as EmailEnv;
-const db = Astro.locals.db;
-// `next` is carried through a form re-render only. DECISION (slice 3): the
-// magic-link flow always lands on /{locale}/my, so we never propagate it into
-// the emailed link.
+type SigninEnv = EmailEnv & IdentityAuthEnv;
+const vars = env as unknown as SigninEnv;
+const db = Astro.locals.rawDb;
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
 const next = Astro.url.searchParams.get('next');
-// After confirming an email change the member is signed out and bounced here with
-// ?changed=1 so we can tell them to sign in with the new address.
 const changed = Astro.url.searchParams.get('changed') === '1';
 let sent = false;
+
+async function identityDeviceId(): Promise<string> {
+  const resolved = await resolveIdentityDeviceCookie(vars, Astro.cookies.get(IDENTITY_DEVICE_COOKIE)?.value);
+  if (resolved.replaced) {
+    Astro.cookies.set(IDENTITY_DEVICE_COOKIE, resolved.cookieValue, {
+      path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 365 * 24 * 60 * 60,
+    });
+  }
+  return resolved.deviceId;
+}
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const honeypot = String(form.get('website') ?? '').trim();
-  const email = String(form.get('email') ?? '').trim().toLowerCase();
-  if (honeypot) {
-    // A bot filled the hidden field. Pretend success; do nothing.
-    sent = true;
-  } else if (email) {
-    // Anti-enumeration: whether or not the person exists (or is rate limited),
-    // we always fall through to the identical "check your email" state.
+  const email = String(form.get('email') ?? '').trim();
+  if (!honeypot && email && campus) {
     try {
-      const person = await getPersonByEmail(db, email);
-      if (person) await sendMagicLink(vars, db, person, locale);
-    } catch (e) {
-      console.error('signin failure', e);
+      const begun = await beginSignin(db, vars, {
+        campusId: campus.id,
+        email,
+        requestContext: identityTrustedRequestContext(Astro.request.headers, await identityDeviceId()),
+        source: 'web',
+      });
+      const delivery = begun.delivery;
+      scheduleIdentityDelivery(
+        Astro.locals.cfContext,
+        delivery
+          ? () => sendIdentitySigninLink(vars, db, delivery, locale, campus.slug)
+          : async () => false,
+      );
+    } catch (error) {
+      // The response is intentionally identical for unknown, ineligible, limited,
+      // and temporarily unavailable accounts.
+      console.error('verified-owner signin start failed', error);
     }
-    sent = true;
   }
+  sent = true;
 }
 ---
 <Base title={t(locale, 'signin.title')} locale={locale} noindex>
   <section class="container-narrow py-16">
     {changed && !sent && (
-      <div class="mb-6 rounded-lg border border-border bg-surface-raised p-4 text-ink-muted">
-        {t(locale, 'signin.changed')}
-      </div>
+      <div class="mb-6 rounded-lg border border-border bg-surface-raised p-4 text-ink-muted">{t(locale, 'signin.changed')}</div>
     )}
-    {
-      sent ? (
-        <div class="bg-surface-raised border border-border rounded-lg p-6">
-          <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'signin.sentTitle')}</h1>
-          <p class="mt-3 text-ink-muted">{t(locale, 'signin.sentBody')}</p>
-        </div>
-      ) : (
-        <>
-          <h1 class="font-display text-heading-md font-bold">{t(locale, 'signin.title')}</h1>
-          <p class="mt-3 text-ink-muted">{t(locale, 'signin.intro')}</p>
-          <form method="post" class="mt-6 space-y-4">
-            {next && <input type="hidden" name="next" value={next} />}
-            {/* Honeypot: hidden from humans, tempting to bots. A filled value is
-                treated as spam. Off-screen rather than display:none so more bots trip it. */}
-            <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
-              <label>
-                Website
-                <input type="text" name="website" tabindex="-1" autocomplete="off" />
-              </label>
-            </div>
-            <label class="block">
-              <span class="block text-sm font-semibold">{t(locale, 'signin.emailLabel')}</span>
-              <input
-                type="email"
-                name="email"
-                required
-                autocomplete="email"
-                placeholder={t(locale, 'signin.emailPlaceholder')}
-                class="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2"
-              />
-            </label>
-            <button
-              type="submit"
-              class="w-full rounded-full bg-primary text-on-primary font-semibold px-4 py-2.5 hover:bg-primary-hover"
-            >
-              {t(locale, 'signin.submit')}
-            </button>
-          </form>
-          {
-            Astro.locals.modules.has('groups') && (
-              <p class="mt-4 text-sm text-ink-muted">
-                {t(locale, 'signin.newHere')}{' '}
-                <a href={localePath(locale, '/signup')} class="font-semibold text-primary hover:underline">
-                  {t(locale, 'signin.createAccount')}
-                </a>
-              </p>
-            )
-          }
-        </>
-      )
-    }
+    {sent ? (
+      <div class="rounded-lg border border-border bg-surface-raised p-6" role="status">
+        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'signin.sentTitle')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'signin.sentBody')}</p>
+      </div>
+    ) : (
+      <>
+        <h1 class="font-display text-heading-md font-bold">{t(locale, 'signin.title')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'signin.intro')}</p>
+        <form method="post" class="mt-6 space-y-4">
+          {next && <input type="hidden" name="next" value={next} />}
+          <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
+            <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+          </div>
+          <label class="block">
+            <span class="block text-sm font-semibold">{t(locale, 'signin.emailLabel')}</span>
+            <input type="email" name="email" required autocomplete="email" placeholder={t(locale, 'signin.emailPlaceholder')} class="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2" />
+          </label>
+          <button type="submit" class="w-full rounded-full bg-primary px-4 py-2.5 font-semibold text-on-primary hover:bg-primary-hover">{t(locale, 'signin.submit')}</button>
+        </form>
+        {Astro.locals.modules.has('groups') && (
+          <p class="mt-4 text-sm text-ink-muted">
+            {t(locale, 'signin.newHere')}{' '}
+            <a href={localePath(locale, '/signup')} class="font-semibold text-primary hover:underline">{t(locale, 'signin.createAccount')}</a>
+          </p>
+        )}
+        <p class="mt-3 text-sm"><a href={localePath(locale, '/recover')} class="font-semibold text-primary hover:underline">{t(locale, 'signin.recover')}</a></p>
+      </>
+    )}
   </section>
 </Base>

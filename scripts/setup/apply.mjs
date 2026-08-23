@@ -212,8 +212,9 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
         throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand });
       }
     }
+    const evidence = typeof stateStore.getEvidence === 'function' ? await stateStore.getEvidence(name) : null;
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
-    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed, managedInstallation });
+    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, evidence, recovering: completed, managedInstallation });
     let preverified;
     try { preverified = await steps[name].verify(context); }
     catch (error) { throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
@@ -247,7 +248,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
     }
     let verified;
     try {
-      verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
+      verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, evidence: null, recovering: completed, managedInstallation }));
       if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
     } catch (error) { throw new SetupApplyError({ step: name, phase: 'postverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
     try {

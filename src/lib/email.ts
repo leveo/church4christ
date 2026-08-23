@@ -3,8 +3,8 @@
 // with a hand-built RFC 5322 MIME message wrapped in EmailMessage from
 // 'cloudflare:email'. sendEmail NEVER throws to its caller — a mail failure must
 // not fail the request that triggered it — it logs to email_log and returns a
-// boolean. When env.EMAIL_DEV_LOG === '1' the mail (including any magic link) is
-// logged to the console and recorded as 'devlog' instead of being sent.
+// boolean. In development only, EMAIL_DEV_LOG='1' logs mail to the console and
+// records it as 'devlog' instead of sending it; production builds ignore it.
 import type { AppDb } from './appDb';
 import { EmailMessage } from 'cloudflare:email';
 
@@ -26,6 +26,8 @@ export interface SendEmailInput {
   html: string;
   text: string;
   detail?: string;
+  /** Keep proof material out of console logs even when EMAIL_DEV_LOG is enabled. */
+  redactDevLogBody?: boolean;
 }
 
 const FROM_NAME = 'Church4Christ';
@@ -118,10 +120,11 @@ export async function sendEmail(
   db: AppDb,
   msg: SendEmailInput,
 ): Promise<boolean> {
-  if (env.EMAIL_DEV_LOG === '1') {
+  if (import.meta.env.DEV && env.EMAIL_DEV_LOG === '1') {
     // Dev mode: no real send. The full text (magic link included) goes to the
     // console so a developer can complete the flow from the terminal.
-    console.log(`[email dev-log] to=${msg.to} kind=${msg.kind} subject=${msg.subject}\n${msg.text}`);
+    const body = msg.redactDevLogBody ? '[sensitive email body omitted]' : msg.text;
+    console.log(`[email dev-log] to=${msg.to} kind=${msg.kind} subject=${msg.subject}\n${body}`);
     await logEmail(db, msg, 'devlog');
     return true;
   }

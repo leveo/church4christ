@@ -1,0 +1,124 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import { btn, lab, tin } from '../../lib/adminUi';
+import type { EmailEnv } from '../../lib/email';
+import { beginRecovery, completeRecoveryRequest } from '../../lib/identityAccount';
+import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../lib/identityAuth';
+import { scheduleIdentityDelivery } from '../../lib/identityDelivery';
+import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../lib/identityDeviceCookie';
+import { sendIdentityRecoveryOtp } from '../../lib/identityNotify';
+import { deliverIdentityRecoveryNotifications } from '../../lib/identityRecoveryOutbox';
+import { t } from '../../lib/i18n';
+import { parseLocale } from '../../lib/locales';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+type RecoveryEnv = EmailEnv & IdentityAuthEnv;
+const vars = env as unknown as RecoveryEnv;
+const db = Astro.locals.rawDb;
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
+let state: 'form' | 'code' | 'invalid' | 'received' = 'form';
+let operationId = '';
+let publicId = '';
+
+async function identityDeviceId(): Promise<string> {
+  const resolved = await resolveIdentityDeviceCookie(vars, Astro.cookies.get(IDENTITY_DEVICE_COOKIE)?.value);
+  if (resolved.replaced) {
+    Astro.cookies.set(IDENTITY_DEVICE_COOKIE, resolved.cookieValue, {
+      path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 365 * 24 * 60 * 60,
+    });
+  }
+  return resolved.deviceId;
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const honeypot = String(form.get('website') ?? '').trim();
+  const action = String(form.get('action') ?? 'begin');
+  if (honeypot || !campus) {
+    state = 'received';
+  } else if (action === 'verify') {
+    operationId = String(form.get('operation_id') ?? '');
+    publicId = String(form.get('public_id') ?? '');
+    const code = String(form.get('code') ?? '').trim();
+    try {
+      const result = await completeRecoveryRequest(db, vars, {
+        campusId: campus.id, operationId, publicId, code, source: 'web', notificationLocale: locale,
+      });
+      if (result.status === 'review') {
+        scheduleIdentityDelivery(Astro.locals.cfContext, async () => {
+          await deliverIdentityRecoveryNotifications(db, vars, { caseId: result.recoveryCaseId });
+          return true;
+        });
+        state = 'received';
+      } else {
+        state = 'invalid';
+      }
+    } catch (error) {
+      console.error('identity recovery completion failed', error);
+      state = 'invalid';
+    }
+  } else {
+    const accountEmail = String(form.get('account_email') ?? '').trim();
+    const reachableEmail = String(form.get('reachable_email') ?? '').trim();
+    try {
+      const begun = await beginRecovery(db, vars, {
+        campusId: campus.id,
+        accountEmail,
+        reachableEmail,
+        requestContext: identityTrustedRequestContext(Astro.request.headers, await identityDeviceId()),
+        source: 'web',
+      });
+      operationId = begun.public.operationId;
+      publicId = begun.delivery.publicId;
+      scheduleIdentityDelivery(Astro.locals.cfContext, () => sendIdentityRecoveryOtp(vars, db, begun.delivery, locale));
+      state = 'code';
+    } catch (error) {
+      console.error('identity recovery start failed', error);
+      state = 'received';
+    }
+  }
+}
+---
+
+<Base title={t(locale, 'recovery.title')} locale={locale} noindex>
+  <section class="container-narrow py-16">
+    {state === 'received' ? (
+      <div class="rounded-lg border border-border bg-surface-raised p-6" role="status">
+        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'recovery.receivedTitle')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'recovery.receivedBody')}</p>
+      </div>
+    ) : state === 'code' || state === 'invalid' ? (
+      <div class="rounded-lg border border-border bg-surface-raised p-6">
+        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'recovery.codeTitle')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'recovery.codeBody')}</p>
+        {state === 'invalid' && <p class="mt-3 text-sm text-danger" role="alert">{t(locale, 'recovery.invalid')}</p>}
+        <form method="post" class="mt-6 space-y-4">
+          <input type="hidden" name="action" value="verify" />
+          <input type="hidden" name="operation_id" value={operationId} />
+          <input type="hidden" name="public_id" value={publicId} />
+          <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1"><label>Website<input name="website" tabindex="-1" autocomplete="off" /></label></div>
+          <label class="block"><span class={lab}>{t(locale, 'recovery.code')}</span><input name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" class={tin} /></label>
+          <button type="submit" class={`${btn} w-full justify-center`}>{t(locale, 'recovery.verify')}</button>
+        </form>
+      </div>
+    ) : (
+      <>
+        <h1 class="font-display text-heading-md font-bold">{t(locale, 'recovery.title')}</h1>
+        <p class="mt-3 text-ink-muted">{t(locale, 'recovery.intro')}</p>
+        <form method="post" class="mt-6 space-y-4">
+          <input type="hidden" name="action" value="begin" />
+          <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1"><label>Website<input name="website" tabindex="-1" autocomplete="off" /></label></div>
+          <label class="block"><span class={lab}>{t(locale, 'recovery.claimedEmail')}</span><input type="email" name="account_email" required autocomplete="email" class={tin} /></label>
+          <label class="block"><span class={lab}>{t(locale, 'recovery.reachableEmail')}</span><input type="email" name="reachable_email" required autocomplete="email" class={tin} /></label>
+          <button type="submit" class={`${btn} w-full justify-center`}>{t(locale, 'recovery.submit')}</button>
+        </form>
+      </>
+    )}
+  </section>
+</Base>

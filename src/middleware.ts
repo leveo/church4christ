@@ -88,6 +88,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const { locale, rest } = pathWithoutLocale(pathname);
   context.locals.locale = locale ?? DEFAULT_LOCALE;
   context.locals.user = null;
+  context.locals.assurance = null;
 
   // Per-request database seam. openDb is a zero-copy passthrough on the D1
   // default (env.DB IS the AppDb) and cannot throw when DB is bound, so it runs
@@ -147,6 +148,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
   };
 
   try {
+    // Runtime binding canary: public and bodyless. It bypasses session, module,
+    // theme, and campus work, but deliberately receives the request-scoped DB so
+    // the route can verify the pinned identity-source and recovery-key records.
+    if (pathname === '/api/health/identity-verification') return finish(await next());
+
     // Active theme from the `theme.name` setting, cached per-isolate (60s) in
     // ./lib/theme. Guarded: an empty DB or a missing settings table (fresh install)
     // falls back to THEME_DEFAULT rather than 500ing every page.
@@ -205,7 +211,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const cookie = context.cookies.get(SESSION_COOKIE)?.value;
     if (cookie && vars.SESSION_SECRET) {
       const claims = await verifySession(vars.SESSION_SECRET, cookie);
-      if (claims) context.locals.user = await loadSessionUser(db, claims.personId, claims.epoch);
+      if (claims) {
+        context.locals.user = await loadSessionUser(db, claims.personId, claims.epoch);
+        if (context.locals.user) context.locals.assurance = claims.assurance;
+      }
     }
     if (!context.locals.user && cookie && import.meta.env.DEV) {
       const screenshotSecret = import.meta.env.SCREENSHOT_SESSION_SECRET;
@@ -216,6 +225,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
           secret: screenshotSecret,
           loadUser: (personId, epoch) => loadSessionUser(db, personId, epoch),
         });
+        if (context.locals.user) {
+          const screenshotClaims = await verifySession(screenshotSecret, cookie);
+          context.locals.assurance = screenshotClaims?.assurance ?? null;
+        }
       }
     }
     // Dev bypass: in `astro dev`, AUTH_DEV_BYPASS_EMAIL attaches that person with no
@@ -313,6 +326,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
       pathname === '/robots.txt';
     if (!isAsset) {
       applySecurityHeaders(res.headers);
+      // Bearer-token URLs and the Team OTP continuation must never be cached or
+      // sent as referrers. This runs after the baseline helper because its
+      // general policy is intentionally less strict for ordinary public pages.
+      if (/^\/auth\/[^/]+\/?$/u.test(pathname) || /^\/recovery-veto\/[^/]+\/?$/u.test(rest) || rest === '/serve/apply') {
+        res.headers.set('cache-control', 'no-store');
+        res.headers.set('referrer-policy', 'no-referrer');
+        res.headers.set('x-content-type-options', 'nosniff');
+      }
       // Any page rendered with a user is personal — never store it in a shared
       // cache. /media/ and /cal/ are long-cacheable public assets (R2 media, iCal
       // feed) that set their own caching even when a user is attached, so exempt

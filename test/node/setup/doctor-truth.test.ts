@@ -7,7 +7,7 @@ import { buildServicePresence, effectiveStripeTestMode } from '../../../scripts/
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
 import { probeDeployResourcePresence } from '../../../scripts/setup/probes.mjs';
-import { readLocalSecretNames, readLocalStripeModeOverride } from '../../../scripts/setup/secrets.mjs';
+import { readLocalIdentityVerificationSecretStatus, readLocalSecretNames, readLocalStripeModeOverride } from '../../../scripts/setup/secrets.mjs';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -42,6 +42,18 @@ describe('doctor service truth', () => {
     try { await readLocalSecretNames(path); } catch (error) { expect(String(error)).not.toContain(secret); }
   });
 
+  it('classifies the local identity verification secret without returning its value', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-identity-secret-')); roots.push(root);
+    const path = join(root, '.dev.vars');
+    const secret = 'identity-secret-that-must-never-escape-from-doctor'.padEnd(40, 'x');
+    await writeFile(path, `IDENTITY_VERIFICATION_SECRET=${secret}\n`);
+    await expect(readLocalIdentityVerificationSecretStatus(path)).resolves.toBe(true);
+    await writeFile(path, 'IDENTITY_VERIFICATION_SECRET=short\n');
+    await expect(readLocalIdentityVerificationSecretStatus(path)).resolves.toBe(false);
+    await writeFile(path, 'OTHER=value\n');
+    await expect(readLocalIdentityVerificationSecretStatus(path)).resolves.toBe(false);
+  });
+
   it('derives exact absent, partial, and complete local Stripe states from .dev.vars names, never host env', async () => {
     const states = [
       { names: [], classification: 'missing', code: 'services.stripe-absent', severity: 'warning' },
@@ -49,13 +61,14 @@ describe('doctor service truth', () => {
       { names: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], classification: 'test', code: 'services.stripe-ok', severity: 'info' },
     ] as const;
     for (const state of states) {
-      const names = new Set<string>(state.names);
+      const names = new Set<string>([...state.names, 'IDENTITY_VERIFICATION_SECRET']);
       const presence = await buildServicePresence(supabaseManifest, {
         hostEnv: { STRIPE_SECRET_KEY: 'host-only', STRIPE_WEBHOOK_SECRET: 'host-only' },
-        localSecretNames: state.names,
+        localSecretNames: [...names],
         localStripeClassification: { classification: state.classification, secretKey: names.has('STRIPE_SECRET_KEY'), webhookSecret: names.has('STRIPE_WEBHOOK_SECRET') },
         stripeModeTest: true,
         localSecretsValid: true,
+        localIdentityVerificationSecretValid: true,
         localSupabaseUrlAvailable: true,
       });
       const checks = await checkServices({ catalog, manifest: supabaseManifest, presence });
@@ -69,10 +82,10 @@ describe('doctor service truth', () => {
     await writeFile(path, `STRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\nSTRIPE_MODE=${mode}\n`);
     const override = await readLocalStripeModeOverride(path);
     const presence = await buildServicePresence(supabaseManifest, {
-      hostEnv: {}, localSecretNames: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
+      hostEnv: {}, localSecretNames: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'IDENTITY_VERIFICATION_SECRET'],
       localStripeClassification: { classification: 'test', secretKey: true, webhookSecret: true },
       stripeModeTest: effectiveStripeTestMode('{ "vars": { "STRIPE_MODE": "test" } }', override),
-      localSecretsValid: true, localSupabaseUrlAvailable: true,
+      localSecretsValid: true, localIdentityVerificationSecretValid: true, localSupabaseUrlAvailable: true,
     });
     const doctor = await runDoctor({
       checkManifest: () => [], checkConfig: () => [], checkDatabase: () => [],

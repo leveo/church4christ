@@ -1,29 +1,29 @@
 ---
-// Apply to serve — PUBLIC (route policy exact match). Two steps like the reference stack:
-// pick a team (GET ?team=), then the full form (optional position, message,
-// and name/email/phone for signed-out applicants) with a honeypot.
-//
-// Ported logic (the reference stack's src/pages/apply.astro): a signed-in user applies as
-// themselves; a signed-out applicant is upserted by email (minimal person —
-// role 'member', active 1, never overwriting an existing account) and gets a
-// best-effort MAGIC LINK so they can sign in and track their status. A
-// duplicate pending application shows a friendly "already applied" note. Every
-// outcome renders the SAME success state (anti-enumeration: the response never
-// reveals whether an email was already registered or rate limited).
+// Apply to serve — PUBLIC. Anonymous identity-affecting writes are durably
+// staged and require mailbox proof before a person/application is created.
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import {
-  createApplication,
-  findOrCreatePersonByEmail,
-  hasPendingApplication,
   listTeamPositions,
   listTeamSummaries,
 } from '../../../lib/teamDb';
-import { getPersonByEmail } from '../../../lib/db';
-import { sendApplicationReceived, sendMagicLink } from '../../../lib/notify';
+import { sendApplicationReceived } from '../../../lib/notify';
 import type { EmailEnv } from '../../../lib/email';
+import type { IdentityAuthEnv } from '../../../lib/identityAuth';
+import { identityTrustedRequestContext } from '../../../lib/identityAuth';
+import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../../lib/identityDeviceCookie';
+import { scheduleIdentityDelivery } from '../../../lib/identityDelivery';
+import {
+  beginTeamApplicationIntent,
+  claimTeamApplicationSessionDelivery,
+  completeTeamApplicationIntent,
+  consumeSignedInTeamApplicationIntent,
+} from '../../../lib/identityBusinessIntent';
+import { identityGatewaySessionContext, type IdentitySourceKeyEnv } from '../../../lib/identityGateway';
+import { sendIdentitySignupOtp } from '../../../lib/identityNotify';
+import { mintSession, sessionCookie } from '../../../lib/session';
 import { parseApplicationForm } from '../../../lib/validate';
 import { btn, lab, noticeErr, tin } from '../../../lib/adminUi';
 
@@ -32,9 +32,15 @@ if (!locale) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');
 }
+Astro.response.headers.set('Cache-Control', 'no-store');
+Astro.response.headers.set('Pragma', 'no-cache');
+Astro.response.headers.set('Referrer-Policy', 'no-referrer');
 const user = Astro.locals.user;
-const vars = env as unknown as EmailEnv;
+type ApplyEnv = EmailEnv & IdentityAuthEnv & IdentitySourceKeyEnv & { SESSION_SECRET?: string };
+const vars = env as unknown as ApplyEnv;
 const db = Astro.locals.db;
+const identityDb = Astro.locals.rawDb;
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
 
 const idOf = (v: string | FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
@@ -43,65 +49,99 @@ const teams = await listTeamSummaries(db, locale);
 
 let errorKeys: string[] = [];
 let postedTeamId: number | null = null;
+let intentId = crypto.randomUUID();
+let publicId = '';
+let verificationState: 'none' | 'code' | 'invalid' | 'review' | 'neutral' = 'none';
+
+async function identityDeviceId(): Promise<string> {
+  const resolved = await resolveIdentityDeviceCookie(vars, Astro.cookies.get(IDENTITY_DEVICE_COOKIE)?.value);
+  if (resolved.replaced) Astro.cookies.set(IDENTITY_DEVICE_COOKIE, resolved.cookieValue, {
+    path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 365 * 24 * 60 * 60,
+  });
+  return resolved.deviceId;
+}
 
 if (Astro.request.method === 'POST') {
   const fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? 'begin');
+  intentId = String(fd.get('intent_id') ?? '');
   // Honeypot: bots fill the hidden "website" field; pretend success, do
-  // nothing — landing on the EXACT signed-out success state so the response is
-  // indistinguishable from a real submission.
+  // nothing — landing on the same anonymous handoff state.
   if (String(fd.get('website') ?? '') !== '') {
-    return Astro.redirect(localePath(locale, '/serve/apply?sent=1&signin=1'), 303);
-  }
-
-  const parsed = parseApplicationForm(fd, !!user);
-  postedTeamId = idOf(fd.get('team_id'));
-  if (!parsed.ok) {
-    errorKeys = [...new Set(Object.values(parsed.errors))];
-  } else if (!teams.some((tm) => tm.id === parsed.data.teamId)) {
-    errorKeys = ['errors.invalidOption'];
+    verificationState = 'neutral';
+  } else if (!campus) {
+    verificationState = 'neutral';
+  } else if (action === 'verify') {
+    publicId = String(fd.get('public_id') ?? '');
+    const code = String(fd.get('code') ?? '').trim();
+    try {
+      const result = await completeTeamApplicationIntent(identityDb, vars, {
+        campusId: campus.id, intentId, publicId, code,
+      });
+      if (result.status === 'review') verificationState = 'review';
+      else if (result.status === 'consumed' && vars.SESSION_SECRET) {
+        const delivery = await claimTeamApplicationSessionDelivery(identityDb, vars, {
+          campusId: campus.id, intentId, publicId, code,
+        });
+        if (!delivery) verificationState = 'invalid';
+        else {
+          await sendApplicationReceived(vars, identityDb, result.applicationId);
+          const jwt = await mintSession(vars.SESSION_SECRET, {
+            id: delivery.personId, sessionEpoch: delivery.sessionEpoch,
+          }, { authMethod: 'email_otp' });
+          return new Response(null, { status: 303, headers: {
+            location: localePath(locale, '/serve/apply?sent=1'),
+            'set-cookie': sessionCookie(jwt, import.meta.env.PROD),
+            'cache-control': 'no-store',
+            'referrer-policy': 'no-referrer',
+          } });
+        }
+      } else verificationState = 'invalid';
+    } catch {
+      verificationState = 'invalid';
+    }
   } else {
-    const input = parsed.data;
-    // Re-derive the position against the CHOSEN team — a posted position_id
-    // from another team is dropped, not trusted.
-    const teamPositions = await listTeamPositions(db, input.teamId, locale);
-    const positionId = teamPositions.some((p) => p.id === input.positionId) ? input.positionId : null;
-
-    const personId = user ? user.id : await findOrCreatePersonByEmail(db, input.email, input.name, input.phone);
-    const alreadyPending = await hasPendingApplication(db, personId, input.teamId);
-
-    // The friendly "already applied" note is for SIGNED-IN users only (they
-    // own the account, nothing leaks). A signed-out submitter must get the
-    // identical neutral success on every branch — new person, existing person,
-    // existing WITH a pending application — or the response would reveal
-    // whether an email already applied to a team (enumeration).
-    if (alreadyPending && user) {
-      return Astro.redirect(localePath(locale, '/serve/apply?sent=1&dup=1'), 303);
-    }
-    if (!alreadyPending) {
-      // A concurrent duplicate is absorbed by the partial-unique index
-      // (createApplication is ON CONFLICT DO NOTHING) — treated as success.
-      await createApplication(db, personId, input.teamId, positionId, input.message);
-      // Best-effort: notify the team's leaders that a new application awaits review.
-      const appRow = await db
-        .prepare(`SELECT id FROM team_applications WHERE person_id = ? AND team_id = ? AND status = 'P'`)
-        .bind(personId, input.teamId)
-        .first<{ id: number }>();
-      if (appRow) await sendApplicationReceived(vars, db, appRow.id);
-    }
-
-    // Signed-out applicants get a sign-in link so they can track their status
-    // (on the pending-duplicate branch too — signing in shows the existing
-    // application). Best-effort: rate limiting and mail failures still land on
-    // the same success page (sendMagicLink already absorbs both).
-    if (!user) {
+    const parsed = parseApplicationForm(fd, !!user);
+    postedTeamId = idOf(fd.get('team_id'));
+    if (!parsed.ok) {
+      errorKeys = [...new Set(Object.values(parsed.errors))];
+    } else if (!teams.some((tm) => tm.id === parsed.data.teamId)) {
+      errorKeys = ['errors.invalidOption'];
+    } else {
+      const input = parsed.data;
+      const teamPositions = await listTeamPositions(db, input.teamId, locale);
+      const positionId = teamPositions.some((p) => p.id === input.positionId) ? input.positionId : null;
       try {
-        const person = await getPersonByEmail(db, input.email);
-        if (person) await sendMagicLink(vars, db, person, locale);
-      } catch (e) {
-        console.error('applicant signin link failed', e);
+        if (user) {
+          const sessionEpoch = await identityDb.prepare('SELECT session_epoch FROM people WHERE id=?1')
+            .bind(user.id).first<number>('session_epoch');
+          if (sessionEpoch === null) throw new Error('identity_business_intent_invalid_session');
+          const result = await consumeSignedInTeamApplicationIntent(identityDb, vars, {
+            campusId: campus.id, intentId, teamId: input.teamId, positionId, message: input.message,
+            session: identityGatewaySessionContext({ personId: user.id, campusId: campus.id, sessionEpoch }),
+          });
+          await sendApplicationReceived(vars, identityDb, result.applicationId);
+          return new Response(null, { status: 303, headers: {
+            location: localePath(locale, '/serve/apply?sent=1'),
+            'cache-control': 'no-store',
+            'referrer-policy': 'no-referrer',
+          } });
+        }
+        const begun = await beginTeamApplicationIntent(identityDb, vars, {
+          campusId: campus.id, intentId, teamId: input.teamId, positionId, message: input.message,
+          name: input.name, email: input.email, phone: input.phone,
+          requestContext: identityTrustedRequestContext(Astro.request.headers, await identityDeviceId()),
+        });
+        if (begun.status === 'verification_required') {
+          scheduleIdentityDelivery(Astro.locals.cfContext,
+            () => sendIdentitySignupOtp(vars, identityDb, begun.delivery, locale));
+          publicId = begun.delivery.publicId;
+          verificationState = 'code';
+        } else verificationState = 'neutral';
+      } catch {
+        verificationState = 'neutral';
       }
     }
-    return Astro.redirect(localePath(locale, `/serve/apply?sent=1${user ? '' : '&signin=1'}`), 303);
   }
 }
 
@@ -109,7 +149,6 @@ const sent = Astro.url.searchParams.has('sent');
 // dup is only ever set for signed-in submitters; gate the render on the
 // session too so hand-typing ?dup=1 anonymously still shows the neutral state.
 const isDup = Astro.url.searchParams.has('dup') && !!user;
-const checkEmail = Astro.url.searchParams.has('signin');
 
 const selectedTeamId = postedTeamId ?? idOf(Astro.url.searchParams.get('team'));
 const selectedTeam = teams.find((tm) => tm.id === selectedTeamId) ?? null;
@@ -121,10 +160,34 @@ const positions = selectedTeam ? await listTeamPositions(db, selectedTeam.id, lo
     <h1 class="font-display text-heading-md font-bold">{t(locale, 'apply.title')}</h1>
 
     {
-      sent ? (
+      verificationState === 'review' ? (
+        <div class="mt-6 space-y-2 rounded-lg border border-border bg-surface-raised p-6 text-ink">
+          <p class="font-semibold">{t(locale, 'signup.reviewTitle')}</p>
+          <p>{t(locale, 'signup.reviewBody')}</p>
+        </div>
+      ) : verificationState === 'code' || verificationState === 'invalid' ? (
+        <div class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+          <p class="font-semibold">{t(locale, 'signup.codeSentTitle')}</p>
+          <p class="mt-2 text-ink-muted">{t(locale, 'signup.codeSentBody')}</p>
+          {verificationState === 'invalid' && <p class="mt-3 text-sm text-danger" role="alert">{t(locale, 'signup.invalidCode')}</p>}
+          <form method="post" class="mt-6 space-y-4">
+            <input type="hidden" name="action" value="verify" />
+            <input type="hidden" name="intent_id" value={intentId} />
+            <input type="hidden" name="public_id" value={publicId} />
+            <label class="block"><span class={lab}>{t(locale, 'signup.codeLabel')}</span>
+              <input name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" class={tin} />
+            </label>
+            <button type="submit" class={btn}>{t(locale, 'signup.verify')}</button>
+          </form>
+        </div>
+      ) : verificationState === 'neutral' ? (
+        <div class="mt-6 space-y-2 rounded-lg border border-border bg-surface-raised p-6 text-ink">
+          <p class="font-semibold">{t(locale, 'signup.codeSentTitle')}</p>
+          <p>{t(locale, 'signup.codeSentBody')}</p>
+        </div>
+      ) : sent ? (
         <div class="mt-6 space-y-2 rounded-lg border border-success bg-success-soft p-6 text-success">
           <p class="font-semibold">{isDup ? t(locale, 'apply.alreadyPending') : t(locale, 'apply.sent')}</p>
-          {checkEmail && <p>{t(locale, 'apply.checkEmail')}</p>}
           <p class="pt-2">
             <a href={localePath(locale, '/serve')} class="font-bold underline">
               {t(locale, 'apply.backToServe')}
@@ -153,6 +216,8 @@ const positions = selectedTeam ? await listTeamPositions(db, selectedTeam.id, lo
             </form>
           ) : (
             <form method="post" class="mt-6 space-y-4">
+              <input type="hidden" name="action" value="begin" />
+              <input type="hidden" name="intent_id" value={intentId} />
               <input type="hidden" name="team_id" value={selectedTeam.id} />
               {/* Honeypot: hidden from humans, tempting for bots. */}
               <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">

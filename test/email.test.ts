@@ -5,6 +5,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendEmail } from '../src/lib/email';
+import { sendIdentityStepUpOtp } from '../src/lib/identityNotify';
 
 beforeEach(async () => {
   await env.DB.prepare('DELETE FROM email_log').run();
@@ -41,6 +42,43 @@ describe('sendEmail dev-log', () => {
       detail: 'detail-x',
       status: 'devlog',
     });
+  });
+
+  it('never writes a step-up OTP or translated body to the development log', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await sendIdentityStepUpOtp(env, env.DB, {
+      to: 'approver@example.com', publicId: 'opaque-public-id', code: '482901',
+      expiresAt: '2030-01-01T00:05:00.000Z',
+    }, 'en');
+    const logged = spy.mock.calls.map((call) => call.join(' ')).join('\n');
+    spy.mockRestore();
+
+    expect(logged).toContain('[sensitive email body omitted]');
+    expect(logged).not.toContain('482901');
+    expect(logged).not.toContain('It expires soon and can be used once');
+  });
+
+  it('ignores a stale EMAIL_DEV_LOG binding in production and sends through the provider', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    const send = vi.fn(async () => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      expect(await sendEmail({
+        EMAIL_DEV_LOG: '1',
+        EMAIL_FROM: 'serve@example.com',
+        EMAIL: { send } as unknown as SendEmail,
+      }, env.DB, { ...base, kind: 'production' })).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(logSpy).not.toHaveBeenCalled();
+    const row = await env.DB.prepare(`SELECT status FROM email_log WHERE kind='production'`).first<{ status: string }>();
+    expect(row).toEqual({ status: 'sent' });
   });
 });
 

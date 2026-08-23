@@ -156,9 +156,9 @@ function sqlTokens(value: string): string[] {
     if (word) { tokens.push(word.toLowerCase()); index += word.length; continue; }
     const number = value.slice(index).match(/^\d+(?:\.\d+)?/)?.[0];
     if (number) { tokens.push(number); index += number.length; continue; }
-    const operator = ['<>', '>=', '<=', '::'].find((candidate) => value.startsWith(candidate, index));
+    const operator = ['<>', '>=', '<=', '::', '||'].find((candidate) => value.startsWith(candidate, index));
     if (operator) { tokens.push(operator); index += operator.length; continue; }
-    if ('().,;=<>+-'.includes(char)) { tokens.push(char); index += 1; continue; }
+    if ('().,;=<>+-*'.includes(char)) { tokens.push(char); index += 1; continue; }
     throw new Error(`unsupported trigger token at: ${value.slice(index)}`);
   }
   const canonical: string[] = [];
@@ -166,6 +166,9 @@ function sqlTokens(value: string): string[] {
     if (tokens.slice(index, index + 4).join(' ') === 'is not distinct from') {
       canonical.push('is');
       index += 3;
+    } else if (tokens.slice(index, index + 3).join(' ') === 'is distinct from') {
+      canonical.push('is', 'not');
+      index += 2;
     } else if (tokens[index] === '::' && tokens[index + 1] === 'text') {
       index += 1;
     } else {
@@ -240,11 +243,64 @@ function pgTriggerEffect(
 
       if (tokens[index] === 'perform') {
         statementKinds.push('perform');
+        const performEnd = tokens.indexOf(';', index);
+        const orderedContactLocks = tokens.slice(index, performEnd + 1).join(' ');
+        const expectedOrderedContactLocks = [
+          'perform pg_advisory_xact_lock ( hashtextextended ( lock_key , 0 ) ) from (',
+          "select 'email:' || o . normalized_email as lock_key from identity_source_records s",
+          'join identity_observations o on o . id = s . observation_id',
+          'where s . id = new . source_record_id and o . normalized_email is not null union all',
+          "select 'phone:' || o . normalized_phone as lock_key from identity_source_records s",
+          'join identity_observations o on o . id = s . observation_id',
+          'where s . id = new . source_record_id and o . normalized_phone is not null',
+          ') contact_locks order by lock_key ;',
+        ].join(' ');
+        if (orderedContactLocks.includes('hashtextextended')) {
+          if (conditions.length !== 0 || orderedContactLocks !== expectedOrderedContactLocks) {
+            throw new Error('unsupported Postgres trigger function: ordered provisional contact locks');
+          }
+          index = performEnd + 1;
+          continue;
+        }
+        if (orderedContactLocks === 'perform person_merge_lock_operation_people_fn ( new . operation_id , new . approver_person_id ) ;') {
+          if (conditions.length > 1 || (conditions.length === 1 && conditions[0].join(' ') !== 'found')) {
+            throw new Error('unsupported Postgres trigger function: merge approval lock precondition');
+          }
+          index = performEnd + 1;
+          continue;
+        }
+        if (orderedContactLocks === 'perform person_merge_lock_operation_people_fn ( new . operation_id , new . decided_by_person_id ) ;') {
+          if (conditions.length !== 0) {
+            throw new Error('unsupported Postgres trigger function: merge decision lock precondition');
+          }
+          index = performEnd + 1;
+          continue;
+        }
+        if (tokens[index + 1] === '1') {
+          const end = performEnd;
+          const rowLock = orderedContactLocks;
+          const conditionalCaseLock = rowLock === 'perform 1 from identity_resolution_cases c where c . id = old . resolution_case_id for update ;'
+            && conditions.length === 1
+            && conditions[0].join(' ') === "new . state in ( 'awaiting_approval' , 'approved' , 'executing' )";
+          if (!conditionalCaseLock && (conditions.length !== 0 || ![
+            'perform 1 from identity_source_records where id = new . source_record_id for update ;',
+            'perform 1 from identity_observations where id = ( select observation_id from identity_source_records where id = new . source_record_id ) for update ;',
+            'perform 1 from people where id = new . person_id for update ;',
+            'perform 1 from campus_memberships where person_id = new . person_id and campus_id = new . campus_id for update ;',
+            'perform 1 from person_merge_operations op where op . operation_id = new . operation_id for update ;',
+            'perform 1 from identity_resolution_cases c where c . id = new . resolution_case_id for update ;',
+          ].includes(rowLock))) {
+            throw new Error('unsupported Postgres trigger function: source row lock or eligibility row lock');
+          }
+          index = end + 1;
+          continue;
+        }
         const perform = tokens.slice(index, index + 3).join(' ');
-        if (perform !== 'perform pg_advisory_xact_lock (' || conditions.length === 0) {
+        if (perform !== 'perform pg_advisory_xact_lock (') {
           throw new Error('unsupported Postgres trigger function: PERFORM');
         }
         index += 3;
+        const argumentStart = index;
         let depth = 1;
         while (index < tokens.length && depth > 0) {
           if (tokens[index] === '(') depth += 1;
@@ -253,6 +309,27 @@ function pgTriggerEffect(
         }
         if (depth !== 0 || tokens[index] !== ';') {
           throw new Error('unsupported Postgres trigger function: advisory lock');
+        }
+        const argumentsText = tokens.slice(argumentStart, index - 1).join(' ');
+        // Existing guarded locks can protect a compound application invariant.
+        // A top-level lock is accepted only for the contact ownership race and
+        // must be keyed exactly by the row's contact point.
+        if (conditions.length === 0 && ![
+          'new . challenge_id',
+          'new . contact_point_id',
+          'new . person_id',
+          'old . contact_point_id',
+          'least ( new . loser_person_id , new . canonical_person_id )',
+          'greatest ( new . loser_person_id , new . canonical_person_id )',
+          "hashtext ( old . campus_id || ':' || old . requester_bucket_hash )",
+          "hashtext ( new . campus_id || ':' || new . bucket_hash )",
+          'hashtext ( new . operation_id )',
+          'new . case_id :: bigint',
+          '732 , new . contact_point_id',
+          '732 , old . contact_point_id',
+          '732 , coalesce ( ( select contact_point_id from identity_recovery_cases where id = new . case_id ) , 0 )',
+        ].includes(argumentsText)) {
+          throw new Error(`unsupported Postgres trigger function: advisory lock key ${argumentsText}`);
         }
         index += 1;
         continue;
@@ -325,13 +402,13 @@ function pgTriggerSignature(row: Record<string, unknown>): string {
     throw new Error('unsupported Postgres trigger-level WHEN');
   }
   const parsed = definition.match(
-    /^CREATE TRIGGER (\S+) (BEFORE|AFTER) (INSERT|UPDATE|DELETE) ON public\.(\S+) FOR EACH ROW EXECUTE FUNCTION (\S+)\(\)$/i,
+    /^CREATE TRIGGER (\S+) (BEFORE|AFTER) (INSERT|UPDATE(?: OF [a-z_, ]+)?|DELETE) ON public\.(\S+) FOR EACH ROW EXECUTE FUNCTION (\S+)\(\)$/i,
   );
   if (!parsed) throw new Error(`unsupported Postgres trigger definition: ${definition}`);
-  const event = parsed[3].toLowerCase() as 'insert' | 'update' | 'delete';
+  const event = parsed[3].toLowerCase().split(/\s+/)[0] as 'insert' | 'update' | 'delete';
   const effect = pgTriggerEffect(String(row.function_source), event);
   return [
-    parsed[1].toLowerCase(), parsed[4].toLowerCase(), parsed[2].toLowerCase(), parsed[3].toLowerCase(),
+    parsed[1].toLowerCase(), parsed[4].toLowerCase(), parsed[2].toLowerCase(), event,
     effect.guard, effect.abortMessage,
   ].join(':');
 }
@@ -386,6 +463,95 @@ describe('Postgres trigger semantic parser', () => {
     `))).toBe(
       "protected_insert:protected_rows:before:insert:( new . fixed = 1 ) and ( new . active = 0 ):protected",
     );
+  });
+
+  it('permits only contact/person-keyed transaction advisory locks before identity guards', () => {
+    const source = `BEGIN
+      PERFORM pg_advisory_xact_lock(NEW.contact_point_id);
+      IF NOT EXISTS (SELECT 1 FROM person_contact_links WHERE person_id=NEW.person_id) THEN
+        RAISE EXCEPTION 'verified_contact_owner_requires_active_link';
+      END IF;
+      RETURN NEW;
+    END;`;
+    expect(pgTriggerSignature(syntheticPgTrigger(source, {
+      definition: 'CREATE TRIGGER verified_contact_owner_requires_active_link_insert BEFORE INSERT ON public.verified_contact_owners FOR EACH ROW EXECUTE FUNCTION verified_contact_owner_requires_active_link_insert()',
+    }))).toBe(
+      'verified_contact_owner_requires_active_link_insert:verified_contact_owners:before:insert:not exists ( select 1 from person_contact_links where person_id = new . person_id ):verified_contact_owner_requires_active_link',
+    );
+    expect(() => pgTriggerSignature(syntheticPgTrigger(source.replace('NEW.contact_point_id', 'NEW.source_record_id')))).toThrow(/advisory lock/i);
+  });
+
+  it('permits only the exact source-row FOR UPDATE lock before a receipt guard', () => {
+    const source = `BEGIN
+      PERFORM 1 FROM identity_source_records WHERE id=NEW.source_record_id FOR UPDATE;
+      PERFORM pg_advisory_xact_lock(NEW.contact_point_id);
+      IF NEW.fixed = 1 THEN RAISE EXCEPTION 'protected'; END IF;
+      RETURN NEW;
+    END;`;
+    expect(pgTriggerSignature(syntheticPgTrigger(source))).toBe(
+      'protected_insert:protected_rows:before:insert:new . fixed = 1:protected',
+    );
+    expect(() => pgTriggerSignature(syntheticPgTrigger(source.replace('identity_source_records', 'people'))))
+      .toThrow(/source row lock/i);
+    expect(() => pgTriggerSignature(syntheticPgTrigger(source.replace('NEW.source_record_id', 'NEW.person_id'))))
+      .toThrow(/source row lock/i);
+  });
+
+  it('permits only exact observation and eligibility row locks with the receipt person advisory key', () => {
+    const source = `BEGIN
+      PERFORM 1 FROM identity_source_records WHERE id=NEW.source_record_id FOR UPDATE;
+      PERFORM 1 FROM identity_observations WHERE id=(SELECT observation_id FROM identity_source_records WHERE id=NEW.source_record_id) FOR UPDATE;
+      PERFORM pg_advisory_xact_lock(NEW.person_id);
+      PERFORM 1 FROM people WHERE id=NEW.person_id FOR UPDATE;
+      PERFORM 1 FROM campus_memberships WHERE person_id=NEW.person_id AND campus_id=NEW.campus_id FOR UPDATE;
+      PERFORM pg_advisory_xact_lock(NEW.contact_point_id);
+      IF NEW.fixed = 1 THEN RAISE EXCEPTION 'protected'; END IF;
+      RETURN NEW;
+    END;`;
+    expect(pgTriggerSignature(syntheticPgTrigger(source))).toContain('new . fixed = 1:protected');
+    for (const unsafe of [
+      source.replace('identity_observations', 'identity_challenges'),
+      source.replace('FROM people WHERE id=NEW.person_id', 'FROM people WHERE id=NEW.source_record_id'),
+      source.replace('campus_id=NEW.campus_id', 'campus_id=1'),
+      source.replace('pg_advisory_xact_lock(NEW.person_id)', 'pg_advisory_xact_lock(NEW.source_record_id)'),
+    ]) expect(() => pgTriggerSignature(syntheticPgTrigger(unsafe))).toThrow();
+  });
+
+  it('normalizes PostgreSQL NULL-safe distinctness to the D1 IS NOT predicate', () => {
+    expect(pgTriggerSignature(syntheticPgTrigger(`BEGIN
+      IF OLD.person_id IS NOT NULL AND NEW.person_id IS DISTINCT FROM OLD.person_id THEN
+        RAISE EXCEPTION 'protected';
+      END IF;
+      RETURN NEW;
+    END;`))).toContain('old . person_id is not null and new . person_id is not old . person_id');
+  });
+
+  it('uses the base UPDATE event, not UPDATE OF columns, in parity signatures', () => {
+    expect(pgTriggerSignature(syntheticPgTrigger(`BEGIN
+      IF OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL THEN
+        RAISE EXCEPTION 'verified_contact_owner_requires_active_link';
+      END IF;
+      RETURN NEW;
+    END;`, {
+      definition: 'CREATE TRIGGER person_contact_link_owner_cannot_end BEFORE UPDATE OF ended_at ON public.person_contact_links FOR EACH ROW EXECUTE FUNCTION person_contact_link_owner_cannot_end()',
+    }))).toBe(
+      'person_contact_link_owner_cannot_end:person_contact_links:before:update:old . ended_at is null and new . ended_at is not null:verified_contact_owner_requires_active_link',
+    );
+  });
+
+  it('accepts only deterministically ordered advisory locks for one-hop redirects', () => {
+    const source = `BEGIN
+      PERFORM pg_advisory_xact_lock(LEAST(NEW.loser_person_id, NEW.canonical_person_id));
+      PERFORM pg_advisory_xact_lock(GREATEST(NEW.loser_person_id, NEW.canonical_person_id));
+      IF EXISTS (SELECT 1 FROM person_merge_redirects WHERE loser_person_id = NEW.canonical_person_id)
+        OR EXISTS (SELECT 1 FROM person_merge_redirects WHERE canonical_person_id = NEW.loser_person_id) THEN
+        RAISE EXCEPTION 'person_merge_redirect_one_hop_required';
+      END IF;
+      RETURN NEW;
+    END;`;
+    expect(pgTriggerSignature(syntheticPgTrigger(source, {
+      definition: 'CREATE TRIGGER person_merge_redirects_one_hop_insert BEFORE INSERT ON public.person_merge_redirects FOR EACH ROW EXECUTE FUNCTION person_merge_redirects_one_hop_insert()',
+    }))).toContain(':before:insert:exists ( select 1 from person_merge_redirects where loser_person_id = new . canonical_person_id ) or exists ( select 1 from person_merge_redirects where canonical_person_id = new . loser_person_id ):');
   });
 
   it.each([
@@ -555,7 +721,11 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
         indexes.indisunique,
         EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = indexes.indexrelid) AS is_constraint,
         ARRAY(
-          SELECT pg_get_indexdef(indexes.indexrelid, position, true)
+          SELECT regexp_replace(
+            pg_get_indexdef(indexes.indexrelid, position, true),
+            '\\s+(ASC|DESC)(\\s+NULLS\\s+(FIRST|LAST))?\\s*$', '', 'i'
+          ) || CASE WHEN pg_index_column_has_property(indexes.indexrelid, position, 'desc')
+            THEN ' desc' ELSE '' END
           FROM generate_series(1, indexes.indnkeyatts) position
           ORDER BY position
         ) AS columns,
@@ -614,11 +784,76 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
       WHERE namespace.nspname = 'public' AND NOT trigger.tgisinternal
       ORDER BY trigger.tgname
     `);
+    const triggerNames = new Set(rows.map((row) => String(row.tgname).toLowerCase()));
+    expect([...triggerNames].filter((name) => name.startsWith('person_merge_operations_risk_set_')
+      || name.startsWith('person_merge_risk_set_')).sort()).toEqual([
+      'person_merge_operations_risk_set_guard',
+      'person_merge_operations_risk_set_snapshot',
+      'person_merge_risk_set_facts_append_only_delete',
+      'person_merge_risk_set_facts_append_only_update',
+      'person_merge_risk_set_facts_insert_guard',
+      'person_merge_risk_set_seals_append_only_delete',
+      'person_merge_risk_set_seals_append_only_update',
+    ]);
+    expect([...d1.triggers.keys()].filter((name) => name.startsWith('person_merge_operations_risk_set_')
+      || name.startsWith('person_merge_risk_set_'))).toHaveLength(27);
+    const semanticBindingLifecycleTriggers = new Set([
+      'person_merge_semantic_binding_people_stripe_bump',
+      'person_merge_semantic_binding_people_calendar_bump',
+      'person_merge_semantic_binding_external_identity_bump',
+      'person_merge_semantic_binding_learning_identity_bump',
+      'person_merge_semantic_binding_canonical_key_bump',
+      // Recurring gifts are a PostgreSQL-only module table.
+      'person_merge_semantic_binding_recurring_gift_guard',
+      'person_merge_semantic_binding_recurring_gift_bump',
+    ]);
+    const lifecycleTrigger = (name: unknown) => {
+      const normalized = String(name).toLowerCase();
+      return normalized === 'campus_membership_after_person_insert'
+        || normalized.startsWith('identity_person_canonical_keys_')
+        || semanticBindingLifecycleTriggers.has(normalized)
+        || normalized === 'identity_recovery_notification_outbox_insert_receipt'
+        || normalized === 'identity_recovery_notification_outbox_transition_receipt'
+        || normalized === 'planning_center_merge_mapping_snapshot'
+        // The recent-step-up guards use native PostgreSQL timestamp/JSON
+        // operators and SQLite julianday/json_extract spellings. Dedicated
+        // D1/PG suites assert their exact binding, expiry, revocation, campus,
+        // and concurrency behavior; the generic token signature cannot safely
+        // erase those engine-specific expressions into apparent equivalence.
+        || normalized === 'person_merge_approvals_step_up_guard'
+        || normalized === 'person_merge_operations_approval_eligibility_guard'
+        || normalized === 'person_merge_step_up_direct_consumed_guard'
+        || normalized === 'person_merge_step_up_binding_immutable'
+        // These two large transition guards are implemented as decomposed
+        // SQLite queries and native PostgreSQL set operations. Their complete
+        // live-set/race behavior is covered by the dedicated C1/PCO suites.
+        || normalized === 'person_merge_operations_risk_source_guard'
+        || normalized === 'planning_center_merge_mapping_stale_guard'
+        // PostgreSQL needs transaction-scoped advisory locks around all live
+        // risk writers and merge transitions; D1 obtains the same ordering from
+        // its single-writer transaction model, so these are engine lifecycle
+        // controls rather than cross-engine abort semantics.
+        || normalized === 'person_merge_operations_a_global_lock_guard'
+        || normalized.startsWith('person_merge_risk_writer_')
+        // D1 decomposes exact live-set equality into small per-domain guards
+        // to stay below the Workers SQLite compound-select limit; PostgreSQL
+        // can enforce the same bidirectional set equality in one trigger.
+        // Their inventories are asserted immediately above and their behavior
+        // is exercised against both engines in the C1 substitution suites.
+        || normalized.startsWith('person_merge_operations_risk_set_')
+        || normalized.startsWith('person_merge_risk_set_');
+    };
     const actual = new Set(rows
-      .filter((row) => String(row.tgname).toLowerCase() !== 'campus_membership_after_person_insert')
-      .map((row) => pgTriggerSignature(row)));
+      .filter((row) => !lifecycleTrigger(row.tgname))
+      .map((row) => {
+        try {
+          return pgTriggerSignature(row);
+        } catch (error) {
+          throw new Error(`failed to parse PostgreSQL trigger ${String(row.tgname)}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }));
     const expected = new Set([...d1.triggers.values()]
-      .filter((trigger) => trigger.name !== 'campus_membership_after_person_insert')
+      .filter((trigger) => !lifecycleTrigger(trigger.name))
       .map((trigger) => [
       trigger.name, trigger.table, trigger.timing, trigger.event, trigger.semanticGuard, trigger.abortMessage,
       ].join(':')));

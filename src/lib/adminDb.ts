@@ -19,6 +19,9 @@ import type {
 } from './validate';
 import { LOCALES, type Locale } from './locales';
 import { parseAdminAreasForRole } from './adminAreas';
+import { normalizeEmail } from './identityNormalize';
+import { hasRecentStepUp, type SessionAssurance } from './sessionAssurance';
+import { hasEmailIdentityCollision } from './identityCollision';
 
 type Role = PersonInput['role'];
 
@@ -51,6 +54,12 @@ export interface AdminPersonRow extends PersonListRow {
   admin_areas: string | null; // CSV carrier — role-filtered before the areas fieldset or session use
 }
 
+export interface AdminVerifiedAuthContact {
+  kind: 'email' | 'phone';
+  displayValue: string;
+  verifiedAt: string;
+}
+
 /** Directory filters (people module). serving/household are tri-state: undefined
  *  = no filter, true = has, false = lacks. */
 export interface ListPeopleOpts {
@@ -65,7 +74,9 @@ export interface SavePersonInput extends PersonInput {
   id: number | null;
 }
 
-export type SavePersonResult = { ok: true; id: number } | { ok: false; errors: { email: string } };
+export type SavePersonResult =
+  | { ok: true; id: number }
+  | { ok: false; code?: 'identity_review_required'; errors: { email: string } };
 
 // A person's live household is a LEFT JOIN through household_members (real
 // members carry a unique person_id, so this yields at most one row per person);
@@ -138,14 +149,46 @@ export async function getPerson(db: AppDb, id: number): Promise<AdminPersonRow |
     .first<AdminPersonRow>();
 }
 
+/** Verified authentication contacts are displayed separately from legacy and
+ * notification-only reachability. Admin People never mutates this ownership. */
+export async function listVerifiedAuthContacts(db: AppDb, personId: number): Promise<AdminVerifiedAuthContact[]> {
+  const { results } = await db.prepare(`SELECT c.kind, c.display_value, o.verified_at
+    FROM verified_contact_owners o
+    JOIN contact_points c ON c.id=o.contact_point_id
+    JOIN person_contact_links l ON l.person_id=o.person_id AND l.contact_point_id=c.id
+      AND l.kind=c.kind AND l.ended_at IS NULL
+    WHERE o.person_id=?1
+    ORDER BY c.kind, c.normalized_value`).bind(personId).all<{
+      kind: 'email' | 'phone'; display_value: string; verified_at: string;
+    }>();
+  return results.map((row) => ({ kind: row.kind, displayValue: row.display_value, verifiedAt: row.verified_at }));
+}
+
+/** Defense-in-depth gate for privilege and identity mutations. The request's
+ * session evidence is necessary but not sufficient: the actor row is re-read
+ * so a demoted, disabled, or deleted administrator cannot race stale locals. */
+export async function canPerformSensitivePersonAction(
+  db: AppDb,
+  actorPersonId: number,
+  assurance: SessionAssurance | null | undefined,
+  nowEpochSeconds = Math.floor(Date.now() / 1000),
+): Promise<boolean> {
+  if (!hasRecentStepUp(assurance, nowEpochSeconds)) return false;
+  const actor = await db.prepare(`SELECT 1 AS ok FROM people
+    WHERE id=?1 AND role='admin' AND super_admin=1 AND active=1 AND deleted_at IS NULL
+      AND identity_state='active' AND auth_disabled_at IS NULL`)
+    .bind(actorPersonId).first<{ ok: number }>();
+  return Boolean(actor);
+}
+
 /**
- * Create or update a person, mapping an email collision to a field error
- * instead of a raw 500.
- *  - Create (id null): if the email is held only by a SOFT-DELETED person,
- *    revive that row (clear deleted_at, overwrite fields) rather than colliding
- *    with UNIQUE(email); a LIVE holder → { email: 'errors.emailTaken' }.
- *  - Update: block moving onto another LIVE person's email; a soft-deleted
- *    occupant still holds the UNIQUE index, so we surface that as taken too.
+ * Create or update a person's administrative profile without granting identity.
+ *  - Create (id null): any matching legacy person or contact point, including a
+ *    soft-deleted/inactive/notification-only record, is routed to identity
+ *    review. Clean creates are provisional and auth-disabled; their email is a
+ *    notification contact only until a separate verified ownership flow runs.
+ *  - Update: email, role, and active are identity/privilege fields and are never
+ *    changed here, even when a forged caller supplies different values.
  * Every write is additionally guarded against a UNIQUE-constraint throw — a
  * double-submit can insert the email between the pre-check SELECT and the
  * write — and the race maps to the same field error, never a raw 500.
@@ -158,60 +201,57 @@ export async function savePerson(
   editedBy: string,
 ): Promise<SavePersonResult> {
   void editedBy;
-  const existing = await db
-    .prepare(`SELECT id, deleted_at FROM people WHERE email = ?`)
-    .bind(input.email)
-    .first<{ id: number; deleted_at: string | null }>();
-
-  const emailTaken: SavePersonResult = { ok: false, errors: { email: 'errors.emailTaken' } };
-
-  if (input.id === null) {
-    if (existing) {
-      if (existing.deleted_at === null) return emailTaken;
-      await writePerson(db, existing.id, input); // revive: clears deleted_at
-      // A resurrected account must re-earn admin privilege explicitly through the
-      // super-only flags form — never inherit the soft-deleted row's super/grants.
-      await db
-        .prepare(`UPDATE people SET super_admin = 0, admin_areas = '' WHERE id = ?`)
-        .bind(existing.id)
-        .run();
-      return { ok: true, id: existing.id };
-    }
-    try {
-      const cols = ['first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang'];
-      const binds: (string | number | null)[] = [
-        input.firstName,
-        input.lastName,
-        input.displayName,
-        input.email,
-        input.phone,
-        input.role,
-        input.active ? 1 : 0,
-        input.lang,
-      ];
-      appendMembershipColumns(cols, binds, input);
-      const created = await db
-        .prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING id`)
-        .bind(...binds)
-        .first<{ id: number }>();
-      return { ok: true, id: created!.id };
-    } catch (e) {
-      if (isUniqueViolation(e)) return emailTaken; // pre-check ↔ INSERT race
-      throw e;
-    }
+  if (input.id !== null) {
+    await writePersonDemographics(db, input.id, input);
+    return { ok: true, id: input.id };
   }
 
-  if (existing && existing.id !== input.id && existing.deleted_at === null) {
-    return emailTaken;
-  }
+  const normalizedEmail = normalizeEmail(input.email);
+  if (!normalizedEmail) return { ok: false, errors: { email: 'errors.emailInvalid' } };
+  const reviewRequired: SavePersonResult = {
+    ok: false,
+    code: 'identity_review_required',
+    errors: { email: 'errors.identityReviewRequired' },
+  };
+  if (await hasEmailIdentityCollision(db, normalizedEmail)) return reviewRequired;
+
   try {
-    await writePerson(db, input.id, input);
+    const cols = [
+      'first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang',
+      'identity_state', 'auth_disabled_at', 'provisional_source',
+    ];
+    const binds: (string | number | null)[] = [
+      input.firstName,
+      input.lastName,
+      input.displayName,
+      normalizedEmail,
+      input.phone,
+      input.role,
+      input.active ? 1 : 0,
+      input.lang,
+      'provisional',
+      new Date().toISOString(),
+      'admin_people',
+    ];
+    appendMembershipColumns(cols, binds, input);
+    await db.batch([
+      // Plain INSERT (rather than ON CONFLICT) makes a contact-only race fail
+      // closed and rolls the whole batch back.
+      db.prepare(`INSERT INTO contact_points(kind, normalized_value, display_value)
+        VALUES('email', ?1, ?2)`).bind(normalizedEmail, input.email.trim()),
+      db.prepare(`INSERT INTO people (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).bind(...binds),
+      db.prepare(`INSERT INTO person_contact_links(person_id, contact_point_id, kind, source, notification_enabled)
+        SELECT p.id, c.id, 'email', 'admin_people', 1
+        FROM people p JOIN contact_points c ON c.kind='email' AND c.normalized_value=?1
+        WHERE p.email=?1`).bind(normalizedEmail),
+    ]);
+    const created = await db.prepare(`SELECT id FROM people WHERE email=?1`).bind(normalizedEmail).first<{ id: number }>();
+    if (!created) throw new Error('person_create_failed');
+    return { ok: true, id: created.id };
   } catch (e) {
-    // Soft-deleted occupant still holding UNIQUE(email), or the same race.
-    if (isUniqueViolation(e)) return emailTaken;
+    if (isUniqueViolation(e)) return reviewRequired;
     throw e;
   }
-  return { ok: true, id: input.id };
 }
 
 export async function setPersonAvatar(db: AppDb, personId: number, avatarUrl: string | null): Promise<void> {
@@ -246,24 +286,20 @@ function appendMembershipColumns(
   binds.push(input.birthday, input.address, input.membershipStatus, input.joinedOn ?? null);
 }
 
-// One UPDATE serves both a normal edit and a revive: deleted_at = NULL is a
-// harmless no-op for a live row and reclaims a soft-deleted one.
-function writePerson(db: AppDb, id: number, input: PersonInput): Promise<unknown> {
-  const cols = ['first_name', 'last_name', 'display_name', 'email', 'phone', 'role', 'active', 'lang'];
+// Administrative demographics deliberately exclude email and privilege fields.
+function writePersonDemographics(db: AppDb, id: number, input: PersonInput): Promise<unknown> {
+  const cols = ['first_name', 'last_name', 'display_name', 'phone', 'lang'];
   const binds: (string | number | null)[] = [
     input.firstName,
     input.lastName,
     input.displayName,
-    input.email,
     input.phone,
-    input.role,
-    input.active ? 1 : 0,
     input.lang,
   ];
   appendMembershipColumns(cols, binds, input);
   const assignments = cols.map((c) => `${c} = ?`).join(', ');
   return db
-    .prepare(`UPDATE people SET ${assignments}, deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`)
+    .prepare(`UPDATE people SET ${assignments}, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`)
     .bind(...binds, id)
     .run();
 }

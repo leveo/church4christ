@@ -21,6 +21,7 @@ import {
   verifyGivingCheckoutProof,
 } from '../../../lib/givingCheckout';
 import { parseLocale, type Locale } from '../../../lib/locales';
+import { continuationPayloadDigest, signedInIdentitySourceContext, type IdentityBusinessContinuationEnv } from '../../../lib/identityBusinessContinuation';
 
 export const prerender = false;
 
@@ -32,6 +33,9 @@ interface GivingCheckoutDeps {
   getSetting: typeof getSetting;
   createOneTimeCheckout: typeof createOneTimeCheckout;
   createRecurringCheckout: typeof createRecurringCheckout;
+  identityEnv?: IdentityBusinessContinuationEnv;
+  attachIdentitySource: typeof signedInIdentitySourceContext;
+  getSessionEpoch(db: App.Locals['db'], personId: number): Promise<number | null>;
 }
 
 const defaultDeps: GivingCheckoutDeps = {
@@ -42,6 +46,10 @@ const defaultDeps: GivingCheckoutDeps = {
   getSetting,
   createOneTimeCheckout,
   createRecurringCheckout,
+  identityEnv: env as unknown as IdentityBusinessContinuationEnv,
+  attachIdentitySource: signedInIdentitySourceContext,
+  getSessionEpoch: (db, personId) => db.prepare('SELECT session_epoch FROM people WHERE id=?1 AND active=1 AND deleted_at IS NULL')
+    .bind(personId).first<number>('session_epoch'),
 };
 
 export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDeps): APIRoute {
@@ -54,6 +62,8 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
       return back(locals.locale, 'form');
     }
     const locale: Locale = parseLocale(String(form.get('locale') ?? '')) ?? locals.locale;
+    const user = locals.user;
+    if (!user) return redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/give`)}`);
     let candidateRequestId: string;
     try {
       candidateRequestId = parseCheckoutRequestId(form.get('checkoutRequestId'));
@@ -76,10 +86,6 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     if (amountCents === null) return back(locale, 'amount');
     if (frequency === null) return back(locale, 'frequency');
 
-    const user = locals.user;
-    if (frequency !== 'once' && !user) {
-      return redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/give`)}`);
-    }
     const fund = await deps.getFund(locals.db, locale, fundId);
     if (!fund || fund.active !== 1) return back(locale, 'fund');
     const currency = await deps.getSetting(locals.db, 'giving.currency', 'usd');
@@ -88,16 +94,10 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     let donorName: string;
     let donorEmail: string;
     let customerId: string | null = null;
-    if (user) {
-      personId = user.id;
-      donorName = user.displayName;
-      donorEmail = user.email;
-      customerId = await deps.getStripeCustomer(locals.db, user.id);
-    } else {
-      personId = null;
-      donorName = String(form.get('name') ?? '');
-      donorEmail = String(form.get('email') ?? '');
-    }
+    personId = user.id;
+    donorName = user.displayName;
+    donorEmail = user.email;
+    customerId = await deps.getStripeCustomer(locals.db, user.id);
 
     let normalized: ReturnType<typeof normalizeGivingCheckoutInput>;
     try {
@@ -123,6 +123,16 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
       || (verifiedProof?.kind === 'retry' && verifiedProof.digest === digest)
       ? candidateRequestId
       : newCheckoutRequestId();
+
+    // Every signed-in checkout passes through the identity-source adapter. The
+    // session epoch is read from the current person row, never from POST data.
+    const epoch = await deps.getSessionEpoch(locals.db, user.id);
+    const campusId = locals.campusMode === 'campus' ? locals.campus?.id : 1;
+    if (!campusId || epoch === null || !Number.isSafeInteger(epoch) || epoch < 0) return back(locale, 'form');
+    await deps.attachIdentitySource(locals.rawDb, deps.identityEnv ?? (env as unknown as IdentityBusinessContinuationEnv), {
+      campusId, source: 'giving', intentId: requestId, personId: user.id, sessionEpoch: epoch,
+      sourceDigest: await continuationPayloadDigest(normalized), name: normalized.donorName, email: normalized.donorEmail,
+    });
 
     try {
       if (frequency === 'once') {

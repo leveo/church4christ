@@ -15,10 +15,6 @@ function screenshotIdentity(identity) {
     !identity
     || !Number.isSafeInteger(identity.personId)
     || identity.personId <= 0
-    || typeof identity.email !== 'string'
-    || identity.email.length > 320
-    || identity.email !== identity.email.trim().toLowerCase()
-    || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identity.email)
     || !Number.isSafeInteger(identity.sessionEpoch)
     || identity.sessionEpoch < 0
   ) {
@@ -43,7 +39,14 @@ export async function mintScreenshotSession(env, rawIdentity, nowEpochSeconds = 
   if (!Number.isSafeInteger(nowEpochSeconds) || nowEpochSeconds <= 0) {
     throw new Error('Screenshot session unavailable');
   }
-  return await new SignJWT({ email: identity.email, ep: identity.sessionEpoch })
+  return await new SignJWT({
+    v: 2,
+    ep: identity.sessionEpoch,
+    sid: crypto.randomUUID(),
+    am: 'screenshot',
+    at: nowEpochSeconds,
+    su: null,
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(String(identity.personId))
     .setIssuedAt(nowEpochSeconds)

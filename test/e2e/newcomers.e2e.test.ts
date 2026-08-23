@@ -17,7 +17,7 @@ beforeEach(async () => {
 });
 
 describe('built D1 Newcomers experience', () => {
-  it('accepts public intake generically without creating a Person', async () => {
+  it('accepts public intake with one auth-disabled notification-only provisional Person', async () => {
     expect((await get('/en/new-here')).status).toBe(200);
     const peopleBefore = await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<number>('n');
     const response = await post('/en/new-here', new URLSearchParams({
@@ -27,7 +27,13 @@ describe('built D1 Newcomers experience', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toContain('no-store');
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM newcomer_submissions').first<number>('n')).toBe(1);
-    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<number>('n')).toBe(peopleBefore);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<number>('n')).toBe(peopleBefore + 1);
+    expect(await env.DB.prepare(`SELECT p.active,p.identity_state,p.auth_disabled_at FROM newcomer_submissions n
+      JOIN people p ON p.id=n.linked_person_id WHERE n.email='taylor.guest@example.test'`)
+      .first()).toMatchObject({ active: 0, identity_state: 'provisional' });
+    expect(await env.DB.prepare(`SELECT count(*) n FROM newcomer_submissions n JOIN identity_source_records s
+      ON s.id=n.identity_source_record_id WHERE s.state='unlinked' AND s.linked_person_id IS NULL
+        AND s.provisional_person_id=n.linked_person_id`).first<number>('n')).toBe(1);
   });
 
   it('lets scoped staff use the queue and create a staff intake but not settings', async () => {
