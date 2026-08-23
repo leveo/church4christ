@@ -955,7 +955,7 @@ async function rollbackJournal(db: AppDb, operationIdValue: string): Promise<rea
     detail.after_row_hash,detail.rollback_mode FROM person_merge_reassignment_journal journal
     JOIN person_merge_journal_row_details detail ON detail.operation_id=journal.operation_id AND detail.journal_id=journal.journal_id
     WHERE journal.operation_id=?1 ORDER BY journal.sequence`).bind(operationIdValue).all<JournalSealRow>();
-  return Object.freeze(rows.results.map(Object.freeze));
+  return Object.freeze(rows.results.map((row) => Object.freeze(row)));
 }
 async function journalSealHash(rows: readonly JournalSealRow[]): Promise<string> {
   return sha256(rows.map((row) => ({ journalId: row.journal_id, sequence: row.sequence,

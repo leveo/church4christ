@@ -87,7 +87,7 @@ describe('Planning Center connection administration', () => {
               await env.DB.prepare(`UPDATE planning_center_connections SET state='disabled',updated_at=CURRENT_TIMESTAMP
                 WHERE id=?1 AND state='paused'`).bind(connectionId).run();
             }
-            return statement.first<T>(columnName);
+            return columnName === undefined ? statement.first<T>() : statement.first<T>(columnName);
           },
           all<T = unknown>() { return statement.all<T>(); },
           run<T = unknown>() { return statement.run<T>(); },
@@ -114,7 +114,9 @@ describe('Planning Center connection administration', () => {
         let statement = env.DB.prepare(sql);
         const wrapped = {
           bind(...values: unknown[]) { statement = statement.bind(...values); return wrapped; },
-          first<T = unknown>(columnName?: string) { return statement.first<T>(columnName); },
+          first<T = unknown>(columnName?: string) {
+            return columnName === undefined ? statement.first<T>() : statement.first<T>(columnName);
+          },
           all<T = unknown>() { return statement.all<T>(); },
           run<T = unknown>() {
             if (sql.includes(`INSERT INTO planning_center_connections`)) throw new Error('planning_center_trigger_abort');

@@ -61,8 +61,9 @@ function businessRedirect(
   locale: string,
   headers: Headers,
 ): Response {
-    if (pending.kind === 'giving' && result.status === 'redirect') return redirect(result.url, headers);
-    if (pending.kind === 'registration' && result.status === 'redirect' && result.resolution?.kind === 'redirect') return redirect(result.resolution.checkoutUrl, headers);
+    if (pending.kind === 'giving' && result.status === 'redirect' && 'url' in result) return redirect(result.url, headers);
+    if (pending.kind === 'registration' && result.status === 'redirect' && 'resolution' in result
+      && result.resolution?.kind === 'redirect') return redirect(result.resolution.checkoutUrl, headers);
     return redirect(pending.returnPath.includes('/register/') ? `/${locale}/register/done?ok=1` : `/${locale}/give/thanks`, headers);
 }
 

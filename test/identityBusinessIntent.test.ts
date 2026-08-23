@@ -256,7 +256,7 @@ describe('identity business Newcomer adapter', () => {
 
   it('serializes two sources for one clean contact into one provisional person and one review', async () => {
     const email = `racing-observation-${next()}@example.test`;
-    const peopleBefore = await env.DB.prepare('SELECT count(*) n FROM people').first<number>('n');
+    const peopleBefore = (await env.DB.prepare('SELECT count(*) n FROM people').first<number>('n')) ?? 0;
     const results = await Promise.all([
       createNewcomerObservationIntent(env.DB, vars, { campusId: 1, intentId: crypto.randomUUID(), backend: 'd1', intake: intake(email) }),
       createNewcomerObservationIntent(env.DB, vars, { campusId: 1, intentId: crypto.randomUUID(), backend: 'd1', intake: intake(email) }),

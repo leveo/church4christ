@@ -47,7 +47,7 @@ describe('paid registration continuation checkout saga', () => {
     const create = vi.fn(async () => ({ id: 'cs_test_2', url: 'https://checkout.stripe.com/c/pay/2' }));
     const result = await continuePaidRegistrationCheckout(db, env, resolution, 9, {
       createCheckout: create as never, attachRequest: vi.fn(async () => false), cancelRequest: vi.fn(),
-      continueRequest: vi.fn(async () => ({ kind: 'redirect', registrationId: 77, checkoutUrl: 'https://checkout.stripe.com/c/pay/winner' })),
+      continueRequest: vi.fn(async () => ({ kind: 'redirect' as const, registrationId: 77, checkoutUrl: 'https://checkout.stripe.com/c/pay/winner' })),
     });
     expect(result).toEqual({ kind: 'redirect', registrationId: 77, checkoutUrl: 'https://checkout.stripe.com/c/pay/winner' });
     expect(create).toHaveBeenCalledOnce();

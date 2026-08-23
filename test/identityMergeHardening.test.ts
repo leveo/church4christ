@@ -433,7 +433,7 @@ describe('identity merge hardening invariants (D1)', () => {
       WHERE operation_id=?1 AND category=?2`).bind(operationId, category).all<{ item_key: string }>();
     expect(snapshot.results).toHaveLength(1);
     expect(snapshot.results[0].item_key).not.toMatch(/cus_merge|calendar-merge|planning_center|:100|:200|learning-original|canonical-original/);
-    await mutate(target.first, sourceId);
+    await mutate(target.first, typeof sourceId === 'number' ? sourceId : undefined);
     await expect(env.DB.prepare("UPDATE person_merge_operations SET state='awaiting_approval',version=2 WHERE operation_id=?1")
       .bind(operationId).run()).rejects.toThrow(/risk_set_stale/);
   });

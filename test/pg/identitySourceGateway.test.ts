@@ -89,8 +89,9 @@ describe.skipIf(!hasPg)('identity source gateway (PostgreSQL)', () => {
     const db = new PgAdapter(sql);
     const source = await registerIdentitySource(db, authEnv, { campusId: 1, source: 'giving', sourceRecordKey: 'pg:source:1',
       email: 'pg-observed@example.test', attachmentPolicy: 'signed_in_or_claim', sourceDigest: 'a'.repeat(64) });
-    await expect(registerIdentitySource(db, { ...authEnv,
-      IDENTITY_VERIFICATION_SECRET: 'rotated-pg-verification-secret-that-is-at-least-thirty-two-characters' },
+    const rotatedVerificationEnv = { ...authEnv,
+      IDENTITY_VERIFICATION_SECRET: 'rotated-pg-verification-secret-that-is-at-least-thirty-two-characters' };
+    await expect(registerIdentitySource(db, rotatedVerificationEnv,
     { campusId: 1, source: 'giving', sourceRecordKey: 'pg:source:1', email: 'pg-observed@example.test',
       attachmentPolicy: 'signed_in_or_claim', sourceDigest: 'a'.repeat(64) })).resolves.toEqual(source);
     await expect(registerIdentitySource(db, { ...authEnv,

@@ -161,7 +161,7 @@ describe('/en/serve/apply (public)', () => {
   it('treats an active victim email exactly like an unknown anonymous email', async () => {
     const beforeApps = await env.DB.prepare(`SELECT count(*) n FROM team_applications WHERE person_id=3 AND team_id=2`).first<number>('n');
     const beforeTokens = await env.DB.prepare(`SELECT count(*) n FROM tokens WHERE person_id=3 AND purpose='login'`).first<number>('n');
-    const beforeMessages = await env.DB.prepare(`SELECT count(*) n FROM email_log`).first<number>('n');
+    const beforeMessages = (await env.DB.prepare(`SELECT count(*) n FROM email_log`).first<number>('n')) ?? 0;
     const victim = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(),
       team_id: '2', name: 'Attacker', email: 'sarah.johnson@example.com', message: 'forged' }).toString());
     const unknown = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(),

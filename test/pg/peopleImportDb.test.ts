@@ -309,7 +309,7 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
       FROM people p JOIN person_contact_links l ON l.person_id=p.id AND l.ended_at IS NULL
       JOIN contact_points c ON c.id=l.contact_point_id AND c.kind='email'
       LEFT JOIN verified_contact_owners o ON o.contact_point_id=c.id
-      ORDER BY p.id`).all();
+      ORDER BY p.id`).all<{ notification_enabled: number; has_owner: number }>();
     expect(contacts).toHaveLength(5);
     expect(contacts.every((contact) => contact.notification_enabled === 1 && contact.has_owner === 0)).toBe(true);
     expect(people[0]).toMatchObject({

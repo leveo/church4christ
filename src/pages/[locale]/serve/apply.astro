@@ -49,7 +49,7 @@ const teams = await listTeamSummaries(db, locale);
 
 let errorKeys: string[] = [];
 let postedTeamId: number | null = null;
-let intentId = crypto.randomUUID();
+let intentId: string = crypto.randomUUID();
 let publicId = '';
 let verificationState: 'none' | 'code' | 'invalid' | 'review' | 'neutral' = 'none';
 

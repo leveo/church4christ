@@ -60,6 +60,7 @@ const PEOPLE_IMPORT_ISSUE_CODES = [
 
 const PEOPLE_IMPORT_DB_ISSUE_CODES = [
   'email_exists',
+  'identity_review_required',
   'household_name_exists',
   'issues_truncated',
 ] as const satisfies readonly PeopleImportDbIssueCode[];

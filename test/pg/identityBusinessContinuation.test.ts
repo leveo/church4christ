@@ -167,9 +167,13 @@ describe.skipIf(!hasPg)('identity business continuation claims (PostgreSQL)', ()
         requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': `203.0.113.${140 + index}` }), intentId),
       })));
       expect(begun.every((result) => result.status === 'verification_required')).toBe(true);
-      if (begun.some((result) => result.status !== 'verification_required')) return;
+      const verificationRequired = begun.filter(
+        (result): result is Extract<(typeof begun)[number], { status: 'verification_required' }> =>
+          result.status === 'verification_required',
+      );
+      if (verificationRequired.length !== begun.length) return;
 
-      const results = await Promise.all(begun.map((result, index) => completeRegistrationContinuation(db, identityEnv, {
+      const results = await Promise.all(verificationRequired.map((result, index) => completeRegistrationContinuation(db, identityEnv, {
         campusId: 1, intentId: intents[index], publicId: result.delivery.publicId, code: result.delivery.code,
         appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
       })));

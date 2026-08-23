@@ -163,10 +163,13 @@ describe('identity business continuations', () => {
     expect(begun.every((item) => item.status === 'verification_required')).toBe(true);
     if (begun.some((item) => item.status !== 'verification_required')) return;
 
-    const results = await Promise.all(begun.map((item, index) => completeRegistrationContinuation(env.DB, continuationEnv, {
-      campusId: 1, intentId: intents[index], publicId: item.delivery.publicId, code: item.delivery.code,
-      appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
-    })));
+    const results = await Promise.all(begun.map((item, index) => {
+      if (item.status !== 'verification_required') throw new Error('test registration did not require verification');
+      return completeRegistrationContinuation(env.DB, continuationEnv, {
+        campusId: 1, intentId: intents[index], publicId: item.delivery.publicId, code: item.delivery.code,
+        appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+      });
+    }));
 
     expect(results.map((result) => result.status).sort()).toEqual(['done', 'invalid']);
     expect(await env.DB.prepare(`SELECT count(*) n FROM registrations WHERE event_id=?1 AND status='confirmed'`)

@@ -382,6 +382,8 @@ export async function verifyConsumedEmailOtpChallenge(db: AppDb, env: IdentityAu
     && challenge.consumed_at !== null && challenge.superseded_at === null && challenge.expires_at > part.now
     && challenge.contact_point_id !== null;
   if (!replayCandidate) return { ok: false };
+  const contactPointId = challenge.contact_point_id;
+  if (contactPointId === null) return { ok: false };
   if (!sameHash(challenge.code_hash, candidate)) {
     if (challenge.attempts < challenge.max_attempts) {
       try {
@@ -405,7 +407,7 @@ export async function verifyConsumedEmailOtpChallenge(db: AppDb, env: IdentityAu
       WHERE f.campus_id=identity_challenges.campus_id AND f.bucket_hash=identity_challenges.requester_bucket_hash
         AND f.window_started_at<=?2 AND datetime(f.window_started_at,'+15 minutes')>?2)<5`).bind(challenge.id, part.now).run();
   if (accepted.meta.changes !== 1) return { ok: false };
-  const contact = await contactById(db, challenge.contact_point_id); if (!contact) return { ok: false };
+  const contact = await contactById(db, contactPointId); if (!contact) return { ok: false };
   return { ok: true, contact, owner: await findVerifiedContactOwner(db, { kind: contact.kind, value: contact.normalizedValue }), sessionEpoch: challenge.expected_session_epoch };
 }
 

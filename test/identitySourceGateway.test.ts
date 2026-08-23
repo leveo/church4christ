@@ -134,9 +134,10 @@ describe('identity source gateway', () => {
       .map((byte) => byte.toString(16).padStart(2, '0')).join('');
     expect(stored).toMatch(/^[0-9a-f]{64}$/);
     expect(stored).not.toBe(plain);
-    expect(await registerIdentitySource(env.DB, {
+    const rotatedVerificationEnv = {
       ...authEnv, IDENTITY_VERIFICATION_SECRET: 'rotated-verification-secret-that-is-still-at-least-thirty-two-characters',
-    }, input)).toEqual(record);
+    };
+    expect(await registerIdentitySource(env.DB, rotatedVerificationEnv, input)).toEqual(record);
     const pinned = await env.DB.prepare('SELECT key_id,verification_tag FROM identity_source_key_config WHERE singleton_id=1')
       .first<{ key_id: string; verification_tag: string }>();
     expect(pinned).toMatchObject({ key_id: 'v1' });

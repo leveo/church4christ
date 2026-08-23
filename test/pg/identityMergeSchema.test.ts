@@ -76,7 +76,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
     ]);
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'9'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [input.operationId];
+    const params: Array<string | number> = [input.operationId];
     for (const category of IDENTITY_MERGE_RISK_FACT_CATEGORIES) {
       const [loser, canonical, collision] = input.overrides?.[category]
         ?? (category === 'campus_membership' ? [1, 1, 1] : [0, 0, 0]);
@@ -123,7 +123,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
     ]);
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'b'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [input.operationId];
+    const params: Array<string | number> = [input.operationId];
     const [{ loser_verified: loserVerified, canonical_verified: canonicalVerified,
       loser_links: loserLinks, canonical_links: canonicalLinks }] = await sql.unsafe(`SELECT
         (SELECT count(*)::int FROM verified_contact_owners WHERE person_id=$1) loser_verified,
@@ -173,13 +173,15 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
     for (const [approver, order, suffix] of [
       [input.approverOne, 1, input.caseId + 3], [input.approverTwo, 2, input.caseId + 4],
     ] as const) {
+      const stepUpId = stepUps.get(approver);
+      if (stepUpId === undefined) throw new Error(`missing merge step-up for approver ${approver}`);
       await sql.unsafe(`INSERT INTO person_merge_approvals(
         approval_id,operation_id,approver_person_id,step_up_challenge_id,approval_order,decision,expected_operation_version,
         expected_preview_hash,expected_risk_state_hash,expected_risk_state_version,
         expected_resolution_case_version,expected_resolution_case_hash)
         VALUES($1,$2,$3,$4,$5,'approve',2,$6,$7,1,1,$8)`, [
         `123e4567-e89b-42d3-a456-${String(suffix).padStart(12, '0')}`,
-        input.operationId, approver, stepUps.get(approver), order, 'a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64),
+        input.operationId, approver, stepUpId, order, 'a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64),
       ]);
     }
     await sql.unsafe("UPDATE person_merge_operations SET state='approved',version=3 WHERE operation_id=$1", [input.operationId]);
@@ -302,7 +304,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
     const [{ operation_id: operationId }] = await sql.unsafe('SELECT operation_id FROM person_merge_operations LIMIT 1');
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'d'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [operationId];
+    const params: Array<string | number> = [operationId];
     for (const category of IDENTITY_MERGE_RISK_FACT_CATEGORIES) {
       const side = category === 'campus_membership' ? 1 : 0;
       params.push(category, side, side, side + side, category === 'campus_membership' ? 1 : 0);
@@ -377,7 +379,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
         'high',$4,1,2,'previewed',189103)`, [operationId, 'c'.repeat(64), 'a'.repeat(64), 'e'.repeat(64)]);
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'e'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [operationId];
+    const params: Array<string | number> = [operationId];
     for (const category of IDENTITY_MERGE_RISK_FACT_CATEGORIES) {
       const side = category === 'campus_membership' ? 1 : 0;
       params.push(category, side, side, side + side, category === 'campus_membership' ? 1 : 0);
@@ -415,7 +417,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
         'critical',$4,1,2,'previewed',189103)`, [operationId, 'c'.repeat(64), 'a'.repeat(64), 'e'.repeat(64)]);
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'e'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [operationId];
+    const params: Array<string | number> = [operationId];
     for (const category of IDENTITY_MERGE_RISK_FACT_CATEGORIES) {
       const loser = category === 'privilege' || category === 'campus_membership' ? 1 : 0;
       const canonical = category === 'campus_membership' ? 1 : 0;
@@ -530,6 +532,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
         return 190021;
       },
       mutate: async (_personId: number, identityId?: number) => {
+        if (identityId === undefined) throw new Error('missing external identity id');
         await sql.unsafe(`UPDATE person_external_identities
           SET organization_id='101',external_person_id='201' WHERE id=$1`, [identityId]);
       },
@@ -545,6 +548,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
         return 190031;
       },
       mutate: async (_personId: number, identityId?: number) => {
+        if (identityId === undefined) throw new Error('missing learning identity id');
         await sql.unsafe("UPDATE learning_identity_links SET external_user_id='learning-pg-replacement' WHERE id=$1", [identityId]);
       },
     },
@@ -571,6 +575,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
         return 190051;
       },
       mutate: async (_personId: number, giftId?: number) => {
+        if (giftId === undefined) throw new Error('missing recurring gift id');
         await sql.unsafe("UPDATE recurring_gifts SET stripe_subscription_id='sub_pg_merge_replacement' WHERE id=$1", [giftId]);
       },
     },
@@ -668,7 +673,7 @@ describe.skipIf(!hasPg)('identity merge operation guards (PostgreSQL)', () => {
     ]);
     const values = IDENTITY_MERGE_RISK_FACT_CATEGORIES.map((category, index) =>
       `($1,$${index * 5 + 2},$${index * 5 + 3},$${index * 5 + 4},$${index * 5 + 5},$${index * 5 + 6},'${'b'.repeat(64)}',1)`).join(',');
-    const params: unknown[] = [operationId];
+    const params: Array<string | number> = [operationId];
     for (const category of IDENTITY_MERGE_RISK_FACT_CATEGORIES) {
       const side = category === 'campus_membership' ? 1 : 0;
       params.push(category, side, side, side + side, category === 'campus_membership' ? 1 : 0);

@@ -275,6 +275,7 @@ describe('identity repository', () => {
     const proof = { kind: 'admin', actorPersonId: owner, reasonCode: 'admin_review' } as const;
     await assignVerifiedContactOwner(env.DB, { campusId: 1, contactPointId: point.id, personId: owner, proof });
     let fired = false;
+    const appDb: AppDb = env.DB;
     const hookedDb: AppDb = {
       prepare: (sql) => env.DB.prepare(sql),
       batch: async (statements) => {
@@ -288,7 +289,7 @@ describe('identity repository', () => {
           } else if (mutation === 'inactive') await env.DB.prepare('UPDATE people SET active=0 WHERE id=?1').bind(owner).run();
           else await env.DB.prepare("UPDATE people SET identity_state='merged',auth_disabled_at=datetime('now') WHERE id=?1").bind(owner).run();
         }
-        return env.DB.batch(statements);
+        return appDb.batch(statements);
       },
     };
     const result = await upsertIdentityObservation(hookedDb, { campusId: 1, source: 'signup', sourceKey: `interleaved-${mutation}-${++nextId}`, email, candidates: [] });
@@ -304,6 +305,7 @@ describe('identity repository', () => {
     await env.DB.prepare(`INSERT INTO person_external_identities(person_id,provider,organization_id,external_person_id,verified_at)
       VALUES(?1,?2,?3,?4,datetime('now'))`).bind(owner, provider, organizationId, externalPersonId).run();
     let fired = false;
+    const appDb: AppDb = env.DB;
     const hookedDb: AppDb = {
       prepare: (sql) => env.DB.prepare(sql),
       batch: async (statements) => {
@@ -313,7 +315,7 @@ describe('identity repository', () => {
             .bind(owner, provider).run();
           else await env.DB.prepare('UPDATE people SET active=0 WHERE id=?1').bind(owner).run();
         }
-        return env.DB.batch(statements);
+        return appDb.batch(statements);
       },
     };
     const result = await upsertIdentityObservation(hookedDb, { campusId: 1, source: 'planning_center', sourceKey: `interleaved-external-${mutation}-${++nextId}`,

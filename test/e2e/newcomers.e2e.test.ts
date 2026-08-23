@@ -19,7 +19,7 @@ beforeEach(async () => {
 describe('built D1 Newcomers experience', () => {
   it('accepts public intake with one auth-disabled notification-only provisional Person', async () => {
     expect((await get('/en/new-here')).status).toBe(200);
-    const peopleBefore = await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<number>('n');
+    const peopleBefore = (await env.DB.prepare('SELECT COUNT(*) AS n FROM people').first<number>('n')) ?? 0;
     const response = await post('/en/new-here', new URLSearchParams({
       website: '', name: 'Taylor Guest', email: 'taylor.guest@example.test', phone: '',
       visit_date: '2026-08-12', service_type_id: '', contact_consent: 'true',

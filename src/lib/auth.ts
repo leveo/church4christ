@@ -75,7 +75,7 @@ async function eligibleLegacyLoginEpoch(db: AppDb, personId: number): Promise<nu
   // has an explicit verified-owner proof; a people.email value is never proof.
   const loginIdentity = loginIdentities.results.find((candidate) => normalizeEmail(candidate.email) === candidate.normalized_value);
   const sessionEpoch = loginIdentity?.session_epoch ?? null;
-  return Number.isSafeInteger(sessionEpoch) && sessionEpoch >= 0 ? sessionEpoch : null;
+  return typeof sessionEpoch === 'number' && Number.isSafeInteger(sessionEpoch) && sessionEpoch >= 0 ? sessionEpoch : null;
 }
 
 /** Login tokens issued for this person within the rate-limit window. */
