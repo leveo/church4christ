@@ -1,0 +1,121 @@
+---
+import Base from '../../../../layouts/Base.astro';
+import { btn, btnSecondary, card, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { t } from '../../../../lib/i18n';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { MINISTRY_CATEGORIES } from '../../../../lib/ministryMeta';
+import { canManageMinistry, listMinistryEditRows, updateMinistryBasics } from '../../../../lib/ministryDb';
+import { listTeamSummaries } from '../../../../lib/teamDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const ministryId = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+if (!ministryId) return new Response(null, { status: 404 });
+
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const hasServeArea = hasAreaAccess(user, 'serve');
+const leaderOwnsMinistry = !user.isAdmin && await canManageMinistry(db, user, ministryId);
+if (!hasServeArea && !leaderOwnsMinistry) {
+  return new Response(t(locale, 'manage.forbidden'), { status: 403, headers: { 'cache-control': 'no-store' } });
+}
+
+let ministry = (await listMinistryEditRows(db)).find(({ id }) => id === ministryId);
+if (!ministry) return new Response(null, { status: 404 });
+
+let errorKey: string | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const nameEn = String(fd.get('name_en') ?? '').trim();
+  const nameZh = String(fd.get('name_zh') ?? '').trim();
+  const category = String(fd.get('category') ?? '').trim();
+  if ((!nameEn && !nameZh) || !(MINISTRY_CATEGORIES as readonly string[]).includes(category)) {
+    errorKey = 'manage.invalid';
+  } else {
+    await updateMinistryBasics(db, ministryId, {
+      name_en: nameEn,
+      name_zh: nameZh,
+      category,
+      icon: String(fd.get('icon') ?? '').trim(),
+      intro_en: String(fd.get('intro_en') ?? '').trim() || null,
+      intro_zh: String(fd.get('intro_zh') ?? '').trim() || null,
+      leader_person_id: ministry.leader_person_id,
+    });
+    return Astro.redirect(localePath(locale, `/manage/ministries/${ministryId}?saved=1`), 303);
+  }
+}
+
+const teams = (await listTeamSummaries(db, locale)).filter(({ ministry_id }) => ministry_id === ministryId);
+const manageableTeams = hasServeArea ? teams : teams.filter(({ id }) => user.leaderTeamIds.includes(id));
+const saved = Astro.url.searchParams.get('saved') === '1';
+---
+
+<Base title={ministry.name_en || ministry.name_zh || t(locale, 'manage.ministry')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/manage')} class="text-sm font-semibold text-primary hover:underline">
+      ← {t(locale, 'manage.title')}
+    </a>
+    <h1 class="mt-3 font-display text-heading-md font-bold">{t(locale, 'manage.editMinistry')}</h1>
+    <p class="mt-2 text-ink-muted">{t(locale, 'manage.editMinistryIntro')}</p>
+    {saved && <p class={`mt-5 ${noticeOk}`}>{t(locale, 'manage.saved')}</p>}
+    {errorKey && <p class={`mt-5 ${noticeErr}`}>{t(locale, errorKey)}</p>}
+
+    <form method="post" class={`mt-8 grid gap-5 sm:grid-cols-2 ${card}`}>
+      <label class="block">
+        <span class={lab}>{t(locale, 'manage.nameEn')}</span>
+        <input name="name_en" value={ministry.name_en ?? ''} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'manage.nameZh')}</span>
+        <input name="name_zh" value={ministry.name_zh ?? ''} class={tin} />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'manage.icon')}</span>
+        <input name="icon" value={ministry.icon} class={tin} maxlength="16" />
+      </label>
+      <label class="block">
+        <span class={lab}>{t(locale, 'manage.category')}</span>
+        <select name="category" class={tin}>
+          {MINISTRY_CATEGORIES.map((category) => (
+            <option value={category} selected={category === ministry!.category}>
+              {t(locale, `ministries.category.${category}`)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label class="block sm:col-span-2">
+        <span class={lab}>{t(locale, 'manage.introEn')}</span>
+        <textarea name="intro_en" rows="4" class={tin}>{ministry.intro_en ?? ''}</textarea>
+      </label>
+      <label class="block sm:col-span-2">
+        <span class={lab}>{t(locale, 'manage.introZh')}</span>
+        <textarea name="intro_zh" rows="4" class={tin}>{ministry.intro_zh ?? ''}</textarea>
+      </label>
+      <div class="sm:col-span-2 flex flex-wrap gap-3">
+        <button type="submit" class={btn}>{t(locale, 'manage.save')}</button>
+        <a href={localePath(locale, '/manage')} class={btnSecondary}>{t(locale, 'manage.cancel')}</a>
+      </div>
+    </form>
+
+    {manageableTeams.length > 0 && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.teams')}</h2>
+        <p class="mt-1 text-sm text-ink-muted">{t(locale, 'manage.teamPanelIntro')}</p>
+        <ul class="mt-4 divide-y divide-border rounded-lg border border-border bg-surface-raised">
+          {manageableTeams.map((team) => (
+            <li class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <span class="font-semibold">{team.name}</span>
+              <a href={localePath(locale, `/serve/teams/${team.id}`)} class="text-sm font-semibold text-primary hover:underline">
+                {t(locale, 'manage.openPanel')} →
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </div>
+</Base>

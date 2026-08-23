@@ -129,6 +129,17 @@ describe('moduleForPath — groups module', () => {
   });
 });
 
+describe('moduleForPath — member opportunities and leader management', () => {
+  it("assigns the member opportunity landing page to the portal module", () => {
+    expect(moduleForPath('/my/opportunities')).toBe('portal');
+  });
+
+  it("assigns ministry leader editing outside /admin to the serve module", () => {
+    expect(moduleForPath('/manage/ministries')).toBe('serve');
+    expect(moduleForPath('/manage/ministries/12')).toBe('serve');
+  });
+});
+
 describe('People import directory entry', () => {
   it('shows both import workflows only behind the people module and full people grant', () => {
     expect(peopleDirectorySource).toMatch(

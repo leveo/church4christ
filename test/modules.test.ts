@@ -82,7 +82,7 @@ describe('MODULES registry', () => {
     expect(MODULES.people.uses).toEqual(['serve']);
     expect(MODULES.giving.uses).toEqual(['people']);
     expect(MODULES.groups.uses).toEqual(['people', 'registration']);
-    expect(MODULES.portal.uses).toEqual(['serve', 'groups']);
+    expect(MODULES.portal.uses).toEqual(['serve', 'groups', 'learning']);
     expect(MODULES['activity-score'].uses).toEqual(['groups', 'serve', 'registration', 'learning']);
     expect(MODULES.learning.uses).toEqual(['groups', 'portal', 'activity-score']);
     for (const key of MODULE_KEYS) {

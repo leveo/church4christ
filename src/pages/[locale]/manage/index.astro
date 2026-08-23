@@ -1,0 +1,120 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { badge, btnSecondary, card } from '../../../lib/adminUi';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { listGroups, listGroupsForPerson, type PersonGroupRow } from '../../../lib/groupDb';
+import { t } from '../../../lib/i18n';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { leaderMinistryIds, listMinistryEditRows, type MinistryEditRow } from '../../../lib/ministryDb';
+import { listPersonTeams, type PersonTeamRow } from '../../../lib/myDb';
+import { listTeamSummaries } from '../../../lib/teamDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const modules = Astro.locals.modules;
+const canManageAllGroups = modules.has('groups') && hasAreaAccess(user, 'groups');
+const canManageAllServe = modules.has('serve') && hasAreaAccess(user, 'serve');
+
+let groups: Array<Pick<PersonGroupRow, 'id' | 'name' | 'kind'>> = [];
+let teams: PersonTeamRow[] = [];
+let ministries: MinistryEditRow[] = [];
+
+if (modules.has('groups')) {
+  groups = canManageAllGroups
+    ? (await listGroups(db)).map(({ id, name, kind }) => ({ id, name, kind }))
+    : (await listGroupsForPerson(db, user.id))
+      .filter(({ is_admin }) => is_admin === 1)
+      .map(({ id, name, kind }) => ({ id, name, kind }));
+}
+if (modules.has('serve')) {
+  const [mine, allMinistries] = await Promise.all([
+    listPersonTeams(db, user.id, locale),
+    listMinistryEditRows(db),
+  ]);
+  if (canManageAllServe) {
+    teams = (await listTeamSummaries(db, locale)).map(({ id, name }) => ({ team_id: id, name, is_leader: 1 }));
+    ministries = allMinistries;
+  } else {
+    teams = mine.filter(({ team_id }) => user.leaderTeamIds.includes(team_id));
+    const ids = new Set(await leaderMinistryIds(db, user));
+    ministries = allMinistries.filter(({ id }) => ids.has(id));
+  }
+}
+
+if (groups.length === 0 && teams.length === 0 && ministries.length === 0 && !canManageAllGroups && !canManageAllServe) {
+  return new Response(t(locale, 'manage.forbidden'), { status: 403, headers: { 'cache-control': 'no-store' } });
+}
+---
+
+<Base title={t(locale, 'manage.title')} description={t(locale, 'manage.intro')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <a href={localePath(locale, '/my/opportunities')} class="text-sm font-semibold text-primary hover:underline">
+      ← {t(locale, 'manage.back')}
+    </a>
+    <h1 class="mt-3 font-display text-heading-md font-bold">{t(locale, 'manage.title')}</h1>
+    <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'manage.intro')}</p>
+
+    {ministries.length > 0 && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.ministries')}</h2>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          {ministries.map((ministry) => (
+            <article class={card}>
+              <span class={`${badge} bg-primary-soft text-on-primary-soft`}>{t(locale, 'manage.ministry')}</span>
+              <h3 class="mt-3 font-display text-lg font-bold">{ministry.icon} {ministry.name_en || ministry.name_zh}</h3>
+              <a href={localePath(locale, `/manage/ministries/${ministry.id}`)} class={`mt-4 ${btnSecondary}`}>
+                {t(locale, 'manage.editMinistry')}
+              </a>
+            </article>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {groups.length > 0 && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.groups')}</h2>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          {groups.map((group) => (
+            <article class={card}>
+              <span class={`${badge} bg-primary-soft text-on-primary-soft`}>
+                {t(locale, group.kind === 'sunday_school' ? 'portal.opportunities.kind.sunday_school' : 'portal.opportunities.kind.group')}
+              </span>
+              <h3 class="mt-3 font-display text-lg font-bold">{group.name}</h3>
+              <a href={localePath(locale, `/groups/${group.id}/manage`)} class={`mt-4 ${btnSecondary}`}>
+                {t(locale, 'manage.openPanel')}
+              </a>
+            </article>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {teams.length > 0 && (
+      <section class="mt-10">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.teams')}</h2>
+        <p class="mt-1 text-sm text-ink-muted">{t(locale, 'manage.teamsIntro')}</p>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          {teams.map((team) => (
+            <article class={card}>
+              <span class={`${badge} bg-accent-soft text-on-accent-soft`}>{t(locale, 'manage.team')}</span>
+              <h3 class="mt-3 font-display text-lg font-bold">{team.name}</h3>
+              <a href={localePath(locale, `/serve/teams/${team.team_id}`)} class={`mt-4 ${btnSecondary}`}>
+                {t(locale, 'manage.openPanel')}
+              </a>
+            </article>
+          ))}
+        </div>
+        <a href={localePath(locale, '/serve/plans')} class="mt-5 inline-block text-sm font-semibold text-primary hover:underline">
+          {t(locale, 'manage.schedule')} →
+        </a>
+      </section>
+    )}
+  </div>
+</Base>

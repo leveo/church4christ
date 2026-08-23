@@ -141,6 +141,13 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     {
       hasPortal && (
         <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <a
+            href={localePath(locale, '/my/opportunities')}
+            class="block rounded-lg border border-primary bg-primary-soft p-5 text-on-primary-soft hover:shadow-md"
+          >
+            <p class="text-xs font-bold uppercase tracking-caps">{t(locale, 'portal.dashboard.opportunities')}</p>
+            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.opportunitiesIntro')}</p>
+          </a>
           {household && (
             <a
               href={localePath(locale, '/my/household')}

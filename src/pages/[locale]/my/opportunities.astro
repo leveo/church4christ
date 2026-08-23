@@ -1,0 +1,177 @@
+---
+import Base from '../../../layouts/Base.astro';
+import PortalNav from '../../../components/PortalNav.astro';
+import { badge, btn, btnSecondary, card } from '../../../lib/adminUi';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { listGroupsForPerson, listPendingJoinGroupIdsForPerson, listPublicGroups, type GroupSummary, type PersonGroupRow } from '../../../lib/groupDb';
+import { t } from '../../../lib/i18n';
+import { listLearningCoursesForLearner, type LearningLearnerCourseView } from '../../../lib/learningLearnerDb';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { buildMemberOpportunityCatalog, type MemberOpportunityItem } from '../../../lib/memberOpportunities';
+import { listApplicationsByPerson, listPersonTeams, type MyApplicationRow, type PersonTeamRow } from '../../../lib/myDb';
+import { leaderMinistryIds } from '../../../lib/ministryDb';
+import { listApplicationTeams, type ApplicationTeam } from '../../../lib/opportunityDb';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const modules = Astro.locals.modules;
+
+let publicGroups: GroupSummary[] = [];
+let groupMemberships: PersonGroupRow[] = [];
+let pendingGroupIds: number[] = [];
+let courses: readonly LearningLearnerCourseView[] = [];
+let applicationTeams: ApplicationTeam[] = [];
+let teamMemberships: PersonTeamRow[] = [];
+let applications: MyApplicationRow[] = [];
+let managedMinistryIds: number[] = [];
+let loadFailed = false;
+
+try {
+  const reads: Promise<void>[] = [];
+  if (modules.has('groups')) {
+    reads.push(Promise.all([
+      listPublicGroups(db),
+      listGroupsForPerson(db, user.id),
+      listPendingJoinGroupIdsForPerson(db, user.id),
+    ]).then(([available, mine, pending]) => {
+      publicGroups = available;
+      groupMemberships = mine;
+      pendingGroupIds = pending;
+    }));
+  }
+  if (modules.has('learning')) {
+    reads.push(listLearningCoursesForLearner(db, { personId: user.id, nowEpochMs: Date.now() })
+      .then((rows) => { courses = rows; }));
+  }
+  if (modules.has('serve')) {
+    reads.push(Promise.all([
+      listApplicationTeams(db, locale),
+      listPersonTeams(db, user.id, locale),
+      listApplicationsByPerson(db, user.id, locale),
+      leaderMinistryIds(db, user),
+    ]).then(([available, mine, mineApplications, ministryIds]) => {
+      applicationTeams = available;
+      teamMemberships = mine;
+      applications = mineApplications;
+      managedMinistryIds = ministryIds;
+    }));
+  }
+  await Promise.all(reads);
+} catch (error) {
+  loadFailed = true;
+  console.error('member opportunities: load failed', error);
+}
+
+const catalog = buildMemberOpportunityCatalog({
+  modules,
+  publicGroups,
+  groupMemberships,
+  pendingGroupIds,
+  courses,
+  applicationTeams,
+  teamMemberships,
+  applications,
+});
+const canManage = groupMemberships.some(({ is_admin }) => is_admin === 1)
+  || teamMemberships.some(({ is_leader }) => is_leader === 1)
+  || managedMinistryIds.length > 0
+  || hasAreaAccess(user, 'groups')
+  || hasAreaAccess(user, 'serve');
+
+const hrefFor = (item: MemberOpportunityItem): string => {
+  if (item.kind === 'group' || item.kind === 'sunday_school') return localePath(locale, `/groups/${item.id}`);
+  if (item.kind === 'course') return localePath(locale, `/learn/${item.id}`);
+  if (item.state === 'joined' || item.state === 'leader') return localePath(locale, `/serve/teams/${item.id}`);
+  return localePath(locale, `/serve/apply?team=${item.id}`);
+};
+const kindLabel = (item: MemberOpportunityItem) => t(locale, `portal.opportunities.kind.${item.kind}`);
+const stateLabel = (item: MemberOpportunityItem) => t(locale, `portal.opportunities.state.${item.state}`);
+const description = (item: MemberOpportunityItem) => item.description?.trim()
+  ? (item.description.length > 150 ? `${item.description.slice(0, 147).trimEnd()}…` : item.description)
+  : null;
+---
+
+<Base title={t(locale, 'portal.opportunities.title')} description={t(locale, 'portal.opportunities.intro')} locale={locale} noindex>
+  <div class="container-content max-w-content py-12">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.opportunities.title')}</h1>
+        <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'portal.opportunities.intro')}</p>
+      </div>
+      {canManage && <a href={localePath(locale, '/manage')} class={btnSecondary}>{t(locale, 'manage.open')}</a>}
+    </div>
+    <PortalNav locale={locale} active="opportunities" />
+
+    {loadFailed && (
+      <p class="mt-6 rounded-lg border border-danger bg-danger-soft p-4 text-sm text-danger" role="alert">
+        {t(locale, 'portal.opportunities.loadFailed')}
+      </p>
+    )}
+
+    <section class="mt-10" aria-labelledby="current-opportunities">
+      <h2 id="current-opportunities" class="font-display text-heading-sm font-bold">{t(locale, 'portal.opportunities.current')}</h2>
+      <p class="mt-1 text-sm text-ink-muted">{t(locale, 'portal.opportunities.currentIntro')}</p>
+      {catalog.current.length === 0 ? (
+        <p class={`mt-5 ${card} text-sm text-ink-muted`}>{t(locale, 'portal.opportunities.currentEmpty')}</p>
+      ) : (
+        <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {catalog.current.map((item) => (
+            <article class={`flex flex-col ${card}`}>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class={`${badge} bg-primary-soft text-on-primary-soft`}>{kindLabel(item)}</span>
+                <span class={`${badge} bg-surface-sunken text-ink-muted`}>{stateLabel(item)}</span>
+              </div>
+              <h3 class="mt-3 font-display text-lg font-bold">{item.title}</h3>
+              {item.subtitle && <p class="mt-1 text-sm font-medium text-primary">{item.subtitle}</p>}
+              {description(item) && <p class="mt-2 text-sm text-ink-muted">{description(item)}</p>}
+              <div class="mt-4 flex-1" />
+              <div class="flex flex-wrap gap-2">
+                <a href={hrefFor(item)} class={btnSecondary}>{t(locale, 'portal.opportunities.view')}</a>
+                {item.isManager && (
+                  <a
+                    href={item.kind === 'team'
+                      ? localePath(locale, `/serve/teams/${item.id}`)
+                      : localePath(locale, `/groups/${item.id}/manage`)}
+                    class={btn}
+                  >{t(locale, 'portal.opportunities.manage')}</a>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+
+    <section class="mt-12" aria-labelledby="open-opportunities">
+      <h2 id="open-opportunities" class="font-display text-heading-sm font-bold">{t(locale, 'portal.opportunities.open')}</h2>
+      <p class="mt-1 text-sm text-ink-muted">{t(locale, 'portal.opportunities.openIntro')}</p>
+      {catalog.open.length === 0 ? (
+        <p class={`mt-5 ${card} text-sm text-ink-muted`}>{t(locale, 'portal.opportunities.openEmpty')}</p>
+      ) : (
+        <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {catalog.open.map((item) => (
+            <article class={`flex flex-col ${card}`}>
+              <span class={`${badge} w-fit bg-accent-soft text-on-accent-soft`}>{kindLabel(item)}</span>
+              <h3 class="mt-3 font-display text-lg font-bold">{item.title}</h3>
+              {item.subtitle && <p class="mt-1 text-sm font-medium text-primary">{item.subtitle}</p>}
+              {description(item) && <p class="mt-2 text-sm text-ink-muted">{description(item)}</p>}
+              {item.positions.length > 0 && (
+                <p class="mt-3 text-xs text-ink-subtle">{item.positions.join(' · ')}</p>
+              )}
+              <div class="mt-4 flex-1" />
+              <a href={hrefFor(item)} class={btn}>
+                {t(locale, item.kind === 'team' ? 'portal.opportunities.apply' : 'portal.opportunities.join')}
+              </a>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  </div>
+</Base>
