@@ -9,6 +9,9 @@ import { runStripeRecovery } from './lib/stripeRecovery';
 import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
 import { runCanvasDisconnectCleanupPass } from './lib/learningCanvasCleanupCron';
 import { runScheduledLearningSyncPass } from './lib/learningSyncOrchestration';
+import { runIdentityRecoveryNotificationSweep } from './lib/identityRecoveryOutbox';
+import { expireIdentityBusinessContinuations } from './lib/identityBusinessContinuation';
+import { enqueueDuePlanningCenterSyncJobs, runPlanningCenterSyncPass } from './lib/planningCenterSync';
 
 // Custom Worker entry (mirrors the reference stack): @astrojs/cloudflare@14 has
 // no workerEntryPoint option; its stock entry is literally `{ fetch: handle }`.
@@ -46,7 +49,19 @@ export default {
       }
       case ATTENDANCE_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(sendAttendanceEmails(vars, db).finally(end));
+        ctx.waitUntil((async () => {
+          try { await sendAttendanceEmails(vars, db); }
+          finally {
+            try { await enqueueDuePlanningCenterSyncJobs(db); await runPlanningCenterSyncPass(env as never, db); }
+            finally {
+              try { await runIdentityRecoveryNotificationSweep(env as never, db); }
+              finally {
+                const scheduledAt = new Date(controller.scheduledTime).toISOString().slice(0, 19).replace('T', ' ');
+                await expireIdentityBusinessContinuations(db, { now: scheduledAt });
+              }
+            }
+          }
+        })().finally(end));
         break;
       }
       case GOOGLE_CLASSROOM_REGISTRATION_CRON: {

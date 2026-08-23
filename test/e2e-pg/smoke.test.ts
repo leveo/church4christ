@@ -51,17 +51,35 @@ describe('Postgres-backed worker: public render path', () => {
     expect(body).toContain('The Beatitudes');
   });
 
-  it('/en/give renders the interactive giving form (giving module on over Postgres)', async () => {
+  it('/en/give sends a guest through identity continuation before checkout', async () => {
     // giving is Supabase-only and defaults ON, so on this backend /give is the
-    // checkout form — not the D1 external-link page. Rendering it exercises
+    // giving form — not the D1 external-link page. Rendering it exercises
     // listFunds() over Postgres (the fund select is empty until the giving seed
-    // lands in Phase 2 Task 9, so assert the form scaffold, not fund rows).
+    // lands in Phase 2 Task 9, so assert the form scaffold, not fund rows). A
+    // guest must verify ownership before a Stripe checkout can be attached.
     const res = await get('/en/give');
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('action="/api/giving/checkout"');
+    expect(body).toContain('action="/api/identity/continuation/start"');
+    expect(body).toContain('name="flow" value="giving"');
+    expect(body).not.toContain('action="/api/giving/checkout"');
+    expect(body).not.toContain('name="identitySource"');
     expect(body).toContain('name="fund_id"');
     expect(body).toContain('name="amount"');
+    expect(body).toContain('name="name"');
+    expect(body).toContain('name="email"');
+  });
+
+  it('/en/give sends a signed-in giver directly to identity-bound checkout', async () => {
+    const res = await get('/en/give', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('action="/api/giving/checkout"');
+    expect(body).toContain('name="identitySource" value="1"');
+    expect(body).not.toContain('action="/api/identity/continuation/start"');
+    expect(body).not.toContain('name="flow"');
+    expect(body).not.toContain('name="name"');
+    expect(body).not.toContain('name="email"');
   });
 
   it('/en/register renders the open-events list empty state (no reg events seeded)', async () => {

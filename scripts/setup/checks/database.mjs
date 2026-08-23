@@ -29,6 +29,9 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   ]),
   people: Object.freeze([
     'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
+    'planning_center_connections', 'planning_center_sync_cursors', 'planning_center_sync_jobs',
+    'planning_center_sync_receipts', 'planning_center_person_mappings', 'planning_center_webhook_receipts',
+    'planning_center_external_evidence',
   ]),
   children: Object.freeze(['checkin_events', 'checkins', 'households', 'household_members']),
   attendance: Object.freeze([
@@ -46,9 +49,9 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'event_admins', 'prayer_items', 'households', 'household_members', 'reg_events', 'reg_event_i18n',
     'registrations',
   ]),
-  giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']),
+  giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
-    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
+    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'identity_registration_continuations',
   ]),
   learning: Object.freeze([
     'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',

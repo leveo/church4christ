@@ -17,16 +17,25 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM tokens'),
     env.DB.prepare('DELETE FROM email_log'),
+    env.DB.prepare('DELETE FROM verified_contact_owners WHERE person_id=1'),
+    env.DB.prepare('DELETE FROM person_contact_links WHERE person_id=1'),
+    env.DB.prepare("DELETE FROM contact_points WHERE normalized_value='tester@example.com'"),
     env.DB.prepare('DELETE FROM people'),
   ]);
   await env.DB.prepare(
     `INSERT INTO people (id, display_name, email, role, active, session_epoch, lang)
      VALUES (1, 'Tester', 'tester@example.com', 'member', 1, 0, 'en')`,
   ).run();
+  const point = await env.DB.prepare("INSERT INTO contact_points(kind,normalized_value,display_value) VALUES('email','tester@example.com','tester@example.com') RETURNING id")
+    .first<number>('id');
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO person_contact_links(person_id,contact_point_id,kind,source) VALUES(1,?1,'email','test')").bind(point),
+    env.DB.prepare("INSERT INTO verified_contact_owners(contact_point_id,person_id,verification_method) VALUES(?1,1,'admin_review')").bind(point),
+  ]);
 });
 
-function rawOf(res: { raw: string } | { rateLimited: true }): string {
-  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: true }): string {
+  if (!('raw' in res)) throw new Error('expected an eligible login token');
   return res.raw;
 }
 
@@ -79,9 +88,13 @@ describe('full sign-in flow', () => {
       id: person.id,
       email: person.email,
       sessionEpoch: person.session_epoch,
-    });
+    }, { authMethod: 'magic_link' });
     const claims = await verifySession(SECRET, jwt);
-    expect(claims).toMatchObject({ personId: 1, email: 'tester@example.com', epoch: 0 });
+    expect(claims).toMatchObject({
+      personId: 1,
+      epoch: 0,
+      assurance: { schemaVersion: 2, authMethod: 'magic_link' },
+    });
     const user = await loadSessionUser(env.DB, claims!.personId, claims!.epoch);
     expect(user).toMatchObject({ id: 1, email: 'tester@example.com', role: 'member' });
   });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { applySetup, createD1Steps, createResourceStep, createSupabaseSteps, SetupApplyError } from '../../../scripts/setup/apply.mjs';
 import { acquireApprovedContentLease } from '../../../scripts/setup/files.mjs';
-import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
+import { createStateStore, fingerprintPlan, identityVerificationAttestationIsFresh } from '../../../scripts/setup/state.mjs';
 import { configureSecrets } from '../../../scripts/setup/secrets.mjs';
 import { probeR2Object } from '../../../scripts/setup/probes.mjs';
 
@@ -414,6 +414,13 @@ describe('setup state', () => {
     const evidence: any = { d1DatabaseName: 'church-db', d1DatabaseId: 'safe', r2BucketName: 'church-media', hyperdriveId: null };
     await store.mark('ensure-resources', evidence); evidence.d1DatabaseId = 'changed';
     expect(JSON.parse(await readFile(path, 'utf8')).completed['ensure-resources'].evidence.d1DatabaseId).toBe('safe');
+    const identityAttestation = { generatedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:15:00.000Z' };
+    await store.mark('configure-secrets', identityAttestation);
+    expect(await store.getEvidence('configure-secrets')).toEqual(identityAttestation);
+    expect(identityVerificationAttestationIsFresh(identityAttestation, Date.parse('2030-01-01T00:10:00.000Z'))).toBe(true);
+    expect(identityVerificationAttestationIsFresh(identityAttestation, Date.parse('2029-12-31T23:59:59.999Z'))).toBe(false);
+    expect(identityVerificationAttestationIsFresh(identityAttestation, Date.parse('2030-01-01T00:15:00.000Z'))).toBe(false);
+    await expect(store.mark('configure-secrets', { generatedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T02:00:00.000Z' })).rejects.toThrow(/evidence/i);
     await expect(store.mark('seed', { token: 'oops' })).rejects.toThrow(/evidence.*null/i);
     await expect(store.mark('seed', { value: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG' })).rejects.toThrow(/evidence.*null/i);
     await store.load(secondFingerprint); expect(await store.has('migrate')).toBe(false);
@@ -459,6 +466,11 @@ describe('setup secrets', () => {
     const text = await readFile(path, 'utf8');
     expect(text).toContain('OTHER=value'); expect(text).toContain(`SESSION_SECRET=${existingSecret}`);
     expect(text).toMatch(/^NEWCOMER_RATE_LIMIT_SECRET=[A-Za-z0-9_-]{43}$/m);
+    expect(text).toMatch(/^IDENTITY_VERIFICATION_SECRET=[A-Za-z0-9_-]{43}$/m);
+    expect(text).toMatch(/^IDENTITY_SOURCE_KEY_SECRET=[A-Za-z0-9_-]{43}$/m);
+    expect(text).toMatch(/^IDENTITY_SOURCE_KEY_ID=v1$/m);
+    expect(text).toMatch(/^IDENTITY_RECOVERY_KEY_SECRET=[A-Za-z0-9_-]{43}$/m);
+    expect(text).toMatch(/^IDENTITY_RECOVERY_KEY_ID=v1$/m);
     expect(text).toContain('AUTH_DEV_BYPASS_EMAIL=admin@example.com');
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(result)).not.toContain(existingSecret);
@@ -476,6 +488,32 @@ describe('setup secrets', () => {
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(result)).not.toContain('sk_test_setup_local');
     expect(JSON.stringify(result)).not.toContain('whsec_setup_local');
+  });
+
+  it('preserves an existing stable identity source key and key id instead of rotating them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-source-key-')); const path = join(root, '.dev.vars');
+    const stable = 'existing-stable-source-key-that-must-not-be-rotated';
+    await writeFile(path, `IDENTITY_SOURCE_KEY_SECRET=${stable}\nIDENTITY_SOURCE_KEY_ID=v1\n`, { mode: 0o600 });
+    const result = await configureSecrets({ mode: 'local', adminEmail: 'admin@example.test', path });
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain(`IDENTITY_SOURCE_KEY_SECRET=${stable}\n`);
+    expect(text).toContain('IDENTITY_SOURCE_KEY_ID=v1\n');
+    expect(result.configured).not.toContain('IDENTITY_SOURCE_KEY_SECRET');
+    expect(result.configured).not.toContain('IDENTITY_SOURCE_KEY_ID');
+    expect(JSON.stringify(result)).not.toContain(stable);
+  });
+
+  it('preserves an existing stable identity recovery key and key id instead of rotating them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'c4c-recovery-key-')); const path = join(root, '.dev.vars');
+    const stable = 'existing-stable-recovery-key-that-must-not-be-rotated';
+    await writeFile(path, `IDENTITY_RECOVERY_KEY_SECRET=${stable}\nIDENTITY_RECOVERY_KEY_ID=v1\n`, { mode: 0o600 });
+    const result = await configureSecrets({ mode: 'local', adminEmail: 'admin@example.test', path });
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain(`IDENTITY_RECOVERY_KEY_SECRET=${stable}\n`);
+    expect(text).toContain('IDENTITY_RECOVERY_KEY_ID=v1\n');
+    expect(result.configured).not.toContain('IDENTITY_RECOVERY_KEY_SECRET');
+    expect(result.configured).not.toContain('IDENTITY_RECOVERY_KEY_ID');
+    expect(JSON.stringify(result)).not.toContain(stable);
   });
 
   it('updates the managed local bypass identity when the setup administrator changes', async () => {
@@ -531,6 +569,12 @@ describe('setup secrets', () => {
     expect(calls[1][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
     expect(calls[2][1]).toEqual(['secret', 'put', 'NEWCOMER_RATE_LIMIT_SECRET', '--config', 'wrangler.jsonc']);
     expect(calls[2][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
+    expect(calls[3][1]).toEqual(['secret', 'put', 'IDENTITY_VERIFICATION_SECRET', '--config', 'wrangler.jsonc']);
+    expect(calls[3][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
+    expect(calls[4][1]).toEqual(['secret', 'put', 'IDENTITY_SOURCE_KEY_SECRET', '--config', 'wrangler.jsonc']);
+    expect(calls[4][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
+    expect(calls[5][1]).toEqual(['secret', 'put', 'IDENTITY_RECOVERY_KEY_SECRET', '--config', 'wrangler.jsonc']);
+    expect(calls[5][2].input).toMatch(/^[A-Za-z0-9_-]{43}\n$/);
     expect(JSON.stringify(result)).not.toContain(calls[1][2].input.trim());
   });
 
@@ -538,7 +582,7 @@ describe('setup secrets', () => {
     const calls: any[] = [];
     const runner = { run: async (...args: any[]) => {
       calls.push(args);
-      return { stdout: calls.length === 1 ? '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"NEWCOMER_RATE_LIMIT_SECRET","type":"secret_text"},{"name":"STRIPE_SECRET_KEY","type":"secret_text"}]' : '', stderr: '', exitCode: 0 };
+      return { stdout: calls.length === 1 ? '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"NEWCOMER_RATE_LIMIT_SECRET","type":"secret_text"},{"name":"IDENTITY_VERIFICATION_SECRET","type":"secret_text"},{"name":"IDENTITY_SOURCE_KEY_SECRET","type":"secret_text"},{"name":"IDENTITY_RECOVERY_KEY_SECRET","type":"secret_text"},{"name":"STRIPE_SECRET_KEY","type":"secret_text"}]' : '', stderr: '', exitCode: 0 };
     } };
     const oldKey = process.env.STRIPE_SECRET_KEY; const oldWebhook = process.env.STRIPE_WEBHOOK_SECRET; const oldMode = process.env.STRIPE_MODE;
     process.env.STRIPE_SECRET_KEY = 'sk_live_ambient_forbidden'; process.env.STRIPE_WEBHOOK_SECRET = 'whsec_ambient_forbidden'; process.env.STRIPE_MODE = 'live';
@@ -573,7 +617,7 @@ describe('setup secrets', () => {
     expect(calls[0][2]).toMatchObject({ allowNonzero: true });
     expect(calls[0][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
     expect(calls[1][2].env).toEqual(expect.objectContaining({ WRANGLER_HIDE_BANNER: 'true', NO_COLOR: '1', FORCE_COLOR: '0' }));
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(6);
     const denied = { run: async () => ({ stdout: '', stderr: 'Authentication error [code: 10000]', exitCode: 1 }) };
     await expect(configureSecrets({ mode: 'deploy', adminEmail: 'a@b.test', runner: denied, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc' })).rejects.toThrow(/secret list failed/i);
     for (const nearMiss of [

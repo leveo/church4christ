@@ -171,6 +171,11 @@ afterEach(async () => {
   await withPg(async (sql) => {
     await sql.unsafe('DROP TRIGGER IF EXISTS mapping_test_abort_people ON people');
     await sql.unsafe('DROP FUNCTION IF EXISTS mapping_test_abort_people()');
+    // Imports create notification-only identity contacts. Clear identity
+    // children before fixture people so PostgreSQL FK enforcement stays useful.
+    await sql.unsafe('DELETE FROM verified_contact_owners');
+    await sql.unsafe('DELETE FROM person_contact_links');
+    await sql.unsafe('DELETE FROM contact_points');
     await sql.unsafe(`DELETE FROM household_members WHERE household_id IN
       (SELECT id FROM households WHERE name = 'PG Mapping Collision Household')`);
     await sql.unsafe("DELETE FROM households WHERE name = 'PG Mapping Collision Household'");
@@ -428,6 +433,12 @@ describe('PostgreSQL canonical export identity round trip', () => {
     await withPg(async (sql) => {
       await sql.unsafe("UPDATE people SET email = 'retarget-pg-' || id || '@example.com'");
       await sql.unsafe("UPDATE households SET name = 'retarget-pg-household-' || id");
+      // This round-trip intentionally simulates migration into a fresh identity
+      // store. Retargeting the deprecated legacy carrier must not free historical
+      // contacts in production, so clear the fixture identity store explicitly.
+      await sql.unsafe('DELETE FROM verified_contact_owners');
+      await sql.unsafe('DELETE FROM person_contact_links');
+      await sql.unsafe('DELETE FROM contact_points');
     });
     const before = await counts();
     let importedRows = 0;

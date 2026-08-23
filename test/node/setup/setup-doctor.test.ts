@@ -50,6 +50,16 @@ const SUPABASE_MIGRATIONS = [
   '0025_learning_sync_schedule.sql',
   '0026_activity_score_learning.sql',
   '0027_multi_campus.sql',
+  '0028_member_identity.sql',
+  '0029_identity_account.sql',
+  '0030_identity_security_cutover.sql',
+  '0031_identity_source_records.sql',
+  '0032_identity_recovery_approval.sql',
+  '0033_identity_merge_operations.sql',
+  '0034_identity_business_intents.sql',
+  '0035_identity_business_continuations.sql',
+  '0036_identity_merge_execution.sql',
+  '0037_planning_center.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -348,6 +358,9 @@ describe('doctor database check', () => {
     ]));
     expect(TABLES_BY_CAPABILITY.people).toEqual([
       'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',
+      'planning_center_connections', 'planning_center_sync_cursors', 'planning_center_sync_jobs',
+      'planning_center_sync_receipts', 'planning_center_person_mappings', 'planning_center_webhook_receipts',
+      'planning_center_external_evidence',
     ]);
     expect(TABLES_BY_CAPABILITY.learning).toEqual(expect.arrayContaining([
       ...GOOGLE_CLASSROOM_TABLES,
@@ -503,22 +516,22 @@ describe('doctor capability services check', () => {
   it('reports required R2, email by mode, exact Stripe states, and optional backup', async () => {
     const full = { ...baseManifest, mode: 'deploy', preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } } as const;
     const absent = await checkServices({ catalog, manifest: full, presence: { worker: false, r2: false, hyperdrive: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
-    expect(absent.map((entry) => entry.code)).toEqual(['services.worker', 'services.r2', 'services.hyperdrive', 'services.email', 'services.stripe-absent', 'services.newcomer-rate-limit-secret', 'services.backup-absent']);
+    expect(absent.map((entry) => entry.code)).toEqual(['services.worker', 'services.r2', 'services.hyperdrive', 'services.email', 'services.stripe-absent', 'services.newcomer-rate-limit-secret', 'services.identity-verification-secret', 'services.identity-source-key', 'services.identity-recovery-key', 'services.backup-absent']);
     expect(absent.find((entry) => entry.code === 'services.stripe-absent')?.message).toMatch(/free registration.*offline giving/i);
     const partial = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: false, backup: true } });
     expect(partial.map((entry) => [entry.code, entry.severity])).toEqual([
-      ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.newcomer-rate-limit-secret', 'error'], ['services.backup-ok', 'info'],
+      ['services.worker-ok', 'info'], ['services.r2-ok', 'info'], ['services.hyperdrive-ok', 'info'], ['services.email-ok', 'info'], ['services.stripe-partial', 'error'], ['services.newcomer-rate-limit-secret', 'error'], ['services.identity-verification-secret', 'error'], ['services.identity-source-key', 'error'], ['services.identity-recovery-key', 'error'], ['services.backup-ok', 'info'],
     ]);
-    const complete = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
+    const complete = await checkServices({ catalog, manifest: full, presence: { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: true, stripeWebhookSecret: true, backup: false } });
     expect(complete.find((entry) => entry.code === 'services.stripe-unverifiable')?.severity).toBe('warning');
     expect(complete.find((entry) => entry.code === 'services.backup-absent')?.severity).toBe('info');
-    const local = await checkServices({ catalog, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
-    expect(local.map((entry) => entry.code)).toEqual(['services.worker-ok', 'services.r2-ok', 'services.email-dev', 'services.backup-absent']);
+    const local = await checkServices({ catalog, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    expect(local.map((entry) => entry.code)).toEqual(['services.worker-ok', 'services.r2-ok', 'services.email-dev', 'services.identity-verification-secret-ok', 'services.identity-source-key-ok', 'services.identity-recovery-key-ok', 'services.backup-absent']);
   });
 
   it('fails local live or unknown Stripe values and reports deploy value classification as unverifiable', async () => {
     const full: any = { ...baseManifest, database: 'supabase', modules: [...catalog.presets['full-church'].modules], resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } };
-    const basePresence = { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, stripeSecretKey: true, stripeWebhookSecret: true, backup: false };
+    const basePresence = { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, identityVerificationSecretStatus: 'valid' as const, identitySourceKeyStatus: 'valid' as const, identityRecoveryKeyStatus: 'valid' as const, stripeSecretKey: true, stripeWebhookSecret: true, backup: false };
     for (const classification of ['live', 'unknown']) {
       const findings = await checkServices({ catalog, manifest: full, presence: { ...basePresence, stripeClassification: classification, stripeModeTest: true, stripeClassificationVerifiable: true } });
       expect(findings).toContainEqual(expect.objectContaining({ code: `services.stripe-${classification}`, severity: 'error' }));
@@ -531,15 +544,40 @@ describe('doctor capability services check', () => {
   it('fails missing mandatory email/Stripe and unknown required services instead of silently ignoring them', async () => {
     const future: any = structuredClone(catalog);
     future.providers.d1.requiredServices = ['worker', 'r2', 'email', 'stripe', 'mystery'];
-    const findings = await checkServices({ catalog: future, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    const findings = await checkServices({ catalog: future, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
     expect(findings.map((entry) => [entry.code, entry.severity])).toEqual([
       ['services.required-unsupported', 'error'], ['services.worker-ok', 'info'], ['services.r2-ok', 'info'],
-      ['services.email', 'error'], ['services.stripe-absent', 'error'], ['services.backup-absent', 'info'],
+      ['services.email', 'error'], ['services.stripe-absent', 'error'], ['services.identity-verification-secret-ok', 'info'], ['services.identity-source-key-ok', 'info'], ['services.identity-recovery-key-ok', 'info'], ['services.backup-absent', 'info'],
     ]);
     const optional: any = structuredClone(catalog);
     optional.capabilities.bulletins.optionalServices = ['stripe'];
-    const optionalFindings = await checkServices({ catalog: optional, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    const optionalFindings = await checkServices({ catalog: optional, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
     expect(optionalFindings.map((entry) => [entry.code, entry.severity])).toContainEqual(['services.stripe-absent', 'warning']);
+  });
+
+  it('fails closed when deploy metadata reports the identity secret but cannot prove its value', async () => {
+    const findings = await checkServices({ catalog, manifest: { ...baseManifest, mode: 'deploy' }, presence: {
+      worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false,
+      identityVerificationSecretStatus: 'unverifiable', stripeSecretKey: false, stripeWebhookSecret: false, backup: false,
+    } });
+    expect(findings).toContainEqual(expect.objectContaining({ code: 'services.identity-verification-secret-unverifiable', severity: 'error' }));
+    expect(findings.find((entry) => entry.code === 'services.identity-verification-secret-unverifiable')?.remediation)
+      .toMatch(/do not rotate IDENTITY_VERIFICATION_SECRET/i);
+    expect(findings).not.toContainEqual(expect.objectContaining({ code: 'services.identity-verification-secret-ok' }));
+    const sourceMismatch = await checkServices({ catalog, manifest: { ...baseManifest, mode: 'deploy' }, presence: {
+      worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false,
+      identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'invalid',
+      stripeSecretKey: false, stripeWebhookSecret: false, backup: false,
+    } });
+    expect(sourceMismatch).toContainEqual(expect.objectContaining({ code: 'services.identity-source-key-invalid', severity: 'error',
+      remediation: expect.stringMatching(/original.*rewrap/i) }));
+    const recoveryMismatch = await checkServices({ catalog, manifest: { ...baseManifest, mode: 'deploy' }, presence: {
+      worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: false,
+      identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'invalid',
+      stripeSecretKey: false, stripeWebhookSecret: false, backup: false,
+    } });
+    expect(recoveryMismatch).toContainEqual(expect.objectContaining({ code: 'services.identity-recovery-key-invalid', severity: 'error',
+      remediation: expect.stringMatching(/pinned.*rewrap/i) }));
   });
 });
 

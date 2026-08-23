@@ -11,12 +11,9 @@ import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { getPortalHousehold, setOwner, updateMemberProfile, type MemberProfilePatch } from '../../../lib/portalDb';
-import { requestEmailChange } from '../../../lib/emailChange';
-import { sendEmailChangeLink } from '../../../lib/notify';
 import { setPersonAvatar } from '../../../lib/adminDb';
 import { saveImageUpload, type MediaBucket } from '../../../lib/mediaUpload';
 import { normalizeAvatarUrl } from '../../../lib/mediaRef';
-import { type EmailEnv } from '../../../lib/email';
 import { badge, badgeScheduled, btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -90,23 +87,6 @@ if (Astro.request.method === 'POST' && household) {
         return fail(mapMutationErrCode(e));
       }
     }
-  } else if (action === 'requestEmailChange') {
-    const result = await requestEmailChange(db, user.id, str(fd.get('new_email')));
-    if ('error' in result) {
-      return fail(
-        { invalid: 'email_invalid', taken: 'email_taken', rate_limited: 'email_rate_limited' }[result.error] ?? 'generic',
-      );
-    } else {
-      await sendEmailChangeLink(
-        env as unknown as EmailEnv,
-        db,
-        { id: user.id, email: user.email, display_name: user.displayName, lang: user.lang },
-        result.raw,
-        result.newEmail,
-        locale,
-      );
-      return done('emailChange');
-    }
   } else if (action === 'avatar') {
     const memberId = idOf(fd.get('member_id'));
     const target = household.members.find((m) => m.id === memberId);
@@ -144,7 +124,7 @@ if (Astro.request.method === 'POST' && household) {
 
 // Extra people-row fields (name/contact/email) for every LINKED member, keyed
 // by person_id — getPortalHousehold's members only carry display_name/role/
-// owner flags, and the self card additionally needs email + pending_email.
+// owner flags, and the self card additionally needs its compatibility email.
 interface MemberProfileRow {
   id: number;
   first_name: string;
@@ -153,7 +133,6 @@ interface MemberProfileRow {
   birthday: string | null;
   address: string | null;
   email: string;
-  pending_email: string | null;
   avatar_url: string | null;
 }
 const profileByPersonId = new Map<number, MemberProfileRow>();
@@ -162,7 +141,7 @@ if (household) {
   if (linkedIds.length > 0) {
     const { results } = await db
       .prepare(
-        `SELECT id, first_name, last_name, phone, birthday, address, email, pending_email, avatar_url
+        `SELECT id, first_name, last_name, phone, birthday, address, email, avatar_url
          FROM people WHERE id IN (${linkedIds.map(() => '?').join(', ')}) AND deleted_at IS NULL`,
       )
       .bind(...linkedIds)
@@ -380,22 +359,8 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
               <span class={lab}>{t(locale, 'profile.email')}</span>
               {selfProfile?.email}
             </p>
-            {selfProfile?.pending_email && (
-              <p class={`mt-2 ${noticeOk}`}>
-                {t(locale, 'portal.household.pendingEmail', { email: selfProfile.pending_email })}
-              </p>
-            )}
-            <form method="post" class="mt-4 flex flex-wrap items-end gap-3">
-              <input type="hidden" name="_action" value="requestEmailChange" />
-              <label class="block">
-                <span class={lab}>{t(locale, 'portal.household.newEmail')}</span>
-                <input type="email" name="new_email" required class={tin} />
-              </label>
-              <button type="submit" class={btn}>
-                {t(locale, 'portal.household.emailChangeSubmit')}
-              </button>
-            </form>
-            <p class="mt-2 text-xs text-ink-muted">{t(locale, 'portal.household.emailChangeHint')}</p>
+            <p class="mt-3 text-sm text-ink-muted">{t(locale, 'security.contactSharedHint')}</p>
+            <a href={localePath(locale, '/settings/security')} class={`mt-4 inline-flex ${btn}`}>{t(locale, 'security.title')}</a>
           </section>
         </>
       )

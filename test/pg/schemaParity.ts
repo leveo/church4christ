@@ -153,6 +153,12 @@ export function normalizeIndexPredicate(value: string | null): string | null {
     while (hasSingleOuterPair(normalized)) normalized = normalized.slice(1, -1).trim();
     pair = redundantAtomPair(normalized);
   }
+  // PostgreSQL renders an IN-list as `= ANY (ARRAY[...])`. Treat that canonical
+  // server spelling as the same predicate without changing quoted values.
+  normalized = normalized.replace(
+    /=any array\[((?:'(?:[^']|'')*'(?:,\s*)?)+)\]/gi,
+    (_match, values: string) => ` in ${values.replace(/,\s+/g, ',')}`,
+  );
   return normalized;
 }
 
@@ -223,7 +229,7 @@ function canonicalTriggerExpression(value: string): string {
     if (number) { tokens.push(number); index += number.length; continue; }
     const operator = ['<>', '>=', '<=', '::'].find((candidate) => value.startsWith(candidate, index));
     if (operator) { tokens.push(operator); index += operator.length; continue; }
-    if ('().,;=<>+-'.includes(char)) { tokens.push(char); index += 1; continue; }
+    if ('().,;=<>+-*'.includes(char)) { tokens.push(char); index += 1; continue; }
     throw new Error(`unsupported trigger guard token at: ${value.slice(index)}`);
   }
   const canonical: string[] = [];
@@ -231,6 +237,9 @@ function canonicalTriggerExpression(value: string): string {
     if (tokens.slice(index, index + 4).join(' ') === 'is not distinct from') {
       canonical.push('is');
       index += 3;
+    } else if (tokens.slice(index, index + 3).join(' ') === 'is distinct from') {
+      canonical.push('is', 'not');
+      index += 2;
     } else if (tokens[index] === '::' && tokens[index + 1] === 'text') {
       index += 1;
     } else {
@@ -260,9 +269,65 @@ function triggerAbort(rawBody: string): Pick<D1Trigger, 'bodyGuard' | 'abortMess
   throw new Error(`unsupported trigger body: ${body}`);
 }
 
+type SemanticBindingBumpContract = {
+  table: string;
+  event: string;
+  when: string;
+  body: string;
+};
+
+const semanticBindingBumpContracts = new Map<string, SemanticBindingBumpContract>([
+  ['person_merge_semantic_binding_people_stripe_bump', {
+    table: 'people',
+    event: 'update of stripe_customer_id',
+    when: 'new . stripe_customer_id is not old . stripe_customer_id',
+    body: 'update people set merge_stripe_customer_binding_version = old . merge_stripe_customer_binding_version + 1 where id = new . id',
+  }],
+  ['person_merge_semantic_binding_people_calendar_bump', {
+    table: 'people',
+    event: 'update of calendar_token',
+    when: 'new . calendar_token is not old . calendar_token',
+    body: 'update people set merge_calendar_binding_version = old . merge_calendar_binding_version + 1 where id = new . id',
+  }],
+  ['person_merge_semantic_binding_external_identity_bump', {
+    table: 'person_external_identities',
+    event: 'update of provider , organization_id , external_person_id',
+    when: 'new . provider is not old . provider or new . organization_id is not old . organization_id or new . external_person_id is not old . external_person_id',
+    body: 'update person_external_identities set merge_binding_version = old . merge_binding_version + 1 where id = new . id',
+  }],
+  ['person_merge_semantic_binding_learning_identity_bump', {
+    table: 'learning_identity_links',
+    event: 'update of connection_id , external_user_id',
+    when: 'new . connection_id is not old . connection_id or new . external_user_id is not old . external_user_id',
+    body: 'update learning_identity_links set merge_binding_version = old . merge_binding_version + 1 where id = new . id',
+  }],
+  ['person_merge_semantic_binding_canonical_key_bump', {
+    table: 'identity_person_canonical_keys',
+    event: 'update of legacy_email_key , normalized_name_key , normalization_version',
+    when: 'new . legacy_email_key is not old . legacy_email_key or new . normalized_name_key is not old . normalized_name_key or new . normalization_version is not old . normalization_version',
+    body: 'update identity_person_canonical_keys set merge_binding_version = old . merge_binding_version + 1 where person_id = new . person_id',
+  }],
+]);
+
+function assertSemanticBindingBumpContract(
+  name: string,
+  parsed: RegExpMatchArray,
+  when: string | null,
+): void {
+  const contract = semanticBindingBumpContracts.get(name);
+  if (!contract) return;
+  const body = parsed[6].trim().replace(/;\s*$/u, '');
+  const valid = parsed[2].toLowerCase() === 'after'
+    && canonicalTriggerExpression(parsed[3]) === contract.event
+    && identifier(parsed[4]) === contract.table
+    && (when === null ? null : canonicalTriggerExpression(when)) === contract.when
+    && canonicalTriggerExpression(body) === contract.body;
+  if (!valid) throw new Error(`unsupported semantic binding lifecycle trigger: ${name}`);
+}
+
 function parseTrigger(statement: string): D1Trigger {
   const parsed = statement.match(
-    /^CREATE\s+TRIGGER\s+(\S+)\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+(\S+)(?:\s+FOR\s+EACH\s+ROW)?(?:\s+WHEN\s+([\s\S]+?))?\s+BEGIN\s+([\s\S]*)\s+END\s*;$/i,
+    /^CREATE\s+TRIGGER\s+(\S+)\s+(BEFORE|AFTER)\s+(INSERT|UPDATE(?:\s+OF\s+[\w\s,]+)?|DELETE)\s+ON\s+(\S+)(?:\s+FOR\s+EACH\s+ROW)?(?:\s+WHEN\s+([\s\S]+?))?\s+BEGIN\s+([\s\S]*)\s+END\s*;$/i,
   );
   if (!parsed) throw new Error(`unsupported trigger definition: ${statement}`);
   const when = parsed[5] ? normalizeTriggerExpression(parsed[5]) : null;
@@ -270,19 +335,44 @@ function parseTrigger(statement: string): D1Trigger {
   // It has dedicated D1/Postgres behavior tests and is excluded from the
   // abort-trigger parity comparison, whose model intentionally describes only
   // RAISE/EXCEPTION guards.
-  if (identifier(parsed[1]) === 'campus_membership_after_person_insert') {
-    if (!/^INSERT\s+OR\s+IGNORE\s+INTO\s+campus_memberships\b/i.test(parsed[6].trim())) {
-      throw new Error(`unsupported campus membership trigger body: ${parsed[6].trim()}`);
+  const triggerName = identifier(parsed[1]);
+  const semanticBindingBump = semanticBindingBumpContracts.has(triggerName);
+  if (identifier(parsed[1]) === 'campus_membership_after_person_insert'
+    || identifier(parsed[1]).startsWith('identity_person_canonical_keys_')
+    || semanticBindingBump
+    || identifier(parsed[1]) === 'identity_recovery_notification_outbox_insert_receipt'
+    || identifier(parsed[1]) === 'identity_recovery_notification_outbox_transition_receipt'
+    || identifier(parsed[1]) === 'person_merge_operations_risk_set_snapshot'
+    || identifier(parsed[1]) === 'planning_center_merge_mapping_snapshot') {
+    if (identifier(parsed[1]) === 'campus_membership_after_person_insert'
+      && !/^INSERT\s+OR\s+IGNORE\s+INTO\s+campus_memberships\b/i.test(parsed[6].trim())) {
+      throw new Error(`unsupported lifecycle trigger body: ${parsed[6].trim()}`);
     }
+    if (semanticBindingBump) assertSemanticBindingBumpContract(triggerName, parsed, when);
+    if (identifier(parsed[1]) === 'planning_center_merge_mapping_snapshot'
+      && !/^INSERT\s+INTO\s+planning_center_merge_mapping_snapshots\b/i.test(parsed[6].trim())) {
+      throw new Error(`unsupported lifecycle trigger body: ${parsed[6].trim()}`);
+    }
+    const semantic = identifier(parsed[1]) === 'campus_membership_after_person_insert'
+      ? 'campus membership side effect'
+      : semanticBindingBump
+        ? 'person merge semantic binding generation side effect'
+      : identifier(parsed[1]).startsWith('identity_recovery_notification_outbox_')
+        ? 'identity recovery notification receipt side effect'
+        : identifier(parsed[1]) === 'person_merge_operations_risk_set_snapshot'
+          ? 'person merge risk set snapshot side effect'
+          : identifier(parsed[1]) === 'planning_center_merge_mapping_snapshot'
+            ? 'planning center merge mapping snapshot side effect'
+          : 'identity canonical key side effect';
     return {
       name: identifier(parsed[1]),
       table: identifier(parsed[4]),
       timing: parsed[2].toLowerCase() as D1Trigger['timing'],
-      event: parsed[3].toLowerCase() as D1Trigger['event'],
+      event: parsed[3].toLowerCase().split(/\s+/)[0] as D1Trigger['event'],
       when,
       bodyGuard: null,
-      semanticGuard: 'campus membership side effect',
-      abortMessage: 'campus membership side effect',
+      semanticGuard: semantic,
+      abortMessage: semantic,
     };
   }
   const effect = triggerAbort(parsed[6]);
@@ -293,7 +383,7 @@ function parseTrigger(statement: string): D1Trigger {
     name: identifier(parsed[1]),
     table: identifier(parsed[4]),
     timing: parsed[2].toLowerCase() as D1Trigger['timing'],
-    event: parsed[3].toLowerCase() as D1Trigger['event'],
+    event: parsed[3].toLowerCase().split(/\s+/)[0] as D1Trigger['event'],
     when,
     ...effect,
     semanticGuard: conditions.length === 0
@@ -574,13 +664,22 @@ function parseColumn(entry: string): { column: D1Column; constraints: D1Constrai
       ...referentialActions(foreign[3]),
     });
   }
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const singletonPrimary = name === 'singleton_id' && new RegExp(
+    `\\bCHECK\\s*\\(\\s*"?${escapedName}"?\\s*=\\s*[+-]?\\d+\\s*\\)`,
+    'i',
+  ).test(tail);
   return {
     column: {
       name,
       type,
       nullable: !primary && !hasTopLevelNotNull(tail),
       defaultValue: normalizeDefault(defaultExpression(tail)),
-      identity: type === 'integer' && primary,
+      // SQLite aliases a plain INTEGER PRIMARY KEY to rowid, but shared-key
+      // one-to-one rows and fixed singleton sentinels are application supplied.
+      // PostgreSQL correctly models those as ordinary integer PKs, not identity
+      // columns, so keep that semantic distinction in the parity model.
+      identity: type === 'integer' && primary && !foreign && !singletonPrimary,
     },
     constraints,
   };
@@ -724,6 +823,11 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
         throw new Error(`cannot drop missing index ${name}`);
       }
       schema.indexes.delete(name);
+      continue;
+    }
+
+    // Read-only query factoring for the closed 0033 merge guard namespace.
+    if (/^CREATE\s+VIEW\s+person_merge_(?:operation_sides|live_[a-z_]+)\s+AS\s+SELECT\b/i.test(statement)) {
       continue;
     }
 

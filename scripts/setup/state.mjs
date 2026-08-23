@@ -11,6 +11,8 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
 const RESOURCE_KEYS = ['d1DatabaseName', 'd1DatabaseId', 'r2BucketName', 'hyperdriveId'];
 const RESOURCE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const RESOURCE_ID = /^[A-Za-z0-9_-]+$/;
+const IDENTITY_ATTESTATION_KEYS = ['generatedAt', 'expiresAt'];
+const IDENTITY_ATTESTATION_WINDOW_MS = 15 * 60_000;
 
 function stable(value) {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
@@ -61,8 +63,29 @@ function resourceEvidence(value) {
   return resource;
 }
 
+function identityVerificationAttestationEvidence(value) {
+  if (!isRecord(value) || Object.keys(value).sort().join('|') !== [...IDENTITY_ATTESTATION_KEYS].sort().join('|') ||
+      typeof value.generatedAt !== 'string' || typeof value.expiresAt !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.generatedAt) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.expiresAt)) {
+    throw new Error('configure-secrets evidence is invalid');
+  }
+  const generatedAt = Date.parse(value.generatedAt); const expiresAt = Date.parse(value.expiresAt);
+  if (!Number.isFinite(generatedAt) || !Number.isFinite(expiresAt) || expiresAt - generatedAt !== IDENTITY_ATTESTATION_WINDOW_MS) {
+    throw new Error('configure-secrets evidence is invalid');
+  }
+  return jsonClone(value, 'configure-secrets evidence');
+}
+
+export function identityVerificationAttestationIsFresh(value, now = Date.now()) {
+  try {
+    const evidence = identityVerificationAttestationEvidence(value);
+    return Number.isFinite(now) && Date.parse(evidence.generatedAt) <= now && now < Date.parse(evidence.expiresAt);
+  } catch { return false; }
+}
+
 function stepEvidence(name, value) {
   if (name === 'ensure-resources') return resourceEvidence(value);
+  if (name === 'configure-secrets') return value === null ? null : identityVerificationAttestationEvidence(value);
   if (value !== null) throw new Error(`Setup step ${name} evidence must be null`);
   return null;
 }

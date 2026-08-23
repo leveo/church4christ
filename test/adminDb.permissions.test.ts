@@ -114,15 +114,15 @@ describe('last super admin guard', () => {
   });
 });
 
-describe('savePerson: reviving a soft-deleted person', () => {
-  it('clears super_admin and admin_areas instead of inheriting them from the deleted row', async () => {
+describe('savePerson: soft-deleted identity collision', () => {
+  it('routes the collision to identity review without reviving or mutating privilege', async () => {
     // A soft-deleted row that used to be an active super admin with grants.
     await db.prepare(
       `INSERT INTO people (id, first_name, last_name, display_name, email, role, active, super_admin, admin_areas, deleted_at)
        VALUES (4, 'R', 'Four', 'R Four', 'revive@example.com', 'admin', 1, 1, 'groups', datetime('now'))`,
     ).run();
 
-    // "Create" a new person that collides on the soft-deleted email — the revive path.
+    // A new-person submission that collides with historical identity must stop.
     const r = await savePerson(
       db,
       {
@@ -141,10 +141,15 @@ describe('savePerson: reviving a soft-deleted person', () => {
       'actor@example.com',
     );
 
-    expect(r).toEqual({ ok: true, id: 4 });
+    expect(r).toEqual({
+      ok: false,
+      code: 'identity_review_required',
+      errors: { email: 'errors.identityReviewRequired' },
+    });
     const row = await db
       .prepare(`SELECT deleted_at, active, super_admin, admin_areas FROM people WHERE id = 4`)
       .first<{ deleted_at: string | null; active: number; super_admin: number; admin_areas: string }>();
-    expect(row).toEqual({ deleted_at: null, active: 1, super_admin: 0, admin_areas: '' });
+    expect(row).toMatchObject({ active: 1, super_admin: 1, admin_areas: 'groups' });
+    expect(row?.deleted_at).not.toBeNull();
   });
 });

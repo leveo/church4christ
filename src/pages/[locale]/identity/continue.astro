@@ -1,0 +1,43 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import { lab, tin, btn, noticeErr } from '../../../lib/adminUi';
+import { IDENTITY_CONTINUATION_COOKIE, openIdentityContinuationCookie } from '../../../lib/identityContinuationCookie';
+import { parseLocale } from '../../../lib/locales';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) { Astro.response.status = 404; return Astro.rewrite('/404'); }
+Astro.response.headers.set('cache-control', 'no-store');
+Astro.response.headers.set('referrer-policy', 'no-referrer');
+const secret = String((env as unknown as { IDENTITY_VERIFICATION_SECRET?: string }).IDENTITY_VERIFICATION_SECRET ?? '');
+const pending = await openIdentityContinuationCookie(secret, Astro.cookies.get(IDENTITY_CONTINUATION_COOKIE)?.value);
+const error = Astro.url.searchParams.get('error') === 'invalid';
+const waiting = Astro.url.searchParams.get('error') === 'waiting';
+const title = locale === 'zh' ? '继续操作' : 'Continue securely';
+const intro = locale === 'zh' ? '我们已向你的邮箱发送一次性验证码。请输入验证码以继续。' : 'We sent a one-time code to your email. Enter it to continue.';
+const invalid = locale === 'zh' ? '验证码无效或已过期。请重新开始。' : 'That code is invalid or expired. Please start again.';
+const waitingText = locale === 'zh' ? '操作仍在安全处理中。请稍后再次输入同一验证码。' : 'Your request is still being processed securely. Please retry the same code shortly.';
+---
+
+<Base title={title} locale={locale} noindex>
+  <section class="container-narrow py-16">
+    <div class="rounded-lg border border-border bg-surface-raised p-6">
+      <h1 class="font-display text-heading-sm font-semibold">{title}</h1>
+      {error && <p class={`${noticeErr} mt-3`} role="alert">{invalid}</p>}
+      {waiting && <p class={`${noticeErr} mt-3`} role="status">{waitingText}</p>}
+      {pending ? (
+        <>
+          <p class="mt-3 text-ink-muted">{intro}</p>
+          <form method="post" action="/api/identity/continuation/complete" class="mt-6 space-y-4">
+            <input type="hidden" name="locale" value={locale} />
+            <label class="block"><span class={lab}>{locale === 'zh' ? '验证码' : 'Verification code'}</span>
+              <input name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" class={tin} /></label>
+            <button type="submit" class={`${btn} w-full justify-center`}>{locale === 'zh' ? '验证并继续' : 'Verify and continue'}</button>
+          </form>
+        </>
+      ) : (
+        <p class="mt-3 text-ink-muted">{locale === 'zh' ? '请求已过期或不可用，请返回并重新提交。' : 'This request is no longer available. Please go back and try again.'}</p>
+      )}
+    </div>
+  </section>
+</Base>

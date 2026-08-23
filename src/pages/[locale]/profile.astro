@@ -232,6 +232,7 @@ if (hasGroups) {
       <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
     )}
     <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'profile.title')}</h1>
+    <p class="mt-2 text-sm"><a href={localePath(locale, '/settings/security')} class="font-semibold text-primary hover:underline">{t(locale, 'security.title')}</a></p>
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.saved')}</p>}
     {interestsSaved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.interestsSaved')}</p>}

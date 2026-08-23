@@ -9,14 +9,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { loadSessionUser, loadSessionUserByEmail } from '../src/lib/currentUser';
 import { canAccess, classifyRoute } from '../src/lib/routePolicy';
 
-// Storage is isolated per test file but not per test, so reset the FK chain and
-// re-seed before each test. Person 3 leads team 1, is a plain member of team 2,
-// and belongs to soft-deleted team 3 (which must be excluded from both arrays).
+// Storage is isolated per test file but not per test. Redirects are immutable
+// production evidence, so keep the fixed redirect and idempotently restore the
+// people baseline instead of deleting through that FK chain. Person 3 leads
+// team 1, is a plain member of team 2, and belongs to soft-deleted team 3.
 beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM team_members'),
     env.DB.prepare('DELETE FROM teams'),
-    env.DB.prepare('DELETE FROM people'),
   ]);
   await env.DB.prepare(
     `INSERT INTO people (id, display_name, email, role, active, session_epoch, lang, deleted_at) VALUES
@@ -25,8 +25,21 @@ beforeEach(async () => {
       (3, 'Leader',   'leader@example.com',   'member', 1, 0, NULL, NULL),
       (4, 'Member',   'member@example.com',   'member', 1, 0, 'en', NULL),
       (5, 'Inactive', 'inactive@example.com', 'member', 0, 0, NULL, NULL),
-      (6, 'Deleted',  'deleted@example.com',  'member', 1, 0, NULL, datetime('now'))`,
+      (6, 'Deleted',  'deleted@example.com',  'member', 1, 0, NULL, datetime('now')),
+      (7, 'Provisional', 'provisional@example.com', 'member', 1, 0, NULL, NULL),
+      (8, 'Merged', 'merged@example.com', 'member', 0, 1, NULL, NULL),
+      (9, 'Disabled', 'disabled@example.com', 'member', 1, 0, NULL, NULL),
+      (10, 'Redirected', 'redirected@example.com', 'member', 1, 0, NULL, NULL)
+      ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,email=excluded.email,
+        role=excluded.role,active=excluded.active,session_epoch=excluded.session_epoch,lang=excluded.lang,
+        deleted_at=excluded.deleted_at,identity_state='active',merged_into_person_id=NULL,
+        auth_disabled_at=NULL,super_admin=0,admin_areas='',finance=0`,
   ).run();
+  await env.DB.prepare("UPDATE people SET identity_state = 'provisional' WHERE id = 7").run();
+  await env.DB.prepare("UPDATE people SET identity_state = 'merged', merged_into_person_id = 4, auth_disabled_at = datetime('now') WHERE id = 8").run();
+  await env.DB.prepare("UPDATE people SET auth_disabled_at = datetime('now') WHERE id = 9").run();
+  await env.DB.prepare(`INSERT INTO person_merge_redirects (loser_person_id, canonical_person_id)
+    VALUES (10, 4) ON CONFLICT(loser_person_id) DO NOTHING`).run();
   await env.DB.prepare('INSERT INTO teams (id, ministry_id) VALUES (1, NULL), (2, NULL), (3, NULL)').run();
   await env.DB.prepare("UPDATE teams SET deleted_at = datetime('now') WHERE id = 3").run();
   await env.DB.prepare(
@@ -64,6 +77,13 @@ describe('loadSessionUser', () => {
     expect(await loadSessionUser(env.DB, 5, 0)).toBeNull(); // inactive
     expect(await loadSessionUser(env.DB, 6, 0)).toBeNull(); // soft-deleted
     expect(await loadSessionUser(env.DB, 999, 0)).toBeNull(); // missing
+  });
+
+  it('rejects provisional, merged, auth-disabled, and redirected identities', async () => {
+    expect(await loadSessionUser(env.DB, 7, 0)).toBeNull();
+    expect(await loadSessionUser(env.DB, 8, 1)).toBeNull();
+    expect(await loadSessionUser(env.DB, 9, 0)).toBeNull();
+    expect(await loadSessionUser(env.DB, 10, 0)).toBeNull();
   });
 
   it('collects member ∪ leader team ids, excluding soft-deleted teams', async () => {

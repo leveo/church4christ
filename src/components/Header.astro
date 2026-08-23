@@ -9,6 +9,9 @@ import { mediaPath } from '../lib/mediaRef';
 import { groupNavLinks, resolveDefaultNav, resolveNav } from '../lib/nav';
 import LocaleSwitch from './LocaleSwitch.astro';
 
+interface Props { privateMetadata?: boolean }
+const { privateMetadata = false } = Astro.props;
+
 const locale = Astro.locals.locale;
 const home = localePath(locale, '/');
 const give = localePath(locale, '/give');
@@ -78,7 +81,7 @@ const groups = groupNavLinks(links, locale);
           </button>
         )
       }
-      <LocaleSwitch />
+      {!privateMetadata && <LocaleSwitch />}
       <a
         href={give}
         class="px-4 py-2 rounded-full bg-accent text-on-accent font-semibold hover:bg-accent-hover"
@@ -137,7 +140,7 @@ const groups = groupNavLinks(links, locale);
               </button>
             )
           }
-          <LocaleSwitch />
+          {!privateMetadata && <LocaleSwitch />}
         </div>
       </div>
     </nav>

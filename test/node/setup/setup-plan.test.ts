@@ -127,6 +127,16 @@ describe('buildSetupPlan', () => {
   });
 
   it.each([
+    'church.example',
+    '/church',
+    '//church.example',
+    'http://church.example',
+  ])('requires an absolute HTTPS APP_ORIGIN in deploy mode: %s', (appOrigin) => {
+    const deploy = { ...base, mode: 'deploy', preset: 'website', emailFrom: 'serve@example.com' };
+    expect(() => buildSetupPlan({ ...deploy, appOrigin }, raw)).toThrow(/app-origin.*HTTPS origin/i);
+  });
+
+  it.each([
     [{ mode: 'remote' }, /mode.*local.*deploy/i],
     [{ locale: 'fr' }, /locale.*en.*zh/i],
     [{ siteSlug: 'Grace_Church' }, /site-slug.*kebab/i],

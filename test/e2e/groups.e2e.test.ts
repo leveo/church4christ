@@ -285,27 +285,16 @@ describe('POST /en/signup — anti-enumeration', () => {
     return row?.n ?? 0;
   }
 
-  it('a brand-new email creates a person row and shows the neutral confirmation', async () => {
+  it('a brand-new email creates no person before OTP proof and shows the neutral code prompt', async () => {
     const email = 'new.visitor@example.com';
     expect(await personCount(email)).toBe(0);
 
     const res = await post('/en/signup', `first_name=New&last_name=Visitor&email=${encodeURIComponent(email)}`);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('Check your email');
+    expect(body).toContain('Enter your verification code');
 
-    expect(await personCount(email)).toBe(1);
-    const row = await env.DB
-      .prepare(`SELECT display_name, role, active, membership_status, lang FROM people WHERE email = ?`)
-      .bind(email)
-      .first<{ display_name: string; role: string; active: number; membership_status: string; lang: string }>();
-    expect(row).toEqual({
-      display_name: 'New Visitor',
-      role: 'member',
-      active: 1,
-      membership_status: 'visitor',
-      lang: 'en',
-    });
+    expect(await personCount(email)).toBe(0);
   });
 
   it('an existing email shows the identical neutral confirmation and creates no duplicate row', async () => {
@@ -315,7 +304,7 @@ describe('POST /en/signup — anti-enumeration', () => {
     const res = await post('/en/signup', `first_name=Ben&last_name=Wu&email=${encodeURIComponent(email)}`);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('Check your email');
+    expect(body).toContain('Enter your verification code');
 
     expect(await personCount(email)).toBe(1); // no duplicate
   });
@@ -328,7 +317,7 @@ describe('POST /en/signup — anti-enumeration', () => {
     );
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('Check your email');
+    expect(body).toContain('Enter your verification code');
     expect(await personCount(email)).toBe(0);
   });
 });

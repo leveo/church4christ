@@ -23,19 +23,26 @@ describe('screenshot-only session minting', () => {
     );
     await expect(verifySession(SECRET, token)).resolves.toEqual({
       personId: 4,
-      email: 'grace.lin@example.com',
       epoch: 0,
+      assurance: {
+        schemaVersion: 2,
+        sessionId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+        authMethod: 'screenshot',
+        authTime: nowEpochSeconds,
+        stepUpTime: null,
+      },
     });
     const [, payload] = token.split('.');
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     expect(claims.exp - claims.iat).toBe(5 * 60);
+    expect(claims).not.toHaveProperty('email');
   });
 
-  it('rejects ambiguous identities and never logs or persists the secret or token', async () => {
+  it('rejects invalid opaque identities and never logs or persists the secret or token', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const invalid = [
       { personId: 0, email: 'sarah.johnson@example.com', sessionEpoch: 0 },
-      { personId: 3, email: 'Sarah.Johnson@example.com', sessionEpoch: 0 },
+      { personId: 3.5, email: 'sarah.johnson@example.com', sessionEpoch: 0 },
       { personId: 3, email: 'sarah.johnson@example.com', sessionEpoch: -1 },
     ];
     for (const identity of invalid) {
@@ -61,8 +68,8 @@ describe('screenshot-only session minting', () => {
 
     await expect(verifySession(regularSecret, regular)).resolves.toEqual({
       personId: 3,
-      email: identity.email,
       epoch: 0,
+      assurance: expect.objectContaining({ schemaVersion: 2, authMethod: 'legacy' }),
     });
 
     const user = { id: 3, email: identity.email, displayName: 'Sarah Johnson' };
@@ -73,17 +80,17 @@ describe('screenshot-only session minting', () => {
     })).resolves.toBe(user);
   });
 
-  it('rejects a mismatched Person email and a stale session epoch through executable loading', async () => {
+  it('ignores stale profile email in the opaque token flow and rejects a stale session epoch', async () => {
     const screenshot = await mintScreenshotSession(
       { SCREENSHOT_SESSION_SECRET: SECRET },
       { personId: 4, email: 'grace.lin@example.com', sessionEpoch: 0 },
     );
-    const wrongEmail = { id: 4, email: 'sarah.johnson@example.com' };
+    const renamedUser = { id: 4, email: 'new-current-email@example.com' };
     await expect(loadScreenshotSessionUser({
       jwt: screenshot,
       secret: SECRET,
-      loadUser: async () => wrongEmail,
-    })).resolves.toBeNull();
+      loadUser: async () => renamedUser,
+    })).resolves.toBe(renamedUser);
 
     let requestedEpoch: number | undefined;
     await expect(loadScreenshotSessionUser({

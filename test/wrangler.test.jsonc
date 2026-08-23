@@ -11,6 +11,16 @@
   "vars": {
     "SESSION_SECRET": "test-secret-at-least-32-characters-long",
     "NEWCOMER_RATE_LIMIT_SECRET": "test-newcomer-rate-limit-secret-at-least-32-characters",
+    "IDENTITY_VERIFICATION_SECRET": "test-identity-verification-secret-at-least-thirty-two-characters",
+    "IDENTITY_SOURCE_KEY_SECRET": "test-stable-identity-source-key-secret-at-least-thirty-two-characters",
+    "IDENTITY_SOURCE_KEY_ID": "v1",
+    "IDENTITY_RECOVERY_KEY_SECRET": "test-stable-identity-recovery-key-secret-at-least-thirty-two-characters",
+    "IDENTITY_RECOVERY_KEY_ID": "v1",
+    "IDENTITY_RECOVERY_COOLING_HOURS": "24",
+    "PLANNING_CENTER_CLIENT_ID": "planning-center-test-client",
+    "PLANNING_CENTER_SECRET": "planning-center-test-secret",
+    "PLANNING_CENTER_WEBHOOK_SECRET": "planning-center-test-webhook-secret",
+    "PLANNING_CENTER_USER_AGENT": "Church CMS <https://church.example/contact>",
     "EMAIL_DEV_LOG": "1",
     "APP_ORIGIN": "http://localhost"
   },

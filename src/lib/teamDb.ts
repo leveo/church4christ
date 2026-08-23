@@ -14,7 +14,6 @@
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
 import type { AppDb } from './appDb';
-import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
 import { listPlans, type PlanListRow } from './planDb';
@@ -479,46 +478,6 @@ export async function createApplication(
     )
     .bind(personId, teamId, positionId, message)
     .run();
-}
-
-/**
- * Signed-out apply support: the person for `email` (stored lowercased), or a
- * minimal new one (display_name = name, role 'member', active 1). An existing
- * row — even a soft-deleted one — is returned as-is: applying must never
- * resurrect or overwrite an account. The UNIQUE(email) race between the SELECT
- * and INSERT resolves by re-reading the winner's row.
- */
-export async function findOrCreatePersonByEmail(
-  db: AppDb,
-  email: string,
-  name: string,
-  phone: string | null,
-): Promise<number> {
-  const normalized = email.trim().toLowerCase();
-  const existing = await db
-    .prepare(`SELECT id FROM people WHERE email = ?`)
-    .bind(normalized)
-    .first<{ id: number }>();
-  if (existing) return existing.id;
-  try {
-    const created = await db
-      .prepare(
-        `INSERT INTO people (display_name, first_name, last_name, email, phone, role, active)
-         VALUES (?1, '', '', ?2, ?3, 'member', 1) RETURNING id`,
-      )
-      .bind(name, normalized, phone)
-      .first<{ id: number }>();
-    return created!.id;
-  } catch (e) {
-    if (isUniqueViolation(e)) {
-      const winner = await db
-        .prepare(`SELECT id FROM people WHERE email = ?`)
-        .bind(normalized)
-        .first<{ id: number }>();
-      if (winner) return winner.id;
-    }
-    throw e;
-  }
 }
 
 /**

@@ -1,88 +1,122 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
-import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
 import { consumeToken, peekToken } from '../../lib/auth';
 import { getPersonById } from '../../lib/db';
+import { loadSessionUser } from '../../lib/currentUser';
+import { completeSigninLink } from '../../lib/identityAccount';
+import { peekEmailLinkChallenge, type IdentityAuthEnv } from '../../lib/identityAuth';
+import { t } from '../../lib/i18n';
+import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
 import { getEnabledModules } from '../../lib/modules';
 import { mintSession, sessionCookie } from '../../lib/session';
 
-// Two-step consumption: GET only *peeks* (mail scanners prefetch links and would
-// otherwise burn a single-use token); the explicit POST consumes and signs in.
-// This route is locale-free, so the page renders bilingually (en + zh stacked).
 const raw = Astro.params.token ?? '';
-const vars = env as unknown as { SESSION_SECRET?: string };
-const db = Astro.locals.db;
+Astro.response.headers.set('cache-control', 'no-store');
+Astro.response.headers.set('referrer-policy', 'no-referrer');
+Astro.response.headers.set('x-content-type-options', 'nosniff');
+const requestedCampus = Astro.url.searchParams.get('campus');
+const match = raw.match(/^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{20,200})$/u);
+const campus = requestedCampus && Astro.locals.campusMode === 'campus' && Astro.locals.campus?.slug === requestedCampus
+  ? Astro.locals.campus
+  : null;
+const modern = match && campus ? { publicId: match[1], token: match[2], campus } : null;
+const vars = env as unknown as IdentityAuthEnv & { SESSION_SECRET?: string };
+const db = Astro.locals.rawDb;
 let state: 'confirm' | 'error' = 'error';
 
+async function authenticatedResponse(personId: number, sessionEpoch: number): Promise<Response | null> {
+  if (!vars.SESSION_SECRET) return null;
+  const person = await getPersonById(db, personId);
+  if (!person || person.active !== 1) return null;
+  const user = await loadSessionUser(db, person.id, sessionEpoch);
+  if (!user) return null;
+  const jwt = await mintSession(vars.SESSION_SECRET, {
+    id: person.id,
+    sessionEpoch,
+  }, { authMethod: 'magic_link' });
+  const target = user.lang ?? DEFAULT_LOCALE;
+  const modules = Astro.locals.modules ?? (await getEnabledModules(Astro.locals.db, Astro.locals.dbBackend));
+  const landing = modules.has('portal') ? 'my/opportunities' : modules.has('serve') ? 'my' : 'profile';
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/${target}/${landing}`,
+      'set-cookie': sessionCookie(jwt, import.meta.env.PROD),
+    },
+  });
+}
+
 if (Astro.request.method === 'POST') {
-  const consumed = vars.SESSION_SECRET ? await consumeToken(db, raw, 'login') : null;
-  const person = consumed ? await getPersonById(db, consumed.person_id) : null;
-  if (person && person.active === 1 && vars.SESSION_SECRET) {
-    const jwt = await mintSession(vars.SESSION_SECRET, {
-      id: person.id,
-      email: person.email,
-      sessionEpoch: person.session_epoch,
+  if (modern && vars.SESSION_SECRET) {
+    const result = await completeSigninLink(db, vars, {
+      campusId: modern.campus.id,
+      publicId: modern.publicId,
+      token: modern.token,
+      source: 'web',
     });
-    const target = person.lang === 'en' || person.lang === 'zh' ? person.lang : DEFAULT_LOCALE;
-    // Module-aware landing: the portal opportunity hub is the member landing
-    // page when Portal is enabled. `/my` remains serve-owned, so fall back to
-    // profile when neither module is available. The middleware sets
-    // locals.modules on every request; fall back to the lib if it is absent.
-    const modules = Astro.locals.modules ?? (await getEnabledModules(db, Astro.locals.dbBackend));
-    const landing = modules.has('portal') ? 'my/opportunities' : modules.has('serve') ? 'my' : 'profile';
-    return new Response(null, {
-      status: 303,
-      headers: {
-        location: `/${target}/${landing}`,
-        'set-cookie': sessionCookie(jwt, import.meta.env.PROD),
-      },
-    });
+    if (result.status === 'authenticated') {
+      const response = await authenticatedResponse(result.personId, result.sessionEpoch);
+      if (response) return response;
+    }
+  } else if (!match) {
+    // Legacy raw-token grace path: old emails remain usable until their normal
+    // expiry, but successful consumption still mints the opaque v2 session.
+    const consumed = vars.SESSION_SECRET ? await consumeToken(db, raw, 'login') : null;
+    if (consumed) {
+      const epoch = consumed.expected_session_epoch;
+      if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 0) return Astro.redirect('/en/signin', 303);
+      const response = await authenticatedResponse(consumed.person_id, epoch);
+      if (response) return response;
+    }
   }
-  // fall through to the error state
-} else {
+} else if (modern) {
+  try {
+    const peeked = await peekEmailLinkChallenge(db, vars, {
+      campusId: modern.campus.id,
+      publicId: modern.publicId,
+      token: modern.token,
+      purpose: 'login',
+      source: 'web',
+    });
+    state = peeked.ok ? 'confirm' : 'error';
+  } catch {
+    state = 'error';
+  }
+} else if (!match) {
   state = (await peekToken(db, raw, 'login')) !== null ? 'confirm' : 'error';
 }
 
 const title = LOCALES.map((l) => t(l, state === 'confirm' ? 'auth.confirm.title' : 'auth.error.title')).join(' · ');
 ---
-<Base title={title} locale={DEFAULT_LOCALE} noindex>
+<Base title={title} locale={DEFAULT_LOCALE} noindex privateMetadata>
   <section class="container-narrow py-16 text-center">
-    {
-      state === 'confirm' ? (
-        <>
-          {LOCALES.map((l) => (
-            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.confirm.title')}</h1>
-              <p class="mt-2 text-ink-muted">{t(l, 'auth.confirm.body', { site: t(l, 'site.name') })}</p>
-            </div>
-          ))}
-          <form method="post" class="mt-4">
-            <button
-              type="submit"
-              class="rounded-full bg-primary text-on-primary font-semibold px-8 py-3 hover:bg-primary-hover"
-            >
-              {LOCALES.map((l) => t(l, 'auth.confirm.button')).join(' / ')}
-            </button>
-          </form>
-        </>
-      ) : (
-        <>
-          {LOCALES.map((l) => (
-            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.error.title')}</h1>
-              <p class="mt-2 text-ink-muted">{t(l, 'auth.error.body')}</p>
-            </div>
-          ))}
-          <a
-            href={`/${DEFAULT_LOCALE}/signin`}
-            class="inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
-          >
-            {LOCALES.map((l) => t(l, 'auth.error.retry')).join(' / ')}
-          </a>
-        </>
-      )
-    }
+    {state === 'confirm' ? (
+      <>
+        {LOCALES.map((l) => (
+          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.confirm.title')}</h1>
+            <p class="mt-2 text-ink-muted">{t(l, 'auth.confirm.body', { site: t(l, 'site.name') })}</p>
+          </div>
+        ))}
+        <form method="post" class="mt-4">
+          <button type="submit" class="rounded-full bg-primary px-8 py-3 font-semibold text-on-primary hover:bg-primary-hover">
+            {LOCALES.map((l) => t(l, 'auth.confirm.button')).join(' / ')}
+          </button>
+        </form>
+      </>
+    ) : (
+      <>
+        {LOCALES.map((l) => (
+          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
+            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.error.title')}</h1>
+            <p class="mt-2 text-ink-muted">{t(l, 'auth.error.body')}</p>
+          </div>
+        ))}
+        <a href={`/${DEFAULT_LOCALE}/signin`} class="inline-block rounded-full bg-primary px-6 py-3 font-semibold text-on-primary hover:bg-primary-hover">
+          {LOCALES.map((l) => t(l, 'auth.error.retry')).join(' / ')}
+        </a>
+      </>
+    )}
   </section>
 </Base>

@@ -492,6 +492,60 @@ npx wrangler secret put NEWCOMER_RATE_LIMIT_SECRET
 Rotate this secret if it is ever exposed; changing it signs everyone out. See
 [`SECURITY.md`](../SECURITY.md).
 
+### Stable identity-source key
+
+Giving, Registration, Groups, Teams, Newcomer, import, and Planning Center source
+record identifiers use a separate HMAC secret so routine OTP or magic-link key rotation
+cannot make an existing record unreachable and create a duplicate. Guided setup creates
+`IDENTITY_SOURCE_KEY_SECRET` as a Worker secret and sets `IDENTITY_SOURCE_KEY_ID=v1`.
+The end-to-end ownership, OTP, review, recovery, business-continuation, and Planning Center
+boundaries are described in [Member identity](features/member-identity.md).
+For a manual installation, run:
+
+```bash
+npx wrangler secret put IDENTITY_VERIFICATION_SECRET
+npx wrangler secret put IDENTITY_SOURCE_KEY_SECRET
+npx wrangler secret put IDENTITY_RECOVERY_KEY_SECRET
+```
+
+`IDENTITY_SOURCE_KEY_SECRET` and `IDENTITY_SOURCE_KEY_ID` are pinned in
+`identity_source_key_config` with a non-secret verification tag before the first source
+record is accepted. Do not rotate either value in place. Runtime source lookup and the
+doctor canary fail closed if the binding differs from the database pin, before any lookup
+or insert occurs. A future rotation must ship a reviewed transactional rewrap migration
+that retains the old key until every source and observation digest has moved to the new
+key id; simply replacing the Worker secret is not a rotation procedure.
+
+### Stable identity-recovery key
+
+High-risk recovery veto tokens and encrypted security-notification payloads use
+`IDENTITY_RECOVERY_KEY_SECRET` with `IDENTITY_RECOVERY_KEY_ID=v1`, independently of the
+rotatable `IDENTITY_VERIFICATION_SECRET`. The runtime pins the key id and a non-secret
+verification tag in `identity_recovery_key_config` before it creates or drains recovery
+mail. A mismatched or missing binding fails closed before an outbox row is claimed, so it
+must never be replaced in place. Restore the pinned key if configuration drifts; a real
+rotation requires a reviewed transactional migration that re-encrypts every unsent payload
+and preserves old-key verification for already-delivered veto links.
+
+Recovery request, first-approval, and completion notices are enqueued in the same database
+transaction as their state change. Delivery uses retryable leases and immutable receipts.
+The Worker's bounded hourly scheduled sweep retries pending/failed rows and expired leases;
+page traffic and `waitUntil` availability are not liveness requirements. Treat an invalid
+recovery-key doctor/health result as a deployment blocker, especially because first-approval
+mail carries the fraud-veto link.
+
+Before production traffic, verify that OTP email delivery works through the configured sender
+and that repeated requests are rate-limited without exposing whether a Person exists. Do not
+seed verified owners, source attachments, recovery approvals, or merge approvals with ad-hoc
+SQL. These records are version-bound security evidence and must be created through the
+application workflows. Migration 0033 provides sealed merge preview/approval controls;
+0036 adds the closed-handler execution and separately approved 24-hour rollback path.
+Before enabling operational merges, review the safeguards and irreversible boundaries in the
+[feature guide](features/member-identity.md#0036%E5%90%88%E5%B9%B6%E6%89%A7%E8%A1%8C%E4%B8%8E-24-%E5%B0%8F%E6%97%B6%E5%9B%9E%E6%BB%9A),
+confirm at least two active super administrators can receive real step-up email, and rehearse
+one non-production merge plus rollback. Never restore credentials, sessions, revocations, or
+privileges from the rollback journal.
+
 ## 5. Set up email
 
 Church4Christ sends transactional email (sign-in magic links, scheduling requests, the
@@ -552,7 +606,55 @@ the `npm run dev` terminal instead. Click it and you are in as an admin. From th
 your church's name, address, service times, and theme in **Settings**, and start adding
 content.
 
-## 9. (Optional, D1 only) Enable nightly backups
+## 9. (Optional) Configure Planning Center synchronization
+
+Planning Center uses the official two-field Personal Access Token through Worker secrets:
+
+```bash
+npx wrangler secret put PLANNING_CENTER_CLIENT_ID
+npx wrangler secret put PLANNING_CENTER_SECRET
+npx wrangler secret put PLANNING_CENTER_WEBHOOK_SECRET
+npx wrangler secret put PLANNING_CENTER_USER_AGENT
+```
+
+The User-Agent must identify the application and include a contact URL or email, for
+example `Church CMS (https://church.example/contact)`. The webhook secret must contain
+at least 16 non-space characters. After setting the secrets, a
+super-admin with a recent email step-up configures an active campus and numeric
+organization ID at **Admin → People → Identity → Planning Center**. The application
+performs an authoritative `GET /people/v2` Organization check before creating or
+resuming a connection, so a PAT/org/campus mismatch fails closed; connections can be
+paused there without exposing credentials. An organization is pinned to one current
+campus connection. To replace it, pause and permanently disable the old connection,
+then create the replacement; the old connection ID and append-only evidence remain for
+audit, while cursors and mappings are never reused across organizations. The database
+stores only the fixed official API URL/organization and redacted job status; it never
+stores credentials, webhook bodies, or contact fields in receipts. Configure the webhook
+endpoint as
+`/api/planning-center/webhook/<connection-id>` and use the `X-PCO-Webhooks-Authenticity`
+HMAC header. The hourly Worker schedule enqueues and retries authoritative sync work
+even when an incoming request has no `waitUntil` context; a 200 webhook response means
+the receipt and durable jobs were committed together. Super-admin manual sync requires
+a recent email step-up. Both hourly and manual enqueue are bounded and fair across current
+connections. Sync jobs use durable leases and persisted retry times; official rate headers
+and `Retry-After` delay the next attempt instead of causing a tight retry loop.
+
+Planning Center person identifiers are namespaced by organization. If an identity merge
+preview references either person's PCO mappings, the exact opaque mapping set is sealed
+with the preview. The database requires high-risk two-person approval plus a bound
+`external_identity` decision. Any later provider remap makes approval or execution stale,
+and mappings cannot be inserted, transferred, updated, or deleted while that merge is
+executing; the operator must review a fresh resolution case instead. Planning Center Person
+Merger events are evidence only: synchronization never creates a local Person or performs a
+local merge.
+
+Repository tests do not call a live Planning Center tenant. Before production enablement,
+use staging to verify the target organization's read-only credentials, Organization check,
+pagination, rate-limit/`Retry-After` behavior, webhook HMAC and retries, and representative
+People/Person Merger events. Do not enable the production connection until this check is
+recorded. Local fixtures and database tests do not close this external verification gap.
+
+## 10. (Optional, D1 only) Enable nightly backups
 
 The nightly D1 → R2 backup is off until you configure it. To turn it on:
 
@@ -571,7 +673,7 @@ The nightly D1 → R2 backup is off until you configure it. To turn it on:
 The backup file contains **member data** (names, emails, phone numbers). Keep the export
 token scoped to the minimum and treat the bucket as private — see [`SECURITY.md`](../SECURITY.md).
 
-## 10. (Optional) Put Cloudflare Access in front of `/admin`
+## 11. (Optional) Put Cloudflare Access in front of `/admin`
 
 For an extra layer, you can require Cloudflare **Access** (Zero Trust) sign-in before anyone
 can even reach `/admin`, on top of the app's own magic-link auth. This is defense in depth

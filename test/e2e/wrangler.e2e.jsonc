@@ -5,7 +5,9 @@
   // env: an isolated local D1 (never the real database_id), the MEDIA R2 bucket,
   // and the vars/secrets the worker needs — SESSION_SECRET (session JWTs),
   // APP_ORIGIN (also the SELF.fetch origin so same-origin POSTs clear CSRF),
-  // EMAIL_DEV_LOG=1 (magic-link mail goes to the console, never a provider).
+  // EMAIL_E2E_SINK=1 gives the prebuilt e2e-mode worker a bodyless receipt;
+  // EMAIL_DEV_LOG=1 supports test files that directly import source functions
+  // under Vitest DEV. The normal production bundle excludes both branches.
   "name": "church4christ-e2e",
   "main": "../../dist/server/entry.mjs",
   "compatibility_date": "2026-06-01",
@@ -13,7 +15,17 @@
   "vars": {
     "SESSION_SECRET": "e2e-test-secret-at-least-32-characters-long",
     "NEWCOMER_RATE_LIMIT_SECRET": "e2e-newcomer-rate-limit-secret-at-least-32-characters",
+    "IDENTITY_VERIFICATION_SECRET": "e2e-identity-verification-secret-at-least-thirty-two-characters",
+    "IDENTITY_SOURCE_KEY_SECRET": "e2e-stable-identity-source-key-secret-at-least-thirty-two-characters",
+    "IDENTITY_SOURCE_KEY_ID": "v1",
+    "IDENTITY_RECOVERY_KEY_SECRET": "e2e-stable-identity-recovery-key-secret-at-least-thirty-two-characters",
+    "IDENTITY_RECOVERY_KEY_ID": "v1",
+    "PLANNING_CENTER_CLIENT_ID": "e2e_planning_center_client",
+    "PLANNING_CENTER_SECRET": "e2e_planning_center_secret",
+    "PLANNING_CENTER_WEBHOOK_SECRET": "e2e-planning-center-webhook-secret-at-least-thirty-two-characters",
+    "PLANNING_CENTER_USER_AGENT": "Church CMS (https://church.example/contact)",
     "APP_ORIGIN": "https://church.example",
+    "EMAIL_E2E_SINK": "1",
     "EMAIL_DEV_LOG": "1",
     "EMAIL_FROM": "serve@church.example"
   },

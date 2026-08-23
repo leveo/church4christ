@@ -241,62 +241,19 @@ export interface InlineMemberInput {
 }
 
 /**
- * Add a member from the inline "add member" form. With an email, reuse the
- * existing (live) people row for that lowercased email, else create one
- * (role 'member', membership_status 'visitor') — savePerson-style, with the
- * pre-check ↔ INSERT race mapped via isUniqueViolation — then link it. Without an
- * email, insert a name-only member row (person_id NULL), the household-dependent
- * precedent. Returns the new/existing member id.
+ * Add a name-only member from the inline form. Contact-bearing rows must go
+ * through the identity observation gateway; raw email never selects/creates a
+ * person here.
  */
 export async function addMemberInline(db: AppDb, groupId: number, input: InlineMemberInput): Promise<number> {
   const displayName = [input.firstName, input.lastName].map((s) => s.trim()).filter(Boolean).join(' ');
   const email = input.email?.trim().toLowerCase() || null;
-  if (!email) {
-    const created = await db
-      .prepare(`INSERT INTO group_members (group_id, person_id, display_name, phone) VALUES (?1, NULL, ?2, ?3) RETURNING id`)
-      .bind(groupId, displayName, input.phone)
-      .first<{ id: number }>();
-    return created!.id;
-  }
-  const personId = await reuseOrCreatePerson(db, {
-    email,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    displayName: displayName || email,
-    phone: input.phone,
-  });
-  return addMemberByPerson(db, groupId, personId);
-}
-
-async function reuseOrCreatePerson(
-  db: AppDb,
-  p: { email: string; firstName: string; lastName: string; displayName: string; phone: string | null },
-): Promise<number> {
-  const existing = await db
-    .prepare(`SELECT id FROM people WHERE email = ?1 AND deleted_at IS NULL`)
-    .bind(p.email)
+  if (email || input.phone) throw new Error('group_identity_gateway_required');
+  const created = await db
+    .prepare(`INSERT INTO group_members (group_id, person_id, display_name, phone) VALUES (?1, NULL, ?2, ?3) RETURNING id`)
+    .bind(groupId, displayName, input.phone)
     .first<{ id: number }>();
-  if (existing) return existing.id;
-  try {
-    const created = await db
-      .prepare(
-        `INSERT INTO people (first_name, last_name, display_name, email, phone, role, active, membership_status)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'member', 1, 'visitor') RETURNING id`,
-      )
-      .bind(p.firstName, p.lastName, p.displayName, p.email, p.phone)
-      .first<{ id: number }>();
-    return created!.id;
-  } catch (e) {
-    // A live person for this email was created concurrently — adopt it.
-    if (isUniqueViolation(e)) {
-      const raced = await db
-        .prepare(`SELECT id FROM people WHERE email = ?1 AND deleted_at IS NULL`)
-        .bind(p.email)
-        .first<{ id: number }>();
-      if (raced) return raced.id;
-    }
-    throw e;
-  }
+  return created!.id;
 }
 
 /** Remove a member (set removed_at). Returns true when an active row was removed. */

@@ -3,9 +3,9 @@ import peoplePageSource from '../src/pages/admin/people/[id].astro?raw';
 
 describe('Newcomers scoped grant management source boundaries', () => {
   it('keeps the flags mutation and form super-admin-only', () => {
-    const postGuard = peoplePageSource.indexOf("if (!isSuper) return new Response(null, { status: 403 })");
+    const postGuard = peoplePageSource.indexOf("if (!canSensitivePeopleAction) return new Response(null, { status: 403 })");
     const flagWrite = peoplePageSource.indexOf('await setPersonFlags(', postGuard);
-    const formGate = peoplePageSource.indexOf('{isSuper && (');
+    const formGate = peoplePageSource.indexOf('{canSensitivePeopleAction && (');
     const flagsForm = peoplePageSource.indexOf('name="action" value="flags"', formGate);
     expect(postGuard).toBeGreaterThan(-1);
     expect(flagWrite).toBeGreaterThan(postGuard);

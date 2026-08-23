@@ -72,7 +72,7 @@ describe.skipIf(!hasPg)('cross-backend parity (Postgres)', () => {
       const raw = (issued as { raw: string }).raw;
 
       const first = await consumeToken(db, raw, 'login');
-      expect(first).toEqual({ person_id: 1, assignment_id: null });
+      expect(first).toEqual({ person_id: 1, assignment_id: null, expected_session_epoch: 0 });
       // Second consume must fail — used_at is now set (the WHERE clause is the guard).
       expect(await consumeToken(db, raw, 'login')).toBeNull();
     });

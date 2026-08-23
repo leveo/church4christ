@@ -77,7 +77,14 @@ export async function loadSessionUser(
   const person = await db
     .prepare(
       `SELECT ${PERSON_AUTH_COLS} FROM people
-       WHERE id = ? AND active = 1 AND deleted_at IS NULL AND session_epoch = ?`,
+       WHERE id = ? AND active = 1 AND deleted_at IS NULL AND session_epoch = ?
+         AND identity_state = 'active'
+         AND auth_disabled_at IS NULL
+         AND merged_into_person_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM person_merge_redirects redirects
+           WHERE redirects.loser_person_id = people.id
+         )`,
     )
     .bind(personId, epoch)
     .first<PersonAuthRow>();
@@ -94,7 +101,14 @@ export async function loadSessionUserByEmail(db: AppDb, email: string): Promise<
   const person = await db
     .prepare(
       `SELECT ${PERSON_AUTH_COLS} FROM people
-       WHERE email = ? AND active = 1 AND deleted_at IS NULL`,
+       WHERE email = ? AND active = 1 AND deleted_at IS NULL
+         AND identity_state = 'active'
+         AND auth_disabled_at IS NULL
+         AND merged_into_person_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM person_merge_redirects redirects
+           WHERE redirects.loser_person_id = people.id
+         )`,
     )
     .bind(email.trim().toLowerCase())
     .first<PersonAuthRow>();

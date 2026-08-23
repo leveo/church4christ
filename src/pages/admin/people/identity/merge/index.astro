@@ -1,0 +1,173 @@
+---
+import Admin from '../../../../../layouts/Admin.astro';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btnSecondary, card, noticeErr, td, th } from '../../../../../lib/adminUi';
+import { t } from '../../../../../lib/i18n';
+import { createIdentityMergeOperation } from '../../../../../lib/identityMergeExecution';
+import type { Locale } from '../../../../../lib/locales';
+
+const user = Astro.locals.user!;
+if (!user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.rawDb;
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
+let createBlocked = false;
+const formId = (form: FormData, name: string) => {
+  const value = String(form.get(name) ?? '').trim();
+  const parsed = Number(value);
+  if (!/^\d{1,10}$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2_147_483_647) {
+    throw new Error('identity_merge_form_invalid');
+  }
+  return parsed;
+};
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    if (String(form.get('action') ?? '') !== 'create') throw new Error('identity_merge_form_invalid');
+    const result = await createIdentityMergeOperation(db, {
+      backend: Astro.locals.dbBackend,
+      caseId: formId(form, 'caseId'),
+      loserPersonId: formId(form, 'loserPersonId'),
+      canonicalPersonId: formId(form, 'canonicalPersonId'),
+      requestedByPersonId: user.id,
+      scope: campus ? { kind: 'campus', campusId: campus.id } : { kind: 'global' },
+    });
+    return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(result.operationId)}`, 303);
+  } catch {
+    createBlocked = true;
+  }
+}
+
+type MergeCaseRow = {
+  id: number;
+  campus_id: number;
+  version: number;
+  risk: string;
+  score: number;
+  person_a_id: number;
+  person_a_name: string;
+  person_b_id: number;
+  person_b_name: string;
+};
+type MergeOperationRow = {
+  operation_id: string;
+  resolution_case_id: number;
+  campus_id: number | null;
+  scope_kind: 'campus' | 'global';
+  loser_person_id: number;
+  loser_name: string;
+  canonical_person_id: number;
+  canonical_name: string;
+  risk: 'normal' | 'high' | 'critical';
+  state: string;
+  version: number;
+  required_approvals: number;
+  approval_count: number;
+  decision_count: number;
+  blocker_count: number;
+};
+
+const caseSql = `SELECT c.id,c.campus_id,c.version,c.risk,c.score,c.person_a_id,a.display_name person_a_name,
+  c.person_b_id,b.display_name person_b_name
+  FROM identity_resolution_cases c JOIN people a ON a.id=c.person_a_id JOIN people b ON b.id=c.person_b_id
+  WHERE c.state='same_person'${campus ? ' AND c.campus_id=?1' : ''}
+  ORDER BY c.risk DESC,c.score DESC,c.id DESC LIMIT 100`;
+const cases = (campus
+  ? await db.prepare(caseSql).bind(campus.id).all<MergeCaseRow>()
+  : await db.prepare(caseSql).all<MergeCaseRow>()).results;
+
+const operationSql = `SELECT op.operation_id,op.resolution_case_id,op.campus_id,op.scope_kind,
+  op.loser_person_id,loser.display_name loser_name,op.canonical_person_id,canonical.display_name canonical_name,
+  op.risk,op.state,op.version,op.required_approvals,
+  (SELECT count(*) FROM person_merge_approvals approval
+    WHERE approval.operation_id=op.operation_id AND approval.decision='approve') approval_count,
+  (SELECT count(*) FROM person_merge_conflict_decisions decision
+    WHERE decision.operation_id=op.operation_id) decision_count,
+  (SELECT count(*) FROM person_merge_risk_facts fact
+    WHERE fact.operation_id=op.operation_id AND fact.collision_count>0) blocker_count
+  FROM person_merge_operations op JOIN people loser ON loser.id=op.loser_person_id
+  JOIN people canonical ON canonical.id=op.canonical_person_id
+  ${campus ? "WHERE op.scope_kind='campus' AND op.campus_id=?1" : ''}
+  ORDER BY CASE op.state WHEN 'executing' THEN 0 WHEN 'approved' THEN 1 WHEN 'awaiting_approval' THEN 2
+    WHEN 'previewed' THEN 3 ELSE 4 END,op.updated_at DESC,op.operation_id LIMIT 100`;
+const operations = (campus
+  ? await db.prepare(operationSql).bind(campus.id).all<MergeOperationRow>()
+  : await db.prepare(operationSql).all<MergeOperationRow>()).results;
+
+const stateBadge = (state: string) => state === 'completed'
+  ? badgeActive
+  : ['failed', 'cancelled', 'expired'].includes(state) ? badgeInactive : badgeScheduled;
+---
+
+<Admin title={t(lang, 'admin.identityMerge.title')}>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.identityMerge.queue')}</h1>
+      <p class="mt-2 max-w-3xl text-sm text-ink-muted">{t(lang, campus ? 'admin.identityMerge.campusQueueHelp' : 'admin.identityMerge.globalQueueHelp')}</p>
+    </div>
+    <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.identityMerge.backToPeople')}</a>
+  </div>
+
+  <aside class="mt-6 rounded-xl border border-danger bg-danger-soft p-5 text-sm text-danger" role="note">
+    <p class="font-semibold">{t(lang, 'admin.identityMerge.safetyTitle')}</p>
+    <ul class="mt-2 list-disc space-y-1 pl-5">
+      <li>{t(lang, 'admin.identityMerge.twoAdminWarning')}</li>
+      <li>{t(lang, 'admin.identityMerge.privilegeWarning')}</li>
+      <li>{t(lang, 'admin.identityMerge.credentialWarning')}</li>
+    </ul>
+  </aside>
+  {createBlocked && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.identityMerge.createBlocked')}</p>}
+
+  <section class={`mt-6 ${card}`} aria-labelledby="confirmed-cases-heading">
+    <h2 id="confirmed-cases-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.confirmedCases')}</h2>
+    <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.identityMerge.directionHelp')}</p>
+    {cases.length === 0 ? <p class="mt-4 text-ink-muted">{t(lang, 'admin.identityMerge.noConfirmedCases')}</p> : (
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full border-collapse">
+          <thead><tr><th class={th}>{t(lang, 'admin.identityMerge.caseId')}</th><th class={th}>{t(lang, 'admin.identityMerge.campus')}</th><th class={th}>{t(lang, 'admin.identityMerge.personA')}</th><th class={th}>{t(lang, 'admin.identityMerge.personB')}</th><th class={th}>{t(lang, 'admin.identityMerge.caseRisk')}</th><th class={th}>{t(lang, 'admin.identityMerge.direction')}</th></tr></thead>
+          <tbody>{cases.map((item) => <tr class="border-t border-border">
+            <td class={td}>#{item.id} · v{item.version}</td>
+            <td class={td}>{item.campus_id}</td>
+            <td class={td}><span class="font-semibold">#{item.person_a_id}</span> · {item.person_a_name}</td>
+            <td class={td}><span class="font-semibold">#{item.person_b_id}</span> · {item.person_b_name}</td>
+            <td class={td}>{item.risk} · {item.score}</td>
+            <td class={td}>
+              <div class="flex flex-wrap gap-2">
+                <form method="post">
+                  <input type="hidden" name="action" value="create" />
+                  <input type="hidden" name="caseId" value={item.id} />
+                  <input type="hidden" name="canonicalPersonId" value={item.person_a_id} />
+                  <input type="hidden" name="loserPersonId" value={item.person_b_id} />
+                  <button class={btnSecondary} type="submit">{t(lang, 'admin.identityMerge.keepPerson', { id: item.person_a_id })}</button>
+                </form>
+                <form method="post">
+                  <input type="hidden" name="action" value="create" />
+                  <input type="hidden" name="caseId" value={item.id} />
+                  <input type="hidden" name="canonicalPersonId" value={item.person_b_id} />
+                  <input type="hidden" name="loserPersonId" value={item.person_a_id} />
+                  <button class={btnSecondary} type="submit">{t(lang, 'admin.identityMerge.keepPerson', { id: item.person_b_id })}</button>
+                </form>
+              </div>
+            </td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    )}
+  </section>
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-operations-heading">
+    <h2 id="merge-operations-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.operations')}</h2>
+    {operations.length === 0 ? <p class="mt-4 text-ink-muted">{t(lang, 'admin.identityMerge.noOperations')}</p> : (
+      <div class="mt-4 overflow-x-auto"><table class="w-full border-collapse"><thead><tr><th class={th}>{t(lang, 'admin.identityMerge.operation')}</th><th class={th}>{t(lang, 'admin.identityMerge.caseId')}</th><th class={th}>{t(lang, 'admin.identityMerge.direction')}</th><th class={th}>{t(lang, 'admin.identityMerge.scope')}</th><th class={th}>{t(lang, 'admin.identityMerge.risk')}</th><th class={th}>{t(lang, 'admin.identityMerge.progress')}</th></tr></thead>
+        <tbody>{operations.map((operation) => <tr class="border-t border-border">
+          <td class={td}><a class="font-semibold text-primary hover:underline" href={`/admin/people/identity/merge/${encodeURIComponent(operation.operation_id)}`}>{operation.operation_id}</a><div class="mt-1"><span class={`${badge} ${stateBadge(operation.state)}`}>{operation.state}</span> · v{operation.version}</div></td>
+          <td class={td}>#{operation.resolution_case_id}</td>
+          <td class={td}><span class="font-semibold">#{operation.loser_person_id}</span> {operation.loser_name} → <span class="font-semibold">#{operation.canonical_person_id}</span> {operation.canonical_name}</td>
+          <td class={td}>{operation.scope_kind === 'global' ? t(lang, 'admin.identityMerge.global') : `${t(lang, 'admin.identityMerge.campus')} ${operation.campus_id}`}</td>
+          <td class={td}>{operation.risk}{operation.blocker_count > 0 ? ` · ${t(lang, 'admin.identityMerge.blockerCount', { count: operation.blocker_count })}` : ''}</td>
+          <td class={td}>{t(lang, 'admin.identityMerge.approvalProgress', { current: operation.approval_count, required: operation.required_approvals })}<br />{t(lang, 'admin.identityMerge.decisionCount', { count: operation.decision_count })}</td>
+        </tr>)}</tbody>
+      </table></div>
+    )}
+  </section>
+</Admin>

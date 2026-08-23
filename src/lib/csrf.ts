@@ -11,9 +11,9 @@ export function hasSameOriginProvenance(request: Request): boolean {
 
 /**
  * Central mutation-auth classification for the Worker middleware. The exact
- * Stripe POST is server-to-server and authenticates the unmodified body with
- * Stripe's signature inside its endpoint. Every other mutation, including any
- * future webhook, remains on the browser same-origin boundary above.
+ * allowlisted server-to-server POSTs authenticate the unmodified body in
+ * their endpoint. Every other mutation remains on the browser same-origin
+ * boundary above.
  */
 export function hasValidMutationProvenance(request: Request): boolean {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return true;
@@ -22,5 +22,7 @@ export function hasValidMutationProvenance(request: Request): boolean {
     '/api/learning/google/pubsub',
     '/api/learning/canvas/live-events',
   ].includes(new URL(request.url).pathname)) return true;
+  if (request.method === 'POST'
+    && /^\/api\/planning-center\/webhook\/[0-9]{1,32}$/u.test(new URL(request.url).pathname)) return true;
   return hasSameOriginProvenance(request);
 }

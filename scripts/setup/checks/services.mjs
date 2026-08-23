@@ -1,7 +1,10 @@
 import { result } from '../readiness.mjs';
 
-const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog', 'stripeSecretKey', 'stripeWebhookSecret', 'newcomerRateLimitSecret', 'backup']);
+const PRESENCE_KEYS = Object.freeze(['worker', 'r2', 'd1', 'hyperdrive', 'email', 'emailConfigured', 'emailDevLog',
+  'identityVerificationSecretStatus', 'identitySourceKeyStatus', 'identityRecoveryKeyStatus', 'stripeSecretKey', 'stripeWebhookSecret',
+  'newcomerRateLimitSecret', 'backup']);
 const STRIPE_CLASSIFICATIONS = new Set(['test', 'live', 'unknown', 'missing', 'unverifiable']);
+const IDENTITY_SECRET_STATUSES = new Set(['valid', 'missing', 'invalid', 'unverifiable']);
 const SUPPORTED_REQUIRED = new Set(['worker', 'r2', 'hyperdrive', 'email', 'stripe']);
 
 export async function checkServices(options) {
@@ -17,12 +20,16 @@ export async function checkServices(options) {
   delete rawPresence.stripeClassification;
   delete rawPresence.stripeModeTest;
   delete rawPresence.stripeClassificationVerifiable;
-  const supplied = { d1: false, emailConfigured: false, newcomerRateLimitSecret: false, ...rawPresence };
+  const supplied = { d1: false, emailConfigured: false, identityVerificationSecretStatus: 'missing',
+    identitySourceKeyStatus: 'missing', identityRecoveryKeyStatus: 'missing', newcomerRateLimitSecret: false, ...rawPresence };
   const actualPresence = Object.keys(supplied).sort();
   if (actualPresence.join('|') !== [...PRESENCE_KEYS].sort().join('|')) throw new TypeError('services presence fields are invalid');
-  for (const key of PRESENCE_KEYS) {
+  for (const key of PRESENCE_KEYS.filter((key) => !['identityVerificationSecretStatus', 'identitySourceKeyStatus', 'identityRecoveryKeyStatus'].includes(key))) {
     if (typeof supplied[key] !== 'boolean') throw new TypeError(`services presence.${key} must be a boolean`);
   }
+  if (!IDENTITY_SECRET_STATUSES.has(supplied.identityVerificationSecretStatus)) throw new TypeError('services presence.identityVerificationSecretStatus is invalid');
+  if (!IDENTITY_SECRET_STATUSES.has(supplied.identitySourceKeyStatus)) throw new TypeError('services presence.identitySourceKeyStatus is invalid');
+  if (!IDENTITY_SECRET_STATUSES.has(supplied.identityRecoveryKeyStatus)) throw new TypeError('services presence.identityRecoveryKeyStatus is invalid');
   if (!STRIPE_CLASSIFICATIONS.has(stripeClassification)) throw new TypeError('services presence.stripeClassification is invalid');
   if (typeof stripeModeTest !== 'boolean' || typeof stripeClassificationVerifiable !== 'boolean') throw new TypeError('services Stripe mode metadata must be boolean');
   const selected = new Set(options.manifest.modules);
@@ -96,6 +103,36 @@ export async function checkServices(options) {
     checks.push(options.presence.newcomerRateLimitSecret
       ? result('services.newcomer-rate-limit-secret-ok', 'info', 'The Newcomer public rate-limit secret is configured.', 'No action is required.')
       : result('services.newcomer-rate-limit-secret', 'error', 'The Newcomer public rate-limit secret is missing.', 'Configure NEWCOMER_RATE_LIMIT_SECRET before accepting public cards.'));
+  }
+
+  if (supplied.identityVerificationSecretStatus === 'valid') {
+    checks.push(result('services.identity-verification-secret-ok', 'info', 'The identity verification secret is configured for this runtime.', 'No action is required.'));
+  } else if (supplied.identityVerificationSecretStatus === 'invalid') {
+    checks.push(result('services.identity-verification-secret-invalid', 'error', 'The deployed identity verification secret is invalid.', 'Rotate or reconfigure IDENTITY_VERIFICATION_SECRET with a compliant 32–1024 character value, then rerun doctor.'));
+  } else if (supplied.identityVerificationSecretStatus === 'unverifiable') {
+    checks.push(result('services.identity-verification-secret-unverifiable', 'error', 'The remote identity verification secret name exists, but its value cannot be independently verified.', 'Run the bodyless runtime canary and inspect stable source/recovery key pin health; do not rotate IDENTITY_VERIFICATION_SECRET unless its own syntax validation fails.'));
+  } else {
+    checks.push(result('services.identity-verification-secret', 'error', 'The identity verification secret is missing or too short.', 'Configure a 32–1024 character IDENTITY_VERIFICATION_SECRET before allowing member verification.'));
+  }
+
+  if (supplied.identitySourceKeyStatus === 'valid') {
+    checks.push(result('services.identity-source-key-ok', 'info', 'The stable identity source-key configuration is pinned and valid.', 'Do not rotate IDENTITY_SOURCE_KEY_SECRET or IDENTITY_SOURCE_KEY_ID in place.'));
+  } else if (supplied.identitySourceKeyStatus === 'invalid') {
+    checks.push(result('services.identity-source-key-invalid', 'error', 'The deployed source-key configuration is invalid or differs from the database pin.', 'Restore the original IDENTITY_SOURCE_KEY_SECRET and IDENTITY_SOURCE_KEY_ID; rotation requires an explicit transactional rewrap migration.'));
+  } else if (supplied.identitySourceKeyStatus === 'unverifiable') {
+    checks.push(result('services.identity-source-key-unverifiable', 'error', 'The source-key secret exists but its runtime/database pin could not be verified.', 'Run the identity runtime canary and restore the pinned source-key configuration before importing records.'));
+  } else {
+    checks.push(result('services.identity-source-key', 'error', 'The stable identity source-key secret or key id is missing.', 'Configure IDENTITY_SOURCE_KEY_SECRET and IDENTITY_SOURCE_KEY_ID before importing identity sources.'));
+  }
+
+  if (supplied.identityRecoveryKeyStatus === 'valid') {
+    checks.push(result('services.identity-recovery-key-ok', 'info', 'The stable recovery security key is pinned and valid.', 'Do not rotate IDENTITY_RECOVERY_KEY_SECRET or IDENTITY_RECOVERY_KEY_ID in place.'));
+  } else if (supplied.identityRecoveryKeyStatus === 'invalid') {
+    checks.push(result('services.identity-recovery-key-invalid', 'error', 'The deployed recovery security key differs from the database pin.', 'Restore the pinned IDENTITY_RECOVERY_KEY_SECRET and IDENTITY_RECOVERY_KEY_ID; rotation requires an explicit transactional rewrap migration.'));
+  } else if (supplied.identityRecoveryKeyStatus === 'unverifiable') {
+    checks.push(result('services.identity-recovery-key-unverifiable', 'error', 'The recovery security secret exists but its runtime/database pin could not be verified.', 'Run the identity runtime canary and restore the pinned recovery key before accepting or delivering recovery requests.'));
+  } else {
+    checks.push(result('services.identity-recovery-key', 'error', 'The stable recovery security secret or key id is missing.', 'Configure IDENTITY_RECOVERY_KEY_SECRET and IDENTITY_RECOVERY_KEY_ID before accepting identity recovery requests.'));
   }
 
   checks.push(options.presence.backup

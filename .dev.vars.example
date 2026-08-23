@@ -8,6 +8,33 @@ SESSION_SECRET=dev-only-secret-change-me
 # wrangler.jsonc or logs; production uses `npx wrangler secret put`.
 NEWCOMER_RATE_LIMIT_SECRET=dev-only-newcomer-rate-limit-secret-change-me
 
+# HMAC key for member email OTPs, magic links, and opaque identity rate buckets.
+# Use 32–1024 characters. Never put the value in wrangler.jsonc, logs, audit
+# metadata, fixtures, or screenshots; production uses `npx wrangler secret put IDENTITY_VERIFICATION_SECRET`.
+IDENTITY_VERIFICATION_SECRET=dev-only-identity-verification-secret-change-me
+
+# Stable HMAC key for external identity-source record keys. This is deliberately
+# independent from the rotatable OTP/magic-link secret. Never rotate either this
+# value or IDENTITY_SOURCE_KEY_ID in place after importing a source record: the
+# database pin will reject it. A future explicit rewrap migration is required.
+IDENTITY_SOURCE_KEY_SECRET=dev-only-stable-identity-source-key-change-me
+IDENTITY_SOURCE_KEY_ID=v1
+# Stable key for recovery veto links and queued security mail. It is deliberately
+# independent from the rotatable OTP secret. Never rotate this value or its ID
+# in place; use an explicit transactional rewrap migration.
+IDENTITY_RECOVERY_KEY_SECRET=dev-only-stable-identity-recovery-key-change-me
+IDENTITY_RECOVERY_KEY_ID=v1
+# Optional; only 24–168 hours are accepted so deployment config cannot weaken the security floor.
+IDENTITY_RECOVERY_COOLING_HOURS=24
+
+# Planning Center credentials for the single self-hosted organization. The API
+# uses Basic Auth client_id:secret. Keep all four values out of the database,
+# Wrangler vars, receipts, and logs; production uses `wrangler secret put`.
+# PLANNING_CENTER_CLIENT_ID=
+# PLANNING_CENTER_SECRET=
+# PLANNING_CENTER_WEBHOOK_SECRET=change-me-at-least-16-characters
+# PLANNING_CENTER_USER_AGENT=Church CMS <https://church.example/contact>
+
 # AES-256-GCM key ring for encrypted Learning provider credentials. The value is
 # strict JSON: {"currentVersion":1,"keys":{"1":"<32-byte canonical base64>"}}.
 # Generate keys outside the repository and never paste the value into

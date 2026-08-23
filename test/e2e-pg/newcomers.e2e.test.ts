@@ -31,7 +31,7 @@ beforeEach(async () => {
 });
 
 describe('built PostgreSQL Newcomers experience', () => {
-  it('keeps public intake generic and People-isolated, then exposes it to scoped staff', async () => {
+  it('keeps public intake generic with an auth-disabled notification profile, then exposes it to scoped staff', async () => {
     const before = await withPg(async (sql) => sql.unsafe<{ count: string }[]>('SELECT COUNT(*) AS count FROM people'));
     const publicResponse = await post('/zh/new-here', new URLSearchParams({
       website: '', name: 'Morgan Guest', email: 'morgan.guest@example.test', phone: '',
@@ -45,7 +45,7 @@ describe('built PostgreSQL Newcomers experience', () => {
       submissions: await sql.unsafe<{ count: string }[]>("SELECT COUNT(*) AS count FROM newcomer_submissions WHERE source='public'"),
       plaintext: await sql.unsafe<{ count: string }[]>("SELECT COUNT(*) AS count FROM newcomer_rate_limits WHERE bucket_hash LIKE '%morgan%' OR bucket_hash LIKE '%203.0.113.21%'"),
     }));
-    expect(Number(counts.people[0].count)).toBe(Number(before[0].count));
+    expect(Number(counts.people[0].count)).toBe(Number(before[0].count) + 1);
     expect(Number(counts.submissions[0].count)).toBe(1);
     expect(Number(counts.plaintext[0].count)).toBe(0);
 

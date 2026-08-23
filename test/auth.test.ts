@@ -19,6 +19,9 @@ import {
 beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM tokens'),
+    env.DB.prepare('DELETE FROM verified_contact_owners'),
+    env.DB.prepare('DELETE FROM person_contact_links'),
+    env.DB.prepare('DELETE FROM contact_points'),
     env.DB.prepare('DELETE FROM roster_assignments'),
     env.DB.prepare('DELETE FROM positions'),
     env.DB.prepare('DELETE FROM teams'),
@@ -29,10 +32,16 @@ beforeEach(async () => {
   await env.DB.prepare(
     `INSERT INTO people (id, display_name, email) VALUES (1, 'Tester', 'tester@example.com')`,
   ).run();
+  const point = await env.DB.prepare("INSERT INTO contact_points(kind,normalized_value,display_value) VALUES('email','tester@example.com','tester@example.com') RETURNING id")
+    .first<number>('id');
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO person_contact_links(person_id,contact_point_id,kind,source) VALUES(1,?1,'email','test')").bind(point),
+    env.DB.prepare("INSERT INTO verified_contact_owners(contact_point_id,person_id,verification_method) VALUES(?1,1,'admin_review')").bind(point),
+  ]);
 });
 
-function rawOf(res: { raw: string } | { rateLimited: true }): string {
-  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: true }): string {
+  if (!('raw' in res)) throw new Error('expected an eligible login token');
   return res.raw;
 }
 
@@ -59,6 +68,24 @@ async function makeAssignment(): Promise<number> {
 }
 
 describe('one-time tokens', () => {
+  it('never mints a legacy login token from people.email without a verified owner proof', async () => {
+    await env.DB.prepare('DELETE FROM verified_contact_owners WHERE person_id=1').run();
+    expect(await createLoginToken(env.DB, 1)).toEqual({ notEligible: true });
+  });
+
+  it('rejects a mismatched owner contact even when the person is active', async () => {
+    await env.DB.prepare("UPDATE people SET email='different@example.test' WHERE id=1").run();
+    expect(await createLoginToken(env.DB, 1)).toEqual({ notEligible: true });
+  });
+
+  it('does not treat a shared reachability link as ownership for another person', async () => {
+    const point = await env.DB.prepare("SELECT id FROM contact_points WHERE normalized_value='tester@example.com'").first<number>('id');
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people(id,display_name,email) VALUES(2,'Shared','shared@example.test')"),
+      env.DB.prepare("INSERT INTO person_contact_links(person_id,contact_point_id,kind,source) VALUES(2,?1,'email','test')").bind(point),
+    ]);
+    expect(await createLoginToken(env.DB, 2)).toEqual({ notEligible: true });
+  });
   it('stores only the sha256 hash, never the raw token', async () => {
     const raw = rawOf(await createLoginToken(env.DB, 1));
     expect(raw.length).toBeGreaterThanOrEqual(40);

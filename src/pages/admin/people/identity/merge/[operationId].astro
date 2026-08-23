@@ -1,0 +1,349 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../../layouts/Admin.astro';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btn, btnDanger, btnSecondary, card, lab, noticeErr, noticeOk, td, th, tin } from '../../../../../lib/adminUi';
+import type { EmailEnv } from '../../../../../lib/email';
+import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../../../../lib/identityAuth';
+import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../../../../lib/identityDeviceCookie';
+import { scheduleIdentityDelivery } from '../../../../../lib/identityDelivery';
+import {
+  beginIdentityMergeApproval,
+  beginIdentityMergeRollbackApproval,
+  completeIdentityMergeApproval,
+  completeIdentityMergeRollbackApproval,
+  createIdentityMergeRollback,
+  executeIdentityMerge,
+  executeIdentityMergeRollback,
+  recordIdentityMergeDecision,
+  submitIdentityMergeForApproval,
+  type IdentityMergeDecision,
+  type IdentityMergeDecisionCategory,
+} from '../../../../../lib/identityMergeExecution';
+import { sendIdentityStepUpOtp } from '../../../../../lib/identityNotify';
+import { t } from '../../../../../lib/i18n';
+import type { Locale } from '../../../../../lib/locales';
+
+const user = Astro.locals.user!;
+if (!user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.rawDb;
+type MergePageEnv = EmailEnv & IdentityAuthEnv;
+const vars = env as unknown as MergePageEnv;
+const operationId = String(Astro.params.operationId ?? '');
+if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(operationId)) return new Response(null, { status: 404 });
+
+type OperationRow = {
+  operation_id: string;
+  resolution_case_id: number;
+  expected_resolution_case_version: number;
+  case_campus_id: number;
+  scope_kind: 'campus' | 'global';
+  campus_id: number | null;
+  loser_person_id: number;
+  loser_name: string;
+  canonical_person_id: number;
+  canonical_name: string;
+  risk: 'normal' | 'high' | 'critical';
+  required_approvals: number;
+  state: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+type RiskFactRow = {
+  category: string;
+  loser_count: number;
+  canonical_count: number;
+  presence_count: number;
+  collision_count: number;
+};
+type DecisionRow = { category: string; decision: string; decided_by_person_id: number; actor_name: string; created_at: string };
+type ApprovalRow = { approval_order: number; decision: string; approver_person_id: number; actor_name: string; created_at: string };
+type PolicyRow = { policy: string; item_count: number };
+type ExecutionRow = { journal_count: number; rollback_receipt_count: number; reverted_count: number; execution_at: string | null };
+type RollbackRow = { rollback_id: string; state: string; version: number; required_approvals: number; expires_at: string; created_at: string };
+type RollbackApprovalRow = { approval_order: number; decision: string; approver_person_id: number; actor_name: string; created_at: string };
+
+const operation = await db.prepare(`SELECT op.operation_id,op.resolution_case_id,op.expected_resolution_case_version,
+  merge_case.campus_id case_campus_id,
+  op.scope_kind,op.campus_id,op.loser_person_id,loser.display_name loser_name,
+  op.canonical_person_id,canonical.display_name canonical_name,op.risk,op.required_approvals,
+  op.state,op.version,op.created_at,op.updated_at
+  FROM person_merge_operations op JOIN people loser ON loser.id=op.loser_person_id
+  JOIN people canonical ON canonical.id=op.canonical_person_id
+  JOIN identity_resolution_cases merge_case ON merge_case.id=op.resolution_case_id WHERE op.operation_id=?1`)
+  .bind(operationId).first<OperationRow>();
+if (!operation) return new Response(null, { status: 404 });
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
+if (campus && (operation.scope_kind !== 'campus' || operation.campus_id !== campus.id)) return new Response(null, { status: 404 });
+
+const formId = (form: FormData, name: string) => {
+  const value = String(form.get(name) ?? '').trim();
+  const parsed = Number(value);
+  if (!/^\d{1,10}$/u.test(value) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2_147_483_647) {
+    throw new Error('identity_merge_form_invalid');
+  }
+  return parsed;
+};
+const exactFormValue = <T extends string>(form: FormData, name: string, values: readonly T[]): T => {
+  const value = String(form.get(name) ?? '');
+  if (!values.includes(value as T)) throw new Error('identity_merge_form_invalid');
+  return value as T;
+};
+async function deviceId(): Promise<string> {
+  const resolved = await resolveIdentityDeviceCookie(vars, Astro.cookies.get(IDENTITY_DEVICE_COOKIE)?.value);
+  if (resolved.replaced) Astro.cookies.set(IDENTITY_DEVICE_COOKIE, resolved.cookieValue, {
+    path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 365 * 24 * 60 * 60,
+  });
+  return resolved.deviceId;
+}
+let actionNotice: 'updated' | 'blocked' | 'otp' | null = Astro.url.searchParams.get('result') === 'updated' ? 'updated' : null;
+let approvalChallenge: { publicId: string; decision: 'approve' | 'reject' } | null = null;
+let rollbackApprovalChallenge: { publicId: string; decision: 'approve' | 'reject' } | null = null;
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    if (String(form.get('operationId') ?? '') !== operation.operation_id) throw new Error('identity_merge_form_invalid');
+    const expectedVersion = formId(form, 'expectedVersion');
+    const action = String(form.get('action') ?? '');
+    if (action === 'decision') {
+      const category = exactFormValue(form, 'category', [
+        'campus_membership', 'contact_owner', 'external_identity', 'household', 'learning_identity',
+        'privilege', 'recurring_gift', 'unique_collision',
+      ] as const) as IdentityMergeDecisionCategory;
+      const decision = exactFormValue(form, 'value', [
+        'canonical_only', 'dedupe', 'keep_both', 'manual_required', 'preserve_history', 'reject', 'revoke_loser',
+      ] as const) as IdentityMergeDecision;
+      await recordIdentityMergeDecision(db, { operationId, expectedVersion, decidedByPersonId: user.id, category, decision });
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    }
+    if (action === 'submit') {
+      await submitIdentityMergeForApproval(db, { operationId, expectedVersion, actorPersonId: user.id });
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    }
+    if (action === 'execute') {
+      await executeIdentityMerge(db, {
+        backend: Astro.locals.dbBackend,
+        operationId,
+        expectedVersion,
+        actorPersonId: user.id,
+      });
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    }
+    if (action === 'rollback-create') {
+      await createIdentityMergeRollback(db, {
+        operationId,
+        expectedVersion,
+        requestedByPersonId: user.id,
+      });
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    }
+    const currentRollbackId = async () => {
+      const value = await db.prepare('SELECT rollback_id FROM person_merge_rollback_operations WHERE operation_id=?1')
+        .bind(operationId).first<string>('rollback_id');
+      if (!value) throw new Error('identity_merge_rollback_not_found');
+      return value;
+    };
+    if (action === 'approval-start') {
+      const decision = exactFormValue(form, 'decision', ['approve', 'reject'] as const);
+      const begun = await beginIdentityMergeApproval(db, vars, {
+        operationId, expectedVersion, approverPersonId: user.id, campusId: operation.case_campus_id,
+        requestContext: identityTrustedRequestContext(Astro.request.headers, await deviceId()), source: 'admin',
+      });
+      await scheduleIdentityDelivery(Astro.locals.cfContext,
+        () => sendIdentityStepUpOtp(vars, db, begun.delivery, lang));
+      approvalChallenge = { publicId: begun.delivery.publicId, decision };
+      actionNotice = 'otp';
+    } else if (action === 'approval-complete') {
+      const decision = exactFormValue(form, 'decision', ['approve', 'reject'] as const);
+      const publicId = String(form.get('publicId') ?? '');
+      const code = String(form.get('code') ?? '').trim();
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(publicId) || !/^\d{6}$/u.test(code)) {
+        throw new Error('identity_merge_form_invalid');
+      }
+      const completed = await completeIdentityMergeApproval(db, vars, {
+        operationId, expectedVersion, approverPersonId: user.id, campusId: operation.case_campus_id,
+        publicId, code, decision, source: 'admin',
+      });
+      if (completed.status === 'invalid') throw new Error('identity_merge_approval_invalid');
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    } else if (action === 'rollback-approval-start') {
+      const decision = exactFormValue(form, 'decision', ['approve', 'reject'] as const);
+      const begun = await beginIdentityMergeRollbackApproval(db, vars, {
+        rollbackId: await currentRollbackId(),
+        expectedVersion,
+        approverPersonId: user.id,
+        campusId: operation.case_campus_id,
+        requestContext: identityTrustedRequestContext(Astro.request.headers, await deviceId()),
+        source: 'admin',
+      });
+      await scheduleIdentityDelivery(Astro.locals.cfContext,
+        () => sendIdentityStepUpOtp(vars, db, begun.delivery, lang));
+      rollbackApprovalChallenge = { publicId: begun.delivery.publicId, decision };
+      actionNotice = 'otp';
+    } else if (action === 'rollback-approval-complete') {
+      const decision = exactFormValue(form, 'decision', ['approve', 'reject'] as const);
+      const publicId = String(form.get('publicId') ?? '');
+      const code = String(form.get('code') ?? '').trim();
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(publicId) || !/^\d{6}$/u.test(code)) {
+        throw new Error('identity_merge_form_invalid');
+      }
+      const completed = await completeIdentityMergeRollbackApproval(db, vars, {
+        rollbackId: await currentRollbackId(),
+        expectedVersion,
+        approverPersonId: user.id,
+        campusId: operation.case_campus_id,
+        publicId,
+        code,
+        decision,
+        source: 'admin',
+      });
+      if (completed.status === 'invalid') throw new Error('identity_merge_rollback_approval_invalid');
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    } else if (action === 'rollback-execute') {
+      await executeIdentityMergeRollback(db, {
+        rollbackId: await currentRollbackId(),
+        expectedVersion,
+        actorPersonId: user.id,
+      });
+      return Astro.redirect(`/admin/people/identity/merge/${encodeURIComponent(operationId)}?result=updated`, 303);
+    } else if (action !== 'approval-start') {
+      throw new Error('identity_merge_action_invalid');
+    }
+  } catch {
+    approvalChallenge = null;
+    rollbackApprovalChallenge = null;
+    actionNotice = 'blocked';
+  }
+}
+
+const [riskFactsResult, decisionsResult, approvalsResult, policiesResult, execution, rollback] = await Promise.all([
+  db.prepare(`SELECT category,loser_count,canonical_count,presence_count,collision_count
+    FROM person_merge_risk_facts WHERE operation_id=?1 ORDER BY category`).bind(operationId).all<RiskFactRow>(),
+  db.prepare(`SELECT d.category,d.decision,d.decided_by_person_id,p.display_name actor_name,d.created_at
+    FROM person_merge_conflict_decisions d JOIN people p ON p.id=d.decided_by_person_id
+    WHERE d.operation_id=?1 ORDER BY d.category`).bind(operationId).all<DecisionRow>(),
+  db.prepare(`SELECT approval.approval_order,approval.decision,approval.approver_person_id,p.display_name actor_name,
+    approval.created_at FROM person_merge_approvals approval JOIN people p ON p.id=approval.approver_person_id
+    WHERE approval.operation_id=?1 ORDER BY approval.approval_order`).bind(operationId).all<ApprovalRow>(),
+  db.prepare(`SELECT policy,count(*) item_count FROM person_merge_reassignment_journal
+    WHERE operation_id=?1 GROUP BY policy ORDER BY policy`).bind(operationId).all<PolicyRow>(),
+  db.prepare(`SELECT
+    (SELECT count(*) FROM person_merge_reassignment_journal journal WHERE journal.operation_id=?1) journal_count,
+    (SELECT count(*) FROM person_merge_rollback_receipts receipt WHERE receipt.operation_id=?1) rollback_receipt_count,
+    (SELECT coalesce(sum(reverted_count),0) FROM person_merge_rollback_receipts receipt WHERE receipt.operation_id=?1) reverted_count,
+    (SELECT max(created_at) FROM person_merge_reassignment_journal journal WHERE journal.operation_id=?1) execution_at`)
+    .bind(operationId).first<ExecutionRow>(),
+  db.prepare(`SELECT rollback_id,state,version,required_approvals,expires_at,created_at
+    FROM person_merge_rollback_operations WHERE operation_id=?1`).bind(operationId).first<RollbackRow>(),
+]);
+const riskFacts = riskFactsResult.results;
+const decisions = decisionsResult.results;
+const approvals = approvalsResult.results;
+const policies = policiesResult.results;
+const rollbackApprovals = rollback ? (await db.prepare(`SELECT approval.approval_order,approval.decision,
+  approval.approver_person_id,p.display_name actor_name,approval.created_at
+  FROM person_merge_rollback_approvals approval JOIN people p ON p.id=approval.approver_person_id
+  WHERE approval.rollback_id=?1 ORDER BY approval.approval_order`).bind(rollback.rollback_id).all<RollbackApprovalRow>()).results : [];
+const approvalCount = approvals.filter((approval) => approval.decision === 'approve').length;
+const decisionByCategory = new Map(decisions.map((decision) => [decision.category, decision]));
+const requiredDecisionCategories = [
+  ...(riskFacts.some((fact) => fact.category === 'campus_membership' && fact.presence_count > 0) ? ['campus_membership'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'verified_contact_owner' && fact.presence_count > 0) ? ['contact_owner'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'external_identity' && fact.presence_count > 0) ? ['external_identity'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'household' && fact.presence_count > 0) ? ['household'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'learning_identity' && fact.presence_count > 0) ? ['learning_identity'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'privilege' && fact.presence_count > 0) ? ['privilege'] : []),
+  ...(riskFacts.some((fact) => fact.category === 'stripe_recurring' && fact.presence_count > 0) ? ['recurring_gift'] : []),
+  ...(riskFacts.some((fact) => fact.collision_count > 0) ? ['unique_collision'] : []),
+];
+const decisionValues = ['canonical_only', 'dedupe', 'keep_both', 'manual_required', 'preserve_history', 'reject', 'revoke_loser'];
+const executionAt = execution?.execution_at ?? operation.updated_at;
+const utcTimestamp = (value: string) => Date.parse(/[zZ]$|[+-]\d{2}:\d{2}$/u.test(value)
+  ? value
+  : `${value.replace(' ', 'T')}Z`);
+const executionTime = utcTimestamp(executionAt);
+const calculatedRollbackDeadline = Number.isFinite(executionTime) ? new Date(executionTime + 24 * 60 * 60 * 1000) : null;
+const authoritativeRollbackTime = rollback ? utcTimestamp(rollback.expires_at) : Number.NaN;
+const rollbackDeadline = Number.isFinite(authoritativeRollbackTime) ? new Date(authoritativeRollbackTime) : calculatedRollbackDeadline;
+const rollbackAvailable = !rollback && operation.state === 'completed' && rollbackDeadline !== null
+  && Date.now() < rollbackDeadline.getTime() && Number(execution?.rollback_receipt_count ?? 0) === 0;
+const stateBadge = operation.state === 'completed'
+  ? badgeActive
+  : ['failed', 'cancelled', 'expired'].includes(operation.state) ? badgeInactive : badgeScheduled;
+---
+
+<Admin title={t(lang, 'admin.identityMerge.detailTitle')}>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <p class="text-sm text-ink-muted"><a class="hover:underline" href="/admin/people/identity/merge">{t(lang, 'admin.identityMerge.queue')}</a> / {operation.operation_id}</p>
+      <h1 class="mt-2 font-display text-heading-md font-bold">{t(lang, 'admin.identityMerge.operationDetail')}</h1>
+    </div>
+    <span class={`${badge} ${stateBadge}`}>{operation.state} · v{operation.version}</span>
+  </div>
+
+  <aside class="mt-6 rounded-xl border border-danger bg-danger-soft p-5 text-sm text-danger" role="note">
+    <p class="font-semibold">{t(lang, 'admin.identityMerge.safetyTitle')}</p>
+    <ul class="mt-2 list-disc space-y-1 pl-5"><li>{t(lang, 'admin.identityMerge.twoAdminWarning')}</li><li>{t(lang, 'admin.identityMerge.privilegeWarning')}</li><li>{t(lang, 'admin.identityMerge.credentialWarning')}</li></ul>
+  </aside>
+  {actionNotice === 'updated' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityMerge.actionUpdated')}</p>}
+  {actionNotice === 'blocked' && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.identityMerge.actionBlocked')}</p>}
+  {actionNotice === 'otp' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityMerge.otpSent')}</p>}
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-direction-heading">
+    <h2 id="merge-direction-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.direction')}</h2>
+    <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.operation')}</dt><dd class="break-all font-mono text-sm">{operation.operation_id}</dd></div>
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.caseId')}</dt><dd>#{operation.resolution_case_id} · v{operation.expected_resolution_case_version}</dd></div>
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.scope')}</dt><dd>{operation.scope_kind === 'global' ? t(lang, 'admin.identityMerge.global') : `${t(lang, 'admin.identityMerge.campus')} ${operation.campus_id}`}</dd></div>
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.loser')}</dt><dd><span class="font-semibold">#{operation.loser_person_id}</span> · {operation.loser_name}</dd></div>
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.canonical')}</dt><dd><span class="font-semibold">#{operation.canonical_person_id}</span> · {operation.canonical_name}</dd></div>
+      <div><dt class={lab}>{t(lang, 'admin.identityMerge.created')}</dt><dd>{operation.created_at}</dd></div>
+    </dl>
+  </section>
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-risk-heading">
+    <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="merge-risk-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.riskAndPolicy')}</h2><p class="text-sm font-semibold">{operation.risk} · {t(lang, 'admin.identityMerge.approvalProgress', { current: approvalCount, required: operation.required_approvals })}</p></div>
+    <div class="mt-4 overflow-x-auto"><table class="w-full border-collapse"><thead><tr><th class={th}>{t(lang, 'admin.identityMerge.category')}</th><th class={th}>{t(lang, 'admin.identityMerge.loserCount')}</th><th class={th}>{t(lang, 'admin.identityMerge.canonicalCount')}</th><th class={th}>{t(lang, 'admin.identityMerge.totalCount')}</th><th class={th}>{t(lang, 'admin.identityMerge.blocker')}</th></tr></thead>
+      <tbody>{riskFacts.map((fact) => <tr class="border-t border-border"><td class={td}>{fact.category}</td><td class={td}>{fact.loser_count}</td><td class={td}>{fact.canonical_count}</td><td class={td}>{fact.presence_count}</td><td class={td}>{fact.collision_count > 0 ? t(lang, 'admin.identityMerge.collisionCount', { count: fact.collision_count }) : t(lang, 'admin.identityMerge.noBlocker')}</td></tr>)}</tbody>
+    </table></div>
+    <h3 class="mt-6 font-semibold">{t(lang, 'admin.identityMerge.executedPolicies')}</h3>
+    {policies.length === 0 ? <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.identityMerge.noExecutedPolicies')}</p> : <ul class="mt-2 grid gap-2 sm:grid-cols-2">{policies.map((policy) => <li class="rounded-md border border-border p-3"><span class="font-semibold">{policy.policy}</span> · {t(lang, 'admin.identityMerge.itemCount', { count: policy.item_count })}</li>)}</ul>}
+  </section>
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-decisions-heading">
+    <h2 id="merge-decisions-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.decisions')}</h2>
+    {requiredDecisionCategories.length === 0 ? <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.identityMerge.noDecisionsRequired')}</p> : <div class="mt-4 grid gap-4 lg:grid-cols-2">{requiredDecisionCategories.map((category) => {
+      const current = decisionByCategory.get(category);
+      return <div class="rounded-md border border-border p-4"><p class="font-semibold">{category}</p>{current ? <p class="mt-2 text-sm">{current.decision} · #{current.decided_by_person_id} {current.actor_name} · {current.created_at}</p> : operation.state === 'previewed' ? <form method="post" class="mt-3 flex flex-wrap items-end gap-2">
+        <input type="hidden" name="action" value="decision" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><input type="hidden" name="category" value={category} />
+        <label><span class={lab}>{t(lang, 'admin.identityMerge.decision')}</span><select class={tin} name="value">{(category === 'privilege' ? ['canonical_only'] : decisionValues).map((value) => <option value={value}>{value}</option>)}</select></label><button class={btnSecondary} type="submit">{t(lang, 'admin.identityMerge.recordDecision')}</button>
+      </form> : <p class="mt-2 text-sm text-danger">{t(lang, 'admin.identityMerge.decisionMissing')}</p>}</div>;
+    })}</div>}
+    {operation.state === 'previewed' && <form method="post" class="mt-6"><input type="hidden" name="action" value="submit" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><button class={btn} type="submit">{t(lang, 'admin.identityMerge.submitForApproval')}</button></form>}
+  </section>
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-approvals-heading">
+    <h2 id="merge-approvals-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.approvals')}</h2>
+    <p class="mt-2 text-sm text-ink-muted">{t(lang, operation.required_approvals === 2 ? 'admin.identityMerge.twoApprovalsHelp' : 'admin.identityMerge.oneApprovalHelp')}</p>
+    {approvals.length === 0 ? <p class="mt-4 text-ink-muted">{t(lang, 'admin.identityMerge.noApprovals')}</p> : <ol class="mt-4 space-y-2">{approvals.map((approval) => <li class="rounded-md border border-border p-3"><span class="font-semibold">#{approval.approval_order} · {approval.decision}</span> · #{approval.approver_person_id} {approval.actor_name} · {approval.created_at}</li>)}</ol>}
+    {operation.state === 'awaiting_approval' && !approvalChallenge && <div class="mt-5 flex flex-wrap gap-2"><form method="post"><input type="hidden" name="action" value="approval-start" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><input type="hidden" name="decision" value="approve" /><button class={btn} type="submit">{t(lang, 'admin.identityMerge.startApproval')}</button></form><form method="post"><input type="hidden" name="action" value="approval-start" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><input type="hidden" name="decision" value="reject" /><button class={btnDanger} type="submit">{t(lang, 'admin.identityMerge.startRejection')}</button></form></div>}
+    {approvalChallenge && <form method="post" class="mt-5 max-w-md space-y-3"><input type="hidden" name="action" value="approval-complete" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><input type="hidden" name="decision" value={approvalChallenge.decision} /><input type="hidden" name="publicId" value={approvalChallenge.publicId} /><label class="block"><span class={lab}>{t(lang, 'admin.identityMerge.otpCode')}</span><input class={tin} name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required /></label><button class={btn} type="submit">{t(lang, 'admin.identityMerge.completeApproval')}</button></form>}
+    {operation.state === 'approved' && <form method="post" class="mt-6"><input type="hidden" name="action" value="execute" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><button class={btnDanger} type="submit">{t(lang, 'admin.identityMerge.execute')}</button></form>}
+  </section>
+
+  <section class={`mt-6 ${card}`} aria-labelledby="merge-rollback-heading">
+    <h2 id="merge-rollback-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.identityMerge.rollback')}</h2>
+    <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.identityMerge.rollbackHelp')}</p>
+    <p class="mt-3 text-sm">{t(lang, 'admin.identityMerge.executionStatus')}: {operation.state} · {t(lang, 'admin.identityMerge.journalProgress', { receipts: Number(execution?.rollback_receipt_count ?? 0), journal: Number(execution?.journal_count ?? 0), reverted: Number(execution?.reverted_count ?? 0) })}</p>
+    <p class="mt-2 text-sm">{rollbackDeadline ? t(lang, 'admin.identityMerge.rollbackDeadline', { time: rollbackDeadline.toISOString() }) : t(lang, 'admin.identityMerge.rollbackUnavailable')}</p>
+    <p class="mt-3 rounded-md border border-danger bg-danger-soft p-3 text-sm text-danger">{t(lang, 'admin.identityMerge.rollbackLimitations')}</p>
+    {rollbackAvailable && <form method="post" class="mt-5"><input type="hidden" name="action" value="rollback-create" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={operation.version} /><button class={btnDanger} type="submit">{t(lang, 'admin.identityMerge.startRollback')}</button></form>}
+    {rollback && <div class="mt-5 rounded-md border border-border p-4"><p class="font-semibold">{t(lang, 'admin.identityMerge.rollbackRequest')}: {rollback.state} · v{rollback.version}</p><p class="mt-2 text-sm">{t(lang, 'admin.identityMerge.approvalProgress', { current: rollbackApprovals.filter((approval) => approval.decision === 'approve').length, required: rollback.required_approvals })}</p>{rollbackApprovals.length > 0 && <ol class="mt-3 space-y-2">{rollbackApprovals.map((approval) => <li class="text-sm">#{approval.approval_order} · {approval.decision} · #{approval.approver_person_id} {approval.actor_name} · {approval.created_at}</li>)}</ol>}
+      {rollback.state === 'awaiting_approval' && !rollbackApprovalChallenge && <div class="mt-4 flex flex-wrap gap-2"><form method="post"><input type="hidden" name="action" value="rollback-approval-start" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={rollback.version} /><input type="hidden" name="decision" value="approve" /><button class={btn} type="submit">{t(lang, 'admin.identityMerge.startRollbackApproval')}</button></form><form method="post"><input type="hidden" name="action" value="rollback-approval-start" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={rollback.version} /><input type="hidden" name="decision" value="reject" /><button class={btnDanger} type="submit">{t(lang, 'admin.identityMerge.startRollbackRejection')}</button></form></div>}
+      {rollback.state === 'approved' && <form method="post" class="mt-4"><input type="hidden" name="action" value="rollback-execute" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={rollback.version} /><button class={btnDanger} type="submit">{t(lang, 'admin.identityMerge.executeRollback')}</button></form>}
+    </div>}
+    {rollback && rollbackApprovalChallenge && <form method="post" class="mt-5 max-w-md space-y-3"><input type="hidden" name="action" value="rollback-approval-complete" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={rollback.version} /><input type="hidden" name="decision" value={rollbackApprovalChallenge.decision} /><input type="hidden" name="publicId" value={rollbackApprovalChallenge.publicId} /><label class="block"><span class={lab}>{t(lang, 'admin.identityMerge.otpCode')}</span><input class={tin} name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required /></label><button class={btn} type="submit">{t(lang, 'admin.identityMerge.completeRollbackApproval')}</button></form>}
+  </section>
+</Admin>
