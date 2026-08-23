@@ -227,11 +227,15 @@ describe('identity account gateway', () => {
     await env.DB.prepare('UPDATE campus_memberships SET active=0 WHERE campus_id=1 AND person_id=?1').bind(secondOwner.id).run();
     expect((await completeSigninLink(env.DB, authEnv, { campusId: 1, publicId: second.delivery!.publicId,
       token: second.delivery!.token, now: later })).status).toBe('invalid');
-    const unknown = await beginSignin(env.DB, authEnv, { campusId: 1, email: `bound-unknown-${++sequence}@example.test`, requestContext: requestContext(), now });
-    const unknownChallenge = await env.DB.prepare('SELECT person_id FROM identity_challenges WHERE public_id=(SELECT public_id FROM identity_challenges ORDER BY id DESC LIMIT 1)')
-      .first<number>('person_id');
+    const unknownEmail = `bound-unknown-${++sequence}@example.test`;
+    const unknown = await beginSignin(env.DB, authEnv, { campusId: 1, email: unknownEmail, requestContext: requestContext(), now });
+    const unknownChallenge = await env.DB.prepare(`SELECT challenge.person_id FROM identity_challenges challenge
+      JOIN contact_points contact ON contact.id=challenge.contact_point_id
+      WHERE challenge.campus_id=1 AND challenge.purpose='login'
+        AND contact.kind='email' AND contact.normalized_value=?1`).bind(unknownEmail)
+      .first<{ person_id: number | null }>();
     expect(unknown.delivery).toBeNull();
-    expect(unknownChallenge).toBeNull();
+    expect(unknownChallenge).toEqual({ person_id: null });
     const otherCampus = ++sequence;
     await env.DB.prepare('INSERT INTO campuses(id,slug,name) VALUES(?1,?2,?3)').bind(otherCampus, `signin-${otherCampus}`, 'Signin Other Campus').run();
     const crossCampus = await beginSignin(env.DB, authEnv, { campusId: otherCampus, email: owner.email, requestContext: requestContext(), now });
