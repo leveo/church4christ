@@ -80,6 +80,27 @@ describe('sendEmail dev-log', () => {
     const row = await env.DB.prepare(`SELECT status FROM email_log WHERE kind='production'`).first<{ status: string }>();
     expect(row).toEqual({ status: 'sent' });
   });
+
+  it('uses a bodyless email sink only in the dedicated built-worker e2e mode', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('MODE', 'e2e');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      expect(await sendEmail({
+        EMAIL_E2E_SINK: '1',
+        EMAIL_FROM: 'serve@example.com',
+      }, env.DB, { ...base, kind: 'e2e-sink', text: 'one-time credential' })).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+
+    expect(logSpy).not.toHaveBeenCalled();
+    const row = await env.DB.prepare(`SELECT status FROM email_log WHERE kind='e2e-sink'`).first<{ status: string }>();
+    expect(row).toEqual({ status: 'devlog' });
+  });
 });
 
 describe('sendEmail with no sender configured', () => {

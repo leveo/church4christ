@@ -15,6 +15,8 @@ export interface EmailEnv {
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;
   EMAIL_DEV_LOG?: string;
+  /** Built-worker tests only; production builds tree-shake this branch. */
+  EMAIL_E2E_SINK?: string;
   APP_ORIGIN?: string;
 }
 
@@ -125,6 +127,13 @@ export async function sendEmail(
     // console so a developer can complete the flow from the terminal.
     const body = msg.redactDevLogBody ? '[sensitive email body omitted]' : msg.text;
     console.log(`[email dev-log] to=${msg.to} kind=${msg.kind} subject=${msg.subject}\n${body}`);
+    await logEmail(db, msg, 'devlog');
+    return true;
+  }
+  // Built-worker E2E needs successful delivery semantics without a live email
+  // provider. This mode never logs the body, and the normal production build's
+  // bundle gate proves the branch and binding name were tree-shaken away.
+  if (import.meta.env.MODE === 'e2e' && env.EMAIL_E2E_SINK === '1') {
     await logEmail(db, msg, 'devlog');
     return true;
   }
