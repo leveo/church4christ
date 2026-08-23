@@ -22,6 +22,13 @@ before choosing a production setup.
 | ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Member Portal dashboard](docs/images/portal/dashboard.png) |
 | ![The English Genesis 1 learner course](docs/images/learning/genesis-1-en.png) | ![The Chinese Genesis 1 learner course](docs/images/learning/genesis-1-zh.png) | ![The Learning provider administration page](docs/images/learning/admin-overview.png) |
 
+**Grouped navigation.** A fully enabled site condenses its public destinations into
+Welcome, Explore, Connect, and Get Involved. Built-in links stay in their audience
+group, while custom pages and external links appear under More. The order saved in
+Admin → Navigation is preserved inside each group, and empty groups disappear.
+
+![The calmer desktop header with the Connect group open](docs/images/public/grouped-navigation.png)
+
 Two languages are included out of the box (English and Chinese), along with three
 ready-made looks and a modular starting point for further customization.
 
@@ -128,7 +135,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
-| [![](docs/images/portal/dashboard.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | A signed-in home for members — household profiles, groups, events, serving, calendar, giving, and a scoped prayer wall. |
+| [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
@@ -194,15 +201,24 @@ separate Canvas operations and corresponding-source requirements.
 ### A home for your members
 
 The optional **Member Portal** turns the records your church already maintains into a
-useful signed-in experience. Members can update household details, see their giving,
-join or manage groups, register for events, review serving commitments, subscribe to a
-personal calendar, and share prayers with their church, a group, an event, or only
-themselves. Household owners can manage their family's details and view household giving;
-group and event leaders can moderate the prayers in their care. It uses the same
+useful signed-in experience. Its opportunity landing page shows every enabled way to
+learn, belong, and serve in one place: both the groups, classes, and teams already
+connected to the member and opportunities currently open to join or apply for. Members
+can also update household details, see their giving, register for events, review serving
+commitments, subscribe to a personal calendar, and share scoped prayers. It uses the same
 passwordless sign-in links as the rest of Church4Christ — no new account or password to
 remember.
 
-![A member's signed-in home brings household, group, event, prayer, and serving details together](docs/images/portal/dashboard.png)
+![A member's current participation and open opportunities on one page](docs/images/portal/member-opportunities.png)
+
+Ministry, group, Sunday School, and serving-team leaders get a resource-scoped panel at
+`/<locale>/manage`. The church app sign-in protects it, and every operation checks the
+leader's authority over that specific resource. Cloudflare Zero Trust can therefore stay
+limited to the full `/admin` area.
+
+![A leader sees only the ministries, groups, classes, and serving teams assigned to them](docs/images/portal/leader-panel.png)
+
+![Member opportunity discovery and resource-scoped leader administration workflow](docs/images/diagrams/member-opportunity-workflow.png)
 
 The portal requires the optional **Supabase (Postgres)** backend because it adds member
 relationships, protected group files, and scoped prayer moderation. Churches using the

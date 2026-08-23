@@ -16,6 +16,11 @@ export default {
   'nav.fellowships': '团契',
   'nav.groups': '小组',
   'nav.learn': '学习',
+  'nav.group.welcome': '欢迎',
+  'nav.group.explore': '探索',
+  'nav.group.connect': '连接',
+  'nav.group.participate': '参与',
+  'nav.group.more': '更多',
 
   'learning.title': '学习',
   'learning.intro': '在课堂之外，继续使用老师预备的资源和学习活动。',
