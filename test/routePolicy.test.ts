@@ -75,6 +75,8 @@ describe('classifyRoute', () => {
     // ── authed ──
     ['/my', 'authed'],
     ['/my/blockouts', 'authed'],
+    ['/manage', 'authed'],
+    ['/manage/ministries/12', 'authed'],
     ['/profile', 'authed'],
     ['/settings/language', 'authed'],
     ['/settings/notifications', 'authed'],
@@ -137,6 +139,7 @@ describe('classifyRoute', () => {
     ['/admin/xyz', 'adminOnly'],
     ['/admin/newcomersish', 'adminOnly'],
     ['/my/xyz', 'authed'],
+    ['/manage/xyz', 'authed'],
     ['/settings/xyz', 'authed'],
     ['/serve/xyz', 'team'],
     ['/profile/xyz', 'team'], // explicit /profile/<id> rule, not the fallback
@@ -188,6 +191,7 @@ describe('classifyRoute', () => {
     expect(classifyRoute('/serveware')).toBe('public'); // not /serve
     expect(classifyRoute('/administrator')).toBe('public'); // not /admin
     expect(classifyRoute('/settingsx')).toBe('public'); // not /settings
+    expect(classifyRoute('/management')).toBe('public'); // not /manage
   });
 });
 

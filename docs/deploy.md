@@ -579,6 +579,13 @@ and entirely optional; it does not replace application security, dependency main
 backups, or monitoring. Configure it in the Cloudflare Zero Trust dashboard as a
 self-hosted application covering the `/admin*` path.
 
+Do not expand that optional policy to the whole site just to protect ministry tools. Group,
+Sunday School, and ministry/team leaders use `/{locale}/manage` and the linked localized
+management pages outside `/admin`; those routes enforce the normal magic-link session plus
+resource-scoped application-level authorization on every read and write. This keeps delegated
+leaders out of the site-wide admin console while allowing them to manage only the groups,
+classes, ministries, and teams assigned to them without a Cloudflare Zero Trust account.
+
 ![Go-live proceeds from setup and doctor through deployment, domain and HTTPS, email and first-admin checks, then a backup restore drill and monitoring; each operator-managed step must be verified](./images/diagrams/go-live-readiness.png)
 
 ## Go-live checklist

@@ -15,6 +15,7 @@ import {
   listGroups,
   listGroupsForPerson,
   listJoinRequests,
+  listPendingJoinGroupIdsForPerson,
   listMembers,
   listPersonGroupActivity,
   listPublicGroups,
@@ -154,6 +155,21 @@ describe('membership', () => {
 });
 
 describe('join requests', () => {
+  it('lists only this person\'s live pending group ids', async () => {
+    const first = await createGroup(env.DB, G);
+    const second = await createGroup(env.DB, { ...G, name: 'Families', description: '' });
+    await createJoinRequest(env.DB, first, 2);
+    await createJoinRequest(env.DB, second, 2);
+    await createJoinRequest(env.DB, second, 3);
+
+    const [firstRequest] = await listJoinRequests(env.DB, first);
+    await decideJoinRequest(env.DB, firstRequest.id, false, 1);
+
+    expect(await listPendingJoinGroupIdsForPerson(env.DB, 2)).toEqual([second]);
+    expect(await listPendingJoinGroupIdsForPerson(env.DB, 3)).toEqual([second]);
+    expect(await listPendingJoinGroupIdsForPerson(env.DB, 4)).toEqual([]);
+  });
+
   it('runs the full lifecycle and is idempotent on duplicate pending', async () => {
     const id = await createGroup(env.DB, G);
     expect(await createJoinRequest(env.DB, id, 2)).toBe('created');

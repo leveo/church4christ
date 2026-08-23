@@ -26,12 +26,12 @@ if (Astro.request.method === 'POST') {
       sessionEpoch: person.session_epoch,
     });
     const target = person.lang === 'en' || person.lang === 'zh' ? person.lang : DEFAULT_LOCALE;
-    // Module-aware landing: `/my` is serve-owned and 404s when the serve module
-    // is disabled, which would strand the member. Land on their own /profile
-    // instead when serve is off. The middleware sets locals.modules on every
-    // request; fall back to the lib if it is somehow absent.
+    // Module-aware landing: the portal opportunity hub is the member landing
+    // page when Portal is enabled. `/my` remains serve-owned, so fall back to
+    // profile when neither module is available. The middleware sets
+    // locals.modules on every request; fall back to the lib if it is absent.
     const modules = Astro.locals.modules ?? (await getEnabledModules(db, Astro.locals.dbBackend));
-    const landing = modules.has('serve') ? 'my' : 'profile';
+    const landing = modules.has('portal') ? 'my/opportunities' : modules.has('serve') ? 'my' : 'profile';
     return new Response(null, {
       status: 303,
       headers: {

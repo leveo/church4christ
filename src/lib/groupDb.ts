@@ -349,6 +349,21 @@ export interface JoinRequestRow {
   created_at: string;
 }
 
+/** Group ids for which this person currently has a pending join request. */
+export async function listPendingJoinGroupIdsForPerson(db: AppDb, personId: number): Promise<number[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT gjr.group_id AS group_id
+       FROM group_join_requests gjr
+       JOIN groups g ON g.id = gjr.group_id AND g.deleted_at IS NULL
+       WHERE gjr.person_id = ? AND gjr.status = 'pending'
+       ORDER BY gjr.group_id`,
+    )
+    .bind(personId)
+    .all<{ group_id: number }>();
+  return results.map(({ group_id }) => group_id);
+}
+
 /** Pending join requests for a group (with the requester's name + email), oldest first. */
 export async function listJoinRequests(db: AppDb, groupId: number): Promise<JoinRequestRow[]> {
   const { results } = await db

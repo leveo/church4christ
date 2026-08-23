@@ -7,14 +7,15 @@ profiles, groups, event registrations, serving, a personal calendar, giving, and
 scoped prayer without creating a second member directory or a separate account.
 Members use the same passwordless email link as the rest of Church4Christ: enter
 the email already attached to their people record, open the link, and continue to
-the page they requested.
+the page they requested. A direct sign-in starts at the opportunity hub when Portal is
+enabled.
 
 The portal itself is optional and **Supabase (Postgres)-only**. It is force-disabled
 on D1 even if a stale setting says it is on. Groups and Volunteer Scheduling still
 work independently on D1, while Giving and Registration have their own Supabase-only
-module gates. Portal declares soft `uses` of Volunteer Scheduling and Groups, not hard
-dependencies, so selecting Portal in a custom setup does not automatically enable either
-one.
+module gates. Portal declares soft `uses` of Volunteer Scheduling, Groups, and Learning,
+not hard dependencies, so selecting Portal in a custom setup does not automatically
+enable any of them.
 
 ## How members use it
 
@@ -36,6 +37,29 @@ There is no portal password to distribute or reset. In production, a member open
 `/<locale>/signin`, requests a magic link, and follows it from their email. Local
 development can use `AUTH_DEV_BYPASS_EMAIL` only while running `astro dev`; the
 bypass is compiled out of production builds.
+
+### Discover every enabled opportunity
+
+`/my/opportunities` is the Portal-owned landing page. It combines the signed-in
+member's current and pending participation with opportunities that are open to join or
+apply for:
+
+- public groups and Sunday school communities from **Groups**;
+- published classes from **Learning**; and
+- volunteer teams accepting applications from **Volunteer Scheduling**.
+
+Each source appears only while its owning module is enabled. Current memberships,
+enrolments, leadership roles, and pending or approved applications remain visible beside
+the open choices, so members do not need to search separate directories. The page links
+leaders to `/{locale}/manage` when they have resources they may administer.
+
+### Let ministry leaders manage their own work
+
+`/{locale}/manage` is an application-authenticated leader panel. Group administrators,
+team leaders, and ministry leaders see only the groups, teams, schedules, and ministry
+details assigned to them. Every read and write is checked again against the signed-in
+person's resource-level authority. The optional Cloudflare Zero Trust policy may remain
+limited to `/admin`; ministry leaders do not need a Zero Trust account to use this panel.
 
 ### Manage a household with clear responsibilities
 
@@ -123,8 +147,8 @@ its admin board.
 
 1. Follow [`docs/supabase-setup.md`](../supabase-setup.md) and run `npm run setup`.
    Choose **Full Church** for the complete composition pictured above, or explicitly
-   select **Member Portal + Volunteer Scheduling + Groups**. Portal's soft `uses` do not
-   auto-enable the other two. Setup selects Supabase, writes the `HYPERDRIVE` and `MEDIA`
+   select **Member Portal + Volunteer Scheduling + Groups + Learning**. Portal's soft
+   `uses` do not auto-enable the other three. Setup selects Supabase, writes the `HYPERDRIVE` and `MEDIA`
    bindings, runs the current migrations, and records every module setting. Giving and
    Registration remain independently gated selections.
 2. Configure the production `MEDIA` R2 bucket. Protected group-file rows in Postgres
@@ -140,8 +164,8 @@ its admin board.
    than two eligible adult owners. In **Admin → Groups**, appoint group administrators.
    Designated event administrators are managed from the registration event.
 6. Deploy, request a real passwordless sign-in link from `/<locale>/signin`, and verify
-   one ordinary member, one household owner, one group administrator, and one event
-   administrator before inviting the congregation.
+   one ordinary member, one household owner, one group administrator, one ministry or
+   team leader, and one event administrator before inviting the congregation.
 
 ### Local fictional demo
 
@@ -184,14 +208,16 @@ the module to use the preserved portal data again.
 
 The portal navigation is a composition of independently gated capabilities. A custom
 selection does not follow soft `uses`: selecting Portal alone does not enable Volunteer
-Scheduling or Groups. The full dashboard shown in this guide therefore requires Portal +
-Volunteer Scheduling + Groups. The table below matches `config/capabilities.json` and
+Scheduling, Groups, or Learning. The full opportunity composition therefore requires
+Portal + Volunteer Scheduling + Groups + Learning. The table below matches
+`config/capabilities.json` and
 `src/components/PortalNav.astro`.
 
 | Surface | Owning module | Behavior at the boundary |
 |---|---|---|
 | `/my`, `/my/blockouts`, `/my/calendar`, `/cal/*` | `serve` | Volunteer Scheduling must be selected for the dashboard and Calendar; Portal does not enable it automatically. Portal/group/registration records enrich these surfaces only when their modules are also enabled. |
-| `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated, Supabase-only portal routes. Its `uses` of Groups and Volunteer Scheduling are soft composition hints, not auto-enabled dependencies. |
+| `/my/opportunities`, `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated, Supabase-only portal routes. Its `uses` of Groups, Learning, and Volunteer Scheduling are soft composition hints, not auto-enabled dependencies. |
+| `/manage`, `/manage/ministries/*` | Portal / enabled opportunity modules | Application-authenticated, resource-scoped leader panel; it does not depend on Cloudflare Zero Trust. |
 | `/groups/*`, `/signup/*`, `/attendance/*` | `groups` | Groups must be selected for the Groups card/tab and directory. It works on either backend; protected file panels/downloads additionally require Portal and R2. |
 | `/events` and `/admin/events` | `events` | Public event and announcement publishing; independent from registration records shown in My Events. |
 | `/register/*`, `/api/register/*`, `/admin/registration/*` | `registration` | Supabase-only and independently switched; enables the open-registration section and registered-event calendar marks. |
@@ -204,15 +230,18 @@ Volunteer Scheduling + Groups. The table below matches `config/capabilities.json
   `src/lib/modules.ts`, `src/components/PortalNav.astro`, and
   `src/lib/routePolicy.ts`. Longest-prefix matching lets Portal or Giving own a
   specific `/my/...` route while Volunteer Scheduling continues to own `/my`.
-- **Pages:** `src/pages/[locale]/my/{index,household,events,serving,calendar,prayer,giving}.astro`,
-  `src/pages/[locale]/profile.astro`, and `src/pages/[locale]/groups/[id].astro`.
+- **Pages:** `src/pages/[locale]/my/{index,opportunities,household,events,serving,calendar,prayer,giving}.astro`,
+  `src/pages/[locale]/manage/`, `src/pages/[locale]/profile.astro`, and
+  `src/pages/[locale]/groups/[id].astro`.
 - **Data and authorization:** `src/lib/portalDb.ts` (household owners and profile
   edits), `src/lib/groupFiles.ts` (validation, R2 metadata, and file ACL),
   `src/lib/prayerDb.ts` (scope eligibility and moderation), and
-  `src/lib/calendar.ts` (combined calendar marks).
+  `src/lib/calendar.ts` (combined calendar marks), plus
+  `src/lib/memberOpportunities.ts` (module-aware opportunity composition).
 - **Schema and demo:** `migrations-supabase/0009_member_portal.sql`,
   `seed/portal-seed.sql`, and `seed/portal-files/`.
 - **Tests:** `test/portalDb.test.ts`, `test/groupFiles.test.ts`,
   `test/prayerDb.test.ts`, `test/calendar.test.ts`, `test/modules.test.ts`,
+  `test/memberOpportunities.test.ts`, `test/memberOpportunityPages.test.ts`,
   `test/pg/portalSeed.test.ts`, `test/portalMediaSeed.test.ts`, and
   `test/e2e-pg/portal-prayer.e2e.test.ts`.
