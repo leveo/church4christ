@@ -49,11 +49,18 @@ function normalizePgDefault(value: string | null): string | null {
   while (normalized.startsWith('(') && normalized.endsWith(')')) {
     normalized = normalized.slice(1, -1).trim();
   }
+  if (/^current_timestamp$/i.test(normalized)) return 'utc-now';
   if (/^datetime\s*\(\s*'now'::text(?:\s*,[\s\S]*)?\)$/i.test(normalized)) return 'utc-now';
   const text = normalized.match(/^'((?:[^']|'')*)'::text$/i);
   if (text) return text[1].replaceAll("''", "'");
   return normalized.toLowerCase();
 }
+
+describe('Postgres default normalization', () => {
+  it('treats native CURRENT_TIMESTAMP as the D1 UTC-now default', () => {
+    expect(normalizePgDefault('CURRENT_TIMESTAMP')).toBe('utc-now');
+  });
+});
 
 function expectedPgType(table: string, column: string, d1Type: string): string {
   // SQLite's INTEGER affinity stores custom-page UUIDs in revisions.entity_id;
@@ -156,7 +163,7 @@ function sqlTokens(value: string): string[] {
     if (word) { tokens.push(word.toLowerCase()); index += word.length; continue; }
     const number = value.slice(index).match(/^\d+(?:\.\d+)?/)?.[0];
     if (number) { tokens.push(number); index += number.length; continue; }
-    const operator = ['<>', '>=', '<=', '::', '||'].find((candidate) => value.startsWith(candidate, index));
+    const operator = ['#>>', '<>', '>=', '<=', '::', '||'].find((candidate) => value.startsWith(candidate, index));
     if (operator) { tokens.push(operator); index += operator.length; continue; }
     if ('().,;=<>+-*'.includes(char)) { tokens.push(char); index += 1; continue; }
     throw new Error(`unsupported trigger token at: ${value.slice(index)}`);
@@ -324,6 +331,7 @@ function pgTriggerEffect(
           "hashtext ( old . campus_id || ':' || old . requester_bucket_hash )",
           "hashtext ( new . campus_id || ':' || new . bucket_hash )",
           'hashtext ( new . operation_id )',
+          'hashtext ( new . rollback_id )',
           'new . case_id :: bigint',
           '732 , new . contact_point_id',
           '732 , old . contact_point_id',
@@ -425,6 +433,17 @@ function syntheticPgTrigger(
 }
 
 describe('Postgres trigger semantic parser', () => {
+  it('accepts an exact JSONB text-path comparison used by rollback approval binding guards', () => {
+    expect(pgTriggerSignature(syntheticPgTrigger(`BEGIN
+      IF NEW.context_json::jsonb #>> '{person_merge_rollback_approval,rollback_id}' = OLD.rollback_id THEN
+        RAISE EXCEPTION 'protected';
+      END IF;
+      RETURN NEW;
+    END;`))).toContain(
+      "new . context_json :: jsonb #>> '{person_merge_rollback_approval,rollback_id}' = old . rollback_id",
+    );
+  });
+
   it('rejects trigger-level WHEN because its predicate is not represented by the parity signature', () => {
     expect(() => pgTriggerSignature(syntheticPgTrigger(`
       BEGIN
@@ -807,6 +826,44 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
       'person_merge_semantic_binding_recurring_gift_guard',
       'person_merge_semantic_binding_recurring_gift_bump',
     ]);
+    const mergeExecutionLifecycleTriggers = new Set([
+      // PostgreSQL combines each group into one transaction-locked trigger;
+      // D1 uses one trigger per abort condition under SQLite's single writer.
+      'person_merge_rollback_operations_update_guard',
+      'person_merge_rollback_operations_immutable_guard',
+      'person_merge_rollback_operations_state_cas_guard',
+      'person_merge_rollback_operations_transition_guard',
+      'person_merge_rollback_operations_expiry_guard',
+      'person_merge_rollback_state_approval_guard',
+      'person_merge_rollback_approval_gate_guard',
+      'person_merge_rollback_approval_live_guard',
+      'person_merge_rollback_approval_veto_guard',
+      // Migration 0036 adds rollback-aware reverse-mutation branches using
+      // native JSON/set expressions in PostgreSQL and decomposed queries in
+      // D1. Their exact inventories and behavior are covered by the dedicated
+      // 0036 parser plus D1/PG merge execution suites.
+      'identity_newcomer_submission_binding_update_guard',
+      'identity_source_observation_attachment_guard',
+      'identity_source_observation_link_immutable',
+      'identity_source_records_link_immutable',
+      'person_merge_core_receipt_precondition_guard',
+      'person_merge_execution_seals_append_only_delete',
+      'person_merge_execution_seals_append_only_update',
+      'person_merge_journal_row_details_append_only_delete',
+      'person_merge_journal_row_details_append_only_update',
+      'person_merge_operations_completion_seal_guard',
+      'person_merge_reference_facts_append_only_delete',
+      'person_merge_reference_facts_append_only_update',
+      'person_merge_rollback_approvals_append_only_delete',
+      'person_merge_rollback_approvals_append_only_update',
+      'person_merge_rollback_approvals_binding_guard',
+      'person_merge_rollback_completion_guard',
+      'person_merge_rollback_operations_delete_guard',
+      'person_merge_rollback_operations_insert_guard',
+      'person_merge_rollback_receipt_precondition_guard',
+      'person_merge_rollback_step_up_binding_immutable',
+      'person_merge_rollback_step_up_direct_consumed_guard',
+    ]);
     const lifecycleTrigger = (name: unknown) => {
       const normalized = String(name).toLowerCase();
       return normalized === 'campus_membership_after_person_insert'
@@ -829,6 +886,7 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
         // live-set/race behavior is covered by the dedicated C1/PCO suites.
         || normalized === 'person_merge_operations_risk_source_guard'
         || normalized === 'planning_center_merge_mapping_stale_guard'
+        || mergeExecutionLifecycleTriggers.has(normalized)
         // PostgreSQL needs transaction-scoped advisory locks around all live
         // risk writers and merge transitions; D1 obtains the same ordering from
         // its single-writer transaction model, so these are engine lifecycle
