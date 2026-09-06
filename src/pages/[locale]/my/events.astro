@@ -7,8 +7,9 @@
 // registration flow at /register/<id>. No POST handler here: registering and
 // cancelling both stay on that public flow, which already handles Stripe
 // checkout and capacity races.
-import Base from '../../../layouts/Base.astro';
-import PortalNav from '../../../components/PortalNav.astro';
+import Member from '../../../layouts/Member.astro';
+import { memberCopy } from '../../../i18n/designMember';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
@@ -39,10 +40,9 @@ const isFull = (e: RegEvent) => e.capacity !== null && e.taken_count >= e.capaci
 const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity - e.taken_count) : null);
 ---
 
-<Base title={t(locale, 'portal.events.title')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.events.title')}</h1>
-    <PortalNav locale={locale} active="events" />
+<Member active="events" title={t(locale, 'portal.events.title')} locale={locale} noindex>
+  <div class="member-content">
+    <MemberPageHeader title={t(locale, 'portal.events.title')} description={memberCopy(locale).eventsIntro} image="events" />
 
     <section class="mt-8">
       <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.events.mine')}</h2>
@@ -52,7 +52,8 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
         ) : (
           <ul class="mt-4 flex flex-col gap-4">
             {myRegistrations.map((r) => (
-              <li class="rounded-lg border border-border bg-surface-raised p-5">
+              <li class="member-event-ticket rounded-lg border border-border bg-surface-raised p-5">
+                <time datetime={r.starts_at} class="event-date"><strong>{r.starts_at.slice(8, 10)}</strong><span>{formatDate(r.starts_at.slice(0, 10), locale)}</span></time><div>
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-semibold">{r.event_title}</span>
                   <span class={`${badge} ${statusChip[r.status]}`}>{t(locale, `portal.events.status.${r.status}`)}</span>
@@ -62,7 +63,7 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
                 {r.amount_cents > 0 && (
                   <p class="mt-2 text-sm font-semibold tabular-nums">{formatCents(r.amount_cents, r.currency)}</p>
                 )}
-              </li>
+              </div></li>
             ))}
           </ul>
         )
@@ -101,4 +102,12 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
       )
     }
   </div>
-</Base>
+</Member>
+
+<style>
+  .member-event-ticket { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 1.25rem; align-items: center; }
+  .event-date { display: flex; flex-direction: column; align-items: center; padding: .5rem 1rem .5rem 0; border-right: 1px solid var(--color-border); color: var(--color-primary); }
+  .event-date strong { font-size: 2rem; font-weight: 600; line-height: 1.2; }
+  .event-date span { margin-top: .4rem; font-size: .65rem; text-align: center; }
+  @media (max-width: 479px) { .member-event-ticket { grid-template-columns: 75px minmax(0, 1fr); gap: 1rem; } }
+</style>

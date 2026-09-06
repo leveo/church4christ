@@ -1,4 +1,5 @@
 ---
+demo: true
 title: Welcome to Our New Website
 author: Pastor David Chen
 date: "2026-01-11"

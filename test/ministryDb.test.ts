@@ -134,11 +134,18 @@ describe('listPublishedTestimonies', () => {
     ]);
   }
 
-  it('orders requested-locale rows first, then by published_at desc, excluding non-approved/deleted', async () => {
+  it('shows only English submissions on English pages, ordered newest first', async () => {
     await seedTestimonies();
     const rows = await listPublishedTestimonies(env.DB, 'en', 10);
-    expect(rows.map((r) => r.title)).toEqual(['B-en', 'A-en', 'D-zh', 'C-zh']);
-    expect(rows.map((r) => r.locale)).toEqual(['en', 'en', 'zh', 'zh']);
+    expect(rows.map((r) => r.title)).toEqual(['B-en', 'A-en']);
+    expect(rows.map((r) => r.locale)).toEqual(['en', 'en']);
+  });
+
+  it('keeps English pages empty when only Chinese submissions are approved', async () => {
+    await seedTestimonies();
+    await env.DB.prepare("DELETE FROM testimonies WHERE locale = 'en'").run();
+    expect(await listPublishedTestimonies(env.DB, 'en', 10)).toEqual([]);
+    expect((await listPublishedTestimonies(env.DB, 'zh', 10)).map(({ title }) => title)).toEqual(['D-zh', 'C-zh']);
   });
 
   it('puts zh rows first for a zh request', async () => {

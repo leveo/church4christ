@@ -55,6 +55,6 @@ describe('activity score admin source boundaries', () => {
     expect(layout).toContain("href: '/admin/activity-score'");
     expect(layout).toContain("module: 'activity-score', area: 'activity-score'");
     expect(dashboard).toContain("modules.has('activity-score')");
-    expect(dashboard).toContain('href="/admin/activity-score"');
+    expect(dashboard).toContain("href: '/admin/activity-score'");
   });
 });

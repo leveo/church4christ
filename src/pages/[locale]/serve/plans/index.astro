@@ -100,8 +100,8 @@ const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
                         class="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-surface-sunken"
                       >
                         <span class="font-semibold tabular-nums">{formatDate(p.plan_date, locale)}</span>
-                        {p.title && <span class="text-ink-muted">{p.title}</span>}
-                        {p.series && <span class="text-xs text-ink-subtle">{p.series}</span>}
+                        {p.display_title && <span class="text-ink-muted">{p.display_title}</span>}
+                        {p.display_series && <span class="text-xs text-ink-subtle">{p.display_series}</span>}
                         {fill && fill.needed > 0 && (
                           <span
                             class={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${

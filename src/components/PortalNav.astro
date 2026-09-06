@@ -1,60 +1,25 @@
 ---
-// Shared tab strip for the /my/* member-portal pages. Dashboard/Calendar
-// always render; Giving only when the `giving` module is on; the Groups tab
-// links to the existing public groups directory (/groups) and shows only when
-// the `groups` module is on; Household/Events/Serving only when `portal` is on
-// — this component is shared with /my (the serve-only schedule page), which
-// runs without the portal module. The Prayer tab is portal-gated too.
-import { localePath, type Locale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
 import { t } from '../lib/i18n';
-
-export type PortalNavTab = 'dashboard' | 'opportunities' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer';
-
-interface Props {
-  locale: Locale;
-  active: PortalNavTab;
-}
-
-const { locale, active } = Astro.props;
-const modules = Astro.locals.modules;
-
-const tabs: { key: PortalNavTab; href: string; label: string }[] = [
-  { key: 'dashboard', href: localePath(locale, '/my'), label: t(locale, 'portal.nav.dashboard') },
-  ...(modules.has('portal')
-    ? [{ key: 'opportunities' as const, href: localePath(locale, '/my/opportunities'), label: t(locale, 'portal.nav.opportunities') }]
-    : []),
-  ...(modules.has('portal')
-    ? [{ key: 'household' as const, href: localePath(locale, '/my/household'), label: t(locale, 'portal.nav.household') }]
-    : []),
-  ...(modules.has('giving')
-    ? [{ key: 'giving' as const, href: localePath(locale, '/my/giving'), label: t(locale, 'portal.nav.giving') }]
-    : []),
-  ...(modules.has('groups')
-    ? [{ key: 'groups' as const, href: localePath(locale, '/groups'), label: t(locale, 'portal.nav.groups') }]
-    : []),
-  ...(modules.has('portal')
-    ? [
-        { key: 'events' as const, href: localePath(locale, '/my/events'), label: t(locale, 'portal.nav.events') },
-        { key: 'serving' as const, href: localePath(locale, '/my/serving'), label: t(locale, 'portal.nav.serving') },
-        { key: 'prayer' as const, href: localePath(locale, '/my/prayer'), label: t(locale, 'portal.nav.prayer') },
-      ]
-    : []),
-  { key: 'calendar', href: localePath(locale, '/my/calendar'), label: t(locale, 'portal.nav.calendar') },
-];
+import { memberNavigation, type MemberNavKey } from '../lib/memberNavigation';
+import Icon from './ui/Icon.astro';
+export type PortalNavTab = MemberNavKey;
+interface Props { locale: Locale; active: MemberNavKey; rail?: boolean }
+const { locale, active, rail = false } = Astro.props;
+const tabs = memberNavigation(Astro.locals.modules, locale);
 ---
-
-<nav class="mt-4 flex gap-1 overflow-x-auto border-b border-border text-sm" aria-label={t(locale, 'portal.nav.myPortal')}>
-  {
-    tabs.map((tab) => (
-      <a
-        href={tab.href}
-        aria-current={tab.key === active ? 'page' : undefined}
-        class={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 font-medium ${
-          tab.key === active ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink'
-        }`}
-      >
-        {tab.label}
-      </a>
-    ))
-  }
+<nav class:list={['portal-navigation', rail && 'portal-navigation-rail']} aria-label={t(locale, 'portal.nav.myPortal')}>
+  {tabs.map(tab => (
+    <a href={tab.href} aria-current={tab.key === active ? 'page' : undefined}>
+      <Icon name={tab.icon} size={17} /><span>{tab.label}</span>
+    </a>
+  ))}
 </nav>
+<style>
+  .portal-navigation { display: flex; gap: .25rem; overflow-x: auto; padding: .25rem 0 .5rem; }
+  .portal-navigation a { display: flex; align-items: center; gap: .7rem; padding: .75rem .8rem; border-radius: var(--radius-md); font-size: .8rem; font-weight: 500; color: var(--color-ink-muted); white-space: nowrap; }
+  .portal-navigation a:hover { background: var(--color-surface-sunken); color: var(--color-ink); }
+  .portal-navigation a[aria-current] { background: var(--color-primary-soft); color: var(--color-on-primary-soft); font-weight: 650; box-shadow: inset 3px 0 var(--color-primary); }
+  .portal-navigation-rail { flex-direction: column; overflow: visible; }
+  @media (max-width: 1023px) { .portal-navigation-rail { flex-direction: row; overflow-x: auto; border-bottom: 1px solid var(--color-border); } .portal-navigation a[aria-current] { box-shadow: inset 0 -2px var(--color-primary); } .portal-navigation a { padding: .75rem; } }
+</style>

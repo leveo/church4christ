@@ -70,6 +70,17 @@ function redactText(value, secrets) {
   return output;
 }
 
+function structuredErrorText(stdout, secrets) {
+  // Wrangler JSON commands may report failures on stdout with empty stderr.
+  // Never append that stream wholesale: it can contain query rows or secrets.
+  // Decode only the known diagnostic field, then redact decoded secret values
+  // (JSON escaping can prevent redaction of the original serialized string).
+  let value;
+  try { value = JSON.parse(stdout); } catch { return ''; }
+  if (!isRecord(value) || !isRecord(value.error) || typeof value.error.text !== 'string') return '';
+  return redactText(value.error.text, secrets).slice(0, 4096);
+}
+
 function secretVariants(values) {
   const found = new Set();
   const add = (value) => {
@@ -171,7 +182,8 @@ export function createCommandRunner({ exec = defaultExec, secretValues: register
         displayCommand,
       });
       if (safe.exitCode !== 0 && !allowNonzero) {
-        throw new Error(`${displayCommand} failed (${safe.exitCode}): ${safe.stderr}`);
+        const diagnostic = safe.stderr.trim() ? safe.stderr : structuredErrorText(result.stdout, secrets);
+        throw new Error(`${displayCommand} failed (${safe.exitCode}): ${diagnostic}`);
       }
       return safe;
     },

@@ -1,4 +1,5 @@
 ---
+demo: true
 title: Walking Through the Psalms of Ascent
 author: Pastor Grace Lin
 date: "2026-02-15"

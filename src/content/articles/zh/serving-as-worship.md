@@ -1,4 +1,5 @@
 ---
+demo: true
 title: 事奉是敬拜
 author: 陈大卫牧师
 date: "2026-03-08"

@@ -131,6 +131,22 @@ describe('groupNavLinks', () => {
 });
 
 describe('resolveNav', () => {
+  it('omits a Chinese-only custom link from English navigation without changing the saved labels', async () => {
+    const items: NavItem[] = [
+      { type: 'link', url: 'https://example.com/zh-only', label: { en: '', zh: '中文聚会' } },
+      { type: 'link', url: 'https://example.com/both', label: { en: 'Gatherings', zh: '聚会' } },
+    ];
+    await setSetting(env.DB, NAV_SETTING_KEY, serializeNavItems(items));
+
+    expect(await resolveNav(env.DB, 'en', ALL_MODULES)).toEqual([
+      { label: 'Gatherings', href: 'https://example.com/both' },
+    ]);
+    expect(await resolveNav(env.DB, 'zh', ALL_MODULES)).toEqual([
+      { label: '中文聚会', href: 'https://example.com/zh-only' },
+      { label: '聚会', href: 'https://example.com/both' },
+    ]);
+  });
+
   it('with no setting, resolves DEFAULT_NAV to the module-gated builtins with i18n labels', async () => {
     const links = await resolveNav(env.DB, 'en', ALL_MODULES);
     expect(links).toEqual(

@@ -143,13 +143,13 @@ describe('Learning demo screenshot harness rows', () => {
         path: '/en/learn/21000',
         out: 'docs/images/learning/genesis-1-en.png',
         identity: 'member',
-        expectedText: 'Genesis 1: Creation / 创世记第一章：创造',
+        expectedText: 'Genesis 1: Creation',
       }),
       expect.objectContaining({
         path: '/zh/learn/21000',
         out: 'docs/images/learning/genesis-1-zh.png',
         identity: 'member',
-        expectedText: '创世记第一章：创造',
+        expectedText: 'Genesis 1: Creation',
       }),
       expect.objectContaining({
         path: '/admin/learning',
@@ -183,7 +183,7 @@ describe('Learning demo screenshot harness rows', () => {
         sessionIdentity: { personId: 1, email: 'admin@example.com', sessionEpoch: 0 },
         identityExpectedText: 'admin@example.com',
         requiredTexts: [
-          'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+          'Local fictional Canvas snapshot',
           'https://canvas-learning.example.test',
         ],
       }),

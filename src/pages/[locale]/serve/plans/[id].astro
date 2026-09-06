@@ -165,10 +165,10 @@ const personName = (id: number) =>
       </h1>
       {serviceTime && <p class="mt-1 text-sm opacity-80 tabular-nums">{serviceTime}</p>}
       {
-        (plan.title || plan.series) && (
+        (plan.display_title || plan.display_series) && (
           <p class="mt-1 opacity-90">
-            {plan.title}
-            {plan.series && <span class="opacity-70"> · {plan.series}</span>}
+            {plan.display_title}
+            {plan.display_series && <span class="opacity-70">{plan.display_title ? ' · ' : ''}{plan.display_series}</span>}
           </p>
         )
       }

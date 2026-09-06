@@ -90,7 +90,28 @@ describe('draft + publish-window visibility', () => {
   it('the draft sermon title is absent from /en/sermons, published ones show', async () => {
     const body = await (await get('/en/sermons')).text();
     expect(body).toContain('The Beatitudes'); // published sermon renders
+    expect(body).not.toContain('向高山举目'); // Chinese editorial content is excluded in English
     expect(body).not.toContain('上行之诗预告'); // seeded draft sermon (id 10)
+  });
+
+  it('keeps both English and Chinese published sermons on Chinese archive pages', async () => {
+    const body = await (await get('/zh/sermons')).text();
+    expect(body).toContain('The Beatitudes');
+    expect(body).toContain('向高山举目');
+    expect(body).not.toContain('上行之诗预告');
+  });
+
+  it('keeps Chinese prayer-sheet content and dated links out of English public pages', async () => {
+    const sheet = await env.DB.prepare("SELECT sheet_date FROM prayer_sheets WHERE locale = 'zh' AND status = 'published' AND deleted_at IS NULL ORDER BY sheet_date DESC LIMIT 1")
+      .first<{ sheet_date: string }>();
+    expect(sheet).not.toBeNull();
+    const english = await (await get('/en/prayer')).text();
+    expect(english).not.toContain('感谢神赐下平安稳妥的一周');
+    expect(english).not.toContain(`/en/prayer/${sheet!.sheet_date}`);
+    expect((await get(`/en/prayer/${sheet!.sheet_date}`)).status).toBe(404);
+    const chinese = await get(`/zh/prayer/${sheet!.sheet_date}`);
+    expect(chinese.status).toBe(200);
+    expect(await chinese.text()).toContain('感谢神赐下平安稳妥的一周');
   });
 
   it('a future-publish bulletin never appears on /en/bulletin', async () => {
@@ -104,6 +125,31 @@ describe('draft + publish-window visibility', () => {
     ).run();
     const body = await (await get('/en/bulletin')).text();
     expect(body).not.toContain('2099');
+  });
+
+  it('keeps Chinese editorial bulletins out of English readers while preserving Chinese readers', async () => {
+    const row = await env.DB.prepare('SELECT bulletin_date FROM bulletins WHERE id = 8')
+      .first<{ bulletin_date: string }>();
+    expect(row).not.toBeNull();
+    const englishIndex = await (await get('/en/bulletin?service=2')).text();
+    expect(englishIndex).not.toContain('我要向高山举目');
+    expect(englishIndex).toContain('Blessed Are the Poor in Spirit');
+    // An unavailable service retains the existing fallback to an eligible
+    // service for this date, rather than rendering the Chinese source.
+    const englishDate = await (await get(`/en/bulletin/${row!.bulletin_date}?service=2`)).text();
+    expect(englishDate).not.toContain('我要向高山举目');
+    expect(englishDate).toContain('Blessed Are the Poor in Spirit');
+    const chineseDate = await get(`/zh/bulletin/${row!.bulletin_date}?service=2`);
+    expect(chineseDate.status).toBe(200);
+    expect(await chineseDate.text()).toContain('我要向高山举目');
+
+    await env.DB.prepare(`INSERT INTO bulletins (id, service_type_id, bulletin_date, status)
+      VALUES (9002, 2, '2001-01-07', 'published')`).run();
+    await env.DB.prepare(`INSERT INTO bulletin_announcements (bulletin_id, body)
+      VALUES (9002, '本周聚会')`).run();
+    expect((await get('/en/bulletin/2001-01-07')).status).toBe(404);
+    expect((await get('/zh/bulletin/2001-01-07')).status).toBe(200);
+    expect(await (await get('/en/bulletin')).text()).not.toContain('/en/bulletin/2001-01-07');
   });
 });
 

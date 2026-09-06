@@ -1,4 +1,5 @@
 ---
+demo: true
 title: 祷告的操练
 author: 林恩慈传道
 date: "2026-04-19"

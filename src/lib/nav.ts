@@ -3,7 +3,7 @@
 // (the pre-customization menu) is used, so a bad save can never blank the nav.
 import type { AppDb } from './appDb';
 import type { Locale } from './locales';
-import { localePath } from './locales';
+import { localePath, pickLocalizedText } from './locales';
 import { t } from './i18n';
 import { MODULE_KEYS, MODULES } from './modules';
 import { getSetting } from './settings';
@@ -173,7 +173,8 @@ export async function resolveNav(db: AppDb, locale: Locale, modules: Set<string>
       if (!title) continue;
       out.push({ label: title, href: localePath(locale, `/p/${item.slug}`) });
     } else {
-      const label = (locale === 'zh' ? item.label.zh : item.label.en) || item.label.en || item.label.zh;
+      const label = pickLocalizedText(item.label, locale);
+      if (!label) continue;
       out.push({ label, href: item.url });
     }
   }

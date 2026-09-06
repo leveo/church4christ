@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 林恩慈
 role: 团契与关怀传道
 group: pastoral

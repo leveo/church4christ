@@ -1,8 +1,8 @@
 ---
 // Testimonies — PUBLIC (route policy exact match). Shows approved testimonies
-// (locale-first, other-locale rows badged) with full bodies (long ones fold into
+// (English only on en, both languages on zh) with full bodies (long ones fold into
 // a <details>), and a submit form that files a PENDING testimony for review. A
-// name is optional (blank → "Anonymous 匿名"); title + body are required. The
+// name is optional (blank → localized anonymous label); title + body are required. The
 // row's locale is the current page locale. A honeypot field silently absorbs
 // bots. Signed-in visitors get their name prefilled and their person_id linked.
 import Base from '../../../layouts/Base.astro';
@@ -20,7 +20,6 @@ if (!locale) {
 }
 const user = Astro.locals.user;
 const db = Astro.locals.db;
-const ANON = 'Anonymous 匿名';
 const MAX_BODY = 5000;
 
 if (Astro.request.method === 'POST') {
@@ -31,7 +30,7 @@ if (Astro.request.method === 'POST') {
   }
   const title = String(fd.get('title') ?? '').trim().slice(0, 200);
   const body = String(fd.get('body') ?? '').trim().slice(0, MAX_BODY);
-  const name = (user?.displayName ?? String(fd.get('name') ?? '')).trim().slice(0, 120) || ANON;
+  const name = (user?.displayName ?? String(fd.get('name') ?? '')).trim().slice(0, 120);
   if (title && body) {
     await submitTestimony(db, {
       person_id: user?.id ?? null,

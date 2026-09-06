@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Faithful Wang
 role: Elder
 group: elders

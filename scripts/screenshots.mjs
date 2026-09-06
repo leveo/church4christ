@@ -135,8 +135,8 @@ export const RELEASE_SCREENSHOTS = validateScreenshotManifest([
 // Seed-backed capture definitions only. The release documentation task owns
 // actual PNG generation and promotion into RELEASE_SCREENSHOTS.
 export const LEARNING_DEMO_SCREENSHOTS = validateScreenshotManifest([
-  { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation / 创世记第一章：创造', rejectionTexts: ['Sign in', '404', 'Page not found'] },
-  { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: '创世记第一章：创造', rejectionTexts: ['登录', '404', '页面未找到'] },
+  { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation', rejectionTexts: ['Sign in', '404', 'Page not found'] },
+  { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation', rejectionTexts: ['登录', '404', '页面未找到'] },
   { path: '/admin/learning', out: 'docs/images/learning/admin-overview.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Learning provider connections', rejectionTexts: ['Sign in', '403', 'Page not found'] },
 ]);
 
@@ -150,7 +150,7 @@ export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOT
     sessionIdentity: Object.freeze({ personId: 1, email: 'admin@example.com', sessionEpoch: 0 }),
     identityExpectedText: 'admin@example.com',
     requiredTexts: Object.freeze([
-      'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+      'Local fictional Canvas snapshot',
       'https://canvas-learning.example.test',
     ]),
   } : row.locale === 'zh' ? {

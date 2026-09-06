@@ -1,4 +1,5 @@
 ---
+demo: true
 name: English Young Adults
 meetingTime: Sundays · 1:00 PM
 location: Café Corner

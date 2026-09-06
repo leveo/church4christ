@@ -1,6 +1,28 @@
 // Simplified Chinese UI strings. Must keep key + {placeholder} parity with
 // en.ts (enforced by the i18n test). Natural church copy, no machine wording.
 export default {
+  'design.dashboard.next': '接下来要做',
+  'design.dashboard.reflection': '用心预备，喜乐服事。',
+
+  'design.menu.welcome': '从这个主日，开始认识彼此。',
+  'design.menu.explore': '让信仰走进每天的生活。',
+  'design.menu.connect': '找到一起成长的伙伴。',
+  'design.menu.participate': '让你的恩赐成为祝福。',
+  'design.menu.more': '探索更多教会生活。',
+  'design.menu.myChurch': '我的教会',
+
+  'design.home.eyebrow': '以基督为中心，以教会为家',
+  'design.home.title': '在这里，\n一起成长。',
+
+  'design.nav.workspace': '工作台',
+  'design.nav.content': '内容发布',
+  'design.nav.care': '会友关怀',
+  'design.nav.ministry': '事工协作',
+  'design.nav.operations': '数据与运营',
+  'design.nav.system': '系统设置',
+  'design.nav.context': '教会工作空间',
+  'design.nav.skip': '跳转到工作区',
+
   'site.name': '四方基督教会',
   'site.tagline': '城市中的教会',
 

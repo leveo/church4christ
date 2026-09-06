@@ -51,7 +51,7 @@ const frequencies = [
 const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(localePath(locale, '/give'))}`);
 
 // ── Module OFF: the existing external-link stewardship page ──────────────────
-const found = await getLocalized('pages', 'give', locale);
+const found = await getLocalized('pages', 'give', locale, Astro.locals.db);
 if (!found) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

@@ -13,7 +13,9 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
   --app-origin https://church.example
   --email-from serve@church.example
   --backend d1|supabase
-  --demo-data
+  --demo-data | --no-demo-data
+      Include fictional demo content or start without it; both keep the bundled design
+      Noninteractive default: --no-demo-data
   --yes --dry-run --json --force-config --promote-existing-admin
   --allow-hyperdrive-secret-in-argv
       Explicitly permit Wrangler to receive a Supabase URL in its argv when creating deploy Hyperdrive
@@ -41,6 +43,7 @@ export function parseSetupArgs(argv, catalog) {
       'email-from': { type: 'string' },
       backend: { type: 'string' },
       'demo-data': { type: 'boolean' },
+      'no-demo-data': { type: 'boolean' },
       yes: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
       json: { type: 'boolean' },
@@ -53,6 +56,9 @@ export function parseSetupArgs(argv, catalog) {
   });
 
   if (values.help) return { help: true };
+  if (values['demo-data'] && values['no-demo-data']) {
+    throw new Error('--demo-data and --no-demo-data cannot be combined');
+  }
   const doctorOptions = new Set(['doctor', 'strict', 'json']);
   if (values.doctor && Object.keys(values).some((key) => !doctorOptions.has(key))) {
     throw new Error(
@@ -98,7 +104,7 @@ export function parseSetupArgs(argv, catalog) {
     forceConfig: values['force-config'] ?? false,
     promoteExistingAdmin: values['promote-existing-admin'] ?? false,
     allowHyperdriveSecretInArgv: values['allow-hyperdrive-secret-in-argv'] ?? false,
-    demoDataSpecified: values['demo-data'] !== undefined,
+    demoDataSpecified: values['demo-data'] !== undefined || values['no-demo-data'] !== undefined,
     doctor: false,
     strict: false,
   };

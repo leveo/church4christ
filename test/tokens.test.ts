@@ -25,13 +25,13 @@ describe('generateCss', () => {
 
   it('emits sanctuary default (light) block with its light palette', () => {
     const b = block(css, ':root[data-theme="sanctuary"]');
-    expect(b).toContain('--color-primary: #31487A;');
+    expect(b).toContain('--color-primary: #183D35;');
     expect(b).toContain('--color-on-primary: #FFFFFF;');
   });
 
   it('emits sanctuary dark override block with the dark palette', () => {
     const b = block(css, ':root[data-theme="sanctuary"][data-mode="dark"]');
-    expect(b).toContain('--color-primary: #93ACDD;');
+    expect(b).toContain('--color-primary: #A6D0B6;');
   });
 
   it('midnight default block is its dark palette, with a light override', () => {
@@ -59,7 +59,7 @@ describe('generateCss', () => {
     const b = block(css, ':root[data-theme="sanctuary"]');
     expect(b).toContain("--font-display: 'Fraunces Variable', Georgia,");
     expect(b).toContain('--font-mono: ui-monospace, SFMono-Regular,');
-    expect(b).toContain('--radius-md: 10px;');
+    expect(b).toContain('--radius-md: 8px;');
     expect(b).toContain('--shadow-lg: 0 12px 32px rgba(25, 30, 45, 0.12);');
   });
 
@@ -136,7 +136,7 @@ describe('findViolations (check-tokens)', () => {
 
   it('skips tokens.generated.css and non-source extensions', () => {
     const v = fixture({
-      'tokens.generated.css': ':root { --color-primary: #31487A; }\n',
+      'tokens.generated.css': ':root { --color-primary: #183D35; }\n',
       'notes.md': 'color: #FF0000\n',
     });
     expect(v).toEqual([]);

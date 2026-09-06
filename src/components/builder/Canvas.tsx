@@ -4,7 +4,8 @@
 // lines) rather than sortable lists — one mechanism covers palette drops,
 // reorders, and cross-container moves.
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import type { AnyNode, ColumnsNode, LeafNode, PageLayout, SectionNode, L10nString } from '../../lib/pageLayout';
+import type { AnyNode, ColumnsNode, LeafNode, PageLayout, SectionNode } from '../../lib/pageLayout';
+import { pickLocalizedText } from '../../lib/locales';
 import {
   sectionOuterClass, sectionInnerClass, columnsClass, headingRender,
   textClass, imageRender, buttonRender, spacerClass, dividerClass,
@@ -23,10 +24,6 @@ export interface CanvasProps {
   onDuplicate: (id: string) => void;
 }
 
-function pickL10n(s: L10nString, locale: 'en' | 'zh'): string {
-  return locale === 'zh' ? s.zh || s.en : s.en || s.zh;
-}
-
 function DropGap({ container, index, draggingType }: { container: ContainerRef; index: number; draggingType: AnyNode['type'] | null }) {
   const { isOver, setNodeRef } = useDroppable({ id: `gap|${container}|${index}`, data: { container, index } });
   const valid = draggingType !== null && canDrop(draggingType, container);
@@ -42,16 +39,18 @@ function DropGap({ container, index, draggingType }: { container: ContainerRef; 
 function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh' }) {
   switch (node.type) {
     case 'heading': {
+      const text = pickLocalizedText(node.props.text, editLocale);
+      if (!text) return null;
       const r = headingRender(node.props);
       const Tag = `h${node.props.level}` as 'h1' | 'h2' | 'h3';
-      return <Tag className={r.className} style={r.style}>{pickL10n(node.props.text, editLocale)}</Tag>;
+      return <Tag className={r.className} style={r.style}>{text}</Tag>;
     }
     case 'text':
       return (
         <div
           className={textClass(node.props)}
           // Safe: renderMarkdown fully escapes its input before transforming.
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(pickL10n(node.props.md, editLocale)) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(pickLocalizedText(node.props.md, editLocale)) }}
         />
       );
     case 'image': {
@@ -59,7 +58,7 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
       return (
         <div className={r.wrapperClass}>
           {node.props.src ? (
-            <img src={node.props.src} alt={pickL10n(node.props.alt, editLocale)} className={r.imgClass} />
+            <img src={node.props.src} alt={pickLocalizedText(node.props.alt, editLocale)} className={r.imgClass} />
           ) : (
             <div className={`${r.imgClass} flex h-40 items-center justify-center border border-dashed border-border-strong bg-surface-sunken text-sm text-ink-subtle`}>
               🖼
@@ -69,10 +68,12 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
       );
     }
     case 'button': {
+      const label = pickLocalizedText(node.props.label, editLocale);
+      if (!label) return null;
       const r = buttonRender(node.props);
       return (
         <div className={r.wrapperClass}>
-          <span className={r.linkClass}>{pickL10n(node.props.label, editLocale)}</span>
+          <span className={r.linkClass}>{label}</span>
         </div>
       );
     }

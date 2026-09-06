@@ -1,10 +1,13 @@
 ---
 // Bulletin landing: the latest published bulletin for each service type, shown
-// in a CSS-only tabbed switcher (radio inputs — no JS required, native radio
-// semantics only). A single service type renders its bulletin with no tab
-// chrome at all. Year-grouped archive below. Reads fail soft to empty.
+// with a bookmarkable service switcher and a printable reader.
+// Year-grouped archive alongside. Reads fail soft to empty.
 import Base from '../../../layouts/Base.astro';
 import BulletinView from '../../../components/BulletinView.astro';
+import LibraryHeading from '../../../components/public/LibraryHeading.astro';
+import PrintableReader from '../../../components/public/PrintableReader.astro';
+import Icon from '../../../components/ui/Icon.astro';
+import { publicCopy } from '../../../i18n/designPublic';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
@@ -56,119 +59,40 @@ for (const d of dates) {
   byYear.get(year)!.push(d);
 }
 const currentYear = new Date().getFullYear().toString();
+
+const copy = publicCopy(locale);
+const requestedService = Number(Astro.url.searchParams.get('service'));
+const selected = entries.find(({ bulletin }) => bulletin.service_type_id === requestedService) ?? entries[0];
 ---
 
 <Base title={t(locale, 'bulletin.title')} locale={locale}>
-  <div class="bg-primary-soft text-on-primary-soft">
-    <div class="container-content py-12">
-      <h1 class="font-display text-display-lg font-bold">{t(locale, 'bulletin.title')}</h1>
-      <p class="mt-3 text-lg">{t(locale, 'bulletin.intro')}</p>
-    </div>
-  </div>
-
-  <div class="container-content max-w-content py-10">
-    {
-      entries.length === 1 ? (
-        <BulletinView
-          bulletin={entries[0].bulletin}
-          announcements={entries[0].announcements}
-          roster={entries[0].roster}
-          locale={locale}
-        />
-      ) : entries.length > 1 ? (
-        <div class="bulletin-tabs">
-          {entries.map((e, i) => (
-            <input
-              type="radio"
-              name="bulletin-tab"
-              id={`bt-${e.bulletin.service_type_id}`}
-              class="tab-input sr-only"
-              checked={i === 0}
-            />
-          ))}
-          <div class="tab-labels mb-8 flex flex-wrap gap-1 border-b border-border">
-            {entries.map((e) => (
-              <label
-                for={`bt-${e.bulletin.service_type_id}`}
-                class="tab-label -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 font-semibold text-ink-muted hover:text-ink"
-              >
-                {e.bulletin.serviceTypeName}
-              </label>
-            ))}
-          </div>
-          <div class="tab-panels">
-            {entries.map((e) => (
-              <div class="tab-panel">
-                <BulletinView
-                  bulletin={e.bulletin}
-                  announcements={e.announcements}
-                  roster={e.roster}
-                  locale={locale}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <p class="py-12 text-center text-ink-muted">{t(locale, 'bulletin.empty')}</p>
-      )
-    }
-
-    {
-      byYear.size > 0 && (
-        <nav class="mt-14 border-t border-border pt-6" aria-label={t(locale, 'bulletin.archive')}>
-          <h2 class="mb-3 font-display font-bold">{t(locale, 'bulletin.archive')}</h2>
-          {[...byYear.entries()].map(([year, rows]) => (
-            <details open={year === currentYear} class="mb-2">
-              <summary class="cursor-pointer py-1 font-medium">{t(locale, 'sermons.yearLabel', { year })}</summary>
-              <ul class="mt-2 flex flex-wrap gap-2 text-sm">
-                {rows.map((d) => (
-                  <li>
-                    <a
-                      href={`${localePath(locale, `/bulletin/${d.bulletin_date}`)}?service=${d.service_type_id}`}
-                      class="inline-flex rounded-full border border-border px-3 py-1.5 hover:border-border-strong hover:text-accent"
-                    >
-                      {formatDate(d.bulletin_date, locale)} · {d.serviceTypeName}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ))}
-        </nav>
-      )
-    }
+  <div class="container-wide bulletin-library">
+    <LibraryHeading eyebrow={copy.bulletinEyebrow} title={t(locale, 'bulletin.title')} description={copy.bulletinDescription} image="worship" />
+    {entries.length > 1 && <nav class="bulletin-services" aria-label={t(locale, 'bulletin.serviceLabel')}>
+      {entries.map(({ bulletin }) => <a href={`${localePath(locale, '/bulletin')}?service=${bulletin.service_type_id}`} aria-current={selected.bulletin.service_type_id === bulletin.service_type_id ? 'page' : undefined}><span>{bulletin.serviceTypeName}</span><time datetime={bulletin.bulletin_date}>{formatDate(bulletin.bulletin_date, locale)}</time></a>)}
+    </nav>}
+    <PrintableReader locale={locale} title={copy.latestEdition} print={Boolean(selected)} hasArchive={byYear.size > 0}>
+      {selected ? <BulletinView bulletin={selected.bulletin} announcements={selected.announcements} roster={selected.roster} locale={locale} /> : <div class="bulletin-empty"><Icon name="book" size={34}/><h2>{copy.bulletinEmptyTitle}</h2><p>{t(locale, 'bulletin.empty')}</p><a class="action-secondary" href={localePath(locale, '/visit')}>{t(locale, 'nav.visit')}<Icon name="arrow" size={16}/></a></div>}
+      {byYear.size > 0 && <nav slot="archive" aria-label={t(locale, 'bulletin.archive')}>
+        <h2>{t(locale, 'bulletin.archive')}</h2><p>{copy.archiveNote}</p>
+        {[...byYear.entries()].map(([year, rows], index) => <details open={year === currentYear || index === 0}>
+          <summary>{t(locale, 'sermons.yearLabel', { year })}</summary>
+          <ul>{rows.map(d => <li><a href={`${localePath(locale, `/bulletin/${d.bulletin_date}`)}?service=${d.service_type_id}`}><time datetime={d.bulletin_date}>{formatDate(d.bulletin_date, locale)}</time><span class="archive-service">{d.serviceTypeName}</span></a></li>)}</ul>
+        </details>)}
+      </nav>}
+    </PrintableReader>
   </div>
 </Base>
-
 <style>
-  .tab-panel {
-    display: none;
-  }
-  .tab-input:nth-of-type(1):checked ~ .tab-panels > .tab-panel:nth-child(1),
-  .tab-input:nth-of-type(2):checked ~ .tab-panels > .tab-panel:nth-child(2),
-  .tab-input:nth-of-type(3):checked ~ .tab-panels > .tab-panel:nth-child(3),
-  .tab-input:nth-of-type(4):checked ~ .tab-panels > .tab-panel:nth-child(4),
-  .tab-input:nth-of-type(5):checked ~ .tab-panels > .tab-panel:nth-child(5),
-  .tab-input:nth-of-type(6):checked ~ .tab-panels > .tab-panel:nth-child(6) {
-    display: block;
-  }
-  .tab-input:nth-of-type(1):checked ~ .tab-labels > .tab-label:nth-child(1),
-  .tab-input:nth-of-type(2):checked ~ .tab-labels > .tab-label:nth-child(2),
-  .tab-input:nth-of-type(3):checked ~ .tab-labels > .tab-label:nth-child(3),
-  .tab-input:nth-of-type(4):checked ~ .tab-labels > .tab-label:nth-child(4),
-  .tab-input:nth-of-type(5):checked ~ .tab-labels > .tab-label:nth-child(5),
-  .tab-input:nth-of-type(6):checked ~ .tab-labels > .tab-label:nth-child(6) {
-    color: var(--color-accent);
-    border-bottom-color: var(--color-accent);
-  }
-  .tab-input:nth-of-type(1):focus-visible ~ .tab-labels > .tab-label:nth-child(1),
-  .tab-input:nth-of-type(2):focus-visible ~ .tab-labels > .tab-label:nth-child(2),
-  .tab-input:nth-of-type(3):focus-visible ~ .tab-labels > .tab-label:nth-child(3),
-  .tab-input:nth-of-type(4):focus-visible ~ .tab-labels > .tab-label:nth-child(4),
-  .tab-input:nth-of-type(5):focus-visible ~ .tab-labels > .tab-label:nth-child(5),
-  .tab-input:nth-of-type(6):focus-visible ~ .tab-labels > .tab-label:nth-child(6) {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
+  .bulletin-services { display: flex; flex-wrap: wrap; gap: .75rem; padding-bottom: 1.5rem; }
+  .bulletin-services a { min-height: 64px; display: grid; gap: .3rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: .8rem 1.1rem; background: var(--color-surface-raised); }
+  .bulletin-services a[aria-current] { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
+  .bulletin-services a:hover { border-color: var(--color-primary); }
+  .bulletin-services span { font-size: .9rem; font-weight: 600; }
+  .bulletin-services time { font-size: .75rem; color: var(--color-ink-muted); }
+  .archive-service { display: block; font-size: .72rem; margin-top: .2rem; }
+  .bulletin-empty { min-height: 260px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1.25rem; }
+  .bulletin-empty h2 { font-family: var(--font-display); font-size: 2rem; }
+  .bulletin-empty p { color: var(--color-ink-muted); max-width: 34rem; line-height: 1.8; }
+  @media print { .bulletin-services { display: none; } }
 </style>

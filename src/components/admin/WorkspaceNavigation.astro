@@ -1,0 +1,21 @@
+---
+import type { AdminNavGroup } from '../../lib/adminNavigation';
+import { isNavigationActive } from '../../lib/adminNavigation';
+import Icon from '../ui/Icon.astro';
+interface Props { groups: AdminNavGroup[]; current: string; label: string }
+const { groups, current, label } = Astro.props;
+---
+<nav class="workspace-navigation" aria-label={label}>
+  {groups.map(group => group.key === 'workspace' ? group.links.map(link => (
+    <a class="workspace-nav-heading" href={link.href} aria-current={isNavigationActive(current, link.href) ? 'page' : undefined}>
+      <Icon name={group.icon} size={19}/><span>{link.label}</span>
+    </a>
+  )) : (
+    <details class="workspace-nav-group" open={group.links.some(link => isNavigationActive(current, link.href))}>
+      <summary class="workspace-nav-heading"><Icon name={group.icon} size={19}/><span>{group.label}</span><span class="workspace-nav-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="workspace-nav-children">
+        {group.links.map(link => <a href={link.href} aria-current={isNavigationActive(current, link.href) ? 'page' : undefined}>{link.label}</a>)}
+      </div>
+    </details>
+  ))}
+</nav>

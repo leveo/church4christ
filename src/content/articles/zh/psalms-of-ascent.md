@@ -1,4 +1,5 @@
 ---
+demo: true
 title: 行走在上行之诗中
 author: 林恩慈传道
 date: "2026-02-15"

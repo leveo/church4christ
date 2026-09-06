@@ -34,6 +34,19 @@ function commonDatabaseSteps(options) {
   if (!Array.isArray(options.moduleKeys)) throw new TypeError('moduleKeys are required');
   return {
     'initialize-modules': providerStep(async ({ plan, recovering = false, managedInstallation = false } = {}) => {
+      // This is an initial content choice, never a request to replace or remove
+      // existing content. A changed plan resets its completion state, so neither
+      // managed origin nor `recovering` proves that this database is new. Keep
+      // legacy behavior when module settings already exist. Record the choice
+      // before module writes so an interrupted first initialization can resume.
+      if (managedInstallation && !recovering) {
+        const initialized = await options.db.prepare("SELECT key FROM settings WHERE key LIKE 'module.%' LIMIT 1").first();
+        if (!initialized) {
+          await options.db.prepare(
+            'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
+          ).bind('site.demo_content', String(Boolean(plan?.demoData))).run();
+        }
+      }
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);
       const key = `site.name.${plan?.site?.locale}`;
       const current = await options.db.prepare('SELECT value FROM settings WHERE key=?').bind(key).first('value');

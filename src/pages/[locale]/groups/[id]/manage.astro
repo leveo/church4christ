@@ -11,7 +11,7 @@
 // re-checks before every POST write.
 import { env } from 'cloudflare:workers';
 import Base from '../../../../layouts/Base.astro';
-import { localePath, parseLocale } from '../../../../lib/locales';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { formatDate, addDays, todayInTz } from '../../../../lib/dates';
 import {
@@ -702,7 +702,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
               <select name="reg_event_id" class={`${tin} max-w-xs`}>
                 <option value="">{t(locale, 'groups.manage.special.linkSelect')}</option>
                 {linkableEvents.map((e) => (
-                  <option value={e.id}>{(e.title_en || e.title_zh || '—')} · {e.starts_at.slice(0, 10)}</option>
+                  <option value={e.id}>{pickLocalizedText({ en: e.title_en, zh: e.title_zh }, locale) || '—'} · {e.starts_at.slice(0, 10)}</option>
                 ))}
               </select>
               <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.special.linkButton')}</button>

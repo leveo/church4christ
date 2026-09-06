@@ -1,0 +1,5 @@
+{
+  "stdout": "\n{\n  \"error\": {\n    \"text\": \"no such table: settings: SQLITE_ERROR\"\n  }\n}\n",
+  "stderr": "",
+  "exitCode": 1
+}

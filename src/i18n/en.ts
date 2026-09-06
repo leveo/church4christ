@@ -2,6 +2,28 @@
 // add surfaces. Keep parity with zh.ts — the i18n test enforces identical key
 // and {placeholder} sets across locales.
 export default {
+  'design.dashboard.next': 'Your next steps',
+  'design.dashboard.reflection': 'Prepare with care. Serve with joy.',
+
+  'design.menu.welcome': 'Your first Sunday starts here.',
+  'design.menu.explore': 'Discover a faith for everyday life.',
+  'design.menu.connect': 'Find people to share life with.',
+  'design.menu.participate': 'Make room for your gifts.',
+  'design.menu.more': 'More from our community.',
+  'design.menu.myChurch': 'My Church',
+
+  'design.home.eyebrow': 'A place to belong',
+  'design.home.title': 'Life together.\nFaith that grows.',
+
+  'design.nav.workspace': 'Workspace',
+  'design.nav.content': 'Content & Worship',
+  'design.nav.care': 'People & Care',
+  'design.nav.ministry': 'Ministry & Teams',
+  'design.nav.operations': 'Data & Operations',
+  'design.nav.system': 'Settings & Setup',
+  'design.nav.context': 'Church workspace',
+  'design.nav.skip': 'Skip to workspace',
+
   'site.name': 'Church4Christ',
   'site.tagline': 'A church for the city',
 
@@ -119,7 +141,7 @@ export default {
   'nav.register': 'Register',
 
   'locale.en': 'EN',
-  'locale.zh': '中文',
+  'locale.zh': 'Chinese',
 
   'footer.address': 'Address',
   'footer.addressLine': '123 Grace Avenue, Your City',
@@ -139,7 +161,7 @@ export default {
   'common.signIn': 'Sign in',
   'common.signOut': 'Sign out',
   'common.mySchedule': 'My Schedule',
-  'common.zhToggleToTrad': '繁',
+  'common.zhToggleToTrad': 'Traditional Chinese',
   'common.zhToggleAria': 'Switch between Simplified and Traditional Chinese',
 
   'home.heroTitle': 'Find your place in God’s family',
@@ -1312,7 +1334,7 @@ export default {
   'admin.announcements.newTitle': 'New announcement',
   'admin.announcements.editTitle': 'Edit announcement',
   'admin.announcements.titleEn': 'Title (English)',
-  'admin.announcements.titleZh': 'Title (中文)',
+  'admin.announcements.titleZh': 'Title (Chinese)',
   'admin.announcements.url': 'Link URL (optional)',
   'admin.announcements.startsAt': 'Show from (optional)',
   'admin.announcements.endsAt': 'Show until (optional)',
@@ -1337,9 +1359,9 @@ export default {
   'admin.events.newTitle': 'New event',
   'admin.events.editTitle': 'Edit event',
   'admin.events.titleEn': 'Title (English)',
-  'admin.events.titleZh': 'Title (中文)',
+  'admin.events.titleZh': 'Title (Chinese)',
   'admin.events.blurbEn': 'Description (English)',
-  'admin.events.blurbZh': 'Description (中文)',
+  'admin.events.blurbZh': 'Description (Chinese)',
   'admin.events.url': 'Link URL (optional)',
   'admin.events.startsAt': 'Show from (optional)',
   'admin.events.endsAt': 'Show until (optional)',
@@ -1372,9 +1394,9 @@ export default {
   'admin.pages.slug': 'Slug',
   'admin.pages.slugHint': 'Lowercase letters, numbers, and hyphens only. Appears at /en/p/‹slug› and /zh/p/‹slug›.',
   'admin.pages.titleEn': 'Title (English)',
-  'admin.pages.titleZh': 'Title (中文)',
+  'admin.pages.titleZh': 'Title (Chinese)',
   'admin.pages.bodyEn': 'Content (English)',
-  'admin.pages.bodyZh': 'Content (中文)',
+  'admin.pages.bodyZh': 'Content (Chinese)',
   'admin.pages.markdownHint': 'Markdown: ## heading, **bold**, [link](url), - list',
   'admin.pages.previewTitle': 'Preview',
   'admin.pages.hint': 'At least one language title is required.',
@@ -1407,7 +1429,7 @@ export default {
   'admin.builder.redo': 'Redo',
   'admin.builder.editingIn': 'Editing text in',
   'admin.builder.localeEn': 'English',
-  'admin.builder.localeZh': '中文',
+  'admin.builder.localeZh': 'Chinese',
   'admin.builder.slug': 'Slug',
   'admin.builder.titleEn': 'Title (English)',
   'admin.builder.titleZh': 'Title (Chinese)',
@@ -1493,7 +1515,7 @@ export default {
   'admin.navigation.linkUrl': 'URL',
   'admin.navigation.linkUrlHint': 'A full https:// address, or a path starting with /.',
   'admin.navigation.linkLabelEn': 'Label (English)',
-  'admin.navigation.linkLabelZh': 'Label (中文)',
+  'admin.navigation.linkLabelZh': 'Label (Chinese)',
   'admin.navigation.urlInvalid': 'Enter a link starting with http://, https://, or /.',
   'admin.navigation.labelRequired': 'Enter a label in at least one language.',
   'admin.navigation.addButton': 'Add',
@@ -2227,7 +2249,7 @@ export default {
   'groups.manage.special.createTitle': 'Create a special event',
   'groups.manage.special.createHint': 'Creates a free registration event linked to this group. Staff can add a price later from the Registration admin.',
   'groups.manage.special.titleEn': 'Title (English)',
-  'groups.manage.special.titleZh': 'Title (中文)',
+  'groups.manage.special.titleZh': 'Title (Chinese)',
   'groups.manage.special.titleZhHint': 'Optional — the English title is used when this is left blank.',
   'groups.manage.special.starts': 'Starts',
   'groups.manage.special.ends': 'Ends',
@@ -2395,7 +2417,7 @@ export default {
   'kiosk.checkOut': 'Check out',
   'kiosk.enterCode': 'Enter your pickup code',
   'kiosk.wrongCode': 'That code does not match. Please ask a greeter.',
-  'kiosk.langToggle': '中文',
+  'kiosk.langToggle': 'Chinese',
 
   'admin.modules.requiresD1': 'Requires the Cloudflare D1 database',
 

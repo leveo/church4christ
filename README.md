@@ -254,12 +254,20 @@ For local Supabase, the handoff instead exports
 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
 `npm run dev`; that connection URL must not go in `.dev.vars`.
 
-Open the address it prints (usually `http://localhost:4321`). If you chose demo data during
-setup, you will see sample sermons, bulletins, events, ministries, and local demo images.
-The media step copies the generated image pack from `seed/media/` into local R2 and updates
-the configured database records that refer to those objects. It is safe to run again after
-reseeding the database. Without demo data, setup leaves a clean installation for your own
-content.
+During first setup, choose **Include demo content** or **No demo content**. Both keep the
+same bundled design, local decorative images, enabled features, and administrator tools.
+Demo content adds fictional people, sermons, bulletins, events, ministries, and other
+examples. Its media step copies the generated image pack from `seed/media/` into local R2.
+No demo content creates the database schema, operational defaults, church settings, module
+selection, and first administrator without sample business records.
+
+For scripted setup, pass `--demo-data` or `--no-demo-data`; omitting both in noninteractive
+setup keeps the existing no-demo default. The flags cannot be combined. Repeating the same
+setup preserves the recorded content choice and existing records. `--no-demo-data` does
+not clear an existing database, and setup refuses to add demo data over existing people.
+Use a separate fresh workspace/database to try the other starting mode.
+
+Open the address setup prints (usually `http://localhost:4321`).
 
 **Signing in to the admin area.** There is no password. On the sign-in page, enter the
 first-admin email from your setup answers, repeated in the setup handoff, and request a

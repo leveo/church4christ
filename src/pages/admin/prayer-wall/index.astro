@@ -7,6 +7,8 @@
 // button; a drag-and-drop island (progressive enhancement) POSTs the same move.
 // The two terminal columns fold cards older than 90 days unless ?all=1.
 // PUBLIC MESSAGE TEXT IS ALWAYS ESCAPED — rendered as {expr}, never set:html.
+import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
+import { careCopy } from '../../../i18n/designCare';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import {
@@ -21,7 +23,7 @@ import {
   type PrayerRequestRow,
   type PrayerActivityRow,
 } from '../../../lib/adminDb';
-import { tin, badge, badgeActive, badgeInactive, btn, rowBtn, noticeOk, noticeErr, card } from '../../../lib/adminUi';
+import { tin, badge, badgeInactive, btn, rowBtn, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -101,38 +103,35 @@ const stats = [
   { label: statusLabel('answered'), value: String(board.answered.length) },
   { label: t(lang, 'admin.prayerWall.stats.total'), value: String(totalCount) },
 ];
+const copy = careCopy(lang);
 ---
 
 <Admin title={t(lang, 'admin.prayerWall.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.prayerWall.title')}</h1>
-  <p class="mt-1 text-ink-muted">{t(lang, 'admin.prayerWall.intro', { count: newCount })}</p>
+  <CareWorkspace variant="prayer">
+  <div class="care-heading"><div><p class="care-eyebrow">{copy.prayerEyebrow}</p><h1>{t(lang, 'admin.prayerWall.title')}</h1>{!dbFailed && <p class="care-intro">{t(lang, 'admin.prayerWall.intro', { count: newCount })}</p>}</div></div>
   {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.dbError')}</p>}
   {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.prayerWall.actionError')}</p>}
   {showDeleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.prayerWall.deleted')}</p>}
 
-  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {stats.map((s) => (
-      <div class={card}>
-        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
-        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
-      </div>
-    ))}
-  </div>
-
-  <div id="kanban" class="mt-6 flex gap-4 overflow-x-auto pb-4" data-move-error={t(lang, 'admin.prayerWall.moveError')}>
+  {!dbFailed && <dl class="care-prayer-stats">
+    {stats.map((s) => <div class="care-prayer-stat"><dt>{s.label}</dt><dd>{s.value}</dd></div>)}
+  </dl>}
+  <div class="care-focus-row"><p class="text-sm text-ink-muted">{copy.prayerWorkflow}</p></div>
+  <nav class="care-stage-list" aria-label={copy.prayerStages}>{PRAYER_STATUSES.map((status) => <a href={`#prayer-stage-${status}`}>{statusLabel(status)}{!dbFailed && <strong>{board[status].length}</strong>}</a>)}</nav>
+  <div id="kanban" class="care-prayer-board" data-move-error={t(lang, 'admin.prayerWall.moveError')}>
     {
       PRAYER_STATUSES.map((status) => {
         const cards = board[status];
         return (
-          <div data-col={status} class="w-[288px] min-w-[288px] shrink-0 rounded-xl bg-surface-sunken p-3">
+          <section id={`prayer-stage-${status}`} data-col={status} class="care-prayer-column" aria-labelledby={`prayer-stage-label-${status}`}>
             <div class="mb-3 flex items-center justify-between">
-              <h2 class="font-semibold text-ink">{statusLabel(status)}</h2>
-              <span class={`${badge} ${badgeInactive}`}>{cards.length}</span>
+              <h2 id={`prayer-stage-label-${status}`} class="font-semibold text-ink">{statusLabel(status)}</h2>
+              {!dbFailed && <span class={`${badge} ${badgeInactive}`}>{cards.length}</span>}
             </div>
             <div class="space-y-3">
-              {cards.length === 0 && <p class="py-4 text-center text-xs text-ink-subtle">{t(lang, 'admin.prayerWall.empty')}</p>}
+              {!dbFailed && cards.length === 0 && <p class="py-4 text-center text-xs text-ink-subtle">{t(lang, 'admin.prayerWall.empty')}</p>}
               {cards.map((r) => (
-                <article data-card={r.id} draggable="true" class="cursor-grab rounded-lg border border-border bg-surface-raised p-3 shadow-sm">
+                <article data-card={r.id} draggable="true" class="care-prayer-card">
                   <div class="flex items-baseline justify-between gap-2">
                     <span class="min-w-0 truncate">
                       <span class="font-semibold text-ink">{r.name || '—'}</span>
@@ -215,12 +214,13 @@ const stats = [
                 </article>
               ))}
             </div>
-          </div>
+          </section>
         );
       })
     }
   </div>
 
+  <p class="mt-4 text-xs text-ink-muted">{copy.prayerScope}</p>
   <p class="mt-2 text-xs">
     {
       showAll ? (
@@ -271,4 +271,5 @@ const stats = [
       });
     });
   </script>
+  </CareWorkspace>
 </Admin>

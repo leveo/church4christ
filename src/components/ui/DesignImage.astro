@@ -1,0 +1,19 @@
+---
+import { DESIGN_IMAGES, type DesignImage } from '../../lib/designAssets';
+interface Props { image: DesignImage; src?: string | null; alt?: string; class?: string; eager?: boolean }
+const { image, src, alt = '', class: className, eager = false } = Astro.props;
+const fallback = DESIGN_IMAGES[image];
+---
+<img src={src || fallback} data-design-fallback={src ? fallback : undefined} alt={alt} class={className} loading={eager ? 'eager' : 'lazy'} fetchpriority={eager ? 'high' : undefined} decoding="async" />
+<script>
+  document.querySelectorAll<HTMLImageElement>('img[data-design-fallback]').forEach(image => {
+    const fallback = () => {
+      const source = image.dataset.designFallback;
+      if (!source) return;
+      delete image.dataset.designFallback;
+      image.src = source;
+    };
+    image.addEventListener('error', fallback, { once: true });
+    if (image.complete && image.naturalWidth === 0) fallback();
+  });
+</script>

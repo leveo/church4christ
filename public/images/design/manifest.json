@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "purpose": "Bundled decorative imagery, independent of demo records and uploaded media",
+  "assets": [
+    {
+      "file": "sermon-bible.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 66318,
+      "source": "Built-in image generation, September 2026"
+    },
+    {
+      "file": "learning-creation.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 103174,
+      "source": "Built-in image generation, September 2026"
+    },
+    {
+      "file": "kiosk-garden.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 56284,
+      "source": "Built-in image generation, September 2026"
+    },
+    {
+      "file": "welcome.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 78996,
+      "source": "seed/media/hero-worship-gathering.webp"
+    },
+    {
+      "file": "community.webp",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 97746,
+      "source": "seed/media/ministry-college.webp"
+    },
+    {
+      "file": "family.webp",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 125978,
+      "source": "seed/media/ministry-family.webp"
+    },
+    {
+      "file": "children.webp",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 96434,
+      "source": "seed/media/ministry-children.webp"
+    },
+    {
+      "file": "worship.webp",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 68658,
+      "source": "seed/media/ministry-worship.webp"
+    },
+    {
+      "file": "gathering.webp",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 117056,
+      "source": "seed/media/event-summer-bible-camp.webp"
+    }
+  ]
+}

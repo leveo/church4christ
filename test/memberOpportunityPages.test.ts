@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import opportunityPage from '../src/pages/[locale]/my/opportunities.astro?raw';
 import managePage from '../src/pages/[locale]/manage/index.astro?raw';
 import ministryManagePage from '../src/pages/[locale]/manage/ministries/[id].astro?raw';
-import portalNav from '../src/components/PortalNav.astro?raw';
+import { memberNavigation } from '../src/lib/memberNavigation';
 import portalDashboard from '../src/pages/[locale]/my/index.astro?raw';
 import authTokenPage from '../src/pages/auth/[token].astro?raw';
 import deployGuide from '../docs/deploy.md?raw';
@@ -18,8 +18,9 @@ describe('member opportunity landing page', () => {
   });
 
   it('is discoverable as a portal tab and exposes manager actions outside /admin', () => {
-    expect(portalNav).toContain("'opportunities'");
-    expect(portalNav).toContain("'/my/opportunities'");
+    expect(memberNavigation(new Set(['portal']), 'en')).toContainEqual(expect.objectContaining({
+      key: 'opportunities', href: '/en/my/opportunities',
+    }));
     expect(portalDashboard).toContain("'/my/opportunities'");
     expect(opportunityPage).toContain("'/manage'");
     expect(opportunityPage).not.toMatch(/href=.*\/admin/);

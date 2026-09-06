@@ -1,0 +1,88 @@
+---
+interface Props { variant?: string }
+const { variant = 'directory' } = Astro.props;
+---
+<div class={`care-workspace care-${variant}`}><slot /></div>
+<style>
+  .care-workspace { min-width: 0; }
+  .care-workspace :global(.care-heading) { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .care-workspace :global(.care-eyebrow) { margin-bottom: .55rem; font-size: .6875rem; font-weight: 700; letter-spacing: .14em; color: var(--color-primary); }
+  .care-workspace :global(.care-heading h1) { font-family: var(--font-body); font-size: clamp(1.5rem, 2.5vw, 1.8rem); line-height: 1.2; font-weight: 650; letter-spacing: -.025em; }
+  .care-workspace :global(.care-intro) { max-width: 46rem; margin-top: .65rem; font-size: .875rem; line-height: 1.65; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-actions) { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+  .care-workspace :global(.care-panel) { min-width: 0; padding: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-panel h2) { font-size: 1rem; font-weight: 650; }
+  .care-workspace :global(.care-panel-heading) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+  .care-workspace :global(.care-filter) { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .85rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--color-surface-raised); }
+  .care-workspace :global(.care-filter label) { min-width: 8.5rem; flex: 1 1 8.5rem; }
+  .care-workspace :global(.care-filter label.care-search) { flex: 2.3 1 17rem; }
+  .care-workspace :global(.care-filter label > span) { display: block; margin-bottom: .35rem; font-size: .6875rem; font-weight: 650; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-search-control) { position: relative; }
+  .care-workspace :global(.care-search-control svg) { position: absolute; left: .75rem; top: .7rem; color: var(--color-ink-muted); pointer-events: none; }
+  .care-workspace :global(.care-search-control input) { padding-left: 2.4rem; }
+  .care-workspace :global(.care-results-bar) { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .8rem 1rem; border: 1px solid var(--color-border); border-top: 0; background: var(--color-surface-raised); font-size: .75rem; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-results-bar h2) { font-size: .875rem; font-weight: 650; color: var(--color-ink); }
+  .care-workspace :global(.care-table-wrap) { overflow-x: auto; border: 1px solid var(--color-border); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-table) { width: 100%; border-collapse: collapse; text-align: left; }
+  .care-workspace :global(.care-table th) { padding: .7rem 1rem; background: var(--color-surface-sunken); font-size: .625rem; font-weight: 700; color: var(--color-ink-muted); letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+  .care-workspace :global(.care-table td) { padding: .85rem 1rem; vertical-align: middle; font-size: .8125rem; border-top: 1px solid var(--color-border); }
+  .care-workspace :global(.care-table tbody tr:hover) { background: var(--color-surface); }
+  .care-workspace :global(.care-identity) { display: flex; align-items: center; gap: .75rem; min-width: 10rem; }
+  .care-workspace :global(.care-identity a) { display: inline-block; font-weight: 650; color: var(--color-ink); }
+  .care-workspace :global(.care-identity a:hover) { color: var(--color-primary); text-decoration: underline; }
+  .care-workspace :global(.care-subline) { display: block; margin-top: .2rem; font-size: .75rem; color: var(--color-ink-muted); overflow-wrap: anywhere; }
+  .care-workspace :global(.care-tools) { margin-top: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-tools > summary) { cursor: pointer; padding: 1rem 1.25rem; font-size: .8125rem; font-weight: 650; }
+  .care-workspace :global(.care-tools-grid) { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; padding: 0 1.25rem 1.25rem; }
+  .care-workspace :global(.care-tools-grid section) { margin: 0; padding: 1rem; box-shadow: none; border-radius: var(--radius-sm); }
+  .care-workspace :global(.care-tools-grid h2) { font-family: var(--font-body); font-size: .875rem; }
+  .care-workspace :global(.care-profile-summary) { display: flex; align-items: center; flex-wrap: wrap; gap: 1.25rem; padding: 1.5rem; margin: 1.5rem 0; border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-profile-summary dl) { display: flex; flex-wrap: wrap; gap: .75rem 2rem; margin-top: .85rem; font-size: .8125rem; }
+  .care-workspace :global(.care-profile-summary dt) { margin-bottom: .25rem; font-size: .6875rem; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-record-nav) { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: 1.5rem 0; padding-bottom: 1rem; border-bottom: 1px solid var(--color-border); font-size: .8125rem; font-weight: 600; color: var(--color-primary); }
+  .care-workspace :global(.care-record-grid) { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; gap: 1.25rem; }
+  .care-workspace :global(.care-record-grid[data-single="true"]) { grid-template-columns: minmax(0, 48rem); }
+  .care-workspace :global(.care-record-column) { min-width: 0; }
+  .care-workspace :global(.care-record-column > :first-child) { margin-top: 0; }
+  .care-workspace :global(.care-record-column > form), .care-workspace :global(.care-record-column > section), .care-workspace :global(.care-record-column > div) { max-width: none; border-radius: var(--radius-sm); box-shadow: none; }
+  .care-workspace :global(.care-record-column h2) { font-size: 1rem; }
+  .care-workspace :global(.care-household-member) { padding: .8rem 0; border-bottom: 1px solid var(--color-border); }
+  .care-workspace :global(.care-household-member:last-child) { border-bottom: 0; }
+  .care-workspace :global(.care-household-member > span:last-child) { width: calc(100% - 2.75rem); margin-left: 2.75rem; }
+  .care-workspace :global(.care-focus-row) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin: 1.25rem 0; }
+  .care-workspace :global(.care-focus-links) { display: flex; flex-wrap: wrap; gap: .35rem; padding: .25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-focus-links a) { padding: .5rem .8rem; border-radius: var(--radius-sm); font-size: .75rem; font-weight: 600; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-focus-links a[aria-current="page"]) { background: var(--color-primary); color: var(--color-on-primary); }
+  .care-workspace :global(.care-stage-list) { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  .care-workspace :global(.care-stage-list a) { display: inline-flex; align-items: center; gap: .75rem; padding: .5rem .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-size: .75rem; }
+  .care-workspace :global(.care-stage-list a[aria-current="page"]) { border-color: var(--color-primary); color: var(--color-primary); }
+  .care-workspace :global(.care-stage-list strong) { min-width: 1.4rem; text-align: center; border-radius: var(--radius-full); background: var(--color-surface-sunken); color: var(--color-ink); }
+  .care-workspace :global(.care-overdue) { display: inline-flex; flex-direction: column; gap: .2rem; color: var(--color-warn); font-weight: 650; }
+  .care-workspace :global(.care-queue tr[data-overdue="true"] td:first-child) { border-left: 3px solid var(--color-warn); }
+  .care-workspace :global(.care-next-step) { margin: 1.25rem 0; border-top: 3px solid var(--color-primary); }
+  .care-workspace :global(.care-note-list > li) { padding-left: 1rem; border-left: 2px solid var(--color-border-strong); }
+  .care-workspace :global(.care-import-root) { max-width: 76rem; margin: 0 auto; }
+  .care-workspace :global(.care-import-root > section) { border-radius: var(--radius-sm); box-shadow: none; }
+  .care-workspace :global(.care-import-safety) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .65rem 2rem; padding: 1.25rem; border-left: 3px solid var(--color-primary); }
+  .care-workspace :global(.care-import-safety > :first-child), .care-workspace :global(.care-import-safety > div:last-child) { grid-column: 1 / -1; }
+  .care-workspace :global(.care-upload) { border: 1px dashed var(--color-border-strong); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-upload input[type="file"]) { padding: 1rem; background: var(--color-surface); }
+  .care-workspace :global(.care-upload input[type="file"]::file-selector-button) { margin-right: 1rem; padding: .5rem .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); color: var(--color-primary); font: inherit; font-weight: 600; }
+  .care-workspace :global(.care-prayer-stats) { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 1rem 1.25rem; margin: 1.25rem 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  .care-workspace :global(.care-prayer-stat) { display: flex; align-items: baseline; gap: .6rem; }
+  .care-workspace :global(.care-prayer-stat dt) { font-size: .75rem; color: var(--color-ink-muted); }
+  .care-workspace :global(.care-prayer-stat dd) { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--color-primary); }
+  .care-workspace :global(.care-prayer-board) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 1rem; margin-top: 1.25rem; }
+  .care-workspace :global(.care-prayer-column) { min-width: 0; padding: .75rem; border: 1px solid var(--color-border); border-top: 3px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-surface-sunken); scroll-margin-top: 2rem; }
+  .care-workspace :global(.care-prayer-column[data-col="waiting"]) { border-top-color: var(--color-warn); }
+  .care-workspace :global(.care-prayer-column[data-col="answered"]) { border-top-color: var(--color-success); }
+  .care-workspace :global(.care-prayer-column[data-col="cancelled"]) { border-top-color: var(--color-border-strong); }
+  .care-workspace :global(.care-prayer-column[data-col="long_term"]) { border-top-color: var(--color-info); }
+  .care-workspace :global(.care-prayer-column h2) { font-family: var(--font-body); font-size: .8125rem; }
+  .care-workspace :global(.care-prayer-card) { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); box-shadow: var(--shadow-sm); cursor: grab; overflow-wrap: anywhere; }
+  .care-workspace :global(.care-prayer-card button), .care-workspace :global(.care-prayer-card select) { min-height: 2rem; }
+  .care-workspace :global(.care-prayer-card summary) { padding-block: .35rem; }
+  .care-workspace :global(.care-empty) { padding: 2rem 1rem; color: var(--color-ink-muted); text-align: center; }
+  @media (max-width: 1100px) { .care-workspace :global(.care-record-grid) { grid-template-columns: minmax(0, 1fr); } .care-workspace :global(.care-prayer-board) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 640px) { .care-workspace :global(.care-heading) { gap: 1.25rem; } .care-workspace :global(.care-actions) { width: 100%; } .care-workspace :global(.care-import-safety) { grid-template-columns: minmax(0, 1fr); } .care-workspace :global(.care-prayer-board) { grid-template-columns: minmax(0, 1fr); } .care-workspace :global(.care-profile-summary) { padding: 1rem; } .care-workspace :global(.care-filter) { gap: .75rem; } }
+</style>

@@ -7,6 +7,15 @@ export const LOCALES = ['en', 'zh'] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'en';
 
+/** Resolve authored locale fields without borrowing Chinese text for English
+ *  pages. Chinese pages retain the English fallback. Values stay unchanged. */
+export function pickLocalizedText(
+  text: { en?: string | null; zh?: string | null },
+  locale: Locale,
+): string {
+  return locale === 'zh' ? text.zh || text.en || '' : text.en || '';
+}
+
 /** Narrow a single path segment to a Locale, or null if it is not one. */
 export function parseLocale(seg: string): Locale | null {
   return (LOCALES as readonly string[]).includes(seg) ? (seg as Locale) : null;

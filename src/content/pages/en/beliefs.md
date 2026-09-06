@@ -1,6 +1,6 @@
 ---
 title: What We Believe
-description: The core convictions of our faith — a plain statement of what Church4Christ holds to be true.
+description: The core convictions of our faith.
 ---
 
 We are an evangelical church, glad to stand with Christians across the centuries and around the world who confess the historic faith. These are the convictions that shape our life together.

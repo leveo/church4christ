@@ -129,7 +129,7 @@ describe('latestPublishedSermon', () => {
           (4, 1, '2026-07-12', 'Deleted','D', NULL,     'y4', 'S', 'published', datetime('now'))`,
       )
       .run();
-    const s = await latestPublishedSermon(db);
+    const s = await latestPublishedSermon(db, 'en');
     expect(s?.title).toBe('Newest');
     expect(s?.speaker).toBe('B');
     expect(s?.scripture).toBe('John 2');
@@ -141,11 +141,58 @@ describe('latestPublishedSermon', () => {
     await db
       .prepare("INSERT INTO sermons (id, service_type_id, sermon_date, title, status) VALUES (1, 1, '2026-06-28', 'Draft only', 'draft')")
       .run();
-    expect(await latestPublishedSermon(db)).toBeNull();
+    expect(await latestPublishedSermon(db, 'en')).toBeNull();
   });
 });
 
 describe('listSermonYears / listSermonsByYear', () => {
+  it('filters English sermon years and rows by editorial content while preserving speaker names', async () => {
+    await env.DB.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await env.DB.prepare("INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (1, 'en', 'Sunday Worship')").run();
+    await env.DB.prepare(`INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture, series, status) VALUES
+      (1, 1, '2025-12-14', 'Grace and peace', '陈大卫 David Chen', 'John 1', 'Good news', 'published'),
+      (2, 1, '2026-01-04', '主的恩典', 'David Chen', 'John 1', NULL, 'published'),
+      (3, 1, '2026-01-11', 'Psalm reading', 'David Chen', '诗篇 121', NULL, 'published'),
+      (4, 1, '2026-01-18', 'A new beginning', 'David Chen', NULL, '上行之诗', 'published'),
+      (5, 1, '2026-01-25', 'Peace', 'David Chen', NULL, NULL, 'draft')`).run();
+
+    expect(await listSermonYears(env.DB, 'en')).toEqual([2025]);
+    expect(await listSermonsByYear(env.DB, 2026, 'en')).toEqual([]);
+    expect(await listSermonsByYear(env.DB, 2025, 'en')).toEqual([
+      expect.objectContaining({ id: 1, title: 'Grace and peace', speaker: '陈大卫 David Chen' }),
+    ]);
+    expect((await latestPublishedSermon(env.DB, 'en'))?.id).toBe(1);
+    expect(await listSermonYears(env.DB, 'zh')).toEqual([2026, 2025]);
+    expect((await listSermonsByYear(env.DB, 2026, 'zh')).map(({ id }) => id)).toEqual([4, 3, 2]);
+    expect((await listSermonsByYear(env.DB, 2025, 'zh')).map(({ id }) => id)).toEqual([1]);
+    expect((await latestPublishedSermon(env.DB, 'zh'))?.id).toBe(4);
+  });
+
+  it('finds the latest English sermon beyond a full page of newer Chinese content', async () => {
+    await env.DB.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await env.DB.prepare(`INSERT INTO sermons (id, service_type_id, sermon_date, title, status)
+      VALUES (1, 1, '2025-12-14', 'Earlier English message', 'published')`).run();
+    await env.DB.prepare(`WITH RECURSIVE entries(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM entries WHERE n < 105)
+      INSERT INTO sermons (id, service_type_id, sermon_date, title, status)
+      SELECT n+1, 1, date('2026-01-01', '+' || n || ' days'), '中文信息', 'published' FROM entries`).run();
+
+    expect((await latestPublishedSermon(env.DB, 'en'))?.id).toBe(1);
+    expect((await latestPublishedSermon(env.DB, 'zh'))?.id).toBe(106);
+  });
+
+  it('returns empty English sermon results when only Chinese content is published', async () => {
+    await env.DB.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await env.DB.prepare("INSERT INTO service_type_i18n (service_type_id, locale, name) VALUES (1, 'en', 'Sunday Worship')").run();
+    await env.DB.prepare(`INSERT INTO sermons (id, service_type_id, sermon_date, title, status)
+      VALUES (1, 1, '2026-01-04', '中文信息', 'published')`).run();
+
+    expect(await latestPublishedSermon(env.DB, 'en')).toBeNull();
+    expect(await listSermonYears(env.DB, 'en')).toEqual([]);
+    expect(await listSermonsByYear(env.DB, 2026, 'en')).toEqual([]);
+    expect((await latestPublishedSermon(env.DB, 'zh'))?.id).toBe(1);
+    expect(await listSermonYears(env.DB, 'zh')).toEqual([2026]);
+  });
+
   it('lists distinct published years desc and groups a year newest-first with localized service type', async () => {
     const db = env.DB;
     await db.prepare('INSERT INTO service_types (id, sort) VALUES (1, 1), (2, 2)').run();
@@ -165,7 +212,7 @@ describe('listSermonYears / listSermonsByYear', () => {
       )
       .run();
 
-    expect(await listSermonYears(db)).toEqual([2026, 2025]); // draft counts under existing 2026; deleted 2024 excluded
+    expect(await listSermonYears(db, 'zh')).toEqual([2026, 2025]); // draft counts under existing 2026; deleted 2024 excluded
 
     const y2026 = await listSermonsByYear(db, 2026, 'zh');
     expect(y2026.map((s) => s.title)).toEqual(['Newest 2026', 'Older 2026']); // newest first, draft excluded
@@ -208,6 +255,81 @@ describe('latestBulletins / getBulletin / listBulletinDates', () => {
     expect((await getBulletin(db, 1, '2026-06-21', 'en'))?.bulletin_date).toBe('2026-06-21');
     expect((await listBulletinDates(db, 'en')).map((d) => d.bulletin_date)).toEqual(['2026-06-28', '2026-06-21']);
     expect((await listBulletinServicesForDate(db, '2026-06-28', 'en')).map((s) => s.service_type_id)).toEqual([1]);
+  });
+
+  it.each([
+    ['service_time_label', '上午 9:30'],
+    ['program_json', '[{"item":"读经","content":"John 1","person":"Reader"}]'],
+    ['program_json', '[{"item":"Reading","content":"约翰福音","person":"Reader"}]'],
+    ['offering_json', '[{"label":"奉献","amount":10}]'],
+    ['offering_json', '[{"label":"Offering","amount":"十元"}]'],
+    ['attendance_json', '[{"label":"出席","count":10}]'],
+    ['attendance_json', '[{"label":"Attendance","count":"十人"}]'],
+    ['memory_verse', '你们要彼此相爱。'],
+    ['flowers', '为感恩摆上。'],
+  ])('selects English bulletin sources using editorial %s without changing stored content', async (field, value) => {
+    await seedBulletins(env.DB);
+    // Column names are the fixed cases above, never request input.
+    await env.DB.prepare(`UPDATE bulletins SET ${field} = ? WHERE id = 2`).bind(value).run();
+    expect(await getBulletin(env.DB, 1, '2026-06-28', 'en')).toBeNull();
+    expect((await latestBulletins(env.DB, 'en')).map((b) => b.id)).toEqual([1]);
+    expect((await listBulletinDates(env.DB, 'en')).map((b) => b.bulletin_date)).toEqual(['2026-06-21']);
+    expect(await listBulletinServicesForDate(env.DB, '2026-06-28', 'en')).toEqual([]);
+    const chinese = await getBulletin(env.DB, 1, '2026-06-28', 'zh');
+    expect(chinese).toMatchObject({ [field]: value });
+    expect((await latestBulletins(env.DB, 'zh')).map((b) => b.id)).toEqual([2]);
+  });
+
+  it.each(['title', 'body', 'link_label'])('includes announcement %s in whole-bulletin source selection', async (field) => {
+    await seedBulletins(env.DB);
+    await env.DB.prepare(`INSERT INTO bulletin_announcements (bulletin_id, title, body, link_url, link_label)
+      VALUES (2, 'Welcome', 'Join us this week.', '/en/visit', 'Details')`).run();
+    await env.DB.prepare(`UPDATE bulletin_announcements SET ${field} = ? WHERE bulletin_id = 2`).bind('本周聚会').run();
+    expect(await getBulletin(env.DB, 1, '2026-06-28', 'en')).toBeNull();
+    expect((await latestBulletins(env.DB, 'en')).map((b) => b.id)).toEqual([1]);
+    expect((await listBulletinDates(env.DB, 'en')).map((b) => b.bulletin_date)).toEqual(['2026-06-21']);
+    expect(await listBulletinServicesForDate(env.DB, '2026-06-28', 'en')).toEqual([]);
+    expect((await getBulletin(env.DB, 1, '2026-06-28', 'zh'))?.id).toBe(2);
+    expect((await getBulletinAnnouncements(env.DB, 2))[0][field as 'title' | 'body' | 'link_label']).toBe('本周聚会');
+  });
+
+  it('retains Han person names in an English program and ignores fields that are not rendered', async () => {
+    await seedBulletins(env.DB);
+    const program = '[{"item":"Reading","content":"John 1","person":"王明","internalNote":"编者备注"}]';
+    await env.DB.prepare('UPDATE bulletins SET program_json = ? WHERE id = 2').bind(program).run();
+    expect((await getBulletin(env.DB, 1, '2026-06-28', 'en'))?.program_json).toBe(program);
+    expect((await latestBulletins(env.DB, 'en')).map((b) => b.id)).toEqual([2]);
+  });
+
+  it('finds older eligible content beyond a candidate page and applies the archive cap after eligibility', async () => {
+    await seedBulletins(env.DB);
+    await env.DB.prepare(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < 105)
+      INSERT INTO bulletins (service_type_id, bulletin_date, memory_verse, status)
+      SELECT 1, date('2027-01-01', '+' || i || ' days'), 'Love one another.', 'published' FROM n`).run();
+    await env.DB.prepare(`INSERT INTO bulletin_announcements (bulletin_id, body)
+      SELECT id, '本周聚会' FROM bulletins WHERE bulletin_date >= '2027-01-01'`).run();
+    expect((await latestBulletins(env.DB, 'en')).map((b) => b.id)).toEqual([2]);
+    expect((await listBulletinDates(env.DB, 'en')).map((b) => b.bulletin_date)).toEqual(['2026-06-28', '2026-06-21']);
+    expect((await listBulletinDates(env.DB, 'zh'))).toHaveLength(52);
+    expect((await latestBulletins(env.DB, 'zh'))[0].bulletin_date).toBe('2027-04-16');
+  });
+
+  it('keeps per-service latest ordering and omits services with no English source', async () => {
+    await seedBulletins(env.DB);
+    await env.DB.prepare('INSERT INTO service_types (id, sort) VALUES (2, 0), (3, 2)').run();
+    await env.DB.prepare(`INSERT INTO service_type_i18n (service_type_id, locale, name)
+      VALUES (2, 'en', 'Morning'), (3, 'en', 'Evening')`).run();
+    await env.DB.prepare(`INSERT INTO bulletins (id, service_type_id, bulletin_date, memory_verse, status) VALUES
+      (5, 2, '2026-06-21', 'Love one another.', 'published'),
+      (6, 2, '2026-06-28', '彼此相爱', 'published'),
+      (7, 3, '2026-06-28', '彼此相爱', 'published')`).run();
+    expect((await latestBulletins(env.DB, 'en')).map((b) => b.id)).toEqual([5, 2]);
+    expect((await latestBulletins(env.DB, 'zh')).map((b) => b.id)).toEqual([6, 2, 7]);
+    expect((await listBulletinServicesForDate(env.DB, '2026-06-28', 'en')).map((b) => b.service_type_id)).toEqual([1]);
+    await env.DB.prepare("UPDATE bulletins SET memory_verse = '彼此相爱'").run();
+    expect(await latestBulletins(env.DB, 'en')).toEqual([]);
+    expect(await listBulletinDates(env.DB, 'en')).toEqual([]);
+    expect((await listBulletinServicesForDate(env.DB, '2026-06-28', 'zh')).map((b) => b.service_type_id)).toEqual([2, 1, 3]);
   });
 });
 
@@ -257,6 +379,8 @@ describe('bulletinRoster', () => {
     expect(roster.find((r) => r.position === '歌手')!.people).toEqual(['Amy', 'Mark']); // declined Dan excluded
     // deleted assignment (Amy) + soft-deleted person (Del) both excluded
     expect(roster.find((r) => r.position === 'Sound')!.people).toEqual(['Sam']);
+    await db.prepare("UPDATE people SET display_name = '王明' WHERE id = 4").run();
+    expect((await bulletinRoster(db, 1, '2026-06-28', 'en')).find((r) => r.position === 'Sound')!.people).toEqual(['王明']);
   });
 
   it('returns [] when no plan matches the service type + date', async () => {
@@ -287,6 +411,38 @@ describe('bulletin announcements', () => {
 });
 
 describe('prayer sheets', () => {
+  it('keeps English prayer lists, latest, and dated reads within explicitly English content', async () => {
+    await env.DB.prepare(`INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status, publish_at, deleted_at) VALUES
+      (1, '2026-06-01', 'en', '[{"heading":"Prayer","items":["Our community"]}]', 'published', NULL, NULL),
+      (2, '2026-06-08', 'zh', '[{"heading":"祷告","items":["社区"]}]', 'published', NULL, NULL),
+      (3, '2026-06-15', NULL, '[]', 'published', NULL, NULL),
+      (4, '2026-06-22', 'en', '[]', 'draft', NULL, NULL),
+      (5, '2026-06-29', 'en', '[]', 'published', '2999-01-01 00:00:00', NULL),
+      (6, '2026-07-06', 'en', '[]', 'published', NULL, datetime('now'))`).run();
+
+    expect((await latestPrayerSheet(env.DB, 'en'))?.id).toBe(1);
+    expect(await listPrayerSheetDates(env.DB, 'en')).toEqual(['2026-06-01']);
+    expect((await getPrayerSheet(env.DB, '2026-06-01', 'en'))?.id).toBe(1);
+    expect(await getPrayerSheet(env.DB, '2026-06-08', 'en')).toBeNull();
+    expect(await getPrayerSheet(env.DB, '2026-06-15', 'en')).toBeNull();
+
+    expect((await latestPrayerSheet(env.DB, 'zh'))?.id).toBe(3);
+    expect(await listPrayerSheetDates(env.DB, 'zh')).toEqual(['2026-06-15', '2026-06-08', '2026-06-01']);
+    expect((await getPrayerSheet(env.DB, '2026-06-08', 'zh'))?.id).toBe(2);
+    expect((await getPrayerSheet(env.DB, '2026-06-01', 'zh'))?.id).toBe(1);
+  });
+
+  it('returns an empty English prayer archive when there are only Chinese or unlabelled sheets', async () => {
+    await env.DB.prepare(`INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status) VALUES
+      (1, '2026-06-01', 'zh', '[]', 'published'),
+      (2, '2026-06-08', NULL, '[]', 'published')`).run();
+
+    expect(await latestPrayerSheet(env.DB, 'en')).toBeNull();
+    expect(await listPrayerSheetDates(env.DB, 'en')).toEqual([]);
+    expect(await getPrayerSheet(env.DB, '2026-06-01', 'en')).toBeNull();
+    expect((await latestPrayerSheet(env.DB, 'zh'))?.id).toBe(2);
+  });
+
   it('latestPrayerSheet + getPrayerSheet enforce the publish rule; listPrayerSheetDates lists visible dates', async () => {
     const db = env.DB;
     await db
@@ -298,10 +454,10 @@ describe('prayer sheets', () => {
           (4, '2026-07-12', 'zh', '[]', 'draft', NULL, NULL)`,
       )
       .run();
-    expect((await latestPrayerSheet(db))?.sheet_date).toBe('2026-06-28');
-    expect(await getPrayerSheet(db, '2026-07-05')).toBeNull(); // future publish
-    expect(await getPrayerSheet(db, '2026-07-12')).toBeNull(); // draft
-    expect(await listPrayerSheetDates(db)).toEqual(['2026-06-28', '2026-06-21']);
+    expect((await latestPrayerSheet(db, 'zh'))?.sheet_date).toBe('2026-06-28');
+    expect(await getPrayerSheet(db, '2026-07-05', 'zh')).toBeNull(); // future publish
+    expect(await getPrayerSheet(db, '2026-07-12', 'zh')).toBeNull(); // draft
+    expect(await listPrayerSheetDates(db, 'zh')).toEqual(['2026-06-28', '2026-06-21']);
   });
 });
 

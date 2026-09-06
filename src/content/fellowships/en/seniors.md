@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Seniors Fellowship
 meetingTime: Wednesdays · 10:00 AM
 location: Room 105

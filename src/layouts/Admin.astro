@@ -5,6 +5,10 @@
 // showing the signed-in email + a signout POST. Admin UI language follows
 // the signed-in person's `lang` (falling back to English). Fonts are imported
 // the same way Base.astro does so admin renders in the brand faces.
+import WorkspaceNavigation from '../components/admin/WorkspaceNavigation.astro';
+import Icon from '../components/ui/Icon.astro';
+import { groupAdminLinks } from '../lib/adminNavigation';
+import { localePath } from '../lib/locales';
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/bricolage-grotesque';
@@ -161,6 +165,9 @@ const rawSections: NavSection[] = [
     module: 'registration',
     area: 'registration',
   },
+  { label: t(lang, 'admin.console.title'), href: '/admin/ministries', show: isAdmin || (user?.leaderTeamIds.length ?? 0) > 0, module: 'serve', area: 'serve' },
+  { label: t(lang, 'admin.teams.title'), href: '/admin/teams', show: isAdmin, module: 'serve', area: 'serve' },
+  { label: t(lang, 'admin.serviceTypes.title'), href: '/admin/service-types', show: isAdmin, module: 'serve', area: 'serve' },
   { label: t(lang, 'admin.nav.settings'), href: '/admin/settings', show: isSuper },
   { label: t(lang, 'admin.nav.navigation'), href: '/admin/navigation', show: isSuper },
   { label: t(lang, 'admin.nav.campuses'), href: '/admin/campuses', show: isSuper },
@@ -172,11 +179,7 @@ const sections: NavSection[] = rawSections
   .filter((s) => !s.children || s.children.length > 0);
 
 const current = Astro.url.pathname.replace(/\/+$/, '') || '/admin';
-const isActive = (href: string) => current === href || (href !== '/admin' && current.startsWith(href));
-// Rounded nav row on the dark sidebar surface: active gets a lighter overlay +
-// semibold, hover gets the same overlay at rest.
-const itemClass = (href: string) =>
-  `block rounded-md px-3 py-2 text-sm ${isActive(href) ? 'bg-footer-ink/10 font-semibold' : 'hover:bg-footer-ink/10'}`;
+const navigationGroups = groupAdminLinks(sections.flatMap(section => section.children ?? [{ href: section.href!, label: section.label }]), lang);
 ---
 
 <!doctype html>
@@ -206,146 +209,47 @@ const itemClass = (href: string) =>
       })();
     </script>
   </head>
-  <body class="min-h-screen flex flex-col lg:flex-row bg-surface text-ink">
-    {/* Mobile top bar (<lg): brand + a sr-only checkbox-hack disclosure, the
-    same no-JS idiom Header.astro uses for its own mobile menu. */}
-    <div class="lg:hidden bg-footer-bg text-footer-ink">
-      {/* The checkbox must be a sibling of <nav> (not nested inside the bar
-      row) for Tailwind's peer-checked sibling selector below to reach it —
-      the sr-only input stays visually hidden regardless of DOM position. */}
-      <input type="checkbox" id="c4c-admin-nav" class="peer sr-only" />
-      <div class="h-14 px-4 flex items-center justify-between gap-4">
-        <a href="/admin" class="flex items-center gap-2 font-display font-bold">
-          {logoSrc && <img src={logoSrc} alt="" class="h-7 w-auto" />}
-          <span>{appName}</span>
-        </a>
-        <label
-          for="c4c-admin-nav"
-          class="cursor-pointer p-2 min-w-11 min-h-11 flex flex-col items-center justify-center gap-1.5"
-          aria-label={t(lang, 'admin.nav.label')}
-        >
-          <span class="block w-6 h-0.5 bg-current"></span>
-          <span class="block w-6 h-0.5 bg-current"></span>
-          <span class="block w-6 h-0.5 bg-current"></span>
-        </label>
-      </div>
-      <nav
-        class="hidden peer-checked:block border-t border-footer-ink/10 px-3 py-3 max-h-[80vh] overflow-y-auto"
-        aria-label={t(lang, 'admin.nav.label')}
-      >
-        {
-          sections.map((section) =>
-            section.children ? (
-              <div class="pt-3 first:pt-0">
-                <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-caps text-footer-ink/60">{section.label}</p>
-                {section.children.map((c) => (
-                  <a href={c.href} aria-current={isActive(c.href) ? 'page' : undefined} class={itemClass(c.href)}>
-                    {c.label}
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <a href={section.href} aria-current={isActive(section.href!) ? 'page' : undefined} class={itemClass(section.href!)}>
-                {section.label}
-              </a>
-            ),
-          )
-        }
-        {
-          user && (
-            <div class="mt-3 border-t border-footer-ink/10 pt-3 space-y-2">
-              {(campusChoices.length > 1 || isSuper) && (
-                <form method="post" action="/campus/switch" class="px-3 space-y-2">
-                  <input type="hidden" name="next" value={campusSwitchNext} />
-                  <label class="block text-xs text-footer-ink/70" for="campus-switch-mobile">{t(lang, 'admin.campuses.campus')}</label>
-                  <select id="campus-switch-mobile" name="campus" class="w-full rounded border border-footer-ink/30 bg-footer-bg px-2 py-1.5 text-sm">
-                    {isSuper && <option value="all" selected={user.campusMode === 'all'}>{t(lang, 'admin.campuses.all')}</option>}
-                    {campusChoices.map((campus) => <option value={campus.slug} selected={user.campus?.id === campus.id}>{campus.name}</option>)}
-                  </select>
-                  <button type="submit" class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10">{t(lang, 'admin.campuses.switch')}</button>
-                </form>
-              )}
-              <p class="px-3 text-xs text-footer-ink/70 truncate">{user.email}</p>
-              <a href="/" class="block rounded-md px-3 py-2 text-sm hover:bg-footer-ink/10">
-                {t(lang, 'admin.nav.viewSite')}
-              </a>
-              <form method="post" action="/signout" class="px-3">
-                <button
-                  type="submit"
-                  class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10"
-                >
-                  {t(lang, 'common.signOut')}
-                </button>
-              </form>
-            </div>
-          )
-        }
-      </nav>
-    </div>
-
-    {/* Desktop sidebar (lg+): fixed width, dark surface, own scroll if the nav
-    grows taller than the viewport. */}
-    <aside class="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto bg-footer-bg text-footer-ink">
-      <a href="/admin" class="flex items-center gap-2 px-4 py-5 font-display font-bold">
-        {logoSrc && <img src={logoSrc} alt="" class="h-8 w-auto" />}
-        <span>{appName}</span>
+  <body class="workspace-shell min-h-screen bg-surface text-ink">
+    <a href="#workspace-main" class="skip-link">{t(lang, 'design.nav.skip')}</a>
+    <aside class="workspace-sidebar">
+      <a href="/admin" class="workspace-brand">
+        {logoSrc ? <img src={logoSrc} alt="" class="h-8 w-auto" /> : <Icon name="leaf" size={28} />}
+        <span>Church4Christ<small>{t(lang, 'design.nav.context')}</small></span>
       </a>
-      <nav class="flex-1 px-3 space-y-1" aria-label={t(lang, 'admin.nav.label')}>
-        {
-          sections.map((section) =>
-            section.children ? (
-              <div class="pt-4 first:pt-0">
-                <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-caps text-footer-ink/60">{section.label}</p>
-                {section.children.map((c) => (
-                  <a href={c.href} aria-current={isActive(c.href) ? 'page' : undefined} class={itemClass(c.href)}>
-                    {c.label}
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <a href={section.href} aria-current={isActive(section.href!) ? 'page' : undefined} class={itemClass(section.href!)}>
-                {section.label}
-              </a>
-            ),
-          )
-        }
-      </nav>
-      {
-        user && (
-          <div class="mt-auto border-t border-footer-ink/10 px-4 py-4 space-y-2">
-            {(campusChoices.length > 1 || isSuper) && (
-              <form method="post" action="/campus/switch" class="space-y-2">
-                <input type="hidden" name="next" value={campusSwitchNext} />
-                <label class="block text-xs text-footer-ink/70" for="campus-switch-desktop">{t(lang, 'admin.campuses.campus')}</label>
-                <select id="campus-switch-desktop" name="campus" class="w-full rounded border border-footer-ink/30 bg-footer-bg px-2 py-1.5 text-sm">
-                  {isSuper && <option value="all" selected={user.campusMode === 'all'}>{t(lang, 'admin.campuses.all')}</option>}
-                  {campusChoices.map((campus) => <option value={campus.slug} selected={user.campus?.id === campus.id}>{campus.name}</option>)}
-                </select>
-                <button type="submit" class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10">{t(lang, 'admin.campuses.switch')}</button>
-              </form>
-            )}
-            <p class="text-xs text-footer-ink/70 truncate">{user.email}</p>
-            <a href="/" class="block text-sm hover:underline">
-              {t(lang, 'admin.nav.viewSite')}
-            </a>
-            <form method="post" action="/signout">
-              <button
-                type="submit"
-                class="w-full rounded-md border border-footer-ink/30 px-3 py-1.5 text-sm font-semibold hover:bg-footer-ink/10"
-              >
-                {t(lang, 'common.signOut')}
-              </button>
-            </form>
-          </div>
-        )
-      }
-    </aside>
-
-    <main class="flex-1 min-w-0 bg-surface">
-      <div class="mx-auto max-w-wide px-4 sm:px-6 lg:px-10 py-8">
-        <slot />
+      <div class="workspace-desktop-nav"><WorkspaceNavigation groups={navigationGroups} current={current} label={t(lang, 'admin.nav.label')} /></div>
+      <details class="workspace-mobile-nav">
+        <summary>{t(lang, 'admin.nav.label')} <span aria-hidden="true">☰</span></summary>
+        <WorkspaceNavigation groups={navigationGroups} current={current} label={t(lang, 'admin.nav.label')} />
+        <div class="workspace-mobile-account">
+          <a href={localePath(lang, '/')}>{t(lang, 'admin.nav.viewSite')}</a>
+          {user && <form method="post" action="/signout"><button type="submit">{t(lang, 'common.signOut')}</button></form>}
+        </div>
+      </details>
+      <div class="workspace-sidebar-footer">
+        <a href={localePath(lang, '/')}><Icon name="arrow" size={17} /> {t(lang, 'admin.nav.viewSite')}</a>
+        {user && <form method="post" action="/signout"><button type="submit">{t(lang, 'common.signOut')}</button></form>}
       </div>
-    </main>
+    </aside>
+    <div class="workspace-body">
+      <header class="workspace-topbar">
+        {(campusChoices.length > 1 || isSuper) ? (
+          <form method="post" action="/campus/switch" class="workspace-campus">
+            <input type="hidden" name="next" value={campusSwitchNext} />
+            <label class="sr-only" for="workspace-campus">{t(lang, 'admin.campuses.campus')}</label>
+            <select id="workspace-campus" name="campus">
+              {isSuper && <option value="all" selected={user?.campusMode === 'all'}>{t(lang, 'admin.campuses.all')}</option>}
+              {campusChoices.map(campus => <option value={campus.slug} selected={user?.campus?.id === campus.id}>{campus.name}</option>)}
+            </select>
+            <button type="submit">{t(lang, 'admin.campuses.switch')}</button>
+          </form>
+        ) : <span class="workspace-context">{t(lang, 'design.nav.context')}</span>}
+        <span class="workspace-page-title">{title}</span>
+        {user && <a class="workspace-profile" aria-label={t(lang, 'profile.title')} href={localePath(lang, '/profile')}><span class="workspace-avatar" aria-hidden="true">{(user.email ?? '?').slice(0, 1).toUpperCase()}</span><span class="workspace-email">{user.email}</span></a>}
+      </header>
+      <main id="workspace-main" class="workspace-main" tabindex="-1">
+        <slot />
+      </main>
+    </div>
     <script>
       // Repeat-rows editor island (ported from the reference stack): progressive
       // enhancement over a <template data-repeat-template> plus [data-repeat-row]

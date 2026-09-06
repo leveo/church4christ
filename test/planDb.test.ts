@@ -338,6 +338,28 @@ describe('planDb engine', () => {
       expect(plan?.positions[0].position_name).toBe('主唱');
     });
 
+    it('separates English editorial display from raw plan content without losing assignments, names, or messages', async () => {
+      await env.DB.prepare("UPDATE plans SET title = '同心服事', series = '彼此相爱' WHERE id = 1").run();
+      await env.DB.prepare("UPDATE people SET display_name = '王明' WHERE id = 2").run();
+      await assignPerson(env.DB, { planId: 1, positionId: 1, personId: 2, assignedBy: 1, force: true });
+      const assignmentId = await assignmentIdOf(1, 1, 2);
+      await env.DB.prepare("UPDATE roster_assignments SET status = 'D', decline_reason = '照顾家人' WHERE id = ?")
+        .bind(assignmentId).run();
+
+      const english = await getPlan(env.DB, 1, 'en');
+      expect(english).toMatchObject({
+        id: 1, title: '同心服事', series: '彼此相爱', display_title: null, display_series: null,
+      });
+      expect(english?.positions[0].assignees).toEqual([
+        { assignment_id: assignmentId, person_id: 2, person_name: '王明', status: 'D', decline_reason: '照顾家人', is_signup: 0 },
+      ]);
+      expect(await getPlan(env.DB, 1, 'zh')).toMatchObject({
+        id: 1, title: '同心服事', series: '彼此相爱', display_title: '同心服事', display_series: '彼此相爱',
+      });
+      expect(await env.DB.prepare('SELECT title, series FROM plans WHERE id = 1').first())
+        .toEqual({ title: '同心服事', series: '彼此相爱' });
+    });
+
     it('returns null for an unknown plan', async () => {
       expect(await getPlan(env.DB, 9999, 'en')).toBeNull();
     });
@@ -350,6 +372,21 @@ describe('planDb engine', () => {
       const scoped = await listPlans(env.DB, 1, 'en', { from: '2030-01-01' });
       expect(scoped.map((p) => [p.id, p.service_type_name])).toEqual([[1, 'Chinese']]);
       expect(await listPlans(env.DB, null, 'en', { from: '2031-01-01' })).toEqual([]);
+    });
+
+    it('keeps every scheduling ID and independently localizes optional editorial titles and series', async () => {
+      await env.DB.prepare("UPDATE plans SET title = '同心服事', series = 'Life together' WHERE id = 1").run();
+      await env.DB.prepare("UPDATE plans SET title = 'Serve with joy', series = '彼此相爱' WHERE id = 2").run();
+      const english = await listPlans(env.DB, null, 'en', { from: '2030-01-01' });
+      expect(english).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 1, title: '同心服事', series: 'Life together', display_title: null, display_series: 'Life together' }),
+        expect.objectContaining({ id: 2, title: 'Serve with joy', series: '彼此相爱', display_title: 'Serve with joy', display_series: null }),
+      ]));
+      expect(english).toHaveLength(2);
+      const chinese = await listPlans(env.DB, null, 'zh', { from: '2030-01-01' });
+      expect(chinese.map((p) => [p.id, p.display_title, p.display_series])).toEqual([
+        [1, '同心服事', 'Life together'], [2, 'Serve with joy', '彼此相爱'],
+      ]);
     });
   });
 

@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Peter Huang
 role: Deacon of Facilities
 group: staff

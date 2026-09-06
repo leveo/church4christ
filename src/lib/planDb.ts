@@ -14,6 +14,7 @@
 
 import type { AppDb } from './appDb';
 import { i18nJoin } from './db';
+import { isEnglishEditorialText } from './editorialLocale';
 import { addDays, nextWeekday, todayInTz } from './dates';
 import type { Locale } from './locales';
 import type { SessionUser } from './types';
@@ -540,7 +541,20 @@ export interface PlanDetailPosition {
   assignees: PlanAssignee[];
 }
 
-export interface PlanDetail {
+interface PlanEditorialDisplay {
+  /** Optional subtitles safe for this locale; raw title/series remain available for editing. */
+  display_title: string | null;
+  display_series: string | null;
+}
+
+function planEditorialDisplay(plan: { title: string | null; series: string | null }, locale: Locale): PlanEditorialDisplay {
+  return {
+    display_title: locale === 'zh' || isEnglishEditorialText(plan.title) ? plan.title : null,
+    display_series: locale === 'zh' || isEnglishEditorialText(plan.series) ? plan.series : null,
+  };
+}
+
+export interface PlanDetail extends PlanEditorialDisplay {
   id: number;
   service_type_id: number;
   service_type_name: string;
@@ -600,6 +614,7 @@ export async function getPlan(db: AppDb, id: number, locale: Locale): Promise<Pl
 
   return {
     ...meta,
+    ...planEditorialDisplay(meta, locale),
     positions: positions.map((p) => ({
       ...p,
       assignees: assignees
@@ -609,7 +624,7 @@ export async function getPlan(db: AppDb, id: number, locale: Locale): Promise<Pl
   };
 }
 
-export interface PlanListRow {
+export interface PlanListRow extends PlanEditorialDisplay {
   id: number;
   service_type_id: number;
   service_type_name: string;
@@ -644,8 +659,8 @@ export async function listPlans(
        ORDER BY plans.plan_date LIMIT ?3`,
     )
     .bind(from, serviceTypeId, limit)
-    .all<PlanListRow>();
-  return results;
+    .all<Omit<PlanListRow, keyof PlanEditorialDisplay>>();
+  return results.map((plan) => ({ ...plan, ...planEditorialDisplay(plan, locale) }));
 }
 
 // ── Response (slice 3 — preserved verbatim) ──

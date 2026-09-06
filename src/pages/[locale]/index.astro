@@ -5,6 +5,7 @@
 // pulls all user-visible strings from the dictionaries. DB reads fail soft to
 // empty so a database hiccup degrades the page instead of 500ing it — the same
 // pattern as give.astro.
+import Icon from '../../components/ui/Icon.astro';
 import Base from '../../layouts/Base.astro';
 import Hero from '../../components/Hero.astro';
 import Ticker from '../../components/Ticker.astro';
@@ -51,7 +52,7 @@ try {
   const [a, e, s, m, identity, heroKey] = await Promise.all([
     listActiveAnnouncements(db, locale, today),
     listActiveEvents(db, locale, today, 3),
-    latestPublishedSermon(db),
+    latestPublishedSermon(db, locale),
     listMinistries(db, locale),
     getSiteIdentity(db, locale),
     getHeroImageKey(db),
@@ -77,9 +78,9 @@ const rawPrayer = Astro.url.searchParams.get('prayer');
 const prayerStatus = rawPrayer === 'sent' || rawPrayer === 'error' ? rawPrayer : null;
 
 const infoCards = [
-  { icon: '🕘', label: t(locale, 'home.serviceTimesLabel'), value: serviceTimes },
-  { icon: '📍', label: t(locale, 'home.addressLabel'), value: address },
-  { icon: '📞', label: t(locale, 'home.phoneLabel'), value: phone },
+  { icon: 'calendar', label: t(locale, 'home.serviceTimesLabel'), value: serviceTimes },
+  { icon: 'pin', label: t(locale, 'home.addressLabel'), value: address },
+  { icon: 'people', label: t(locale, 'home.phoneLabel'), value: phone },
 ].filter((c) => c.value);
 ---
 
@@ -90,22 +91,10 @@ const infoCards = [
 
   {
     infoCards.length > 0 && (
-      <section class="container-content py-16">
-        <SectionTitle
-          eyebrow={t(locale, 'home.visitEyebrow')}
-          title={t(locale, 'home.visitTitle')}
-          align="center"
-        />
-        <div class="mt-10 grid gap-6 sm:grid-cols-3">
-          {infoCards.map((c) => (
-            <div class="rounded-lg border border-border bg-surface-raised p-6 text-center">
-              <span class="text-3xl" aria-hidden="true">
-                {c.icon}
-              </span>
-              <p class="mt-3 text-sm font-semibold uppercase tracking-caps text-accent">{c.label}</p>
-              <p class="mt-2 font-display text-lg">{c.value}</p>
-            </div>
-          ))}
+      <section class="container-wide">
+        <div class="service-strip">
+          {infoCards.map(c => <div><Icon name={c.icon} size={22}/><span><small>{c.label}</small><strong>{c.value}</strong></span></div>)}
+          <a href={localePath(locale, '/visit')}>{t(locale, 'nav.visit')} <Icon name="arrow" size={18}/></a>
         </div>
       </section>
     )

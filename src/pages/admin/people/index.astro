@@ -5,7 +5,11 @@
 // per-person editor. The core name/email/phone/role/active view predates the
 // people module, so it always renders; the extra filters + columns are gated on
 // locals.modules.has('people').
+import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
+import { careCopy } from '../../../i18n/designCare';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
 import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/ui/Icon.astro';
 import { t } from '../../../lib/i18n';
 import { listPeople } from '../../../lib/adminDb';
 import { hasAreaAccess } from '../../../lib/adminAreas';
@@ -39,11 +43,13 @@ const people = await listPeople(db, {
   ...(hasPeople ? { status, serving, household } : {}),
 });
 const colspan = hasPeople ? 7 : 5;
+const copy = careCopy(lang);
 ---
 
 <Admin title={t(lang, 'admin.people.title')}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.people.title')}</h1>
+  <CareWorkspace>
+  <div class="care-heading">
+    <div><p class="care-eyebrow">{copy.peopleEyebrow}</p><h1>{t(lang, 'admin.people.title')}</h1><p class="care-intro">{copy.peopleIntro}</p></div>
     <div class="flex flex-wrap items-center justify-end gap-2">
       {
         hasPeople && canManagePeople && (
@@ -51,7 +57,7 @@ const colspan = hasPeople ? 7 : 5;
             <a href="/admin/people/import/map" class={btnSecondary}>
               {t(lang, 'admin.peopleImportMapping.entry')}
             </a>
-            <a href="/admin/people/import" class={btn}>{t(lang, 'admin.peopleImport.title')}</a>
+            <a href="/admin/people/import" class={btnSecondary}>{t(lang, 'admin.peopleImport.title')}</a>
           </>
         )
       }
@@ -62,6 +68,96 @@ const colspan = hasPeople ? 7 : 5;
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.deleted')}</p>}
 
+  <form method="get" class="care-filter mt-6" role="search" aria-label={copy.search}>
+    <label class="care-search">
+      <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.search')}</span>
+      <div class="care-search-control"><Icon name="search" size={18} /><input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={tin} /></div>
+    </label>
+    {
+      hasPeople && (
+        <>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterStatus')}</span>
+            <select name="status" class={tin}>
+              <option value="" selected={status === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              {MEMBERSHIP_STATUSES.map((s) => (
+                <option value={s} selected={status === s}>{t(lang, `membership.${s}`)}</option>
+              ))}
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterServing')}</span>
+            <select name="serving" class={tin}>
+              <option value="" selected={serving === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              <option value="yes" selected={serving === true}>{t(lang, 'admin.people.filterYes')}</option>
+              <option value="no" selected={serving === false}>{t(lang, 'admin.people.filterNo')}</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterHousehold')}</span>
+            <select name="household" class={tin}>
+              <option value="" selected={household === undefined}>{t(lang, 'admin.people.filterAny')}</option>
+              <option value="yes" selected={household === true}>{t(lang, 'admin.people.filterYes')}</option>
+              <option value="no" selected={household === false}>{t(lang, 'admin.people.filterNo')}</option>
+            </select>
+          </label>
+        </>
+      )
+    }
+    <button type="submit" class={btn}>{hasPeople ? t(lang, 'admin.people.filterApply') : t(lang, 'admin.people.search')}</button>
+    {(q || (hasPeople && (status || serving !== undefined || household !== undefined))) && <a href="/admin/people" class="pb-2 text-xs text-primary hover:underline">{copy.reset}</a>}
+  </form>
+  <div class="care-results-bar"><h2>{copy.directory}</h2><span><strong class="text-ink">{people.length}</strong> {copy.results}</span></div>
+  <div class="care-table-wrap">
+    <table class="care-table">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.people.colName')}</th>
+          <th class={th}>{t(lang, 'admin.people.colEmail')}</th>
+          <th class={th}>{t(lang, 'admin.people.colPhone')}</th>
+          <th class={th}>{t(lang, 'admin.people.colRole')}</th>
+          {hasPeople && <th class={th}>{t(lang, 'admin.people.colMembership')}</th>}
+          {hasPeople && <th class={th}>{t(lang, 'admin.people.colHousehold')}</th>}
+          <th class={th}>{t(lang, 'admin.people.colActive')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          people.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan={colspan}>
+                {t(lang, 'admin.people.empty')}
+              </td>
+            </tr>
+          ) : (
+            people.map((p) => (
+              <tr class="border-t border-border hover:bg-surface-sunken">
+                <td class={td}><div class="care-identity"><AvatarInitials name={p.display_name} sizeClass="h-9 w-9 text-xs" /><a href={`/admin/people/${p.id}`} class="font-medium text-primary hover:underline">{p.display_name}</a></div></td>
+                <td class={td}>{p.email}</td>
+                <td class={td}>{p.phone ?? '—'}</td>
+                <td class={td}>
+                  <span class={`${badge} ${badgeRole[p.role] ?? badgeInactive}`}>{t(lang, `admin.role.${p.role}`)}</span>
+                </td>
+                {hasPeople && (
+                  <td class={td}>
+                    <span class={`${badge} bg-accent-soft text-on-accent-soft`}>{t(lang, `membership.${p.membership_status}`)}</span>
+                  </td>
+                )}
+                {hasPeople && <td class={`${td} text-ink-muted`}>{p.household_name ?? '—'}</td>}
+                <td class={td}>
+                  <span class={`${badge} ${p.active ? badgeActive : badgeInactive}`}>
+                    {p.active ? t(lang, 'admin.people.active') : t(lang, 'admin.people.inactive')}
+                  </span>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+  {hasPeople && (canManagePeople || user.isSuperAdmin) && (
+    <details class="care-tools"><summary>{copy.dataTools}</summary><div class="care-tools-grid">
   {
     hasPeople && canManagePeople && (
       <section class={`mt-6 ${card}`} aria-labelledby="people-export-heading">
@@ -96,95 +192,8 @@ const colspan = hasPeople ? 7 : 5;
     )
   }
 
-  <form method="get" class="mt-6 flex flex-wrap items-end gap-3">
-    <label class="block">
-      <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.search')}</span>
-      <input type="search" name="q" value={q} placeholder={t(lang, 'admin.people.searchPlaceholder')} class={`${tin} min-w-56`} />
-    </label>
-    {
-      hasPeople && (
-        <>
-          <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterStatus')}</span>
-            <select name="status" class={tin}>
-              <option value="" selected={status === undefined}>{t(lang, 'admin.people.filterAny')}</option>
-              {MEMBERSHIP_STATUSES.map((s) => (
-                <option value={s} selected={status === s}>{t(lang, `membership.${s}`)}</option>
-              ))}
-            </select>
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterServing')}</span>
-            <select name="serving" class={tin}>
-              <option value="" selected={serving === undefined}>{t(lang, 'admin.people.filterAny')}</option>
-              <option value="yes" selected={serving === true}>{t(lang, 'admin.people.filterYes')}</option>
-              <option value="no" selected={serving === false}>{t(lang, 'admin.people.filterNo')}</option>
-            </select>
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.people.filterHousehold')}</span>
-            <select name="household" class={tin}>
-              <option value="" selected={household === undefined}>{t(lang, 'admin.people.filterAny')}</option>
-              <option value="yes" selected={household === true}>{t(lang, 'admin.people.filterYes')}</option>
-              <option value="no" selected={household === false}>{t(lang, 'admin.people.filterNo')}</option>
-            </select>
-          </label>
-        </>
-      )
-    }
-    <button type="submit" class={btn}>{hasPeople ? t(lang, 'admin.people.filterApply') : t(lang, 'admin.people.search')}</button>
-  </form>
 
-  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.people.colName')}</th>
-          <th class={th}>{t(lang, 'admin.people.colEmail')}</th>
-          <th class={th}>{t(lang, 'admin.people.colPhone')}</th>
-          <th class={th}>{t(lang, 'admin.people.colRole')}</th>
-          {hasPeople && <th class={th}>{t(lang, 'admin.people.colMembership')}</th>}
-          {hasPeople && <th class={th}>{t(lang, 'admin.people.colHousehold')}</th>}
-          <th class={th}>{t(lang, 'admin.people.colActive')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          people.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan={colspan}>
-                {t(lang, 'admin.people.empty')}
-              </td>
-            </tr>
-          ) : (
-            people.map((p) => (
-              <tr class="border-t border-border hover:bg-surface-sunken">
-                <td class={td}>
-                  <a href={`/admin/people/${p.id}`} class="font-medium text-primary hover:underline">
-                    {p.display_name}
-                  </a>
-                </td>
-                <td class={td}>{p.email}</td>
-                <td class={td}>{p.phone ?? '—'}</td>
-                <td class={td}>
-                  <span class={`${badge} ${badgeRole[p.role] ?? badgeInactive}`}>{t(lang, `admin.role.${p.role}`)}</span>
-                </td>
-                {hasPeople && (
-                  <td class={td}>
-                    <span class={`${badge} bg-accent-soft text-on-accent-soft`}>{t(lang, `membership.${p.membership_status}`)}</span>
-                  </td>
-                )}
-                {hasPeople && <td class={`${td} text-ink-muted`}>{p.household_name ?? '—'}</td>}
-                <td class={td}>
-                  <span class={`${badge} ${p.active ? badgeActive : badgeInactive}`}>
-                    {p.active ? t(lang, 'admin.people.active') : t(lang, 'admin.people.inactive')}
-                  </span>
-                </td>
-              </tr>
-            ))
-          )
-        }
-      </tbody>
-    </table>
-  </div>
+    </div></details>
+  )}
+  </CareWorkspace>
 </Admin>

@@ -40,6 +40,10 @@ day or has a blockout, and the leader can still go ahead if they mean to.
 **One plan at a time.** Each plan also has its own page showing every position, who is on it,
 and their status (Unconfirmed, Confirmed, Declined). Leaders generate future plans in one step —
 the site copies a service's needs forward week by week, up to about a year ahead.
+English pages keep every plan available under its date and localized service name, while
+omitting optional Chinese editorial titles or series. Chinese pages show the original
+subtitles. This display rule never changes stored titles, assignments, people's names,
+or response messages.
 
 ![A single plan's detail page](../images/serve/plan-detail.png)
 

@@ -1,0 +1,20 @@
+---
+interface Props { name?: string; size?: number; class?: string }
+const { name = 'home', size = 20, class: className } = Astro.props;
+const paths: Record<string, string> = {
+  home: 'm3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  book: 'M12 5c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1Zm0 0v15',
+  people: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8m8-7.9a4 4 0 0 1 0 7.8',
+  serve: 'M12 21s-9-5-9-12a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 7-9 12-9 12Z',
+  chart: 'M4 3v17h17M8 16v-5m5 5V7m5 9V4',
+  settings: 'm9 3-1 3-3 1-2 3 2 2-1 3 3 2 3-1 2 3 3-1 1-3 3-1 2-3-2-2 1-3-3-2-3 1-2-3Zm3 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+  arrow: 'M4 12h16m-6-6 6 6-6 6',
+  chevron: 'm9 5 7 7-7 7',
+  calendar: 'M4 5h16v16H4zM8 2v6m8-6v6M4 11h16',
+  play: 'm9 5 11 7-11 7z',
+  search: 'M21 21l-5-5M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16',
+  pin: 'M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Zm-8-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+  leaf: 'M12 22V3m-4 4h8M12 20C4 20 2 15 2 11c6 0 10 3 10 9Zm0-3c0-6 4-10 10-10 0 6-3 10-10 10Z',
+};
+---
+<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class={className}><path d={paths[name] ?? paths.home} /></svg>

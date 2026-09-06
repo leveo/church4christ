@@ -5,7 +5,9 @@
 import { getCollection } from 'astro:content';
 import type { CollectionEntry, CollectionKey } from 'astro:content';
 import type { Locale } from './locales';
+import type { AppDb } from './appDb';
 import { getLocalizedFrom, listLocalizedFrom, slugOf } from './contentCore';
+import { includeDemoContent } from './contentVisibility';
 
 export { slugOf };
 
@@ -14,16 +16,18 @@ export async function getLocalized<C extends CollectionKey>(
   coll: C,
   slug: string,
   locale: Locale,
+  db: AppDb,
 ): Promise<{ entry: CollectionEntry<C>; translated: boolean } | null> {
   const entries = (await getCollection(coll)) as CollectionEntry<C>[];
-  return getLocalizedFrom(entries, slug, locale);
+  return getLocalizedFrom(entries, slug, locale, await includeDemoContent(db));
 }
 
 /** Deduped list of every slug in `coll` for `locale`, preferring localized entries. */
 export async function listLocalized<C extends CollectionKey>(
   coll: C,
   locale: Locale,
+  db: AppDb,
 ): Promise<{ entry: CollectionEntry<C>; translated: boolean; slug: string }[]> {
   const entries = (await getCollection(coll)) as CollectionEntry<C>[];
-  return listLocalizedFrom(entries, locale);
+  return listLocalizedFrom(entries, locale, await includeDemoContent(db));
 }

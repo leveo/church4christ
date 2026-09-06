@@ -7,6 +7,8 @@
 // missing translation transparently falls back to English.
 import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
+import { isEnglishEditorialText } from './editorialLocale';
+import { parseJsonArray } from './json';
 
 export interface AnnouncementRow {
   title: string;
@@ -78,17 +80,33 @@ export async function listActiveEvents(
   return results;
 }
 
-/** The most recent published, non-deleted sermon (sermons carry no publish_at). */
-export async function latestPublishedSermon(db: AppDb): Promise<LatestSermonRow | null> {
-  return db
-    .prepare(
-      `SELECT id, sermon_date, title, speaker, scripture, series, youtube_id
-       FROM sermons
-       WHERE status = 'published' AND deleted_at IS NULL
-       ORDER BY sermon_date DESC, id DESC
-       LIMIT 1`,
-    )
-    .first<LatestSermonRow>();
+type SermonContent = Pick<LatestSermonRow, 'title' | 'scripture' | 'series'>;
+
+// Legacy sermons have no source-language column. This display-only rule checks
+// editorial content, never speaker names, and does not rewrite stored text.
+// Explicit source-language metadata can replace this heuristic in a future schema.
+function sermonMatchesLocale(sermon: SermonContent, locale: Locale): boolean {
+  return locale === 'zh' || isEnglishEditorialText(sermon.title, sermon.scripture, sermon.series);
+}
+
+/** The most recent visible sermon. Search beyond newer Chinese rows for en. */
+export async function latestPublishedSermon(db: AppDb, locale: Locale): Promise<LatestSermonRow | null> {
+  const pageSize = locale === 'en' ? 100 : 1;
+  for (let offset = 0; ; offset += pageSize) {
+    const { results } = await db
+      .prepare(
+        `SELECT id, sermon_date, title, speaker, scripture, series, youtube_id
+         FROM sermons
+         WHERE status = 'published' AND deleted_at IS NULL
+         ORDER BY sermon_date DESC, id DESC
+         LIMIT ?1 OFFSET ?2`,
+      )
+      .bind(pageSize, offset)
+      .all<LatestSermonRow>();
+    const visible = results.find((sermon) => sermonMatchesLocale(sermon, locale));
+    if (visible) return visible;
+    if (results.length < pageSize) return null;
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -157,17 +175,17 @@ export interface PrayerSheetRow {
   sections_json: string | null;
 }
 
-/** Distinct years that have at least one published sermon, newest first. */
-export async function listSermonYears(db: AppDb): Promise<number[]> {
+/** Distinct years containing a visible published sermon, newest first. */
+export async function listSermonYears(db: AppDb, locale: Locale): Promise<number[]> {
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT CAST(substr(sermon_date, 1, 4) AS INTEGER) AS year
+      `SELECT CAST(substr(sermon_date, 1, 4) AS INTEGER) AS year, title, scripture, series
        FROM sermons
        WHERE status = 'published' AND deleted_at IS NULL
        ORDER BY year DESC`,
     )
-    .all<{ year: number }>();
-  return results.map((r) => r.year);
+    .all<SermonContent & { year: number }>();
+  return [...new Set(results.filter((sermon) => sermonMatchesLocale(sermon, locale)).map((r) => r.year))];
 }
 
 /** Published sermons in `year`, newest first, with the localized service-type name. */
@@ -187,7 +205,7 @@ export async function listSermonsByYear(db: AppDb, year: number, locale: Locale)
     )
     .bind(String(year))
     .all<SermonRow>();
-  return results;
+  return results.filter((sermon) => sermonMatchesLocale(sermon, locale));
 }
 
 const BULLETIN_COLS = `b.id AS id, b.service_type_id AS service_type_id, b.bulletin_date AS bulletin_date,
@@ -196,8 +214,99 @@ const BULLETIN_COLS = `b.id AS id, b.service_type_id AS service_type_id, b.bulle
   b.memory_verse AS memory_verse, b.flowers AS flowers,
   COALESCE(st_l.name, st_d.name) AS "serviceTypeName"`;
 
-/** The latest published bulletin for each service type (one row per type), ordered by type sort. */
+type BulletinCandidate = BulletinRow & { service_type_sort: number };
+
+function bulletinEditorialIsEnglish(bulletin: BulletinRow): boolean {
+  const englishRows = (json: string | null, fields: string[]) =>
+    parseJsonArray<Record<string, unknown> | null>(json)
+      .every((row) => isEnglishEditorialText(...fields.map((field) => row?.[field])));
+  return isEnglishEditorialText(bulletin.service_time_label, bulletin.memory_verse, bulletin.flowers)
+    // The program's dedicated person field is intentionally excluded.
+    && englishRows(bulletin.program_json, ['item', 'content'])
+    && englishRows(bulletin.offering_json, ['label', 'amount'])
+    && englishRows(bulletin.attendance_json, ['label', 'count']);
+}
+
+/**
+ * Read published candidates in bounded pages, newest first. A bulletin is one
+ * editorial publication: English eligibility includes all its announcements,
+ * so dated reads and archive links never expose a partly filtered sheet.
+ * Announcement reads are batched per page, not one query per bulletin.
+ */
+async function* eligibleBulletinPages(
+  db: AppDb,
+  locale: Locale,
+  scope: { serviceTypeId?: number; date?: string } = {},
+): AsyncGenerator<BulletinCandidate[]> {
+  const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
+  const params: (number | string)[] = [];
+  const filters = [published('b')];
+  if (scope.serviceTypeId !== undefined) {
+    params.push(scope.serviceTypeId);
+    filters.push(`b.service_type_id = ?${params.length}`);
+  }
+  if (scope.date !== undefined) {
+    params.push(scope.date);
+    filters.push(`b.bulletin_date = ?${params.length}`);
+  }
+  const pageSize = 100;
+  for (let offset = 0; ; offset += pageSize) {
+    const { results } = await db.prepare(
+      `SELECT ${BULLETIN_COLS}, st.sort AS service_type_sort
+       FROM bulletins b
+       JOIN service_types st ON st.id = b.service_type_id
+       ${joins}
+       WHERE ${filters.join(' AND ')}
+       ORDER BY b.bulletin_date DESC, st.sort, st.id
+       LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
+    ).bind(...params, pageSize, offset).all<BulletinCandidate>();
+
+    if (locale === 'zh') {
+      yield results;
+    } else {
+      const candidates = results.filter(bulletinEditorialIsEnglish);
+      const excluded = new Set<number>();
+      if (candidates.length > 0) {
+        const { results: announcements } = await db.prepare(
+          `SELECT bulletin_id, title, body, link_label
+           FROM bulletin_announcements
+           WHERE bulletin_id IN (${candidates.map(() => '?').join(',')})`,
+        ).bind(...candidates.map((bulletin) => bulletin.id))
+          .all<{ bulletin_id: number; title: string; body: string; link_label: string | null }>();
+        for (const announcement of announcements) {
+          if (!isEnglishEditorialText(announcement.title, announcement.body, announcement.link_label)) {
+            excluded.add(announcement.bulletin_id);
+          }
+        }
+      }
+      yield candidates.filter((bulletin) => !excluded.has(bulletin.id));
+    }
+    if (results.length < pageSize) return;
+  }
+}
+
+function bulletinRow({ service_type_sort: _sort, ...bulletin }: BulletinCandidate): BulletinRow {
+  return bulletin;
+}
+
+/** Latest eligible published bulletin per service type, ordered by type sort. */
 export async function latestBulletins(db: AppDb, locale: Locale): Promise<BulletinRow[]> {
+  if (locale === 'en') {
+    const { results: services } = await db.prepare(
+      `SELECT DISTINCT b.service_type_id FROM bulletins b WHERE ${published('b')}`,
+    ).all<{ service_type_id: number }>();
+    if (services.length === 0) return [];
+    const latest = new Map<number, BulletinCandidate>();
+    for await (const page of eligibleBulletinPages(db, locale)) {
+      for (const bulletin of page) {
+        if (!latest.has(bulletin.service_type_id)) latest.set(bulletin.service_type_id, bulletin);
+      }
+      if (latest.size === services.length) break;
+    }
+    return [...latest.values()]
+      .sort((a, b) => a.service_type_sort - b.service_type_sort || a.service_type_id - b.service_type_id)
+      .map(bulletinRow);
+  }
   const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
   const { results } = await db
     .prepare(
@@ -217,66 +326,43 @@ export async function latestBulletins(db: AppDb, locale: Locale): Promise<Bullet
   return results;
 }
 
-/** A single published bulletin for a service type on a date, or null. */
+/** A single eligible published bulletin for a service type on a date, or null. */
 export async function getBulletin(
   db: AppDb,
   serviceTypeId: number,
   date: string,
   locale: Locale,
 ): Promise<BulletinRow | null> {
-  const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
-  return db
-    .prepare(
-      `SELECT ${BULLETIN_COLS}
-       FROM bulletins b
-       JOIN service_types st ON st.id = b.service_type_id
-       ${joins}
-       WHERE b.service_type_id = ?1 AND b.bulletin_date = ?2 AND ${published('b')}`,
-    )
-    .bind(serviceTypeId, date)
-    .first<BulletinRow>();
+  for await (const page of eligibleBulletinPages(db, locale, { serviceTypeId, date })) {
+    if (page.length > 0) return bulletinRow(page[0]);
+  }
+  return null;
 }
 
-/** Service types (id + localized name) that have a published bulletin on `date`, by type sort. */
+/** Service types with an eligible published bulletin on `date`, by type sort. */
 export async function listBulletinServicesForDate(
   db: AppDb,
   date: string,
   locale: Locale,
 ): Promise<{ service_type_id: number; serviceTypeName: string }[]> {
-  const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
-  const { results } = await db
-    .prepare(
-      `SELECT b.service_type_id AS service_type_id, COALESCE(st_l.name, st_d.name) AS "serviceTypeName"
-       FROM bulletins b
-       JOIN service_types st ON st.id = b.service_type_id
-       ${joins}
-       WHERE b.bulletin_date = ?1 AND ${published('b')}
-       ORDER BY st.sort, st.id`,
-    )
-    .bind(date)
-    .all<{ service_type_id: number; serviceTypeName: string }>();
-  return results;
+  const services: { service_type_id: number; serviceTypeName: string }[] = [];
+  for await (const page of eligibleBulletinPages(db, locale, { date })) {
+    services.push(...page.map(({ service_type_id, serviceTypeName }) => ({ service_type_id, serviceTypeName })));
+  }
+  return services;
 }
 
-/** Archive of published-bulletin dates (date + service type), newest first, capped at 52. */
+/** Eligible archive dates, newest first; the cap applies after source selection. */
 export async function listBulletinDates(db: AppDb, locale: Locale): Promise<BulletinDateRow[]> {
-  const { joins } = i18nJoin('service_type_i18n', 'st', 'service_type_id', ['name'], locale);
-  const { results } = await db
-    .prepare(
-      `SELECT b.bulletin_date AS bulletin_date, b.service_type_id AS service_type_id,
-              COALESCE(st_l.name, st_d.name) AS "serviceTypeName"
-       FROM bulletins b
-       JOIN service_types st ON st.id = b.service_type_id
-       ${joins}
-       WHERE ${published('b')}
-       ORDER BY b.bulletin_date DESC, st.sort, st.id
-       LIMIT 52`,
-    )
-    .all<BulletinDateRow>();
-  return results;
+  const dates: BulletinDateRow[] = [];
+  for await (const page of eligibleBulletinPages(db, locale)) {
+    dates.push(...page.map(({ bulletin_date, service_type_id, serviceTypeName }) => ({ bulletin_date, service_type_id, serviceTypeName })));
+    if (dates.length >= 52) break;
+  }
+  return dates.slice(0, 52);
 }
 
-/** A bulletin's announcements in display order. */
+/** Announcements in display order; public readers first obtain a locale-eligible bulletin. */
 export async function getBulletinAnnouncements(
   db: AppDb,
   bulletinId: number,
@@ -329,35 +415,37 @@ export async function bulletinRoster(
   return groups;
 }
 
-/** The most recent published prayer sheet, or null. */
-export async function latestPrayerSheet(db: AppDb): Promise<PrayerSheetRow | null> {
+/** The most recent published prayer sheet visible in the requested locale. */
+export async function latestPrayerSheet(db: AppDb, locale: Locale): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
        FROM prayer_sheets ps
-       WHERE ${published('ps')}
+       WHERE ${published('ps')} ${locale === 'en' ? "AND ps.locale = 'en'" : ''}
        ORDER BY ps.sheet_date DESC, ps.id DESC
        LIMIT 1`,
     )
     .first<PrayerSheetRow>();
 }
 
-/** A published prayer sheet by date, or null. */
-export async function getPrayerSheet(db: AppDb, date: string): Promise<PrayerSheetRow | null> {
+/** A published prayer sheet by date, excluding non-English sheets for en. */
+export async function getPrayerSheet(db: AppDb, date: string, locale: Locale): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
-       FROM prayer_sheets ps WHERE ps.sheet_date = ?1 AND ${published('ps')}`,
+       FROM prayer_sheets ps WHERE ps.sheet_date = ?1 AND ${published('ps')}
+         ${locale === 'en' ? "AND ps.locale = 'en'" : ''}`,
     )
     .bind(date)
     .first<PrayerSheetRow>();
 }
 
 /** Archive of published prayer-sheet dates, newest first, capped at 52. */
-export async function listPrayerSheetDates(db: AppDb): Promise<string[]> {
+export async function listPrayerSheetDates(db: AppDb, locale: Locale): Promise<string[]> {
   const { results } = await db
     .prepare(
-      `SELECT ps.sheet_date AS sheet_date FROM prayer_sheets ps WHERE ${published('ps')} ORDER BY ps.sheet_date DESC LIMIT 52`,
+      `SELECT ps.sheet_date AS sheet_date FROM prayer_sheets ps WHERE ${published('ps')}
+       ${locale === 'en' ? "AND ps.locale = 'en'" : ''} ORDER BY ps.sheet_date DESC LIMIT 52`,
     )
     .all<{ sheet_date: string }>();
   return results.map((r) => r.sheet_date);

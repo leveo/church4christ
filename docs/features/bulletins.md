@@ -9,7 +9,9 @@ the admin area and have it appear on the website automatically.
 
 Each bulletin is tied to a **date** and a **service type** (for example, the 9:30 English
 worship or the 11:00 Chinese worship), not to a language. That means one bulletin can carry
-both languages, and two services on the same Sunday each get their own sheet.
+both languages, and two services on the same Sunday each get their own sheet. Chinese
+pages can display either language. English pages select sheets with English editorial
+content; a Chinese or bilingual sheet remains available through the Chinese pages.
 
 You can save a bulletin as a **draft** while you are still working on it, and set a
 **publish time** so it goes live on its own — handy for preparing next Sunday's sheet on
@@ -31,7 +33,7 @@ the public. Set it to **published** to make it live now, or fill in a publish ti
 it appear later on its own. You never have to remember to flip a switch at the right moment.
 
 **How it appears on the site.** Visitors find bulletins under the bulletin page, newest
-first, and can open any past week. The published sheet shows the full order of worship,
+first, and can open past weeks eligible for their page language. The published sheet shows the full order of worship,
 announcements, the memory verse, and — near the bottom — a **Serving This Sunday** list.
 
 ![A published bulletin on the public site](../images/public/bulletin.png)
@@ -48,7 +50,9 @@ roster. Neither one has to compromise to fit the other.
 
 **Past weeks stay available.** Every published bulletin is kept, so the bulletin page doubles as
 an archive. Someone who missed a Sunday can pull up that week's sheet, read the announcements,
-and see the memory verse whenever they like.
+and see the memory verse whenever they like. English latest and archive views share the
+same source rule; when the newest sheet is in Chinese, the English page can show an earlier
+English sheet for that service. Its date remains visible.
 
 **Good to know:**
 
@@ -58,6 +62,11 @@ and see the memory verse whenever they like.
   own — no need to be at your computer Saturday night.
 - If you edit a published bulletin, the change is live immediately, and the previous version is
   saved in its history in case you need to undo it.
+- The legacy schema has no language field. English source selection currently checks for
+  Han characters in editorial text, including announcements; it does not translate text.
+  Bilingual prose and Han names embedded in prose may exclude a sheet. Dedicated person
+  and roster-name fields remain unchanged. See [language handling](../i18n.md) for the
+  exact scope and the future metadata remedy.
 
 ## How it fits together
 

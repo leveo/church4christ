@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 英语青年团契
 meetingTime: 每周日 · 下午1:00
 location: 咖啡角

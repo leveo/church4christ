@@ -148,6 +148,11 @@ this Astro/Worker release as an automatic Canvas upgrade.
 
 ## Demo capture and implementation notes
 
+The fictional demo uses English defaults for shared program, course, activity, and resource
+titles, including **Genesis 1: Creation**. These fields have no separate locale storage;
+the same titles appear in both views while navigation, dates, and submission states use the
+selected UI language. Independently authored Chinese content elsewhere keeps its own locale.
+
 Setup applies the Genesis fixture only when explicitly passed `--demo-data`.
 The screenshot runbook deliberately applies `seed/dev-seed.sql` directly through
 `npm run db:seed:local`. Choose one strong, ephemeral `SCREENSHOT_SESSION_SECRET` of at least 32

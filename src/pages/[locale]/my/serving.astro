@@ -13,8 +13,9 @@
 // can't depend on this portal-only page or vice versa. Keep the two in sync by
 // hand if the response/claim semantics ever change.
 import { env } from 'cloudflare:workers';
-import Base from '../../../layouts/Base.astro';
-import PortalNav from '../../../components/PortalNav.astro';
+import Member from '../../../layouts/Member.astro';
+import { memberCopy } from '../../../i18n/designMember';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import StatusBadge from '../../../components/StatusBadge.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -89,10 +90,9 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
 };
 ---
 
-<Base title={t(locale, 'portal.serving.title')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.serving.title')}</h1>
-    <PortalNav locale={locale} active="serving" />
+<Member active="serving" title={t(locale, 'portal.serving.title')} locale={locale} noindex>
+  <div class="member-content">
+    <MemberPageHeader title={t(locale, 'portal.serving.title')} description={memberCopy(locale).servingIntro} />
 
     {claimed && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
     {flashKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, flashKey)}</p>}
@@ -251,4 +251,4 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
       }
     </section>
   </div>
-</Base>
+</Member>

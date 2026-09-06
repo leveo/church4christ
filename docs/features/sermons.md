@@ -53,8 +53,10 @@ year's page shows just that year's sermons, still grouped by month.
 
 - You do not need to upload anything — the video stays on YouTube, and the site just links to it.
 - The video player only loads after a click, so a page full of sermons still loads fast.
-- Each service (for example, English worship vs. Chinese worship) keeps its own sermons, so the
-  two archives never get tangled together.
+- Each service keeps its own sermon entries. English public pages omit messages with Chinese
+  characters in the title, scripture, or series; Chinese pages include both languages.
+  This temporary rule preserves speaker names and source text. Sermons do not yet have a
+  source-language field, so the rule cannot determine the video's spoken language.
 - Getting the date and speaker right matters more than the title — that is what people search by.
 - A series name is optional and free-form; you can start using one at any time, even partway
   through a run of messages, and reuse it as often as you like.

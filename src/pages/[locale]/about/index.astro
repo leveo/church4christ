@@ -13,7 +13,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
-const found = await getLocalized('pages', 'about', locale);
+const found = await getLocalized('pages', 'about', locale, Astro.locals.db);
 if (!found) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

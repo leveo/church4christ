@@ -1,0 +1,74 @@
+---
+import LibraryHeading from './LibraryHeading.astro';
+import SermonMonthGrid from '../SermonMonthGrid.astro';
+import YouTubeEmbed from '../YouTubeEmbed.astro';
+import DesignImage from '../ui/DesignImage.astro';
+import Icon from '../ui/Icon.astro';
+import { publicCopy } from '../../i18n/designPublic';
+import { t } from '../../lib/i18n';
+import { localePath, type Locale } from '../../lib/locales';
+import { formatDate } from '../../lib/dates';
+import type { SermonRow } from '../../lib/publicDb';
+interface Props { locale: Locale; sermons: SermonRow[]; years: number[]; year?: number }
+const { locale, sermons, years, year } = Astro.props;
+const copy = publicCopy(locale);
+const [featured, ...remaining] = sermons;
+const title = year ? t(locale, 'sermons.titleYear', { year }) : t(locale, 'sermons.title');
+const meta = featured ? [featured.speaker, featured.scripture].filter(Boolean).join(' · ') : '';
+---
+<div class="container-wide sermon-library">
+  <LibraryHeading eyebrow={copy.sermonsEyebrow} title={title} description={copy.sermonsDescription} />
+  {featured ? (
+    <section class="message-feature" aria-labelledby="featured-message-title">
+      <div class="message-player">
+        {featured.youtube_id ? <YouTubeEmbed posterImage="sermons" videoId={featured.youtube_id} title={featured.title} locale={locale} /> : <DesignImage image="sermons" class="aspect-video h-full w-full object-cover" />}
+      </div>
+      <div class="message-feature-copy">
+        <p class="section-eyebrow">{copy.featuredMessage}</p>
+        {featured.series && <p class="message-series">{featured.series}</p>}
+        <h2 id="featured-message-title">{featured.title}</h2>
+        {meta && <p class="message-meta">{meta}</p>}
+        <p class="message-date"><Icon name="calendar" size={16}/><time datetime={featured.sermon_date}>{formatDate(featured.sermon_date, locale)}</time></p>
+        {featured.serviceTypeName && <p class="message-service">{featured.serviceTypeName}</p>}
+      </div>
+    </section>
+  ) : (
+    <section class="message-empty">
+      <div><DesignImage image="sermons" class="h-full w-full object-cover" /></div>
+      <div class="message-empty-copy"><Icon name="book" size={30}/><h2>{copy.messageLibrary}</h2><p>{t(locale, year ? 'sermons.emptyYear' : 'sermons.empty')}</p><a class="action-secondary" href={localePath(locale, '/visit')}>{t(locale, 'nav.visit')}<Icon name="arrow" size={16}/></a></div>
+    </section>
+  )}
+  <div class="library-toolbar">
+    <h2>{copy.messageLibrary}</h2>
+    <nav aria-label={t(locale, 'sermons.archive')}>
+      <a href={localePath(locale, '/sermons')} aria-current={year === undefined ? 'page' : undefined}>{copy.allMessages}</a>
+      {years.filter(y => y >= 2000 && y <= 2100).map(y => <a href={localePath(locale, `/sermons/${y}`)} aria-current={year === y ? 'page' : undefined}>{t(locale, 'sermons.yearLabel', { year: y })}</a>)}
+    </nav>
+  </div>
+  {remaining.length > 0 && <SermonMonthGrid sermons={remaining} locale={locale} />}
+  {year && <a class="library-back" href={localePath(locale, '/sermons')}>{t(locale, 'sermons.back')}</a>}
+</div>
+<style>
+  .sermon-library { padding-bottom: 4rem; }
+  .message-feature { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface-raised); }
+  .message-player { display: grid; align-items: center; min-width: 0; background: var(--color-primary-soft); }
+  .message-player :global(.yt-facade) { border-radius: 0; }
+  .message-feature-copy { align-self: center; padding: clamp(1.5rem, 3vw, 2.75rem); }
+  .message-feature h2 { font-family: var(--font-display); font-size: clamp(1.8rem, 3vw, 2.7rem); line-height: 1.15; letter-spacing: -.025em; margin-top: 1rem; overflow-wrap: anywhere; }
+  .message-series { margin-top: 1rem; color: var(--color-primary); font-size: .85rem; }
+  .message-meta { margin-top: 1rem; color: var(--color-ink-muted); line-height: 1.7; }
+  .message-date { display: flex; gap: .5rem; align-items: center; margin-top: 1.5rem; color: var(--color-ink-muted); font-size: .8rem; }
+  .message-service { font-size: .8rem; color: var(--color-ink-muted); margin-top: .5rem; }
+  .library-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.2rem; padding-block: 2.75rem 2rem; }
+  .library-toolbar h2 { font-family: var(--font-display); font-size: 1.7rem; }
+  .library-toolbar nav { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .library-toolbar a { display: inline-flex; align-items: center; min-height: 44px; padding: .6rem .95rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: .85rem; }
+  .library-toolbar a[aria-current], .library-toolbar a:hover { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-on-primary-soft); }
+  .message-empty { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+  .message-empty > div:first-child { min-height: 260px; }
+  .message-empty-copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1rem; padding: 2rem; }
+  .message-empty h2 { font-family: var(--font-display); font-size: 1.8rem; }
+  .message-empty p { color: var(--color-ink-muted); line-height: 1.8; }
+  .library-back { display: inline-block; padding-block: .8rem; color: var(--color-primary); font-size: .9rem; text-decoration: underline; text-underline-offset: .25rem; }
+  @media (max-width: 760px) { .message-feature, .message-empty { grid-template-columns: 1fr; } .message-empty > div:first-child { height: 180px; min-height: 0; } .library-toolbar { align-items: flex-start; flex-direction: column; } }
+</style>

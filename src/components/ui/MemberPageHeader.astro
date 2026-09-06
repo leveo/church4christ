@@ -1,0 +1,26 @@
+---
+import DesignImage from './DesignImage.astro';
+import type { DesignImage as ImageKey } from '../../lib/designAssets';
+interface Props { title: string; description?: string; eyebrow?: string; image?: ImageKey }
+const { title, description, eyebrow, image } = Astro.props;
+---
+<header class:list={['member-page-header', image && 'with-image']}>
+  <div class="member-page-copy">
+    {eyebrow && <p class="section-eyebrow">{eyebrow}</p>}
+    <h1>{title}</h1>
+    {description && <p class="member-page-description">{description}</p>}
+    {Astro.slots.has('default') && <div class="member-page-actions"><slot /></div>}
+  </div>
+  {image && <div class="member-page-photo"><DesignImage image={image} class="h-full w-full object-cover" eager /></div>}
+</header>
+<style>
+  .member-page-header { padding-bottom: 1.5rem; border-bottom: 1px solid var(--color-border); }
+  .member-page-header.with-image { display: grid; grid-template-columns: 1.35fr 1fr; padding: 0; border: 1px solid var(--color-border); background: var(--color-surface-raised); border-radius: var(--radius-lg); overflow: hidden; }
+  .with-image .member-page-copy { padding: 2rem; align-self: center; }
+  .member-page-copy h1 { margin-top: .5rem; }
+  .member-page-description { margin-top: .85rem; max-width: 40rem; font-size: .88rem; color: var(--color-ink-muted); line-height: 1.75; }
+  .member-page-actions { margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: .65rem; }
+  .member-page-photo { min-height: 210px; position: relative; }
+  .member-page-photo :global(img) { position: absolute; inset: 0; }
+  @media (max-width: 639px) { .member-page-header.with-image { grid-template-columns: 1fr; } .with-image .member-page-copy { padding: 1.5rem; } .member-page-photo { min-height: 160px; } }
+</style>

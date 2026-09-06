@@ -324,7 +324,7 @@ describe('people import request and privacy boundary', () => {
 describe('people import commit semantics', () => {
   it('requires acknowledgement for an existing household name and then creates a separate household', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
-    const contents = familyCsv('warning-copy', 'Chen Family 陈家');
+    const contents = familyCsv('warning-copy', 'Chen Family');
     const before = await tableCounts();
 
     const preview = await upload(PREVIEW, admin, contents);
@@ -353,10 +353,10 @@ describe('people import commit semantics', () => {
        JOIN households h ON h.id = hm.household_id
        WHERE p.email = 'warning-copy.primary@example.com'`,
     ).first<{ household_id: number; household_name: string }>();
-    expect(imported).toMatchObject({ household_name: 'Chen Family 陈家' });
+    expect(imported).toMatchObject({ household_name: 'Chen Family' });
     expect(imported?.household_id).not.toBe(1);
     const sameName = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM households WHERE name = 'Chen Family 陈家' AND deleted_at IS NULL`,
+      `SELECT COUNT(*) AS n FROM households WHERE name = 'Chen Family' AND deleted_at IS NULL`,
     ).first<{ n: number }>();
     expect(sameName?.n).toBe(2);
   });

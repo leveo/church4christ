@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 张路得
 role: 接待执事
 group: staff

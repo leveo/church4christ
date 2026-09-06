@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Young Professionals Fellowship
 meetingTime: Fridays · 7:30 PM
 location: Room 201

@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Family Fellowship
 meetingTime: Saturdays · 5:00 PM
 location: Fellowship Hall

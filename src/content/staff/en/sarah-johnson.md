@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Sarah Johnson
 role: Pastor of Preaching & Teaching
 group: pastoral

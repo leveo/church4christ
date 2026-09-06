@@ -78,6 +78,7 @@ export function formatPlan(plan) {
     : [];
   return [
     `Setup plan: ${plan.site.name}`,
+    `Content: ${plan.demoData ? 'Include demo content (fictional examples)' : 'No demo content (church settings and first administrator)'}; both keep the bundled design`,
     `Capabilities (${plan.modules.length}): ${plan.modules.join(', ')}`,
     `Database: ${database}`,
     `Required accounts: ${accounts}`,
@@ -347,6 +348,9 @@ async function applyDefaultSetup(plan, options, catalog) {
         const validIdentity = typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity);
         const preserveImported = !managedInstallation;
         const identityReady = (recovering || preserveImported) ? validIdentity : identity === activePlan.site.name;
+        // Initialized legacy databases intentionally have no content marker.
+        // The first-initialization write owns that choice; maintenance only
+        // verifies the selected modules and church identity here.
         return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },

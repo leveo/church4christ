@@ -7,6 +7,8 @@
 // other surface — privacy rule), the person's serving applications, and an
 // invite-to-serve touchpoint. Every panel + the invite action is gated on
 // locals.modules.has('people'); a crafted POST while off is ignored.
+import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
+import { careCopy } from '../../../i18n/designCare';
 import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
@@ -405,18 +407,29 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
 const summaryErrors = Object.entries(errors)
   .filter(([field]) => !INLINE_ERROR_FIELDS.has(field))
   .map(([field, key]) => `${t(lang, FIELD_LABEL_KEYS[field] ?? `admin.person.${field}`)}: ${t(lang, key)}`);
+const copy = careCopy(lang);
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <a href="/admin/people/" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.person.back')}</a>
+  <CareWorkspace variant="record">
+  <div class="care-heading">
+    <div><p class="care-eyebrow">{copy.peopleEyebrow}</p><h1>{isNew ? heading : person?.display_name}</h1><p class="care-intro">{copy.profileIntro}</p></div>
+    <a href="/admin/people/" class={btnSecondary}>&larr; {t(lang, 'admin.person.back')}</a>
   </div>
-
+  {!isNew && person && <section class="care-profile-summary" aria-label={copy.profile}>
+    {avatarUrl ? <img src={avatarUrl} alt="" class="h-16 w-16 rounded-full object-cover" /> : <AvatarInitials name={person.display_name} sizeClass="h-16 w-16 text-xl" />}
+    <div class="min-w-0 flex-1"><div class="care-actions"><strong class="text-lg">{person.display_name}</strong><span class={`${badge} ${person.active === 1 ? badgeActive : badgeInactive}`}>{t(lang, person.active === 1 ? 'admin.people.active' : 'admin.people.inactive')}</span></div>
+      <dl><div><dt>{t(lang, 'admin.person.email')}</dt><dd class="break-all">{person.email}</dd></div><div><dt>{t(lang, 'admin.person.phone')}</dt><dd>{person.phone || '—'}</dd></div>{hasPeople && <div><dt>{t(lang, 'admin.person.membershipStatus')}</dt><dd>{t(lang, `membership.${person.membership_status}`)}</dd></div>}</dl>
+    </div>
+    {canManagePeople && <a class={btnSecondary} href="#person-profile">{copy.editProfile}</a>}
+  </section>}
+  <nav class="care-record-nav" aria-label={copy.recordNavigation}><a href="#person-profile">{t(lang, 'admin.person.detailsTitle')}</a>{!isNew && person && <a href="#person-access">{copy.access}</a>}{!isNew && person && hasPeople && canManagePeople && <a href="#person-household">{copy.care}</a>}</nav>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.people.saved')}</p>}
   {summaryErrors.length > 0 && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{summaryErrors.join(' ')}</p>}
 
-  <form method="post" enctype="multipart/form-data" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
+  <div class="care-record-grid" data-single={isNew ? 'true' : undefined}>
+  <div class="care-record-column">
+  <form id="person-profile" method="post" enctype="multipart/form-data" class={`${card} grid gap-4 sm:grid-cols-2`}>
     {/* Without the people grant this form is view-only: no action means a
         crafted submit is a no-op client-side, and the server independently
         403s any POST save regardless (defense in depth). */}
@@ -558,7 +571,7 @@ const summaryErrors = Object.entries(errors)
             admin (this page is reachable by all of them via the always-on
             people-basic area) sees a read-only summary instead. */}
         {isSuper && (
-          <form method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
+          <form id="person-access" method="post" class={`mt-6 ${card} max-w-2xl space-y-4`}>
             <input type="hidden" name="action" value="flags" />
             <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
             <label class="block max-w-xs">
@@ -614,7 +627,7 @@ const summaryErrors = Object.entries(errors)
           </form>
         )}
         {!isSuper && (
-          <div class={`mt-6 ${card} max-w-2xl`}>
+          <div id="person-access" class={`mt-6 ${card} max-w-2xl`}>
             <h2 class="font-semibold">{t(lang, 'admin.person.flagsTitle')}</h2>
             <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-sm">
               <div class="flex items-center gap-2">
@@ -635,10 +648,18 @@ const summaryErrors = Object.entries(errors)
           </div>
         )}
 
+      </>
+    )
+  }
+  </div>
+  <div class="care-record-column">
+  {
+    !isNew && person && (
+      <>
         {hasPeople && canManagePeople && (
           <>
             {/* (b) Household panel — admin household management for this person. */}
-            <section class={`mt-6 ${card} max-w-2xl`}>
+            <section id="person-household" class={`mt-6 ${card} max-w-2xl`}>
               <h2 class="font-semibold">{t(lang, 'admin.person.household.title')}</h2>
               {householdErrorKey && <p class={`mt-3 ${noticeErr}`}>{t(lang, householdErrorKey)}</p>}
               {household ? (
@@ -651,8 +672,8 @@ const summaryErrors = Object.entries(errors)
                   </p>
                   <ul class="flex flex-col gap-2">
                     {household.members.map((m) => (
-                      <li class="flex flex-wrap items-center gap-2 text-sm">
-                        <span class="font-medium">{m.display_name}</span>
+                      <li class="care-household-member flex flex-wrap items-center gap-2 text-sm">
+                        <AvatarInitials name={m.display_name} sizeClass="h-8 w-8 text-xs" /><span class="font-medium">{m.display_name}</span>
                         <span class="rounded-full bg-surface-sunken px-2 py-0.5 text-xs text-ink-muted">
                           {t(lang, m.role === 'child' ? 'admin.person.household.roleChild' : 'admin.person.household.roleAdult')}
                         </span>
@@ -901,6 +922,9 @@ const summaryErrors = Object.entries(errors)
       </>
     )
   }
+  </div>
+  </div>
+  </CareWorkspace>
 </Admin>
 
 <script>

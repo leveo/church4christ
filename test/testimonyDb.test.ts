@@ -30,6 +30,20 @@ beforeEach(async () => {
 });
 
 describe('submitTestimony / listPendingTestimonies / countPendingTestimonies', () => {
+  it('uses an anonymous label in the submission language when no author is supplied', async () => {
+    await submitTestimony(env.DB, input({ title: 'English anonymous', author_name: '', locale: 'en' }));
+    await submitTestimony(env.DB, input({ title: 'Chinese anonymous', author_name: '  ', locale: 'zh' }));
+    const pending = await listPendingTestimonies(env.DB);
+    expect(pending.map(({ author_name }) => author_name)).toEqual(['Anonymous', '匿名']);
+  });
+
+  it('keeps a supplied author name unchanged in either locale', async () => {
+    const name = 'David Chen 陈大卫';
+    await submitTestimony(env.DB, input({ title: 'Named English', author_name: name, locale: 'en' }));
+    await submitTestimony(env.DB, input({ title: 'Named Chinese', author_name: name, locale: 'zh' }));
+    expect((await listPendingTestimonies(env.DB)).map(({ author_name }) => author_name)).toEqual([name, name]);
+  });
+
   it('files a pending row and surfaces it in the review queue (oldest first)', async () => {
     const id1 = await submitTestimony(env.DB, input({ title: 'First', author_name: 'Ada' }));
     const id2 = await submitTestimony(env.DB, input({ title: 'Second', locale: 'zh', author_name: '志明' }));

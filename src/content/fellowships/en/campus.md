@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Campus Fellowship
 meetingTime: Thursdays · 7:00 PM
 location: Room 203

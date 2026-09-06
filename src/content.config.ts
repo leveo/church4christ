@@ -12,6 +12,7 @@ const pages = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string().optional(),
+    demo: z.boolean().optional(),
   }),
 });
 
@@ -23,6 +24,7 @@ const articles = defineCollection({
   schema: z.object({
     title: z.string(),
     author: z.string(),
+    demo: z.boolean().optional(),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
     excerpt: z.string().optional(),
   }),
@@ -35,6 +37,7 @@ const fellowships = defineCollection({
   schema: z.object({
     name: z.string(),
     meetingTime: z.string(),
+    demo: z.boolean().optional(),
     location: z.string(),
     audience: z.string().optional(),
     order: z.number(),
@@ -57,6 +60,7 @@ const staff = defineCollection({
   schema: z.object({
     name: z.string(),
     role: z.string(),
+    demo: z.boolean().optional(),
     group: z.enum(['pastoral', 'elders', 'staff']),
     order: z.number(),
     email: z.string().optional(),

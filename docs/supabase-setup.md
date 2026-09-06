@@ -352,6 +352,14 @@ handoff prints the canonical host variable required to start Wrangler.
 2. **Run guided local setup** with `SUPABASE_DB_URL` exported. It writes the local Hyperdrive
    binding and initializes the selected modules and first admin.
 
+   Choose **Include demo content** to explore fictional examples, or **No demo content**
+   to start with your own content. Both retain the same bundled design and local
+   decorative assets. No demo content still applies all migrations and creates operational
+   defaults, explicit module settings, church identity, and the first administrator.
+   Noninteractive scripts can use `--demo-data` or `--no-demo-data` (the existing default).
+   Rerunning no-demo setup does not remove records; use a separate fresh database to
+   evaluate the other starting mode.
+
    ```bash
    export SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres
    npm run setup

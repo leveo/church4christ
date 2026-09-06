@@ -13,7 +13,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
-const members = await listLocalized('staff', locale);
+const members = await listLocalized('staff', locale, Astro.locals.db);
 
 const GROUPS = ['pastoral', 'elders', 'staff'] as const;
 const groups = GROUPS.map((group) => ({

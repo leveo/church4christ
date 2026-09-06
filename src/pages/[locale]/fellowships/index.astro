@@ -12,7 +12,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
-const fellowships = (await listLocalized('fellowships', locale)).sort(
+const fellowships = (await listLocalized('fellowships', locale, Astro.locals.db)).sort(
   (a, b) => a.entry.data.order - b.entry.data.order,
 );
 

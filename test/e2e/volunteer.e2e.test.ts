@@ -336,9 +336,9 @@ describe('/en/profile household card (self-service)', () => {
     const page = await get('/en/profile', { cookie });
     expect(page.status).toBe(200);
     const body = await page.text();
-    expect(body).toContain('Chen Family 陈家'); // the household name
-    expect(body).toContain('Amy Chen 陈爱美'); // fellow real adult, live people.display_name
-    expect(body).toContain('Ethan Chen 陈以恒'); // name-only child dependent
+    expect(body).toContain('Chen Family'); // the household name
+    expect(body).toContain('Amy Chen'); // fellow real adult, live people.display_name
+    expect(body).toContain('Ethan Chen'); // name-only child dependent
     expect(body).toContain('88 Cornerstone Way'); // seeded household address
     // David is an adult member, so the manage-dependents form renders for him.
     expect(body).toContain('value="addDependent"');

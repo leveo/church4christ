@@ -61,7 +61,7 @@ describe('children check-in kiosk', () => {
     const checkin = await post(`/kiosk/${KIOSK_TOKEN}/household/2`, body.toString());
     expect(checkin.status).toBe(200);
     const checkinBody = await checkin.text();
-    expect(checkinBody).toContain('Noah Lin 林诺亚');
+    expect(checkinBody).toContain('Noah Lin');
     expect(checkinBody).toMatch(/[A-HJ-NP-Z2-9]{4}/);
   });
 });

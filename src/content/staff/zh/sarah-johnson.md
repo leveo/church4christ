@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 莎拉·约翰逊
 role: 讲道与教导牧师
 group: pastoral

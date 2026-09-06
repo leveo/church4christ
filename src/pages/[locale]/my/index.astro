@@ -19,8 +19,10 @@
 // assignment_id belonging to someone else is a no-op. Claims re-derive
 // membership/fullness/conflicts inside claimOpenSlot (never forced).
 import { env } from 'cloudflare:workers';
-import Base from '../../../layouts/Base.astro';
-import PortalNav from '../../../components/PortalNav.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import { memberCopy } from '../../../i18n/designMember';
 import StatusBadge from '../../../components/StatusBadge.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -126,89 +128,22 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
 };
 ---
 
-<Base title={t(locale, 'my.title')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'my.welcome', { name: user.displayName })}</h1>
-    <PortalNav locale={locale} active="dashboard" />
-    <div class="mt-3 flex flex-wrap gap-2 text-sm">
+<Member active="dashboard" title={t(locale, 'my.title')} locale={locale} noindex>
+  <div class="member-content">
+    <MemberPageHeader title={t(locale, 'my.welcome', { name: user.displayName })} description={memberCopy(locale).welcomeBody} eyebrow={memberCopy(locale).welcome}>
+      <a href={localePath(locale, '/my/calendar')} class={btn}>{t(locale, 'my.calendar')}</a>
       <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
-      <a href={localePath(locale, '/profile')} class={btnSecondary}>{t(locale, 'profile.title')}</a>
-    </div>
+    </MemberPageHeader>
+    <dl class="member-summary">
+      <div><dt>{t(locale, 'my.pending')}</dt><dd>{pending.length}</dd></div>
+      <div><dt>{t(locale, 'my.upcoming')}</dt><dd>{upcoming.length}</dd></div>
+      <div><dt>{t(locale, 'my.openSlots')}</dt><dd>{openSlots.length}</dd></div>
+    </dl>
 
     {claimed && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
     {flashKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, flashKey)}</p>}
 
-    {
-      hasPortal && (
-        <section class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <a
-            href={localePath(locale, '/my/opportunities')}
-            class="block rounded-lg border border-primary bg-primary-soft p-5 text-on-primary-soft hover:shadow-md"
-          >
-            <p class="text-xs font-bold uppercase tracking-caps">{t(locale, 'portal.dashboard.opportunities')}</p>
-            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.opportunitiesIntro')}</p>
-          </a>
-          {household && (
-            <a
-              href={localePath(locale, '/my/household')}
-              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.household')}</p>
-              <p class="mt-2 font-semibold">{household.name}</p>
-              <p class="mt-1 flex items-center gap-2 text-sm text-ink-muted">
-                {t(locale, 'portal.dashboard.memberCount', { count: household.members.length })}
-                {household.viewerIsOwner && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.owner')}</span>}
-              </p>
-            </a>
-          )}
-
-          <a
-            href={localePath(locale, '/groups')}
-            class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-          >
-            <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.groups')}</p>
-            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.groupCount', { count: myGroups.length })}</p>
-            {myGroups.length > 0 && (
-              <p class="mt-1 text-sm text-ink-muted">{myGroups.slice(0, 3).map((g) => g.name).join(', ')}</p>
-            )}
-          </a>
-
-          {(pendingJoinRequests.length > 0 || pendingPrayerItems.length > 0) && (
-            <a
-              href={localePath(locale, pendingJoinRequests.length > 0 ? '/groups' : '/my/prayer')}
-              class="block rounded-lg border border-warn bg-warn-soft p-5 hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
-              <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
-                {pendingJoinRequests.length > 0 && (
-                  <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingJoinRequests.length })}</p>
-                )}
-                {pendingPrayerItems.length > 0 && (
-                  <p>{t(locale, 'portal.dashboard.pendingPrayerItems', { count: pendingPrayerItems.length })}</p>
-                )}
-              </div>
-            </a>
-          )}
-
-          {hasRegistration && nextRegistrations.length > 0 && (
-            <a
-              href={localePath(locale, '/my/events')}
-              class="block rounded-lg border border-border bg-surface-raised p-5 hover:border-border-strong hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.upcomingEvents')}</p>
-              <ul class="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
-                {nextRegistrations.map((r) => (
-                  <li>
-                    {r.event_title} · {formatDate(r.starts_at.slice(0, 10), locale)}
-                  </li>
-                ))}
-              </ul>
-            </a>
-          )}
-        </section>
-      )
-    }
-
+    <div class="member-dashboard-grid"><div>
     {
       pending.length > 0 && (
         <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
@@ -299,6 +234,79 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
       )
     }
 
+</div><aside class="member-dashboard-aside">
+<h2 class="font-semibold">{memberCopy(locale).community}</h2>
+    {
+      hasPortal && (
+        <section class="mt-4 grid gap-3">
+          <a
+            href={localePath(locale, '/my/opportunities')}
+            class="block rounded-lg border border-primary bg-primary-soft p-4 text-on-primary-soft hover:shadow-md"
+          >
+            <p class="text-xs font-bold uppercase tracking-caps">{t(locale, 'portal.dashboard.opportunities')}</p>
+            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.opportunitiesIntro')}</p>
+          </a>
+          {household && (
+            <a
+              href={localePath(locale, '/my/household')}
+              class="block rounded-lg border border-border bg-surface-raised p-4 hover:border-border-strong hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.household')}</p>
+              <p class="mt-2 font-semibold">{household.name}</p>
+              <p class="mt-1 flex items-center gap-2 text-sm text-ink-muted">
+                {t(locale, 'portal.dashboard.memberCount', { count: household.members.length })}
+                {household.viewerIsOwner && <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'portal.owner')}</span>}
+              </p>
+            </a>
+          )}
+
+          <a
+            href={localePath(locale, '/groups')}
+            class="block rounded-lg border border-border bg-surface-raised p-4 hover:border-border-strong hover:shadow-md"
+          >
+            <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.groups')}</p>
+            <p class="mt-2 font-semibold">{t(locale, 'portal.dashboard.groupCount', { count: myGroups.length })}</p>
+            {myGroups.length > 0 && (
+              <p class="mt-1 text-sm text-ink-muted">{myGroups.slice(0, 3).map((g) => g.name).join(', ')}</p>
+            )}
+          </a>
+
+          {(pendingJoinRequests.length > 0 || pendingPrayerItems.length > 0) && (
+            <a
+              href={localePath(locale, pendingJoinRequests.length > 0 ? '/groups' : '/my/prayer')}
+              class="block rounded-lg border border-warn bg-warn-soft p-4 hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-warn">{t(locale, 'portal.dashboard.pendingApprovals')}</p>
+              <div class="mt-2 flex flex-col gap-0.5 text-sm font-semibold text-warn">
+                {pendingJoinRequests.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingApplications', { count: pendingJoinRequests.length })}</p>
+                )}
+                {pendingPrayerItems.length > 0 && (
+                  <p>{t(locale, 'portal.dashboard.pendingPrayerItems', { count: pendingPrayerItems.length })}</p>
+                )}
+              </div>
+            </a>
+          )}
+
+          {hasRegistration && nextRegistrations.length > 0 && (
+            <a
+              href={localePath(locale, '/my/events')}
+              class="block rounded-lg border border-border bg-surface-raised p-4 hover:border-border-strong hover:shadow-md"
+            >
+              <p class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{t(locale, 'portal.dashboard.upcomingEvents')}</p>
+              <ul class="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
+                {nextRegistrations.map((r) => (
+                  <li>
+                    {r.event_title} · {formatDate(r.starts_at.slice(0, 10), locale)}
+                  </li>
+                ))}
+              </ul>
+            </a>
+          )}
+        </section>
+      )
+    }
+
     {
       showApplications && (
         <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
@@ -317,5 +325,16 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
         </section>
       )
     }
+      <div class="member-community-photo"><DesignImage image="groups" class="h-full w-full object-cover" /></div>
+    </aside></div>
   </div>
-</Base>
+</Member>
+<style>
+  .member-summary { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--color-border); padding: 1.25rem 0; gap: 1rem; }
+  .member-summary dt { color: var(--color-ink-muted); font-size: .75rem; }
+  .member-summary dd { margin-top: .25rem; font-size: 1.8rem; font-weight: 600; }
+  .member-dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(240px, 1fr); gap: 1.5rem; align-items: start; }
+  .member-dashboard-aside { margin-top: 2rem; }
+  .member-community-photo { height: 200px; margin-top: 1.5rem; overflow: hidden; border-radius: var(--radius-lg); }
+  @media (max-width: 767px) { .member-dashboard-grid { grid-template-columns: 1fr; } .member-dashboard-aside { margin-top: .5rem; } }
+</style>

@@ -12,6 +12,52 @@ const flags = (port: number) => [
 ];
 
 describe('clean-room D1 setup', () => {
+  it('starts without demo records and preserves real content on a no-demo rerun', async () => {
+    const workspace = await createCleanWorkspace();
+    const port = await allocatePort();
+    const cleanFlags = [...flags(port).filter((flag) => flag !== '--demo-data'), '--no-demo-data'];
+    const env = { WRANGLER_PERSIST_TO: '.noncanonical/wrangler-state', ASTRO_DEV_BACKGROUND: '0' };
+    const first = JSON.parse((await workspace.execNode(cleanFlags, env, 300_000)).stdout);
+    expect(first.apply.actions).not.toContain('seed');
+    expect(first.apply.actions).not.toContain('seed-media');
+    expect(first).toMatchObject({ backend: 'd1', moduleRows: 21 });
+    expect(first.doctor.status).toBe('ready-with-limitations');
+    const manifest = JSON.parse(await readFile(join(workspace.root, 'church.config.json'), 'utf8'));
+    expect(manifest.demoData).toBe(false);
+
+    const query = async (command: string) => JSON.parse((await execWorkspace(workspace.root, join(workspace.root, 'node_modules/.bin/wrangler'), [
+      'd1', 'execute', 'DB', '--local', '--json', '--persist-to', join(workspace.root, env.WRANGLER_PERSIST_TO),
+      '--config', join(workspace.root, 'wrangler.jsonc'), '--command', command,
+    ])).stdout);
+    const tables = ['sermons', 'events', 'ministries', 'groups', 'households', 'testimonies', 'bulletins', 'plans',
+      'prayer_requests', 'checkins', 'learning_courses', 'learning_provider_connections', 'newcomer_submissions', 'media'];
+    const results = await query([
+      ...tables.map((table) => `SELECT COUNT(*) AS count FROM ${table}`),
+      'SELECT email, role, super_admin FROM people',
+      "SELECT key, value FROM settings WHERE key IN ('site.demo_content','site.name.en') ORDER BY key",
+      "SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'",
+      'SELECT COUNT(*) AS count FROM newcomer_statuses',
+      'SELECT COUNT(*) AS count FROM email_templates',
+    ].join(';'));
+    tables.forEach((table, index) => expect(results[index].results[0].count, table).toBe(0));
+    expect(results[tables.length].results).toEqual([{ email: 'owner@clean.invalid', role: 'admin', super_admin: 1 }]);
+    expect(results[tables.length + 1].results).toEqual([
+      { key: 'site.demo_content', value: 'false' }, { key: 'site.name.en', value: 'Clean Church' },
+    ]);
+    expect(results[tables.length + 2].results[0].count).toBe(21);
+    expect(results[tables.length + 3].results[0].count).toBeGreaterThan(0);
+    expect(results[tables.length + 4].results[0].count).toBeGreaterThan(0);
+
+    await query("UPDATE settings SET value='Our Updated Church' WHERE key='site.name.en'; INSERT INTO events (id, active) VALUES (500, 1)");
+    const second = JSON.parse((await workspace.execNode(cleanFlags, env, 300_000)).stdout);
+    expect(second.apply.results.every(({ status }: { status: string }) => ['already-complete', 'verified'].includes(status))).toBe(true);
+    const retained = await query("SELECT id FROM events; SELECT value FROM settings WHERE key='site.name.en'; SELECT value FROM settings WHERE key='site.demo_content'; SELECT COUNT(*) AS count FROM people");
+    expect(retained[0].results).toEqual([{ id: 500 }]);
+    expect(retained[1].results[0].value).toBe('Our Updated Church');
+    expect(retained[2].results[0].value).toBe('false');
+    expect(retained[3].results[0].count).toBe(1);
+  }, 600_000);
+
   it('creates, verifies, serves, and safely reruns the Website installation', async () => {
     const workspace = await createCleanWorkspace();
     const port = await allocatePort();
@@ -33,6 +79,7 @@ describe('clean-room D1 setup', () => {
     expect(first.moduleRows).toBe(21);
     expect(first.admin.status).toMatch(/created|already-admin/);
     expect(first.doctor.status).toBe('ready-with-limitations');
+    expect(first.apply.actions).toEqual(expect.arrayContaining(['seed', 'seed-media']));
     const doctorRun = await workspace.execNode(['--doctor', '--json'], env, 300_000);
     expect(JSON.parse(doctorRun.stdout).status).toBe('ready-with-limitations');
 

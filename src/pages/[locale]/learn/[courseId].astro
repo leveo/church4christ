@@ -1,5 +1,7 @@
 ---
-import Base from '../../../layouts/Base.astro';
+import Member from '../../../layouts/Member.astro';
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import { memberCopy } from '../../../i18n/designMember';
 import YouTubeEmbed from '../../../components/YouTubeEmbed.astro';
 import { card } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
@@ -50,6 +52,13 @@ try {
 }
 if (!loadFailed && !course) return notFound();
 
+// Materials read from earliest publication onward; time-sensitive work keeps
+// the provider snapshot's due-date order. Neither list implies lesson completion.
+const activities = [
+  ...(course?.activities.filter(activity => activity.kind === 'material') ?? []).sort((a, b) =>
+    (a.publishedAt ?? '9999').localeCompare(b.publishedAt ?? '9999') || a.activityId - b.activityId),
+  ...(course?.activities.filter(activity => activity.kind !== 'material') ?? []),
+];
 const providerName = course
   ? t(locale, course.provider === 'canvas' ? 'learning.provider.canvas' : 'learning.provider.google')
   : '';
@@ -61,13 +70,13 @@ const submissionName = (status: string | undefined) => status
 const openResourceLabel = (title: string) => t(locale, 'learning.openResource').replace('{title}', () => title);
 ---
 
-<Base
+<Member active="learning"
   title={course?.displayName ?? t(locale, 'learning.loadErrorTitle')}
   description={course ? t(locale, 'learning.authoritativeNotice', { provider: providerName }) : t(locale, 'learning.loadErrorBody')}
   locale={locale}
   noindex
 >
-  <div class="container-content max-w-content py-10">
+  <div>
     <nav aria-label={t(locale, 'learning.title')}>
       <a href={localePath(locale, '/learn')} class="rounded-sm text-sm font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
         {t(locale, 'learning.courseBack')}
@@ -81,7 +90,9 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
       </section>
     ) : (
       <>
-        <header class="mt-6">
+        <header class="course-header mt-6">
+          <div class="course-cover"><DesignImage image="learning" class="h-full w-full object-cover" eager /></div>
+          <div class="course-header-copy">
           <p class="text-sm font-semibold text-primary">{course.programName}</p>
           <div class="mt-1 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -99,10 +110,10 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
             >{t(locale, 'learning.openCourse', { provider: providerName })}</a>
           </div>
           <p class="mt-4 max-w-3xl text-sm text-ink-muted">{t(locale, 'learning.authoritativeNotice', { provider: providerName })}</p>
-        </header>
+        </div></header>
 
         {course.isStale ? (
-          <section class="mt-6 rounded-lg border border-warning bg-warning-soft p-4 text-warning" role="status">
+          <section class="mt-6 rounded-lg border border-warn bg-warn-soft p-4 text-warn" role="status">
             <h2 class="font-semibold">{t(locale, 'learning.staleTitle')}</h2>
             <p class="mt-1 text-sm">
               {course.lastSyncedAt
@@ -114,15 +125,24 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
           <p class="mt-5 text-xs text-ink-subtle">{t(locale, 'learning.lastSynced', { date: formatLearningDateTime(course.lastSyncedAt, locale) })}</p>
         )}
 
-        <section class="mt-10" aria-labelledby="learning-activities-title">
+        <div class="learning-player">
+          <aside class="learning-contents">
+            <h2 class="text-sm font-semibold">{memberCopy(locale).contents}</h2>
+            <nav aria-label={memberCopy(locale).contents}>
+              <ol>{activities.map((activity, index) => (
+                <li><a href={`#activity-${activity.activityId}`}><span class="course-step">{String(index + 1).padStart(2, '0')}</span><span><small>{kindName(activity.kind)}</small>{activity.title}</span></a></li>
+              ))}</ol>
+            </nav>
+          </aside>
+        <section class="min-w-0" aria-labelledby="learning-activities-title">
           <h2 id="learning-activities-title" class="font-display text-heading-sm font-bold">{t(locale, 'learning.activitiesTitle')}</h2>
           {course.activities.length === 0 ? (
             <p class="mt-3 text-ink-muted">{t(locale, 'learning.activitiesEmpty')}</p>
           ) : (
             <div class="mt-5 grid gap-6">
-              {course.activities.map((activity) => (
-                <article id={`activity-${activity.activityId}`} class={card} aria-labelledby={`activity-title-${activity.activityId}`}>
-                  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              {activities.map((activity) => (
+                <article id={`activity-${activity.activityId}`} class={`learning-activity ${card}`} aria-labelledby={`activity-title-${activity.activityId}`}>
+                  <div class="flex flex-col gap-4">
                     <div>
                       <p class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{kindName(activity.kind)}</p>
                       <h3 id={`activity-title-${activity.activityId}`} class="mt-1 font-display text-xl font-bold">{activity.title}</h3>
@@ -134,7 +154,7 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
                           {activity.dueAt
                             ? <span class="text-ink-muted">{t(locale, 'learning.due', { date: formatLearningDateTime(activity.dueAt, locale) })}</span>
                             : <span class="text-ink-muted">{t(locale, 'learning.noDueDate')}</span>}
-                          {activity.submission?.late === 1 && <span class="text-warning">{t(locale, 'learning.submission.late')}</span>}
+                          {activity.submission?.late === 1 && <span class="text-warn">{t(locale, 'learning.submission.late')}</span>}
                         </div>
                       )}
                       {activity.submission && (
@@ -159,7 +179,7 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
                       <div class="mt-4 grid gap-4 sm:grid-cols-2">
                         {activity.resources.map((resource) => resource.kind === 'youtube' && resource.youtubeVideoId ? (
                           <div class="sm:col-span-2">
-                            <YouTubeEmbed videoId={resource.youtubeVideoId} title={resource.title} locale={locale} autoplay={false} loadThumbnail={false} />
+                            <YouTubeEmbed videoId={resource.youtubeVideoId} title={resource.title} locale={locale} autoplay={false} loadThumbnail={false} posterImage="learning" />
                             <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.youtubeDisclaimer')}</p>
                           </div>
                         ) : (
@@ -185,8 +205,24 @@ const openResourceLabel = (title: string) => t(locale, 'learning.openResource').
               ))}
             </div>
           )}
-        </section>
+        </section></div>
       </>
     )}
   </div>
-</Base>
+</Member>
+
+<style>
+  .course-header { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface-raised); }
+  .course-cover { height: 180px; }
+  .course-header-copy { padding: 1.5rem; }
+  .learning-player { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 1.5rem; margin-top: 2rem; align-items: start; }
+  .learning-contents { position: sticky; top: 6rem; border: 1px solid var(--color-border); background: var(--color-surface-raised); border-radius: var(--radius-lg); padding: 1rem; }
+  .learning-contents ol { margin-top: .8rem; }
+  .learning-contents a { display: flex; gap: .7rem; padding: .85rem .2rem; border-top: 1px solid var(--color-border); font-size: .8rem; line-height: 1.6; }
+  .learning-contents a:hover { color: var(--color-primary); }
+  .learning-contents small { display: block; font-size: .64rem; color: var(--color-ink-muted); margin-bottom: .2rem; }
+  .course-step { color: var(--color-primary); font-variant-numeric: tabular-nums; padding-top: .1rem; }
+  .learning-activity { scroll-margin-top: 6rem; }
+  .learning-activity:target { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+  @media (max-width: 767px) { .learning-player { grid-template-columns: 1fr; } .learning-contents { position: static; } .course-cover { height: 140px; } }
+</style>

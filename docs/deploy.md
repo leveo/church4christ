@@ -43,6 +43,14 @@ next command, normally `npm run deploy`. Verify readiness at any time with:
 npm run doctor
 ```
 
+Choose **No demo content** for a church's initial deployment. The matching scripted flag
+is `--no-demo-data`, also the noninteractive default. It retains the bundled design and
+decorative images, schema, operational defaults, selected modules, church settings, and
+first administrator. **Include demo content** (`--demo-data`) adds fictional examples for
+a disposable evaluation installation. Neither choice resets an existing installation;
+use a fresh workspace/database to evaluate the other mode and follow the upgrade runbook
+for an established church.
+
 Doctor reports configuration and resource readiness that the installer can inspect. It
 does not prove production email delivery, successful sign-in, route behavior, scheduled-job
 execution, or backup recovery; verify those outcomes with the go-live checklist below.
@@ -413,9 +421,10 @@ npm run db:migrate:remote
 This creates every table. It does **not** load the demo content — a real deployment starts
 empty, and you add your church's content through the admin area.
 
-The local `npm run db:seed-media:local` command is only for the developer demo. Production
-media starts empty too; admins can upload the homepage hero, event images, ministry covers,
-and profile pictures through the admin area or profile pages after the site is live.
+The local `npm run db:seed-media:local` command is only for the developer demo. Uploaded
+media starts empty too; the bundled decorative images ship with the application. Admins
+can upload the homepage hero, event images, ministry covers, and profile pictures through
+the admin area or profile pages after the site is live.
 
 ### D1 capacity for People CSV imports
 

@@ -52,7 +52,7 @@ INSERT INTO gifts (id, person_id, donor_name, donor_email, fund_id, amount_cents
   (3, 9, NULL, NULL, 2, 6000, 'usd', 'card', 'succeeded', 'cs_test_demo003', 'pi_test_demo003', NULL, NULL, datetime('now','-47 days')),
   (4, 3, NULL, NULL, 1, 10000, 'usd', 'card', 'succeeded', 'cs_test_demo004', 'pi_test_demo004', NULL, NULL, datetime('now','-9 days')),
   (5, 10, NULL, NULL, 2, 4500, 'usd', 'card', 'succeeded', 'cs_test_demo005', 'pi_test_demo005', NULL, NULL, datetime('now','-75 days')),
-  (6, NULL, 'Hannah Guest 来宾', 'guest.hannah@example.com', 1, 5000, 'usd', 'card', 'succeeded', 'cs_test_demo006', 'pi_test_demo006', NULL, NULL, datetime('now','-5 days')),
+  (6, NULL, 'Hannah Guest', 'guest.hannah@example.com', 1, 5000, 'usd', 'card', 'succeeded', 'cs_test_demo006', 'pi_test_demo006', NULL, NULL, datetime('now','-5 days')),
   (7, 2, NULL, NULL, 1, 5000, 'usd', 'card', 'succeeded', NULL, 'pi_test_demo007', 'in_test_demo001', 'sub_test_demo001', datetime('now','-30 days'));
 
 -- Five manually recorded gifts (checks and cash), each entered by the admin

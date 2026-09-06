@@ -107,7 +107,7 @@ describe('runtime setup hardening', () => {
       people_count: 10,
       admin_email: 'admin@example.com', admin_display_name: 'Alex Admin', admin_role: 'admin',
       ministry_slug: 'av-tech', sermon_count: 5,
-      learning_course_name: 'Genesis 1: Creation / 创世记第一章：创造',
+      learning_course_name: 'Genesis 1: Creation',
       learning_enrollment_count: 2, learning_credential_count: 0,
     };
     const database = (row: Record<string, unknown>) => {

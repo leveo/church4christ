@@ -1,26 +1,18 @@
 ---
-title: About Church4Christ
-description: Our story, our mission, and the values that shape how we follow Jesus together in the city.
+title: About Our Church
+description: A community shaped by faith, prayer, and care for one another.
 ---
 
-Church4Christ began in 2004 as a handful of families gathered around a kitchen table, praying for a church where people from different languages and backgrounds could worship as one family. Two decades later, we are still that family — larger now, meeting in two languages, but held together by the same conviction: that Jesus makes strangers into brothers and sisters.
-
-## Our story
-
-Those early years were humble. We borrowed a school cafeteria, set up chairs on Sunday morning, and stacked them again before we left. What we lacked in polish we made up for in love. As the city grew, so did we, welcoming university students, young families, and grandparents alike. Along the way we planted deep roots: a commitment to the Bible, to prayer, and to caring for one another in the ordinary rhythms of life.
+Church is a place to seek God, ask honest questions, and grow alongside others. Whether you are exploring faith or have followed Jesus for many years, you are welcome here.
 
 ## Our mission
 
-We exist to help people find and follow Jesus. That means we want the doors open wide for those exploring faith for the first time, and we want to walk with believers all the way into maturity. We gather to worship, we scatter to serve, and we keep pointing one another back to Christ.
+We seek to help people find and follow Jesus. We gather to worship, listen to Scripture, and pray, then carry that faith into our everyday lives. Together, we learn to love our neighbors and serve with generosity.
 
-## What we value
+## Life together
 
-**Scripture over opinion.** We believe the Bible is God's word, and we let it shape us rather than reshaping it to suit ourselves.
+Faith grows through ordinary acts of care: sharing a meal, listening well, praying for a friend, and making room for someone new. We hope to be a community where people can belong, contribute, and take their next step in faith.
 
-**Family over strangers.** We are not a crowd that happens to share a room; we are a household. We know each other's names, carry each other's burdens, and make space at the table.
+## Our invitation
 
-**Both languages, one church.** Worshiping in English and Chinese is not a division we tolerate but a picture we treasure — a small glimpse of every tribe and tongue gathered before God.
-
-**Grace over performance.** No one here has it all together, and no one is expected to pretend. We come as we are, and we grow by grace.
-
-If any of this stirs something in you, we'd love for you to come and see for yourself.
+You do not need to have every answer before you visit. Come with your questions and your story. Explore our beliefs, find out how to join a gathering, or get in touch to learn more.

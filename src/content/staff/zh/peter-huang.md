@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 黄彼得
 role: 总务执事
 group: staff

@@ -7,6 +7,9 @@ import { t } from '../lib/i18n';
 import { getSiteIdentity, getLogoImageKey } from '../lib/settings';
 import { mediaPath } from '../lib/mediaRef';
 import { groupNavLinks, resolveDefaultNav, resolveNav } from '../lib/nav';
+import Icon from './ui/Icon.astro';
+import DesignImage from './ui/DesignImage.astro';
+import type { DesignImage as DesignImageKey } from '../lib/designAssets';
 import LocaleSwitch from './LocaleSwitch.astro';
 
 const locale = Astro.locals.locale;
@@ -32,12 +35,15 @@ try {
   /* keep the hardcoded site name, no logo, and the default nav when settings are unavailable */
 }
 const groups = groupNavLinks(links, locale);
+const groupImages: Record<string, DesignImageKey> = { welcome: 'welcome', explore: 'sermons', connect: 'groups', participate: 'worship', more: 'learning' };
+const memberHome = modules.has('portal') || modules.has('serve');
+const memberPath = modules.has('serve') ? '/my' : '/my/opportunities';
 ---
 
 <header class="sticky top-0 z-40 bg-header-bg text-header-ink border-b border-border">
-  <div class="container-wide flex items-center gap-4 h-16">
+  <div class="container-wide relative flex items-center gap-4 h-20">
     <a href={home} class="font-display font-bold text-lg whitespace-nowrap shrink-0 flex items-center gap-2">
-      {logoSrc && <img src={logoSrc} alt="" class="h-8 w-auto" />}
+      {logoSrc ? <img src={logoSrc} alt="" class="h-8 w-auto" /> : <Icon name="leaf" size={27} class="text-primary"/>}
       <span>{siteName}</span>
     </a>
 
@@ -47,17 +53,17 @@ const groups = groupNavLinks(links, locale);
     >
       {
         groups.map((group) => (
-          <details class="group relative">
+          <details class="group site-nav-disclosure" name="site-navigation">
             <summary class="flex cursor-pointer list-none items-center gap-1 rounded-md px-3 py-2 font-semibold hover:bg-surface-raised [&::-webkit-details-marker]:hidden">
               {group.label}
               <span aria-hidden="true" class="text-xs text-ink-muted transition-transform group-open:rotate-180">⌄</span>
             </summary>
-            <div class="absolute left-1/2 top-[calc(100%+0.5rem)] z-50 min-w-56 -translate-x-1/2 rounded-xl border border-border bg-surface p-2 text-header-ink shadow-xl">
-              {group.links.map((link) => (
-                <a href={link.href} class="block rounded-lg px-3 py-2.5 font-medium hover:bg-surface-raised">
-                  {link.label}
-                </a>
-              ))}
+            <div class="site-mega-menu">
+              <div class="site-mega-links">
+                <p class="section-eyebrow">{group.label}</p>
+                {group.links.map(link => <a href={link.href}>{link.label}<Icon name="arrow" size={16}/></a>)}
+              </div>
+              <div class="site-mega-feature"><DesignImage image={groupImages[group.key]} class="h-40 w-full object-cover rounded-md" /><p>{t(locale, `design.menu.${group.key}`)}</p></div>
             </div>
           </details>
         ))
@@ -80,10 +86,10 @@ const groups = groupNavLinks(links, locale);
       }
       <LocaleSwitch />
       <a
-        href={give}
-        class="px-4 py-2 rounded-full bg-accent text-on-accent font-semibold hover:bg-accent-hover"
+        href={memberHome ? localePath(locale, memberPath) : give}
+        class="px-4 py-2 rounded-md bg-primary text-on-primary font-semibold hover:bg-primary-hover"
       >
-        {t(locale, 'nav.give')}
+        {t(locale, memberHome ? 'design.menu.myChurch' : 'nav.give')}
       </a>
     </div>
 
@@ -99,7 +105,7 @@ const groups = groupNavLinks(links, locale);
       <span class="block w-6 h-0.5 bg-current"></span>
     </label>
     <nav
-      class="hidden peer-checked:block absolute top-16 inset-x-0 bg-header-bg text-header-ink border-b border-border shadow-lg lg:hidden max-h-[80vh] overflow-y-auto"
+      class="hidden peer-checked:block absolute top-20 inset-x-0 bg-header-bg text-header-ink border-b border-border shadow-lg lg:hidden max-h-[80vh] overflow-y-auto"
       aria-label={t(locale, 'common.menu')}
     >
       <div class="container-wide py-4 flex flex-col gap-3">

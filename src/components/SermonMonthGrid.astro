@@ -3,7 +3,7 @@
 // YouTubeEmbed facade with title, speaker/scripture, and formatted date. Sermons
 // arrive already ordered newest-first, so months and cards keep that order.
 import YouTubeEmbed from './YouTubeEmbed.astro';
-import ImagePlaceholder from './ImagePlaceholder.astro';
+import DesignImage from './ui/DesignImage.astro';
 import { formatDate, formatMonth } from '../lib/dates';
 import type { Locale } from '../lib/locales';
 import type { SermonRow } from '../lib/publicDb';
@@ -24,24 +24,39 @@ for (const s of sermons) {
 
 {
   [...byMonth.entries()].map(([ym, list]) => (
-    <section class="mb-14">
-      <h3 class="mb-6 border-l-4 border-accent pl-3 font-display text-heading-sm font-bold">{formatMonth(ym, locale)}</h3>
-      <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+    <section class="sermon-month">
+      <h3 class="month-heading">{formatMonth(ym, locale)}</h3>
+      <div class="message-grid">
         {list.map((s) => (
-          <article>
+          <article class="message-card">
             {s.youtube_id ? (
-              <YouTubeEmbed videoId={s.youtube_id} title={s.title} locale={locale} />
+              <YouTubeEmbed posterImage="sermons" videoId={s.youtube_id} title={s.title} locale={locale} />
             ) : (
-              <ImagePlaceholder seed={s.title} class="aspect-video w-full rounded-lg" />
+              <DesignImage image="sermons" class="aspect-video w-full object-cover" />
             )}
-            <h4 class="mt-3 font-display font-semibold">{s.title}</h4>
+            <div class="message-card-copy">
+            {s.series && <p class="message-card-series">{s.series}</p>}
+            <h4 class="font-display font-semibold">{s.title}</h4>
             {[s.speaker, s.scripture].filter(Boolean).length > 0 && (
               <p class="mt-1 text-sm text-ink-muted">{[s.speaker, s.scripture].filter(Boolean).join(' · ')}</p>
             )}
             <p class="text-sm text-ink-subtle">{[formatDate(s.sermon_date, locale), s.serviceTypeName].filter(Boolean).join(' · ')}</p>
+            </div>
           </article>
         ))}
       </div>
     </section>
   ))
 }
+<style>
+  .sermon-month { margin-bottom: 2.75rem; }
+  .month-heading { padding-bottom: 1rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--color-border); font-family: var(--font-display); font-size: 1.3rem; }
+  .message-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; }
+  .message-card { min-width: 0; overflow: hidden; background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .message-card :global(.yt-facade) { border-radius: 0; }
+  .message-card-copy { padding: 1.25rem; display: grid; gap: .65rem; }
+  .message-card h4 { font-size: 1.25rem; line-height: 1.35; overflow-wrap: anywhere; }
+  .message-card-series { color: var(--color-primary); font-size: .75rem; }
+  @media (max-width: 1000px) { .message-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 600px) { .message-grid { grid-template-columns: 1fr; } }
+</style>

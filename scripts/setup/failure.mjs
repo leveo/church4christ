@@ -29,7 +29,7 @@ export function buildSetupRerunCommand(plan, controls = {}) {
     args.push('--app-origin', plan.site.appOrigin, '--email-from', plan.site.emailFrom);
   }
   args.push('--backend', plan.backend);
-  if (plan.demoData === true) args.push('--demo-data');
+  args.push(plan.demoData === true ? '--demo-data' : '--no-demo-data');
   if (controls.forceConfig === true) args.push('--force-config');
   if (controls.promoteExistingAdmin === true) args.push('--promote-existing-admin');
   if (controls.allowHyperdriveSecretInArgv === true) args.push('--allow-hyperdrive-secret-in-argv');
