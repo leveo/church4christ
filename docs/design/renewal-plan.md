@@ -35,10 +35,10 @@ Retain selectable Harvest/Midnight themes; renew default Sanctuary with light/da
   calendar, serving, giving history, scoped prayer, course catalog/player, provider admin.
 - [x] 8. Operations: offline giving ledger/funds/reconciliation, explainable activity
   score, campuses, resource grants, modules/settings/navigation, email and launch readiness.
-- [ ] 9. Release validation: all 21 modules explicitly checked against this inventory;
+- [x] 9. Release validation: all 21 modules explicitly checked against this inventory;
   English/Chinese desktop/mobile screenshots, keyboard checks, fresh setup/media verification,
   Node/Workers/Postgres tests as appropriate, Astro check, token lint, production build,
-  smoke and E2E. Review diff and publish/merge verified batches to main as appropriate.
+  smoke and E2E. Delivery and remote CI are tracked in [PR #37](https://github.com/leveo/church4christ/pull/37).
 
 ## Required boundaries
 
@@ -116,4 +116,6 @@ All 21 principal module bodies now have dedicated layouts; see [module-coverage.
 - README text now explains the 21 distinct module workspaces and both demo choices. All 29 actual interface screenshots were refreshed from a dedicated local seeded PostgreSQL/R2 environment and visually inspected; the four separate diagrams were reviewed and retained. The capture preset verifies exact pages/identities and decoded local media, uses isolated short-lived sessions, and submits no forms.
 - The final screenshot review found and fixed a video-thumbnail loading gap: the bundled sermon cover now renders immediately under the optional provider thumbnail. No external image service is required for the initial design.
 - Final rebuilt-worker E2E: D1 363/363 across 30 suites (29.39s); PostgreSQL 150/150 across 14 suites (43.68s), including 103 rendered design surfaces. The subsequent production build passed and confirmed development screenshot sessions and the test email sink are excluded.
-- PR/CI/main integration is the remaining release step; append its result after completion.
+- Subsequent complete PostgreSQL run under the documented UTC session configuration: **630/630 across 57 suites** (83.08s).
+- The real production smoke script was observed failing on its old homepage title assertion. Updated that assertion to the two lines of the new title; the complete smoke run then passed, including routing, protected redirects, anti-enumeration, public pages, localization and response headers.
+- Remote CI and the merge record are tracked in [PR #37](https://github.com/leveo/church4christ/pull/37).
