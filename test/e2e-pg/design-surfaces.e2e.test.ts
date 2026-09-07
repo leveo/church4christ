@@ -24,6 +24,7 @@ const fixture = {
   bulletinId: 0, sermonId: 0, prayerSheetId: 0,
   registrationId: 0, registrationTitle: 'Design smoke community supper',
   householdId: 0, householdName: '', kioskToken: '',
+  kioskEventId: 0,
 };
 
 beforeAll(async () => {
@@ -108,6 +109,13 @@ beforeAll(async () => {
       householdId: household.id, householdName: household.name, kioskToken: kiosk.value,
       bulletinId: bulletin.id, sermonId: sermon.id, prayerSheetId: prayerSheet.id,
     });
+
+    // The demo check-in event only opens on Sundays. Give this render suite an
+    // every-day event so kiosk search and the child picker work on any CI date.
+    const [checkinEvent] = await sql.unsafe<{ id: number }[]>(
+      "INSERT INTO checkin_events (name,weekday,active) VALUES ('Design smoke daily check-in',NULL,1) RETURNING id",
+    );
+    fixture.kioskEventId = checkinEvent.id;
 
     // dev-seed intentionally has no registration events. Create a real free,
     // open event and question so public/admin detail pages exercise their query
@@ -261,7 +269,10 @@ describe('PostgreSQL design surfaces: public and serving', () => {
 
   it('renders kiosk search and the seeded household child picker', async () => {
     expect(await rendered(`/kiosk/${fixture.kioskToken}`)).toContain('<form');
-    expect(await rendered(`/kiosk/${fixture.kioskToken}/household/${fixture.householdId}`)).toContain(fixture.householdName);
+    const picker = await rendered(`/kiosk/${fixture.kioskToken}/household/${fixture.householdId}`);
+    expect(picker).toContain(fixture.householdName);
+    expect(picker).toContain('name="member"');
+    expect(picker).toContain(`name="event" value="${fixture.kioskEventId}"`);
   });
 });
 
