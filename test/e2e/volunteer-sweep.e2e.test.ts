@@ -373,7 +373,7 @@ describe('gifts → interests → potential volunteers', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('Potential volunteers');
-    expect(html).toContain('Mark Liu 刘马可');
+    expect(html).toContain('Mark Liu');
     expect(html).toContain('Gifts quiz'); // via_gift badge
     expect(html).toContain('Interested'); // via_interest badge
   });
@@ -381,6 +381,27 @@ describe('gifts → interests → potential volunteers', () => {
 
 // ── Checklist 8: role matrix on the volunteer surfaces ──
 describe('volunteer-surface role matrix', () => {
+  it('keeps Chinese-service plans accessible with English display subtitles and unchanged source content', async () => {
+    const cookie = await sessionCookie(5, 'mark.liu@example.com');
+    const index = await get('/en/serve/plans', { cookie });
+    expect(index.status).toBe(200);
+    const indexBody = await index.text();
+    expect(indexBody).toContain('/en/serve/plans/9');
+    expect(indexBody).not.toContain('我要向高山举目');
+    const english = await get('/en/serve/plans/9', { cookie });
+    expect(english.status).toBe(200);
+    const englishBody = await english.text();
+    expect(englishBody).not.toContain('我要向高山举目');
+    expect(englishBody).not.toContain('上行之诗');
+    const chinese = await get('/zh/serve/plans/9', { cookie });
+    expect(chinese.status).toBe(200);
+    const chineseBody = await chinese.text();
+    expect(chineseBody).toContain('我要向高山举目');
+    expect(chineseBody).toContain('上行之诗');
+    expect(await env.DB.prepare('SELECT title, series FROM plans WHERE id = 9').first())
+      .toEqual({ title: '我要向高山举目', series: '上行之诗' });
+  });
+
   it('/serve/plans: anon→303 signin, no-team person→403, team member→200', async () => {
     const anon = await get('/en/serve/plans');
     expect(anon.status).toBe(303);

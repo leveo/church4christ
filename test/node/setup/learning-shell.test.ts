@@ -158,7 +158,7 @@ describe('Learning capability shell', () => {
     expect(adminLayout).toContain("href: '/admin/learning'");
     expect(adminLayout).toContain("module: 'learning', area: 'learning'");
     expect(dashboard).toContain("modules.has('learning')");
-    expect(dashboard).toContain('href="/admin/learning"');
+    expect(dashboard).toContain("href: '/admin/learning'");
     expect(personEditor).toContain("learning: 'admin.nav.learning'");
 
     const keys = [

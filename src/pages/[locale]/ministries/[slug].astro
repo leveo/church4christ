@@ -3,6 +3,7 @@
 // teams (leaders, member count, position chips, open-slots badge), the named
 // lead's card, and a CTA panel (apply to serve + gifts quiz). Unknown/inactive
 // slugs 404. Reads run inside the getMinistryBySlug call; a null result 404s.
+import DesignImage from '../../../components/ui/DesignImage.astro';
 import Base from '../../../layouts/Base.astro';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -33,8 +34,9 @@ const coverSrc = mediaPath(ministry.coverKey);
 ---
 
 <Base title={ministry.name} description={ministry.intro} locale={locale}>
-  <div class="bg-primary-soft text-on-primary-soft">
-    <div class="container-content py-12">
+  <div class="ministry-detail-intro">
+    <div class="container-content py-12 ministry-hero">
+      <div>
       <a href={localePath(locale, '/ministries')} class="text-sm font-semibold hover:underline">
         {t(locale, 'ministries.back')}
       </a>
@@ -50,7 +52,8 @@ const coverSrc = mediaPath(ministry.coverKey);
           </p>
         )
       }
-      {coverSrc && <img src={coverSrc} alt="" class="mt-8 aspect-[3/1] w-full rounded-lg border border-border object-cover" loading="lazy" />}
+      </div>
+      <DesignImage image={slug.includes('child') ? 'children' : 'worship'} src={coverSrc} eager class="ministry-photo" />
     </div>
   </div>
 
@@ -128,3 +131,11 @@ const coverSrc = mediaPath(ministry.coverKey);
     </section>
   </div>
 </Base>
+
+<style>
+.ministry-detail-intro { border-bottom:1px solid var(--color-border); }
+.ministry-hero { display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.85fr);gap:3rem;align-items:center; }
+.ministry-hero h1 { color:var(--color-primary);font-size:clamp(2.5rem,5vw,4rem);line-height:1.1;letter-spacing:-.04em; }
+.ministry-hero :global(.ministry-photo) { width:100%;height:300px;object-fit:cover;border-radius:var(--radius-lg); }
+@media(max-width:700px) { .ministry-hero { grid-template-columns:1fr;gap:1.5rem; } .ministry-hero :global(.ministry-photo) { height:180px; } }
+</style>

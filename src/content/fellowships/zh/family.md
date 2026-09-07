@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 家庭团契
 meetingTime: 每周六 · 下午5:00
 location: 交谊厅

@@ -2,8 +2,8 @@
 // single active ministry with its serving teams (localized names, member counts,
 // leader names, position chips, and open-signup counts on future plans);
 // `listPublishedTestimonies` returns approved testimonies for the serve strip,
-// ordering the requested locale first and other-locale rows after (so the page
-// can badge them). Localized text flows through the shared i18nJoin builder so a
+// selecting English submissions for en and both languages, Chinese first, for zh.
+// Localized text flows through the shared i18nJoin builder so a
 // missing zh row falls back to English. Every query filters soft-deletes.
 //
 // The admin-console reads/writes (ministry summaries table, active toggle, and
@@ -165,9 +165,9 @@ export interface TestimonyCardRow {
 }
 
 /**
- * Approved (status='A'), non-deleted testimonies for the serve strip. Rows in the
- * requested locale come first, then other-locale rows; within each group the
- * newest published_at wins. Capped at `limit`.
+ * Approved (status='A'), non-deleted testimonies for the serve strip. English
+ * pages include English submissions only; Chinese pages include both languages,
+ * with Chinese first. Within each group the newest published_at wins.
  */
 export async function listPublishedTestimonies(
   db: AppDb,
@@ -178,7 +178,7 @@ export async function listPublishedTestimonies(
     .prepare(
       `SELECT author_name AS "authorName", title, body, locale, published_at AS "publishedAt"
        FROM testimonies
-       WHERE status = 'A' AND deleted_at IS NULL
+       WHERE status = 'A' AND deleted_at IS NULL AND (?1 = 'zh' OR locale = 'en')
        ORDER BY (CASE WHEN locale = ?1 THEN 0 ELSE 1 END), published_at DESC, id DESC
        LIMIT ?2`,
     )

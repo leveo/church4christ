@@ -138,8 +138,12 @@ describe('aggregate Attendance records and reports', () => {
 
   it('derives distinct children across real linked rooms and preserves null versus configured zero', async () => {
     const attendance = await sessionCookie(60, 'ada.aggregate@example.com');
+    // Link edits take effect today. Use file-local rooms rather than seeded
+    // event 1: its UTC-relative Sunday checkins can coincide with Chicago's
+    // today late on Sunday, adding unrelated children to this aggregate.
     const day = todayInTz();
     await env.DB.batch([
+      env.DB.prepare(`INSERT INTO checkin_events (id,name,weekday,active) VALUES (90,'Active Room',NULL,1)`),
       env.DB.prepare(`INSERT INTO checkin_events (id,name,weekday,active) VALUES (91,'Inactive Room',NULL,0)`),
       env.DB.prepare(`INSERT INTO checkin_events (id,name,weekday,active) VALUES (92,'Empty Room',NULL,1)`),
       env.DB.prepare(`UPDATE households SET deleted_at=datetime('now') WHERE id=2`),
@@ -155,7 +159,7 @@ describe('aggregate Attendance records and reports', () => {
     expect(await before.text()).toContain(`${day},2,Chinese Sunday Worship,110,,`);
 
     const linkOne = new URLSearchParams({ service_type_id: '1' });
-    linkOne.append('checkin_event_id', '1');
+    linkOne.append('checkin_event_id', '90');
     linkOne.append('checkin_event_id', '91');
     expect(await status(await post('/admin/attendance/checkin-links', linkOne.toString(), { cookie: attendance }))).toBe(303);
     expect(await status(await post('/admin/attendance/checkin-links', new URLSearchParams({
@@ -164,7 +168,7 @@ describe('aggregate Attendance records and reports', () => {
 
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO checkins (event_id,household_id,household_member_id,child_name,security_code,checkin_date,checked_in_at)
-        VALUES (1,2,8,'Noah Lin 林诺亚','A2B3',?,datetime('now'))`).bind(day),
+        VALUES (90,2,8,'Noah Lin 林诺亚','A2B3',?,datetime('now'))`).bind(day),
       env.DB.prepare(`INSERT INTO checkins (event_id,household_id,household_member_id,child_name,security_code,checkin_date,checked_in_at,checked_out_at)
         VALUES (91,2,8,'Noah Lin 林诺亚','A2B3',?,datetime('now'),datetime('now'))`).bind(day),
       env.DB.prepare(`INSERT INTO checkins (event_id,household_id,household_member_id,child_name,security_code,checkin_date,checked_in_at)

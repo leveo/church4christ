@@ -5,6 +5,8 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import seedSql from '../seed/dev-seed.sql?raw';
+import givingSeedSql from '../seed/giving-seed.sql?raw';
+import registrationSeedSql from '../seed/registration-seed.sql?raw';
 import manifest from '../seed/media/manifest.json';
 import { listServiceAttendanceReport } from '../src/lib/serviceAttendanceDb';
 import { getSiteIdentity, getTheme } from '../src/lib/settings';
@@ -48,6 +50,69 @@ describe('demo seed: people', () => {
       n: number;
     }>();
     expect(bad?.n).toBe(0);
+  });
+});
+
+describe('demo seed: English defaults for shared display fields', () => {
+  it('uses English for shared prayer demos while retaining Chinese prayer-sheet examples', async () => {
+    const requests = await env.DB.prepare(
+      'SELECT id, name, email, message, status FROM prayer_requests ORDER BY id',
+    ).all<{ id: number; name: string; email: string; message: string; status: string }>();
+    expect(requests.results.map(({ id, name, email, status }) => ({ id, name, email, status }))).toEqual([
+      { id: 1, name: 'Anna Lee', email: 'anna.lee@example.com', status: 'new' },
+      { id: 2, name: 'Tom Park', email: 'tom.park@example.com', status: 'praying' },
+      { id: 3, name: 'Wen Chen', email: 'wen.chen@example.com', status: 'long_term' },
+      { id: 4, name: 'Maria Gomez', email: 'maria.gomez@example.com', status: 'waiting' },
+      { id: 5, name: 'Xiaoming Wang', email: 'xiaoming.wang@example.com', status: 'answered' },
+    ]);
+    for (const request of requests.results) {
+      expect(request.message.trim().length).toBeGreaterThan(20);
+      expect(`${request.name} ${request.message}`).not.toMatch(/\p{Script=Han}/u);
+    }
+    const sheets = await env.DB.prepare(
+      "SELECT sections_json FROM prayer_sheets WHERE locale = 'zh'",
+    ).all<{ sections_json: string }>();
+    expect(sheets.results.length).toBeGreaterThan(0);
+    expect(sheets.results.every((sheet) => /\p{Script=Han}/u.test(sheet.sections_json))).toBe(true);
+  });
+
+  it('keeps packaged shared labels and English testimony content readable without Chinese suffixes', async () => {
+    const selections = [
+      'SELECT display_name AS value FROM people',
+      'SELECT meeting_time AS value FROM ministries',
+      'SELECT decline_reason AS value FROM roster_assignments',
+      'SELECT reason AS value FROM blockout_dates',
+      'SELECT message AS value FROM team_applications',
+      'SELECT name AS value FROM households',
+      'SELECT display_name AS value FROM household_members',
+      'SELECT name AS value FROM groups',
+      'SELECT term_label AS value FROM groups',
+      'SELECT display_name AS value FROM group_members',
+      'SELECT title AS value FROM group_events',
+      'SELECT location AS value FROM group_events',
+      'SELECT name AS value FROM checkin_events',
+      'SELECT child_name AS value FROM checkins',
+      'SELECT display_name AS value FROM learning_provider_connections',
+      'SELECT display_name AS value FROM learning_programs',
+      'SELECT display_name AS value FROM learning_courses',
+      'SELECT title AS value FROM learning_activities',
+      'SELECT title AS value FROM learning_resources',
+      "SELECT author_name AS value FROM testimonies WHERE locale = 'en'",
+      "SELECT title AS value FROM testimonies WHERE locale = 'en'",
+      "SELECT body AS value FROM testimonies WHERE locale = 'en'",
+    ];
+    const batches = await env.DB.batch<{ value: string | null }>(selections.map((sql) => env.DB.prepare(sql)));
+    const results = batches.flatMap((batch) => batch.results);
+    expect(results.filter(({ value }) => value && /\p{Script=Han}/u.test(value))).toEqual([]);
+  });
+
+  it('keeps Postgres-only registration and giving shared fields English while retaining translated rows', () => {
+    const sharedStatements = [givingSeedSql, registrationSeedSql].flatMap(seedStatements)
+      .filter((sql) => /^INSERT INTO (?:gifts|reg_events|registrations)\s*\(/u.test(sql));
+    expect(sharedStatements).toHaveLength(4);
+    expect(sharedStatements.filter((sql) => /\p{Script=Han}/u.test(sql))).toEqual([]);
+    expect(givingSeedSql).toContain("(1, 'zh', '常费')");
+    expect(registrationSeedSql).toContain("(900, 'zh', '秋季家庭退修会'");
   });
 });
 
@@ -223,7 +288,7 @@ describe('demo seed: people module — households, notes, statuses', () => {
     const { results } = await env.DB.prepare(
       'SELECT name FROM households WHERE deleted_at IS NULL ORDER BY id',
     ).all<{ name: string }>();
-    expect(results.map((r) => r.name)).toEqual(['Chen Family 陈家', 'Lin Family 林家', 'Zhao Household 赵家']);
+    expect(results.map((r) => r.name)).toEqual(['Chen Family', 'Lin Family', 'Zhao Household']);
   });
 
   it('seeds nine household members with exactly one primary per household', async () => {
@@ -324,7 +389,7 @@ describe('demo seed: member portal shared fixtures', () => {
       .first<{ kind: string; term_label: string; term_start: string; term_end: string }>();
     expect(row).toMatchObject({
       kind: 'sunday_school',
-      term_label: 'Foundations of Faith 信仰基础',
+      term_label: 'Foundations of Faith',
     });
   });
 });
@@ -340,7 +405,7 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
       .bind(connectionId).first<Record<string, unknown>>();
     expect(connection).toMatchObject({
       provider: 'canvas',
-      display_name: 'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+      display_name: 'Local fictional Canvas snapshot',
       base_url: baseUrl,
       status: 'active',
     });
@@ -351,14 +416,14 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
     expect(credentials?.n).toBe(0);
   });
 
-  it('seeds the exact bilingual Sunday-school sequence and safe resource metadata', async () => {
+  it('seeds the exact English-default Sunday-school sequence and safe resource metadata', async () => {
     const course = await env.DB.prepare(`SELECT program.display_name AS program_name,
       course.display_name, course.launch_url, course.last_synced_at
       FROM learning_courses course JOIN learning_programs program ON program.id=course.program_id
       WHERE course.id=?1`).bind(courseId).first<Record<string, unknown>>();
     expect(course).toMatchObject({
-      program_name: 'Genesis Sunday School / 创世记主日学',
-      display_name: 'Genesis 1: Creation / 创世记第一章：创造',
+      program_name: 'Genesis Sunday School',
+      display_name: 'Genesis 1: Creation',
       launch_url: `${baseUrl}/courses/genesis-1-creation`,
     });
     expect(Date.now() - Date.parse(String(course?.last_synced_at))).toBeLessThan(24 * 60 * 60 * 1_000);
@@ -367,12 +432,12 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
       FROM learning_activities WHERE course_id=?1 ORDER BY id`).bind(courseId)
       .all<{ id: number; title: string; kind: string; launch_url: string; due_at: string | null }>();
     expect(activities.results.map(({ id, title, kind }) => ({ id, title, kind }))).toEqual([
-      { id: 21101, title: 'Opening: In the beginning / 开场：起初', kind: 'material' },
-      { id: 21102, title: 'Scripture overview: Genesis 1 / 经文概览：创世记第一章', kind: 'material' },
-      { id: 21103, title: 'Days 1–3: Forming creation / 第1–3日：塑造创造', kind: 'material' },
-      { id: 21104, title: 'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分', kind: 'material' },
-      { id: 21105, title: 'Assignment: Creation care reflection / 作业：创造关怀反思', kind: 'assignment' },
-      { id: 21106, title: 'Quiz: Genesis 1 review / 测验：创世记第一章复习', kind: 'quiz' },
+      { id: 21101, title: 'Opening: In the beginning', kind: 'material' },
+      { id: 21102, title: 'Scripture overview: Genesis 1', kind: 'material' },
+      { id: 21103, title: 'Days 1–3: Forming creation', kind: 'material' },
+      { id: 21104, title: 'Days 4–6: Humanity and stewardship', kind: 'material' },
+      { id: 21105, title: 'Assignment: Creation care reflection', kind: 'assignment' },
+      { id: 21106, title: 'Quiz: Genesis 1 review', kind: 'quiz' },
     ]);
     expect(activities.results.slice(0, 4).every((row) => row.due_at === null)).toBe(true);
     expect(Date.parse(activities.results[4].due_at!) - Date.now()).toBeGreaterThan(24 * 60 * 60 * 1_000);
@@ -462,7 +527,7 @@ describe('demo seed: fictional Genesis 1 Learning course', () => {
     const chinese = await listLearningCoursesForLearner(env.DB as AppDb, { personId: 4, nowEpochMs });
     expect(english).toMatchObject({
       courseId,
-      displayName: 'Genesis 1: Creation / 创世记第一章：创造',
+      displayName: 'Genesis 1: Creation',
       provider: 'canvas',
       isStale: false,
     });

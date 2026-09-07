@@ -6,8 +6,9 @@ import { getPersonById } from '../../lib/db';
 import { loadSessionUser } from '../../lib/currentUser';
 import { completeSigninLink } from '../../lib/identityAccount';
 import { peekEmailLinkChallenge, type IdentityAuthEnv } from '../../lib/identityAuth';
-import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
+import ConfirmationPanel from '../../components/ui/ConfirmationPanel.astro';
+import { tokenPagePresentation } from '../../lib/tokenPagePresentation';
+import { DEFAULT_LOCALE } from '../../lib/locales';
 import { getEnabledModules } from '../../lib/modules';
 import { mintSession, sessionCookie } from '../../lib/session';
 
@@ -87,36 +88,14 @@ if (Astro.request.method === 'POST') {
   state = (await peekToken(db, raw, 'login')) !== null ? 'confirm' : 'error';
 }
 
-const title = LOCALES.map((l) => t(l, state === 'confirm' ? 'auth.confirm.title' : 'auth.error.title')).join(' · ');
+const presentation = tokenPagePresentation(Astro.request, 'auth', state);
 ---
-<Base title={title} locale={DEFAULT_LOCALE} noindex privateMetadata>
-  <section class="container-narrow py-16 text-center">
+<Base title={presentation.title} locale={presentation.locale} noindex privateMetadata>
+  <ConfirmationPanel title={presentation.title} body={presentation.body}>
     {state === 'confirm' ? (
-      <>
-        {LOCALES.map((l) => (
-          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.confirm.title')}</h1>
-            <p class="mt-2 text-ink-muted">{t(l, 'auth.confirm.body', { site: t(l, 'site.name') })}</p>
-          </div>
-        ))}
-        <form method="post" class="mt-4">
-          <button type="submit" class="rounded-full bg-primary px-8 py-3 font-semibold text-on-primary hover:bg-primary-hover">
-            {LOCALES.map((l) => t(l, 'auth.confirm.button')).join(' / ')}
-          </button>
-        </form>
-      </>
+      <form method="post"><button type="submit">{presentation.action}</button></form>
     ) : (
-      <>
-        {LOCALES.map((l) => (
-          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.error.title')}</h1>
-            <p class="mt-2 text-ink-muted">{t(l, 'auth.error.body')}</p>
-          </div>
-        ))}
-        <a href={`/${DEFAULT_LOCALE}/signin`} class="inline-block rounded-full bg-primary px-6 py-3 font-semibold text-on-primary hover:bg-primary-hover">
-          {LOCALES.map((l) => t(l, 'auth.error.retry')).join(' / ')}
-        </a>
-      </>
+      <a href={presentation.retryHref}>{presentation.action}</a>
     )}
-  </section>
+  </ConfirmationPanel>
 </Base>

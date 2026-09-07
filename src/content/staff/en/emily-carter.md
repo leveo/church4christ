@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Emily Carter
 role: Church Administrator
 group: staff

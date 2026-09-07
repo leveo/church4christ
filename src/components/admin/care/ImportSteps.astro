@@ -1,0 +1,30 @@
+---
+import { careCopy } from '../../../i18n/designCare';
+import type { Locale } from '../../../lib/locales';
+interface Props { locale: Locale; mapping?: boolean }
+const { locale, mapping = false } = Astro.props;
+const copy = careCopy(locale);
+const steps = [
+  [copy.upload, copy.uploadHint],
+  [mapping ? copy.map : copy.validate, mapping ? copy.mapHint : copy.validateHint],
+  [copy.review, copy.reviewHint],
+];
+---
+<ol class="import-steps" aria-label={copy.importSteps}>
+  {steps.map(([label, hint], i) => (
+    <li data-import-step={i + 1} aria-current={i === 0 ? 'step' : undefined}>
+      <span class="import-step-number" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+      <div><strong>{label}</strong><span class="import-step-hint">{hint}</span></div>
+    </li>
+  ))}
+</ol>
+<style>
+  .import-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; padding: 0; margin: 1.5rem 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-border); list-style: none; }
+  li { display: flex; align-items: center; gap: .85rem; padding: 1rem 1.15rem; background: var(--color-surface-raised); color: var(--color-ink-muted); }
+  li[aria-current="step"] { background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
+  .import-step-number { display: grid; flex: 0 0 2rem; width: 2rem; height: 2rem; place-items: center; border: 1px solid var(--color-border-strong); border-radius: var(--radius-full); font-size: .75rem; font-weight: 700; }
+  li[aria-current="step"] .import-step-number { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
+  strong { display: block; font-size: .875rem; }
+  .import-step-hint { display: block; margin-top: .2rem; font-size: .75rem; }
+  @media (max-width: 640px) { li { flex-direction: column; align-items: flex-start; gap: .5rem; padding: .75rem; } strong { font-size: .75rem; } .import-step-hint { display: none; } }
+</style>

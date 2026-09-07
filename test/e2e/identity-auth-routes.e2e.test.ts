@@ -95,6 +95,8 @@ describe('verified signup route', () => {
 
   it('authenticates an existing verified owner without creating or renaming a profile', async () => {
     const email = 'faithful.wang@example.com';
+    const storedName = 'Faithful Wang 王信实';
+    await env.DB.prepare('UPDATE people SET display_name=?1 WHERE id=6').bind(storedName).run();
     await seedVerifiedOwner(6, email, 98050);
     const begun = await beginSignup(env.DB, IDENTITY_ENV, {
       campusId: 1,
@@ -108,7 +110,7 @@ describe('verified signup route', () => {
     expect(response.status).toBe(303);
     expect(response.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
     expect(await env.DB.prepare('SELECT count(*) n FROM people WHERE email=?1').bind(email).first<number>('n')).toBe(1);
-    expect(await env.DB.prepare('SELECT display_name FROM people WHERE id=6').first<string>('display_name')).toBe('Faithful Wang 王信实');
+    expect(await env.DB.prepare('SELECT display_name FROM people WHERE id=6').first<string>('display_name')).toBe(storedName);
   });
 
   it('preserves the bound operation after a wrong code so the correct code can be retried', async () => {

@@ -10,6 +10,33 @@ than published to npm.
 
 ## [Unreleased]
 
+### Changed
+
+- Renewed all 21 core modules with Sanctuary typography, forest-green navigation,
+  purpose-specific public/member/admin workspaces, responsive layouts, keyboard
+  editor controls, and nine bundled decorative images. English interface and demo
+  presentation stay English; Chinese pages retain bilingual support. Existing
+  personal names, messages, editor inputs, and authorization boundaries remain.
+  README now includes 29 refreshed application screenshots and a repeatable capture
+  inventory. No image service or API key is required for the packaged design.
+- First setup now describes both starting-content choices explicitly and accepts
+  `--no-demo-data` alongside `--demo-data`. Both keep the bundled design; no-demo setup
+  retains schema, operational defaults, modules, church settings, and the first admin
+  without sample business records. Noninteractive setup still defaults to no demo data.
+  New managed initialization records `site.demo_content` without overwriting an existing
+  choice. Operator impact: no migration or reseeding is required; neither flag clears an
+  existing installation, and existing content remains protected during reruns and feature
+  selection changes. Legacy initialized databases retain their absent content marker.
+- Setup preserves Wrangler's structured stdout error messages when stderr is empty,
+  extracting only the bounded, redacted diagnostic field. This keeps fresh-database
+  detection working with JSON command errors without dumping query results or secret
+  fields. No dependency change or operator action is required.
+- Fresh administrator setup now creates its trusted verified contact and audit
+  records atomically, so both demo choices can sign in after member-identity
+  migrations. Reruns do not reverify existing or revoked ownership. PostgreSQL
+  query compatibility fixes cover child attendance, scoped team scheduling, and
+  security contact labels; PostgreSQL identity sessions require UTC as documented.
+
 ## [1.1.0] - 2026-08-18
 
 ### Added

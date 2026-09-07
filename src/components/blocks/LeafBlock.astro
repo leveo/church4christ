@@ -1,22 +1,22 @@
 ---
 // One leaf block → plain HTML. Class/style come from src/lib/blockStyles (the
-// module shared with the builder canvas); text falls back per-field to the
-// other locale, mirroring the site-wide i18n convention. Text blocks go
+// module shared with the builder canvas); Chinese text falls back per-field to
+// English, while English pages use only English fields. Text blocks go
 // through renderMarkdown (XSS-safe: input is fully escaped before transforms).
 import { renderMarkdown } from '../../lib/markdown';
 import {
   headingRender, textClass, imageRender, buttonRender, spacerClass, dividerClass,
 } from '../../lib/blockStyles';
 import type { LeafNode, L10nString } from '../../lib/pageLayout';
-import type { Locale } from '../../lib/locales';
+import { pickLocalizedText, type Locale } from '../../lib/locales';
 
 interface Props { node: LeafNode; locale: Locale }
 const { node, locale } = Astro.props;
-const pick = (s: L10nString): string => (locale === 'zh' ? s.zh || s.en : s.en || s.zh);
+const pick = (s: L10nString): string => pickLocalizedText(s, locale);
 ---
 
 {
-  node.type === 'heading' &&
+  node.type === 'heading' && pick(node.props.text) &&
     (() => {
       const r = headingRender(node.props);
       const Tag = `h${node.props.level}` as 'h1' | 'h2' | 'h3';
@@ -27,7 +27,7 @@ const pick = (s: L10nString): string => (locale === 'zh' ? s.zh || s.en : s.en |
       );
     })()
 }
-{node.type === 'text' && <div class={textClass(node.props)} set:html={renderMarkdown(pick(node.props.md))} />}
+{node.type === 'text' && pick(node.props.md) && <div class={textClass(node.props)} set:html={renderMarkdown(pick(node.props.md))} />}
 {
   node.type === 'image' && node.props.src &&
     (() => {
@@ -40,7 +40,7 @@ const pick = (s: L10nString): string => (locale === 'zh' ? s.zh || s.en : s.en |
     })()
 }
 {
-  node.type === 'button' &&
+  node.type === 'button' && pick(node.props.label) &&
     (() => {
       const r = buttonRender(node.props);
       return (

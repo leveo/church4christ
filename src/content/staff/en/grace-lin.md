@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Grace Lin
 role: Pastor of Fellowships & Care
 group: pastoral

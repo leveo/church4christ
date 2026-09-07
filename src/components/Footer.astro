@@ -15,13 +15,17 @@ const year = new Date().getFullYear();
 // sets it; a DB hiccup falls back to the i18n defaults rather than blanking the
 // footer. address/email/phone are locale-free settings — empty until configured.
 let siteName = t(locale, 'site.name');
-let addressLine = t(locale, 'footer.addressLine');
+let addressLine = '';
+let serviceTimes = '';
+let tagline = t(locale, 'site.tagline');
 let email = '';
 let phone = '';
 try {
   const identity = await getSiteIdentity(Astro.locals.db, locale);
   if (identity.name) siteName = identity.name;
-  if (identity.address) addressLine = identity.address;
+  addressLine = identity.address;
+  serviceTimes = identity.serviceTimes;
+  tagline = identity.tagline || tagline;
   email = identity.email;
   phone = identity.phone;
 } catch {
@@ -52,9 +56,8 @@ const visibleQuickLinks = quickLinks.filter((link) => {
   <div class="container-wide py-12 grid gap-8 sm:grid-cols-3">
     <div>
       <p class="font-display font-bold text-lg">{siteName}</p>
-      <p class="mt-2 text-sm">{t(locale, 'site.tagline')}</p>
-      <p class="mt-4 text-sm font-semibold">{t(locale, 'footer.address')}</p>
-      <p class="text-sm">{addressLine}</p>
+      <p class="mt-2 text-sm">{tagline}</p>
+      {addressLine && <><p class="mt-4 text-sm font-semibold">{t(locale, 'footer.address')}</p><p class="text-sm">{addressLine}</p></>}
       {phone && <p class="text-sm">{phone}</p>}
       {email && (
         <p class="text-sm">
@@ -65,8 +68,7 @@ const visibleQuickLinks = quickLinks.filter((link) => {
 
     <div>
       <p class="font-semibold">{t(locale, 'footer.serviceTimes')}</p>
-      <p class="mt-2 text-sm">{t(locale, 'footer.serviceLine1')}</p>
-      <p class="text-sm">{t(locale, 'footer.serviceLine2')}</p>
+      {serviceTimes ? <p class="mt-2 text-sm whitespace-pre-line">{serviceTimes}</p> : <a href={localePath(locale, '/visit')} class="mt-2 inline-block text-sm underline">{t(locale, 'nav.visit')}</a>}
     </div>
 
     <div>

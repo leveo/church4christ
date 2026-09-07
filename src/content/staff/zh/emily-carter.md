@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 艾米莉·卡特
 role: 行政同工
 group: staff

@@ -1,10 +1,13 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 import Base from '../../../layouts/Base.astro';
 import { badge, btnSecondary, card } from '../../../lib/adminUi';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { listGroups, listGroupsForPerson, type PersonGroupRow } from '../../../lib/groupDb';
 import { t } from '../../../lib/i18n';
-import { localePath, parseLocale } from '../../../lib/locales';
+import { localePath, parseLocale, pickLocalizedText } from '../../../lib/locales';
 import { leaderMinistryIds, listMinistryEditRows, type MinistryEditRow } from '../../../lib/ministryDb';
 import { listPersonTeams, type PersonTeamRow } from '../../../lib/myDb';
 import { listTeamSummaries } from '../../../lib/teamDb';
@@ -50,24 +53,30 @@ if (modules.has('serve')) {
 if (groups.length === 0 && teams.length === 0 && ministries.length === 0 && !canManageAllGroups && !canManageAllServe) {
   return new Response(t(locale, 'manage.forbidden'), { status: 403, headers: { 'cache-control': 'no-store' } });
 }
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'manage.title')} description={t(locale, 'manage.intro')} locale={locale} noindex>
+<MinistryWorkspace locale={locale} audience="leader" variant="work">
   <div class="container-content max-w-content py-12">
     <a href={localePath(locale, '/my/opportunities')} class="text-sm font-semibold text-primary hover:underline">
       ← {t(locale, 'manage.back')}
     </a>
-    <h1 class="mt-3 font-display text-heading-md font-bold">{t(locale, 'manage.title')}</h1>
-    <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'manage.intro')}</p>
+    <MinistryHeader title={t(locale, 'manage.title')} eyebrow={copy.scheduleEyebrow} description={copy.leaderIntro} />
+    <dl class="mw-metrics">
+      {ministries.length > 0 && <div><dt>{t(locale, 'manage.ministries')}</dt><dd>{ministries.length}</dd></div>}
+      {teams.length > 0 && <div><dt>{copy.teams}</dt><dd>{teams.length}</dd></div>}
+      {groups.length > 0 && <div><dt>{t(locale, 'manage.groups')}</dt><dd>{groups.length}</dd></div>}
+    </dl>
 
     {ministries.length > 0 && (
       <section class="mt-10">
         <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.ministries')}</h2>
-        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div class="mw-directory mt-4">
           {ministries.map((ministry) => (
             <article class={card}>
               <span class={`${badge} bg-primary-soft text-on-primary-soft`}>{t(locale, 'manage.ministry')}</span>
-              <h3 class="mt-3 font-display text-lg font-bold">{ministry.icon} {ministry.name_en || ministry.name_zh}</h3>
+              <h3 class="mt-3 font-display text-lg font-bold">{ministry.icon} {pickLocalizedText({ en: ministry.name_en, zh: ministry.name_zh }, locale) || t(locale, 'manage.ministry')}</h3>
               <a href={localePath(locale, `/manage/ministries/${ministry.id}`)} class={`mt-4 ${btnSecondary}`}>
                 {t(locale, 'manage.editMinistry')}
               </a>
@@ -80,7 +89,7 @@ if (groups.length === 0 && teams.length === 0 && ministries.length === 0 && !can
     {groups.length > 0 && (
       <section class="mt-10">
         <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.groups')}</h2>
-        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div class="mw-directory mt-4">
           {groups.map((group) => (
             <article class={card}>
               <span class={`${badge} bg-primary-soft text-on-primary-soft`}>
@@ -100,7 +109,7 @@ if (groups.length === 0 && teams.length === 0 && ministries.length === 0 && !can
       <section class="mt-10">
         <h2 class="font-display text-heading-sm font-bold">{t(locale, 'manage.teams')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(locale, 'manage.teamsIntro')}</p>
-        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div class="mw-directory mt-4">
           {teams.map((team) => (
             <article class={card}>
               <span class={`${badge} bg-accent-soft text-on-accent-soft`}>{t(locale, 'manage.team')}</span>
@@ -117,4 +126,5 @@ if (groups.length === 0 && teams.length === 0 && ministries.length === 0 && !can
       </section>
     )}
   </div>
+</MinistryWorkspace>
 </Base>

@@ -21,6 +21,7 @@ interface Props {
   description?: string;
   locale: Locale;
   noindex?: boolean;
+  footer?: boolean;
   /** Suppress URL-derived SEO links on bearer-token and other secret pages. */
   privateMetadata?: boolean;
 }
@@ -100,7 +101,7 @@ const alternates = privateMetadata ? [] : [
     <main id="main" class="flex-1">
       <slot />
     </main>
-    <Footer />
+    {Astro.props.footer !== false && <Footer />}
     <script>
       // 简/繁 toggle: cheap no-op on non-zh pages; the conversion table itself
       // is behind a dynamic import and only loads when the visitor enables

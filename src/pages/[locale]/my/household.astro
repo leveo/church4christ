@@ -5,8 +5,9 @@
 // member's own email-change flow. Household create/leave/add-dependent stay on
 // /profile (spec overlap decision) — this page only links there.
 import { env } from 'cloudflare:workers';
-import Base from '../../../layouts/Base.astro';
-import PortalNav from '../../../components/PortalNav.astro';
+import Member from '../../../layouts/Member.astro';
+import { memberCopy } from '../../../i18n/designMember';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -176,10 +177,9 @@ const ERR_MSG: Record<string, string> = {
 const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
 ---
 
-<Base title={t(locale, 'portal.household.title')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'portal.household.title')}</h1>
-    <PortalNav locale={locale} active="household" />
+<Member active="household" title={t(locale, 'portal.household.title')} locale={locale} noindex>
+  <div class="member-content">
+    <MemberPageHeader title={t(locale, 'portal.household.title')} description={memberCopy(locale).householdIntro} image="family" />
 
     {okKey && <p class={`mt-6 ${noticeOk}`}>{t(locale, okKey)}</p>}
     {errKey && <p class={`mt-6 ${noticeErr}`}>{t(locale, errKey)}</p>}
@@ -193,7 +193,7 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
           </a>
         </div>
       ) : (
-        <>
+        <div class="household-workspace">
           <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -219,7 +219,8 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
                   return (
                     <li class="rounded-md border border-border p-4">
                       <div class="flex flex-wrap items-center gap-2 text-sm">
-                        <span class="font-medium">{m.display_name}</span>
+                        {mp?.avatar_url ? <img src={normalizeAvatarUrl(mp.avatar_url) ?? ''} alt="" class="h-10 w-10 rounded-full object-cover" /> : <AvatarInitials name={m.display_name} sizeClass="h-10 w-10 text-sm" />}
+                        <span class="font-semibold">{m.display_name}</span>
                         <span class="rounded-full bg-surface-sunken px-2 py-0.5 text-xs text-ink-muted">
                           {t(locale, m.role === 'child' ? 'profile.household.roleChild' : 'profile.household.roleAdult')}
                         </span>
@@ -353,7 +354,7 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
             </div>
           </section>
 
-          <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+          <section class="household-contact rounded-lg border border-border bg-surface-raised p-6">
             <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.household.selfTitle')}</h2>
             <p class="mt-3 text-sm">
               <span class={lab}>{t(locale, 'profile.email')}</span>
@@ -362,8 +363,14 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
             <p class="mt-3 text-sm text-ink-muted">{t(locale, 'security.contactSharedHint')}</p>
             <a href={localePath(locale, '/settings/security')} class={`mt-4 inline-flex ${btn}`}>{t(locale, 'security.title')}</a>
           </section>
-        </>
+        </div>
       )
     }
   </div>
-</Base>
+</Member>
+
+<style>
+  .household-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 265px; gap: 1.5rem; align-items: start; }
+  .household-contact { margin-top: 1.5rem; border-top: 3px solid var(--color-primary); }
+  @media (max-width: 1199px) { .household-workspace { grid-template-columns: 1fr; gap: 0; } }
+</style>

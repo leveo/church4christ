@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
 import { badge, badgeActive, badgeInactive, badgeScheduled, btn, btnDanger, btnSecondary, card, lab, noticeErr, noticeOk, td, th, tin } from '../../../../../lib/adminUi';
 import type { EmailEnv } from '../../../../../lib/email';
 import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../../../../lib/identityAuth';
@@ -275,6 +276,7 @@ const stateBadge = operation.state === 'completed'
 ---
 
 <Admin title={t(lang, 'admin.identityMerge.detailTitle')}>
+  <IdentityWorkspace locale={lang}>
   <div class="flex flex-wrap items-start justify-between gap-4">
     <div>
       <p class="text-sm text-ink-muted"><a class="hover:underline" href="/admin/people/identity/merge">{t(lang, 'admin.identityMerge.queue')}</a> / {operation.operation_id}</p>
@@ -346,4 +348,5 @@ const stateBadge = operation.state === 'completed'
     </div>}
     {rollback && rollbackApprovalChallenge && <form method="post" class="mt-5 max-w-md space-y-3"><input type="hidden" name="action" value="rollback-approval-complete" /><input type="hidden" name="operationId" value={operation.operation_id} /><input type="hidden" name="expectedVersion" value={rollback.version} /><input type="hidden" name="decision" value={rollbackApprovalChallenge.decision} /><input type="hidden" name="publicId" value={rollbackApprovalChallenge.publicId} /><label class="block"><span class={lab}>{t(lang, 'admin.identityMerge.otpCode')}</span><input class={tin} name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required /></label><button class={btn} type="submit">{t(lang, 'admin.identityMerge.completeRollbackApproval')}</button></form>}
   </section>
+  </IdentityWorkspace>
 </Admin>

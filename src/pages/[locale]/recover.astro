@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import { btn, lab, tin } from '../../lib/adminUi';
 import type { EmailEnv } from '../../lib/email';
 import { beginRecovery, completeRecoveryRequest } from '../../lib/identityAccount';
@@ -87,7 +88,7 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Base title={t(locale, 'recovery.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="signin">
     {state === 'received' ? (
       <div class="rounded-lg border border-border bg-surface-raised p-6" role="status">
         <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'recovery.receivedTitle')}</h1>
@@ -120,5 +121,5 @@ if (Astro.request.method === 'POST') {
         </form>
       </>
     )}
-  </section>
+  </WelcomeForm>
 </Base>

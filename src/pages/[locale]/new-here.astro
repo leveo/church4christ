@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import Base from '../../layouts/Base.astro';
 import { btn, lab, tin } from '../../lib/adminUi';
 import { listNewcomerFormDefinition } from '../../lib/newcomerDb';
@@ -88,7 +89,7 @@ const today = todayInTz();
 ---
 
 <Base title={t(locale, 'newcomers.public.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="connection">
     {unavailable ? (
       <div class="rounded-lg border border-border bg-surface-raised p-6">
         <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'newcomers.public.unavailableTitle')}</h1>
@@ -127,5 +128,5 @@ const today = todayInTz();
         </form>
       </>
     )}
-  </section>
+  </WelcomeForm>
 </Base>

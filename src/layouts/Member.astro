@@ -1,0 +1,44 @@
+---
+import Base from './Base.astro';
+import PortalNav from '../components/PortalNav.astro';
+import AvatarInitials from '../components/AvatarInitials.astro';
+import ModeToggle from '../components/ModeToggle.astro';
+import { localePath, type Locale } from '../lib/locales';
+import type { MemberNavKey } from '../lib/memberNavigation';
+import { t } from '../lib/i18n';
+import { memberCopy } from '../i18n/designMember';
+interface Props { title: string; description?: string; locale: Locale; active: MemberNavKey; noindex?: boolean }
+const { title, description, locale, active } = Astro.props;
+const user = Astro.locals.user;
+---
+<Base title={title} description={description} locale={locale} noindex footer={false}>
+  <div class="member-shell container-wide">
+    <aside class="member-sidebar">
+      <a class="member-identity" href={localePath(locale, '/profile')} aria-label={t(locale, 'profile.title')}>
+        <AvatarInitials name={user?.displayName ?? ''} sizeClass="h-11 w-11 text-sm" />
+        <span><small>{t(locale, 'portal.nav.myPortal')}</small><strong>{user?.displayName}</strong></span>
+      </a>
+      <PortalNav locale={locale} active={active} rail />
+    </aside>
+    <div class="member-main"><slot /></div>
+  </div>
+  <div class="member-footer container-wide">
+    <a href={localePath(locale, '/')}>{t(locale, 'admin.nav.viewSite')}</a>
+    <a href={localePath(locale, '/privacy')}>{memberCopy(locale).privacy}</a>
+    <div class="ml-auto"><ModeToggle /></div>
+  </div>
+</Base>
+<style>
+  .member-shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 2.5rem; padding-top: 2rem; padding-bottom: 3rem; }
+  .member-sidebar { position: sticky; top: 6.5rem; align-self: start; }
+  .member-identity { display: flex; gap: .8rem; padding: .5rem .75rem 1.5rem; align-items: center; border-bottom: 1px solid var(--color-border); margin-bottom: 1rem; }
+  .member-identity span { min-width: 0; }
+  .member-identity small { display: block; font-size: .68rem; color: var(--color-ink-muted); margin-bottom: .2rem; }
+  .member-identity strong { display: block; font-size: .85rem; overflow-wrap: anywhere; font-weight: 600; }
+  .member-main { min-width: 0; }
+  .member-main :global(h1) { font-family: var(--font-body); font-size: clamp(1.65rem, 3vw, 2.1rem); font-weight: 600; letter-spacing: -.035em; line-height: 1.25; }
+  .member-main :global(h2), .member-main :global(h3) { font-family: var(--font-body); letter-spacing: -.015em; }
+  .member-main :global(input), .member-main :global(select), .member-main :global(textarea) { max-width: 100%; }
+  .member-footer { display: flex; gap: 1.5rem; padding-block: 1.25rem; border-top: 1px solid var(--color-border); color: var(--color-ink-muted); font-size: .75rem; }
+  @media (max-width: 1023px) { .member-shell { grid-template-columns: 1fr; gap: 1.5rem; padding-top: 1rem; } .member-sidebar { position: static; min-width: 0; } .member-identity { display: none; } }
+</style>

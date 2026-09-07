@@ -1,0 +1,10 @@
+---
+import { financeCopy } from '../../i18n/designFinance';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; title: string; description: string }
+const { locale, title, description } = Astro.props;
+---
+<header class="finance-heading">
+  <div><p class="section-eyebrow">{financeCopy(locale).eyebrow}</p><h1>{title}</h1><p class="finance-description">{description}</p></div>
+  <div class="finance-heading-actions"><slot /></div>
+</header>

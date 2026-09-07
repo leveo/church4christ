@@ -1,7 +1,10 @@
 ---
+import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+import { careCopy } from '../../../i18n/designCare';
 import Admin from '../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
-import { btn, btnSecondary, card, lab, noticeErr, td, th, tin } from '../../../lib/adminUi';
+import { btn, btnSecondary, noticeErr, tin } from '../../../lib/adminUi';
 import { listNewcomerQueue } from '../../../lib/newcomerDb';
 import { parseNewcomerQueueFilters } from '../../../lib/newcomerValidation';
 import { todayInTz } from '../../../lib/dates';
@@ -29,24 +32,59 @@ const query = (nextPage: number) => {
   params.set('page', String(nextPage));
   return params.toString();
 };
+const copy = careCopy(lang);
+const currentDue = Astro.url.searchParams.get('due') ?? 'all';
+const currentSource = Astro.url.searchParams.get('source') ?? '';
+const today = todayInTz();
+const filterLink = (key: string, value: string) => {
+  const params = new URLSearchParams(Astro.url.searchParams);
+  params.set(key, value);
+  params.delete('page');
+  return `?${params.toString()}`;
+};
+// These are page-local presentation counts, never totals across the scoped queue.
+const stages = [...new Map(page.rows.map((row) => [row.statusId, row.statusLabel])).entries()]
+  .map(([id, label]) => ({ id, label, count: page.rows.filter((row) => row.statusId === id).length }));
+
 ---
 <Admin title={t(lang, 'admin.newcomers.title')}>
-  <div class="flex flex-wrap items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.newcomers.title')}</h1>
-    <div class="flex gap-2">{user?.isSuperAdmin && <a class={btnSecondary} href="/admin/newcomers/settings">{t(lang, 'admin.newcomers.settings')}</a>}<a class={btn} href="/admin/newcomers/new">{t(lang, 'admin.newcomers.add')}</a></div>
-  </div>
-  <form method="get" class={`mt-6 grid gap-3 md:grid-cols-4 ${card}`}>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.status')}</span><input class={tin} type="number" min="1" name="statusId" value={Astro.url.searchParams.get('statusId') ?? ''} /></label>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.assignee')}</span><input class={tin} type="number" min="1" name="assigneePersonId" value={Astro.url.searchParams.get('assigneePersonId') ?? ''} /></label>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.due')}</span><select class={tin} name="due"><option value="all">{t(lang, 'admin.newcomers.all')}</option><option value="overdue">{t(lang, 'admin.newcomers.overdue')}</option><option value="scheduled">{t(lang, 'admin.newcomers.scheduled')}</option><option value="none">{t(lang, 'admin.newcomers.none')}</option></select></label>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.source')}</span><select class={tin} name="source"><option value="">{t(lang, 'admin.newcomers.all')}</option><option value="public">{t(lang, 'admin.newcomers.public')}</option><option value="staff">{t(lang, 'admin.newcomers.staff')}</option></select></label>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.visitFrom')}</span><input class={tin} type="date" name="visitFrom" value={Astro.url.searchParams.get('visitFrom') ?? ''} /></label>
-    <label><span class={lab}>{t(lang, 'admin.newcomers.visitTo')}</span><input class={tin} type="date" name="visitTo" value={Astro.url.searchParams.get('visitTo') ?? ''} /></label>
-    <div class="flex items-end"><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.filter')}</button></div>
-  </form>
-  {failed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
-  <div class="mt-6 overflow-x-auto rounded-xl border border-border"><table class="w-full border-collapse"><thead class="bg-surface-sunken"><tr><th class={th}>{t(lang, 'newcomers.name')}</th><th class={th}>{t(lang, 'admin.newcomers.status')}</th><th class={th}>{t(lang, 'newcomers.visitDate')}</th><th class={th}>{t(lang, 'admin.newcomers.followUp')}</th><th class={th}>{t(lang, 'admin.newcomers.source')}</th></tr></thead><tbody>
-    {page.rows.length === 0 ? <tr><td class={td} colspan="5">{t(lang, 'admin.newcomers.empty')}</td></tr> : page.rows.map((row) => <tr class="border-t border-border"><td class={td}><a class="font-medium text-primary hover:underline" href={`/admin/newcomers/${row.id}`}>{row.name}</a><div class="text-sm text-ink-muted">{row.email ?? row.phone ?? '—'}</div></td><td class={td}>{row.statusLabel}</td><td class={td}>{row.visitDate}</td><td class={td}>{row.nextFollowUpDate ?? '—'}</td><td class={td}>{row.source}</td></tr>)}
-  </tbody></table></div>
-  <div class="mt-4 flex justify-between">{page.page > 1 ? <a class={btnSecondary} href={`?${query(page.page - 1)}`}>{t(lang, 'admin.newcomers.previous')}</a> : <span></span>}{page.hasNext && <a class={btnSecondary} href={`?${query(page.page + 1)}`}>{t(lang, 'admin.newcomers.next')}</a>}</div>
+  <CareWorkspace variant="queue">
+    <div class="care-heading">
+      <div><p class="care-eyebrow">{copy.newcomerEyebrow}</p><h1>{t(lang, 'admin.newcomers.title')}</h1><p class="care-intro">{copy.newcomerIntro}</p></div>
+      <div class="care-actions">{user?.isSuperAdmin && <a class={btnSecondary} href="/admin/newcomers/settings">{t(lang, 'admin.newcomers.settings')}</a>}<a class={btn} href="/admin/newcomers/new">{t(lang, 'admin.newcomers.add')}</a></div>
+    </div>
+    <div class="care-focus-row">
+      <nav class="care-focus-links" aria-label={copy.dueFocus}>
+        {(['all', 'overdue', 'scheduled', 'none'] as const).map((due) => <a href={filterLink('due', due)} aria-current={currentDue === due ? 'page' : undefined}>{t(lang, `admin.newcomers.${due}`)}</a>)}
+      </nav>
+      {!failed && <span class="text-xs text-ink-muted">{copy.onPage}: <strong class="text-ink">{page.rows.length}</strong></span>}
+    </div>
+    <form method="get" class="care-filter">
+      <label><span>{t(lang, 'admin.newcomers.status')}</span><input class={tin} type="number" min="1" name="statusId" value={Astro.url.searchParams.get('statusId') ?? ''} /></label>
+      <label><span>{t(lang, 'admin.newcomers.assignee')}</span><input class={tin} type="number" min="1" name="assigneePersonId" value={Astro.url.searchParams.get('assigneePersonId') ?? ''} /></label>
+      <label><span>{t(lang, 'admin.newcomers.due')}</span><select class={tin} name="due">{(['all', 'overdue', 'scheduled', 'none'] as const).map((due) => <option value={due} selected={currentDue === due}>{t(lang, `admin.newcomers.${due}`)}</option>)}</select></label>
+      <label><span>{t(lang, 'admin.newcomers.source')}</span><select class={tin} name="source"><option value="" selected={currentSource === ''}>{t(lang, 'admin.newcomers.all')}</option><option value="public" selected={currentSource === 'public'}>{t(lang, 'admin.newcomers.public')}</option><option value="staff" selected={currentSource === 'staff'}>{t(lang, 'admin.newcomers.staff')}</option></select></label>
+      <label><span>{t(lang, 'admin.newcomers.visitFrom')}</span><input class={tin} type="date" name="visitFrom" value={Astro.url.searchParams.get('visitFrom') ?? ''} /></label>
+      <label><span>{t(lang, 'admin.newcomers.visitTo')}</span><input class={tin} type="date" name="visitTo" value={Astro.url.searchParams.get('visitTo') ?? ''} /></label>
+      {Astro.url.searchParams.has('serviceTypeId') && <input type="hidden" name="serviceTypeId" value={Astro.url.searchParams.get('serviceTypeId')} />}
+      {Astro.url.searchParams.has('limit') && <input type="hidden" name="limit" value={Astro.url.searchParams.get('limit')} />}
+      <button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.filter')}</button>
+      {Astro.url.searchParams.size > 0 && <a href="/admin/newcomers" class="pb-2 text-xs text-primary hover:underline">{copy.reset}</a>}
+    </form>
+    {failed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.newcomers.error')}</p>}
+    <div class="care-results-bar"><h2>{t(lang, 'admin.newcomers.queue')}</h2>{!failed && <span>{copy.onPage} {page.page}</span>}</div>
+    <div class="care-table-wrap"><table class="care-table care-queue"><thead><tr><th>{t(lang, 'newcomers.name')}</th><th>{t(lang, 'admin.newcomers.status')}</th><th>{t(lang, 'newcomers.visitDate')}</th><th>{t(lang, 'admin.newcomers.followUp')}</th><th>{t(lang, 'admin.newcomers.source')}</th><th><span class="sr-only">{copy.openRecord}</span></th></tr></thead><tbody>
+      {page.rows.length === 0 ? <tr><td class="care-empty" colspan="6">{t(lang, failed ? 'admin.newcomers.error' : 'admin.newcomers.empty')}</td></tr> : page.rows.map((row) => {
+        const overdue = row.nextFollowUpDate !== null && row.nextFollowUpDate < today;
+        return <tr data-overdue={overdue ? 'true' : undefined}>
+          <td><div class="care-identity"><AvatarInitials name={row.name} sizeClass="h-10 w-10 text-sm" /><div><a href={`/admin/newcomers/${row.id}`}>{row.name}</a><span class="care-subline">{row.email ?? row.phone ?? '—'}</span></div></div></td>
+          <td><span class="rounded-full bg-primary-soft px-2 py-1 text-xs text-on-primary-soft">{row.statusLabel}</span></td><td class="whitespace-nowrap tabular-nums">{row.visitDate}</td>
+          <td><span class={overdue ? 'care-overdue' : 'whitespace-nowrap tabular-nums'}>{row.nextFollowUpDate ?? '—'}{overdue && <small>{t(lang, 'admin.newcomers.overdue')}</small>}</span></td>
+          <td>{t(lang, `admin.newcomers.${row.source}`)}</td><td><a class="whitespace-nowrap text-xs font-semibold text-primary hover:underline" href={`/admin/newcomers/${row.id}`} aria-label={`${copy.openRecord}: ${row.name}`}>{copy.openRecord} →</a></td>
+        </tr>;
+      })}
+    </tbody></table></div>
+    {stages.length > 0 && <nav class="care-stage-list" aria-label={copy.stages}>{stages.map((stage) => <a href={filterLink('statusId', String(stage.id))} aria-current={Astro.url.searchParams.get('statusId') === String(stage.id) ? 'page' : undefined}>{stage.label}<strong>{stage.count}</strong></a>)}<span class="self-center text-xs text-ink-muted">{copy.stages}</span></nav>}
+    <div class="mt-4 flex justify-between">{page.page > 1 ? <a class={btnSecondary} href={`?${query(page.page - 1)}`}>{t(lang, 'admin.newcomers.previous')}</a> : <span></span>}{page.hasNext && <a class={btnSecondary} href={`?${query(page.page + 1)}`}>{t(lang, 'admin.newcomers.next')}</a>}</div>
+  </CareWorkspace>
 </Admin>

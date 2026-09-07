@@ -18,16 +18,16 @@ const { sheet, locale } = Astro.props;
 const sections = parseJsonArray<Section>(sheet.sections_json);
 ---
 
-<article>
+<article class="prayer-document">
   <h2 class="font-display text-heading-md font-bold">
     {t(locale, 'prayer.sheetTitle')} · {formatDate(sheet.sheet_date, locale)}
   </h2>
   <div class="mt-6 space-y-6">
     {
       sections.map((sec) => (
-        <section>
-          <h3 class="mb-2 border-l-4 border-accent pl-3 font-display font-bold">{sec.heading}</h3>
-          <ul class="list-disc space-y-1 pl-6 text-sm">
+        <section class="prayer-section">
+          <h3>{sec.heading}</h3>
+          <ul>
             {(sec.items ?? []).map((item) => <li>{item}</li>)}
           </ul>
         </section>
@@ -35,3 +35,12 @@ const sections = parseJsonArray<Section>(sheet.sections_json);
     }
   </div>
 </article>
+<style>
+  .prayer-document > h2 { padding-bottom: 1.75rem; margin-bottom: 2rem; border-bottom: 1px solid var(--color-border); font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 500; color: var(--color-primary); }
+  .prayer-section + .prayer-section { padding-top: 1.5rem; border-top: 1px solid var(--color-border); }
+  .prayer-section h3 { font-family: var(--font-display); font-size: 1.35rem; line-height: 1.4; margin-bottom: 1rem; color: var(--color-primary); }
+  .prayer-section ul { list-style: disc; padding-left: 1.2rem; display: grid; gap: .8rem; }
+  .prayer-section li { padding-left: .35rem; line-height: 1.9; overflow-wrap: anywhere; }
+  .prayer-section li::marker { color: var(--color-primary); }
+  @media print { .prayer-document > h2 { padding-bottom: 1rem; margin-bottom: 1rem; } .prayer-section ul { gap: .45rem; } .prayer-section li { line-height: 1.6; } }
+</style>

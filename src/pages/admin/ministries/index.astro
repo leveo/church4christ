@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Volunteer console (console route class — leaders ∪ admins; an editor with no
 // team is 403'd here: the volunteer console is not the content console). A tabbed
 // surface over overview / applications / ministries / new-ministry wizard / email
@@ -285,24 +288,24 @@ const tabs: { id: string; label: string; show: boolean }[] = [
   { id: 'email', label: 'admin.console.tab.email', show: canAdmin },
   { id: 'availability', label: 'admin.console.tab.availability', show: true },
 ];
+const copy = ministryCopy(lang);
 ---
 <Admin title={t(lang, 'admin.console.title')}>
-  <div class="flex items-center gap-4 flex-wrap">
-    <div class="flex-1 min-w-64">
-      <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.console.title')}</h1>
-      <p class="mt-1 text-sm text-ink-muted">{scope === 'leader' ? `${user.displayName} · ${t(lang, 'admin.console.scopeLeaderDesc')}` : t(lang, 'admin.console.scopeAdminDesc')}</p>
-    </div>
+<MinistryWorkspace locale={lang} variant="admin">
+  <MinistryHeader title={t(lang, 'admin.console.title')} eyebrow={copy.scheduleEyebrow} description={copy.consoleIntro}>
+    <p class="mw-scope">{scope === 'leader' ? `${user.displayName} · ${t(lang, 'admin.console.scopeLeaderDesc')}` : t(lang, 'admin.console.scopeAdminDesc')}</p>
     {canAdmin && (
       <div class="flex border border-border rounded-full p-0.5 gap-0.5">
         <a href={`/admin/ministries?tab=${tab}&scope=leader`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'leader' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeLeader')}</a>
         <a href={`/admin/ministries?tab=${tab}`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'admin' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeAdmin')}</a>
       </div>
     )}
-  </div>
+  </MinistryHeader>
 
   <nav class="mt-5 flex gap-1 flex-wrap border-b border-border" aria-label={t(lang, 'admin.console.title')}>
     {tabs.filter((tb) => tb.show).map((tb) => (
       <a href={`/admin/ministries?tab=${tb.id}${scopeQ}`}
+         aria-current={tab === tb.id ? 'page' : undefined}
          class:list={['px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb.id ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}>
         {t(lang, tb.label)}
         {tb.id === 'applications' && pendingBadge > 0 && (
@@ -312,7 +315,7 @@ const tabs: { id: string; label: string; show: boolean }[] = [
     ))}
   </nav>
 
-  <div class="mt-6">
+  <div class="mw-console-content mt-6">
     {flashKey && <p class="mb-5 rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success">{t(lang, flashKey)}</p>}
     {errKey && <p class="mb-5 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(lang, errKey)}</p>}
 
@@ -323,4 +326,5 @@ const tabs: { id: string; label: string; show: boolean }[] = [
     {tab === 'email' && emailData && <EmailTab lang={lang} rules={emailData.rules} templates={emailData.templates} selectedKey={emailData.selectedKey} log={emailData.log} testSent={emailData.testSent} />}
     {tab === 'availability' && availData && <AvailabilityTab lang={lang} teams={availData.teams} selectedTeamId={availData.selectedTeamId} selectedTeamName={availData.selectedTeamName} availability={availData.availability} scope={scope} />}
   </div>
+</MinistryWorkspace>
 </Admin>

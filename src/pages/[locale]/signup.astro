@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import { btn, lab, tin } from '../../lib/adminUi';
 import type { EmailEnv } from '../../lib/email';
 import { getPersonById } from '../../lib/db';
@@ -109,7 +110,7 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Base title={t(locale, 'signup.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="signup">
     {state === 'review' ? (
       <div class="rounded-lg border border-border bg-surface-raised p-6" role="status">
         <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'signup.reviewTitle')}</h1>
@@ -162,5 +163,5 @@ if (Astro.request.method === 'POST') {
         </p>
       </>
     )}
-  </section>
+  </WelcomeForm>
 </Base>

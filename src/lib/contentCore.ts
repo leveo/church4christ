@@ -11,6 +11,7 @@
 /** Minimal shape these helpers need — Astro's CollectionEntry satisfies it. */
 export interface HasId {
   id: string;
+  data?: { demo?: boolean };
 }
 
 const EN = 'en';
@@ -36,10 +37,12 @@ export function getLocalizedFrom<T extends HasId>(
   entries: T[],
   slug: string,
   locale: string,
+  includeDemo = true,
 ): { entry: T; translated: boolean } | null {
-  const exact = entries.find((e) => e.id === `${locale}/${slug}`);
+  const visible = (entry: T) => includeDemo || entry.data?.demo !== true;
+  const exact = entries.find((e) => e.id === `${locale}/${slug}` && visible(e));
   if (exact) return { entry: exact, translated: true };
-  const fallback = entries.find((e) => e.id === `${EN}/${slug}`);
+  const fallback = entries.find((e) => e.id === `${EN}/${slug}` && visible(e));
   if (fallback) return { entry: fallback, translated: false };
   return null;
 }
@@ -52,13 +55,14 @@ export function getLocalizedFrom<T extends HasId>(
 export function listLocalizedFrom<T extends HasId>(
   entries: T[],
   locale: string,
+  includeDemo = true,
 ): { entry: T; translated: boolean; slug: string }[] {
   const slugs = new Set<string>();
   for (const e of entries) slugs.add(splitId(e.id).slug);
 
   const out: { entry: T; translated: boolean; slug: string }[] = [];
   for (const slug of slugs) {
-    const resolved = getLocalizedFrom(entries, slug, locale);
+    const resolved = getLocalizedFrom(entries, slug, locale, includeDemo);
     if (resolved) out.push({ ...resolved, slug });
   }
   return out;

@@ -1,4 +1,5 @@
 ---
+demo: true
 name: David Chen
 role: Senior Pastor
 group: pastoral

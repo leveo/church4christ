@@ -32,9 +32,9 @@
 -- couple of days before the start so both stay inside their sign-up window.
 INSERT INTO reg_events (id, starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at, active) VALUES
   (900, datetime('now','+30 days','start of day','+9 hours'), datetime('now','+31 days','start of day','+16 hours'),
-   'Pine Valley Camp 松谷营地', NULL, NULL, 'usd', NULL, datetime('now','+28 days','start of day','+23 hours'), 1),
+   'Pine Valley Camp', NULL, NULL, 'usd', NULL, datetime('now','+28 days','start of day','+23 hours'), 1),
   (910, datetime('now','+20 days','start of day','+18 hours'), datetime('now','+20 days','start of day','+21 hours'),
-   'Fellowship Hall 团契厅', 20, 2500, 'usd', NULL, datetime('now','+18 days','start of day','+23 hours'), 1);
+   'Fellowship Hall', 20, 2500, 'usd', NULL, datetime('now','+18 days','start of day','+23 hours'), 1);
 
 INSERT INTO reg_event_i18n (event_id, locale, title, description) VALUES
   (900, 'en', 'Fall Family Retreat',
@@ -77,13 +77,13 @@ INSERT INTO reg_question_i18n (question_id, locale, label) VALUES
 -- ones (a Checkout session attached but not yet paid — payment_intent NULL — the
 -- state that holds a seat until Stripe confirms or the session expires).
 INSERT INTO registrations (id, event_id, person_id, name, email, status, amount_cents, currency, stripe_checkout_session_id, stripe_payment_intent_id, created_at) VALUES
-  (900, 900, 3, 'Sarah Johnson 莎拉', 'sarah.johnson@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-8 days')),
-  (901, 900, 5, 'Mark Liu 刘马可', 'mark.liu@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-6 days')),
+  (900, 900, 3, 'Sarah Johnson', 'sarah.johnson@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-8 days')),
+  (901, 900, 5, 'Mark Liu', 'mark.liu@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-6 days')),
   (902, 900, NULL, 'Rebecca Adams', 'rebecca.adams@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-5 days')),
-  (910, 910, 7, 'Amy Chen 陈爱美', 'amy.chen@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg001', 'pi_test_reg001', datetime('now','-7 days')),
-  (911, 910, 2, '陈大卫 David Chen', 'pastor.david@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg002', 'pi_test_reg002', datetime('now','-7 days')),
-  (912, 910, 4, 'Grace Lin 林恩慈', 'grace.lin@example.com', 'pending', 2500, 'usd', 'cs_test_reg003', NULL, datetime('now','-2 days')),
-  (913, 910, 8, 'Ben Wu 吴恩本', 'ben.wu@example.com', 'pending', 2500, 'usd', 'cs_test_reg004', NULL, datetime('now','-1 days'));
+  (910, 910, 7, 'Amy Chen', 'amy.chen@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg001', 'pi_test_reg001', datetime('now','-7 days')),
+  (911, 910, 2, 'David Chen', 'pastor.david@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg002', 'pi_test_reg002', datetime('now','-7 days')),
+  (912, 910, 4, 'Grace Lin', 'grace.lin@example.com', 'pending', 2500, 'usd', 'cs_test_reg003', NULL, datetime('now','-2 days')),
+  (913, 910, 8, 'Ben Wu', 'ben.wu@example.com', 'pending', 2500, 'usd', 'cs_test_reg004', NULL, datetime('now','-1 days'));
 
 -- Answers, keyed to the exact registration + question ids above. Select values are
 -- among each question's options, yes/no is normalized 'yes'/'no', and optional

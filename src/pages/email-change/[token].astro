@@ -1,22 +1,14 @@
 ---
 import Base from '../../layouts/Base.astro';
-import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
+import ConfirmationPanel from '../../components/ui/ConfirmationPanel.astro';
+import { tokenPagePresentation } from '../../lib/tokenPagePresentation';
 // The 0030 identity-security cutover permanently retires legacy email-change
-// tokens. This locale-free endpoint is deliberately mutation-free and bilingual
-// so stale messages cannot reveal or alter a member record.
-const title = LOCALES.map((locale) => t(locale, 'portal.emailChange.error.title')).join(' · ');
+// tokens. This locale-free endpoint stays mutation-free so stale messages
+// cannot reveal or alter a member record; presentation follows request locale.
+const presentation = tokenPagePresentation(Astro.request, 'emailChange', 'error');
 ---
-<Base title={title} locale={DEFAULT_LOCALE} noindex>
-  <section class="container-narrow py-16 text-center">
-    {LOCALES.map((locale) => (
-      <div class="mb-6" lang={locale === 'zh' ? 'zh-Hans' : 'en'}>
-        <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'portal.emailChange.error.title')}</h1>
-        <p class="mt-2 text-ink-muted">{t(locale, 'portal.emailChange.error.body')}</p>
-      </div>
-    ))}
-    <a href={`/${DEFAULT_LOCALE}/signin`} class="inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover">
-      {LOCALES.map((locale) => t(locale, 'portal.emailChange.error.retry')).join(' / ')}
-    </a>
-  </section>
+<Base title={presentation.title} locale={presentation.locale} noindex privateMetadata>
+  <ConfirmationPanel title={presentation.title} body={presentation.body}>
+    <a href={presentation.retryHref}>{presentation.action}</a>
+  </ConfirmationPanel>
 </Base>

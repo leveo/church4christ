@@ -13,7 +13,7 @@
 // Authorization stays in the pages: every caller re-checks admin-or-leader of
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
-import type { AppDb } from './appDb';
+import type { AppDb, SnapshotBackend } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
 import { listPlans, type PlanListRow } from './planDb';
@@ -547,15 +547,21 @@ export async function listPotentialVolunteers(
   db: AppDb,
   category: string,
   excludeTeamId: number,
+  backend: SnapshotBackend = 'd1',
 ): Promise<PotentialVolunteer[]> {
+  // Recommendations are JSON arrays stored in TEXT on both backends, but the
+  // table-valued JSON function is provider-specific. Keep exact element matching.
+  const recommendations = backend === 'supabase'
+    ? 'jsonb_array_elements_text(CAST(gift_results.recommended_json AS jsonb)) AS recommendation(value)'
+    : 'json_each(gift_results.recommended_json) AS recommendation';
   const { results } = await db
     .prepare(
       `WITH candidates AS (
          SELECT person_id, 1 AS via_interest, 0 AS via_gift FROM person_interests WHERE category = ?1
          UNION ALL
          SELECT gift_results.person_id, 0 AS via_interest, 1 AS via_gift
-         FROM gift_results, json_each(gift_results.recommended_json)
-         WHERE json_each.value = ?1
+         FROM gift_results, ${recommendations}
+         WHERE recommendation.value = ?1
            AND gift_results.id = (SELECT id FROM gift_results g2 WHERE g2.person_id = gift_results.person_id
                                   ORDER BY g2.created_at DESC, g2.id DESC LIMIT 1)
        )
@@ -564,7 +570,7 @@ export async function listPotentialVolunteers(
        FROM candidates
        JOIN people ON people.id = candidates.person_id AND people.active = 1 AND people.deleted_at IS NULL
        WHERE people.id NOT IN (SELECT person_id FROM team_members WHERE team_id = ?2)
-       GROUP BY people.id
+       GROUP BY people.id, people.display_name, people.email
        ORDER BY people.display_name`,
     )
     .bind(category, excludeTeamId)
@@ -630,15 +636,19 @@ export async function getMatrix(
       .all<MatrixNeedRow>(),
     db
       .prepare(
-        `SELECT DISTINCT pos.id AS position_id, COALESCE(pos_l.name, pos_d.name) AS position_name,
-                tm.id AS team_id, COALESCE(tm_l.name, tm_d.name) AS team_name
-         FROM plan_positions pp
-         JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
-         ${posJ.joins}
-         JOIN teams tm ON tm.id = pos.team_id AND tm.deleted_at IS NULL
-         ${tmJ.joins}
-         WHERE pp.plan_id IN (${placeholders})
-         ORDER BY tm.sort, tm.id, pos.sort, pos.id`,
+        `SELECT position_id, position_name, team_id, team_name
+         FROM (
+           SELECT DISTINCT pos.id AS position_id, COALESCE(pos_l.name, pos_d.name) AS position_name,
+                  tm.id AS team_id, COALESCE(tm_l.name, tm_d.name) AS team_name,
+                  tm.sort AS team_sort, pos.sort AS position_sort
+           FROM plan_positions pp
+           JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
+           ${posJ.joins}
+           JOIN teams tm ON tm.id = pos.team_id AND tm.deleted_at IS NULL
+           ${tmJ.joins}
+           WHERE pp.plan_id IN (${placeholders})
+         ) matrix_rows
+         ORDER BY team_sort, team_id, position_sort, position_id`,
       )
       .bind(...ids)
       .all<MatrixRow>(),

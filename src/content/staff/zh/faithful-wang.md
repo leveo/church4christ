@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 王信实
 role: 长老
 group: elders

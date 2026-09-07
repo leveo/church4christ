@@ -1,4 +1,9 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+import DateBadge from '../../../components/gatherings/DateBadge.astro';
+
 // One event's question builder + registration roster (console class — re-checks
 // editor∪admin). The builder is a repeat-row form submitting indexed fields
 // (q[0][type]…) parsed by parseQuestionsForm into saveQuestions (replace-all;
@@ -78,20 +83,78 @@ const qLabel = (q: RegQuestionAdmin) => (lang === 'zh' ? q.label_zh || q.label_e
 
 const types: RegQuestionAdmin['type'][] = ['text', 'textarea', 'select', 'checkbox', 'yesno'];
 const needsOptions = (type: string) => type === 'select' || type === 'checkbox';
+const copy = gatheringsCopy(lang);
 const heading = t(lang, 'admin.reg.title');
 const h2 = 'font-display text-heading-sm font-bold';
 const cellCls = 'flex-1 min-w-40';
 ---
 
 <Admin title={`${eventTitle} · ${heading}`}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{eventTitle}</h1>
+  <GatheringSurface>
+  <div class="gathering-heading">
+    <div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{eventTitle}</h1><p class="gathering-intro">{copy.rosterIntro}</p></div>
     <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.backToList')}</a>
   </div>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {cancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
 
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.reg.questions')}</h2>
+  <div class="gathering-section-heading">
+    <div class="gathering-actions"><DateBadge date={event.starts_at} locale={lang} /><div><h2 class={h2}>{t(lang, 'admin.reg.registrations')}</h2><p class="mt-1 text-xs text-ink-muted">{roster.length} {copy.recordsShown}</p></div></div>
+    <a href={`/admin/registration/${eventId}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
+  </div>
+  <div class="gathering-table-wrap mt-4">
+    <table class="gathering-table">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reg.name')}</th>
+          <th class={th}>{t(lang, 'admin.reg.email')}</th>
+          <th class={th}>{t(lang, 'admin.reg.status')}</th>
+          <th class={th}>{t(lang, 'admin.reg.amount')}</th>
+          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
+          {questions.map((q) => <th class={th}>{qLabel(q)}</th>)}
+          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          roster.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan={6 + questions.length}>
+                {t(lang, 'admin.reg.rosterEmpty')}
+              </td>
+            </tr>
+          ) : (
+            roster.map((r) => {
+              const byLabel = new Map(r.answers.map((a) => [a.label, a.value]));
+              return (
+                <tr class="border-t border-border align-top">
+                  <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={r.name} sizeClass="h-8 w-8 text-xs" />{r.name}</div></td>
+                  <td class={`${td} break-all`}>{r.email}</td>
+                  <td class={td}><span class="gathering-roster-status" data-status={r.status}>{r.status}</span></td>
+                  <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
+                  <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>
+                  {questions.map((q) => (
+                    <td class={td}>{byLabel.get(qLabel(q)) ?? ''}</td>
+                  ))}
+                  <td class={td}>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.reg.cancelConfirm'))})`}>
+                      <input type="hidden" name="action" value="cancel" />
+                      <input type="hidden" name="registration_id" value={r.id} />
+                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled'}>
+                        {t(lang, 'admin.reg.cancel')}
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              );
+            })
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <details class="gathering-editor" open={!!qError || questions.length === 0}><summary>{t(lang, 'admin.reg.questions')}</summary><div class="gathering-editor-inner">
   <form method="post" class="mt-4 max-w-3xl" data-q-form>
     <input type="hidden" name="action" value="saveQuestions" />
     {qError && <p class={`mb-4 ${noticeErr}`}>{t(lang, qError)}</p>}
@@ -186,62 +249,7 @@ const cellCls = 'flex-1 min-w-40';
     </div>
   </form>
 
-  <div class="mt-10 flex items-center justify-between gap-4">
-    <h2 class={h2}>{t(lang, 'admin.reg.registrations')}</h2>
-    <a href={`/admin/registration/${eventId}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
-  </div>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.reg.name')}</th>
-          <th class={th}>{t(lang, 'admin.reg.email')}</th>
-          <th class={th}>{t(lang, 'admin.reg.status')}</th>
-          <th class={th}>{t(lang, 'admin.reg.amount')}</th>
-          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
-          {questions.map((q) => <th class={th}>{qLabel(q)}</th>)}
-          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          roster.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan={6 + questions.length}>
-                {t(lang, 'admin.reg.rosterEmpty')}
-              </td>
-            </tr>
-          ) : (
-            roster.map((r) => {
-              const byLabel = new Map(r.answers.map((a) => [a.label, a.value]));
-              return (
-                <tr class="border-t border-border align-top">
-                  <td class={`${td} font-medium`}>{r.name}</td>
-                  <td class={`${td} break-all`}>{r.email}</td>
-                  <td class={td}>{r.status}</td>
-                  <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
-                  <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>
-                  {questions.map((q) => (
-                    <td class={td}>{byLabel.get(qLabel(q)) ?? ''}</td>
-                  ))}
-                  <td class={td}>
-                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.reg.cancelConfirm'))})`}>
-                      <input type="hidden" name="action" value="cancel" />
-                      <input type="hidden" name="registration_id" value={r.id} />
-                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled'}>
-                        {t(lang, 'admin.reg.cancel')}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              );
-            })
-          )
-        }
-      </tbody>
-    </table>
-  </div>
-
+  </div></details>
   {
     hasPortal && (
       <section class={`mt-10 ${card} max-w-2xl`}>
@@ -290,6 +298,7 @@ const cellCls = 'flex-1 min-w-40';
     )
   }
   {!hasPortal && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
+  </GatheringSurface>
 </Admin>
 
 <script>

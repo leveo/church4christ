@@ -1,4 +1,5 @@
 ---
+demo: true
 title: 欢迎来到我们的新网站
 author: 陈大卫牧师
 date: "2026-01-11"

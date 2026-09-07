@@ -31,47 +31,49 @@ const dateStr = (d: number) => `${year}-${String(month).padStart(2, '0')}-${Stri
 const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
 ---
 
-<div class="overflow-hidden rounded-lg border border-border bg-surface-raised">
-  <div class="grid grid-cols-7 bg-primary-soft text-center text-xs font-bold text-on-primary-soft">
-    {dayNames.map((d) => <div class="py-2">{d}</div>)}
-  </div>
-  <div class="grid grid-cols-7 text-sm">
-    {
-      cells.map((d) => {
-        const mark = d ? marks.get(dateStr(d)) : undefined;
-        const isToday = d !== null && dateStr(d) === today;
-        return (
-          <div class:list={['min-h-16 border-t border-l border-border p-1.5 first:border-l-0', mark?.blocked && 'bg-surface-sunken']}>
-            {d && (
-              <>
-                <span
-                  class:list={[
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs',
-                    isToday ? 'bg-primary font-bold text-on-primary' : 'text-ink-muted',
-                  ]}
-                >
-                  {d}
-                </span>
-                <div class="mt-1 flex flex-wrap gap-1">
-                  {mark?.statuses.map((s) => (
-                    <span class={`h-2 w-2 rounded-full ${dot[s]}`} title={t(locale, `serve.status.${s}`)} />
-                  ))}
-                  {mark?.events?.map((name) => <span class="h-2 w-2 rounded-full bg-info" title={name} />)}
-                  {mark?.meetings?.map((name) => <span class="h-2 w-2 rounded-full bg-accent" title={name} />)}
-                </div>
-              </>
-            )}
-          </div>
-        );
-      })
-    }
-  </div>
+<div class="calendar-frame">
+  <table class="month-calendar">
+    <caption class="sr-only">{`${year}-${String(month).padStart(2, '0')}`}</caption>
+    <thead><tr>{dayNames.map(day => <th scope="col">{day}</th>)}</tr></thead>
+    <tbody>{Array.from({ length: cells.length / 7 }, (_, week) => (
+      <tr>{cells.slice(week * 7, week * 7 + 7).map(day => {
+        const mark = day ? marks.get(dateStr(day)) : undefined;
+        return <td class:list={[mark?.blocked && 'calendar-blocked']}>
+          {day && <>
+            <time datetime={dateStr(day)} aria-current={dateStr(day) === today ? 'date' : undefined}>{day}</time>
+            <ul class="calendar-day-items">
+              {mark?.statuses.map(status => <li><span class={`calendar-dot ${dot[status]}`} aria-hidden="true" /><span>{t(locale, `serve.status.${status}`)}</span></li>)}
+              {mark?.events?.map(name => <li><span class="calendar-dot bg-info" aria-hidden="true" /><span>{name}</span></li>)}
+              {mark?.meetings?.map(name => <li><span class="calendar-dot bg-accent" aria-hidden="true" /><span>{name}</span></li>)}
+              {mark?.blocked && <li class="calendar-blocked-label">{t(locale, 'my.cal.blockedOut')}</li>}
+            </ul>
+          </>}
+        </td>;
+      })}</tr>
+    ))}</tbody>
+  </table>
 </div>
-<div class="mt-2 flex flex-wrap gap-4 text-xs text-ink-muted">
-  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span>{t(locale, 'serve.status.C')}</span>
-  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn"></span>{t(locale, 'serve.status.U')}</span>
-  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-danger"></span>{t(locale, 'serve.status.D')}</span>
-  <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded border border-border bg-surface-sunken"></span>{t(locale, 'my.cal.blockedOut')}</span>
-  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-info"></span>{t(locale, 'portal.calendar.legendEvent')}</span>
-  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-accent"></span>{t(locale, 'portal.calendar.legendMeeting')}</span>
+<div class="mt-3 flex flex-wrap gap-4 text-xs text-ink-muted">
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success" />{t(locale, 'serve.status.C')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn" />{t(locale, 'serve.status.U')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-danger" />{t(locale, 'serve.status.D')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-info" />{t(locale, 'portal.calendar.legendEvent')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-accent" />{t(locale, 'portal.calendar.legendMeeting')}</span>
 </div>
+<style>
+  .calendar-frame { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface-raised); }
+  .month-calendar { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  .month-calendar th { padding: .85rem .25rem; font-size: .7rem; font-weight: 600; color: var(--color-ink-muted); background: var(--color-surface-sunken); }
+  .month-calendar td { vertical-align: top; height: 105px; padding: .5rem; border: 1px solid var(--color-border); }
+  .month-calendar td:first-child { border-left: 0; }
+  .month-calendar td:last-child { border-right: 0; }
+  .month-calendar tr:last-child td { border-bottom: 0; }
+  .month-calendar time { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; font-size: .8rem; }
+  .month-calendar time[aria-current] { border-radius: var(--radius-full); background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
+  .calendar-day-items { margin-top: .3rem; display: grid; gap: .3rem; }
+  .calendar-day-items li { display: flex; gap: .25rem; font-size: .65rem; line-height: 1.4; overflow-wrap: anywhere; }
+  .calendar-dot { flex: 0 0 5px; width: 5px; height: 5px; border-radius: var(--radius-full); margin-top: .3rem; }
+  .calendar-blocked { background: var(--color-surface-sunken); }
+  .calendar-blocked-label { color: var(--color-ink-muted); }
+  @media (max-width: 639px) { .month-calendar td { padding: .2rem; height: 85px; } .calendar-day-items li { font-size: .55rem; } .calendar-dot { display: none; } }
+</style>

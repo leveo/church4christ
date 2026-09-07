@@ -5,7 +5,7 @@
 // guarded on status = 'P', which makes them idempotent — a second approve of an
 // already-approved row is a no-op and never re-stamps published_at.
 //
-// Public reads (locale-first ordering for the serve strip + page) live in
+// Public reads (English-only on en, Chinese-first on zh) live in
 // ministryDb.listPublishedTestimonies; this module owns writes + the review queue.
 
 import type { AppDb } from './appDb';
@@ -21,12 +21,15 @@ export interface TestimonyInput {
 
 /** Insert a testimony as pending (status defaults to 'P'). Returns its id. */
 export async function submitTestimony(db: AppDb, input: TestimonyInput): Promise<number> {
+  const authorName = input.author_name.trim()
+    ? input.author_name
+    : input.locale === 'zh' ? '匿名' : 'Anonymous';
   const created = await db
     .prepare(
       `INSERT INTO testimonies (person_id, author_name, locale, title, body, category)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id`,
     )
-    .bind(input.person_id, input.author_name, input.locale, input.title, input.body, input.category)
+    .bind(input.person_id, authorName, input.locale, input.title, input.body, input.category)
     .first<{ id: number }>();
   return created!.id;
 }

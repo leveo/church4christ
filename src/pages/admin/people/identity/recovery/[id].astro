@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
 import { btn, card, lab, noticeErr, noticeOk, tin } from '../../../../../lib/adminUi';
 import type { IdentityAuthEnv } from '../../../../../lib/identityAuth';
 import { scheduleIdentityDelivery } from '../../../../../lib/identityDelivery';
@@ -60,6 +61,7 @@ scheduleIdentityDelivery(Astro.locals.cfContext, async () => {
 ---
 
 <Admin title={t(lang, 'admin.identityRecovery.title')}>
+  <IdentityWorkspace locale={lang}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.identityRecovery.case', { id: recovery.id })}</h1>
   {notice === 'holding' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityRecovery.holding', { time: noticeTime })}</p>}
   {notice === 'completed' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityRecovery.completed')}</p>}
@@ -77,4 +79,5 @@ scheduleIdentityDelivery(Astro.locals.cfContext, async () => {
       </form>
     )}
   </section>
+  </IdentityWorkspace>
 </Admin>

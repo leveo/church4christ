@@ -1,4 +1,9 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import DateBadge from '../../../components/gatherings/DateBadge.astro';
+import { DESIGN_IMAGES } from '../../../lib/designAssets';
+
 // Public event registration page: event details + a form built dynamically from
 // the event's questions (text→input, textarea→textarea, select→select,
 // checkbox→checkbox group, yesno→two radios). A signed-in member's name/email are
@@ -25,6 +30,7 @@ if (!locale) {
   return Astro.rewrite('/404');
 }
 
+const copy = gatheringsCopy(locale);
 const eventId = Number(Astro.params.id);
 const event =
   Number.isInteger(eventId) && eventId > 0 ? await getOpenEvent(Astro.locals.db, locale, eventId) : null;
@@ -60,7 +66,7 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
 {
   !event && ownsWaitingSeat ? (
     <Base title={t(locale, 'register.title')} locale={locale}>
-      <div class="container-content max-w-xl py-16 text-center">
+      <GatheringSurface mode="public"><div class="gathering-complete">
         {errorKey && <p class={noticeErr}>{t(locale, errorKey)}</p>}
         <form method="post" action="/api/register/submit" class="mt-6">
           <input type="hidden" name="locale" value={locale} />
@@ -69,30 +75,38 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
           <input type="hidden" name="action" value="continue" />
           <button type="submit" class={btn}>{t(locale, 'register.submit.paid')}</button>
         </form>
-      </div>
+      </div></GatheringSurface>
     </Base>
   ) : !event ? (
     <Base title={t(locale, 'register.title')} locale={locale}>
-      <div class="container-content max-w-xl py-16 text-center">
+      <GatheringSurface mode="public"><div class="gathering-complete">
         <p class={noticeErr}>{t(locale, 'register.error.closed')}</p>
         <a href={localePath(locale, '/register')} class="mt-6 inline-block underline">
           {t(locale, 'register.back')}
         </a>
-      </div>
+      </div></GatheringSurface>
     </Base>
   ) : (
     <Base title={event.title} locale={locale}>
-      <div class="container-content max-w-xl py-12">
+      <GatheringSurface mode="public">
+      <div class="container-content gathering-registration-detail">
+      <section class="gathering-registration-about">
         <a href={localePath(locale, '/register')} class="text-sm text-ink-muted hover:underline">
           {t(locale, 'register.back')}
         </a>
+        <img src={DESIGN_IMAGES.events} alt="" width="1200" height="750" class="mt-5" />
+        <p class="gathering-eyebrow">{copy.eventDetails}</p>
         <h1 class="mt-3 font-display text-heading-md font-bold">{event.title}</h1>
-        <p class="mt-2 text-sm text-ink-muted">{when}</p>
+        <div class="mt-5 flex items-center gap-4"><DateBadge date={event.starts_at} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
         {event.location && <p class="text-sm text-ink-muted">{event.location}</p>}
         <p class="mt-2 text-sm">
           <span class="font-semibold">{t(locale, 'register.price')}:</span> {priceLabel}
         </p>
-        {event.description && <p class="mt-4 whitespace-pre-line">{event.description}</p>}
+        {event.description && <p class="mt-5 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{event.description}</p>}
+      </section>
+      <section class="gathering-registration-form" aria-labelledby="registration-details-heading">
+        <h2 id="registration-details-heading">{copy.yourDetails}</h2>
+        <ol class="gathering-flow" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === (isFull ? 0 : 1) ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
 
         {errorKey && <p class={`${noticeErr} mt-6`}>{t(locale, errorKey)}</p>}
 
@@ -135,13 +149,13 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
 
             {questions.map((q) => (
               <fieldset class="block">
-                <span class={lab}>{q.label}</span>
-                {q.type === 'text' && <input name={String(q.id)} required={q.required === 1} class={tin} />}
+                <legend class={lab}>{q.label}</legend>
+                {q.type === 'text' && <input name={String(q.id)} aria-label={q.label} required={q.required === 1} class={tin} />}
                 {q.type === 'textarea' && (
-                  <textarea name={String(q.id)} required={q.required === 1} rows="4" class={tin} />
+                  <textarea name={String(q.id)} aria-label={q.label} required={q.required === 1} rows="4" class={tin} />
                 )}
                 {q.type === 'select' && (
-                  <select name={String(q.id)} required={q.required === 1} class={tin}>
+                  <select name={String(q.id)} aria-label={q.label} required={q.required === 1} class={tin}>
                     <option value="">—</option>
                     {(q.options ?? []).map((o) => (
                       <option value={o}>{o}</option>
@@ -178,7 +192,9 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
             </button>
           </form>
         )}
+      </section>
       </div>
+      </GatheringSurface>
     </Base>
   )
 }

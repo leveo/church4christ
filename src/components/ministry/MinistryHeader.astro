@@ -1,0 +1,15 @@
+---
+import DesignImage from '../ui/DesignImage.astro';
+import type { DesignImage as ImageKey } from '../../lib/designAssets';
+interface Props { title: string; eyebrow?: string; description?: string; image?: ImageKey }
+const { title, eyebrow, description, image } = Astro.props;
+---
+<header class:list={['mw-header', image && 'mw-header-image']}>
+  <div class="mw-header-copy">
+    {eyebrow && <p class="mw-eyebrow">{eyebrow}</p>}
+    <h1>{title}</h1>
+    {description && <p class="mw-description">{description}</p>}
+    {Astro.slots.has('default') && <div class="mw-actions"><slot /></div>}
+  </div>
+  {image && <div class="mw-header-art"><DesignImage image={image} eager class="h-full w-full object-cover" /></div>}
+</header>

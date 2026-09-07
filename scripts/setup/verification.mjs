@@ -18,7 +18,7 @@ export async function verifyCanonicalDemoSeed(db) {
     return Number(state?.people_count) >= 10 && state?.admin_email === 'admin@example.com' &&
       state?.admin_display_name === 'Alex Admin' && state?.admin_role === 'admin' &&
       state?.ministry_slug === 'av-tech' && Number(state?.sermon_count) >= 1 &&
-      state?.learning_course_name === 'Genesis 1: Creation / 创世记第一章：创造' &&
+      state?.learning_course_name === 'Genesis 1: Creation' &&
       Number(state?.learning_enrollment_count) === 2 && Number(state?.learning_credential_count) === 0;
   } catch { return false; }
 }

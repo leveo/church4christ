@@ -182,6 +182,13 @@ const PEOPLE_IMPORT_MAPPING_COPY_KEYS = [
 ] as const;
 
 describe('dictionaries (parity, ported from the reference stack)', () => {
+  it('keeps every English UI label in English, including language choices', () => {
+    const chineseLabels = Object.entries(en).filter(([, value]) => /\p{Script=Han}/u.test(value));
+    expect(chineseLabels).toEqual([]);
+    expect(t('en', 'locale.zh')).toBe('Chinese');
+    expect(t('zh', 'locale.zh')).toBe('中文');
+  });
+
   it('has a non-empty string for every key in both locales', () => {
     for (const locale of ['en', 'zh'] as const) {
       for (const [key, value] of Object.entries(dicts[locale])) {

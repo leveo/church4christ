@@ -1,0 +1,20 @@
+---
+import { t } from '../../lib/i18n';
+import { contentCopy } from '../../i18n/designContent';
+import { tin, lab, errorText, btn } from '../../lib/adminUi';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; status: string; scheduled?: boolean; publishAt?: string; error?: string }
+const { locale, status, scheduled = false, publishAt = '', error } = Astro.props;
+const copy = contentCopy(locale);
+---
+<section class="content-publication">
+  <h2>{t(locale, 'admin.form.publishTitle')}</h2>
+  <p>{copy.publishHint}</p>
+  <fieldset class="publication-options">
+    <legend class="sr-only">{t(locale, 'admin.form.publishTitle')}</legend>
+    <label><input type="radio" name="status" value="draft" checked={status !== 'published'} />{t(locale, 'admin.form.statusDraft')}</label>
+    <label><input type="radio" name="status" value="published" checked={status === 'published'} />{t(locale, 'admin.form.statusPublished')}</label>
+  </fieldset>
+  {scheduled && <label class="block"><span class={lab}>{t(locale, 'admin.form.publishAt')}</span><input type="datetime-local" name="publish_at" value={publishAt} class={tin}/>{error && <span class={errorText}>{t(locale, error)}</span>}<small class="publication-help">{copy.scheduleHint}</small></label>}
+  <button type="submit" class={`publication-save ${btn}`}>{t(locale, 'admin.form.save')}</button>
+</section>

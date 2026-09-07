@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../../layouts/Base.astro';
+import ConfirmationPanel from '../../../components/ui/ConfirmationPanel.astro';
 import { btn } from '../../../lib/adminUi';
 import type { IdentityRecoveryKeyEnv } from '../../../lib/identityRecoveryKey';
 import { peekIdentityRecoveryVeto, vetoIdentityRecovery } from '../../../lib/identityRecovery';
@@ -26,12 +27,7 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Base title={t(locale, 'recovery.veto.title')} locale={locale} noindex privateMetadata>
-  <section class="container-narrow py-16">
-    <div class="rounded-lg border border-border bg-surface-raised p-6">
-      <h1 class="font-display text-heading-sm font-semibold">{t(locale, 'recovery.veto.title')}</h1>
-      {state === 'confirm' ? (
-        <><p class="mt-3 text-ink-muted">{t(locale, 'recovery.veto.body')}</p><form method="post" class="mt-6"><button type="submit" class={`${btn} w-full justify-center`}>{t(locale, 'recovery.veto.submit')}</button></form></>
-      ) : <p class="mt-3 text-ink-muted" role="status">{t(locale, state === 'done' ? 'recovery.veto.done' : 'recovery.veto.invalid')}</p>}
-    </div>
-  </section>
+  <ConfirmationPanel title={t(locale, 'recovery.veto.title')} body={t(locale, state === 'confirm' ? 'recovery.veto.body' : state === 'done' ? 'recovery.veto.done' : 'recovery.veto.invalid')} icon="lock">
+    {state === 'confirm' && <form method="post"><button type="submit" class={btn}>{t(locale, 'recovery.veto.submit')}</button></form>}
+  </ConfirmationPanel>
 </Base>

@@ -91,12 +91,65 @@ const h2 = 'font-display text-heading-sm font-bold';
 ---
 
 <Admin title={heading}>
-  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  <div class="flex flex-wrap items-center justify-between gap-4"><h1 class="font-display text-heading-md font-bold">{heading}</h1><a href="#group-editor" class={btn}>{t(lang, 'admin.groups.newTitle')}</a></div>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
 
-  <form method="post" class="mt-6 max-w-2xl">
+  <div class:list={['group-admin-grid', { 'is-editing': Boolean(editId) || hasErrors }]}><section>  <h2 class={h2}>{t(lang, 'admin.groups.existing')}</h2>
+  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.groups.colName')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colVisibility')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colMembers')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colAdmins')}</th>
+          <th class={th}>{t(lang, 'admin.groups.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="5">
+                {t(lang, 'admin.groups.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  <a href={`/admin/groups/${r.id}`} class="font-medium text-primary hover:underline">
+                    {r.name}
+                  </a>
+                </td>
+                <td class={td}>
+                  <span class={`${badge} ${r.is_public ? badgeActive : badgeInactive}`}>
+                    {r.is_public ? t(lang, 'admin.groups.public') : t(lang, 'admin.groups.private')}
+                  </span>
+                </td>
+                <td class={td}>{r.member_count}</td>
+                <td class={`${td} text-ink-muted`}>{(adminNamesByGroup.get(r.id) ?? []).join(', ') || '—'}</td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/groups/${r.id}`} class={rowBtn}>{t(lang, 'admin.groups.manageAdmins')}</a>
+                    <a href={`/admin/groups?edit=${r.id}#group-editor`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.groups.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</section><aside>  <form method="post" id="group-editor" class="group-editor">
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{formHeading}</h2>
       <input type="hidden" name="action" value="save" />
@@ -147,57 +200,13 @@ const h2 = 'font-display text-heading-sm font-bold';
     </section>
   </form>
 
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.groups.existing')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.groups.colName')}</th>
-          <th class={th}>{t(lang, 'admin.groups.colVisibility')}</th>
-          <th class={th}>{t(lang, 'admin.groups.colMembers')}</th>
-          <th class={th}>{t(lang, 'admin.groups.colAdmins')}</th>
-          <th class={th}>{t(lang, 'admin.groups.colActions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          rows.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan="5">
-                {t(lang, 'admin.groups.empty')}
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr class="border-t border-border align-top">
-                <td class={td}>
-                  <a href={`/admin/groups/${r.id}`} class="font-medium text-primary hover:underline">
-                    {r.name}
-                  </a>
-                </td>
-                <td class={td}>
-                  <span class={`${badge} ${r.is_public ? badgeActive : badgeInactive}`}>
-                    {r.is_public ? t(lang, 'admin.groups.public') : t(lang, 'admin.groups.private')}
-                  </span>
-                </td>
-                <td class={td}>{r.member_count}</td>
-                <td class={`${td} text-ink-muted`}>{(adminNamesByGroup.get(r.id) ?? []).join(', ') || '—'}</td>
-                <td class={td}>
-                  <div class="flex flex-wrap gap-2">
-                    <a href={`/admin/groups/${r.id}`} class={rowBtn}>{t(lang, 'admin.groups.manageAdmins')}</a>
-                    <a href={`/admin/groups?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
-                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.groups.deleteConfirm'))})`}>
-                      <input type="hidden" name="action" value="delete" />
-                      <input type="hidden" name="id" value={r.id} />
-                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
-                    </form>
-                  </div>
-                </td>
-              </tr>
-            ))
-          )
-        }
-      </tbody>
-    </table>
-  </div>
+</aside></div>
 </Admin>
+
+<style>
+.group-admin-grid { display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:1.75rem;margin-top:2rem;align-items:start; }
+.group-admin-grid > * { min-width:0; }
+.group-editor { scroll-margin-top:7rem; }
+.group-editor :global(.sm\:grid-cols-3) { grid-template-columns:1fr; }
+@media(max-width:1100px) { .group-admin-grid { grid-template-columns:1fr; } .group-admin-grid.is-editing > aside { order:-1; } }
+</style>

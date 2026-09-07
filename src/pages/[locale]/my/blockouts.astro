@@ -6,7 +6,8 @@
 // from the reference stack's src/pages/my/blockouts.astro; parsing lives in
 // validate.parseBlockoutForm and the writes in myDb so both are unit-tested.
 // Every mutation is scoped to the SESSION user's person_id.
-import Base from '../../../layouts/Base.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { addBlockout, deleteBlockout, deleteBlockoutSeries, listBlockouts } from '../../../lib/myDb';
@@ -51,10 +52,10 @@ if (Astro.request.method === 'POST') {
 const blockouts = await listBlockouts(db, user.id, todayInTz());
 ---
 
-<Base title={t(locale, 'my.blockouts')} locale={locale} noindex>
-  <div class="container-content max-w-3xl py-12">
+<Member active="blockouts" title={t(locale, 'my.blockouts')} locale={locale} noindex>
+  <div class="member-content">
     <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
-    <h1 class="mt-2 font-display text-heading-md font-bold">{t(locale, 'my.blockouts')}</h1>
+    <MemberPageHeader title={t(locale, 'my.blockouts')} />
 
     {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
 
@@ -138,4 +139,4 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
       {blockouts.length === 0 && <li class="px-4 py-3 text-sm text-ink-muted">{t(locale, 'my.none')}</li>}
     </ul>
   </div>
-</Base>
+</Member>

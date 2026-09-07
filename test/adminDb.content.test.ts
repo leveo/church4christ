@@ -247,12 +247,12 @@ describe('saveSermon', () => {
   it('a draft shows in admin listSermons but not public latestPublishedSermon; soft-delete removes a published one from both', async () => {
     const draftId = idOf(await saveSermon(env.DB, sInput({ status: 'draft' }), 'ed'));
     expect((await listSermons(env.DB)).some((s) => s.id === draftId)).toBe(true);
-    expect((await latestPublishedSermon(env.DB))?.id).not.toBe(draftId);
+    expect((await latestPublishedSermon(env.DB, 'en'))?.id).not.toBe(draftId);
 
     const pubId = idOf(await saveSermon(env.DB, sInput({ serviceTypeId: 2, sermonDate: '2026-07-12', status: 'published' }), 'ed'));
-    expect((await latestPublishedSermon(env.DB))?.id).toBe(pubId);
+    expect((await latestPublishedSermon(env.DB, 'en'))?.id).toBe(pubId);
     await softDeleteSermon(env.DB, pubId, 'ed');
-    expect((await latestPublishedSermon(env.DB))?.id).not.toBe(pubId);
+    expect((await latestPublishedSermon(env.DB, 'en'))?.id).not.toBe(pubId);
     expect((await listSermons(env.DB)).some((s) => s.id === pubId)).toBe(false);
   });
 });
@@ -297,12 +297,12 @@ describe('savePrayerSheet', () => {
   it('a draft shows in admin listPrayerSheets but not public latestPrayerSheet; soft-delete removes a published one from both', async () => {
     const draftId = idOf(await savePrayerSheet(env.DB, pInput({ sheetDate: '2026-07-01', status: 'draft' }), 'ed'));
     expect((await listPrayerSheets(env.DB)).some((p) => p.id === draftId)).toBe(true);
-    expect((await latestPrayerSheet(env.DB))?.id).not.toBe(draftId);
+    expect((await latestPrayerSheet(env.DB, 'zh'))?.id).not.toBe(draftId);
 
     const pubId = idOf(await savePrayerSheet(env.DB, pInput({ sheetDate: '2026-07-08', status: 'published' }), 'ed'));
-    expect((await latestPrayerSheet(env.DB))?.id).toBe(pubId);
+    expect((await latestPrayerSheet(env.DB, 'zh'))?.id).toBe(pubId);
     await softDeletePrayerSheet(env.DB, pubId, 'ed');
-    expect((await latestPrayerSheet(env.DB))?.id).not.toBe(pubId);
+    expect((await latestPrayerSheet(env.DB, 'zh'))?.id).not.toBe(pubId);
     expect((await listPrayerSheets(env.DB)).some((p) => p.id === pubId)).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
-import Base from '../../../layouts/Base.astro';
-import PortalNav from '../../../components/PortalNav.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { beginContactChange, completeContactChange, recentStepUpContext } from '../../../lib/identityAccount';
 import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../../lib/identityAuth';
 import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../../lib/identityDeviceCookie';
@@ -72,8 +72,8 @@ if (Astro.request.method === 'POST') {
 // shared / reachability is a label for this member's own linked contact only.
 // This query never returns contact values that belong solely to another person.
 type ContactRow = { value: string; kind: 'email' | 'phone'; notificationEnabled: number; isOwner: number; shared: number };
-const { results: contacts } = await db.prepare(`SELECT cp.display_value value,cp.kind,l.notification_enabled notificationEnabled,
-  CASE WHEN o.person_id=?1 THEN 1 ELSE 0 END isOwner,
+const { results: contacts } = await db.prepare(`SELECT cp.display_value value,cp.kind,l.notification_enabled AS "notificationEnabled",
+  CASE WHEN o.person_id=?1 THEN 1 ELSE 0 END AS "isOwner",
   CASE WHEN EXISTS(SELECT 1 FROM person_contact_links other WHERE other.contact_point_id=l.contact_point_id AND other.person_id<>?1 AND other.ended_at IS NULL)
     OR EXISTS(SELECT 1 FROM household_contact_links h WHERE h.contact_point_id=l.contact_point_id) THEN 1 ELSE 0 END shared
   FROM person_contact_links l JOIN contact_points cp ON cp.id=l.contact_point_id
@@ -83,11 +83,9 @@ const assurance = Astro.locals.assurance;
 const recentlyVerified = hasRecentStepUp(assurance);
 const verifiedAt = assurance?.stepUpTime ?? assurance?.authTime ?? null;
 ---
-<Base title={t(locale, 'security.title')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'security.title')}</h1>
-    <PortalNav locale={locale} active="security" />
-    <p class="mt-4 text-ink-muted">{t(locale, 'security.intro')}</p>
+<Member title={t(locale, 'security.title')} locale={locale} active="security">
+  <div class="security-workspace">
+    <MemberPageHeader title={t(locale, 'security.title')} description={t(locale, 'security.intro')} />
     {state === 'review' && <p class="mt-5 rounded-lg border border-border bg-surface-raised p-4" role="status">{t(locale, 'security.changeReview')}</p>}
     {state === 'invalid' && <p class="mt-5 rounded-lg border border-danger bg-surface-raised p-4" role="alert">{t(locale, 'security.changeInvalid')}</p>}
 
@@ -121,4 +119,12 @@ const verifiedAt = assurance?.stepUpTime ?? assurance?.authTime ?? null;
       <form method="post" class="mt-4"><input type="hidden" name="_action" value="signoutAll" /><button class="rounded-full border border-border px-4 py-2.5 font-semibold">{t(locale, 'security.signOutAll')}</button>{!recentlyVerified && <a href={reauthPath()} class="ml-3 text-sm font-semibold text-primary">{t(locale, 'security.stepUpRequired')}</a>}</form>
     </section>
   </div>
-</Base>
+</Member>
+
+<style>
+  .security-workspace section { scroll-margin-top: 7rem; }
+  .security-workspace li { overflow-wrap: anywhere; }
+  .security-workspace form label { min-width: 0; max-width: 100%; }
+  .security-workspace input { width: 100%; }
+  .security-workspace button { min-height: 44px; border-radius: var(--radius-md); }
+</style>

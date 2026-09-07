@@ -1,0 +1,33 @@
+---
+import CareWorkspace from './CareWorkspace.astro';
+import Icon from '../../ui/Icon.astro';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = Astro.url.pathname;
+const links = [
+  { href: '/admin/people', label: t(locale, 'admin.identityMerge.backToPeople'), icon: 'people' },
+  { href: '/admin/people/identity/merge', label: t(locale, 'admin.identityMerge.queue'), icon: 'people' },
+  { href: '/admin/people/identity/recovery', label: t(locale, 'admin.identityRecovery.queue'), icon: 'lock' },
+  { href: '/admin/people/identity/planning-center', label: locale === 'zh' ? 'Planning Center 同步' : 'Planning Center sync', icon: 'settings' },
+];
+---
+<CareWorkspace variant="identity">
+  <nav class="identity-navigation" aria-label={locale === 'zh' ? '身份管理' : 'Identity management'}>
+    {links.map(link => <a href={link.href} aria-current={link.href !== '/admin/people' && path.startsWith(link.href) ? 'page' : undefined}><Icon name={link.icon} size={16} />{link.label}</a>)}
+  </nav>
+  <div class="identity-body"><slot /></div>
+</CareWorkspace>
+<style>
+  .identity-navigation { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: 1rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border); }
+  .identity-navigation a { display: flex; align-items: center; gap: .5rem; padding: .7rem .85rem; white-space: nowrap; border-radius: var(--radius-md); font-size: .78rem; color: var(--color-ink-muted); }
+  .identity-navigation a:hover, .identity-navigation a[aria-current] { background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
+  .identity-body { min-width: 0; }
+  .identity-body :global(h1) { font-family: var(--font-body); font-size: clamp(1.5rem, 2.5vw, 1.8rem); font-weight: 650; letter-spacing: -.025em; }
+  .identity-body :global(h2) { font-family: var(--font-body); font-size: 1rem; font-weight: 650; }
+  .identity-body :global(section) { min-width: 0; border-radius: var(--radius-sm); }
+  .identity-body :global(td) { max-width: 24rem; overflow-wrap: anywhere; }
+  .identity-body :global(input), .identity-body :global(select), .identity-body :global(button) { max-width: 100%; min-height: 40px; }
+  .identity-body :global(label) { min-width: 0; }
+</style>

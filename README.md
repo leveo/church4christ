@@ -22,12 +22,27 @@ before choosing a production setup.
 | ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Member Portal dashboard](docs/images/portal/dashboard.png) |
 | ![The English Genesis 1 learner course](docs/images/learning/genesis-1-en.png) | ![The Chinese Genesis 1 learner course](docs/images/learning/genesis-1-zh.png) | ![The Learning provider administration page](docs/images/learning/admin-overview.png) |
 
+**A distinct workspace for every core module.** The default Sanctuary design pairs
+warm ivory surfaces and forest green navigation with layouts suited to each task:
+publishing editors with local previews, people and household records, care queues,
+serving matrices, touch-friendly children's check-in, course players, and finance
+ledgers. Public, member, leader, and administrator menus follow the enabled modules
+and each person's permissions. Harvest and Midnight remain available, with light and
+dark modes. See the [21-module design inventory](docs/design/module-coverage.md).
+
+The screenshots use the repository's fictional demo content. First setup lets you
+include those examples or start without them; both choices keep the same layouts,
+theme, and bundled default images. English pages use English interface and demo copy;
+Chinese pages support Chinese and bilingual content. All 29 interface screenshots were
+recaptured from the running application; see the [capture inventory and regeneration
+command](docs/design/readme-screenshot-inventory.md).
+
 **Grouped navigation.** A fully enabled site condenses its public destinations into
 Welcome, Explore, Connect, and Get Involved. Built-in links stay in their audience
 group, while custom pages and external links appear under More. The order saved in
 Admin → Navigation is preserved inside each group, and empty groups disappear.
 
-![The calmer desktop header with the Connect group open](docs/images/public/grouped-navigation.png)
+![The Connect menu with its own links and community image](docs/images/public/grouped-navigation.png)
 
 Two languages are included out of the box (English and Chinese), along with three
 ready-made looks and a modular starting point for further customization.
@@ -255,12 +270,20 @@ For local Supabase, the handoff instead exports
 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
 `npm run dev`; that connection URL must not go in `.dev.vars`.
 
-Open the address it prints (usually `http://localhost:4321`). If you chose demo data during
-setup, you will see sample sermons, bulletins, events, ministries, and local demo images.
-The media step copies the generated image pack from `seed/media/` into local R2 and updates
-the configured database records that refer to those objects. It is safe to run again after
-reseeding the database. Without demo data, setup leaves a clean installation for your own
-content.
+During first setup, choose **Include demo content** or **No demo content**. Both keep the
+same bundled design, local decorative images, enabled features, and administrator tools.
+Demo content adds fictional people, sermons, bulletins, events, ministries, and other
+examples. Its media step copies the generated image pack from `seed/media/` into local R2.
+No demo content creates the database schema, operational defaults, church settings, module
+selection, and first administrator without sample business records.
+
+For scripted setup, pass `--demo-data` or `--no-demo-data`; omitting both in noninteractive
+setup keeps the existing no-demo default. The flags cannot be combined. Repeating the same
+setup preserves the recorded content choice and existing records. `--no-demo-data` does
+not clear an existing database, and setup refuses to add demo data over existing people.
+Use a separate fresh workspace/database to try the other starting mode.
+
+Open the address setup prints (usually `http://localhost:4321`).
 
 **Signing in to the admin area.** There is no password. On the sign-in page, enter the
 first-admin email from your setup answers, repeated in the setup handoff, and request a
@@ -268,6 +291,11 @@ link. Because local email is set to print instead of send, the **magic-link URL 
 right in your terminal**. Paste it into the browser and you are in. (For quicker local
 testing, setup writes that same address as `AUTH_DEV_BYPASS_EMAIL` in `.dev.vars`, which
 signs you in automatically. Remove that line to test the real sign-in flow.)
+
+In both content modes, setup creates a new administrator and their audited sign-in
+identity together. Reruns preserve existing contact ownership; they do not verify an
+existing email or restore revoked access. If setup reports an identity problem, complete
+the [identity review or recovery workflow](docs/features/member-identity.md) before rerunning.
 
 Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 18
 D1-compatible modules), and **Full Church** (all 21 modules). Portal, Giving, and

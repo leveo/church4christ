@@ -27,15 +27,15 @@
 -- People: one admin, one editor pastor, eight volunteers (all @example.com).
 INSERT INTO people (id, first_name, last_name, display_name, email, phone, role, lang) VALUES
   (1, 'Alex', 'Admin', 'Alex Admin', 'admin@example.com', '(555) 010-1000', 'admin', 'en'),
-  (2, 'David', 'Chen', '陈大卫 David Chen', 'pastor.david@example.com', '(555) 010-2000', 'editor', 'zh'),
-  (3, 'Sarah', 'Johnson', 'Sarah Johnson 莎拉', 'sarah.johnson@example.com', NULL, 'member', 'en'),
-  (4, 'Grace', 'Lin', 'Grace Lin 林恩慈', 'grace.lin@example.com', NULL, 'member', 'zh'),
-  (5, 'Mark', 'Liu', 'Mark Liu 刘马可', 'mark.liu@example.com', NULL, 'member', 'zh'),
-  (6, 'Faithful', 'Wang', 'Faithful Wang 王信实', 'faithful.wang@example.com', NULL, 'member', 'zh'),
-  (7, 'Amy', 'Chen', 'Amy Chen 陈爱美', 'amy.chen@example.com', NULL, 'member', 'zh'),
-  (8, 'Ben', 'Wu', 'Ben Wu 吴恩本', 'ben.wu@example.com', NULL, 'member', 'en'),
-  (9, 'Esther', 'Lin', 'Esther Lin 林以斯帖', 'esther.lin@example.com', NULL, 'member', 'zh'),
-  (10, 'Joshua', 'Zhao', 'Joshua Zhao 赵约书亚', 'joshua.zhao@example.com', NULL, 'member', 'en');
+  (2, 'David', 'Chen', 'David Chen', 'pastor.david@example.com', '(555) 010-2000', 'editor', 'zh'),
+  (3, 'Sarah', 'Johnson', 'Sarah Johnson', 'sarah.johnson@example.com', NULL, 'member', 'en'),
+  (4, 'Grace', 'Lin', 'Grace Lin', 'grace.lin@example.com', NULL, 'member', 'zh'),
+  (5, 'Mark', 'Liu', 'Mark Liu', 'mark.liu@example.com', NULL, 'member', 'zh'),
+  (6, 'Faithful', 'Wang', 'Faithful Wang', 'faithful.wang@example.com', NULL, 'member', 'zh'),
+  (7, 'Amy', 'Chen', 'Amy Chen', 'amy.chen@example.com', NULL, 'member', 'zh'),
+  (8, 'Ben', 'Wu', 'Ben Wu', 'ben.wu@example.com', NULL, 'member', 'en'),
+  (9, 'Esther', 'Lin', 'Esther Lin', 'esther.lin@example.com', NULL, 'member', 'zh'),
+  (10, 'Joshua', 'Zhao', 'Joshua Zhao', 'joshua.zhao@example.com', NULL, 'member', 'en');
 
 -- Alex Admin is the demo super admin. The migration's role='admin' backfill runs
 -- BEFORE seeding, so seeded rows must set the flag explicitly. Lydia Kwan is the
@@ -43,7 +43,7 @@ INSERT INTO people (id, first_name, last_name, display_name, email, phone, role,
 -- plus her granted groups + news/events areas.
 UPDATE people SET super_admin = 1 WHERE id = 1;
 INSERT INTO people (id, first_name, last_name, display_name, email, phone, role, lang, super_admin, admin_areas) VALUES
-  (11, 'Lydia', 'Kwan', 'Lydia Kwan 关莉迪', 'lydia.kwan@example.com', NULL, 'admin', 'zh', 0, 'groups,events');
+  (11, 'Lydia', 'Kwan', 'Lydia Kwan', 'lydia.kwan@example.com', NULL, 'admin', 'zh', 0, 'groups,events');
 
 -- Development identities explicitly model the legacy-grace ownership proof;
 -- a seed person's people.email alone must never make a magic link eligible.
@@ -59,16 +59,16 @@ INSERT INTO verified_contact_owners(contact_point_id, person_id, verification_me
 -- Ten ministries with emoji icons and matching categories. Leaders point at the
 -- three team leaders plus the senior pastor for the care ministry.
 INSERT INTO ministries (id, slug, category, icon, leader_person_id, meeting_time, active, sort) VALUES
-  (1, 'worship', 'worship', '🎵', 3, 'Sundays 主日', 1, 1),
-  (2, 'children', 'children', '🧒', NULL, 'Sundays 主日', 1, 2),
-  (3, 'youth', 'youth', '🔥', NULL, 'Friday nights 周五晚', 1, 3),
-  (4, 'college', 'college', '🎓', NULL, 'Saturday evenings 周六晚', 1, 4),
-  (5, 'family', 'family', '👨‍👩‍👧', NULL, 'Monthly 每月', 1, 5),
-  (6, 'seniors', 'seniors', '🌿', NULL, 'Wednesday mornings 周三上午', 1, 6),
-  (7, 'missions', 'missions', '🌏', NULL, 'Quarterly 每季', 1, 7),
-  (8, 'care', 'care', '💗', 2, 'As needed 随时', 1, 8),
-  (9, 'hospitality', 'hospitality', '🤝', 6, 'Every Sunday 每主日', 1, 9),
-  (10, 'av-tech', 'av-tech', '🎥', 8, 'Every Sunday 每主日', 1, 10);
+  (1, 'worship', 'worship', '🎵', 3, 'Sundays', 1, 1),
+  (2, 'children', 'children', '🧒', NULL, 'Sundays', 1, 2),
+  (3, 'youth', 'youth', '🔥', NULL, 'Friday nights', 1, 3),
+  (4, 'college', 'college', '🎓', NULL, 'Saturday evenings', 1, 4),
+  (5, 'family', 'family', '👨‍👩‍👧', NULL, 'Monthly', 1, 5),
+  (6, 'seniors', 'seniors', '🌿', NULL, 'Wednesday mornings', 1, 6),
+  (7, 'missions', 'missions', '🌏', NULL, 'Quarterly', 1, 7),
+  (8, 'care', 'care', '💗', 2, 'As needed', 1, 8),
+  (9, 'hospitality', 'hospitality', '🤝', 6, 'Every Sunday', 1, 9),
+  (10, 'av-tech', 'av-tech', '🎥', 8, 'Every Sunday', 1, 10);
 
 INSERT INTO ministry_i18n (ministry_id, locale, name, intro) VALUES
   (1, 'en', 'Worship', 'We lead the congregation into the presence of God through music, song, and heartfelt praise every Sunday.'),
@@ -213,7 +213,7 @@ INSERT INTO plan_positions (plan_id, position_id, needed, open_signup) VALUES
 INSERT INTO roster_assignments (plan_id, position_id, person_id, status, decline_reason, is_signup, assigned_by, responded_at) VALUES
   (1, 1, 3, 'C', NULL, 0, 'admin@example.com', datetime('now')),
   (1, 2, 5, 'U', NULL, 0, 'admin@example.com', NULL),
-  (1, 2, 7, 'D', 'Out of town 出城', 0, 'admin@example.com', datetime('now')),
+  (1, 2, 7, 'D', 'Out of town', 0, 'admin@example.com', datetime('now')),
   (1, 5, 8, 'C', NULL, 0, 'admin@example.com', datetime('now')),
   (9, 1, 2, 'C', NULL, 0, 'admin@example.com', datetime('now')),
   (9, 3, 4, 'U', NULL, 1, 'admin@example.com', NULL);
@@ -221,13 +221,13 @@ INSERT INTO roster_assignments (plan_id, position_id, person_id, status, decline
 -- Ben is away one Sunday — plan 2/10's date (the second upcoming Sunday), so the
 -- leader conflict demo has a real blocked-out serving date to collide with.
 INSERT INTO blockout_dates (person_id, start_date, end_date, reason) VALUES
-  (8, date('now','weekday 0','+7 days'), date('now','weekday 0','+7 days'), 'Family trip 家庭旅行');
+  (8, date('now','weekday 0','+7 days'), date('now','weekday 0','+7 days'), 'Family trip');
 
 -- Three team applications, one of each status (pending, approved, rejected).
 INSERT INTO team_applications (person_id, team_id, position_id, message, status, decided_by, decided_at) VALUES
-  (9, 1, 2, 'I have sung in choir for years and would love to serve. 我在诗班唱了多年，很想参与服事。', 'P', NULL, NULL),
-  (10, 3, 8, 'Happy to welcome newcomers every Sunday. 乐意每主日迎接新朋友。', 'A', 'admin@example.com', datetime('now')),
-  (7, 2, 6, 'I can help run slides during worship. 我可以在敬拜时帮忙投影。', 'R', 'admin@example.com', datetime('now'));
+  (9, 1, 2, 'I have sung in choir for years and would love to serve.', 'P', NULL, NULL),
+  (10, 3, 8, 'Happy to welcome newcomers every Sunday.', 'A', 'admin@example.com', datetime('now')),
+  (7, 2, 6, 'I can help run slides during worship.', 'R', 'admin@example.com', datetime('now'));
 
 -- Self-selected serving interests (feeds the leader potential-volunteers list).
 INSERT INTO person_interests (person_id, category) VALUES
@@ -240,7 +240,7 @@ INSERT INTO gift_results (person_id, top_gifts_json, recommended_json) VALUES
 
 -- Four testimonies: two English, two Chinese, three approved and one pending.
 INSERT INTO testimonies (id, person_id, author_name, locale, title, body, category, status, published_at) VALUES
-  (1, 8, 'Ben Wu 吴恩本', 'en', 'Found on a Tuesday Night',
+  (1, 8, 'Ben Wu', 'en', 'Found on a Tuesday Night',
    'I wandered into a small group not expecting much. Over a few months the honest friendships and the words of Scripture slowly rebuilt my hope. I gave my life to Jesus on an ordinary Tuesday, and nothing has been ordinary since.',
    'faith', 'A', datetime('now')),
   (2, 5, 'Mark Liu 刘马可', 'zh', '从怀疑到信靠',
@@ -249,7 +249,7 @@ INSERT INTO testimonies (id, person_id, author_name, locale, title, body, catego
   (3, 7, 'Amy Chen 陈爱美', 'zh', '在敬拜中重新遇见神',
    '有一段时间我服事得很累，几乎想要放下一切。直到某个主日我停下来，单单地敬拜，才重新想起起初的爱。神的恩典把我从枯干中领回丰盛。',
    'worship', 'A', datetime('now')),
-  (4, 10, 'Joshua Zhao 赵约书亚', 'en', 'Still Learning to Trust',
+  (4, 10, 'Joshua Zhao', 'en', 'Still Learning to Trust',
    'Trust does not come easily to me. But serving on the AV team taught me that faithfulness in small hidden things is its own kind of worship. I am still learning, one Sunday at a time.',
    'serving', 'P', NULL);
 
@@ -400,12 +400,14 @@ INSERT INTO event_i18n (event_id, locale, title, blurb) VALUES
   (3, 'zh', '复活节庆祝', '满有喜乐的复活节聚会，一同敬拜并享用爱筵（此活动已结束）。');
 
 -- Five prayer requests spread across the kanban statuses.
+-- Shared demo records have no locale field, so their authored copy is English.
+-- This seed is for fresh demos only; real submitted names/messages stay untouched.
 INSERT INTO prayer_requests (id, name, email, message, status) VALUES
-  (1, 'Anna Lee 李安娜', 'anna.lee@example.com', '请为我年迈的母亲身体健康祷告，也求神赐给我们全家平安。', 'new'),
+  (1, 'Anna Lee', 'anna.lee@example.com', 'Please pray for my elderly mother''s health and for God to give our whole family peace.', 'new'),
   (2, 'Tom Park', 'tom.park@example.com', 'Please pray for a job interview next week. I am trusting God for provision and peace.', 'praying'),
-  (3, '陈稳', 'wen.chen@example.com', '为一位还未信主的家人祷告，愿他早日认识主的爱，这是长久以来的心愿。', 'long_term'),
+  (3, 'Wen Chen', 'wen.chen@example.com', 'Please pray that a family member who does not yet believe will come to know the love of Jesus. This has been my prayer for many years.', 'long_term'),
   (4, 'Maria Gomez', 'maria.gomez@example.com', 'Praying about a big decision for our family. Asking God for wisdom and clear direction.', 'waiting'),
-  (5, '王小明', 'xiaoming.wang@example.com', '感谢神，上个月分享的手术已经顺利完成，恢复得很好，愿一切荣耀归给神。', 'answered');
+  (5, 'Xiaoming Wang', 'xiaoming.wang@example.com', 'Praise God, the surgery I shared about last month went smoothly, and my recovery is going well. All glory to God.', 'answered');
 
 INSERT INTO prayer_activity (request_id, author, kind, body) VALUES
   (2, 'Alex Admin', 'prayed', NULL),
@@ -433,17 +435,17 @@ UPDATE people SET membership_status = 'inactive' WHERE id = 10;
 -- real adults; (3) a single-adult household. Member display_name mirrors what the
 -- createHousehold path copies from the people row.
 INSERT INTO households (id, name, address, phone) VALUES
-  (1, 'Chen Family 陈家', '88 Cornerstone Way, Springfield, TX 75000', '(555) 010-2000'),
-  (2, 'Lin Family 林家', '12 Riverbend Road, Springfield, TX 75000', '(555) 010-4040'),
-  (3, 'Zhao Household 赵家', '5 Maple Court, Springfield, TX 75000', NULL);
+  (1, 'Chen Family', '88 Cornerstone Way, Springfield, TX 75000', '(555) 010-2000'),
+  (2, 'Lin Family', '12 Riverbend Road, Springfield, TX 75000', '(555) 010-4040'),
+  (3, 'Zhao Household', '5 Maple Court, Springfield, TX 75000', NULL);
 
 INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES
-  (1, 1, 2, '陈大卫 David Chen', 'adult', 1),
-  (2, 1, 7, 'Amy Chen 陈爱美', 'adult', 0),
-  (3, 1, NULL, 'Ethan Chen 陈以恒', 'child', 0),
-  (4, 2, 4, 'Grace Lin 林恩慈', 'adult', 1),
-  (5, 2, 9, 'Esther Lin 林以斯帖', 'adult', 0),
-  (6, 3, 10, 'Joshua Zhao 赵约书亚', 'adult', 1);
+  (1, 1, 2, 'David Chen', 'adult', 1),
+  (2, 1, 7, 'Amy Chen', 'adult', 0),
+  (3, 1, NULL, 'Ethan Chen', 'child', 0),
+  (4, 2, 4, 'Grace Lin', 'adult', 1),
+  (5, 2, 9, 'Esther Lin', 'adult', 0),
+  (6, 3, 10, 'Joshua Zhao', 'adult', 1);
 
 -- Member portal: David is the Chen household's initial owner. He is a linked
 -- adult and primary member, so the seeded household can exercise owner-only
@@ -458,6 +460,7 @@ INSERT INTO person_notes (id, person_id, author_email, body) VALUES
 
 -- Site settings. Localized keys carry a .locale suffix and fall back to .en.
 INSERT INTO settings (key, value) VALUES
+  ('site.demo_content', 'true'),
   ('site.name.en', 'Church4Christ'),
   ('site.name.zh', '四方基督教会'),
   ('site.tagline.en', 'A church for the city'),
@@ -529,25 +532,25 @@ UPDATE people SET avatar_url = '/media/uploads/05218adece952076-avatar-esther-li
 -- Term dates float around today so the seasonal class is visibly in session in a
 -- fresh demo without disturbing the long-running fellowship/private-group cases.
 INSERT INTO groups (id, name, description, is_public, kind, term_label, term_start, term_end) VALUES
-  (1, 'Young Adults 青年团契', 'A community for young adults to grow in faith and friendship through weekly study and fellowship.', 1, 'fellowship', NULL, NULL, NULL),
-  (2, 'Prayer Partners 祷告伙伴', 'A small, private circle who commit to praying for one another through the week.', 0, 'fellowship', NULL, NULL, NULL),
-  (3, 'Foundations of Faith 信仰基础', 'A Sunday School class exploring the foundations of Christian belief and everyday discipleship.', 1, 'sunday_school', 'Foundations of Faith 信仰基础', date('now','-30 days'), date('now','+60 days'));
+  (1, 'Young Adults', 'A community for young adults to grow in faith and friendship through weekly study and fellowship.', 1, 'fellowship', NULL, NULL, NULL),
+  (2, 'Prayer Partners', 'A small, private circle who commit to praying for one another through the week.', 0, 'fellowship', NULL, NULL, NULL),
+  (3, 'Foundations of Faith', 'A Sunday School class exploring the foundations of Christian belief and everyday discipleship.', 1, 'sunday_school', 'Foundations of Faith', date('now','-30 days'), date('now','+60 days'));
 
 INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admin) VALUES
-  (1, 1, 8, 'Ben Wu 吴恩本', NULL, 1),
-  (2, 1, 5, 'Mark Liu 刘马可', NULL, 0),
-  (3, 1, 10, 'Joshua Zhao 赵约书亚', NULL, 0),
-  (4, 1, NULL, 'Hannah Guest 访客', '(555) 010-7777', 0),
-  (5, 2, 6, 'Faithful Wang 王信实', NULL, 1),
-  (6, 2, 9, 'Esther Lin 林以斯帖', NULL, 0),
-  (7, 3, 2, '陈大卫 David Chen', NULL, 1),
-  (8, 3, 4, 'Grace Lin 林恩慈', NULL, 0);
+  (1, 1, 8, 'Ben Wu', NULL, 1),
+  (2, 1, 5, 'Mark Liu', NULL, 0),
+  (3, 1, 10, 'Joshua Zhao', NULL, 0),
+  (4, 1, NULL, 'Hannah Guest', '(555) 010-7777', 0),
+  (5, 2, 6, 'Faithful Wang', NULL, 1),
+  (6, 2, 9, 'Esther Lin', NULL, 0),
+  (7, 3, 2, 'David Chen', NULL, 1),
+  (8, 3, 4, 'Grace Lin', NULL, 0);
 
 INSERT INTO group_join_requests (id, group_id, person_id, status) VALUES
   (1, 1, 4, 'pending');
 
 INSERT INTO group_events (id, group_id, title, description, location, recurrence, starts_on, start_time, duration_min, ends_on, track_attendance, active) VALUES
-  (1, 1, 'Friday Bible Study 週五查經', 'Weekly study in the Gospel of John with prayer and supper.', 'Fellowship Hall 团契厅', 'weekly', date('now','weekday 5','-14 days'), '19:00', 90, NULL, 1, 1);
+  (1, 1, 'Friday Bible Study', 'Weekly study in the Gospel of John with prayer and supper.', 'Fellowship Hall', 'weekly', date('now','weekday 5','-14 days'), '19:00', 90, NULL, 1, 1);
 
 INSERT INTO group_event_occurrences (id, event_id, occurs_on, starts_at, ends_at) VALUES
   (1, 1, date('now','weekday 5','-14 days'), datetime('now','weekday 5','-14 days','start of day','+19 hours'), datetime('now','weekday 5','-14 days','start of day','+19 hours','+90 minutes')),
@@ -568,26 +571,26 @@ INSERT INTO group_attendance (id, occurrence_id, member_id, present, recorded_by
 -- sermons/prayer_sheets blocks above use) so the admin dashboard's 12-week
 -- chart renders non-empty on a freshly seeded, freshly cloned DB.
 INSERT INTO household_members (id, household_id, person_id, display_name, role, is_primary) VALUES
-  (7, 1, NULL, 'Mia Chen 陈米娅', 'child', 0),
-  (8, 2, NULL, 'Noah Lin 林诺亚', 'child', 0),
-  (9, 2, NULL, 'Lily Lin 林莉莉', 'child', 0);
+  (7, 1, NULL, 'Mia Chen', 'child', 0),
+  (8, 2, NULL, 'Noah Lin', 'child', 0),
+  (9, 2, NULL, 'Lily Lin', 'child', 0);
 
 UPDATE people SET phone = '(555) 010-4040' WHERE id = 4;
 
 INSERT INTO checkin_events (id, name, weekday, active) VALUES
-  (1, 'Sunday Kids 主日儿童', 0, 1);
+  (1, 'Sunday Kids', 0, 1);
 
 INSERT INTO checkins (id, event_id, household_id, household_member_id, child_name, security_code, checkin_date, checked_in_at) VALUES
-  (1, 1, 1, 3, 'Ethan Chen 陈以恒', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
-  (2, 1, 1, 7, 'Mia Chen 陈米娅', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
-  (3, 1, 2, 8, 'Noah Lin 林诺亚', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
-  (4, 1, 2, 9, 'Lily Lin 林莉莉', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
-  (5, 1, 1, 3, 'Ethan Chen 陈以恒', 'P2R8', date('now','weekday 0','-21 days'), datetime('now','weekday 0','-21 days','start of day','+9 hours')),
-  (6, 1, 1, 7, 'Mia Chen 陈米娅', 'T5V3', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
-  (7, 1, 2, 8, 'Noah Lin 林诺亚', 'W9Y4', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
-  (8, 1, 2, 9, 'Lily Lin 林莉莉', 'C6D2', date('now','weekday 0','-35 days'), datetime('now','weekday 0','-35 days','start of day','+9 hours')),
-  (9, 1, 1, 3, 'Ethan Chen 陈以恒', 'F8G5', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours')),
-  (10, 1, 2, 8, 'Noah Lin 林诺亚', 'H4J7', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours'));
+  (1, 1, 1, 3, 'Ethan Chen', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
+  (2, 1, 1, 7, 'Mia Chen', 'K7XQ', date('now','weekday 0','-7 days'), datetime('now','weekday 0','-7 days','start of day','+9 hours')),
+  (3, 1, 2, 8, 'Noah Lin', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
+  (4, 1, 2, 9, 'Lily Lin', 'M3N9', date('now','weekday 0','-14 days'), datetime('now','weekday 0','-14 days','start of day','+9 hours')),
+  (5, 1, 1, 3, 'Ethan Chen', 'P2R8', date('now','weekday 0','-21 days'), datetime('now','weekday 0','-21 days','start of day','+9 hours')),
+  (6, 1, 1, 7, 'Mia Chen', 'T5V3', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
+  (7, 1, 2, 8, 'Noah Lin', 'W9Y4', date('now','weekday 0','-28 days'), datetime('now','weekday 0','-28 days','start of day','+9 hours')),
+  (8, 1, 2, 9, 'Lily Lin', 'C6D2', date('now','weekday 0','-35 days'), datetime('now','weekday 0','-35 days','start of day','+9 hours')),
+  (9, 1, 1, 3, 'Ethan Chen', 'F8G5', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours')),
+  (10, 1, 2, 8, 'Noah Lin', 'H4J7', date('now','weekday 0','-42 days'), datetime('now','weekday 0','-42 days','start of day','+9 hours'));
 
 -- Aggregate service attendance for the four most recent Sundays. These are
 -- totals only and never identify adult attendees. Person 1 is the fictional
@@ -634,15 +637,15 @@ INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES
 -- domain and the made-up video id stays click-only behind the no-cookie facade.
 INSERT INTO learning_provider_connections
   (id, provider, display_name, base_url, status, revision, last_successful_sync_at, created_by_person_id, updated_by_person_id) VALUES
-  (21000, 'canvas', 'Local fictional Canvas snapshot / 本地虚构 Canvas 快照', 'https://canvas-learning.example.test', 'active', 1, replace(datetime('now','-2 hours'),' ','T') || 'Z', 1, 1);
+  (21000, 'canvas', 'Local fictional Canvas snapshot', 'https://canvas-learning.example.test', 'active', 1, replace(datetime('now','-2 hours'),' ','T') || 'Z', 1, 1);
 
 INSERT INTO learning_programs
   (id, slug, display_name, status, created_by_person_id, updated_by_person_id) VALUES
-  (21000, 'genesis-sunday-school', 'Genesis Sunday School / 创世记主日学', 'active', 1, 1);
+  (21000, 'genesis-sunday-school', 'Genesis Sunday School', 'active', 1, 1);
 
 INSERT INTO learning_courses
   (id, program_id, connection_id, provider, external_course_id, display_name, launch_url, lifecycle_state, provider_updated_at, last_synced_at) VALUES
-  (21000, 21000, 21000, 'canvas', 'genesis-1-creation', 'Genesis 1: Creation / 创世记第一章：创造', 'https://canvas-learning.example.test/courses/genesis-1-creation', 'active', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+  (21000, 21000, 21000, 'canvas', 'genesis-1-creation', 'Genesis 1: Creation', 'https://canvas-learning.example.test/courses/genesis-1-creation', 'active', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
 
 INSERT INTO learning_identity_links
   (id, connection_id, person_id, external_user_id, status) VALUES
@@ -656,19 +659,19 @@ INSERT INTO learning_enrollments
 
 INSERT INTO learning_activities
   (id, course_id, external_activity_id, title, kind, lifecycle_state, launch_url, due_at, published_at, provider_updated_at, last_synced_at) VALUES
-  (21101, 21000, 'genesis-opening', 'Opening: In the beginning / 开场：起初', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/opening', NULL, replace(datetime('now','-6 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
-  (21102, 21000, 'genesis-scripture-overview', 'Scripture overview: Genesis 1 / 经文概览：创世记第一章', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/scripture-overview', NULL, replace(datetime('now','-5 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
-  (21103, 21000, 'genesis-days-1-3', 'Days 1–3: Forming creation / 第1–3日：塑造创造', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-1-3', NULL, replace(datetime('now','-4 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
-  (21104, 21000, 'genesis-days-4-6', 'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-4-6', NULL, replace(datetime('now','-3 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
-  (21105, 21000, 'genesis-creation-care-assignment', 'Assignment: Creation care reflection / 作业：创造关怀反思', 'assignment', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/assignments/creation-care-reflection', replace(datetime('now','+2 days'),' ','T') || 'Z', replace(datetime('now','-2 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
-  (21106, 21000, 'genesis-1-review-quiz', 'Quiz: Genesis 1 review / 测验：创世记第一章复习', 'quiz', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/quizzes/genesis-1-review', replace(datetime('now','+5 days'),' ','T') || 'Z', replace(datetime('now','-1 day'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
+  (21101, 21000, 'genesis-opening', 'Opening: In the beginning', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/opening', NULL, replace(datetime('now','-6 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21102, 21000, 'genesis-scripture-overview', 'Scripture overview: Genesis 1', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/scripture-overview', NULL, replace(datetime('now','-5 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21103, 21000, 'genesis-days-1-3', 'Days 1–3: Forming creation', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-1-3', NULL, replace(datetime('now','-4 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21104, 21000, 'genesis-days-4-6', 'Days 4–6: Humanity and stewardship', 'material', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/modules/items/days-4-6', NULL, replace(datetime('now','-3 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21105, 21000, 'genesis-creation-care-assignment', 'Assignment: Creation care reflection', 'assignment', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/assignments/creation-care-reflection', replace(datetime('now','+2 days'),' ','T') || 'Z', replace(datetime('now','-2 days'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z'),
+  (21106, 21000, 'genesis-1-review-quiz', 'Quiz: Genesis 1 review', 'quiz', 'published', 'https://canvas-learning.example.test/courses/genesis-1-creation/quizzes/genesis-1-review', replace(datetime('now','+5 days'),' ','T') || 'Z', replace(datetime('now','-1 day'),' ','T') || 'Z', replace(datetime('now','-3 hours'),' ','T') || 'Z', replace(datetime('now','-2 hours'),' ','T') || 'Z');
 
 INSERT INTO learning_resources
   (id, activity_id, external_resource_id, title, kind, launch_url, youtube_video_id, mime_type, size_bytes, provider_updated_at) VALUES
-  (21201, 21101, 'genesis-1-video', 'Genesis 1 creation overview / 创世记第一章创造概览', 'youtube', 'https://www.youtube-nocookie.com/embed/DemoGen1Vid', 'DemoGen1Vid', NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
-  (21202, 21103, 'genesis-1-learner-handout', 'Genesis 1 learner handout / 创世记第一章学员讲义', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-learner-handout/download', NULL, 'application/pdf', 245760, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
-  (21203, 21104, 'genesis-1-teacher-guide', 'Genesis 1 teacher guide / 创世记第一章教师指南', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-teacher-guide/download', NULL, 'application/pdf', 368640, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
-  (21204, 21104, 'genesis-1-stewardship-link', 'Creation and stewardship reading / 创造与管家职分阅读', 'link', 'https://canvas-learning.example.test/courses/genesis-1-creation/pages/creation-and-stewardship', NULL, NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z');
+  (21201, 21101, 'genesis-1-video', 'Genesis 1 creation overview', 'youtube', 'https://www.youtube-nocookie.com/embed/DemoGen1Vid', 'DemoGen1Vid', NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21202, 21103, 'genesis-1-learner-handout', 'Genesis 1 learner handout', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-learner-handout/download', NULL, 'application/pdf', 245760, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21203, 21104, 'genesis-1-teacher-guide', 'Genesis 1 teacher guide', 'provider_file', 'https://canvas-learning.example.test/files/genesis-1-teacher-guide/download', NULL, 'application/pdf', 368640, replace(datetime('now','-3 hours'),' ','T') || 'Z'),
+  (21204, 21104, 'genesis-1-stewardship-link', 'Creation and stewardship reading', 'link', 'https://canvas-learning.example.test/courses/genesis-1-creation/pages/creation-and-stewardship', NULL, NULL, NULL, replace(datetime('now','-3 hours'),' ','T') || 'Z');
 
 INSERT INTO learning_submission_snapshots
   (course_id, activity_id, activity_kind, enrollment_id, status, late, attempt_number, submitted_at, returned_at, provider_updated_at, synced_at) VALUES

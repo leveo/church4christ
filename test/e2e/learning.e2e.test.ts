@@ -138,21 +138,21 @@ describe('Learning built-worker shell boundaries', () => {
     const response = await get('/en/learn', { cookie: member });
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('Genesis Sunday School / 创世记主日学');
-    expect(html).toContain('Genesis 1: Creation / 创世记第一章：创造');
+    expect(html).toContain('Genesis Sunday School');
+    expect(html).toContain('Genesis 1: Creation');
     expect(html).toContain('/en/learn/21000');
-    expect(html).toContain('Assignment: Creation care reflection / 作业：创造关怀反思');
-    expect(html).toContain('Quiz: Genesis 1 review / 测验：创世记第一章复习');
+    expect(html).toContain('Assignment: Creation care reflection');
+    expect(html).toContain('Quiz: Genesis 1 review');
     expect(html).not.toContain('No courses to show');
 
     const englishDetail = await get('/en/learn/21000', { cookie: member });
     expect(englishDetail.status).toBe(200);
     const englishHtml = await englishDetail.text();
     for (const marker of [
-      'Opening: In the beginning / 开场：起初',
-      'Scripture overview: Genesis 1 / 经文概览：创世记第一章',
-      'Days 1–3: Forming creation / 第1–3日：塑造创造',
-      'Days 4–6: Humanity and stewardship / 第4–6日：人类与管家职分',
+      'Opening: In the beginning',
+      'Scripture overview: Genesis 1',
+      'Days 1–3: Forming creation',
+      'Days 4–6: Humanity and stewardship',
       'Submitted',
       'Not submitted',
     ]) expect(englishHtml).toContain(marker);
@@ -270,7 +270,7 @@ describe('Learning built-worker shell boundaries', () => {
     const learningPage = await get('/admin/learning', { cookie: learningAdmin });
     expect(learningPage.status).toBe(200);
     const learningHtml = await learningPage.text();
-    expect(learningHtml).toContain('Local fictional Canvas snapshot / 本地虚构 Canvas 快照');
+    expect(learningHtml).toContain('Local fictional Canvas snapshot');
     expect(learningHtml).toContain('https://canvas-learning.example.test');
     expect(learningHtml).toContain('Disconnected');
     expect(learningHtml).toContain('Authorize Canvas with OAuth');

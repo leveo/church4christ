@@ -1,4 +1,5 @@
 ---
+demo: true
 title: A New Year Pastoral Letter
 author: Pastor David Chen
 date: "2026-01-04"

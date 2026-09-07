@@ -13,6 +13,7 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-worker
 // it here with a comment.
 const NODE_ONLY = [
   'test/tokens.test.ts',
+  'test/node/designAssets.test.ts',
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
   'test/node/screenshotValidation.test.ts',

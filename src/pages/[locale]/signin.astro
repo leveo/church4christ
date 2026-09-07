@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import type { EmailEnv } from '../../lib/email';
 import { beginSignin } from '../../lib/identityAccount';
 import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../lib/identityAuth';
@@ -63,7 +64,7 @@ if (Astro.request.method === 'POST') {
 }
 ---
 <Base title={t(locale, 'signin.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="signin">
     {changed && !sent && (
       <div class="mb-6 rounded-lg border border-border bg-surface-raised p-4 text-ink-muted">{t(locale, 'signin.changed')}</div>
     )}
@@ -96,5 +97,5 @@ if (Astro.request.method === 'POST') {
         <p class="mt-3 text-sm"><a href={localePath(locale, '/recover')} class="font-semibold text-primary hover:underline">{t(locale, 'signin.recover')}</a></p>
       </>
     )}
-  </section>
+  </WelcomeForm>
 </Base>

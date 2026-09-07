@@ -88,7 +88,7 @@ describe('admin person editor (people module on)', () => {
     const body = await leaderView.text();
 
     // Positive control: his own display name IS shown to the leader.
-    expect(body).toContain('陈大卫 David Chen');
+    expect(body).toContain('David Chen');
 
     // Private membership data is all withheld (REAL seeded strings).
     expect(body).not.toContain('Chen Family'); // household name

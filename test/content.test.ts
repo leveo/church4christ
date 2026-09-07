@@ -95,3 +95,41 @@ describe('listLocalizedFrom', () => {
     expect(list.length).toBe(2);
   });
 });
+
+describe('demo content visibility', () => {
+  const content = [
+    { id: 'en/sample', data: { demo: true } },
+    { id: 'zh/sample', data: { demo: true } },
+    { id: 'en/our-story', data: {} },
+    { id: 'zh/our-story', data: { demo: false } },
+    { id: 'en/community', data: { demo: true } },
+    { id: 'zh/community', data: {} },
+    { id: 'en/prayer', data: {} },
+    { id: 'zh/prayer', data: { demo: true } },
+  ];
+
+  it('hides demo entries from lists while retaining church-authored entries', () => {
+    expect(listLocalizedFrom(content, 'zh', false).map(({ entry }) => entry.id)).toEqual([
+      'zh/our-story', 'zh/community', 'en/prayer',
+    ]);
+  });
+
+  it('hides direct demo URLs, including English fallback in another locale', () => {
+    expect(getLocalizedFrom(content, 'sample', 'en', false)).toBeNull();
+    expect(getLocalizedFrom(content, 'sample', 'zh', false)).toBeNull();
+    expect(getLocalizedFrom(content, 'sample', 'es', false)).toBeNull();
+  });
+
+  it('resolves visibility before locale fallback so authored translations remain available', () => {
+    expect(getLocalizedFrom(content, 'community', 'zh', false)?.entry.id).toBe('zh/community');
+    expect(getLocalizedFrom(content, 'prayer', 'zh', false)).toMatchObject({
+      entry: { id: 'en/prayer' }, translated: false,
+    });
+  });
+
+  it('preserves bundled content for legacy callers and demo installations', () => {
+    expect(getLocalizedFrom(content, 'sample', 'zh')?.entry.id).toBe('zh/sample');
+    expect(getLocalizedFrom(content, 'sample', 'zh', true)?.entry.id).toBe('zh/sample');
+    expect(listLocalizedFrom(content, 'en')).toHaveLength(4);
+  });
+});

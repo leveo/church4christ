@@ -131,8 +131,8 @@ describe.skipIf(!hasPg)('givingDb (Postgres)', () => {
     expect(ids).toContain(amyGift);
     expect(ids).not.toContain(graceGift);
     // giver_name resolves the person's display name.
-    expect(view.find((g) => g.id === davidGift)!.giver_name).toBe('陈大卫 David Chen');
-    expect(view.find((g) => g.id === amyGift)!.giver_name).toBe('Amy Chen 陈爱美');
+    expect(view.find((g) => g.id === davidGift)!.giver_name).toBe('David Chen');
+    expect(view.find((g) => g.id === amyGift)!.giver_name).toBe('Amy Chen');
     // Amy (7) is the same household → sees David's gift too (symmetric).
     expect((await listHouseholdGifts(db, 'en', 7)).map((g) => g.id)).toContain(davidGift);
   });

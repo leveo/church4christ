@@ -17,7 +17,7 @@ describe('canonical Genesis Learning demo on the built PostgreSQL worker', () =>
     });
     expect(english.status).toBe(200);
     const englishHtml = await english.text();
-    expect(englishHtml).toContain('Genesis 1: Creation / 创世记第一章：创造');
+    expect(englishHtml).toContain('Genesis 1: Creation');
     expect(englishHtml).toContain('data-embed="https://www.youtube-nocookie.com/embed/DemoGen1Vid"');
     expect(englishHtml).not.toContain('<iframe');
     expect(englishHtml).toContain('Submitted');

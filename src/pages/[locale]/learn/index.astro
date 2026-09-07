@@ -1,5 +1,7 @@
 ---
-import Base from '../../../layouts/Base.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { memberCopy } from '../../../i18n/designMember';
 import { card } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
 import { localePath, parseLocale } from '../../../lib/locales';
@@ -42,10 +44,9 @@ const submissionName = (status: string | undefined) => status
   : t(locale, 'learning.submission.unavailable');
 ---
 
-<Base title={t(locale, 'learning.title')} description={t(locale, 'learning.intro')} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'learning.title')}</h1>
-    <p class="mt-2 max-w-3xl text-ink-muted">{t(locale, 'learning.intro')}</p>
+<Member active="learning" title={t(locale, 'learning.title')} description={t(locale, 'learning.intro')} locale={locale} noindex>
+  <div>
+    <MemberPageHeader title={t(locale, 'learning.title')} description={t(locale, 'learning.intro')} eyebrow={memberCopy(locale).learningEyebrow} image="learning" />
     {loadFailed ? (
       <section class={`mt-8 ${card}`} role="alert">
         <h2 class="font-display text-heading-sm font-bold">{t(locale, 'learning.loadErrorTitle')}</h2>
@@ -58,10 +59,10 @@ const submissionName = (status: string | undefined) => status
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.emptyDisconnected')}</p>
       </section>
     ) : (
-      <div class="mt-8 grid gap-6">
+      <div class="mt-8 grid gap-6 xl:grid-cols-2">
         {courses.map((course) => (
-          <article class={card} aria-labelledby={`learning-course-${course.courseId}`}>
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <article class={`learning-course-card ${card}`} aria-labelledby={`learning-course-${course.courseId}`}>
+            <div class="flex flex-col gap-4">
               <div>
                 <p class="text-sm font-semibold text-primary">{course.programName}</p>
                 <h2 id={`learning-course-${course.courseId}`} class="mt-1 font-display text-heading-sm font-bold">
@@ -85,7 +86,7 @@ const submissionName = (status: string | undefined) => status
             </div>
 
             {course.isStale && (
-              <div class="mt-5 rounded-lg border border-warning bg-warning-soft p-4 text-warning" role="status">
+              <div class="mt-5 rounded-lg border border-warn bg-warn-soft p-4 text-warn" role="status">
                 <h3 class="font-semibold">{t(locale, 'learning.staleTitle')}</h3>
                 <p class="mt-1 text-sm">
                   {course.lastSyncedAt
@@ -100,15 +101,15 @@ const submissionName = (status: string | undefined) => status
               </p>
             )}
 
-            <div class="mt-6 grid gap-6 lg:grid-cols-2">
+            <div class="mt-6 grid gap-6">
               <section aria-labelledby={`learning-upcoming-${course.courseId}`}>
                 <h3 id={`learning-upcoming-${course.courseId}`} class="font-display text-lg font-bold">{t(locale, 'learning.upcomingTitle')}</h3>
                 {course.upcomingActivities.length === 0 ? (
                   <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.upcomingEmpty')}</p>
                 ) : (
                   <ul class="mt-3 space-y-3">
-                    {course.upcomingActivities.slice(0, 3).map((activity) => (
-                      <li class="rounded-lg border border-border p-4">
+                    {course.upcomingActivities.slice(0, 2).map((activity) => (
+                      <li class="border-t border-border pt-3">
                         <div class="flex flex-wrap items-center gap-2 text-xs text-ink-subtle">
                           <span>{kindName(activity.kind)}</span><span aria-hidden="true">·</span>
                           <span>{submissionName(activity.submission?.status)}</span>
@@ -129,8 +130,8 @@ const submissionName = (status: string | undefined) => status
                   <p class="mt-2 text-sm text-ink-muted">{t(locale, 'learning.recentEmpty')}</p>
                 ) : (
                   <ul class="mt-3 space-y-3">
-                    {course.recentMaterials.slice(0, 3).map((activity) => (
-                      <li class="rounded-lg border border-border p-4">
+                    {course.recentMaterials.slice(0, 2).map((activity) => (
+                      <li class="border-t border-border pt-3">
                         <a href={localePath(locale, `/learn/${course.courseId}#activity-${activity.activityId}`)} class="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                           {activity.title}
                         </a>
@@ -146,4 +147,8 @@ const submissionName = (status: string | undefined) => status
       </div>
     )}
   </div>
-</Base>
+</Member>
+
+<style>
+  .learning-course-card { border-top: 3px solid var(--color-primary); }
+</style>

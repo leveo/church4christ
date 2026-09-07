@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Ruth Zhang
 role: Deacon of Hospitality
 group: staff

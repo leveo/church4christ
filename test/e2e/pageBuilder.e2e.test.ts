@@ -35,6 +35,37 @@ const LAYOUT = JSON.stringify({
 });
 
 describe('builder pages render zero-JS on the public route', () => {
+  it('keeps Chinese-only block text out of English pages and preserves it in Chinese pages', async () => {
+    const created = await savePageLayout(env.DB, {
+      id: null, slug: 'e2e-built-locale-boundary', published: true,
+      title_en: 'Locale Boundary', title_zh: '语言边界', updatedBy: 'e@x',
+      layoutJson: JSON.stringify({ v: 1, blocks: [{
+        id: 's1', type: 'section', props: { bg: 'none', width: 'content', padY: 'lg' },
+        children: [
+          { id: 'h1', type: 'heading', props: { level: 2, text: { en: '', zh: '仅中文标题' }, align: 'left', size: 'lg' } },
+          { id: 't1', type: 'text', props: { md: { en: '', zh: '仅中文正文' }, align: 'left' } },
+          { id: 'b1', type: 'button', props: { label: { en: '', zh: '仅中文按钮' }, href: '/zh/visit', variant: 'primary', align: 'left' } },
+          { id: 't2', type: 'text', props: { md: { en: 'English fallback stays available.', zh: '' }, align: 'left' } },
+        ],
+      }] }),
+    });
+    expect(created.ok).toBe(true);
+
+    const english = await get('/en/p/e2e-built-locale-boundary');
+    expect(english.status).toBe(200);
+    const englishHtml = await english.text();
+    for (const text of ['仅中文标题', '仅中文正文', '仅中文按钮']) expect(englishHtml).not.toContain(text);
+    expect(englishHtml).toContain('English fallback stays available.');
+    expect(englishHtml).not.toContain('href="/zh/visit"');
+
+    const chinese = await get('/zh/p/e2e-built-locale-boundary');
+    expect(chinese.status).toBe(200);
+    const chineseHtml = await chinese.text();
+    for (const text of ['仅中文标题', '仅中文正文', '仅中文按钮', 'English fallback stays available.']) {
+      expect(chineseHtml).toContain(text);
+    }
+  });
+
   it('a published builder page renders sections, columns, markdown text, and button — with NO island', async () => {
     await savePageLayout(env.DB, {
       id: null, slug: 'e2e-built', published: true,

@@ -9,13 +9,15 @@
 // DEFAULT_NAV. A live preview (resolveNav, en + zh) shows what the public header
 // will actually render, since a module-gated builtin or an unpublished page drops
 // out of the real nav even though it stays listed here for the admin to manage.
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { BUILTIN_NAV, NAV_SETTING_KEY, parseNavItems, resolveNav, serializeNavItems, type NavItem } from '../../../lib/nav';
 import { deleteSetting, getSetting, setSetting } from '../../../lib/settings';
 import { listCustomPages } from '../../../lib/pagesDb';
 import { isHttpUrl } from '../../../lib/validate';
-import { tin, lab, card, errorText, btn, btnDanger, badge, badgeInactive, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, card, errorText, btn, btnSecondary, btnDanger, badge, badgeInactive, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -138,26 +140,26 @@ function labelsOf(item: NavItem): { en: string; zh: string; target: string } {
     const p = pageBySlug.get(item.slug);
     return { en: p?.title_en || item.slug, zh: p?.title_zh || item.slug, target: `/p/${item.slug}` };
   }
-  return { en: item.label.en || item.label.zh, zh: item.label.zh || item.label.en, target: item.url };
+  return { en: item.label.en || t('en', 'admin.navigation.untitled'), zh: item.label.zh || item.label.en, target: item.url };
 }
 const h2 = 'font-display text-heading-sm font-bold';
 ---
 
 <Admin title={t(lang, 'admin.navigation.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.navigation.title')}</h1>
+  <MemberPageHeader title={t(lang, 'admin.navigation.title')} eyebrow={operationsCopy(lang).navigation} description={operationsCopy(lang).navigationIntro} />
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.navigation.saved')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
 
-  <section class="mt-6 max-w-2xl space-y-3">
+<div class="navigation-workspace"><div>  <section class="navigation-items space-y-3">
     <h2 class={h2}>{t(lang, 'admin.navigation.itemsTitle')}</h2>
     {items.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.navigation.empty')}</p>}
     {
       items.map((item, i) => {
         const { en, zh, target } = labelsOf(item);
         return (
-          <div class={`${card} flex items-center justify-between gap-4`}>
-            <div>
-              <div class="flex items-center gap-2">
+          <div class={`${card} navigation-row`}>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2"><span class="menu-position" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
                 <span class={`${badge} ${badgeInactive}`}>{typeLabel(item)}</span>
                 <span class="font-semibold text-ink">{en}</span>
               </div>
@@ -169,21 +171,21 @@ const h2 = 'font-display text-heading-sm font-bold';
               <form method="post">
                 <input type="hidden" name="action" value="up" />
                 <input type="hidden" name="idx" value={i} />
-                <button type="submit" class={btn} disabled={i === 0} aria-label={t(lang, 'admin.form.moveUp')}>
+                <button type="submit" class={btnSecondary} disabled={i === 0} aria-label={t(lang, 'admin.form.moveUp')}>
                   ↑
                 </button>
               </form>
               <form method="post">
                 <input type="hidden" name="action" value="down" />
                 <input type="hidden" name="idx" value={i} />
-                <button type="submit" class={btn} disabled={i === items.length - 1} aria-label={t(lang, 'admin.form.moveDown')}>
+                <button type="submit" class={btnSecondary} disabled={i === items.length - 1} aria-label={t(lang, 'admin.form.moveDown')}>
                   ↓
                 </button>
               </form>
               <form method="post">
                 <input type="hidden" name="action" value="remove" />
                 <input type="hidden" name="idx" value={i} />
-                <button type="submit" class={btn} aria-label={t(lang, 'admin.navigation.removeItem')} title={t(lang, 'admin.navigation.removeItem')}>
+                <button type="submit" class={btnSecondary} aria-label={t(lang, 'admin.navigation.removeItem')} title={t(lang, 'admin.navigation.removeItem')}>
                   ✕
                 </button>
               </form>
@@ -194,7 +196,27 @@ const h2 = 'font-display text-heading-sm font-bold';
     }
   </section>
 
-  <section class={`${card} mt-6 max-w-2xl space-y-6`}>
+  <section class="mt-6 ">
+    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.navigation.resetConfirm'))})`}>
+      <input type="hidden" name="action" value="reset" />
+      <button type="submit" class={btnDanger}>
+        {t(lang, 'admin.navigation.reset')}
+      </button>
+    </form>
+  </section>
+
+  <section class="mt-8 ">
+    <h2 class={h2}>{t(lang, 'admin.navigation.previewTitle')}</h2>
+    <div class="mt-2 space-y-2 text-sm text-ink-muted">
+      <p>
+        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewEn')}:</span> {previewEn.map((l) => l.label).join(' · ') || '—'}
+      </p>
+      <p>
+        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewZh')}:</span> {previewZh.map((l) => l.label).join(' · ') || '—'}
+      </p>
+    </div>
+  </section>
+</div><aside>  <section class={`${card} space-y-6 navigation-add`}>
     <h2 class={h2}>{t(lang, 'admin.navigation.addSectionTitle')}</h2>
 
     <div>
@@ -281,24 +303,18 @@ const h2 = 'font-display text-heading-sm font-bold';
     </div>
   </section>
 
-  <section class="mt-6 max-w-2xl">
-    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.navigation.resetConfirm'))})`}>
-      <input type="hidden" name="action" value="reset" />
-      <button type="submit" class={btnDanger}>
-        {t(lang, 'admin.navigation.reset')}
-      </button>
-    </form>
-  </section>
-
-  <section class="mt-8 max-w-2xl">
-    <h2 class={h2}>{t(lang, 'admin.navigation.previewTitle')}</h2>
-    <div class="mt-2 space-y-2 text-sm text-ink-muted">
-      <p>
-        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewEn')}:</span> {previewEn.map((l) => l.label).join(' · ') || '—'}
-      </p>
-      <p>
-        <span class="font-semibold text-ink">{t(lang, 'admin.navigation.previewZh')}:</span> {previewZh.map((l) => l.label).join(' · ') || '—'}
-      </p>
-    </div>
-  </section>
+</aside></div>
 </Admin>
+
+<style>
+.navigation-workspace { display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr);gap:2rem;margin-top:2rem;align-items:start; }
+.navigation-workspace > *, .navigation-row > * { min-width:0; }
+.navigation-row { display:flex;justify-content:space-between;align-items:center;gap:1rem; }
+.navigation-row p { overflow-wrap:anywhere; }
+.menu-position { color:var(--color-ink-subtle);font-size:.7rem;font-variant-numeric:tabular-nums; }
+.navigation-add form { grid-template-columns:1fr; }
+.navigation-add label, .navigation-add input, .navigation-add select { width:100%;max-width:100%; }
+.navigation-add form > * { grid-column:1; }
+@media(max-width:1050px) { .navigation-workspace { grid-template-columns:1fr; } }
+@media(max-width:480px) { .navigation-row { align-items:start;flex-direction:column; } }
+</style>

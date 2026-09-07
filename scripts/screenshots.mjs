@@ -4,7 +4,7 @@
 //
 // Drives system Chrome in headless mode over the Chrome DevTools Protocol (CDP)
 // via Node's built-in global WebSocket + fetch — no third-party dependency. It
-// contains the PAGES manifest below and captures rows selected with `--only` at
+// contains the CAPTURE_ROWS manifest below and captures rows selected with `--only` at
 // a fixed 1280x800 viewport. The manifest intentionally mixes D1/Supabase and
 // several signed-in identities, so an unfiltered run is rejected before Chrome
 // starts or any file is written. Regeneration is split into the precise passes
@@ -17,18 +17,32 @@
 //        npm run db:migrate:local && npm run db:seed:local
 //        npm run db:seed-media:local
 //        npm run dev                       # astro dev on http://localhost:4321
-//      Existing admin/member rows may use AUTH_DEV_BYPASS_EMAIL as documented
-//      below. Learning rows use an exact, five-minute screenshot session. Set the
+//      Every authenticated README row uses an exact, five-minute screenshot
+//      session. Set the
 //      same ephemeral SCREENSHOT_SESSION_SECRET in both local processes; it is
 //      independent of SESSION_SECRET and must never be persisted or logged.
 //   2. Google Chrome / Chromium installed. Override the binary with CHROME_PATH.
 //
 // USAGE
+//   node scripts/screenshots.mjs --base http://localhost:4321 --only readme
 //   npm run screenshots -- --only public/events.png,public/ministries.png
 //   node scripts/screenshots.mjs --base http://localhost:4321 --only public/events.png,public/ministries.png
 //   node scripts/screenshots.mjs --only public/events.png,public/ministries.png
 //
-// AUTH'D SHOTS (admin + member)
+// README SHOTS (see docs/design/readme-screenshot-inventory.md)
+//   Use the seeded identities listed in README_CAPTURE_ROWS. Run astro dev with
+//   AUTH_DEV_BYPASS_EMAIL unset and the same ephemeral SCREENSHOT_SESSION_SECRET
+//   in the server and capture process. Each shot gets its own browser context;
+//   a dedicated HttpOnly cookie identifies only that row's seeded person.
+//   `--only readme` selects all 29 interface images against a fully enabled,
+//   seeded Supabase server (including local Learning fixtures and R2 media).
+//   Public rows receive no session. The secret is independent of SESSION_SECRET
+//   and must not be printed, persisted, or used against a deployed server.
+//   Select exact output-path tokens with --only, in passes matching the backend.
+//   No README capture submits forms, creates merge operations, or contacts a
+//   learning/payment provider. The four diagrams are maintained separately.
+//
+// LEGACY FEATURE-DOCUMENT SHOTS (outside the README inventory)
 //   The legacy dev bypass is a single global env (AUTH_DEV_BYPASS_EMAIL) the dev server
 //   reads at boot, so a page needing a *different* identity than the running
 //   server can't be shot in the same pass. Each authed PAGES row carries a
@@ -47,7 +61,7 @@
 //     # member portal group-files (Ben Wu) pass
 //     AUTH_DEV_BYPASS_EMAIL=ben.wu@example.com npm run dev &
 //     node scripts/screenshots.mjs --only portal/group-files.png
-//   Learning captures do not depend on that global bypass. Supply one ephemeral
+//   README and Learning captures do not depend on that global bypass. Supply one ephemeral
 //   secret to both the dev-server and harness environments without printing or
 //   writing it; each fresh CDP target receives only its exact seeded identity's
 //   short-lived HttpOnly cookie. After setting the same ephemeral variable in
@@ -58,7 +72,7 @@
 //   Prefer full output-path tokens for batches so short filenames do not select
 //   unrelated outputs that happen to contain the same substring.
 //
-// VARIANTS (see PAGES rows)
+// VARIANTS (see CAPTURE_ROWS)
 //   theme + mode : the theme is normally driven by the DB `theme.name` /
 //     `theme.default_mode` settings. Rather than mutate the database per shot,
 //     this harness flips data-theme / data-mode on <html> via CDP *after* load
@@ -95,7 +109,7 @@ const MIN_BYTES = 20 * 1024;
 // --- config -----------------------------------------------------------------
 // Each row: { path, out, admin?, bypass?, hant?, theme?, mode?, backend?, expectedText? }
 //   path   — URL path on --base (default http://localhost:4321)
-//   out    — repo-relative PNG destination
+//   out    — repo-relative PNG/JPEG destination (extension selects real encoding)
 //   admin  — page needs an admin dev-bypass session (AUTH_DEV_BYPASS_EMAIL=
 //            admin@example.com); default false
 //   bypass — page needs a specific non-admin member session; the value is the
@@ -114,6 +128,11 @@ const MIN_BYTES = 20 * 1024;
 //            with --only.
 //   expectedText — page marker required before capture; guards authenticated
 //            shots against redirects and other unexpected rendered pages
+//   sessionIdentity — exact seeded person + epoch, signed by the dedicated
+//            development-only screenshot secret (all authenticated README rows)
+//   openDisclosure — open this desktop header group before capture; missing
+//            disclosure is an error rather than a closed-navigation screenshot
+//   waitForSelector — wait for a client-rendered editor before validating/capture
 //   postForm — after load, click every element matching `checkAll` (if given)
 //            then `requestSubmit()` the element matching `form` and wait for
 //            the resulting navigation before continuing. Used for the one shot
@@ -135,8 +154,8 @@ export const RELEASE_SCREENSHOTS = validateScreenshotManifest([
 // Seed-backed capture definitions only. The release documentation task owns
 // actual PNG generation and promotion into RELEASE_SCREENSHOTS.
 export const LEARNING_DEMO_SCREENSHOTS = validateScreenshotManifest([
-  { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation / 创世记第一章：创造', rejectionTexts: ['Sign in', '404', 'Page not found'] },
-  { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: '创世记第一章：创造', rejectionTexts: ['登录', '404', '页面未找到'] },
+  { path: '/en/learn/21000', out: 'docs/images/learning/genesis-1-en.png', locale: 'en', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation', rejectionTexts: ['Sign in', '404', 'Page not found'] },
+  { path: '/zh/learn/21000', out: 'docs/images/learning/genesis-1-zh.png', locale: 'zh', backend: 'either', identity: 'member', viewport: VIEWPORT, expectedText: 'Genesis 1: Creation', rejectionTexts: ['登录', '404', '页面未找到'] },
   { path: '/admin/learning', out: 'docs/images/learning/admin-overview.png', locale: 'en', backend: 'either', identity: 'admin', viewport: VIEWPORT, expectedText: 'Learning provider connections', rejectionTexts: ['Sign in', '403', 'Page not found'] },
 ]);
 
@@ -145,12 +164,11 @@ export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOT
   ...(row.identity === 'admin' ? {
     admin: true,
     bypass: 'admin@example.com',
-    anchor: 'Course synchronization',
-    anchorMargin: 600,
+    anchor: 'Learning provider connections',
     sessionIdentity: Object.freeze({ personId: 1, email: 'admin@example.com', sessionEpoch: 0 }),
     identityExpectedText: 'admin@example.com',
     requiredTexts: Object.freeze([
-      'Local fictional Canvas snapshot / 本地虚构 Canvas 快照',
+      'Local fictional Canvas snapshot',
       'https://canvas-learning.example.test',
     ]),
   } : row.locale === 'zh' ? {
@@ -168,7 +186,7 @@ export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOT
   }),
 })));
 
-const PAGES = [
+const LEGACY_CAPTURE_ROWS = [
   ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
   ...LEARNING_DEMO_CAPTURE_ROWS,
   // Multi-campus core capability — top-level management and the below-the-fold
@@ -261,6 +279,88 @@ const PAGES = [
   { path: '/en/', out: 'docs/images/themes/home-midnight-light.png', theme: 'midnight', mode: 'light' },
 ];
 
+// README is the release gallery. Keep its complete capture contract separate
+// from additional feature-documentation screenshots so omissions are testable.
+const ACTORS = Object.freeze({
+  admin: Object.freeze({ personId: 1, email: 'admin@example.com', sessionEpoch: 0 }),
+  david: Object.freeze({ personId: 2, email: 'pastor.david@example.com', sessionEpoch: 0 }),
+  sarah: Object.freeze({ personId: 3, email: 'sarah.johnson@example.com', sessionEpoch: 0 }),
+  grace: Object.freeze({ personId: 4, email: 'grace.lin@example.com', sessionEpoch: 0 }),
+});
+
+function readmeShot(path, output, expectedText, { actor = 'public', ...options } = {}) {
+  const locale = path.startsWith('/zh/') ? 'zh' : 'en';
+  const identity = actor === 'public' ? 'public' : actor === 'admin' ? 'admin' : 'member';
+  return Object.freeze({
+    path, out: `docs/images/${output}`, locale, backend: 'either', identity,
+    viewport: VIEWPORT, expectedText, theme: 'sanctuary', mode: 'light',
+    rejectionTexts: locale === 'zh' ? ['页面未找到', '服务暂时不可用'] : ['Page not found', 'Service unavailable'],
+    ...(actor === 'public' ? {} : {
+      sessionIdentity: ACTORS[actor],
+      ...(actor === 'admin' ? { admin: true, identityExpectedText: ACTORS.admin.email } : {}),
+    }),
+    ...options,
+  });
+}
+
+export const README_CAPTURE_ROWS = Object.freeze([
+  readmeShot('/en/', 'public/home-en.png', 'Life together. Faith that grows.'),
+  readmeShot('/zh/', 'public/home-zh.png', '在这里， 一起成长。'),
+  readmeShot('/en/', 'public/grouped-navigation.png', 'Life together. Faith that grows.', { openDisclosure: 'Connect', requiredTexts: ['Find people to share life with.'] }),
+  readmeShot('/en/', 'themes/home-midnight-dark.png', 'Life together. Faith that grows.', { theme: 'midnight', mode: 'dark' }),
+  readmeShot('/en/sermons', 'public/sermons.png', 'Sermons', { requiredTexts: ['You Are the Light of the World'] }),
+  readmeShot('/admin', 'admin/dashboard.png', 'Dashboard', { actor: 'admin' }),
+  readmeShot('/admin/prayer-wall', 'admin/prayer-wall.png', 'Prayer Wall', { actor: 'admin' }),
+  readmeShot('/admin/people/11', 'admin/person-permissions.png', 'Lydia Kwan', { actor: 'admin', requiredTexts: ['Access & status'] }),
+  readmeShot('/admin/campuses', 'admin/campuses-overview.png', 'Campus management', { actor: 'admin' }),
+  readmeShot('/admin/bulletins/1', 'admin/bulletin-editor.png', 'Edit bulletin', { actor: 'admin', requiredTexts: ['Order of worship', 'Publishing'] }),
+  readmeShot('/admin/people/export', 'admin/people-export.png', 'Export people and households', { actor: 'admin' }),
+  readmeShot('/admin/people/identity/merge', 'identity/merge-review-queue.jpg', 'Merge review queue', { actor: 'admin', requiredTexts: ['Confirmed same-person cases', 'Merge operations'] }),
+  readmeShot('/en/groups/1/manage', 'groups/member-checklist.png', 'Manage Young Adults', { actor: 'admin', anchor: 'Members', identityExpectedText: 'Alex Admin' }),
+  readmeShot('/admin/children?tab=dashboard', 'admin/children-dashboard.png', 'Children check-in', { actor: 'admin' }),
+  readmeShot('/admin/attendance', 'admin/attendance-report.png', 'Attendance report', { actor: 'admin', anchor: 'Attendance report' }),
+  readmeShot('/admin/newcomers', 'admin/newcomers-queue.png', 'Newcomer follow-up', { actor: 'admin', requiredTexts: ['Jamie New'] }),
+  readmeShot('/admin/onboarding', 'admin/onboarding.png', 'Launch checklist', { actor: 'admin' }),
+  readmeShot('/admin/pages/builder/seedbuilderwelcome0000000000pb01', 'admin/page-builder.png', 'Design your page', { actor: 'admin', waitForSelector: '.builder-topbar', requiredTexts: ['Save & publish'] }),
+  readmeShot('/admin/giving', 'admin/giving.png', 'Giving', { actor: 'admin', backend: 'supabase', requiredTexts: ['Gifts', 'Offline entry', 'Amounts are listed per gift in their recorded currency'] }),
+  readmeShot('/admin/registration', 'admin/registration.png', 'Registration', { actor: 'admin', backend: 'supabase' }),
+  readmeShot('/admin/ministries?tab=email', 'admin/email-tab.png', 'Automation rules', { actor: 'admin', anchor: 'Automation rules', requiredTexts: ['Email templates', 'Recent emails'] }),
+  readmeShot('/admin/settings', 'admin/settings-modules.png', 'Site Settings', { actor: 'admin', anchor: 'Modules', requiredTexts: ['Save modules'] }),
+  readmeShot('/admin/learning', 'learning/admin-overview.png', 'Learning provider connections', { actor: 'admin', anchor: 'Learning provider connections', requiredTexts: ['Local fictional Canvas snapshot', 'https://canvas-learning.example.test'] }),
+  readmeShot('/en/my', 'portal/dashboard.png', 'Welcome, David Chen', { actor: 'david', backend: 'supabase', identityExpectedText: 'David Chen', requiredTexts: ['Chen Family'] }),
+  readmeShot('/en/my/opportunities', 'portal/member-opportunities.png', 'Find Your Place', { actor: 'sarah', backend: 'supabase', identityExpectedText: 'Sarah Johnson', requiredTexts: ['My participation', 'Open opportunities'] }),
+  readmeShot('/en/manage', 'portal/leader-panel.png', 'Leader Panel', { actor: 'sarah', requiredTexts: ['Worship'] }),
+  readmeShot('/en/serve/matrix/1', 'serve/matrix.png', 'Scheduling Matrix', { actor: 'sarah', requiredTexts: ['Sunday Worship (English)', 'WORSHIP TEAM'] }),
+  ...LEARNING_DEMO_CAPTURE_ROWS.filter((row) => row.identity === 'member').map((row) => Object.freeze({ ...row, theme: 'sanctuary', mode: 'light' })),
+]);
+
+export const README_SCREENSHOTS = validateScreenshotManifest(README_CAPTURE_ROWS.map((row) => {
+  const { path, out, locale, backend, identity, viewport, expectedText, rejectionTexts } = row;
+  return { path, out, locale, backend, identity, viewport, expectedText, rejectionTexts };
+}));
+
+// These explain architecture/workflows and are authored separately, not browser pages.
+export const README_DIAGRAMS = Object.freeze([
+  'docs/images/diagrams/product-overview.png',
+  'docs/images/learning/learning-flow.png',
+  'docs/images/diagrams/member-opportunity-workflow.png',
+  'docs/images/diagrams/setup-paths-overview.png',
+]);
+
+export const CAPTURE_ROWS = Object.freeze([
+  ...LEGACY_CAPTURE_ROWS.map((row) => README_CAPTURE_ROWS.find((readme) => readme.out === row.out) ?? row),
+  ...README_CAPTURE_ROWS.filter((row) => !LEGACY_CAPTURE_ROWS.some((legacy) => legacy.out === row.out)),
+]);
+
+export function selectScreenshotRows(argv) {
+  requireScreenshotOnly(argv);
+  const tokens = (argv[argv.indexOf('--only') + 1] ?? '').split(',').filter(Boolean);
+  if (tokens.length === 1 && tokens[0] === 'readme') return README_CAPTURE_ROWS;
+  const pages = CAPTURE_ROWS.filter((row) => tokens.some((token) => row.out.includes(token)));
+  if (pages.length === 0) throw new Error(`--only matched no pages (tokens: ${tokens.join(', ')})`);
+  return pages;
+}
+
 // --- Chrome discovery + launch ----------------------------------------------
 function resolveChrome() {
   const candidates = [
@@ -349,21 +449,63 @@ async function connect(wsUrl) {
   return { ws, send, onceEvent };
 }
 
-// --- PNG IHDR dimensions -----------------------------------------------------
-function pngDimensions(buf) {
+// --- Image format/dimensions -------------------------------------------------
+export function screenshotFormat(output) {
+  if (/\.png$/i.test(output)) return 'png';
+  if (/\.jpe?g$/i.test(output)) return 'jpeg';
+  throw new Error(`Unsupported screenshot format: ${output}`);
+}
+
+export function screenshotImageDimensions(buf, format) {
+  if (format === 'jpeg') {
+    if (buf.length < 4 || buf.readUInt16BE(0) !== 0xffd8) throw new Error('not a JPEG (missing SOI)');
+    let offset = 2;
+    while (offset + 4 <= buf.length) {
+      if (buf[offset++] !== 0xff) break;
+      while (offset < buf.length && buf[offset] === 0xff) offset++;
+      const marker = buf[offset++];
+      if (marker === 0xd9 || marker === 0xda || offset + 2 > buf.length) break;
+      const length = buf.readUInt16BE(offset);
+      if (length < 2 || offset + length > buf.length) break;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker) && length >= 8) {
+        return { width: buf.readUInt16BE(offset + 5), height: buf.readUInt16BE(offset + 3) };
+      }
+      offset += length;
+    }
+    throw new Error('not a JPEG (missing valid frame dimensions)');
+  }
   // 8-byte signature, 4-byte length, "IHDR", then width/height (big-endian u32).
-  if (buf.length < 24 || buf.toString('ascii', 12, 16) !== 'IHDR') {
+  if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47 || buf.toString('ascii', 12, 16) !== 'IHDR') {
     throw new Error('not a PNG (missing IHDR)');
   }
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
+export function screenshotClip(row, anchorY) {
+  if (!row.anchor) return undefined;
+  if (!Number.isFinite(anchorY) || anchorY < 0) throw new Error(`${row.out}: required anchor ${JSON.stringify(row.anchor)} was not found`);
+  return { x: 0, y: Math.max(0, anchorY - (row.anchorMargin ?? 40)), width: VIEWPORT.width, height: VIEWPORT.height, scale: 1 };
+}
+
+export async function createScreenshotTarget({ send }) {
+  // New tabs in the default context share cookies. An incognito context also
+  // isolates localStorage, campus choices, and the preceding shot's identity.
+  const { browserContextId } = await send('Target.createBrowserContext', {});
+  const close = () => send('Target.disposeBrowserContext', { browserContextId });
+  try {
+    const { targetId } = await send('Target.createTarget', { url: 'about:blank', browserContextId });
+    const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    return { sessionId, close };
+  } catch (error) {
+    await close().catch(() => {});
+    throw error;
+  }
+}
+
 // --- capture one page --------------------------------------------------------
 async function capture(cdp, base, row) {
   const { send, onceEvent } = cdp;
-  // Fresh target per shot → isolated page lifecycle.
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  const { sessionId, close } = await createScreenshotTarget(cdp);
 
   try {
     await send('Page.enable', {}, sessionId);
@@ -399,6 +541,18 @@ async function capture(cdp, base, row) {
     await send('Page.navigate', { url }, sessionId);
     await loaded;
     const mainResponse = await mainDocument;
+
+    if (row.waitForSelector) {
+      let ready = false;
+      for (let i = 0; i < 100; i++) {
+        const { result } = await send('Runtime.evaluate', {
+          expression: `!!document.querySelector(${JSON.stringify(row.waitForSelector)})`, returnByValue: true,
+        }, sessionId);
+        if (result.value === true) { ready = true; break; }
+        await sleep(100);
+      }
+      if (!ready) throw new Error(`${row.out}: editor did not mount (${row.waitForSelector})`);
+    }
 
     // A scripted form submission: check every box matching `checkAll`, then
     // submit the form and wait for the real server-rendered response page
@@ -442,21 +596,26 @@ async function capture(cdp, base, row) {
     await send('Runtime.evaluate',
       { expression: "document.querySelectorAll('astro-dev-toolbar, #astro-dev-toolbar-root').forEach(e=>e.remove())" }, sessionId);
 
+    if (row.openDisclosure) {
+      const { result } = await send('Runtime.evaluate', {
+        expression: `(()=>{const d=[...document.querySelectorAll('header details')].find(e=>e.querySelector('summary')?.textContent.trim().startsWith(${JSON.stringify(row.openDisclosure)}));if(!d)return false;d.open=true;return d.open;})()`,
+        returnByValue: true,
+      }, sessionId);
+      if (result.value !== true) throw new Error(`${row.out}: required disclosure ${JSON.stringify(row.openDisclosure)} was not found`);
+      await sleep(100);
+    }
+
     // Anchored shots frame a below-the-fold panel (e.g. the household / notes
     // cards): find the first heading containing `anchor` and clip a 1280x800
     // window starting `anchorMargin` px above it (captureBeyondViewport renders
-    // the region even below the live viewport). Falls back to a top-of-page shot
-    // if the anchor is missing.
+    // the region even below the live viewport). A missing panel fails capture.
     let clip;
     if (row.anchor) {
       const { result } = await send('Runtime.evaluate', {
         expression: `(()=>{const h=[...document.querySelectorAll('h1,h2,h3')].find(e=>e.textContent.includes(${JSON.stringify(row.anchor)}));return h?Math.round(h.getBoundingClientRect().top+window.scrollY):-1;})()`,
         returnByValue: true,
       }, sessionId);
-      if (typeof result.value === 'number' && result.value >= 0) {
-        const y = Math.max(0, result.value - (row.anchorMargin ?? 40));
-        clip = { x: 0, y, width: VIEWPORT.width, height: VIEWPORT.height, scale: 1 };
-      }
+      clip = screenshotClip(row, result.value);
     }
 
     const { result: pageState } = await send('Runtime.evaluate', {
@@ -465,11 +624,21 @@ async function capture(cdp, base, row) {
     }, sessionId);
     assertExpectedScreenshotPage(row, pageState.value);
 
+    // Decode local media in the actual capture region, including lazy images
+    // below the live viewport in an anchored shot. External video thumbnails
+    // may remain pending; the product's packaged poster is already visible.
+    const { result: mediaState } = await send('Runtime.evaluate', {
+      expression: `(async()=>{const top=${clip?.y ?? 0};const bottom=top+${VIEWPORT.height};const images=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return r.width>0&&r.height>0&&r.top+scrollY<bottom&&r.bottom+scrollY>top&&new URL(img.currentSrc||img.src,location.href).origin===location.origin;});const ready=Promise.all(images.map(async img=>{img.loading='eager';await img.decode();})).then(()=>true);return Promise.race([ready,new Promise(resolve=>setTimeout(()=>resolve(false),10000))]);})()`,
+      awaitPromise: true, returnByValue: true,
+    }, sessionId);
+    if (mediaState.value !== true) throw new Error(`${row.out}: local capture media did not decode`);
+
+    const format = screenshotFormat(row.out);
     const { data } = await send('Page.captureScreenshot',
-      clip ? { format: 'png', clip, captureBeyondViewport: true } : { format: 'png' }, sessionId);
+      { format, ...(format === 'jpeg' ? { quality: 90 } : {}), ...(clip ? { clip, captureBeyondViewport: true } : {}) }, sessionId);
     const buf = Buffer.from(data, 'base64');
 
-    const { width, height } = pngDimensions(buf);
+    const { width, height } = screenshotImageDimensions(buf, format);
     if (width !== VIEWPORT.width || height !== VIEWPORT.height) {
       throw new Error(`${row.out}: expected ${VIEWPORT.width}x${VIEWPORT.height}, got ${width}x${height}`);
     }
@@ -482,7 +651,7 @@ async function capture(cdp, base, row) {
     await writeFile(outPath, buf);
     console.log(`  ok  ${row.out}  ${width}x${height}  ${(buf.length / 1024).toFixed(0)}KB`);
   } finally {
-    await send('Target.closeTarget', { targetId }).catch(() => {});
+    await close().catch(() => {});
   }
 }
 
@@ -498,10 +667,7 @@ async function main() {
   // `--only <substr[,substr...]>` captures just the rows whose `out` contains a
   // token — used to shoot the admin/member pages against a dev server booted for
   // that identity without re-capturing the whole table.
-  const onlyIdx = process.argv.indexOf('--only');
-  const onlyTokens = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] ?? '').split(',').filter(Boolean) : null;
-  const pages = onlyTokens ? PAGES.filter((p) => onlyTokens.some((tok) => p.out.includes(tok))) : PAGES;
-  if (pages.length === 0) throw new Error(`--only matched no pages (tokens: ${onlyTokens?.join(', ')})`);
+  const pages = selectScreenshotRows(process.argv);
   if (pages.some((row) => row.sessionIdentity)) requireScreenshotSessionEnvironment(process.env);
 
   // Fail fast if the dev server is not up.

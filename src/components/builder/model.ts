@@ -26,6 +26,7 @@ export interface BuilderState {
 export type BuilderAction =
   | { type: 'insert'; container: ContainerRef; index: number; node: AnyNode }
   | { type: 'move'; container: ContainerRef; index: number; id: string }
+  | { type: 'nudge'; id: string; direction: -1 | 1 }
   | { type: 'update'; id: string; props: Record<string, unknown> }
   | { type: 'remove'; id: string }
   | { type: 'duplicate'; id: string }
@@ -137,6 +138,18 @@ export function builderReducer(state: BuilderState, action: BuilderAction): Buil
       if (!arr) return state;
       arr.splice(Math.min(action.index, arr.length), 0, structuredClone(action.node));
       return commit(state, next, action.node.id);
+    }
+
+    case 'nudge': {
+      const found = findNode(state.layout, action.id);
+      if (!found) return state;
+      const siblings = containerArray(state.layout, found.container);
+      const target = found.index + action.direction;
+      if (!siblings || target < 0 || target >= siblings.length) return state;
+      return builderReducer(state, {
+        type: 'move', id: action.id, container: found.container,
+        index: action.direction === 1 ? found.index + 2 : found.index - 1,
+      });
     }
 
     case 'move': {

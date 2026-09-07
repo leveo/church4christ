@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 学生团契
 meetingTime: 每周四 · 晚上7:00
 location: 203室

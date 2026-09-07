@@ -23,6 +23,13 @@ Local Supabase requires a local Postgres/Supabase database or a hosted Supabase 
 Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supabase content
 migration, so this guide does not promise a lossless backend switch for an existing site.
 
+Use **UTC for PostgreSQL sessions**, including a locally hosted test database. Identity
+approval timestamps are stored as UTC text and the current database guards compare them
+with the session clock. Check `SHOW timezone;` with the application connection. If needed,
+set the application's database or connection role to UTC and reconnect before using
+identity approval/recovery. The church's displayed service dates still use the site's
+time-zone rules; they are separate from this database requirement.
+
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
 > explains, in plain language, what Cloudflare is and how its plan allowances work. Guided
 > setup does not require reading the manual deployment sequence first. If you are tracing
@@ -351,6 +358,14 @@ handoff prints the canonical host variable required to start Wrangler.
 
 2. **Run guided local setup** with `SUPABASE_DB_URL` exported. It writes the local Hyperdrive
    binding and initializes the selected modules and first admin.
+
+   Choose **Include demo content** to explore fictional examples, or **No demo content**
+   to start with your own content. Both retain the same bundled design and local
+   decorative assets. No demo content still applies all migrations and creates operational
+   defaults, explicit module settings, church identity, and the first administrator.
+   Noninteractive scripts can use `--demo-data` or `--no-demo-data` (the existing default).
+   Rerunning no-demo setup does not remove records; use a separate fresh database to
+   evaluate the other starting mode.
 
    ```bash
    export SUPABASE_DB_URL=postgres://postgres:postgres@localhost:5432/postgres

@@ -258,6 +258,19 @@ describe('teamDb', () => {
   });
 
   describe('getMatrix / listPlanFills', () => {
+    it('keeps the same scheduling grid when English plan subtitles need localized presentation', async () => {
+      await env.DB.prepare("UPDATE plans SET title = '同心服事', series = '彼此相爱' WHERE id = 1").run();
+      await env.DB.prepare("UPDATE people SET display_name = '王明' WHERE id = 1").run();
+      const english = await getMatrix(env.DB, 1, '2030-06-01', 8, 'en');
+      const chinese = await getMatrix(env.DB, 1, '2030-06-01', 8, 'zh');
+      expect(english.plans.map((p) => p.id)).toEqual(chinese.plans.map((p) => p.id));
+      expect(english.plans[0]).toMatchObject({ id: 1, display_title: null, display_series: null });
+      expect(chinese.plans[0]).toMatchObject({ id: 1, display_title: '同心服事', display_series: '彼此相爱' });
+      expect(english.needs).toEqual(chinese.needs);
+      expect(english.assignments).toEqual(chinese.assignments);
+      expect(english.assignments[0].person_name).toBe('王明');
+    });
+
     it('returns plans, team-grouped rows, needs, and live assignments', async () => {
       const m = await getMatrix(env.DB, 1, '2030-06-01', 8, 'zh');
       expect(m.plans.map((p) => p.plan_date)).toEqual(['2030-06-02', '2030-06-09']);

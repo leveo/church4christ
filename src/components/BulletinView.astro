@@ -27,11 +27,11 @@ const offering = parseJsonArray<OfferingRow>(bulletin.offering_json);
 const attendance = parseJsonArray<AttendanceRow>(bulletin.attendance_json);
 const nameSep = locale === 'zh' ? '、' : ', ';
 
-const headingClass = 'mb-4 border-l-4 border-accent pl-3 font-display text-heading-sm font-bold';
+const headingClass = 'bulletin-section-heading';
 ---
 
-<article class="space-y-10">
-  <header>
+<article class="bulletin-document space-y-10">
+  <header class="bulletin-masthead">
     <p class="text-sm font-semibold uppercase tracking-caps text-accent">{bulletin.serviceTypeName}</p>
     <h2 class="mt-1 font-display text-heading-md font-bold">{formatDate(bulletin.bulletin_date, locale)}</h2>
     {bulletin.service_time_label && <p class="mt-1 text-ink-muted">{bulletin.service_time_label}</p>}
@@ -150,3 +150,15 @@ const headingClass = 'mb-4 border-l-4 border-accent pl-3 font-display text-headi
     )
   }
 </article>
+<style>
+  .bulletin-masthead { text-align: center; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border-strong); }
+  .bulletin-masthead > p:first-child { color: var(--color-primary); font-size: .78rem; }
+  .bulletin-masthead h2 { margin-top: .7rem; font-size: clamp(1.65rem, 3vw, 2.3rem); font-weight: 500; }
+  .bulletin-section-heading { margin-bottom: 1.2rem; font-family: var(--font-display); font-size: 1.45rem; font-weight: 550; color: var(--color-primary); }
+  .bulletin-document th, .bulletin-document td { padding-block: .9rem; overflow-wrap: anywhere; }
+  .bulletin-document section { line-height: 1.8; }
+  .bulletin-document > section > ol { padding-left: 1.4rem; }
+  .bulletin-document > section > ol li { padding-left: .35rem; }
+  @media (max-width: 550px) { .bulletin-document th { min-width: 5rem; } .bulletin-document td:last-child { min-width: 4.5rem; } }
+  @media print { .bulletin-masthead { padding-bottom: 1rem; } .bulletin-document { font-size: .9rem; } .bulletin-document th, .bulletin-document td { padding-block: .45rem; } .bulletin-document > section { margin-top: 1.5rem; } }
+</style>

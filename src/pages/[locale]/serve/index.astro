@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Volunteer landing: hero, a three-step "how it works", the full ministry grid
 // (with open-role badges), a published-testimonies strip, and a closing CTA
 // band. Every DB read fails soft to empty so the page degrades gracefully (grid
@@ -38,39 +41,20 @@ const steps = [1, 2, 3].map((n) => ({
 
 // Soft-degrade: hide the gifts-quiz CTA when the gifts module is off.
 const modules = Astro.locals.modules;
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.title')} locale={locale}>
-  <section class="bg-primary text-on-primary">
-    <div class="container-content py-20 text-center">
-      <p class="text-sm font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.heroEyebrow')}</p>
-      <h1 class="mx-auto mt-3 max-w-narrow font-display text-display-2xl font-bold">{t(locale, 'serve.heroTitle')}</h1>
-      <p class="mx-auto mt-5 max-w-narrow text-lg">{t(locale, 'serve.heroBody')}</p>
-      <div class="mt-8 flex flex-wrap justify-center gap-3">
-        <a
-          href={localePath(locale, '/serve/apply')}
-          class="inline-flex min-h-11 items-center rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-        >
-          {t(locale, 'serve.ctaApply')}
-        </a>
-        {
-          modules.has('gifts') && (
-            <a
-              href={localePath(locale, '/serve/gifts')}
-              class="inline-flex min-h-11 items-center rounded-full border border-on-primary px-6 py-2.5 text-sm font-semibold hover:bg-primary-hover"
-            >
-              {t(locale, 'serve.ctaGifts')}
-            </a>
-          )
-        }
-      </div>
-    </div>
-  </section>
+<MinistryWorkspace locale={locale} audience="public" variant="public">
+  <MinistryHeader title={t(locale, 'serve.heroTitle')} eyebrow={t(locale, 'serve.heroEyebrow')} description={t(locale, 'serve.heroBody')} image="worship">
+    <a href={localePath(locale, '/serve/apply')} class="inline-flex min-h-11 items-center rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary hover:bg-primary-hover">{t(locale, 'serve.ctaApply')}</a>
+    {modules.has('gifts') && <a href={localePath(locale, '/serve/gifts')} class="inline-flex min-h-11 items-center rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-ink hover:bg-surface-raised">{t(locale, 'serve.ctaGifts')}</a>}
+  </MinistryHeader>
 
-  <section class="bg-surface-sunken py-16">
+  <section class="mw-public-section">
     <div class="container-content">
       <SectionTitle eyebrow={t(locale, 'serve.howEyebrow')} title={t(locale, 'serve.howTitle')} align="center" />
-      <div class="mx-auto mt-10 grid max-w-content gap-8 sm:grid-cols-3">
+      <div class="mw-directory mt-6">
         {
           steps.map((s) => (
             <div class="text-center">
@@ -86,7 +70,7 @@ const modules = Astro.locals.modules;
     </div>
   </section>
 
-  <section class="container-content py-16">
+  <section class="container-content mw-public-section">
     <SectionTitle
       eyebrow={t(locale, 'serve.ministriesEyebrow')}
       title={t(locale, 'serve.ministriesTitle')}
@@ -131,7 +115,7 @@ const modules = Astro.locals.modules;
 
   {
     testimonies.length > 0 && (
-      <section class="bg-surface-sunken py-16">
+      <section class="mw-public-section">
         <div class="container-content">
           <SectionTitle
             eyebrow={t(locale, 'serve.testimoniesEyebrow')}
@@ -160,7 +144,7 @@ const modules = Astro.locals.modules;
     )
   }
 
-  <section class="container-content py-16">
+  <section class="container-content mw-public-section">
     <div class="rounded-lg bg-primary p-10 text-center text-on-primary">
       <h2 class="font-display text-heading-md font-bold">{t(locale, 'serve.bandTitle')}</h2>
       <p class="mx-auto mt-3 max-w-narrow">{t(locale, 'serve.bandBody')}</p>
@@ -180,4 +164,5 @@ const modules = Astro.locals.modules;
       </div>
     </div>
   </section>
+</MinistryWorkspace>
 </Base>

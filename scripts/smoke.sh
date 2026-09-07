@@ -124,7 +124,8 @@ done
 # (events strip, anchored prayer section with its honeypot), and the locale-free
 # prayer-request API is POST-only (a bare GET must not render anything).
 home_en=$(curl -sf "$BASE/en/")
-echo "$home_en" | grep -q 'Find your place in God' || fail "/en/ missing hero title"
+echo "$home_en" | grep -q 'Life together\.' || fail "/en/ missing hero title"
+echo "$home_en" | grep -q 'Faith that grows\.' || fail "/en/ missing hero subtitle line"
 echo "$home_en" | grep -q 'Upcoming Events' || fail "/en/ missing events section landmark"
 echo "$home_en" | grep -q 'id="prayer"' || fail "/en/ missing prayer section landmark"
 echo "$home_en" | grep -q 'name="website"' || fail "/en/ missing prayer honeypot field"

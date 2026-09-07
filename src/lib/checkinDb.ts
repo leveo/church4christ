@@ -287,8 +287,8 @@ export async function getHouseholdForKiosk(
 
   const { results: checkins } = await db
     .prepare(
-      `SELECT c.id AS checkinId, c.household_member_id AS memberId, c.event_id AS eventId, e.name AS eventName,
-              c.security_code AS securityCode, c.checked_out_at AS checkedOutAt
+      `SELECT c.id AS "checkinId", c.household_member_id AS "memberId", c.event_id AS "eventId", e.name AS "eventName",
+              c.security_code AS "securityCode", c.checked_out_at AS "checkedOutAt"
        FROM checkins c JOIN checkin_events e ON e.id = c.event_id
        WHERE c.household_id = ? AND c.checkin_date = ?`,
     )
@@ -333,8 +333,8 @@ export async function staffCheckOut(db: AppDb, checkinId: number): Promise<void>
 export async function todayRoster(db: AppDb, date: string): Promise<RosterRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT c.id AS checkinId, c.child_name AS childName, h.name AS householdName, e.name AS eventName,
-              c.security_code AS securityCode, c.checked_in_at AS checkedInAt, c.checked_out_at AS checkedOutAt
+      `SELECT c.id AS "checkinId", c.child_name AS "childName", h.name AS "householdName", e.name AS "eventName",
+              c.security_code AS "securityCode", c.checked_in_at AS "checkedInAt", c.checked_out_at AS "checkedOutAt"
        FROM checkins c
        JOIN households h ON h.id = c.household_id
        JOIN checkin_events e ON e.id = c.event_id
@@ -357,7 +357,7 @@ export async function weeklyStats(db: AppDb, opts: { today: string; weeksBack?: 
 
   const { results: rows } = await db
     .prepare(
-      `SELECT c.checkin_date AS checkinDate, c.event_id AS eventId, e.name AS eventName, COUNT(*) AS n
+      `SELECT c.checkin_date AS "checkinDate", c.event_id AS "eventId", e.name AS "eventName", COUNT(*) AS n
        FROM checkins c JOIN checkin_events e ON e.id = c.event_id
        WHERE c.checkin_date >= ?
        GROUP BY c.checkin_date, c.event_id, e.name`,

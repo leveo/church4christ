@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 长者团契
 meetingTime: 每周三 · 上午10:00
 location: 105室

@@ -12,6 +12,7 @@ import Canvas from './Canvas';
 import Palette from './Palette';
 import PropertiesPanel from './PropertiesPanel';
 import TopBar from './TopBar';
+import './builder-chrome.css';
 
 export interface PageBuilderProps {
   pageId: string | null;
@@ -158,7 +159,7 @@ export default function PageBuilder(props: PageBuilderProps) {
   const viewHref = pageId && meta.published && !dirty ? `/${props.uiLang}/p/${meta.slug}` : null;
 
   return (
-    <div className="space-y-4">
+    <div className="content-builder space-y-4">
       <TopBar
         slug={meta.slug}
         titleEn={meta.titleEn}
@@ -180,8 +181,10 @@ export default function PageBuilder(props: PageBuilderProps) {
         onSave={save}
       />
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDraggingType(null)}>
-        <div className="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)_18rem]">
-          <Palette strings={props.strings} onQuickAdd={quickAdd} />
+        <div className="builder-workspace">
+          <aside className="builder-palette"><Palette strings={props.strings} onQuickAdd={quickAdd} /></aside>
+          <section className="builder-canvas-panel" aria-labelledby="builder-canvas-title">
+          <div className="builder-panel-heading"><h2 id="builder-canvas-title">{props.strings.canvas}</h2><p>{props.strings.canvasHint}</p></div>
           <Canvas
             layout={state.layout}
             selectedId={state.selectedId}
@@ -191,15 +194,17 @@ export default function PageBuilder(props: PageBuilderProps) {
             onSelect={(id) => dispatch({ type: 'select', id })}
             onRemove={(id) => dispatch({ type: 'remove', id })}
             onDuplicate={(id) => dispatch({ type: 'duplicate', id })}
+            onMove={(id, direction) => dispatch({ type: 'nudge', id, direction })}
           />
-          <PropertiesPanel
+          </section>
+          <aside className="builder-properties"><PropertiesPanel
             node={selectedNode}
             editLocale={editLocale}
             media={props.media}
             strings={props.strings}
             onUpdate={(id, p) => dispatch({ type: 'update', id, props: p })}
             onUpload={upload}
-          />
+          /></aside>
         </div>
         <DragOverlay>
           {draggingType && (

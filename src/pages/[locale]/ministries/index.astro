@@ -3,6 +3,8 @@
 // groups (ministryMeta), each rendered as a section with a heading. Empty groups
 // are skipped; cards badge open serving roles. DB read fails soft to an empty
 // list so a database hiccup degrades to the "nothing yet" state instead of 500.
+import LibraryHeading from '../../../components/public/LibraryHeading.astro';
+import { frontdoorCopy } from '../../../i18n/designFrontdoor';
 import Base from '../../../layouts/Base.astro';
 import SectionTitle from '../../../components/SectionTitle.astro';
 import MinistryCard from '../../../components/MinistryCard.astro';
@@ -32,10 +34,7 @@ const sections = MINISTRY_GROUPS.map((group) => ({
 ---
 
 <Base title={t(locale, 'ministries.title')} locale={locale}>
-  <div class="bg-primary-soft text-on-primary-soft">
-    <div class="container-content py-12">
-      <h1 class="font-display text-display-lg font-bold">{t(locale, 'ministries.title')}</h1>
-      <p class="mt-3 max-w-narrow text-lg">{t(locale, 'ministries.intro')}</p>
+<div class="container-content"><LibraryHeading eyebrow={frontdoorCopy(locale).ministries} title={t(locale, 'ministries.title')} description={t(locale, 'ministries.intro')} image="worship">
       <div class="mt-6 flex flex-wrap items-center gap-4">
         <a
           href={localePath(locale, '/serve')}
@@ -50,8 +49,7 @@ const sections = MINISTRY_GROUPS.map((group) => ({
           {t(locale, 'opportunities.boardLink')} →
         </a>
       </div>
-    </div>
-  </div>
+    </LibraryHeading></div>
 
   <div class="container-content py-10">
     {

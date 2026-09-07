@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Plan detail (team class via route policy): full plan via getPlan — per
 // position a needed/open-signup editor, the assignee list (StatusBadge + remove),
 // an assign picker, and a claim button for open slots. Ported from the reference stack.
@@ -152,28 +155,25 @@ const addablePositions = (
 const teams = [...new Map(plan.positions.map((pp) => [pp.team_id, pp.team_name])).entries()];
 const personName = (id: number) =>
   [...membersByTeam.values()].flat().find((m) => m.person_id === id)?.display_name ?? `#${id}`;
+const copy = ministryCopy(locale);
 ---
 
 <Base title={`${formatDate(plan.plan_date, locale)} · ${plan.service_type_name}`} locale={locale} noindex>
-  <section class="bg-primary text-on-primary">
-    <div class="container-content py-10">
-      <a href={localePath(locale, '/serve/plans')} class="text-sm opacity-80 hover:opacity-100">
-        ← {t(locale, 'serve.plans.title')}
-      </a>
-      <h1 class="mt-2 font-display text-heading-md font-bold tabular-nums">
-        {formatDate(plan.plan_date, locale)} · {plan.service_type_name}
-      </h1>
-      {serviceTime && <p class="mt-1 text-sm opacity-80 tabular-nums">{serviceTime}</p>}
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
+  <MinistryHeader title={`${formatDate(plan.plan_date, locale)} · ${plan.service_type_name}`} eyebrow={copy.planDetails} description={copy.planIntro}>
+      {serviceTime && <p class="text-sm text-ink-muted tabular-nums">{serviceTime}</p>}
       {
-        (plan.title || plan.series) && (
-          <p class="mt-1 opacity-90">
-            {plan.title}
-            {plan.series && <span class="opacity-70"> · {plan.series}</span>}
+        (plan.display_title || plan.display_series) && (
+          <p class="text-sm text-ink-muted">
+            {plan.display_title}
+            {plan.display_series && <span class="opacity-70">{plan.display_title ? ' · ' : ''}{plan.display_series}</span>}
           </p>
         )
       }
-    </div>
-  </section>
+      <a href={localePath(locale, `/serve/matrix/${plan.service_type_id}`)} class={btnSecondary}>{copy.matrix} →</a>
+  </MinistryHeader>
+
+  {teams.length > 0 && <nav class="mw-section-nav" aria-label={copy.teams}>{teams.map(([id, name]) => <a href={`#plan-team-${id}`}>{name}</a>)}</nav>}
 
   <div class="container-content py-10">
     {claimed && <p class={`mb-4 ${noticeOk}`}>{t(locale, 'serve.plans.claimed')}</p>}
@@ -190,7 +190,7 @@ const personName = (id: number) =>
         const canEdit = hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
         const members = membersByTeam.get(teamId) ?? [];
         return (
-          <section class="mt-8">
+          <section class="mt-8" id={`plan-team-${teamId}`}>
             <h2 class="font-display text-lg font-semibold">{teamName}</h2>
             <div class="mt-3 space-y-3">
               {plan.positions
@@ -203,7 +203,7 @@ const personName = (id: number) =>
                   const canClaim =
                     pp.open_signup === 1 && user.memberTeamIds.includes(teamId) && slotsLeft > 0 && !mine;
                   return (
-                    <div class="rounded-lg border border-border bg-surface-raised p-4">
+                    <div class="mw-panel">
                       <div class="flex flex-wrap items-center gap-3">
                         <span class="font-semibold">{pp.position_name}</span>
                         {pp.open_signup === 1 && (
@@ -353,4 +353,5 @@ const personName = (id: number) =>
       )
     }
   </div>
+</MinistryWorkspace>
 </Base>

@@ -15,7 +15,7 @@ if (!locale) {
 }
 
 const slug = Astro.params.slug ?? '';
-const found = await getLocalized('staff', slug, locale);
+const found = await getLocalized('staff', slug, locale, Astro.locals.db);
 if (!found) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

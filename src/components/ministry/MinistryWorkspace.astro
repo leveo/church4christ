@@ -1,0 +1,102 @@
+---
+import Icon from '../ui/Icon.astro';
+import { ministryCopy } from '../../i18n/designMinistry';
+import { ministryNavigation, ministryLinkActive, type MinistryAudience } from '../../lib/ministryNavigation';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; audience?: MinistryAudience; variant?: 'work' | 'public' | 'admin' | 'assessment'; }
+const { locale, audience, variant = 'work' } = Astro.props;
+const links = audience ? ministryNavigation(Astro.locals.modules, locale, Astro.locals.user ?? null, audience) : [];
+---
+<div class={`ministry-workspace mw-${variant}`}>
+  {links.length > 0 && <nav class="mw-navigation" aria-label={ministryCopy(locale).navigation}>
+    {links.map(link => <a href={link.href} aria-current={ministryLinkActive(link.href, Astro.url.pathname) ? 'page' : undefined}>
+      <Icon name={link.icon} size={17} /><span>{link.label}</span>
+    </a>)}
+  </nav>}
+  <slot />
+</div>
+<style>
+  .ministry-workspace { max-width: var(--container-wide); margin-inline: auto; padding: 1.5rem clamp(1rem, 3vw, 2rem) 4rem; min-width: 0; }
+  .mw-admin { padding: 0; max-width: none; }
+  .mw-navigation { display: flex; flex-wrap: wrap; gap: .3rem; border-bottom: 1px solid var(--color-border); padding-bottom: .75rem; margin-bottom: 2rem; }
+  .mw-navigation a { display: flex; align-items: center; gap: .55rem; padding: .65rem .9rem; border-radius: var(--radius-md); font-size: .78rem; font-weight: 600; color: var(--color-ink-muted); }
+  .mw-navigation a:hover { background: var(--color-surface-raised); color: var(--color-primary); }
+  .mw-navigation a[aria-current] { color: var(--color-on-primary-soft); background: var(--color-primary-soft); }
+  .ministry-workspace :global(.container-content), .ministry-workspace :global(.container-narrow) { width: 100%; max-width: none; padding-inline: 0; padding-block: 0; }
+  .ministry-workspace :global(h1), .ministry-workspace :global(h2), .ministry-workspace :global(h3) { font-family: var(--font-body); letter-spacing: -.025em; }
+  .ministry-workspace :global(h1) { font-size: clamp(1.9rem, 3vw, 2.7rem); font-weight: 600; line-height: 1.2; }
+  .ministry-workspace :global(h2) { font-size: 1.12rem; font-weight: 650; }
+  .ministry-workspace :global(.mw-header) { display: flex; align-items: center; justify-content: space-between; gap: 2.5rem; padding-bottom: 1.75rem; margin-bottom: 1.75rem; border-bottom: 1px solid var(--color-border); }
+  .ministry-workspace :global(.mw-header-copy) { min-width: 0; flex: 1; }
+  .ministry-workspace :global(.mw-eyebrow) { font-size: .67rem; font-weight: 750; text-transform: uppercase; letter-spacing: .16em; color: var(--color-primary); margin-bottom: .8rem; }
+  .ministry-workspace :global(.mw-description) { margin-top: .85rem; color: var(--color-ink-muted); max-width: 42rem; font-size: .9rem; line-height: 1.8; }
+  .ministry-workspace :global(.mw-actions) { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; margin-top: 1.3rem; }
+  .ministry-workspace :global(.mw-header-art) { width: 34%; height: 230px; border-radius: var(--radius-lg); overflow: hidden; }
+  .mw-public :global(h1) { font-family: var(--font-display); font-size: clamp(2.5rem, 5vw, 4rem); color: var(--color-primary); font-weight: 500; }
+  .ministry-workspace :global(.mw-public-section) { padding-block: 2.5rem; }
+  .ministry-workspace :global(.mw-panel) { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); padding: 1.5rem; }
+  .ministry-workspace :global(.mw-panel-heading), .ministry-workspace :global(.mw-toolbar) { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  .ministry-workspace :global(.mw-toolbar) { padding: 1rem 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); margin-block: 1.5rem; }
+  .ministry-workspace :global(.mw-search) { display: grid; gap: .35rem; font-size: .75rem; font-weight: 600; color: var(--color-ink-muted); width: min(100%, 22rem); }
+  .ministry-workspace :global(.mw-search input) { width: 100%; padding: .7rem .8rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-ink); font-size: .85rem; }
+  .ministry-workspace :global(.mw-search-empty) { margin-top: 1rem; font-size: .85rem; color: var(--color-ink-muted); }
+  .ministry-workspace :global(.mw-section-nav) { display: flex; flex-wrap: wrap; gap: 1.1rem; margin: 1.5rem 0; padding: .85rem 0; border-block: 1px solid var(--color-border); font-size: .8rem; font-weight: 600; color: var(--color-primary); }
+  .ministry-workspace :global(.mw-section-nav a:hover) { text-decoration: underline; }
+  .ministry-workspace :global(.mw-metrics) { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1.4rem; }
+  .ministry-workspace :global(.mw-metrics div) { min-width: 6rem; border-left: 2px solid var(--color-border); padding-left: .85rem; }
+  .ministry-workspace :global(.mw-metrics dt) { font-size: .72rem; color: var(--color-ink-muted); }
+  .ministry-workspace :global(.mw-metrics dd) { font-size: 1.6rem; font-weight: 600; margin-top: .15rem; }
+  .ministry-workspace :global(.mw-disclosure) { margin-top: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-disclosure > summary) { padding: 1rem 1.25rem; cursor: pointer; font-size: .82rem; font-weight: 650; }
+  .ministry-workspace :global(.mw-disclosure-content) { padding: .25rem 1.25rem 1.25rem; }
+  .ministry-workspace :global(.mw-split) { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 2rem; align-items: start; }
+  .ministry-workspace :global(.mw-aside) { position: sticky; top: 6.5rem; }
+  .ministry-workspace :global(.mw-aside p) { color: var(--color-ink-muted); font-size: .85rem; line-height: 1.8; margin-top: .7rem; }
+  .ministry-workspace :global(.mw-directory) { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 1rem; }
+  .ministry-workspace :global(.mw-directory > article), .ministry-workspace :global(.mw-directory > div), .ministry-workspace :global(.mw-directory > a) { border-radius: var(--radius-md); padding: 1.4rem; border: 1px solid var(--color-border); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-directory > [hidden]) { display: none; }
+  .ministry-workspace :global([data-ministry-item][hidden]) { display: none; }
+  .ministry-workspace :global(.mw-identity) { display: flex; align-items: center; gap: .7rem; }
+  .ministry-workspace :global(.mw-roster > li) { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-table-wrap) { overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-table-wrap table) { width: 100%; border-collapse: collapse; }
+  .ministry-workspace :global(.mw-table-wrap th) { padding: .85rem 1rem; font-size: .67rem; font-weight: 650; color: var(--color-ink-muted); background: var(--color-surface-sunken); }
+  .ministry-workspace :global(.mw-table-wrap td) { padding: .95rem 1rem; font-size: .82rem; }
+  .ministry-workspace :global(.mw-table-wrap tr:hover td) { background: var(--color-surface); }
+  .ministry-workspace :global(.mw-plan-row) { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; align-items: center; gap: 1rem; padding: 1.15rem 1.25rem; }
+  .ministry-workspace :global(.mw-plan-date) { display: flex; flex-direction: column; align-items: center; padding: .45rem; background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-radius: var(--radius-md); font-size: .72rem; }
+  .ministry-workspace :global(.mw-plan-date strong) { font-size: 1.35rem; line-height: 1.3; font-weight: 650; }
+  .ministry-workspace :global(.mw-plan-copy) { display: flex; flex-direction: column; gap: .35rem; font-size: .84rem; }
+  .ministry-workspace :global(.mw-plan-copy small) { color: var(--color-ink-muted); }
+  .ministry-workspace :global(.mw-plan-fill) { font-size: .72rem; white-space: nowrap; }
+  .ministry-workspace :global(.mw-matrix) { max-height: 72vh; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-matrix thead th) { position: sticky; top: 0; z-index: 2; background: var(--color-surface-sunken); padding-block: 1rem; }
+  .ministry-workspace :global(.mw-matrix thead th:first-child) { z-index: 4; }
+  .ministry-workspace :global(.mw-matrix tbody th) { z-index: 1; }
+  .ministry-workspace :global(.mw-matrix td) { min-width: 150px; border-right: 1px solid var(--color-border); }
+  .ministry-workspace :global(.mw-matrix select) { min-width: 0; max-width: 100%; padding: .5rem; }
+  .ministry-workspace :global(.mw-legend) { display: flex; align-items: center; flex-wrap: wrap; gap: .8rem; font-size: .72rem; }
+  .ministry-workspace :global(.mw-legend span) { display: inline-flex; align-items: center; gap: .3rem; }
+  .ministry-workspace :global(.mw-stories) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: start; }
+  .ministry-workspace :global(.mw-stories article) { padding: 1.65rem; border-radius: var(--radius-md); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-top: 3px solid var(--color-primary); }
+  .ministry-workspace :global(.mw-story-body) { line-height: 1.85; font-size: .95rem; }
+  .ministry-workspace :global(.mw-quiz) { max-width: 52rem; margin-inline: auto; }
+  .ministry-workspace :global(.mw-question) { padding: 1.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .ministry-workspace :global(.mw-question legend) { padding-top: 1.25rem; font-weight: 600; font-size: .95rem; }
+  .ministry-workspace :global(.mw-question:has(input:checked)) { border-left: 3px solid var(--color-primary); }
+  .ministry-workspace :global(.mw-question label) { min-height: 3.2rem; }
+  .ministry-workspace :global(.mw-progress) { position: sticky; top: 0; z-index: 5; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; }
+  .ministry-workspace :global(.mw-progress button) { margin-top: .65rem; font-size: .75rem; color: var(--color-primary); font-weight: 600; }
+  .ministry-workspace :global(.mw-scope) { padding: .75rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); font-size: .78rem; }
+  .ministry-workspace :global(.mw-steps) { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1.5rem; font-size: .8rem; color: var(--color-ink-muted); }
+  .ministry-workspace :global(.mw-steps li) { display: flex; align-items: center; gap: .6rem; }
+  .ministry-workspace :global(.mw-steps span) { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border: 1px solid var(--color-border); border-radius: 50%; }
+  .ministry-workspace :global(.mw-steps [aria-current]) { color: var(--color-primary); font-weight: 650; }
+  .ministry-workspace :global(.mw-steps [aria-current] span) { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+  .ministry-workspace :global(.mw-console-content > div) { box-shadow: none; border-radius: var(--radius-md); }
+  .ministry-workspace :global(input), .ministry-workspace :global(select), .ministry-workspace :global(textarea) { max-width: 100%; accent-color: var(--color-primary); }
+  .ministry-workspace :global(button), .ministry-workspace :global(select) { min-height: 2.25rem; }
+  .ministry-workspace :global([id]) { scroll-margin-top: 6rem; }
+  @media (max-width: 800px) { .ministry-workspace :global(.mw-split) { grid-template-columns: 1fr; } .ministry-workspace :global(.mw-aside) { position: static; } .ministry-workspace :global(.mw-stories) { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .mw-navigation { flex-wrap: nowrap; overflow-x: auto; } .mw-navigation a { flex-shrink: 0; font-size: .72rem; padding-inline: .6rem; } .ministry-workspace :global(.mw-header) { flex-direction: column; align-items: stretch; gap: 1.25rem; } .ministry-workspace :global(.mw-header-art) { width: 100%; height: 165px; } .ministry-workspace :global(.mw-plan-row) { grid-template-columns: 3.5rem minmax(0, 1fr); } .ministry-workspace :global(.mw-plan-fill) { grid-column: 2; } .ministry-workspace :global(.mw-matrix) { max-height: 68vh; } }
+</style>

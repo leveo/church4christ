@@ -1,0 +1,31 @@
+const en = {
+  welcome: 'Your week, together.',
+  welcomeBody: 'Respond to invitations, see what is coming up, and stay connected with your church community.',
+  community: 'My community',
+  calendarIntro: 'Make room for what matters. See your serving, groups, events, and time away in one place.',
+  calendarAgenda: 'This month',
+  learningEyebrow: 'Grow in faith',
+  contents: 'Course contents',
+  householdIntro: 'Keep your family connected, with the right information for each person.',
+  servingIntro: 'Your invitations, teams, and upcoming opportunities to serve.',
+  prayerIntro: 'A place to share, support one another, and return to what you are praying for.',
+  eventsIntro: 'Your registrations and the next opportunities to gather.',
+  givingIntro: 'A clear record of your gifts and recurring contributions.',
+  privacy: 'Privacy',
+};
+const zh: typeof en = {
+  welcome: '一起走过这一周',
+  welcomeBody: '回应服事邀请，查看近期安排，与教会生活保持连接。',
+  community: '我的教会生活',
+  calendarIntro: '为重要的事留出时间。在这里查看服事、小组、活动和休假安排。',
+  calendarAgenda: '本月日程',
+  learningEyebrow: '在信仰中成长',
+  contents: '课程目录',
+  householdIntro: '一起照顾家庭，及时更新每位成员的重要资料。',
+  servingIntro: '查看服事邀请、所属团队与接下来的服事机会。',
+  prayerIntro: '分享代祷、彼此支持，也记念祷告中的回应。',
+  eventsIntro: '查看已报名的活动，发现下一次相聚的机会。',
+  givingIntro: '清楚查看奉献记录与定期奉献安排。',
+  privacy: '隐私政策',
+};
+export const memberCopy = (locale: 'en' | 'zh') => locale === 'zh' ? zh : en;

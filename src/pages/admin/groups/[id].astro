@@ -98,7 +98,7 @@ const h2 = 'font-display text-heading-sm font-bold';
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {addAdminError && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.groups.addAdminError')}</p>}
 
-  <section class={`mt-6 ${card} max-w-2xl space-y-2`}>
+  <section class={`mt-6 ${card} space-y-2`}>
     <div class="flex items-center gap-2">
       <span class={`${badge} ${group.is_public ? badgeActive : badgeInactive}`}>
         {group.is_public ? t(lang, 'admin.groups.public') : t(lang, 'admin.groups.private')}
@@ -114,7 +114,7 @@ const h2 = 'font-display text-heading-sm font-bold';
     </p>
   </section>
 
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.groups.membersTitle')}</h2>
+<div class="group-roster-grid"><div>  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.groups.membersTitle')}</h2>
   <div class="mt-4 overflow-x-auto rounded-xl border border-border">
     <table class="w-full border-collapse">
       <thead class="bg-surface-sunken">
@@ -169,7 +169,7 @@ const h2 = 'font-display text-heading-sm font-bold';
     </table>
   </div>
 
-  <section class={`mt-8 ${card} max-w-2xl space-y-4`}>
+</div><aside>  <section class={`mt-8 ${card} max-w-2xl space-y-4`}>
     <h2 class={h2}>{t(lang, 'admin.groups.addAdminTitle')}</h2>
     <p class="text-sm text-ink-muted">{t(lang, 'admin.groups.addAdminHint')}</p>
     <form method="get" class="flex flex-wrap items-end gap-3">
@@ -201,4 +201,11 @@ const h2 = 'font-display text-heading-sm font-bold';
       )
     }
   </section>
+</aside></div>
 </Admin>
+
+<style>
+.group-roster-grid { display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:1.75rem;align-items:start; }
+.group-roster-grid > * { min-width:0; }
+@media(max-width:1050px) { .group-roster-grid { grid-template-columns:1fr; } }
+</style>

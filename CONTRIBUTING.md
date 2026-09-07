@@ -20,6 +20,22 @@ npm run dev
 If you use `npm ci --ignore-scripts`, run `npm run tokens` manually before `npm run setup`
 or `npm run dev`.
 
+First setup offers **Include demo content** and **No demo content**. Both use the same
+bundled design and local decorative assets. Choose demo content to explore example
+workflows; choose no demo content to check empty states with just your church settings,
+operational defaults, and first administrator. Scripts can select `--demo-data` or
+`--no-demo-data`; the noninteractive default remains no demo content. These are initial
+content choices, not database reset commands. Use a separate disposable workspace and
+database to compare them.
+
+Managed first setup stores `site.demo_content` as `true` or `false`. Initialization never
+overwrites a present marker. Existing module settings identify a previously initialized
+database, independently of setup-plan fingerprints. Imported and previously initialized
+installations leave an absent marker unchanged for legacy behavior, including when the
+selected features change. The fictional seed explicitly records `true`. Bundled
+sample content must honor an explicit `false`; decorative design assets remain available
+in either mode. Never use this setting to delete or hide administrator-created records.
+
 Open the printed address (usually `http://localhost:4321`). To reach the admin area, use the
 first-admin email from your setup answers, repeated in the setup handoff. The magic link
 prints to your terminal (local email is logged, not sent), and setup also writes the same

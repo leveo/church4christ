@@ -1,5 +1,6 @@
 ---
 import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
 import { card, btn, th, td } from '../../../../../lib/adminUi';
 import { t } from '../../../../../lib/i18n';
 import { planningCenterCredentials } from '../../../../../lib/planningCenterSync';
@@ -22,6 +23,7 @@ const campuses = (await Astro.locals.rawDb.prepare(`SELECT id,name FROM campuses
 ---
 
 <Admin title={lang === 'zh' ? 'Planning Center 同步' : 'Planning Center sync'}>
+  <IdentityWorkspace locale={lang}>
   <div class="flex flex-wrap items-center justify-between gap-4">
     <div>
       <h1 class="font-display text-heading-md font-bold">{lang === 'zh' ? 'Planning Center 同步' : 'Planning Center sync'}</h1>
@@ -76,4 +78,5 @@ const campuses = (await Astro.locals.rawDb.prepare(`SELECT id,name FROM campuses
       button.disabled = false;
     });
   </script>
+  </IdentityWorkspace>
 </Admin>

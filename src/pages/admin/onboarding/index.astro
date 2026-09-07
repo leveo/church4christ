@@ -1,4 +1,7 @@
 ---
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import Icon from '../../../components/ui/Icon.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { btn, card } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
@@ -35,12 +38,14 @@ const statusLabel = (status: string) => t(lang, `admin.onboarding.${status === '
 
 <Admin title={t(lang, 'admin.onboarding.title')}>
   <div data-screenshot-marker="admin-onboarding">
-    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.onboarding.title')}</h1>
-    <p class="mt-1 max-w-3xl text-ink-muted">{t(lang, 'admin.onboarding.intro')}</p>
+    <MemberPageHeader title={t(lang, 'admin.onboarding.title')} eyebrow={operationsCopy(lang).readiness} description={t(lang, 'admin.onboarding.intro')} />
+    <dl class="readiness-summary">{[{status:'pass',label:operationsCopy(lang).readinessPassed},{status:'action_required',label:operationsCopy(lang).readinessAction},{status:'manual',label:operationsCopy(lang).readinessManual}].map(item => <div><dt>{item.label}</dt><dd>{checks.filter(check => check.status === item.status).length}</dd></div>)}</dl>
     {!user.isSuperAdmin && <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.onboarding.superOnly')}</p>}
-    <div class="mt-6 grid gap-4 lg:grid-cols-2">
-      {checks.map((check) => (
-        <section class={card} data-check-id={check.checkId}>
+    <div class="readiness-list">
+      {checks.map((check, index) => (
+        <section class={`${card} readiness-check`} data-check-id={check.checkId} data-status={check.status}>
+          <span class="check-number" aria-hidden="true">{check.status === 'pass' ? <Icon name="check" /> : String(index + 1).padStart(2, '0')}</span>
+          <div>
           <div class="flex items-start justify-between gap-4">
             <div><h2 class="font-display text-heading-sm font-bold">{copy(check.title)}</h2><p class="mt-1 text-sm text-ink-muted">{copy(check.description)}</p></div>
             <span class="rounded-full border border-border px-2 py-1 text-xs font-semibold">{statusLabel(check.status)}</span>
@@ -51,8 +56,22 @@ const statusLabel = (status: string) => t(lang, `admin.onboarding.${status === '
             {user.isSuperAdmin && check.status === 'manual' && <form method="post"><input type="hidden" name="check_id" value={check.checkId} /><button class={btn} type="submit">{t(lang, 'admin.onboarding.acknowledge')}</button></form>}
             {check.acknowledged && <span class="text-sm text-ink-muted">{t(lang, 'admin.onboarding.acknowledged')}</span>}
           </div>
+          </div>
         </section>
       ))}
     </div>
   </div>
 </Admin>
+
+<style>
+.readiness-summary { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin-block:1.5rem; }
+.readiness-summary > div { background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:1.25rem; }
+.readiness-summary dt { font-size:.75rem;color:var(--color-ink-muted); }
+.readiness-summary dd { font-size:2rem;font-weight:600;letter-spacing:-.03em;margin-top:.4rem;color:var(--color-primary); }
+.readiness-list { display:grid;gap:1rem; }
+.readiness-check { display:grid;grid-template-columns:40px minmax(0,1fr);gap:1rem; }
+.check-number { display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--color-border);border-radius:50%;font-size:.75rem;font-weight:600;color:var(--color-ink-muted); }
+.readiness-check[data-status='pass'] .check-number { background:var(--color-primary-soft);color:var(--color-on-primary-soft);border-color:transparent; }
+.readiness-check[data-status='action_required'] { border-left:3px solid var(--color-warn); }
+@media(max-width:500px) { .readiness-summary { gap:.5rem; } .readiness-summary > div { padding:.8rem; } .readiness-check { grid-template-columns:1fr; } }
+</style>

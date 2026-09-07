@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Serving plans index (team class via route policy): one section per service
 // type listing upcoming plans (date, title/series, filled/needed summary).
 // Admin-only controls per section: create a single plan (date+title+series) and
@@ -72,11 +75,13 @@ const today = todayInTz();
 const defaultDate = nextWeekday(today, 0);
 const defaultThrough = addDays(today, 56); // ~8 weeks out
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.plans.title')} locale={locale} noindex>
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
   <div class="container-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.plans.title')}</h1>
+    <MinistryHeader title={t(locale, 'serve.plans.title')} eyebrow={copy.scheduleEyebrow} description={copy.scheduleIntro} />
 
     {generated !== null && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'serve.plans.generated', { count: generated })}</p>}
     {errorKey && <p class={`mt-4 ${noticeErr}`}>{t(locale, errorKey)}</p>}
@@ -85,8 +90,11 @@ const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
       types.map((st) => {
         const plans = plansByType[types.indexOf(st)];
         return (
-          <section class="mt-10">
-            <h2 class="font-display text-lg font-semibold">{st.name}</h2>
+          <section class="mb-8">
+            <div class="mw-panel-heading">
+              <h2 class="font-display text-lg font-semibold">{st.name}</h2>
+              <a href={localePath(locale, `/serve/matrix/${st.id}`)} class="text-sm font-semibold text-primary hover:underline">{copy.matrix} →</a>
+            </div>
             {plans.length === 0 ? (
               <p class="mt-3 text-sm text-ink-muted">{t(locale, 'serve.plans.empty')}</p>
             ) : (
@@ -97,14 +105,16 @@ const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
                     <li>
                       <a
                         href={localePath(locale, `/serve/plans/${p.id}`)}
-                        class="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-surface-sunken"
+                        class="mw-plan-row hover:bg-surface-sunken"
                       >
-                        <span class="font-semibold tabular-nums">{formatDate(p.plan_date, locale)}</span>
-                        {p.title && <span class="text-ink-muted">{p.title}</span>}
-                        {p.series && <span class="text-xs text-ink-subtle">{p.series}</span>}
+                        <time class="mw-plan-date" datetime={p.plan_date} aria-hidden="true"><span>{p.plan_date.slice(5, 7)}</span><strong>{p.plan_date.slice(8)}</strong></time>
+                        <span class="mw-plan-copy"><strong>{formatDate(p.plan_date, locale)}</strong>
+                          {p.display_title && <span>{p.display_title}</span>}
+                          {p.display_series && <small>{p.display_series}</small>}
+                        </span>
                         {fill && fill.needed > 0 && (
                           <span
-                            class={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            class={`mw-plan-fill inline-flex items-center rounded-full px-2.5 py-1 font-semibold ${
                               fill.filled >= fill.needed ? 'bg-success-soft text-success' : 'bg-warn-soft text-warn'
                             }`}
                           >
@@ -119,7 +129,9 @@ const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
             )}
 
             {canCreate && (
-              <div class="mt-4 flex flex-wrap gap-8">
+              <details class="mw-disclosure" open={errorKey !== null}>
+                <summary>{copy.planTools}</summary>
+                <div class="mw-disclosure-content flex flex-wrap gap-8">
                 <form method="post" class="flex flex-wrap items-end gap-3">
                   <input type="hidden" name="_action" value="create" />
                   <input type="hidden" name="service_type_id" value={st.id} />
@@ -154,11 +166,13 @@ const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
                   </label>
                   <button type="submit" class={btnSecondary}>{t(locale, 'serve.plans.generate')}</button>
                 </form>
-              </div>
+                </div>
+              </details>
             )}
           </section>
         );
       })
     }
   </div>
+</MinistryWorkspace>
 </Base>

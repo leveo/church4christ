@@ -1,4 +1,8 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import MinistrySearch from '../../../../components/ministry/MinistrySearch.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Team directory (team class via route policy): every serving team with its
 // localized name, ministry link, member/leader counts, and an open-slot badge.
 // Admin-only: a create-team form (ministry select + en/zh names) — the POST
@@ -38,16 +42,18 @@ if (Astro.request.method === 'POST') {
 const teams = await listTeamSummaries(db, locale);
 const ministries = hasAreaAccess(user, 'serve') ? await listMinistryOptions(db, locale) : [];
 const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.teams.title')} locale={locale} noindex>
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
   <div class="container-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.teams.title')}</h1>
-
-    <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <MinistryHeader title={t(locale, 'serve.teams.title')} eyebrow={copy.scheduleEyebrow} description={copy.teamIntro} />
+    <div class="mw-toolbar"><MinistrySearch target="team-directory" label={copy.searchTeams} locale={locale} /><span class="text-sm text-ink-muted">{teams.length} · {copy.teams}</span></div>
+    <div class="mw-directory" id="team-directory">
       {
         teams.map((tm) => (
-          <div class="rounded-lg border border-border bg-surface-raised p-5">
+          <article data-ministry-item={`${tm.name} ${tm.ministry_name ?? ''}`}>
             <div class="flex flex-wrap items-center gap-2">
               <a
                 href={localePath(locale, `/serve/teams/${tm.id}`)}
@@ -81,15 +87,16 @@ const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
               {' · '}
               {t(locale, 'serve.teams.leadersCount', { count: tm.leader_count })}
             </p>
-          </div>
+          </article>
         ))
       }
     </div>
 
     {
       hasAreaAccess(user, 'serve') && (
-        <section class="mt-10 rounded-lg border border-border bg-surface-raised p-6">
-          <h2 class="mb-4 font-display text-lg font-semibold">{t(locale, 'serve.teams.create')}</h2>
+        <details class="mw-disclosure" open={errorKey !== null}>
+          <summary>{copy.teamTools}</summary>
+          <div class="mw-disclosure-content">
           {errorKey && <p class={`mb-3 ${noticeErr}`}>{t(locale, errorKey)}</p>}
           <form method="post" class="flex flex-wrap items-end gap-3">
             <input type="hidden" name="_action" value="create" />
@@ -112,8 +119,10 @@ const myTeamIds = new Set([...user.memberTeamIds, ...user.leaderTeamIds]);
             </label>
             <button type="submit" class={btn}>{t(locale, 'serve.teams.create')}</button>
           </form>
-        </section>
+          </div>
+        </details>
       )
     }
   </div>
+</MinistryWorkspace>
 </Base>

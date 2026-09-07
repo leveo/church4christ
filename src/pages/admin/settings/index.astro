@@ -9,6 +9,9 @@
 // setSettings batch → clearThemeCache() so a theme change takes effect on the
 // very next render → 303 ?saved=1. The Admin shell reads the active theme, so
 // this page (and the whole site) restyles immediately after a save.
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
@@ -141,13 +144,16 @@ const moduleGroups = MODULE_GROUPS;
 ---
 
 <Admin title={t(lang, 'admin.settings.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.settings.title')}</h1>
+  <MemberPageHeader title={t(lang, 'admin.settings.title')} eyebrow={operationsCopy(lang).settings} description={operationsCopy(lang).settingsIntro} />
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.settings.saved')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
-  <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl space-y-6">
-    <section class={`${card} space-y-4`}>
+  <div class="settings-workspace">
+  <nav class="settings-sections" aria-label={t(lang, 'admin.settings.title')}>{['identity','contact','links','appearance','modules'].map(key => <a href={`#settings-${key}`}>{t(lang, `admin.settings.${key}Title`)}</a>)}</nav>
+  <div><form method="post" enctype="multipart/form-data" class="space-y-6">
+
+    <section id="settings-identity" class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.identityTitle')}</h2>
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="block">
@@ -177,7 +183,7 @@ const moduleGroups = MODULE_GROUPS;
       </div>
     </section>
 
-    <section class={`${card} space-y-4`}>
+    <section id="settings-contact" class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.contactTitle')}</h2>
       <label class="block">
         <span class={lab}>{t(lang, 'admin.settings.address')}</span>
@@ -201,7 +207,7 @@ const moduleGroups = MODULE_GROUPS;
       </label>
     </section>
 
-    <section class={`${card} space-y-4`}>
+    <section id="settings-links" class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.linksTitle')}</h2>
       <label class="block">
         <span class={lab}>{t(lang, 'admin.settings.givingUrl')}</span>
@@ -215,15 +221,17 @@ const moduleGroups = MODULE_GROUPS;
       </label>
     </section>
 
-    <section class={`${card} space-y-4`}>
+    <section id="settings-appearance" class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.appearanceTitle')}</h2>
       <p class="text-sm text-ink-muted">{t(lang, 'admin.settings.currentTheme', { theme: themeLabel(selectedTheme) })}</p>
+      <DesignImage image="welcome" src={heroImage} class="settings-hero-preview" />
+      <p class="text-xs text-ink-muted">{operationsCopy(lang).appearanceDefault}</p>
       <div class="space-y-2">
         {
           heroImage && (
             <div class="space-y-1">
               <span class={lab}>{t(lang, 'admin.settings.currentHeroImage')}</span>
-              <img src={heroImage} alt="" class="w-full max-w-md rounded border border-border" loading="lazy" />
+
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="remove_hero_image" /> {t(lang, 'admin.settings.removeHeroImage')}
               </label>
@@ -256,7 +264,7 @@ const moduleGroups = MODULE_GROUPS;
       </div>
       <fieldset>
         <legend class={lab}>{t(lang, 'admin.settings.theme')}</legend>
-        <div class="grid gap-3 sm:grid-cols-3">
+        <div class="theme-options">
           {
             THEME_META.map((m) => (
               <label class={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${selectedTheme === m.name ? 'border-primary ring-2 ring-primary' : 'border-border'}`}>
@@ -293,14 +301,14 @@ const moduleGroups = MODULE_GROUPS;
       </div>
     </section>
 
-    <div class="flex items-center gap-4">
+    <div class="settings-save flex items-center gap-4">
       <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
     </div>
   </form>
 
-  <form method="post" class="mt-8 max-w-2xl">
+  <form method="post" class="mt-8">
     <input type="hidden" name="action" value="modules" />
-    <section class={`${card} space-y-4`}>
+    <section id="settings-modules" class={`${card} space-y-4`}>
       <div>
         <h2 class={h2}>{t(lang, 'admin.settings.modulesTitle')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.settings.modulesIntro')}</p>
@@ -338,4 +346,20 @@ const moduleGroups = MODULE_GROUPS;
       </div>
     </section>
   </form>
+  </div></div>
 </Admin>
+
+<style>
+.settings-workspace { display:grid;grid-template-columns:180px minmax(0,1fr);gap:2rem;margin-top:2rem; }
+.settings-sections { position:sticky;top:7rem;align-self:start;display:flex;flex-direction:column;gap:.35rem; }
+.settings-sections a { padding:.75rem 1rem;border-radius:var(--radius-md);font-size:.8rem;font-weight:600;color:var(--color-ink-muted); }
+.settings-sections a:hover { color:var(--color-on-primary-soft);background:var(--color-primary-soft); }
+.settings-workspace section { scroll-margin-top:7rem; }
+.settings-workspace :global(.settings-hero-preview) { width:100%;height:210px;object-fit:cover;border-radius:var(--radius-md); }
+.theme-options { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:.75rem; }
+.theme-options label { flex-wrap:wrap; }
+.settings-save { position:sticky;bottom:1rem;padding:.85rem 1rem;background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);z-index:2; }
+#settings-modules fieldset { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem; }
+#settings-modules fieldset label { margin:0; }
+@media(max-width:800px) { .settings-workspace { grid-template-columns:1fr;gap:1rem; } .settings-sections { position:static;flex-direction:row;flex-wrap:wrap; } #settings-modules fieldset { grid-template-columns:1fr; } }
+</style>

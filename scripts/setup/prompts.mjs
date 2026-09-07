@@ -81,9 +81,12 @@ export async function collectInteractiveAnswers(partial, catalog, ask) {
     answers.emailFrom ??= await prompt(ask, 'emailFrom', 'Verified sender email');
   }
   if (!answers.demoDataSpecified) {
-    answers.demoData = yes(await prompt(ask, 'demoData', 'Load fictional demo data?', [
-      { value: true, label: 'Yes' }, { value: false, label: 'No' },
-    ]));
+    const contentChoice = await prompt(ask, 'demoData', 'Choose starting content. Both options keep the same bundled design and enabled features.', [
+      { value: true, label: 'Include demo content — fictional people, sermons, events, and other examples' },
+      { value: false, label: 'No demo content — start with your church settings and first administrator' },
+    ]);
+    if (!yes(contentChoice) && !no(contentChoice)) throw new Error('The demo content answer must be yes or no');
+    answers.demoData = yes(contentChoice);
   }
 
   return normalizeSetupAnswers(answers, catalog);

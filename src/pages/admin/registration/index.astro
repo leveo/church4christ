@@ -1,4 +1,7 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+
 // Registration events admin (console class — editors run events, so this re-checks
 // editor∪admin and 403s a bare team leader, mirroring the events console). Inline
 // add/edit model like funds/events (?edit=<id>, a single save action): the create
@@ -88,22 +91,71 @@ const v = echoing
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.reg.title');
 const formHeading = editId ? t(lang, 'admin.reg.editEvent') : t(lang, 'admin.reg.newEvent');
+const copy = gatheringsCopy(lang);
 const h2 = 'font-display text-heading-sm font-bold';
 ---
 
 <Admin title={heading}>
-  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  <GatheringSurface>
+  <div class="gathering-heading"><div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{heading}</h1><p class="gathering-intro">{copy.adminRegistrationIntro}</p></div><a href="?new=1#gathering-event-editor" class={btn}>{t(lang, 'admin.reg.newEvent')}</a></div>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
 
-  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {stats.map((s) => (
-      <div class={card}>
-        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
-        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
-      </div>
-    ))}
-  </div>
+  <dl class="gathering-stats">{stats.map((stat) => <div><dt>{stat.label}</dt><dd>{stat.value}</dd></div>)}</dl>
 
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.reg.events')}</h2>
+  <div class="gathering-table-wrap mt-4">
+    <table class="gathering-table">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reg.titleEn')}</th>
+          <th class={th}>{t(lang, 'admin.reg.starts')}</th>
+          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
+          <th class={th}>{t(lang, 'admin.reg.price')}</th>
+          <th class={th}>{t(lang, 'admin.reg.status')}</th>
+          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="6">
+                {t(lang, 'admin.reg.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  {lang === 'zh' && <div class="text-ink-muted">{r.title_zh || '—'}</div>}
+                </td>
+                <td class={`${td} text-ink-muted tabular-nums`}>{r.starts_at.slice(0, 16)}</td>
+                <td class={`${td} tabular-nums`}>
+                  {r.taken_count}
+                  {r.capacity != null ? ` / ${r.capacity}` : ''}
+                </td>
+                <td class={td}>{r.price_cents == null ? t(lang, 'admin.reg.free') : formatCents(r.price_cents, r.currency)}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.reg.active') : t(lang, 'admin.reg.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/registration?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <a href={`/admin/registration/${r.id}`} class={rowBtn}>{t(lang, 'admin.reg.manage')}</a>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+  <details id="gathering-event-editor" class="gathering-editor" open={Astro.url.searchParams.has('new') || !!editId || hasErrors || rows.length === 0}><summary>{formHeading}</summary>
   <form method="post" class="mt-6 max-w-2xl">
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{formHeading}</h2>
@@ -182,57 +234,6 @@ const h2 = 'font-display text-heading-sm font-bold';
       </div>
     </section>
   </form>
-
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.reg.events')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.reg.titleEn')}</th>
-          <th class={th}>{t(lang, 'admin.reg.starts')}</th>
-          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
-          <th class={th}>{t(lang, 'admin.reg.price')}</th>
-          <th class={th}>{t(lang, 'admin.reg.status')}</th>
-          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          rows.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan="6">
-                {t(lang, 'admin.reg.empty')}
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr class="border-t border-border align-top">
-                <td class={td}>
-                  <div class="font-medium">{r.title_en || '—'}</div>
-                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
-                </td>
-                <td class={`${td} text-ink-muted tabular-nums`}>{r.starts_at.slice(0, 16)}</td>
-                <td class={`${td} tabular-nums`}>
-                  {r.taken_count}
-                  {r.capacity != null ? ` / ${r.capacity}` : ''}
-                </td>
-                <td class={td}>{r.price_cents == null ? t(lang, 'admin.reg.free') : formatCents(r.price_cents, r.currency)}</td>
-                <td class={td}>
-                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
-                    {r.active ? t(lang, 'admin.reg.active') : t(lang, 'admin.reg.inactive')}
-                  </span>
-                </td>
-                <td class={td}>
-                  <div class="flex flex-wrap gap-2">
-                    <a href={`/admin/registration?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
-                    <a href={`/admin/registration/${r.id}`} class={rowBtn}>{t(lang, 'admin.reg.manage')}</a>
-                  </div>
-                </td>
-              </tr>
-            ))
-          )
-        }
-      </tbody>
-    </table>
-  </div>
+  </details>
+  </GatheringSurface>
 </Admin>

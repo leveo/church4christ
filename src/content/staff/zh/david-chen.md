@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 陈大卫
 role: 主任牧师
 group: pastoral

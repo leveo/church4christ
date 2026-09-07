@@ -1,10 +1,13 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Service types CRUD (admin only): bilingual name + optional start/end times +
 // sort. Service types carry plans and bulletins/sermons, so this is the one place
 // they are created and retired (soft delete). Ported from the reference stack.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import type { Locale } from '../../../lib/locales';
+import { pickLocalizedText, type Locale } from '../../../lib/locales';
 import { listServiceTypesAdmin, saveServiceType, softDeleteServiceType } from '../../../lib/teamDb';
 import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
 
@@ -40,18 +43,22 @@ if (Astro.request.method === 'POST') {
 }
 
 const types = await listServiceTypesAdmin(db);
+const copy = ministryCopy(lang);
 ---
 <Admin title={t(lang, 'admin.serviceTypes.title')}>
-  <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.serviceTypes.back')}</a>
-  <h1 class="mt-2 font-display text-heading-md font-bold">{t(lang, 'admin.serviceTypes.title')}</h1>
-  <p class="mt-1 text-ink-muted">{t(lang, 'admin.serviceTypes.intro')}</p>
+<MinistryWorkspace locale={lang} variant="admin">
+  <MinistryHeader title={t(lang, 'admin.serviceTypes.title')} eyebrow={copy.scheduleEyebrow} description={copy.serviceIntro}>
+    <a href="#new-service" class={btn}>{copy.serviceCreate}</a>
+  </MinistryHeader>
 
   {errKey && <p class="mt-4 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(lang, errKey)}</p>}
 
   <div class="mt-6 space-y-3">
     {types.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.serviceTypes.none')}</p>}
     {types.map((st) => (
-      <form method="post" class={`${card} flex flex-wrap items-end gap-3`}>
+      <details class="mw-disclosure" open={errKey !== null}>
+      <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickLocalizedText({ en: st.name_en, zh: st.name_zh }, lang) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
+      <form method="post" class="mw-disclosure-content flex flex-wrap items-end gap-3">
         <input type="hidden" name="id" value={st.id} />
         <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required value={st.name_en ?? ''} class={tin} /></label>
         <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" value={st.name_zh ?? ''} class={tin} /></label>
@@ -61,10 +68,11 @@ const types = await listServiceTypesAdmin(db);
         <button name="_action" value="save" class={btn}>{t(lang, 'admin.serviceTypes.save')}</button>
         <button name="_action" value="delete" data-confirm={t(lang, 'admin.serviceTypes.confirmDelete')} class={btnDanger}>{t(lang, 'admin.serviceTypes.delete')}</button>
       </form>
+      </details>
     ))}
   </div>
 
-  <section class={`mt-8 ${card}`}>
+  <section id="new-service" class="mt-8 mw-panel">
     <h2 class="font-display text-heading-sm font-bold mb-4">{t(lang, 'admin.serviceTypes.create')}</h2>
     <form method="post" class="flex flex-wrap items-end gap-3">
       <input type="hidden" name="_action" value="create" />
@@ -76,4 +84,5 @@ const types = await listServiceTypesAdmin(db);
       <button class={btn}>{t(lang, 'admin.serviceTypes.create')}</button>
     </form>
   </section>
+</MinistryWorkspace>
 </Admin>

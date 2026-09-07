@@ -1,4 +1,5 @@
 ---
+demo: true
 name: Mark Liu
 role: Elder
 group: elders

@@ -1,5 +1,6 @@
 ---
 import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
 import { card, td, th } from '../../../../../lib/adminUi';
 import { getIdentityRecoveryTargetSummary, listAllOpenIdentityRecoveryCases, listOpenIdentityRecoveryCases } from '../../../../../lib/identityRecovery';
 import { t } from '../../../../../lib/i18n';
@@ -16,6 +17,7 @@ const summaries = new Map((await Promise.all(cases.map(async (item) => [item.id,
 ---
 
 <Admin title={t(lang, 'admin.identityRecovery.title')}>
+  <IdentityWorkspace locale={lang}>
   <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.identityRecovery.queue')}</h1>
   <section class={`mt-6 ${card}`}>
     {cases.length === 0 ? <p class="text-ink-muted">{t(lang, 'admin.identityRecovery.empty')}</p> : (
@@ -24,4 +26,5 @@ const summaries = new Map((await Promise.all(cases.map(async (item) => [item.id,
       </table></div>
     )}
   </section>
+  </IdentityWorkspace>
 </Admin>

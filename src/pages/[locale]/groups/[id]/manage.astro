@@ -10,8 +10,9 @@
 // aren't in (anti-enumeration). The guard runs on every request, so it also
 // re-checks before every POST write.
 import { env } from 'cloudflare:workers';
-import Base from '../../../../layouts/Base.astro';
-import { localePath, parseLocale } from '../../../../lib/locales';
+import Member from '../../../../layouts/Member.astro';
+import MemberPageHeader from '../../../../components/ui/MemberPageHeader.astro';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { formatDate, addDays, todayInTz } from '../../../../lib/dates';
 import {
@@ -341,16 +342,17 @@ const fileSize = (bytes: number): string =>
 const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
 ---
 
-<Base title={pageTitle} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
+<Member active="groups" title={pageTitle} locale={locale} noindex>
+  <div class="group-management">
     <a href={localePath(locale, `/groups/${group.id}`)} class="text-sm text-ink-muted hover:text-primary">
       {t(locale, 'groups.manage.back')}
     </a>
-    <h1 class="mt-2 font-display text-heading-md font-bold">{pageTitle}</h1>
+    <MemberPageHeader title={pageTitle} description={group.name} />
+    <nav class="group-section-links" aria-label={pageTitle}>{['requests','members','events','attendance','visibility', ...(hasPortal ? ['files'] : []), ...(hasRegistration ? ['special'] : [])].map(key => <a href={`#group-${key}`}>{t(locale, `groups.manage.${key}.title`)}</a>)}</nav>
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'groups.manage.saved')}</p>}
 
     {/* 1 ── Visibility ─────────────────────────────────────────── */}
-    <section class={`mt-8 ${card}`}>
+    <section id="group-visibility" class={`mt-8 ${card}`}>
       <h2 class={h2}>{t(locale, 'groups.manage.visibility.title')}</h2>
       <p class="mt-2 text-sm text-ink-muted">
         {t(locale, group.is_public === 1 ? 'groups.manage.visibility.publicNow' : 'groups.manage.visibility.privateNow')}
@@ -364,7 +366,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
     </section>
 
     {/* 2 ── Join requests ─────────────────────────────────────── */}
-    <section class={`mt-8 ${card}`}>
+    <section id="group-requests" class={`mt-8 ${card}`}>
       <h2 class={h2}>{t(locale, 'groups.manage.requests.title')}</h2>
       {joinRequests.length === 0 ? (
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.requests.none')}</p>
@@ -398,7 +400,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
     </section>
 
     {/* 3 ── Members ────────────────────────────────────────────── */}
-    <section class={`mt-8 ${card}`}>
+    <section id="group-members" class={`mt-8 ${card}`}>
       <h2 class={h2}>{t(locale, 'groups.manage.members.title')}</h2>
       {members.length === 0 ? (
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.members.none')}</p>
@@ -501,7 +503,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
 
     {/* 3c ── Files (portal module only) ────────────────────────── */}
     {hasPortal && (
-      <section class={`mt-8 ${card}`}>
+      <section id="group-files" class={`mt-8 ${card}`}>
         <h2 class={h2}>{t(locale, 'groups.manage.files.title')}</h2>
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.files.hint', { max: maxFileMb, types: ALLOWED_GROUP_FILE_EXTS.join(', ') })}</p>
         {fileError && <p class={`mt-3 ${noticeErr}`}>{t(locale, `groups.manage.files.err.${fileError}`)}</p>}
@@ -536,7 +538,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
     )}
 
     {/* 4 ── Routine events ─────────────────────────────────────── */}
-    <section class={`mt-8 ${card}`}>
+    <section id="group-events" class={`mt-8 ${card}`}>
       <h2 class={h2}>{t(locale, 'groups.manage.events.title')}</h2>
 
       {events.length === 0 ? (
@@ -633,7 +635,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
     </section>
 
     {/* 5 ── Attendance history ─────────────────────────────────── */}
-    <section class={`mt-8 ${card}`}>
+    <section id="group-attendance" class={`mt-8 ${card}`}>
       <h2 class={h2}>{t(locale, 'groups.manage.attendance.title')}</h2>
       {trackedEvents.length === 0 || trackedEvents.every((e) => (pastByEvent.get(e.id) ?? []).length === 0) ? (
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.attendance.none')}</p>
@@ -666,7 +668,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
 
     {/* 6 ── Special events (registration module only) ──────────── */}
     {hasRegistration && (
-      <section class={`mt-8 ${card}`}>
+      <section id="group-special" class={`mt-8 ${card}`}>
         <h2 class={h2}>{t(locale, 'groups.manage.special.title')}</h2>
         <p class="mt-2 text-sm text-ink-muted">{t(locale, 'groups.manage.special.note')}</p>
 
@@ -709,7 +711,7 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
               <select name="reg_event_id" class={`${tin} max-w-xs`}>
                 <option value="">{t(locale, 'groups.manage.special.linkSelect')}</option>
                 {linkableEvents.map((e) => (
-                  <option value={e.id}>{(e.title_en || e.title_zh || '—')} · {e.starts_at.slice(0, 10)}</option>
+                  <option value={e.id}>{pickLocalizedText({ en: e.title_en, zh: e.title_zh }, locale) || '—'} · {e.starts_at.slice(0, 10)}</option>
                 ))}
               </select>
               <button type="submit" class={btnSecondary}>{t(locale, 'groups.manage.special.linkButton')}</button>
@@ -760,4 +762,14 @@ const maxFileMb = String(MAX_GROUP_FILE_BYTES / (1024 * 1024));
       </section>
     )}
   </div>
-</Base>
+</Member>
+
+<style>
+.group-section-links { display:flex;gap:.4rem;flex-wrap:wrap;padding-block:.75rem 1.25rem;border-bottom:1px solid var(--color-border); }
+.group-section-links a { padding:.55rem .75rem;border:1px solid var(--color-border);background:var(--color-surface-raised);border-radius:var(--radius-md);font-size:.75rem;font-weight:600; }
+.group-management > section { scroll-margin-top:7rem; }
+.group-management #group-requests { border-left:3px solid var(--color-primary); }
+.group-management #group-members li { padding-block:.85rem; }
+.group-management #group-attendance { background:var(--color-primary-soft); }
+.group-management #group-attendance h2 { color:var(--color-on-primary-soft); }
+</style>

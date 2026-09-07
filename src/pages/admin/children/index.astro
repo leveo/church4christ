@@ -1,4 +1,9 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import { DESIGN_IMAGES } from '../../../lib/designAssets';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+
 // Admin children's check-in console (admin-only; enforced by routePolicy's
 // ADMIN_ONLY list + the 'children' module gate in middleware). Four tabs —
 // dashboard (stats + weekly chart), today (live roster + staff checkout),
@@ -122,16 +127,18 @@ function timeOf(utcSql: string | null): string {
 
 const weekdayLabel = (weekday: number | null) =>
   weekday === null ? t(lang, 'admin.children.events.anyDay') : t(lang, `admin.children.weekday.${weekday}`);
+const copy = gatheringsCopy(lang);
 ---
 
 <Admin title={t(lang, 'admin.children.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.children.title')}</h1>
+  <GatheringSurface>
+  <div class="gathering-children-banner"><div class="gathering-heading"><div><p class="gathering-eyebrow">{copy.childrenEyebrow}</p><h1>{t(lang, 'admin.children.title')}</h1><p class="gathering-intro">{copy.childrenIntro}</p></div></div><img src={DESIGN_IMAGES.children} alt="" width="600" height="375" /></div>
 
-  <nav class="mt-5 flex gap-1 flex-wrap border-b border-border" aria-label={t(lang, 'admin.children.title')}>
+  <nav class="gathering-tabs" aria-label={t(lang, 'admin.children.title')}>
     {TABS.map((tb) => (
       <a
         href={`/admin/children?tab=${tb}`}
-        class:list={['px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}
+        aria-current={tab === tb ? 'page' : undefined}
       >
         {t(lang, `admin.children.tab.${tb}`)}
       </a>
@@ -142,26 +149,14 @@ const weekdayLabel = (weekday: number | null) =>
     {
       tab === 'dashboard' && stats && (
         <>
-          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div class={card}>
-              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.thisWeek')}</div>
-              <div class="mt-2 text-display-lg font-bold">{stats.thisWeek}</div>
-            </div>
-            <div class={card}>
-              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.fourWeekAvg')}</div>
-              <div class="mt-2 text-display-lg font-bold">{stats.fourWeekAvg}</div>
-            </div>
-            <div class={card}>
-              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.distinctMonth')}</div>
-              <div class="mt-2 text-display-lg font-bold">{stats.distinctChildrenThisMonth}</div>
-            </div>
-            <div class={card}>
-              <div class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.children.stat.activeEvents')}</div>
-              <div class="mt-2 text-display-lg font-bold">{stats.activeEvents}</div>
-            </div>
-          </div>
+          <dl class="gathering-stats">
+            <div><dt>{t(lang, 'admin.children.stat.thisWeek')}</dt><dd>{stats.thisWeek}</dd></div>
+            <div><dt>{t(lang, 'admin.children.stat.fourWeekAvg')}</dt><dd>{stats.fourWeekAvg}</dd></div>
+            <div><dt>{t(lang, 'admin.children.stat.distinctMonth')}</dt><dd>{stats.distinctChildrenThisMonth}</dd></div>
+            <div><dt>{t(lang, 'admin.children.stat.activeEvents')}</dt><dd>{stats.activeEvents}</dd></div>
+          </dl>
 
-          <section class={`mt-6 ${card}`}>
+          <section class="gathering-panel mt-6">
             <h2 class="font-semibold">{t(lang, 'admin.children.chart.title')}</h2>
             <div class="mt-4">
               <WeeklyCheckinChart weeks={stats.weeks} locale={lang} />
@@ -170,8 +165,8 @@ const weekdayLabel = (weekday: number | null) =>
 
           {
             stats.byEvent.length > 0 && (
-              <section class="mt-6 overflow-x-auto rounded-xl border border-border bg-surface-raised">
-                <table class="w-full border-collapse text-sm">
+              <section class="gathering-table-wrap mt-6">
+                <table class="gathering-table">
                   <thead class="bg-surface-sunken">
                     <tr>
                       <th class={th}>{t(lang, 'admin.children.events.name')}</th>
@@ -200,8 +195,8 @@ const weekdayLabel = (weekday: number | null) =>
 
     {
       tab === 'today' && (
-        <div class="overflow-x-auto rounded-xl border border-border bg-surface-raised">
-          <table class="w-full border-collapse text-sm">
+        <section aria-labelledby="children-today-heading"><div class="gathering-section-heading"><h2 id="children-today-heading">{copy.todayRoster}</h2><p class="text-xs text-ink-muted">{formatDate(today, lang)}</p></div><div class="gathering-table-wrap">
+          <table class="gathering-table">
             <thead class="bg-surface-sunken">
               <tr>
                 <th class={th}>{t(lang, 'admin.children.today.child')}</th>
@@ -221,7 +216,7 @@ const weekdayLabel = (weekday: number | null) =>
               ) : (
                 roster.map((row) => (
                   <tr class="border-t border-border">
-                    <td class={`${td} font-medium`}>{row.childName}</td>
+                    <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={row.childName} sizeClass="h-8 w-8 text-xs" />{row.childName}</div></td>
                     <td class={td}>{row.householdName}</td>
                     <td class={td}>{row.eventName}</td>
                     <td class={`${td} tabular-nums`}>{row.securityCode}</td>
@@ -232,7 +227,7 @@ const weekdayLabel = (weekday: number | null) =>
                         <form method="post">
                           <input type="hidden" name="action" value="checkout" />
                           <input type="hidden" name="checkinId" value={row.checkinId} />
-                          <button type="submit" class="text-xs font-semibold text-primary hover:underline">
+                          <button type="submit" class={btnSecondary}>
                             {t(lang, 'admin.children.today.checkout')}
                           </button>
                         </form>
@@ -243,7 +238,7 @@ const weekdayLabel = (weekday: number | null) =>
               )}
             </tbody>
           </table>
-        </div>
+        </div></section>
       )
     }
 
@@ -268,8 +263,8 @@ const weekdayLabel = (weekday: number | null) =>
             <button type="submit" class={btn}>{t(lang, 'admin.children.events.add')}</button>
           </form>
 
-          <div class="mt-4 overflow-x-auto rounded-xl border border-border bg-surface-raised">
-            <table class="w-full border-collapse text-sm">
+          <div class="gathering-table-wrap mt-4">
+            <table class="gathering-table">
               <thead class="bg-surface-sunken">
                 <tr>
                   <th class={th}>{t(lang, 'admin.children.events.name')}</th>
@@ -342,7 +337,7 @@ const weekdayLabel = (weekday: number | null) =>
 
     {
       tab === 'kiosk' && (
-        <div class={`${card} max-w-2xl`}>
+        <div class="gathering-panel gathering-kiosk-panel"><div>
           <h2 class="font-semibold">{t(lang, 'admin.children.kiosk.heading')}</h2>
           <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.instructions')}</p>
 
@@ -362,10 +357,11 @@ const weekdayLabel = (weekday: number | null) =>
               <button type="submit" class={btnDanger}>{t(lang, 'admin.children.kiosk.regenerate')}</button>
             </form>
           </details>
-        </div>
+        </div><div><img src={DESIGN_IMAGES.kiosk} alt="" width="800" height="450" /><h3 class="mt-4 text-sm font-semibold">{copy.kioskReady}</h3><p class="mt-2 text-sm leading-relaxed text-ink-muted">{copy.kioskAdminHint}</p></div></div>
       )
     }
   </div>
+  </GatheringSurface>
 </Admin>
 
 <script>

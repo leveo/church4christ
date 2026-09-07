@@ -5,10 +5,13 @@
 // a unique fund_number and a name in both locales (saveFund writes both). A
 // duplicate fund_number surfaces admin.giving.fundNumberTaken, never a 500.
 import Admin from '../../../layouts/Admin.astro';
+import FinanceSurface from '../../../components/finance/FinanceSurface.astro';
+import FinanceHeader from '../../../components/finance/FinanceHeader.astro';
+import { financeCopy } from '../../../i18n/designFinance';
 import { t } from '../../../lib/i18n';
 import { parseFundForm } from '../../../lib/validate';
 import { listFundsAdmin, saveFund, toggleFundActive } from '../../../lib/fundDb';
-import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -76,59 +79,22 @@ const v = echoing
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.giving.funds');
 const formHeading = editId ? t(lang, 'admin.giving.editFund') : t(lang, 'admin.giving.newFund');
-const h2 = 'font-display text-heading-sm font-bold';
+const copy = financeCopy(lang);
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <a href="/admin/giving" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.giving.record')}</a>
-  </div>
-
-  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
-  {fundNumberTaken && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, 'admin.giving.fundNumberTaken')}</p>}
-
-  <form method="post" class="mt-6 max-w-2xl">
-    <section class={`${card} space-y-4`}>
-      <h2 class={h2}>{formHeading}</h2>
-      <input type="hidden" name="action" value="save" />
-      {editId && <input type="hidden" name="id" value={editId} />}
-      {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundNumber')}</span>
-          <input name="fund_number" value={v.fundNumber} class={tin} />
-          {errors.fund_number && <span class={errorText}>{t(lang, errors.fund_number)}</span>}
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.sort')}</span>
-          <input name="sort" value={v.sort} class={tin} />
-          {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
-        </label>
-      </div>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundNameEn')}</span>
-          <input name="name_en" value={v.nameEn} class={tin} />
-          {errors.name_en && <span class={errorText}>{t(lang, errors.name_en)}</span>}
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundNameZh')}</span>
-          <input name="name_zh" value={v.nameZh} class={tin} />
-        </label>
-      </div>
-      <label class="flex items-center gap-2 text-sm">
-        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
-      </label>
-      <div class="flex items-center gap-4">
-        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
-        {editId && <a href="/admin/giving/funds" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.cancelEdit')}</a>}
-      </div>
-    </section>
-  </form>
-
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.funds')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+<FinanceSurface>
+  <FinanceHeader locale={lang} title={heading} description={copy.fundsIntro}>
+    <a href="/admin/giving" class="text-primary hover:underline">&larr; {t(lang, 'admin.giving.ledger')}</a>
+    <a href={editId ? '/admin/giving/funds#finance-fund-editor' : '#finance-fund-editor'} class={btn}>{t(lang, 'admin.giving.newFund')}</a>
+  </FinanceHeader>
+  {saved && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.form.saved')}</p>}
+  {fundNumberTaken && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.giving.fundNumberTaken')}</p>}
+  <div class="finance-workspace">
+    <div class="finance-main">
+  <div class="finance-section-heading finance-section-heading-first"><h2>{t(lang, 'admin.giving.funds')}</h2><p>{copy.totalFunds}: {rows.length} · {copy.active}: {rows.filter((row) => row.active === 1).length}</p></div>
+  <p class="finance-scope">{copy.fundHint}</p>
+  <div class="finance-table" role="region" aria-label={heading} tabindex="0">
     <table class="w-full border-collapse">
       <thead class="bg-surface-sunken">
         <tr>
@@ -163,7 +129,7 @@ const h2 = 'font-display text-heading-sm font-bold';
                 </td>
                 <td class={td}>
                   <div class="flex flex-wrap gap-2">
-                    <a href={`/admin/giving/funds?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <a href={`/admin/giving/funds?edit=${r.id}#finance-fund-editor`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
                     <form method="post">
                       <input type="hidden" name="action" value="toggle" />
                       <input type="hidden" name="id" value={r.id} />
@@ -180,4 +146,46 @@ const h2 = 'font-display text-heading-sm font-bold';
       </tbody>
     </table>
   </div>
+    </div>
+  <form method="post" class="finance-side-form" id="finance-fund-editor">
+    <section class="space-y-4" aria-labelledby="finance-fund-heading">
+      <h2 id="finance-fund-heading">{formHeading}</h2>
+      <input type="hidden" name="action" value="save" />
+      {editId && <input type="hidden" name="id" value={editId} />}
+      {hasErrors && <p class={noticeErr} role="alert">{t(lang, 'admin.form.fixErrors')}</p>}
+      <div class="finance-entry-fields">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNumber')}</span>
+          <input name="fund_number" value={v.fundNumber} class={tin} />
+          {errors.fund_number && <span class={errorText}>{t(lang, errors.fund_number)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.sort')}</span>
+          <input name="sort" value={v.sort} class={tin} />
+          {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
+        </label>
+      </div>
+      <div class="finance-entry-fields">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNameEn')}</span>
+          <input name="name_en" value={v.nameEn} class={tin} />
+          {errors.name_en && <span class={errorText}>{t(lang, errors.name_en)}</span>}
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundNameZh')}</span>
+          <input name="name_zh" value={v.nameZh} class={tin} />
+        </label>
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
+      </label>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+        {editId && <a href="/admin/giving/funds" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.cancelEdit')}</a>}
+      </div>
+    </section>
+  </form>
+
+  </div>
+</FinanceSurface>
 </Admin>

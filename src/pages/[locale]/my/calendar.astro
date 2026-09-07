@@ -4,14 +4,16 @@
 // the iCal subscribe box. Ported from the reference stack's src/pages/my/calendar.astro,
 // except the calendar token is an explicit Generate/Regenerate action (32 hex
 // chars) instead of create-on-view — regenerating invalidates the old URL.
-import Base from '../../../layouts/Base.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { memberCopy } from '../../../i18n/designMember';
 import MonthCalendar from '../../../components/MonthCalendar.astro';
 import { buildCalendarMarks } from '../../../lib/calendar';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { listBlockouts, listPersonAssignments } from '../../../lib/myDb';
 import { generateCalendarToken, getCalendarToken } from '../../../lib/ical';
-import { formatMonth, monthRange, todayInTz, utcToDatetimeLocal } from '../../../lib/dates';
+import { formatDate, formatMonth, monthRange, todayInTz, utcToDatetimeLocal } from '../../../lib/dates';
 import { btn, btnSecondary, tin } from '../../../lib/adminUi';
 import { listUpcomingOccurrencesForPerson } from '../../../lib/groupEventDb';
 import { listRegistrationsForPerson } from '../../../lib/regDb';
@@ -81,21 +83,31 @@ const webcalUrl = icsPath ? `webcal://${Astro.url.host}${icsPath}` : null;
 const httpsUrl = icsPath ? new URL(icsPath, Astro.url.origin).href : null;
 ---
 
-<Base title={t(locale, 'my.calendar')} locale={locale} noindex>
-  <div class="container-content max-w-3xl py-12">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+<Member active="calendar" title={t(locale, 'my.calendar')} locale={locale} noindex>
+  <div class="member-content">
+<MemberPageHeader title={t(locale, 'my.calendar')} description={memberCopy(locale).calendarIntro} />
     <div class="mt-2 flex items-center gap-4">
-      <h1 class="font-display text-heading-md font-bold">{formatMonth(ym, locale)}</h1>
+      <h2 class="text-xl font-semibold">{formatMonth(ym, locale)}</h2>
       <div class="ml-auto flex gap-2 text-sm">
         <a href={localePath(locale, `/my/calendar?month=${prev}`)} class={btnSecondary}>{t(locale, 'my.cal.prev')}</a>
         <a href={localePath(locale, `/my/calendar?month=${next}`)} class={btnSecondary}>{t(locale, 'my.cal.next')}</a>
       </div>
     </div>
 
+    <div class="member-calendar-grid"><div>
     <div class="mt-6">
       <MonthCalendar locale={locale} year={year} month={month} marks={marks} today={today} />
     </div>
 
+    </div><aside class="calendar-agenda">
+      <h2 class="font-semibold">{memberCopy(locale).calendarAgenda}</h2>
+      <ul class="mt-4 divide-y divide-border">
+        {assignments.map(a => <li class="py-3 text-sm"><time class="block text-xs text-ink-muted" datetime={a.plan_date}>{formatDate(a.plan_date, locale)}</time><p class="mt-1 font-medium">{a.position_name}</p><p class="mt-1 text-xs text-ink-muted">{a.team_name} · {t(locale, `serve.status.${a.status}`)}</p></li>)}
+        {[...events, ...meetings].sort((a, b) => a.date.localeCompare(b.date)).map(item => <li class="py-3 text-sm"><time class="block text-xs text-ink-muted" datetime={item.date}>{formatDate(item.date, locale)}</time><p class="mt-1 font-medium">{item.title}</p></li>)}
+      </ul>
+      {assignments.length === 0 && events.length === 0 && meetings.length === 0 && <p class="mt-3 text-sm text-ink-muted">{t(locale, 'my.noUpcoming')}</p>}
+      <a href={localePath(locale, '/my/blockouts')} class={`mt-4 ${btnSecondary}`}>{t(locale, 'my.blockouts')}</a>
+    </aside></div>
     <div class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
       <p class="font-display font-semibold">{t(locale, 'my.cal.subscribeTitle')}</p>
       <p class="mt-1 text-sm text-ink-muted">{t(locale, 'my.cal.subscribeIntro')}</p>
@@ -131,4 +143,10 @@ const httpsUrl = icsPath ? new URL(icsPath, Astro.url.origin).href : null;
       }
     </div>
   </div>
-</Base>
+</Member>
+
+<style>
+  .member-calendar-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 1.5rem; }
+  .calendar-agenda { margin-top: 1.5rem; padding: 1.2rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); align-self: start; }
+  @media (max-width: 1199px) { .member-calendar-grid { grid-template-columns: 1fr; } }
+</style>

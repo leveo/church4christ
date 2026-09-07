@@ -1,8 +1,10 @@
 ---
 import Base from '../../layouts/Base.astro';
+import ConfirmationPanel from '../../components/ui/ConfirmationPanel.astro';
+import { tokenPagePresentation } from '../../lib/tokenPagePresentation';
 import AttendanceSheet from '../../components/AttendanceSheet.astro';
 import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, LOCALES, type Locale } from '../../lib/locales';
+import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
 import { getPersonById } from '../../lib/db';
 import { getOccurrenceWithEvent } from '../../lib/groupEventDb';
 import { listMembers } from '../../lib/groupDb';
@@ -14,7 +16,7 @@ import { verifyAttendanceToken, saveAttendance, getAttendanceMap } from '../../l
 // to correct a mistake — so GET and POST both merely *verify* (never consume) it.
 // POST re-verifies the token from the hidden field (not the URL alone) before
 // writing, then 303-redirects to itself with ?saved=1. Invalid/expired tokens get
-// a friendly bilingual 404 that leaks no occurrence detail. CSRF is covered by the
+// a localized 404 that leaks no occurrence detail. CSRF is covered by the
 // middleware's same-origin check.
 const raw = Astro.params.token ?? '';
 const db = Astro.locals.db;
@@ -58,6 +60,7 @@ if (Astro.request.method === 'POST') {
 if (!valid) {
   Astro.response.status = 404;
 }
+const presentation = tokenPagePresentation(Astro.request, 'attendance', 'error');
 ---
 {
   valid && occurrence ? (
@@ -73,15 +76,8 @@ if (!valid) {
       />
     </Base>
   ) : (
-    <Base title={LOCALES.map((l) => t(l, 'attendance.invalid.title')).join(' · ')} locale={DEFAULT_LOCALE} noindex>
-      <section class="container-narrow py-16 text-center">
-        {LOCALES.map((l) => (
-          <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-            <h1 class="font-display text-heading-sm font-semibold">{t(l, 'attendance.invalid.title')}</h1>
-            <p class="mt-2 text-ink-muted">{t(l, 'attendance.invalid.body')}</p>
-          </div>
-        ))}
-      </section>
+    <Base title={presentation.title} locale={presentation.locale} noindex>
+      <ConfirmationPanel title={presentation.title} body={presentation.body} icon="calendar" />
     </Base>
   )
 }

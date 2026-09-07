@@ -44,6 +44,30 @@ describe('/en/serve/gifts (public quiz)', () => {
 });
 
 describe('/en/serve/testimonies (submit + review lifecycle)', () => {
+  it('shows English submissions on English pages and both languages on Chinese pages', async () => {
+    const english = await (await get('/en/serve/testimonies')).text();
+    expect(english).toContain('Found on a Tuesday Night');
+    expect(english).not.toContain('从怀疑到信靠');
+    expect(english).not.toContain('在敬拜中重新遇见神');
+    const chinese = await (await get('/zh/serve/testimonies')).text();
+    expect(chinese).toContain('Found on a Tuesday Night');
+    expect(chinese).toContain('从怀疑到信靠');
+    expect(chinese).toContain('在敬拜中重新遇见神');
+  });
+
+  it('stores a localized anonymous label for a visitor who leaves the name blank', async () => {
+    for (const [locale, expectedName] of [['en', 'Anonymous'], ['zh', '匿名']] as const) {
+      const title = `E2E anonymous locale ${locale}`;
+      const response = await post(`/${locale}/serve/testimonies`, new URLSearchParams({
+        title, body: 'A story of grace.', name: '',
+      }).toString());
+      expect(response.status).toBe(303);
+      const row = await env.DB.prepare('SELECT author_name FROM testimonies WHERE title = ?')
+        .bind(title).first<{ author_name: string }>();
+      expect(row?.author_name).toBe(expectedName);
+    }
+  });
+
   it('a submission files a PENDING row that is not public until approved', async () => {
     const title = 'E2E Testimony Marker QX';
     const res = await post(

@@ -4,7 +4,8 @@
 // lines) rather than sortable lists — one mechanism covers palette drops,
 // reorders, and cross-container moves.
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import type { AnyNode, ColumnsNode, LeafNode, PageLayout, SectionNode, L10nString } from '../../lib/pageLayout';
+import type { AnyNode, ColumnsNode, LeafNode, PageLayout, SectionNode } from '../../lib/pageLayout';
+import { pickLocalizedText } from '../../lib/locales';
 import {
   sectionOuterClass, sectionInnerClass, columnsClass, headingRender,
   textClass, imageRender, buttonRender, spacerClass, dividerClass,
@@ -21,10 +22,7 @@ export interface CanvasProps {
   onSelect: (id: string | null) => void;
   onRemove: (id: string) => void;
   onDuplicate: (id: string) => void;
-}
-
-function pickL10n(s: L10nString, locale: 'en' | 'zh'): string {
-  return locale === 'zh' ? s.zh || s.en : s.en || s.zh;
+  onMove: (id: string, direction: -1 | 1) => void;
 }
 
 function DropGap({ container, index, draggingType }: { container: ContainerRef; index: number; draggingType: AnyNode['type'] | null }) {
@@ -42,16 +40,18 @@ function DropGap({ container, index, draggingType }: { container: ContainerRef; 
 function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh' }) {
   switch (node.type) {
     case 'heading': {
+      const text = pickLocalizedText(node.props.text, editLocale);
+      if (!text) return null;
       const r = headingRender(node.props);
       const Tag = `h${node.props.level}` as 'h1' | 'h2' | 'h3';
-      return <Tag className={r.className} style={r.style}>{pickL10n(node.props.text, editLocale)}</Tag>;
+      return <Tag className={r.className} style={r.style}>{text}</Tag>;
     }
     case 'text':
       return (
         <div
           className={textClass(node.props)}
           // Safe: renderMarkdown fully escapes its input before transforming.
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(pickL10n(node.props.md, editLocale)) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(pickLocalizedText(node.props.md, editLocale)) }}
         />
       );
     case 'image': {
@@ -59,7 +59,7 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
       return (
         <div className={r.wrapperClass}>
           {node.props.src ? (
-            <img src={node.props.src} alt={pickL10n(node.props.alt, editLocale)} className={r.imgClass} />
+            <img src={node.props.src} alt={pickLocalizedText(node.props.alt, editLocale)} className={r.imgClass} />
           ) : (
             <div className={`${r.imgClass} flex h-40 items-center justify-center border border-dashed border-border-strong bg-surface-sunken text-sm text-ink-subtle`}>
               🖼
@@ -69,10 +69,12 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
       );
     }
     case 'button': {
+      const label = pickLocalizedText(node.props.label, editLocale);
+      if (!label) return null;
       const r = buttonRender(node.props);
       return (
         <div className={r.wrapperClass}>
-          <span className={r.linkClass}>{pickL10n(node.props.label, editLocale)}</span>
+          <span className={r.linkClass}>{label}</span>
         </div>
       );
     }
@@ -84,10 +86,11 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
 }
 
 function BlockFrame({
-  node, selected, strings, onSelect, onRemove, onDuplicate, children,
+  node, selected, strings, onSelect, onRemove, onDuplicate, onMove, children,
 }: {
   node: AnyNode; selected: boolean; strings: Record<string, string>;
   onSelect: (id: string) => void; onRemove: (id: string) => void; onDuplicate: (id: string) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
   children: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -98,13 +101,16 @@ function BlockFrame({
     <div
       ref={setNodeRef}
       onClick={(e) => { e.stopPropagation(); onSelect(node.id); }}
-      className={`relative rounded ${isDragging ? 'opacity-40' : ''} ${selected ? 'ring-2 ring-ring' : 'hover:ring-1 hover:ring-border-strong'}`}
+      className={`builder-block relative rounded ${isDragging ? 'opacity-40' : ''} ${selected ? 'ring-2 ring-ring' : 'hover:ring-1 hover:ring-border-strong'}`}
     >
+      <button type="button" className="builder-select-block" aria-label={`${strings.selectBlock}: ${strings['block.' + node.type]}`} aria-pressed={selected} onClick={(event) => { event.stopPropagation(); onSelect(node.id); }}>{strings['block.' + node.type]}</button>
       {selected && (
-        <div className="absolute -top-3 right-2 z-10 flex gap-1 rounded-md border border-border bg-surface-raised px-1 py-0.5 text-xs shadow-sm">
-          <button type="button" className="cursor-grab px-1" title={strings['block.' + node.type]} {...listeners} {...attributes}>⠿</button>
-          <button type="button" className="px-1" title={strings.duplicate} onClick={(e) => { e.stopPropagation(); onDuplicate(node.id); }}>⧉</button>
-          <button type="button" className="px-1 text-danger" title={strings.delete} onClick={(e) => { e.stopPropagation(); onRemove(node.id); }}>✕</button>
+        <div className="builder-block-actions">
+          <button type="button" className="cursor-grab" title={strings['block.' + node.type]} {...listeners} {...attributes}>⠿</button>
+          <button type="button" aria-label={strings.moveUp} title={strings.moveUp} onClick={(event) => { event.stopPropagation(); onMove(node.id, -1); }}>↑</button>
+          <button type="button" aria-label={strings.moveDown} title={strings.moveDown} onClick={(event) => { event.stopPropagation(); onMove(node.id, 1); }}>↓</button>
+          <button type="button" aria-label={strings.duplicate} title={strings.duplicate} onClick={(e) => { e.stopPropagation(); onDuplicate(node.id); }}>⧉</button>
+          <button type="button" className="text-danger" aria-label={strings.delete} title={strings.delete} onClick={(e) => { e.stopPropagation(); onRemove(node.id); }}>✕</button>
         </div>
       )}
       {children}
@@ -123,6 +129,7 @@ export default function Canvas(props: CanvasProps) {
       onSelect={props.onSelect}
       onRemove={props.onRemove}
       onDuplicate={props.onDuplicate}
+      onMove={props.onMove}
     >
       {children}
     </BlockFrame>
@@ -144,7 +151,7 @@ export default function Canvas(props: CanvasProps) {
   );
 
   return (
-    <div className="min-h-[60vh] rounded-xl border border-border bg-surface p-2" onClick={() => props.onSelect(null)}>
+    <div className="builder-canvas min-h-[60vh] rounded-xl border border-border bg-surface p-2" onClick={() => props.onSelect(null)}>
       <DropGap container="root" index={0} draggingType={draggingType} />
       {layout.blocks.map((section: SectionNode, i) => (
         <div key={section.id}>

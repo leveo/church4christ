@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 刘马可
 role: 长老
 group: elders

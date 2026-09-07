@@ -1,28 +1,18 @@
 ---
-title: Privacy Policy
-description: How this demo site handles the limited information you share with us.
+title: Privacy Information
+description: Information about using this website and contacting the church about your data.
 ---
 
-Church4Christ respects your privacy. This is a demonstration website, and this policy explains, in plain language, what information we collect and how we use it.
+Your questions about the information you share are welcome. Use the church's published contact details to ask how your information is handled.
 
-## What we collect
+## Information you share
 
-We only collect the information you choose to give us. If you submit a prayer request or send a message through the site, we receive whatever you type into the form, along with basic technical details such as the time of your request. We do not sell your information, and we do not share it with advertisers.
+When you use a form on this website, the information you submit is sent to the church for the purpose described by that form. Share only the details you want the church to receive, and review any consent or visibility options before submitting.
 
-## Prayer requests
+## Sign-in and display preferences
 
-Prayer requests are read by our pastoral team and, unless you tell us otherwise, treated as confidential. You may ask us to delete your request at any time.
+This website uses functional cookies to support sign-in and remember display preferences. Signing out ends your current session on this device.
 
-## Cookies
+## Questions and requests
 
-This site uses a small number of functional cookies — for example, to remember your language and light or dark display preference. These do not track you across other websites.
-
-## How we use your information
-
-We use what you share only to respond to you and to care for you as part of our church family. We keep it no longer than we need to.
-
-## Getting in touch
-
-If you have any questions about your information, or you'd like us to remove something, please contact the church office. We'll be glad to help.
-
-_This policy is provided for a demonstration site and is not legal advice._
+Contact the church if you would like to understand who can access information you have shared, ask about how long it is kept, or request a correction or deletion. The church can also explain the arrangements for any services it connects to this website.

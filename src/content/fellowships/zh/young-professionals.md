@@ -1,4 +1,5 @@
 ---
+demo: true
 name: 职青团契
 meetingTime: 每周五 · 晚上7:30
 location: 201室

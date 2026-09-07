@@ -1,4 +1,5 @@
 ---
+demo: true
 title: Serving as Worship
 author: Pastor David Chen
 date: "2026-03-08"

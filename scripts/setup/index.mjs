@@ -29,6 +29,7 @@ import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureS
 import { applyMediaPlan, loadMediaPlan, verifyMediaPlan } from './media.mjs';
 import { probeDeployResourcePresence, probeDeployResources, probeR2Object } from './probes.mjs';
 import { probeIdentityVerificationRuntime } from './identity-verification-probe.mjs';
+import { isBootstrapAdminReady } from '../../src/lib/setupDb.mjs';
 import { verifyCanonicalDemoSeed, verifyMigrationCompleteness } from './verification.mjs';
 import { resolveLocalPersistence } from './persistence.mjs';
 import { inspectBaselineLocalD1Installation, inspectLegacyInstallation } from './import-existing.mjs';
@@ -81,6 +82,7 @@ export function formatPlan(plan) {
     : [];
   return [
     `Setup plan: ${plan.site.name}`,
+    `Content: ${plan.demoData ? 'Include demo content (fictional examples)' : 'No demo content (church settings and first administrator)'}; both keep the bundled design`,
     `Capabilities (${plan.modules.length}): ${plan.modules.join(', ')}`,
     `Database: ${database}`,
     `Required accounts: ${accounts}`,
@@ -380,13 +382,15 @@ async function applyDefaultSetup(plan, options, catalog) {
         const validIdentity = typeof identity === 'string' && identity.trim() === identity && identity.length > 0 && identity.length <= 200 && !/[\0-\x1f\x7f]/.test(identity);
         const preserveImported = !managedInstallation;
         const identityReady = (recovering || preserveImported) ? validIdentity : identity === activePlan.site.name;
+        // Initialized legacy databases intentionally have no content marker.
+        // The first-initialization write owns that choice; maintenance only
+        // verifies the selected modules and church identity here.
         return identityReady && catalog.order.every((key) => found.get(`module.${key}`) === (enabled.has(key) ? '1' : '0'));
       } catch { return false; }
     },
     'bootstrap-admin': async ({ plan: activePlan }) => {
       try {
-        const row = await db.prepare('SELECT role, active, deleted_at, super_admin FROM people WHERE lower(email)=lower(?)').bind(activePlan.adminEmail).first();
-        return row?.role === 'admin' && Number(row.active) === 1 && row.deleted_at == null && Number(row.super_admin) === 1;
+        return await isBootstrapAdminReady(db, activePlan.adminEmail);
       } catch { return false; }
     },
   };

@@ -1,8 +1,11 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Testimonies — PUBLIC (route policy exact match). Shows approved testimonies
-// (locale-first, other-locale rows badged) with full bodies (long ones fold into
+// (English only on en, both languages on zh) with full bodies (long ones fold into
 // a <details>), and a submit form that files a PENDING testimony for review. A
-// name is optional (blank → "Anonymous 匿名"); title + body are required. The
+// name is optional (blank → localized anonymous label); title + body are required. The
 // row's locale is the current page locale. A honeypot field silently absorbs
 // bots. Signed-in visitors get their name prefilled and their person_id linked.
 import Base from '../../../layouts/Base.astro';
@@ -20,7 +23,6 @@ if (!locale) {
 }
 const user = Astro.locals.user;
 const db = Astro.locals.db;
-const ANON = 'Anonymous 匿名';
 const MAX_BODY = 5000;
 
 if (Astro.request.method === 'POST') {
@@ -31,7 +33,7 @@ if (Astro.request.method === 'POST') {
   }
   const title = String(fd.get('title') ?? '').trim().slice(0, 200);
   const body = String(fd.get('body') ?? '').trim().slice(0, MAX_BODY);
-  const name = (user?.displayName ?? String(fd.get('name') ?? '')).trim().slice(0, 120) || ANON;
+  const name = (user?.displayName ?? String(fd.get('name') ?? '')).trim().slice(0, 120);
   if (title && body) {
     await submitTestimony(db, {
       person_id: user?.id ?? null,
@@ -55,16 +57,14 @@ try {
 const isLong = (s: string) => [...s].length > 320;
 const preview = (s: string) => [...s].slice(0, 200).join('') + '…';
 const dateOf = (t: TestimonyCardRow) => (t.publishedAt ?? '').slice(0, 10);
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.testimonies.title')} locale={locale}>
-  <section class="bg-primary text-on-primary">
-    <div class="container-content max-w-content py-14 text-center">
-      <p class="text-sm font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.testimonies.eyebrow')}</p>
-      <h1 class="mt-3 font-display text-display-xl font-bold">{t(locale, 'serve.testimonies.title')}</h1>
-      <p class="mx-auto mt-4 max-w-narrow">{t(locale, 'serve.testimonies.intro')}</p>
-    </div>
-  </section>
+<MinistryWorkspace locale={locale} audience="public" variant="public">
+  <MinistryHeader title={t(locale, 'serve.testimonies.title')} eyebrow={t(locale, 'serve.testimonies.eyebrow')} description={copy.storyIntro}>
+    <a href="#share-story" class="inline-flex items-center rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary hover:bg-primary-hover">{t(locale, 'serve.testimonies.shareTitle')}</a>
+  </MinistryHeader>
 
   <div class="container-content max-w-content py-12">
     {
@@ -73,7 +73,7 @@ const dateOf = (t: TestimonyCardRow) => (t.publishedAt ?? '').slice(0, 10);
           {t(locale, 'serve.testimonies.none')}
         </p>
       ) : (
-        <div class="grid gap-6 md:grid-cols-2">
+        <div class="mw-stories">
           {published.map((ti) => (
             <article class="flex flex-col rounded-lg border border-border bg-surface-raised p-6">
               {ti.locale !== locale && (
@@ -93,7 +93,7 @@ const dateOf = (t: TestimonyCardRow) => (t.publishedAt ?? '').slice(0, 10);
                   </summary>
                 </details>
               ) : (
-                <p class="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{ti.body}</p>
+                <p class="mw-story-body mt-3 whitespace-pre-wrap text-ink-muted">{ti.body}</p>
               )}
               <div class="mt-4 flex items-center gap-3">
                 <AvatarInitials name={ti.authorName} sizeClass="w-9 h-9 text-sm" />
@@ -108,7 +108,7 @@ const dateOf = (t: TestimonyCardRow) => (t.publishedAt ?? '').slice(0, 10);
       )
     }
 
-    <section class="mx-auto mt-14 max-w-xl rounded-lg border border-border bg-surface-raised p-8">
+    <section id="share-story" class="mx-auto mt-10 max-w-2xl mw-panel">
       <h2 class="font-display text-heading-sm font-bold">{t(locale, 'serve.testimonies.shareTitle')}</h2>
       {
         sent ? (
@@ -148,4 +148,5 @@ const dateOf = (t: TestimonyCardRow) => (t.publishedAt ?? '').slice(0, 10);
       }
     </section>
   </div>
+</MinistryWorkspace>
 </Base>

@@ -96,7 +96,10 @@ describe('identity route boundaries', () => {
     expect(legacyEmailChangePage).not.toContain('consumeEmailChange');
     expect(legacyEmailChangePage).not.toContain('peekEmailChange');
     expect(legacyEmailChangePage).not.toContain('requestEmailChange');
-    expect(legacyEmailChangePage).toContain('portal.emailChange.error.title');
+    expect(legacyEmailChangePage).toContain("tokenPagePresentation(Astro.request, 'emailChange', 'error')");
+    expect(legacyEmailChangePage).not.toContain('Astro.request.method');
+    expect(legacyEmailChangePage).not.toContain('<form');
+    expect(legacyEmailChangePage).toContain('privateMetadata');
   });
 
   it('sends the completed recovery warning instead of the pending-request notice after execution', () => {

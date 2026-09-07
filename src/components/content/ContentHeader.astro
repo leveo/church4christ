@@ -1,0 +1,11 @@
+---
+import Icon from '../ui/Icon.astro';
+import { contentCopy } from '../../i18n/designContent';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; title: string; description?: string; eyebrow?: string }
+const { locale, title, description, eyebrow } = Astro.props;
+---
+<header class="content-page-heading">
+  <div><p class="section-eyebrow"><Icon name="book" size={15} />{eyebrow ?? contentCopy(locale).workspace}</p><h1>{title}</h1>{description && <p class="content-page-description">{description}</p>}</div>
+  <div class="content-heading-actions"><slot /></div>
+</header>

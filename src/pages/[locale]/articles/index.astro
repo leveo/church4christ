@@ -2,6 +2,10 @@
 // Articles listing: every article for this locale (localized-or-en-fallback),
 // newest first, as excerpt cards. A badge marks entries only available in English.
 import Base from '../../../layouts/Base.astro';
+import LibraryHeading from '../../../components/public/LibraryHeading.astro';
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import Icon from '../../../components/ui/Icon.astro';
+import { publicCopy } from '../../../i18n/designPublic';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/dates';
@@ -14,51 +18,82 @@ if (!locale) {
 }
 
 // date is 'YYYY-MM-DD' → lexical sort desc == chronological desc.
-const articles = (await listLocalized('articles', locale)).sort((a, b) =>
+const articles = (await listLocalized('articles', locale, Astro.locals.db)).sort((a, b) =>
   b.entry.data.date.localeCompare(a.entry.data.date),
 );
+
+const copy = publicCopy(locale);
+const [featured, ...remaining] = articles;
 ---
 
 <Base title={t(locale, 'articles.title')} locale={locale}>
-  <div class="bg-primary-soft text-on-primary-soft">
-    <div class="container-content py-12">
-      <h1 class="font-display text-display-lg font-bold">{t(locale, 'articles.title')}</h1>
-      <p class="mt-3 text-lg">{t(locale, 'articles.intro')}</p>
-    </div>
-  </div>
-
-  <div class="container-content py-10">
-    {
-      articles.length === 0 ? (
-        <p class="text-ink-muted">{t(locale, 'articles.empty')}</p>
-      ) : (
-        <ul class="flex flex-col gap-6">
-          {articles.map(({ entry, translated, slug }) => (
-            <li>
-              <a
-                href={localePath(locale, `/articles/${slug}`)}
-                class="block bg-surface-raised border border-border rounded-lg p-6 hover:shadow-md hover:border-border-strong transition-shadow"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <h2 class="font-display text-heading-sm font-semibold">{entry.data.title}</h2>
-                  {!translated && (
-                    <span class="shrink-0 rounded-full bg-info-soft text-info px-2.5 py-0.5 text-xs font-semibold">
-                      {t(locale, 'articles.englishBadge')}
-                    </span>
-                  )}
-                </div>
-                <p class="mt-1 text-sm text-ink-subtle">
-                  {t(locale, 'articles.byline', {
-                    author: entry.data.author,
-                    date: formatDate(entry.data.date, locale),
-                  })}
-                </p>
-                {entry.data.excerpt && <p class="mt-3 text-ink-muted">{entry.data.excerpt}</p>}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )
-    }
+  <div class="container-wide journal">
+    <LibraryHeading eyebrow={copy.articlesEyebrow} title={t(locale, 'articles.title')} description={copy.articlesDescription} />
+    {featured ? (
+      <>
+        <a href={localePath(locale, `/articles/${featured.slug}`)} class="journal-feature">
+          <div class="journal-feature-art"><DesignImage image="groups" eager class="h-full w-full object-cover" /></div>
+          <div class="journal-feature-copy">
+            <p class="section-eyebrow">{copy.featuredArticle}</p>
+            <h2>{featured.entry.data.title}</h2>
+            {featured.entry.data.excerpt && <p class="journal-excerpt">{featured.entry.data.excerpt}</p>}
+            <p class="journal-byline">{t(locale, 'articles.byline', { author: featured.entry.data.author, date: formatDate(featured.entry.data.date, locale) })}</p>
+            {!featured.translated && <span class="journal-language">{t(locale, 'articles.englishBadge')}</span>}
+            <span class="journal-read">{t(locale, 'common.readMore')}<Icon name="arrow" size={18}/></span>
+          </div>
+        </a>
+        {remaining.length > 0 && <section class="journal-more">
+          <h2>{copy.moreArticles}</h2>
+          <ul class="journal-grid">
+            {remaining.map(({ entry, translated, slug }, index) => (
+              <li>
+                <a href={localePath(locale, `/articles/${slug}`)} class="journal-entry">
+                  <div class="journal-entry-top"><time datetime={entry.data.date}>{formatDate(entry.data.date, locale)}</time><span aria-hidden="true">{String(index + 2).padStart(2, '0')}</span></div>
+                  <h3>{entry.data.title}</h3>
+                  {!translated && <span class="journal-language">{t(locale, 'articles.englishBadge')}</span>}
+                  {entry.data.excerpt && <p class="journal-excerpt">{entry.data.excerpt}</p>}
+                  <div class="journal-entry-bottom"><p>{entry.data.author}</p><Icon name="arrow" size={18}/></div>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>}
+      </>
+    ) : (
+      <section class="journal-empty">
+        <DesignImage image="sermons" class="h-full w-full object-cover" />
+        <div><Icon name="book" size={28}/><h2>{copy.articleEmptyTitle}</h2><p>{t(locale, 'articles.empty')}</p><a class="action-secondary" href={localePath(locale, '/about')}>{t(locale, 'nav.about')}<Icon name="arrow" size={16}/></a></div>
+      </section>
+    )}
   </div>
 </Base>
+<style>
+  .journal { padding-bottom: 4rem; }
+  .journal-feature { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); }
+  .journal-feature-art { min-height: 380px; position: relative; }
+  .journal-feature-art :global(img) { position: absolute; inset: 0; }
+  .journal-feature-copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1.2rem; padding: clamp(1.5rem, 4vw, 3.5rem); }
+  .journal-feature h2 { font-family: var(--font-display); font-size: clamp(1.9rem, 3.5vw, 3rem); line-height: 1.15; letter-spacing: -.025em; overflow-wrap: anywhere; }
+  .journal-excerpt { color: var(--color-ink-muted); line-height: 1.8; }
+  .journal-byline { font-size: .8rem; color: var(--color-ink-muted); }
+  .journal-read { display: inline-flex; align-items: center; gap: .7rem; color: var(--color-primary); font-size: .85rem; font-weight: 600; }
+  .journal-feature:hover .journal-read { text-decoration: underline; text-underline-offset: .25rem; }
+  .journal-language { display: inline-block; border-radius: var(--radius-sm); padding: .2rem .5rem; background: var(--color-info-soft); color: var(--color-info); font-size: .7rem; }
+  .journal-more { margin-top: 3rem; }
+  .journal-more > h2 { font-family: var(--font-display); font-size: 1.7rem; margin-bottom: 1.5rem; }
+  .journal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; }
+  .journal-entry { height: 100%; display: flex; align-items: flex-start; flex-direction: column; gap: 1rem; padding: 1.6rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); }
+  .journal-entry:hover { border-color: var(--color-primary); }
+  .journal-entry-top, .journal-entry-bottom { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; color: var(--color-ink-muted); font-size: .75rem; }
+  .journal-entry-top > span { font-family: var(--font-display); font-size: 1.4rem; color: var(--color-primary); }
+  .journal-entry h3 { font-family: var(--font-display); font-size: 1.5rem; line-height: 1.3; overflow-wrap: anywhere; }
+  .journal-entry .journal-excerpt { font-size: .9rem; }
+  .journal-entry-bottom { margin-top: auto; padding-top: 1rem; }
+  .journal-empty { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .journal-empty > :global(img) { max-height: 320px; }
+  .journal-empty > div { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1rem; padding: 2rem; }
+  .journal-empty h2 { font-family: var(--font-display); font-size: 1.8rem; }
+  .journal-empty p { color: var(--color-ink-muted); }
+  @media (max-width: 900px) { .journal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 650px) { .journal-feature, .journal-grid, .journal-empty { grid-template-columns: 1fr; } .journal-feature-art { min-height: 220px; } .journal-empty > :global(img) { height: 180px; } }
+</style>

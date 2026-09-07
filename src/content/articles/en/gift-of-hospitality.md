@@ -1,4 +1,5 @@
 ---
+demo: true
 title: The Gift of Hospitality
 author: Pastor David Chen
 date: "2026-05-24"

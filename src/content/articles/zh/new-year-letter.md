@@ -1,4 +1,5 @@
 ---
+demo: true
 title: 新年牧函
 author: 陈大卫牧师
 date: "2026-01-04"

@@ -9,6 +9,9 @@
 // re-renders with an error banner instead of 500ing.
 export const prerender = false;
 import Admin from '../../../../layouts/Admin.astro';
+import ContentSurface from '../../../../components/content/ContentSurface.astro';
+import ContentHeader from '../../../../components/content/ContentHeader.astro';
+import { contentCopy } from '../../../../i18n/designContent';
 import { t } from '../../../../lib/i18n';
 import { listRevisions, getRevision, restoreRevision } from '../../../../lib/adminDb';
 import { card, btnSecondary, noticeOk, noticeErr, badge, badgeInactive } from '../../../../lib/adminUi';
@@ -101,10 +104,10 @@ const editorHref = EDITOR_URL[entity](entityId);
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  <ContentSurface>
+  <ContentHeader locale={lang} title={heading} eyebrow={contentCopy(lang).history} description={contentCopy(lang).historyIntro}>
     <a href={editorHref} class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.revisions.back')}</a>
-  </div>
+  </ContentHeader>
 
   {restored && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.revisions.restored')}</p>}
   {restoreErrorKey && <p class={`mt-4 ${noticeErr}`}>{t(lang, restoreErrorKey)}</p>}
@@ -112,14 +115,15 @@ const editorHref = EDITOR_URL[entity](entityId);
 
   {
     rows.length === 0 ? (
-      <p class="mt-6 text-ink-muted">{t(lang, 'admin.revisions.empty')}</p>
+      <p class="content-empty mt-6">{t(lang, 'admin.revisions.empty')}</p>
     ) : (
-      <ul class="mt-6 space-y-4">
+      <ol class="content-revision-timeline mt-6">
         {rows.map((r) => (
-          <li class={card}>
+          <li class="content-revision-entry">
+            <p class="section-eyebrow mb-3">{contentCopy(lang).version} #{r.id}</p>
             <div class="flex flex-wrap items-center gap-3">
               <span class="text-sm font-medium text-ink">{r.edited_by}</span>
-              <span class="text-sm text-ink-subtle">{r.edited_at} (UTC)</span>
+              <time class="text-sm text-ink-subtle" datetime={r.edited_at.replace(' ', 'T') + 'Z'}>{r.edited_at} (UTC)</time>
               {r.deleted && <span class={`${badge} ${badgeInactive}`}>{t(lang, 'admin.revisions.deletedBadge')}</span>}
               <form
                 method="post"
@@ -137,7 +141,8 @@ const editorHref = EDITOR_URL[entity](entityId);
             </details>
           </li>
         ))}
-      </ul>
+      </ol>
     )
   }
+  </ContentSurface>
 </Admin>

@@ -43,6 +43,14 @@ next command, normally `npm run deploy`. Verify readiness at any time with:
 npm run doctor
 ```
 
+Choose **No demo content** for a church's initial deployment. The matching scripted flag
+is `--no-demo-data`, also the noninteractive default. It retains the bundled design and
+decorative images, schema, operational defaults, selected modules, church settings, and
+first administrator. **Include demo content** (`--demo-data`) adds fictional examples for
+a disposable evaluation installation. Neither choice resets an existing installation;
+use a fresh workspace/database to evaluate the other mode and follow the upgrade runbook
+for an established church.
+
 Doctor reports configuration and resource readiness that the installer can inspect. It
 does not prove production email delivery, successful sign-in, route behavior, scheduled-job
 execution, or backup recovery; verify those outcomes with the go-live checklist below.
@@ -413,9 +421,10 @@ npm run db:migrate:remote
 This creates every table. It does **not** load the demo content — a real deployment starts
 empty, and you add your church's content through the admin area.
 
-The local `npm run db:seed-media:local` command is only for the developer demo. Production
-media starts empty too; admins can upload the homepage hero, event images, ministry covers,
-and profile pictures through the admin area or profile pages after the site is live.
+The local `npm run db:seed-media:local` command is only for the developer demo. Uploaded
+media starts empty too; the bundled decorative images ship with the application. Admins
+can upload the homepage hero, event images, ministry covers, and profile pictures through
+the admin area or profile pages after the site is live.
 
 ### D1 capacity for People CSV imports
 
@@ -597,14 +606,32 @@ Using `church.yunfei-song.com` as the example:
 
 ## 8. Sign in as the first admin
 
-`npm run setup` creates or promotes the first administrator through the same validated,
-idempotent bootstrap path on both databases. Use the email you supplied to setup; do not
-insert an admin with ad-hoc SQL. Open `https://church.yunfei-song.com/en/signin`, enter that
-email, and request a link.
+`npm run setup` creates or explicitly promotes the first administrator through the same
+validated bootstrap path on both databases. For a new administrator, the trusted CLI
+operation creates the person, active email contact link, verified owner, and ownership
+audit together in one transaction. This runs with **Include demo content** and **No demo
+content**; it does not depend on demo identities or the migration's legacy backfill.
+
+Setup verifies the administrator's current sign-in eligibility before marking that step
+complete. If the transaction fails, its writes roll back. If only the local checkpoint
+write fails, rerunning verifies the committed identity without creating another owner or
+audit. Existing accounts retain their contact ownership: `--promote-existing-admin`
+changes privileges, but does not verify an email, transfer ownership, or restore revoked
+ownership. An existing administrator without an eligible identity must complete the
+[trusted identity review or recovery workflow](features/member-identity.md) before setup
+can finish. A changed setup plan or deleted checkpoint does not authorize a new identity
+grant. Do not insert an admin or verified owner with ad-hoc SQL.
+
+Use the email you supplied to setup. Open `https://church.yunfei-song.com/en/signin`, enter
+that email, and request a link.
 The magic link is delivered by email. For a local run only, `EMAIL_DEV_LOG=1` prints it in
 the `npm run dev` terminal instead. Click it and you are in as an admin. From there, set
 your church's name, address, service times, and theme in **Settings**, and start adding
 content.
+
+Local setup also writes `AUTH_DEV_BYPASS_EMAIL` for development. Remove that line from
+`.dev.vars` when checking the real sign-in flow; automatic development access does not
+prove that email delivery or contact ownership works.
 
 ## 9. (Optional) Configure Planning Center synchronization
 

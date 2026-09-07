@@ -1,0 +1,24 @@
+---
+import DesignImage from '../ui/DesignImage.astro';
+import type { DesignImage as ImageKey } from '../../lib/designAssets';
+interface Props { eyebrow: string; title: string; description: string; image?: ImageKey }
+const { eyebrow, title, description, image } = Astro.props;
+---
+<header class:list={['library-heading', { 'with-image': image }]}>
+  <div>
+    <p class="section-eyebrow">{eyebrow}</p>
+    <h1>{title}</h1>
+    <p class="library-description">{description}</p>
+    <slot />
+  </div>
+  {image && <div class="library-heading-art"><DesignImage image={image} eager class="h-full w-full object-cover" /></div>}
+</header>
+<style>
+  .library-heading { padding-block: 3.5rem 2.5rem; }
+  .with-image { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(240px, .7fr); gap: 3rem; align-items: center; }
+  h1 { font-family: var(--font-display); font-size: clamp(2.5rem, 5vw, 4rem); line-height: 1.1; letter-spacing: -.04em; color: var(--color-primary); margin-top: 1rem; }
+  .library-description { max-width: 40rem; margin-top: 1.25rem; color: var(--color-ink-muted); font-size: 1.05rem; line-height: 1.8; }
+  .library-heading-art { height: 220px; overflow: hidden; border-radius: var(--radius-lg); }
+  @media (max-width: 640px) { .library-heading { padding-block: 2.25rem 2rem; } .with-image { grid-template-columns: 1fr; gap: 1.5rem; } .library-heading-art { height: 160px; } }
+  @media print { .library-heading { display: none; } }
+</style>

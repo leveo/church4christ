@@ -121,7 +121,8 @@ describe('catalog-owned docs', () => {
     );
     expect(guidedSignIn).toMatch(/first-admin email[^.]*setup (?:handoff|answers)/i);
     expect(guidedSignIn).not.toContain('admin@example.com');
-    expect(readme).toMatch(/if you (?:choose|chose|selected?) (?:to load )?demo data/i);
+    expect(readme).toContain('choose **Include demo content** or **No demo content**');
+    expect(readme).toContain('`--demo-data` or `--no-demo-data`');
     expect(readme).not.toMatch(/updates? the local D1 rows that point at those objects/i);
 
     const contributing = readFileSync('CONTRIBUTING.md', 'utf8');

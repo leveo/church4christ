@@ -1,0 +1,17 @@
+---
+interface Props { title: string; intro: string; eyebrow: string; image: string }
+const { title, intro, eyebrow, image } = Astro.props;
+---
+<header class="gathering-hero container-content">
+  <div class="gathering-hero-copy"><p class="gathering-eyebrow">{eyebrow}</p><h1>{title}</h1><p class="gathering-intro">{intro}</p><div class="gathering-hero-actions"><slot /></div></div>
+  <img src={image} alt="" width="1536" height="1024" fetchpriority="high" />
+</header>
+<style>
+  .gathering-hero { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 5rem); align-items: center; padding-block: 3rem; }
+  .gathering-eyebrow { color: var(--color-primary); font-size: .6875rem; font-weight: 700; letter-spacing: .14em; }
+  h1 { max-width: 12ch; margin-top: 1rem; font-family: var(--font-display); font-size: clamp(2.3rem, 4.5vw, 4rem); line-height: 1.1; font-weight: 550; letter-spacing: -.04em; }
+  .gathering-intro { max-width: 35rem; margin-top: 1.25rem; line-height: 1.8; color: var(--color-ink-muted); }
+  .gathering-hero-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+  img { width: 100%; aspect-ratio: 1.6; border-radius: var(--radius-sm); object-fit: cover; }
+  @media (max-width: 700px) { .gathering-hero { grid-template-columns: 1fr; gap: 1.5rem; padding-block: 2rem; } h1 { max-width: none; } img { aspect-ratio: 2; } }
+</style>

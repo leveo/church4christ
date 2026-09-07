@@ -1,0 +1,23 @@
+---
+import Icon from './Icon.astro';
+interface Props { title: string; body: string; icon?: string }
+const { title, body, icon = 'arrow' } = Astro.props;
+---
+<section class="confirmation-panel">
+  <div class="confirmation-card">
+    <span class="confirmation-icon"><Icon name={icon} size={28} /></span>
+    <h1>{title}</h1>
+    <p>{body}</p>
+    {Astro.slots.has('default') && <div class="confirmation-actions"><slot /></div>}
+  </div>
+</section>
+<style>
+  .confirmation-panel { padding: clamp(3rem, 8vw, 6rem) 1.25rem; }
+  .confirmation-card { max-width: 34rem; margin: 0 auto; padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid var(--color-border); border-top: 3px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-surface-raised); text-align: center; }
+  .confirmation-icon { display: inline-flex; align-items: center; justify-content: center; width: 3.5rem; height: 3.5rem; border-radius: var(--radius-full); background: var(--color-primary-soft); color: var(--color-primary); }
+  h1 { margin-top: 1.5rem; font-family: var(--font-display); font-size: clamp(1.65rem, 4vw, 2.25rem); line-height: 1.15; letter-spacing: -.025em; }
+  p { margin-top: 1rem; color: var(--color-ink-muted); line-height: 1.75; font-size: .9375rem; overflow-wrap: anywhere; }
+  .confirmation-actions { margin-top: 1.75rem; }
+  .confirmation-actions :global(button), .confirmation-actions :global(a) { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: .7rem 1.5rem; border-radius: var(--radius-sm); background: var(--color-primary); color: var(--color-on-primary); font-size: .875rem; font-weight: 650; }
+  .confirmation-actions :global(button:hover), .confirmation-actions :global(a:hover) { background: var(--color-primary-hover); }
+</style>
