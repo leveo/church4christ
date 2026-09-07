@@ -31,12 +31,14 @@ function PaletteItem({ type, label, onQuickAdd }: { type: AnyNode['type']; label
 
 export default function Palette({ strings, onQuickAdd }: { strings: Record<string, string>; onQuickAdd: (t: AnyNode['type']) => void }) {
   return (
-    <div className="space-y-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">{strings.blocks}</h2>
+    <details open>
+      <summary className="builder-palette-title">{strings.blocks}</summary>
+      <div className="builder-palette-items">
       {TYPES.map((type) => (
         <PaletteItem key={type} type={type} label={strings[`block.${type}`]} onQuickAdd={onQuickAdd} />
       ))}
+      </div>
       <p className="text-xs text-ink-subtle">{strings.dragHint}</p>
-    </div>
+    </details>
   );
 }

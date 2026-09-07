@@ -9,7 +9,8 @@
 // the blockout REASON can be private ("medical", "counselling") — reasons are
 // visible to admins only; leaders see the dates/times with the reason nulled.
 import { env } from 'cloudflare:workers';
-import Base from '../../../layouts/Base.astro';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import ServingHistory from '../../../components/ServingHistory.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -87,12 +88,12 @@ const visibleBlockouts = hasAreaAccess(user, 'serve') ? blockouts : blockouts.ma
 const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale, `ministries.category.${c}`) : c);
 ---
 
-<Base title={person.display_name} locale={locale} noindex>
-  <div class="container-content max-w-content py-12">
+<Member active="profile" title={person.display_name} locale={locale} noindex>
+  <div class="profile-detail">
     <a href={localePath(locale, '/serve/teams')} class="text-sm text-ink-muted hover:text-primary">
       ← {t(locale, 'serve.teams.title')}
     </a>
-    <h1 class="mt-2 font-display text-heading-md font-bold">{person.display_name}</h1>
+    <MemberPageHeader title={person.display_name} description={t(locale, 'profile.title')} />
     <p class="mt-1 text-sm text-ink-muted">
       {person.email}{person.phone && ` · ${person.phone}`}
     </p>
@@ -193,4 +194,4 @@ const categoryLabel = (c: string) => (MINISTRY_CATEGORIES.includes(c) ? t(locale
       <ServingHistory locale={locale} history={history} blockouts={visibleBlockouts} />
     </div>
   </div>
-</Base>
+</Member>

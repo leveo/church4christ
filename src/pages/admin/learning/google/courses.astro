@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import MemberPageHeader from '../../../../components/ui/MemberPageHeader.astro';
 import Admin from '../../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi';
@@ -110,8 +111,8 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
 
 <Admin title={copy.title}>
   <a class={btnSecondary} href="/admin/learning">{copy.back}</a>
-  <h1 class="mt-6 font-display text-heading-md font-bold">{copy.title}</h1>
-  <p class="mt-2 max-w-3xl text-ink-muted">{copy.intro}</p>
+  <div class="mt-6"><MemberPageHeader title={copy.title} description={copy.intro} eyebrow="Google Classroom" /></div>
+
   <p class={`mt-4 max-w-3xl ${card} ${
     pushReadiness.mode === 'misconfigured' ? 'text-danger' : 'text-ink-muted'
   }`}>
@@ -140,7 +141,7 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
   ) : (
     <div class="mt-6 grid max-w-4xl gap-4">
       {options.courses.map(({ course, mappedProgramId }) => (
-        <article class={card}>
+        <article class={`${card} mapping-course`} data-mapped={mappedProgramId !== null}>
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 class="font-display text-lg font-bold">{course.displayName}</h2>
@@ -176,3 +177,10 @@ const banner = Astro.url.searchParams.get('saved') === 'course_mapped'
     </div>
   )}
 </Admin>
+
+<style>
+.mapping-course { border-left:3px solid var(--color-border-strong); }
+.mapping-course[data-mapped='true'] { border-left-color:var(--color-primary); }
+.mapping-course form { align-items:end; }
+.mapping-course form button { justify-self:start; }
+</style>

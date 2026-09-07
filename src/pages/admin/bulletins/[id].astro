@@ -8,6 +8,11 @@
 // parallel arrays; the Admin repeat-row island is pure enhancement and the
 // server skips fully-blank rows.
 import Admin from '../../../layouts/Admin.astro';
+import ContentSurface from '../../../components/content/ContentSurface.astro';
+import ContentHeader from '../../../components/content/ContentHeader.astro';
+import PublicationPanel from '../../../components/content/PublicationPanel.astro';
+import FormPreview from '../../../components/content/FormPreview.astro';
+import { contentCopy } from '../../../i18n/designContent';
 import { t } from '../../../lib/i18n';
 import { parseBulletinForm } from '../../../lib/validate';
 import {
@@ -134,21 +139,22 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <div class="flex items-center gap-4 text-sm">
+  <ContentSurface>
+  <ContentHeader locale={lang} title={heading} description={contentCopy(lang).bulletins}>
+
       {viewHref && <a href={viewHref} class="text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
       {!isNew && <a href={`/admin/revisions/bulletin/${id}`} class="text-primary hover:underline">{t(lang, 'admin.form.history')}</a>}
       <a href="/admin/bulletins" class="text-primary hover:underline">&larr; {t(lang, 'admin.bulletins.back')}</a>
-    </div>
-  </div>
+      </ContentHeader>
+  <nav class="content-section-guide" aria-label={contentCopy(lang).sectionGuide}><a href="#content-program">{contentCopy(lang).program}</a><a href="#content-offerings">{contentCopy(lang).offerings}</a><a href="#content-reflection">{contentCopy(lang).reflection}</a><a href="#content-news">{contentCopy(lang).news}</a></nav>
 
-  {hasErrors && <p class={`mt-4 max-w-3xl ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+  {hasErrors && <p role="alert" class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
-  <form method="post" class="mt-6 max-w-3xl space-y-6">
+  <form method="post" id="content-editor-form" class="content-editor">
     <input type="hidden" name="action" value="save" />
+    <div class="content-editor-main">
 
-    <section class={`${card} grid gap-4 sm:grid-cols-2`}>
+    <section id="content-basics" class={`${card} grid gap-4 sm:grid-cols-2`}>
       <h2 class={`${h2} sm:col-span-2`}>{t(lang, 'admin.bulletins.basics')}</h2>
       <label class="block">
         <span class={lab}>{t(lang, 'admin.bulletins.serviceType')} *</span>
@@ -170,13 +176,13 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       </label>
     </section>
 
-    <section class={card} data-repeat>
+    <section id="content-program" class={card} data-repeat>
       <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.program')}</h2>
       {v.program.map((row) => (
         <div class="mb-2 flex flex-wrap items-start gap-2" data-repeat-row>
-          <input name="program_item" value={row.item} placeholder={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
-          <input name="program_content" value={row.content} placeholder={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
-          <input name="program_person" value={row.person} placeholder={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
+          <input name="program_item" value={row.item} placeholder={t(lang, 'admin.bulletins.programItem')} aria-label={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
+          <input name="program_content" value={row.content} placeholder={t(lang, 'admin.bulletins.programContent')} aria-label={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
+          <input name="program_person" value={row.person} placeholder={t(lang, 'admin.bulletins.programPerson')} aria-label={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
           <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
           <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
           <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
@@ -184,9 +190,9 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       ))}
       <template data-repeat-template>
         <div class="mb-2 flex flex-wrap items-start gap-2" data-repeat-row>
-          <input name="program_item" placeholder={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
-          <input name="program_content" placeholder={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
-          <input name="program_person" placeholder={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
+          <input name="program_item" placeholder={t(lang, 'admin.bulletins.programItem')} aria-label={t(lang, 'admin.bulletins.programItem')} class={`${tin} flex-1`} />
+          <input name="program_content" placeholder={t(lang, 'admin.bulletins.programContent')} aria-label={t(lang, 'admin.bulletins.programContent')} class={`${tin} flex-1`} />
+          <input name="program_person" placeholder={t(lang, 'admin.bulletins.programPerson')} aria-label={t(lang, 'admin.bulletins.programPerson')} class={`${tin} flex-1`} />
           <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
           <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
           <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
@@ -195,20 +201,20 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
     </section>
 
-    <div class="grid gap-6 sm:grid-cols-2">
+    <div id="content-offerings" class="grid gap-6">
       <section class={card} data-repeat>
         <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.offering')}</h2>
         {v.offering.map((row) => (
           <div class="mb-2 flex items-start gap-2" data-repeat-row>
-            <input name="offering_label" value={row.label} placeholder={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
-            <input name="offering_amount" value={row.value} placeholder={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
+            <input name="offering_label" value={row.label} placeholder={t(lang, 'admin.bulletins.offeringLabel')} aria-label={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
+            <input name="offering_amount" value={row.value} placeholder={t(lang, 'admin.bulletins.offeringAmount')} aria-label={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
         ))}
         <template data-repeat-template>
           <div class="mb-2 flex items-start gap-2" data-repeat-row>
-            <input name="offering_label" placeholder={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
-            <input name="offering_amount" placeholder={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
+            <input name="offering_label" placeholder={t(lang, 'admin.bulletins.offeringLabel')} aria-label={t(lang, 'admin.bulletins.offeringLabel')} class={`${tin} flex-1`} />
+            <input name="offering_amount" placeholder={t(lang, 'admin.bulletins.offeringAmount')} aria-label={t(lang, 'admin.bulletins.offeringAmount')} class={`${tin} w-28`} />
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
         </template>
@@ -219,15 +225,15 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
         <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.attendance')}</h2>
         {v.attendance.map((row) => (
           <div class="mb-2 flex items-start gap-2" data-repeat-row>
-            <input name="attendance_label" value={row.label} placeholder={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
-            <input name="attendance_count" value={row.value} placeholder={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
+            <input name="attendance_label" value={row.label} placeholder={t(lang, 'admin.bulletins.attendanceLabel')} aria-label={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
+            <input name="attendance_count" value={row.value} placeholder={t(lang, 'admin.bulletins.attendanceCount')} aria-label={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
         ))}
         <template data-repeat-template>
           <div class="mb-2 flex items-start gap-2" data-repeat-row>
-            <input name="attendance_label" placeholder={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
-            <input name="attendance_count" placeholder={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
+            <input name="attendance_label" placeholder={t(lang, 'admin.bulletins.attendanceLabel')} aria-label={t(lang, 'admin.bulletins.attendanceLabel')} class={`${tin} flex-1`} />
+            <input name="attendance_count" placeholder={t(lang, 'admin.bulletins.attendanceCount')} aria-label={t(lang, 'admin.bulletins.attendanceCount')} class={`${tin} w-28`} />
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
         </template>
@@ -235,7 +241,8 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       </section>
     </div>
 
-    <section class={`${card} space-y-4`}>
+    <section id="content-reflection" class={`${card} space-y-4`}>
+      <h2>{contentCopy(lang).reflection}</h2>
       <label class="block">
         <span class={lab}>{t(lang, 'admin.bulletins.memoryVerse')}</span>
         <textarea name="memory_verse" rows="2" class={tin}>{v.memoryVerse}</textarea>
@@ -246,21 +253,21 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       </label>
     </section>
 
-    <section class={card} data-repeat>
+    <section id="content-news" class={card} data-repeat>
       <h2 class={`${h2} mb-4`}>{t(lang, 'admin.bulletins.announcements')}</h2>
       {v.announcements.map((a, i) => (
         <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
           <div class="flex items-start gap-2">
-            <input name="ann_title" value={a.title} placeholder={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
+            <input name="ann_title" value={a.title} placeholder={t(lang, 'admin.bulletins.annTitle')} aria-label={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
             <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
             <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
-          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} class={tin}>{a.body}</textarea>
+          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} aria-label={t(lang, 'admin.bulletins.annBody')} class={tin}>{a.body}</textarea>
           {errors[`ann_body_${i}`] && <span class={errorText}>{t(lang, errors[`ann_body_${i}`])}</span>}
           <div class="flex gap-2">
-            <input name="ann_url" value={a.url} placeholder={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
-            <input name="ann_label" value={a.label} placeholder={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
+            <input name="ann_url" value={a.url} placeholder={t(lang, 'admin.bulletins.annUrl')} aria-label={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
+            <input name="ann_label" value={a.label} placeholder={t(lang, 'admin.bulletins.annLabel')} aria-label={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
           </div>
           {errors[`ann_url_${i}`] && <span class={errorText}>{t(lang, errors[`ann_url_${i}`])}</span>}
         </div>
@@ -268,50 +275,33 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       <template data-repeat-template>
         <div class="mb-4 space-y-2 border-b border-border pb-4" data-repeat-row>
           <div class="flex items-start gap-2">
-            <input name="ann_title" placeholder={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
+            <input name="ann_title" placeholder={t(lang, 'admin.bulletins.annTitle')} aria-label={t(lang, 'admin.bulletins.annTitle')} class={`${tin} flex-1`} />
             <button type="button" data-repeat-up class={rowBtn} aria-label={t(lang, 'admin.form.moveUp')}>↑</button>
             <button type="button" data-repeat-down class={rowBtn} aria-label={t(lang, 'admin.form.moveDown')}>↓</button>
             <button type="button" data-repeat-remove class={rowBtn}>{t(lang, 'admin.form.remove')}</button>
           </div>
-          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} class={tin}></textarea>
+          <textarea name="ann_body" rows="2" placeholder={t(lang, 'admin.bulletins.annBody')} aria-label={t(lang, 'admin.bulletins.annBody')} class={tin}></textarea>
           <div class="flex gap-2">
-            <input name="ann_url" placeholder={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
-            <input name="ann_label" placeholder={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
+            <input name="ann_url" placeholder={t(lang, 'admin.bulletins.annUrl')} aria-label={t(lang, 'admin.bulletins.annUrl')} class={`${tin} flex-1`} />
+            <input name="ann_label" placeholder={t(lang, 'admin.bulletins.annLabel')} aria-label={t(lang, 'admin.bulletins.annLabel')} class={`${tin} flex-1`} />
           </div>
         </div>
       </template>
       <button type="button" data-repeat-add class={rowBtn}>＋ {t(lang, 'admin.form.addRow')}</button>
     </section>
 
-    <section class={`${card} space-y-4`}>
-      <h2 class={h2}>{t(lang, 'admin.form.publishTitle')}</h2>
-      <div class="flex gap-6 text-sm">
-        <label class="flex items-center gap-2">
-          <input type="radio" name="status" value="draft" checked={v.status !== 'published'} />
-          {t(lang, 'admin.form.statusDraft')}
-        </label>
-        <label class="flex items-center gap-2">
-          <input type="radio" name="status" value="published" checked={v.status === 'published'} />
-          {t(lang, 'admin.form.statusPublished')}
-        </label>
-      </div>
-      <label class="block max-w-sm">
-        <span class={lab}>{t(lang, 'admin.form.publishAt')}</span>
-        <input type="datetime-local" name="publish_at" value={v.publishAtLocal} class={tin} />
-        {errors.publish_at && <span class={errorText}>{t(lang, errors.publish_at)}</span>}
-      </label>
-    </section>
-
-    <div class="flex items-center gap-4">
-      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
     </div>
+    <aside class="content-editor-rail">
+      <PublicationPanel locale={lang} status={v.status} scheduled publishAt={v.publishAtLocal} error={errors.publish_at} />
+      <FormPreview locale={lang} kind="bulletin" />
+    </aside>
   </form>
 
   {
     !isNew && (
       <form
         method="post"
-        class="mt-6 max-w-3xl"
+        class="content-delete"
         onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.bulletins.deleteConfirm'))})`}
       >
         <input type="hidden" name="action" value="delete" />
@@ -319,4 +309,5 @@ const viewHref = publishedNow ? `${localePath(lang, `/bulletin/${v.bulletinDate}
       </form>
     )
   }
+  </ContentSurface>
 </Admin>

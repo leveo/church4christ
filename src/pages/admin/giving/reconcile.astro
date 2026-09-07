@@ -7,10 +7,12 @@
 // over a 7/30/90-day window and lists the three drift buckets. Read-only — audit,
 // no writes.
 import Admin from '../../../layouts/Admin.astro';
+import FinanceSurface from '../../../components/finance/FinanceSurface.astro';
+import FinanceHeader from '../../../components/finance/FinanceHeader.astro';
+import { financeCopy } from '../../../i18n/designFinance';
 import { t } from '../../../lib/i18n';
 import { stripeFdwAvailable, reconcile } from '../../../lib/givingReconcile';
-import { formatCents } from '../../../lib/money';
-import { card, th, td, noticeOk, btn } from '../../../lib/adminUi';
+import { th, td, noticeOk, btn } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -34,26 +36,29 @@ const allClear =
   report.refundDrift.length === 0;
 
 const heading = t(lang, 'admin.giving.reconcile');
-const h2 = 'font-display text-heading-sm font-bold';
-const tableWrap = 'mt-3 overflow-x-auto rounded-xl border border-border';
+const copy = financeCopy(lang);
+const tableWrap = 'finance-table';
 const table = 'w-full border-collapse';
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <a href="/admin/giving" class="text-sm text-primary hover:underline">&larr; {t(lang, 'admin.giving.record')}</a>
-  </div>
-
+<FinanceSurface>
+  <FinanceHeader locale={lang} title={heading} description={copy.reconcileIntro}>
+    <a href="/admin/giving" class="text-primary hover:underline">&larr; {t(lang, 'admin.giving.ledger')}</a>
+  </FinanceHeader>
+  <section class="finance-callout mt-6">
+    <h2>{copy.readOnly}</h2><p>{copy.readOnlyHint}</p>
+  </section>
   {
     !available ? (
-      <section class={`mt-6 max-w-2xl ${card}`}>
+      <section class="finance-empty mt-6">
+        <h2 class="font-semibold text-ink">{copy.comparisonUnavailable}</h2>
         <p class="text-sm text-ink-muted">{t(lang, 'admin.giving.fdwMissing')}</p>
         <p class="mt-3 font-mono text-xs text-ink-subtle">migrations-supabase/9000_stripe_fdw.sql.example</p>
       </section>
     ) : (
       <>
-        <form method="get" class="mt-6 flex flex-wrap items-end gap-3">
+        <form method="get" class="finance-filter mt-6">
           <label class="block">
             <span class="block text-sm font-semibold text-ink-muted mb-1">{t(lang, 'admin.giving.sinceDays')}</span>
             <select name="since" class="rounded-md border border-border bg-surface px-3 py-2 text-sm">
@@ -65,16 +70,25 @@ const table = 'w-full border-collapse';
           <button type="submit" class={btn}>{t(lang, 'admin.giving.filter')}</button>
         </form>
 
+        <p class="finance-scope">{copy.createdWindow}</p>
+        <nav class="finance-comparisons" aria-label={heading}>
+          <a href="#finance-missing"><span>{t(lang, 'admin.giving.missingLocally')}</span><strong>{report!.missingLocally.length}</strong><small>{copy.missingHint}</small></a>
+          <a href="#finance-amount"><span>{t(lang, 'admin.giving.amountMismatch')}</span><strong>{report!.amountMismatch.length}</strong><small>{copy.amountHint}</small></a>
+          <a href="#finance-refund"><span>{t(lang, 'admin.giving.refundDrift')}</span><strong>{report!.refundDrift.length}</strong><small>{copy.refundHint}</small></a>
+        </nav>
+        <p class="finance-scope">{copy.unitScope}</p>
         {allClear && <p class={`mt-6 max-w-2xl ${noticeOk}`}>{t(lang, 'admin.giving.reconcileClean')}</p>}
 
         {/* Bucket 1: paid gift sessions in Stripe with no local gift */}
-        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.missingLocally')}</h2>
-        <div class={tableWrap}>
+        <section id="finance-missing" class="finance-comparison-section" aria-labelledby="finance-missing-heading">
+        <h2 id="finance-missing-heading">{t(lang, 'admin.giving.missingLocally')}</h2>
+        <p class="finance-scope">{copy.missingHint}</p>
+        <div class={tableWrap} role="region" aria-label={t(lang, 'admin.giving.missingLocally')} tabindex="0">
           <table class={table}>
             <thead class="bg-surface-sunken">
               <tr>
                 <th class={th}>{t(lang, 'admin.giving.colSession')}</th>
-                <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colAmount')}<span class="block text-xs font-normal">{copy.minorUnits}</span></th>
                 <th class={th}>{t(lang, 'admin.giving.colDate')}</th>
                 <th class={th}>{t(lang, 'admin.giving.colEmail')}</th>
               </tr>
@@ -82,13 +96,13 @@ const table = 'w-full border-collapse';
             <tbody>
               {report!.missingLocally.length === 0 ? (
                 <tr>
-                  <td class={`${td} text-ink-muted`} colspan="4">—</td>
+                  <td class={`${td} text-ink-muted`} colspan="4">{copy.clear}</td>
                 </tr>
               ) : (
                 report!.missingLocally.map((r) => (
                   <tr class="border-t border-border">
                     <td class={`${td} font-mono text-xs`}>{r.session_id}</td>
-                    <td class={`${td} tabular-nums font-medium`}>{formatCents(r.amount)}</td>
+                    <td class={`${td} tabular-nums font-medium`}>{r.amount}</td>
                     <td class={`${td} tabular-nums`}>{r.created}</td>
                     <td class={td}>{r.email ?? '—'}</td>
                   </tr>
@@ -97,41 +111,47 @@ const table = 'w-full border-collapse';
             </tbody>
           </table>
         </div>
+        </section>
 
         {/* Bucket 2: local gift amount differs from the Stripe session */}
-        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.amountMismatch')}</h2>
-        <div class={tableWrap}>
+        <section id="finance-amount" class="finance-comparison-section" aria-labelledby="finance-amount-heading">
+        <h2 id="finance-amount-heading">{t(lang, 'admin.giving.amountMismatch')}</h2>
+        <p class="finance-scope">{copy.amountHint}</p>
+        <div class={tableWrap} role="region" aria-label={t(lang, 'admin.giving.amountMismatch')} tabindex="0">
           <table class={table}>
             <thead class="bg-surface-sunken">
               <tr>
                 <th class={th}>{t(lang, 'admin.giving.colGift')}</th>
                 <th class={th}>{t(lang, 'admin.giving.colSession')}</th>
-                <th class={th}>{t(lang, 'admin.giving.colLocal')}</th>
-                <th class={th}>{t(lang, 'admin.giving.colStripe')}</th>
+                <th class={th}>{t(lang, 'admin.giving.colLocal')}<span class="block text-xs font-normal">{copy.minorUnits}</span></th>
+                <th class={th}>{t(lang, 'admin.giving.colStripe')}<span class="block text-xs font-normal">{copy.minorUnits}</span></th>
               </tr>
             </thead>
             <tbody>
               {report!.amountMismatch.length === 0 ? (
                 <tr>
-                  <td class={`${td} text-ink-muted`} colspan="4">—</td>
+                  <td class={`${td} text-ink-muted`} colspan="4">{copy.clear}</td>
                 </tr>
               ) : (
                 report!.amountMismatch.map((r) => (
                   <tr class="border-t border-border">
                     <td class={`${td} tabular-nums`}>{r.gift_id}</td>
                     <td class={`${td} font-mono text-xs`}>{r.session_id}</td>
-                    <td class={`${td} tabular-nums`}>{formatCents(r.local_cents)}</td>
-                    <td class={`${td} tabular-nums`}>{formatCents(r.stripe_cents)}</td>
+                    <td class={`${td} tabular-nums`}>{r.local_cents}</td>
+                    <td class={`${td} tabular-nums`}>{r.stripe_cents}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
+        </section>
 
         {/* Bucket 3: Stripe charge refunded but local gift still succeeded */}
-        <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.refundDrift')}</h2>
-        <div class={tableWrap}>
+        <section id="finance-refund" class="finance-comparison-section" aria-labelledby="finance-refund-heading">
+        <h2 id="finance-refund-heading">{t(lang, 'admin.giving.refundDrift')}</h2>
+        <p class="finance-scope">{copy.refundHint}</p>
+        <div class={tableWrap} role="region" aria-label={t(lang, 'admin.giving.refundDrift')} tabindex="0">
           <table class={table}>
             <thead class="bg-surface-sunken">
               <tr>
@@ -142,7 +162,7 @@ const table = 'w-full border-collapse';
             <tbody>
               {report!.refundDrift.length === 0 ? (
                 <tr>
-                  <td class={`${td} text-ink-muted`} colspan="2">—</td>
+                  <td class={`${td} text-ink-muted`} colspan="2">{copy.clear}</td>
                 </tr>
               ) : (
                 report!.refundDrift.map((r) => (
@@ -155,7 +175,9 @@ const table = 'w-full border-collapse';
             </tbody>
           </table>
         </div>
+        </section>
       </>
     )
   }
+</FinanceSurface>
 </Admin>

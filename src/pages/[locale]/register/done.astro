@@ -1,4 +1,8 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import Icon from '../../../components/ui/Icon.astro';
+
 // Registration confirmation page. Reached two ways: the submit endpoint 303s a
 // FREE registration here (?ok=1, no paid marker → "you're registered"), and a
 // PAID registration lands here after the Stripe Checkout redirect (?ok=1&paid=1 →
@@ -15,11 +19,15 @@ if (!locale) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');
 }
+const copy = gatheringsCopy(locale);
 const paid = Astro.url.searchParams.get('paid') === '1';
 ---
 
 <Base title={t(locale, 'register.done.title')} locale={locale} noindex={true}>
-  <div class="container-content max-w-xl py-16 text-center">
+  <GatheringSurface mode="public">
+  <div class="gathering-complete">
+    <div class="gathering-complete-icon"><Icon name="calendar" size={28} /></div>
+    <ol class="gathering-flow justify-center" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === 2 ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
     <h1 class="font-display text-heading-md font-bold">{t(locale, 'register.done.title')}</h1>
     {paid && <p class="mt-4 text-ink-muted">{t(locale, 'register.done.paid')}</p>}
 
@@ -28,4 +36,5 @@ const paid = Astro.url.searchParams.get('paid') === '1';
       <a href={localePath(locale, '/register')} class={btnSecondary}>{t(locale, 'register.title')}</a>
     </div>
   </div>
+  </GatheringSurface>
 </Base>

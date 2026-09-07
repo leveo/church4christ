@@ -1,6 +1,7 @@
 ---
 // Plan-a-visit page: renders the `pages/visit` content entry (en-fallback aware).
 import { render } from 'astro:content';
+import { frontdoorCopy } from '../../i18n/designFrontdoor';
 import ContentPage from '../../components/ContentPage.astro';
 import { parseLocale } from '../../lib/locales';
 import { getLocalized } from '../../lib/content';
@@ -30,14 +31,16 @@ const mapUrl = identity?.mapUrl && /^https?:\/\//i.test(identity.mapUrl) ? ident
 ---
 
 <ContentPage
+  image="welcome"
+  eyebrow={frontdoorCopy(locale).visit}
   title={entry.data.title}
   description={entry.data.description}
   locale={locale}
   translated={translated}
 >
   {(identity?.serviceTimes || identity?.address || identity?.email || identity?.phone) && (
-    <Fragment slot="before">
-      <dl class="grid gap-6 rounded-lg border border-border bg-surface-raised p-6 sm:grid-cols-2">
+    <Fragment slot="aside">
+      <dl class="grid gap-6 rounded-lg border border-border bg-surface-raised p-6">
         {identity.serviceTimes && (
           <div>
             <dt class="font-display font-semibold">{t(locale, 'footer.serviceTimes')}</dt>

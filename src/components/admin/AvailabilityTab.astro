@@ -2,9 +2,10 @@
 // Availability tab: a team picker and a members × next-4-plans grid marking each
 // cell scheduled / blocked / free. Data comes from planDb.getTeamAvailability.
 import { t } from '../../lib/i18n';
+import { operationsCopy } from '../../i18n/designOperations';
 import type { Locale } from '../../lib/locales';
 import type { AvailabilityData } from '../../lib/planDb';
-import { card, tin, badge, badgeScheduled, badgeActive, badgeInactive } from '../../lib/adminUi';
+import { card, tin, btnSecondary, badge, badgeScheduled, badgeActive, badgeInactive } from '../../lib/adminUi';
 
 interface Props {
   lang: Locale;
@@ -21,12 +22,12 @@ const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: ba
   <div class="flex items-center gap-3 flex-wrap">
     <h2 class="font-display text-heading-sm font-bold">{selectedTeamName || t(lang, 'admin.console.availTitle')}</h2>
     {teams.length > 1 && (
-      <form method="get" class="ml-auto">
+      <form method="get" class="ml-auto flex flex-wrap gap-2">
         <input type="hidden" name="tab" value="availability" />
         {scope === 'leader' && <input type="hidden" name="scope" value="leader" />}
-        <select name="team" onchange="this.form.submit()" class={`${tin} w-auto`}>
+        <label><span class="sr-only">{t(lang, 'admin.console.availTitle')}</span><select name="team" class={`${tin} w-auto`}>
           {teams.map((tm) => <option value={tm.id} selected={tm.id === selectedTeamId}>{tm.name}</option>)}
-        </select>
+        </select></label><button type="submit" class={btnSecondary}>{operationsCopy(lang).apply}</button>
       </form>
     )}
   </div>
@@ -35,7 +36,7 @@ const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: ba
   {availability.plans.length === 0 || availability.rows.length === 0 ? (
     <p class="mt-6 text-sm text-ink-muted">{t(lang, teams.length === 0 ? 'admin.console.availNoTeam' : 'admin.console.availNoPlans')}</p>
   ) : (
-    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+    <div class="availability-matrix mt-4 overflow-x-auto rounded-xl border border-border">
       <table class="w-full border-collapse text-sm min-w-[36rem]">
         <thead class="bg-surface-sunken">
           <tr>
@@ -65,3 +66,10 @@ const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: ba
     </div>
   )}
 </div>
+
+<style>
+.availability-matrix { max-height:68vh;overflow:auto;background:var(--color-surface-raised); }
+.availability-matrix thead { position:sticky;top:0;z-index:1; }
+.availability-matrix tbody td:first-child { position:sticky;left:0;background:var(--color-surface-raised); }
+.availability-matrix td { padding-block:1.15rem;border-right:1px solid var(--color-border); }
+</style>

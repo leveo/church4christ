@@ -1,5 +1,7 @@
 ---
 // Provider-neutral Learning provider administration.
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { badge, btn, btnSecondary, card, lab, tin } from '../../../lib/adminUi';
@@ -170,21 +172,20 @@ if (queryEntries.length === 1) {
 ---
 
 <Admin title={t(lang, 'admin.learning.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.learning.title')}</h1>
-  <p class="mt-2 max-w-3xl text-ink-muted">{t(lang, 'admin.learning.intro')}</p>
+  <MemberPageHeader title={t(lang, 'admin.learning.title')} eyebrow={operationsCopy(lang).learning} description={t(lang, 'admin.learning.intro')} image="learning" />
   {banner && <p class={`mt-4 max-w-3xl rounded-card px-4 py-3 text-sm ${
     banner.tone === 'success' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
   }`}>{banner.text}</p>}
 
-  <section class="mt-8 max-w-4xl">
+<div class="learning-admin-workspace"><div>  <section class="learning-connections">
     <h2 class="font-display text-heading-sm font-bold">{copy.providers}</h2>
     {connections.length === 0 && <p class={`mt-4 ${card} text-ink-muted`}>{copy.none}</p>}
     <div class="mt-4 grid gap-4">
       {connections.map((connection) => (
-        <article class={card}>
+        <article class={`${card} learning-connection`} data-provider={connection.provider}>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="font-display text-lg font-bold">{connection.displayName}</h3>
+              <div class="flex items-center gap-3"><span class="provider-mark" aria-hidden="true">{connection.provider === 'canvas' ? 'C' : 'G'}</span><h3 class="font-display text-lg font-bold">{connection.displayName}</h3></div>
               <p class="mt-1 text-sm text-ink-muted">
                 {connection.provider === 'canvas' ? 'Canvas' : 'Google Classroom'}
                 {connection.baseUrl ? ` · ${connection.baseUrl}` : ''}
@@ -257,27 +258,8 @@ if (queryEntries.length === 1) {
     </div>
   </section>
 
-  <section class="mt-8 grid max-w-4xl gap-4 lg:grid-cols-2">
-    <form method="post" action="/admin/learning/connections" class={card}>
-      <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="provider" value="canvas" />
-      <h2 class="font-display text-heading-sm font-bold">{copy.createCanvas}</h2>
-      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
-      <label class={`${lab} mt-3`}>{copy.baseUrl}<input class={tin} type="url" name="base_url" placeholder="https://canvas.example.org" required maxlength="2048" /></label>
-      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
-    </form>
-    <form method="post" action="/admin/learning/connections" class={card}>
-      <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="provider" value="google_classroom" />
-      <h2 class="font-display text-heading-sm font-bold">{copy.createGoogle}</h2>
-      <p class="mt-2 text-sm text-ink-muted">{copy.googleNote}</p>
-      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
-      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
-    </form>
-  </section>
-
   {syncCourses.length > 0 && (
-    <section class="mt-8 max-w-4xl">
+    <section class="mt-8 learning-sync">
       <h2 class="font-display text-heading-sm font-bold">{copy.syncHeading}</h2>
       <div class="mt-4 grid gap-3">
         {syncCourses.map((course) => (
@@ -299,4 +281,35 @@ if (queryEntries.length === 1) {
       </div>
     </section>
   )}
+</div><aside><p class="section-eyebrow mb-4">{operationsCopy(lang).addProvider}</p>  <section class="learning-add">
+    <form method="post" action="/admin/learning/connections" class={card}>
+      <input type="hidden" name="action" value="create" />
+      <input type="hidden" name="provider" value="canvas" />
+      <h2 class="font-display text-heading-sm font-bold">{copy.createCanvas}</h2>
+      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
+      <label class={`${lab} mt-3`}>{copy.baseUrl}<input class={tin} type="url" name="base_url" placeholder="https://canvas.example.org" required maxlength="2048" /></label>
+      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
+    </form>
+    <form method="post" action="/admin/learning/connections" class={card}>
+      <input type="hidden" name="action" value="create" />
+      <input type="hidden" name="provider" value="google_classroom" />
+      <h2 class="font-display text-heading-sm font-bold">{copy.createGoogle}</h2>
+      <p class="mt-2 text-sm text-ink-muted">{copy.googleNote}</p>
+      <label class={`${lab} mt-4`}>{copy.name}<input class={tin} name="display_name" required maxlength="120" /></label>
+      <button class={`${btn} mt-4`} type="submit">{copy.create}</button>
+    </form>
+  </section>
+
+</aside></div>
 </Admin>
+
+<style>
+.learning-admin-workspace { display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:2rem;margin-top:2rem;align-items:start; }
+.learning-admin-workspace > * { min-width:0; }
+.learning-add { display:grid;gap:1rem; }
+.learning-connection { border-top:3px solid var(--color-primary); }
+.provider-mark { display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;background:var(--color-primary-soft);color:var(--color-on-primary-soft);border-radius:var(--radius-md);font-weight:700; }
+.learning-sync article { border-left:3px solid var(--color-primary); }
+@media(max-width:1100px) { .learning-admin-workspace { grid-template-columns:1fr; } .learning-add { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:640px) { .learning-add { grid-template-columns:1fr; } }
+</style>

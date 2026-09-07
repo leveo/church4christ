@@ -25,6 +25,34 @@ describe('canDrop containment', () => {
 });
 
 describe('builderReducer', () => {
+  it('moves a selected block one position with keyboard controls and supports undo', () => {
+    let state = start();
+    const section = state.layout.blocks[0].id;
+    const a = newBlock('heading'); const b = newBlock('text');
+    for (const [index, node] of [a, b].entries()) state = builderReducer(state, { type: 'insert', container: `sec:${section}`, index, node });
+    const before = state;
+    state = builderReducer(state, { type: 'nudge', id: a.id, direction: 1 });
+    expect(state.layout.blocks[0].children.map(node => node.id)).toEqual([b.id, a.id]);
+    expect(state.selectedId).toBe(a.id);
+    expect(builderReducer(state, { type: 'undo' }).layout).toEqual(before.layout);
+    state = builderReducer(state, { type: 'nudge', id: a.id, direction: -1 });
+    expect(state.layout.blocks[0].children.map(node => node.id)).toEqual([a.id, b.id]);
+  });
+
+  it('keeps boundary moves unchanged and keeps nested moves inside their column', () => {
+    let state = start();
+    const section = state.layout.blocks[0].id;
+    const cols = newBlock('columns');
+    const a = newBlock('heading'); const b = newBlock('text');
+    state = builderReducer(state, { type: 'insert', container: `sec:${section}`, index: 0, node: cols });
+    for (const [index, node] of [a, b].entries()) state = builderReducer(state, { type: 'insert', container: `col:${cols.id}:0`, index, node });
+    expect(builderReducer(state, { type: 'nudge', id: a.id, direction: -1 })).toBe(state);
+    expect(builderReducer(state, { type: 'nudge', id: b.id, direction: 1 })).toBe(state);
+    state = builderReducer(state, { type: 'nudge', id: b.id, direction: -1 });
+    expect(findNode(state.layout, b.id)).toMatchObject({ container: `col:${cols.id}:0`, index: 0 });
+    expect((findNode(state.layout, cols.id)!.node as ColumnsNode).columns[1]).toEqual([]);
+  });
+
   it('insert appends into a section and records history + selection', () => {
     const s0 = start();
     const secId = s0.layout.blocks[0].id;

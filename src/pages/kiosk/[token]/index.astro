@@ -1,4 +1,9 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import { DESIGN_IMAGES } from '../../../lib/designAssets';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+
 // Kiosk page 1: household search. Gated by the token in the URL itself (no
 // session) — see routePolicy.ts's `/kiosk` public prefix. `?lang=` (not the
 // site's locale-prefixed routing) drives i18n here since this tree lives
@@ -38,24 +43,31 @@ const toggleHref = `?lang=${otherLang}${q ? `&q=${encodeURIComponent(q)}` : ''}`
 // tablet read from arm's length.
 const kioskNotice =
   'w-full rounded-2xl border border-danger bg-danger-soft px-6 py-4 text-center text-xl text-danger';
+const copy = gatheringsCopy(lang);
 ---
 
 <Kiosk title={t(lang, 'kiosk.title')} lang={lang}>
+  <GatheringSurface mode="kiosk">
   <div class="flex w-full items-center justify-between">
-    <h1 class="font-display text-display-lg font-bold">{t(lang, 'kiosk.title')}</h1>
+    <p class="text-base font-semibold text-primary">{t(lang, 'kiosk.title')}</p>
     <a href={toggleHref} class="rounded-2xl px-4 py-2 text-lg font-semibold text-primary hover:underline">
       {t(lang, 'kiosk.langToggle')}
     </a>
   </div>
+
+  <header class="kiosk-welcome"><img class="kiosk-scene" src={DESIGN_IMAGES.kiosk} alt="" width="1600" height="900" /><div><h1>{copy.kioskWelcome}</h1><p>{copy.kioskIntro}</p></div></header>
+  <ol class="gathering-flow" aria-label={copy.kioskSteps}>{[copy.findHousehold, copy.selectChildren, copy.keepCode].map((label, i) => <li aria-current={i === 0 ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
 
   {
     events.length === 0 ? (
       <p class={`mt-10 ${kioskNotice}`}>{t(lang, 'kiosk.noEvents')}</p>
     ) : (
       <>
-        <form method="get" class="mt-10 flex w-full flex-col gap-4">
+        <form method="get" class="kiosk-search-panel mt-6 flex w-full flex-col gap-4">
           <input type="hidden" name="lang" value={lang} />
+          <label for="kiosk-household-search">{copy.findHousehold}</label>
           <input
+            id="kiosk-household-search"
             type="text"
             name="q"
             value={q}
@@ -69,16 +81,16 @@ const kioskNotice =
         </form>
 
         {searched && (
-          <div class="mt-8 flex w-full flex-col gap-4">
+          <section class="mt-8 flex w-full flex-col gap-4" aria-labelledby="kiosk-results-heading"><h2 id="kiosk-results-heading" class="text-base font-semibold">{copy.householdResults}</h2>
             {results.length === 0 ? (
               <p class={kioskNotice}>{t(lang, 'kiosk.noResults')}</p>
             ) : (
               results.map((h) => (
                 <a
                   href={`/kiosk/${token}/household/${h.id}?lang=${lang}&q=${encodeURIComponent(q)}`}
-                  class="block w-full rounded-2xl border border-border bg-surface-raised p-6 shadow-sm hover:bg-surface-sunken"
+                  class="kiosk-result"
                 >
-                  <p class="text-2xl font-bold">{h.name}</p>
+                  <AvatarInitials name={h.name} sizeClass="h-12 w-12 text-base" /><div class="min-w-0 flex-1"><p class="text-2xl font-bold">{h.name}</p>
                   {h.adults.length > 0 && (
                     <p class="mt-1 text-ink-muted">
                       <span class="text-sm text-ink-subtle">{t(lang, 'kiosk.adults')}: </span>
@@ -86,13 +98,14 @@ const kioskNotice =
                     </p>
                   )}
                   {h.phone && <p class="mt-1 text-ink-muted">{maskPhone(h.phone)}</p>}
-                  <p class="mt-1 text-ink-muted">{t(lang, 'kiosk.childrenCount', { count: h.children.length })}</p>
+                  <p class="mt-1 text-ink-muted">{t(lang, 'kiosk.childrenCount', { count: h.children.length })}</p></div><span class="text-primary" aria-hidden="true">→</span>
                 </a>
               ))
             )}
-          </div>
+          </section>
         )}
       </>
     )
   }
+  </GatheringSurface>
 </Kiosk>

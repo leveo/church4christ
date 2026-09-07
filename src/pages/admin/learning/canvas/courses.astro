@@ -1,4 +1,5 @@
 ---
+import MemberPageHeader from '../../../../components/ui/MemberPageHeader.astro';
 import Admin from '../../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { btn, btnSecondary, card, lab, tin } from '../../../../lib/adminUi';
@@ -47,11 +48,11 @@ const copy = lang === 'zh' ? {
 ---
 <Admin title={copy.title}>
   <a class={btnSecondary} href="/admin/learning">{copy.back}</a>
-  <h1 class="mt-6 font-display text-heading-md font-bold">{copy.title}</h1>
-  <p class="mt-2 text-ink-muted">{copy.intro}</p>
+  <div class="mt-6"><MemberPageHeader title={copy.title} description={copy.intro} eyebrow="Canvas" /></div>
+
   <div class="mt-6 grid gap-4">
     {options.courses.map(({ course, mappedProgramId }) => (
-      <article class={card}>
+      <article class={`${card} mapping-course`} data-mapped={mappedProgramId !== null}>
         <h2 class="font-display text-lg font-bold">{course.displayName}</h2>
         <p class="mt-1 text-sm text-ink-muted">{copy.course} {course.externalCourseId}</p>
         {mappedProgramId === null ? (
@@ -78,3 +79,10 @@ const copy = lang === 'zh' ? {
     ))}
   </div>
 </Admin>
+
+<style>
+.mapping-course { border-left:3px solid var(--color-border-strong); }
+.mapping-course[data-mapped='true'] { border-left-color:var(--color-primary); }
+.mapping-course form { align-items:end; }
+.mapping-course form button { justify-self:start; }
+</style>

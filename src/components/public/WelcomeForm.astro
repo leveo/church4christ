@@ -1,0 +1,33 @@
+---
+import DesignImage from '../ui/DesignImage.astro';
+import { frontdoorCopy } from '../../i18n/designFrontdoor';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; kind: 'signin' | 'signup' | 'connection' }
+const { locale, kind } = Astro.props;
+const copy = frontdoorCopy(locale);
+---
+<div class="welcome-form container-content">
+  <aside class="welcome-panel">
+    <DesignImage image={kind === 'connection' ? 'family' : 'welcome'} eager class="welcome-photo" />
+    <div class="welcome-story">
+      <p class="section-eyebrow">{copy[kind]}</p>
+      <h2>{copy.welcome}</h2>
+      <p>{kind === 'connection' ? copy.welcomeBody : copy.accountBody}</p>
+    </div>
+  </aside>
+  <section class="welcome-fields"><slot /></section>
+</div>
+<style>
+  .welcome-form { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1fr); gap: 4rem; padding-block: 3.5rem; align-items: start; }
+  .welcome-panel { overflow: hidden; border-radius: var(--radius-lg); background: var(--color-primary); color: var(--color-on-primary); position: sticky; top: 7rem; }
+  .welcome-panel :global(.welcome-photo) { width: 100%; height: 250px; object-fit: cover; }
+  .welcome-story { padding: 2rem; }
+  .welcome-story .section-eyebrow { color: inherit; opacity: .8; }
+  h2 { font-family: var(--font-display); font-size: clamp(1.9rem, 3vw, 2.7rem); line-height: 1.15; letter-spacing: -.03em; margin-block: .8rem 1rem; }
+  .welcome-story > p:last-child { font-size: .9rem; line-height: 1.8; opacity: .85; }
+  .welcome-fields { min-width: 0; padding: 2rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); }
+  .welcome-fields :global(h1) { font-family: var(--font-body); font-size: 1.75rem; line-height: 1.25; letter-spacing: -.025em; }
+  .welcome-fields :global(input:not([type='checkbox']):not([type='radio'])), .welcome-fields :global(select) { min-height: 44px; }
+  .welcome-fields :global(button[type='submit']) { min-height: 46px; border-radius: var(--radius-md); }
+  @media (max-width: 800px) { .welcome-form { grid-template-columns: 1fr; gap: 1.5rem; padding-block: 1.5rem; } .welcome-panel { position: static; } .welcome-panel :global(.welcome-photo) { height: 150px; } .welcome-story, .welcome-fields { padding: 1.5rem; } }
+</style>

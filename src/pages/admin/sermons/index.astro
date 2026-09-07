@@ -2,6 +2,9 @@
 // Sermons list (console class — re-checks editor∪admin). Non-deleted sermons
 // (drafts included), newest first, with an optional ?year= filter.
 import Admin from '../../../layouts/Admin.astro';
+import ContentSurface from '../../../components/content/ContentSurface.astro';
+import ContentHeader from '../../../components/content/ContentHeader.astro';
+import { contentCopy } from '../../../i18n/designContent';
 import { t } from '../../../lib/i18n';
 import { listSermons, listSermonYears, listServiceTypeOptions } from '../../../lib/adminDb';
 import { badge, btn, tin, th, td, noticeOk, statusBadge } from '../../../lib/adminUi';
@@ -28,16 +31,21 @@ const nowSql = new Date().toISOString().slice(0, 19).replace('T', ' ');
 ---
 
 <Admin title={t(lang, 'admin.sermons.title')}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.sermons.title')}</h1>
+  <ContentSurface>
+  <ContentHeader locale={lang} title={t(lang, 'admin.sermons.title')} description={contentCopy(lang).sermons}>
     <a href="/admin/sermons/new" class={btn}>{t(lang, 'admin.sermons.new')}</a>
-  </div>
+  </ContentHeader>
+  <dl class="content-library-summary">
+    <div><dt>{contentCopy(lang).records}</dt><dd>{rows.length}</dd></div>
+    <div><dt>{contentCopy(lang).drafts}</dt><dd>{rows.filter(row => row.status !== 'published').length}</dd></div>
+    <div><dt>{contentCopy(lang).published}</dt><dd>{rows.filter(row => row.status === 'published').length}</dd></div>
+  </dl>
 
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
 
   <form method="get" class="mt-6 flex max-w-md gap-2">
-    <select name="year" class={tin}>
+    <select aria-label={t(lang, 'admin.sermons.filter')} name="year" class={tin}>
       <option value="">{t(lang, 'admin.sermons.filterAll')}</option>
       {years.map((y) => (
         <option value={y} selected={y === year}>{y}</option>
@@ -46,7 +54,7 @@ const nowSql = new Date().toISOString().slice(0, 19).replace('T', ' ');
     <button type="submit" class={btn}>{t(lang, 'admin.sermons.filter')}</button>
   </form>
 
-  <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+  <div class="content-library-table mt-6">
     <table class="w-full border-collapse">
       <thead class="bg-surface-sunken">
         <tr>
@@ -75,7 +83,10 @@ const nowSql = new Date().toISOString().slice(0, 19).replace('T', ' ');
                       {r.sermon_date}
                     </a>
                   </td>
-                  <td class={td}>{r.title}</td>
+                  <td class={td}>
+                    <a href={`/admin/sermons/${r.id}`} class="font-semibold text-primary hover:underline">{r.title}</a>
+                    {r.speaker && <p class="mt-1 text-xs text-ink-muted">{r.speaker}</p>}
+                  </td>
                   <td class={td}>{serviceName.get(r.service_type_id) ?? r.serviceTypeName}</td>
                   <td class={td}>
                     <span class={`${badge} ${b.cls}`}>{t(lang, b.key)}</span>
@@ -89,4 +100,5 @@ const nowSql = new Date().toISOString().slice(0, 19).replace('T', ' ');
       </tbody>
     </table>
   </div>
+  </ContentSurface>
 </Admin>

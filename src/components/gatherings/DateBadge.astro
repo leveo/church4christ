@@ -1,0 +1,15 @@
+---
+import type { Locale } from '../../lib/locales';
+import { formatDate } from '../../lib/dates';
+interface Props { date: string; locale: Locale }
+const { date, locale } = Astro.props;
+const day = date.slice(0, 10);
+const month = locale === 'zh' ? `${Number(day.slice(5, 7))}月` : new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+---
+<time class="gathering-date" datetime={day} aria-label={formatDate(day, locale)}><span>{month}</span><strong>{Number(day.slice(8, 10))}</strong><small>{day.slice(0, 4)}</small></time>
+<style>
+  .gathering-date { display: flex; flex: 0 0 4.25rem; width: 4.25rem; flex-direction: column; align-items: center; padding: .65rem .4rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-primary-soft); color: var(--color-on-primary-soft); font-family: var(--font-body); }
+  span { font-size: .6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
+  strong { font-size: 1.8rem; font-weight: 600; line-height: 1.2; }
+  small { margin-top: .2rem; font-size: .625rem; }
+</style>

@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Matrix service-type picker (team class via route policy). With exactly one
 // service type there is nothing to pick — redirect straight to its grid.
 import Base from '../../../../layouts/Base.astro';
@@ -15,13 +18,15 @@ const db = Astro.locals.db;
 
 const types = await listServiceTypes(db, locale);
 if (types.length === 1) return Astro.redirect(localePath(locale, `/serve/matrix/${types[0].id}`), 303);
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.matrix.title')} locale={locale} noindex>
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
   <div class="container-content py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'serve.matrix.title')}</h1>
-    <p class="mt-2 text-ink-muted">{t(locale, 'serve.matrix.pick')}</p>
-    <div class="mt-6 grid max-w-content gap-4 sm:grid-cols-2">
+    <MinistryHeader title={t(locale, 'serve.matrix.title')} eyebrow={copy.scheduleEyebrow} description={copy.matrixIntro} />
+    <p class="mb-4 text-sm text-ink-muted">{t(locale, 'serve.matrix.pick')}</p>
+    <div class="mw-directory">
       {
         types.map((st) => (
           <a
@@ -39,4 +44,5 @@ if (types.length === 1) return Astro.redirect(localePath(locale, `/serve/matrix/
       }
     </div>
   </div>
+</MinistryWorkspace>
 </Base>

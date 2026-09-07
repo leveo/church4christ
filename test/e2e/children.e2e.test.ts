@@ -49,6 +49,8 @@ describe('children check-in kiosk', () => {
     const search = await get(`/kiosk/${KIOSK_TOKEN}/?lang=en&q=Lin`);
     expect(search.status).toBe(200);
     const searchBody = await search.text();
+    expect(searchBody).toContain('data-theme="sanctuary"');
+    expect(searchBody).toContain('data-mode="light"');
     expect(searchBody).toContain('Lin Family');
     expect(searchBody).toContain(`/kiosk/${KIOSK_TOKEN}/household/2`);
 
@@ -61,6 +63,8 @@ describe('children check-in kiosk', () => {
     const checkin = await post(`/kiosk/${KIOSK_TOKEN}/household/2`, body.toString());
     expect(checkin.status).toBe(200);
     const checkinBody = await checkin.text();
+    expect(checkinBody).toContain('data-theme="sanctuary"');
+    expect(checkinBody).toContain('data-mode="light"');
     expect(checkinBody).toContain('Noah Lin');
     expect(checkinBody).toMatch(/[A-HJ-NP-Z2-9]{4}/);
   });

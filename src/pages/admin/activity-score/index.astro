@@ -1,4 +1,6 @@
 ---
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { badge, badgeActive, badgeInactive, btn, btnSecondary, card, noticeErr, noticeOk, td, th, tin, lab } from '../../../lib/adminUi';
@@ -121,10 +123,7 @@ const formMessage = formError === 'conflict'
 ---
 
 <Admin title={t(lang, 'admin.activityScore.title')}>
-  <div>
-    <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.activityScore.title')}</h1>
-    <p class="mt-1 max-w-3xl text-sm text-ink-muted">{t(lang, 'admin.activityScore.intro')}</p>
-  </div>
+  <MemberPageHeader title={t(lang, 'admin.activityScore.title')} eyebrow={operationsCopy(lang).insights} description={t(lang, 'admin.activityScore.intro')} />
 
   {Astro.url.searchParams.get('saved') === '1' && <p class={`mt-5 ${noticeOk}`}>{t(lang, 'admin.activityScore.saved')}</p>}
   {formMessage && <p class={`mt-5 ${noticeErr}`}>{formMessage}</p>}
@@ -139,7 +138,7 @@ const formMessage = formError === 'conflict'
 
   {report && (
     <>
-      <section class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section class="activity-summary mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div class={card}>
           <p class="text-xs font-semibold uppercase tracking-caps text-accent">{t(lang, 'admin.activityScore.average')}</p>
           <p class="mt-2 text-display-lg font-bold">{report.summary.average ?? '—'}</p>
@@ -166,6 +165,7 @@ const formMessage = formError === 'conflict'
             return <div class="rounded-lg border border-border p-4">
               <p class="font-semibold">{dimensionLabel(key)}</p>
               <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.coverageValue', { people: value.people, eligible: value.eligible })}</p>
+              <div class="coverage-track" aria-hidden="true"><span style={`width:${value.eligible > 0 ? Math.min(100, Math.max(0, value.people / value.eligible * 100)) : 0}%`}></span></div>
             </div>;
           })}
         </div>
@@ -196,7 +196,7 @@ const formMessage = formError === 'conflict'
         ) : visibleRows.length === 0 ? (
           <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.activityScore.empty')}</p>
         ) : (
-          <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+          <div class="activity-people-table mt-4 overflow-x-auto rounded-xl border border-border">
             <table class="w-full border-collapse">
               <thead class="bg-surface-sunken"><tr>
                 <th class={th}>{t(lang, 'admin.activityScore.name')}</th>
@@ -209,7 +209,7 @@ const formMessage = formError === 'conflict'
               <tbody>{visibleRows.map((row) => <tr class="border-t border-border align-top">
                 <td class={td}>{row.name}</td>
                 <td class={td}>{statusLabel(row.membershipStatus)}</td>
-                <td class={td}><span class={`${badge} ${row.band === 'active' ? badgeActive : badgeInactive}`}>{row.score} · {bandLabel(row.band)}</span></td>
+                <td class={td}><div class="score-track" aria-hidden="true"><span style={`width:${Math.min(100, Math.max(0, row.score))}%`}></span></div><span class={`${badge} ${row.band === 'active' ? badgeActive : badgeInactive}`}>{row.score} · {bandLabel(row.band)}</span></td>
                 <td class={td}>{row.trend >= 0 ? '+' : ''}{row.trend}</td>
                 {report!.availableDimensions.map((key) => <td class={td}>{row.dimensions[key]?.score ?? 0}</td>)}
                 <td class={td}>
@@ -236,8 +236,8 @@ const formMessage = formError === 'conflict'
       </section>
 
       {user!.isSuperAdmin && (
-        <section class={`mt-6 ${card}`}>
-          <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.configTitle')}</h2>
+        <details class={`activity-config mt-6 ${card}`} open={Boolean(formMessage)}>
+          <summary><h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.activityScore.configTitle')}</h2></summary>
           <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.activityScore.configIntro')}</p>
           <form method="post" class="mt-5 space-y-6">
             <input type="hidden" name="action" value="save_config" />
@@ -272,8 +272,21 @@ const formMessage = formError === 'conflict'
             </fieldset>
             <button class={btn} type="submit">{t(lang, 'admin.activityScore.save')}</button>
           </form>
-        </section>
+        </details>
       )}
     </>
   )}
 </Admin>
+
+<style>
+.activity-summary > div:first-child { background:var(--color-primary);color:var(--color-on-primary);border-color:var(--color-primary); }
+.activity-summary > div:first-child p { color:inherit; }
+.activity-summary .text-display-lg { font-size:2.5rem;line-height:1.15;letter-spacing:-.035em; }
+.coverage-track,.score-track { height:6px;background:var(--color-surface-sunken);border-radius:3px;overflow:hidden;margin-top:.75rem; }
+.coverage-track span,.score-track span { display:block;height:100%;background:var(--color-primary); }
+.score-track { width:100px;margin-block:0 .5rem; }
+.activity-people-table { max-height:650px;overflow:auto; }
+.activity-people-table thead { position:sticky;top:0;z-index:1; }
+.activity-config summary { cursor:pointer; }
+.activity-config summary h2 { display:inline; }
+</style>

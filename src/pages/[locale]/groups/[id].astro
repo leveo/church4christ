@@ -10,6 +10,8 @@
 // join request (groupDb.createJoinRequest is idempotent); members see a
 // membership notice, and group admins (or site admins) additionally get a
 // link to the manage console (Slice D — fine if it 404s until that lands).
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import AvatarInitials from '../../../components/AvatarInitials.astro';
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -147,6 +149,7 @@ function fileSize(bytes: number): string {
     <a href={localePath(locale, '/groups')} class="text-sm text-ink-muted hover:underline">
       {t(locale, 'groups.back')}
     </a>
+    <div class="group-hero"><div>
     <h1 class="mt-2 font-display text-heading-md font-bold">{group.name}</h1>
     {
       (group.kind === 'sunday_school' || group.term_label) && (
@@ -173,9 +176,9 @@ function fileSize(bytes: number): string {
           </div>
         )
       }
-    </dl>
+    </dl></div><DesignImage image={group.kind === 'sunday_school' ? 'learning' : 'groups'} eager class="group-hero-photo" /></div>
 
-    <section class="mt-8">
+    <div class="group-detail-grid"><section class="mt-8">
       <h2 class="font-display text-lg font-semibold">{t(locale, 'groups.detail.upcomingTitle')}</h2>
       {
         occurrences.length === 0 ? (
@@ -215,7 +218,7 @@ function fileSize(bytes: number): string {
       )
     }
 
-    <section class="mt-8 rounded-lg border border-border bg-surface-raised p-6">
+    <section class="group-join rounded-lg border border-border bg-surface-raised p-6">
       {
         !user ? (
           <div>
@@ -295,7 +298,7 @@ function fileSize(bytes: number): string {
           <ul class="mt-3 flex flex-col gap-2">
             {members.map((m) => (
               <li class="flex items-center gap-2 text-sm">
-                <span>{m.display_name}</span>
+                <AvatarInitials name={m.display_name} sizeClass="w-8 h-8 text-xs" /><span>{m.display_name}</span>
                 {m.is_admin === 1 && <span class={`${badge} ${badgeRole.admin}`}>{t(locale, 'groups.admin')}</span>}
               </li>
             ))}
@@ -303,5 +306,16 @@ function fileSize(bytes: number): string {
         </section>
       )
     }
+    </div>
   </div>
 </Base>
+
+<style>
+.group-hero { display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,.7fr);gap:3rem;align-items:center;padding-block:1.5rem 2rem;border-bottom:1px solid var(--color-border); }
+.group-hero h1 { color:var(--color-primary);font-size:clamp(2.1rem,5vw,3.5rem);line-height:1.1;letter-spacing:-.035em; }
+.group-hero :global(.group-hero-photo) { width:100%;height:230px;object-fit:cover;border-radius:var(--radius-lg); }
+.group-detail-grid { display:grid;grid-template-columns:minmax(0,1fr) 290px;column-gap:2.5rem;align-items:start; }
+.group-detail-grid > section { grid-column:1; }
+.group-detail-grid > .group-join { grid-column:2;grid-row:1 / span 4;position:sticky;top:7rem;margin-top:2rem; }
+@media(max-width:750px) { .group-hero,.group-detail-grid { display:block; } .group-hero :global(.group-hero-photo) { height:160px;margin-top:1.5rem; } .group-detail-grid > .group-join { position:static; } }
+</style>

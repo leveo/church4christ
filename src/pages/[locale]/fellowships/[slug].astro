@@ -29,7 +29,7 @@ const withRole = (l: { name: string; role?: string }) =>
   l.role ? (locale === 'zh' ? `${l.name}（${l.role}）` : `${l.name} (${l.role})`) : l.name;
 ---
 
-<ContentPage title={name} description={audience} locale={locale} translated={translated}>
+<ContentPage image="groups" title={name} description={audience} locale={locale} translated={translated}>
   <div slot="before" class="bg-surface-sunken border border-border rounded-lg p-5">
     <dl class="text-sm flex flex-col gap-2">
       {

@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import Base from '../../layouts/Base.astro';
 import { t } from '../../lib/i18n';
 import { localePath, parseLocale } from '../../lib/locales';
@@ -47,7 +48,7 @@ if (Astro.request.method === 'POST') {
 }
 ---
 <Base title={t(locale, 'signin.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="signin">
     {changed && !sent && (
       <div class="mb-6 rounded-lg border border-border bg-surface-raised p-4 text-ink-muted">
         {t(locale, 'signin.changed')}
@@ -104,5 +105,5 @@ if (Astro.request.method === 'POST') {
         </>
       )
     }
-  </section>
+  </WelcomeForm>
 </Base>

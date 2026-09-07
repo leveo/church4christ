@@ -1,5 +1,8 @@
 ---
 import Admin from '../../layouts/Admin.astro';
+import FinanceSurface from '../../components/finance/FinanceSurface.astro';
+import FinanceHeader from '../../components/finance/FinanceHeader.astro';
+import { financeCopy } from '../../i18n/designFinance';
 import { env } from 'cloudflare:workers';
 import { t } from '../../lib/i18n';
 import { paymentOperationsEnabled } from '../../lib/modules';
@@ -24,7 +27,7 @@ import {
   cancelPendingCheckoutRequest,
   reconcileCheckoutRequestNow,
 } from '../../lib/stripeCheckoutRecovery';
-import { badge, badgeActive, badgeInactive, badgeScheduled, btnDanger, btnSecondary, card, lab, noticeErr, noticeOk, td, th, tin } from '../../lib/adminUi';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btnDanger, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../lib/adminUi';
 
 const user = Astro.locals.user;
 if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
@@ -44,6 +47,7 @@ const requestState = REQUEST_STATES.find((state) => state === requestStateRaw);
 const eventPage = numberParam(Astro.url.searchParams.get('eventPage'));
 const requestPage = numberParam(Astro.url.searchParams.get('requestPage'));
 const testMode = t(lang, 'admin.stripe.testMode');
+const copy = financeCopy(lang);
 
 if (Astro.request.method === 'POST') {
   // Middleware enforces same-origin/CSRF first; repeat finance + module
@@ -129,19 +133,22 @@ const queryHref = (overrides: Record<string, string | number | undefined>) => {
 ---
 
 <Admin title={heading}>
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <strong class="rounded-full bg-accent-soft px-3 py-1 text-sm text-on-accent-soft">
-      {testMode}
-    </strong>
-  </div>
-  <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.stripe.rawHidden')}</p>
-  {result === 'ok' && <p class={`mt-4 ${noticeOk}`}>{testMode}: {t(lang, 'admin.stripe.resultSuccess')}</p>}
-  {result === 'error' && <p class={`mt-4 ${noticeErr}`}>{testMode}: {t(lang, 'admin.stripe.resultError')}</p>}
-  <section class={`mt-6 ${card}`}>
-    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.stripe.events')}</h2>
-    <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.stripe.replayHelp')}</p>
-    <form method="get" class="mt-4 flex flex-wrap items-end gap-3">
+<FinanceSurface>
+  <FinanceHeader locale={lang} title={heading} description={copy.operationsIntro}>
+    <strong class="finance-test-badge">{testMode}</strong>
+    {Astro.locals.modules.has('giving') && <a href="/admin/giving/reconcile" class="text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>}
+  </FinanceHeader>
+  <p class="finance-scope">{t(lang, 'admin.stripe.rawHidden')}</p>
+  {result === 'ok' && <p class={`mt-4 ${noticeOk}`} role="status">{testMode}: {t(lang, 'admin.stripe.resultSuccess')}</p>}
+  {result === 'error' && <p class={`mt-4 ${noticeErr}`} role="alert">{testMode}: {t(lang, 'admin.stripe.resultError')}</p>}
+  <nav class="finance-operations-nav" aria-label={heading}>
+    <a href="#finance-events">{t(lang, 'admin.stripe.events')} <span class="ml-2 tabular-nums">{events.length}</span></a>
+    {Astro.locals.modules.has('registration') && <a href="#finance-requests">{t(lang, 'admin.stripe.requests')} <span class="ml-2 tabular-nums">{requests.length}</span></a>}
+  </nav>
+  <section id="finance-events" class="finance-operations-section" aria-labelledby="finance-events-heading">
+    <h2 id="finance-events-heading">{t(lang, 'admin.stripe.events')}</h2>
+    <p class="finance-scope">{t(lang, 'admin.stripe.replayHelp')}</p>
+    <form method="get" class="finance-filter mt-4">
       <label>
         <span class={lab}>{t(lang, 'admin.stripe.status')}</span>
         <select name="eventStatus" class={tin}>
@@ -152,51 +159,50 @@ const queryHref = (overrides: Record<string, string | number | undefined>) => {
       {requestState && <input type="hidden" name="requestState" value={requestState} />}
       <button type="submit" class={btnSecondary}>{t(lang, 'admin.stripe.filter')}</button>
     </form>
-    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-      <table class="w-full border-collapse">
-        <thead class="bg-surface-sunken"><tr>
-          <th class={th}>{t(lang, 'admin.stripe.eventId')}</th><th class={th}>{t(lang, 'admin.stripe.eventType')}</th>
-          <th class={th}>{t(lang, 'admin.stripe.status')}</th><th class={th}>{t(lang, 'admin.stripe.outcome')}</th>
-          <th class={th}>{t(lang, 'admin.stripe.attempts')}</th><th class={th}>{t(lang, 'admin.stripe.updatedAt')}</th>
-          <th class={th}>{t(lang, 'admin.stripe.completedAt')}</th>
-          <th class={th}>{t(lang, 'admin.stripe.lastError')}</th><th class={th}>{t(lang, 'admin.stripe.actions')}</th>
-        </tr></thead>
-        <tbody>
-          {events.length === 0 ? <tr><td class={`${td} text-ink-muted`} colspan="9">{t(lang, 'admin.stripe.emptyEvents')}</td></tr> : events.map((row) => {
-            const replay = stripeWebhookReplayAvailability(row, new Date());
-            return <tr class="border-t border-border align-top">
-              <td class={`${td} font-mono text-xs`}>{row.eventId}</td><td class={td}>{row.eventType}</td>
-              <td class={td}><span class={`${badge} ${statusClass(row.status)}`}>{t(lang, `admin.stripe.status.${row.status}`)}</span><div class="mt-1 text-xs">{testMode}</div></td>
-              <td class={td}>{row.outcome ?? '—'}</td><td class={`${td} tabular-nums`}>{row.attemptCount}</td>
-              <td class={`${td} whitespace-nowrap`}>{row.updatedAt}</td>
-              <td class={`${td} whitespace-nowrap`}>{row.completedAt ?? '—'}<div class="mt-1 text-xs text-ink-muted">{t(lang, 'admin.stripe.ageDays', { count: ageDays(row.completedAt ?? row.receivedAt) })}</div></td>
-              <td class={td}>{row.lastError ?? '—'}</td>
-              <td class={`${td} min-w-72 space-y-2`}>
-                {replay === 'warning' && <p class="text-xs text-danger">{t(lang, 'admin.stripe.replayWarning')}</p>}
-                {replay === 'expired' && <p class="text-xs text-ink-muted">{t(lang, 'admin.stripe.replayExpired')}</p>}
-                {(replay === 'available' || replay === 'warning') && <form method="post">
-                  <input type="hidden" name="action" value="replay" /><input type="hidden" name="eventId" value={row.eventId} />
-                  <button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.replay')}</button>
-                </form>}
-                {row.status === 'failed' && <form method="post" class="space-y-2">
-                  <input type="hidden" name="action" value="dismiss" /><input type="hidden" name="eventId" value={row.eventId} />
-                  <label><span class={lab}>{t(lang, 'admin.stripe.confirmDismiss')}</span><input name="confirmation" required placeholder={`dismiss-${row.eventId}`} class={tin} /></label>
-                  <button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.dismiss')}</button>
-                </form>}
-              </td>
-            </tr>;
-          })}
-        </tbody>
-      </table>
+    <p class="finance-scope">{copy.eventsShown}: {events.length}</p>
+    <div class="finance-investigation-list">
+      {events.length === 0 ? <p class="finance-empty">{t(lang, 'admin.stripe.emptyEvents')}</p> : events.map((row) => {
+        const replay = stripeWebhookReplayAvailability(row, new Date());
+        return <article class="finance-investigation">
+          <header>
+            <div><h3>{row.eventType}</h3><p class="finance-investigation-code"><span>{t(lang, 'admin.stripe.eventId')}: </span>{row.eventId}</p></div>
+            <div class="flex flex-wrap items-center gap-2"><span class={`${badge} ${statusClass(row.status)}`}>{t(lang, `admin.stripe.status.${row.status}`)}</span><span class="text-xs text-ink-muted">{testMode}</span></div>
+          </header>
+          <div class="finance-investigation-body">
+            <dl aria-label={copy.eventDetails}>
+              <div><dt>{t(lang, 'admin.stripe.outcome')}</dt><dd>{row.outcome ?? '—'}</dd></div>
+              <div><dt>{t(lang, 'admin.stripe.attempts')}</dt><dd class="tabular-nums">{row.attemptCount}</dd></div>
+              <div><dt>{t(lang, 'admin.stripe.updatedAt')}</dt><dd>{row.updatedAt}</dd></div>
+              <div><dt>{t(lang, 'admin.stripe.completedAt')}</dt><dd>{row.completedAt ?? '—'}<span class="block mt-1 text-xs text-ink-muted">{t(lang, 'admin.stripe.ageDays', { count: ageDays(row.completedAt ?? row.receivedAt) })}</span></dd></div>
+              <div class="finance-investigation-error"><dt>{t(lang, 'admin.stripe.lastError')}</dt><dd>{row.lastError ?? '—'}</dd></div>
+            </dl>
+            <details class="finance-investigation-actions" open>
+              <summary>{copy.recovery}</summary>
+              {replay === 'warning' && <p class="mb-3 text-xs text-danger">{t(lang, 'admin.stripe.replayWarning')}</p>}
+              {replay === 'expired' && <p class="mb-3 text-xs text-ink-muted">{t(lang, 'admin.stripe.replayExpired')}</p>}
+              {(replay === 'available' || replay === 'warning') && <form method="post">
+                <input type="hidden" name="action" value="replay" /><input type="hidden" name="eventId" value={row.eventId} />
+                <button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.replay')}</button>
+              </form>}
+              {row.status === 'failed' && <form method="post" class="space-y-2">
+                <input type="hidden" name="action" value="dismiss" /><input type="hidden" name="eventId" value={row.eventId} />
+                <label class="block"><span class={lab}>{t(lang, 'admin.stripe.confirmDismiss')}</span><code class="block mb-2 text-xs break-all">dismiss-{row.eventId}</code><input name="confirmation" required placeholder={`dismiss-${row.eventId}`} class={tin} /></label>
+                <button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.dismiss')}</button>
+              </form>}
+              {replay !== 'available' && replay !== 'warning' && replay !== 'expired' && row.status !== 'failed' && <p class="finance-scope">{copy.noRecovery}</p>}
+            </details>
+          </div>
+        </article>;
+      })}
     </div>
-    <nav class="mt-4 flex gap-4">
-      {eventPage > 1 && <a class="text-sm text-primary hover:underline" href={queryHref({ eventPage: eventPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}
-      {events.length === PAGE_SIZE && <a class="text-sm text-primary hover:underline" href={queryHref({ eventPage: eventPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}
+    <nav class="finance-operations-nav" aria-label={copy.eventsPage}>
+      {eventPage > 1 && <a class="text-primary hover:underline" href={queryHref({ eventPage: eventPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}
+      {events.length === PAGE_SIZE && <a class="text-primary hover:underline" href={queryHref({ eventPage: eventPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}
     </nav>
   </section>
-  {Astro.locals.modules.has('registration') && <section class={`mt-6 ${card}`}>
-    <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.stripe.requests')}</h2>
-    <form method="get" class="mt-4 flex flex-wrap items-end gap-3">
+  {Astro.locals.modules.has('registration') && <section id="finance-requests" class="finance-operations-section" aria-labelledby="finance-requests-heading">
+    <h2 id="finance-requests-heading">{t(lang, 'admin.stripe.requests')}</h2>
+    <form method="get" class="finance-filter mt-4">
       <label><span class={lab}>{t(lang, 'admin.stripe.status')}</span><select name="requestState" class={tin}>
         <option value="">{t(lang, 'admin.stripe.allRequestStates')}</option>
         {REQUEST_STATES.map((state) => <option value={state} selected={requestState === state}>{t(lang, `admin.stripe.request.${state}`)}</option>)}
@@ -204,18 +210,32 @@ const queryHref = (overrides: Record<string, string | number | undefined>) => {
       {eventStatus && <input type="hidden" name="eventStatus" value={eventStatus} />}
       <button type="submit" class={btnSecondary}>{t(lang, 'admin.stripe.filter')}</button>
     </form>
-    <div class="mt-4 overflow-x-auto rounded-xl border border-border"><table class="w-full border-collapse">
-      <thead class="bg-surface-sunken"><tr><th class={th}>{t(lang, 'admin.stripe.requestId')}</th><th class={th}>{t(lang, 'admin.stripe.registrationId')}</th><th class={th}>{t(lang, 'admin.stripe.status')}</th><th class={th}>{t(lang, 'admin.stripe.attempts')}</th><th class={th}>{t(lang, 'admin.stripe.updatedAt')}</th><th class={th}>{t(lang, 'admin.stripe.lastError')}</th><th class={th}>{t(lang, 'admin.stripe.actions')}</th></tr></thead>
-      <tbody>{requests.length === 0 ? <tr><td class={`${td} text-ink-muted`} colspan="7">{t(lang, 'admin.stripe.emptyRequests')}</td></tr> : requests.map((row) => <tr class="border-t border-border align-top">
-        <td class={`${td} font-mono text-xs`}>{row.requestId}</td><td class={`${td} tabular-nums`}>{row.registrationId}</td><td class={td}><span class={`${badge} ${badgeScheduled}`}>{t(lang, `admin.stripe.request.${row.state}`)}</span><div class="mt-1 text-xs">{testMode}</div></td><td class={`${td} tabular-nums`}>{row.reconcileAttempts}</td><td class={`${td} whitespace-nowrap`}>{row.updatedAt}</td><td class={td}>{row.lastError ?? '—'}</td>
-        <td class={`${td} min-w-80 space-y-3`}>
-          {(row.state === 'creating' || row.state === 'attached') && <form method="post"><input type="hidden" name="action" value="reconcile" /><input type="hidden" name="requestId" value={row.requestId} /><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.reconcile')}</button></form>}
-          {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="attach" /><input type="hidden" name="requestId" value={row.requestId} /><label><span class={lab}>{t(lang, 'admin.stripe.sessionId')}</span><input name="sessionId" required pattern="cs_test_[A-Za-z0-9_]+" class={tin} /></label><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.attach')}</button></form>}
-          {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="cancel" /><input type="hidden" name="requestId" value={row.requestId} /><label><span class={lab}>{t(lang, 'admin.stripe.confirmCancel', { id: row.registrationId })}</span><input name="confirmation" required placeholder={`cancel-registration-${row.registrationId}`} class={tin} /></label><button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.cancel')}</button></form>}
-        </td>
-      </tr>)}</tbody>
-    </table></div>
-    <nav class="mt-4 flex gap-4">{requestPage > 1 && <a class="text-sm text-primary hover:underline" href={queryHref({ requestPage: requestPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}{requests.length === PAGE_SIZE && <a class="text-sm text-primary hover:underline" href={queryHref({ requestPage: requestPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}</nav>
+    <p class="finance-scope">{copy.requestsShown}: {requests.length}</p>
+    <div class="finance-investigation-list">
+      {requests.length === 0 ? <p class="finance-empty">{t(lang, 'admin.stripe.emptyRequests')}</p> : requests.map((row) => <article class="finance-investigation">
+        <header>
+          <div><h3>{t(lang, 'admin.stripe.registrationId')} {row.registrationId}</h3><p class="finance-investigation-code"><span>{t(lang, 'admin.stripe.requestId')}: </span>{row.requestId}</p></div>
+          <div class="flex flex-wrap items-center gap-2"><span class={`${badge} ${badgeScheduled}`}>{t(lang, `admin.stripe.request.${row.state}`)}</span><span class="text-xs text-ink-muted">{testMode}</span></div>
+        </header>
+        <div class="finance-investigation-body">
+          <dl aria-label={copy.requestDetails}>
+            <div><dt>{t(lang, 'admin.stripe.attempts')}</dt><dd class="tabular-nums">{row.reconcileAttempts}</dd></div>
+            <div><dt>{t(lang, 'admin.stripe.updatedAt')}</dt><dd>{row.updatedAt}</dd></div>
+            <div class="finance-investigation-error"><dt>{t(lang, 'admin.stripe.lastError')}</dt><dd>{row.lastError ?? '—'}</dd></div>
+          </dl>
+          <details class="finance-investigation-actions" open>
+            <summary>{copy.recovery}</summary>
+            {(row.state === 'creating' || row.state === 'attached') && <form method="post"><input type="hidden" name="action" value="reconcile" /><input type="hidden" name="requestId" value={row.requestId} /><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.reconcile')}</button></form>}
+            {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="attach" /><input type="hidden" name="requestId" value={row.requestId} /><label class="block"><span class={lab}>{t(lang, 'admin.stripe.sessionId')}</span><input name="sessionId" required pattern="cs_test_[A-Za-z0-9_]+" class={tin} /></label><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.attach')}</button></form>}
+            {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="cancel" /><input type="hidden" name="requestId" value={row.requestId} /><label class="block"><span class={lab}>{t(lang, 'admin.stripe.confirmCancel', { id: row.registrationId })}</span><code class="block mb-2 text-xs break-all">cancel-registration-{row.registrationId}</code><input name="confirmation" required placeholder={`cancel-registration-${row.registrationId}`} class={tin} /></label><button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.cancel')}</button></form>}
+          </details>
+        </div>
+      </article>)}
+    </div>
+    <nav class="finance-operations-nav" aria-label={copy.requestsPage}>
+      {requestPage > 1 && <a class="text-primary hover:underline" href={queryHref({ requestPage: requestPage - 1 })}>{t(lang, 'admin.stripe.previous')}</a>}
+      {requests.length === PAGE_SIZE && <a class="text-primary hover:underline" href={queryHref({ requestPage: requestPage + 1 })}>{t(lang, 'admin.stripe.next')}</a>}
+    </nav>
   </section>}
-  {Astro.locals.modules.has('giving') && <p class="mt-6"><a href="/admin/giving/reconcile" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a></p>}
+</FinanceSurface>
 </Admin>

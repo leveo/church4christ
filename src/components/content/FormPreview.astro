@@ -1,0 +1,22 @@
+---
+import { contentCopy } from '../../i18n/designContent';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+interface Props { locale: Locale; kind: 'bulletin' | 'prayer' | 'sermon' }
+const { locale, kind } = Astro.props;
+const copy = contentCopy(locale);
+const labels = {
+  program: t(locale, 'bulletin.program'), offering: t(locale, 'bulletin.offering'), attendance: t(locale, 'bulletin.attendance'),
+  announcements: t(locale, 'bulletin.announcements'), memory: t(locale, 'bulletin.memoryVerse'), flowers: t(locale, 'bulletin.flowers'),
+  empty: copy.previewEmpty,
+};
+---
+<section class="content-preview" data-content-preview={kind} data-preview-labels={JSON.stringify(labels)}>
+  <h2>{copy.preview}</h2><p class="content-preview-hint">{copy.previewHint}</p>
+  <div class="content-preview-paper" data-preview-output hidden></div>
+  <noscript><p class="content-preview-hint">{copy.previewNoJs}</p></noscript>
+</section>
+<script>
+  import { initContentPreviews } from './editorPreview';
+  initContentPreviews();
+</script>

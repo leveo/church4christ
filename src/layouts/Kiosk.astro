@@ -2,8 +2,8 @@
 // Minimal full-screen shell for the public /kiosk/<token> pages: reuses
 // Base.astro's <head> essentials (token CSS import, fonts) but skips the
 // header/footer/nav — a kiosk tablet has no site chrome, just the current
-// step. Deliberately dependency-light: no theme/db lookups (a wrong token
-// already 404s in the page before this layout renders).
+// step. A wrong token already 404s before this layout renders. Valid kiosks
+// use the church's theme and default mode so every token-based style resolves.
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/bricolage-grotesque';
@@ -12,6 +12,7 @@ import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
 
 import type { Locale } from '../lib/locales';
+import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 
 interface Props {
   title: string;
@@ -19,10 +20,17 @@ interface Props {
 }
 
 const { title, lang } = Astro.props;
+const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
+let defaultMode = THEME_DEFAULT_MODE[theme];
+try {
+  defaultMode = (await getActiveTheme(Astro.locals.db)).defaultMode;
+} catch {
+  // Keep the bundled theme default if settings are unavailable.
+}
 ---
 
 <!doctype html>
-<html lang={lang === 'zh' ? 'zh-Hans' : 'en'}>
+<html lang={lang === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={defaultMode}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

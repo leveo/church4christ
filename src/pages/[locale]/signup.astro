@@ -9,6 +9,7 @@
 // was already registered). Owned by the `groups` module — the middleware 404s
 // this route when the module is off.
 import { env } from 'cloudflare:workers';
+import WelcomeForm from '../../components/public/WelcomeForm.astro';
 import Base from '../../layouts/Base.astro';
 import { t } from '../../lib/i18n';
 import { localePath, parseLocale } from '../../lib/locales';
@@ -68,7 +69,7 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Base title={t(locale, 'signup.title')} locale={locale} noindex>
-  <section class="container-narrow py-16">
+  <WelcomeForm locale={locale} kind="signup">
     {
       sent ? (
         <div class="bg-surface-raised border border-border rounded-lg p-6">
@@ -120,5 +121,5 @@ if (Astro.request.method === 'POST') {
         </>
       )
     }
-  </section>
+  </WelcomeForm>
 </Base>

@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Apply to serve — PUBLIC (route policy exact match). Two steps like the reference stack:
 // pick a team (GET ?team=), then the full form (optional position, message,
 // and name/email/phone for signed-out applicants) with a honeypot.
@@ -114,11 +117,18 @@ const checkEmail = Astro.url.searchParams.has('signin');
 const selectedTeamId = postedTeamId ?? idOf(Astro.url.searchParams.get('team'));
 const selectedTeam = teams.find((tm) => tm.id === selectedTeamId) ?? null;
 const positions = selectedTeam ? await listTeamPositions(db, selectedTeam.id, locale) : [];
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'apply.title')} locale={locale}>
-  <div class="container-content max-w-xl py-12">
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'apply.title')}</h1>
+<MinistryWorkspace locale={locale} audience="public" variant="work">
+  <MinistryHeader title={t(locale, 'apply.title')} eyebrow={copy.scheduleEyebrow} description={copy.applicationIntro} />
+  {!sent && <ol class="mw-steps" aria-label={t(locale, 'apply.title')}>
+    <li aria-current={!selectedTeam ? 'step' : undefined}><span>1</span>{copy.chooseTeam}</li>
+    <li aria-current={selectedTeam ? 'step' : undefined}><span>2</span>{copy.introduceYourself}</li>
+  </ol>}
+  <div class="mw-split">
+  <div class="mw-panel">
 
     {
       sent ? (
@@ -215,4 +225,9 @@ const positions = selectedTeam ? await listTeamPositions(db, selectedTeam.id, lo
       )
     }
   </div>
+  <aside class="mw-panel mw-aside"><p class="mw-eyebrow">{copy.nextStep}</p><h2>{copy.applicationNext}</h2><p>{copy.applicationNextBody}</p>
+    {selectedTeam && <div class="mt-5 border-t border-border pt-5"><strong>{selectedTeam.name}</strong>{selectedTeam.ministry_name && <p>{selectedTeam.ministry_name}</p>}</div>}
+  </aside>
+  </div>
+</MinistryWorkspace>
 </Base>

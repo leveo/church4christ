@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Spiritual-gifts quiz — PUBLIC (route policy exact match). A no-JS single-form
 // POST: 40 first-person statements each answered on a 4-point frequency scale
 // (Never/Sometimes/Often/Always → 0..3). Submitting scores the answers, saves a
@@ -73,16 +76,12 @@ const linkFor = (category: string) => {
   const m = ministries.find((x) => x.category === category);
   return { label: categoryLabel(category), href: m ? localePath(locale, `/ministries/${m.slug}`) : null };
 };
+const copy = ministryCopy(locale);
 ---
 
 <Base title={t(locale, 'serve.gifts.title')} locale={locale}>
-  <section class="bg-primary text-on-primary">
-    <div class="container-content max-w-narrow py-14 text-center">
-      <p class="text-sm font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.gifts.eyebrow')}</p>
-      <h1 class="mt-3 font-display text-display-xl font-bold">{t(locale, 'serve.gifts.title')}</h1>
-      <p class="mt-4">{t(locale, 'serve.gifts.intro')}</p>
-    </div>
-  </section>
+<MinistryWorkspace locale={locale} audience="public" variant="assessment">
+  <MinistryHeader title={t(locale, 'serve.gifts.title')} eyebrow={t(locale, 'serve.gifts.eyebrow')} description={copy.giftIntro} />
 
   <div class="container-content max-w-content py-12">
     {
@@ -91,7 +90,7 @@ const linkFor = (category: string) => {
           <h2 class="font-display text-heading-md font-bold">{t(locale, 'serve.gifts.resultTitle')}</h2>
           <p class="mt-2 text-ink-muted">{t(locale, 'serve.gifts.resultIntro')}</p>
 
-          <div class="mt-6 flex flex-col gap-6">
+          <div class="mw-directory mt-6">
             {results.topGifts.map((code, i) => {
               const gift = giftMeta(code);
               return gift ? (
@@ -139,24 +138,26 @@ const linkFor = (category: string) => {
           </div>
         </div>
       ) : (
-        <form method="post" id="giftForm">
-          <div class="sticky top-0 z-10 -mx-4 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur">
+        <form method="post" id="giftForm" class="mw-quiz">
+          <div class="mw-progress">
             <div class="flex items-center gap-3">
-              <div class="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+              <div role="progressbar" aria-label={t(locale, 'serve.gifts.title')} aria-valuemin="0" aria-valuemax={QUESTIONS.length} aria-valuenow="0" class="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
                 <div id="giftProgressBar" class="h-full bg-primary transition-[width] duration-200" style="width:0%" />
               </div>
-              <span id="giftProgressText" class="shrink-0 text-xs font-semibold tabular-nums text-ink-muted">
+              <span aria-live="polite" id="giftProgressText" class="shrink-0 text-xs font-semibold tabular-nums text-ink-muted">
                 {t(locale, 'serve.gifts.progress', { done: 0, total: QUESTIONS.length })}
               </span>
             </div>
+            <button type="button" id="giftContinue" hidden>{copy.unanswered}</button>
           </div>
 
+          <p class="mt-6 text-sm text-ink-muted">{copy.giftScale}</p>
           <ol class="mt-6 space-y-5">
             {QUESTIONS.map((q) => (
-              <li class="rounded-lg border border-border bg-surface-raised p-5">
-                <p class="font-semibold">
+              <li><fieldset class="mw-question">
+                <legend>
                   {q.id}. {q.text[locale]}
-                </p>
+                </legend>
                 <div class="mt-3 grid gap-2 sm:grid-cols-4">
                   {SCALE.map((s) => (
                     <label class="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-surface-sunken has-[:checked]:border-primary has-[:checked]:bg-primary-soft has-[:checked]:text-on-primary-soft">
@@ -165,7 +166,7 @@ const linkFor = (category: string) => {
                     </label>
                   ))}
                 </div>
-              </li>
+              </fieldset></li>
             ))}
           </ol>
 
@@ -190,12 +191,21 @@ const linkFor = (category: string) => {
         if (form) {
           const bar = document.getElementById('giftProgressBar');
           const text = document.getElementById('giftProgressText');
+          const progress = form.querySelector('[role="progressbar"]');
+          const next = document.getElementById('giftContinue');
+          next.hidden = false;
+          next.addEventListener('click', () => {
+            const question = [...form.querySelectorAll('fieldset')].find(field => !field.querySelector('input:checked'));
+            (question?.querySelector('input') ?? form.querySelector('button[type="submit"]'))?.focus();
+          });
           const update = () => {
             const done = new Set(
               [...form.querySelectorAll('input[type=radio]:checked')].map((el) => el.name),
             ).size;
             bar.style.width = `${(done / total) * 100}%`;
             text.textContent = label.replace('__d__', String(done));
+            progress.setAttribute('aria-valuenow', String(done));
+            next.hidden = done === total;
           };
           form.addEventListener('change', update);
           update();
@@ -203,4 +213,5 @@ const linkFor = (category: string) => {
       </script>
     )
   }
+</MinistryWorkspace>
 </Base>

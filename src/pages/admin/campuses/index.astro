@@ -1,4 +1,6 @@
 ---
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
@@ -83,22 +85,61 @@ const globalModules = await getEnabledModules(db, Astro.locals.dbBackend);
 const enabledModules = selected
   ? await getEffectiveCampusModules(db, selected.id, globalModules)
   : new Set<string>();
+const AREA_LABEL_KEYS: Record<string, string> = {
+  bulletins: 'admin.nav.bulletins',
+  sermons: 'admin.nav.sermons',
+  'prayer-sheets': 'admin.nav.prayerSheets',
+  testimonies: 'admin.nav.testimonies',
+  pages: 'admin.nav.pages',
+  events: 'admin.nav.news',
+  people: 'admin.areas.people',
+  groups: 'admin.nav.groups',
+  children: 'admin.nav.children',
+  attendance: 'admin.nav.attendance',
+  'activity-score': 'admin.nav.activityScore',
+  learning: 'admin.nav.learning',
+  giving: 'admin.giving.title',
+  registration: 'admin.reg.title',
+  'payment-operations': 'admin.areas.paymentOperations',
+  serve: 'admin.areas.serve',
+  newcomers: 'admin.areas.newcomers',
+};
+const areaLabel = (area: string) => AREA_LABEL_KEYS[area] ? t(lang, AREA_LABEL_KEYS[area]) : area;
 const saved = Astro.url.searchParams.has('saved');
 const failed = Astro.url.searchParams.has('error');
 ---
 
 <Admin title={t(lang, 'admin.campuses.title')}>
   <div class="space-y-6">
-    <header>
-      <h1 class="font-display text-3xl font-bold text-ink">{t(lang, 'admin.campuses.title')}</h1>
-      <p class="mt-2 text-ink-muted">{t(lang, 'admin.campuses.intro')}</p>
-    </header>
+    <MemberPageHeader title={t(lang, 'admin.campuses.title')} eyebrow={operationsCopy(lang).campuses} description={t(lang, 'admin.campuses.intro')} />
 
     {saved && <p class={noticeOk}>{t(lang, 'admin.campuses.saved')}</p>}
     {failed && <p class={noticeErr}>{t(lang, 'admin.campuses.error')}</p>}
 
-    <section class={`${card} space-y-4`}>
-      <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.create')}</h2>
+<div class="campus-workspace"><aside>    <section class="campus-selector">
+      <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.campus')}</h2>
+      <div class="campus-list">
+        {campuses.map((campus) => (
+          <a
+            href={`/admin/campuses?manageCampus=${campus.id}`}
+            aria-current={selected?.id === campus.id ? 'page' : undefined}
+            class={`rounded-full border px-3 py-1.5 text-sm ${selected?.id === campus.id ? 'border-accent bg-accent text-on-accent' : 'border-border'}`}
+          >
+            {campus.name}{campus.active !== 1 ? ` · ${operationsCopy(lang).inactive}` : ''}
+          </a>
+        ))}
+      </div>
+      {selected && (
+        <form method="post" action="/campus/switch" class="flex items-center gap-3">
+          <input type="hidden" name="campus" value={selected.slug} />
+          <input type="hidden" name="next" value="/admin" />
+          <button class={btn} type="submit">{t(lang, 'admin.campuses.switch')}</button>
+          <span class="text-sm text-ink-muted">{selected.name}</span>
+        </form>
+      )}
+    </section>
+    <details class="campus-create" open={failed}>
+      <summary>{t(lang, 'admin.campuses.create')}</summary>
       <form method="post" class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <input type="hidden" name="action" value="create" />
         <label>
@@ -112,30 +153,9 @@ const failed = Astro.url.searchParams.has('error');
         </label>
         <button class={btn} type="submit">{t(lang, 'admin.campuses.create')}</button>
       </form>
-    </section>
+    </details>
 
-    <section class={`${card} space-y-4`}>
-      <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.campus')}</h2>
-      <div class="flex flex-wrap gap-2">
-        {campuses.map((campus) => (
-          <a
-            href={`/admin/campuses?manageCampus=${campus.id}`}
-            class={`rounded-full border px-3 py-1.5 text-sm ${selected?.id === campus.id ? 'border-accent bg-accent text-accent-contrast' : 'border-border'}`}
-          >
-            {campus.name}{campus.active !== 1 ? ' · inactive' : ''}
-          </a>
-        ))}
-      </div>
-      {selected && (
-        <form method="post" action="/campus/switch" class="flex items-center gap-3">
-          <input type="hidden" name="campus" value={selected.slug} />
-          <input type="hidden" name="next" value="/admin" />
-          <button class={btn} type="submit">{t(lang, 'admin.campuses.switch')}</button>
-          <span class="text-sm text-ink-muted">{selected.name}</span>
-        </form>
-      )}
-    </section>
-
+</aside><div class="campus-main">
     {selected && (
       <>
         <section class={`${card} space-y-5`}>
@@ -170,7 +190,7 @@ const failed = Astro.url.searchParams.has('error');
               <legend class={lab}>{t(lang, 'admin.campuses.areas')}</legend>
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {GRANTABLE_AREAS.map((area) => (
-                  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="area" value={area} /> {area}</label>
+                  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="area" value={area} /> {areaLabel(area)}</label>
                 ))}
               </div>
             </fieldset>
@@ -189,8 +209,8 @@ const failed = Astro.url.searchParams.has('error');
                     {memberships.map((membership) => (
                       <tr class="border-b border-border/60">
                         <td class="py-2"><span class="font-medium">{membership.displayName}</span><br /><span class="text-ink-muted">{membership.email}</span></td>
-                        <td>{membership.role}{membership.active !== 1 ? ' · inactive' : ''}{membership.finance === 1 ? ' · finance' : ''}</td>
-                        <td>{membership.adminAreas.join(', ') || '—'}</td>
+                        <td>{t(lang, `admin.campuses.role.${membership.role}`)}{membership.active !== 1 ? ` · ${operationsCopy(lang).inactive}` : ''}{membership.finance === 1 ? ` · ${t(lang, 'admin.campuses.finance')}` : ''}</td>
+                        <td>{membership.adminAreas.map(areaLabel).join(', ') || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -226,5 +246,23 @@ const failed = Astro.url.searchParams.has('error');
         </section>
       </>
     )}
+    </div></div>
   </div>
 </Admin>
+
+<style>
+.campus-workspace { display:grid;grid-template-columns:260px minmax(0,1fr);gap:2rem;align-items:start; }
+.campus-workspace > aside { position:sticky;top:7rem; }
+.campus-main { min-width:0;display:grid;gap:1.5rem; }
+.campus-selector { padding:1.25rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface-raised); }
+.campus-list { display:flex;flex-direction:column;gap:.5rem;margin-block:1rem; }
+.campus-list a { border-radius:var(--radius-md);padding:.85rem 1rem; }
+.campus-selector form { flex-direction:column;align-items:start; }
+.campus-create { margin-top:1rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:1rem; }
+.campus-create summary { cursor:pointer;font-size:.85rem;font-weight:600; }
+.campus-create form { display:grid;grid-template-columns:1fr;margin-top:1rem; }
+.campus-main fieldset label:has(input[type='checkbox']) { padding:.7rem;border:1px solid var(--color-border);border-radius:var(--radius-md); }
+.campus-main fieldset label:has(input:checked) { background:var(--color-primary-soft); }
+.campus-main table td, .campus-main table th { padding:.75rem .5rem; }
+@media(max-width:1100px) { .campus-workspace { grid-template-columns:1fr; } .campus-workspace > aside { position:static; } .campus-list { flex-direction:row;flex-wrap:wrap; } }
+</style>

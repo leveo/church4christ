@@ -3,6 +3,8 @@
 // served over a ?months= window (default 12), busiest first — a burnout and
 // re-engagement view. CSV export lives at /admin/reports.csv. Ported from
 // the reference stack.
+import AvatarInitials from '../../../components/AvatarInitials.astro';
+import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
@@ -17,6 +19,7 @@ const db = Astro.locals.db;
 const months = Math.min(60, Math.max(1, Number(Astro.url.searchParams.get('months')) || 12));
 const today = todayInTz();
 const rows = await listServeReport(db, addDays(today, -months * 30), today);
+const confirmedScale = Math.max(1, ...rows.map(row => row.confirmed));
 ---
 <Admin title={t(lang, 'admin.reports.title')}>
   <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.reports.back')}</a>
@@ -26,6 +29,7 @@ const rows = await listServeReport(db, addDays(today, -months * 30), today);
   </div>
   <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reports.window', { months })}</p>
 
+  <form method="get" class="report-window"><label><span>{operationsCopy(lang).reportWindow}</span><input type="number" name="months" min="1" max="60" value={months} /></label><button type="submit">{operationsCopy(lang).apply}</button></form>
   <div class="mt-6 overflow-x-auto rounded-xl border border-border">
     <table class="w-full text-sm border-collapse">
       <thead class="bg-surface-sunken">
@@ -40,8 +44,8 @@ const rows = await listServeReport(db, addDays(today, -months * 30), today);
       <tbody>
         {rows.map((r) => (
           <tr class="border-t border-border">
-            <td class={td}><a href={`/${lang}/profile/${r.person_id}`} class="font-medium text-primary hover:underline">{r.name}</a></td>
-            <td class={`${td} text-right tabular-nums`}>{r.confirmed}</td>
+            <td class={td}><div class="flex items-center gap-3"><AvatarInitials name={r.name} sizeClass="w-8 h-8 text-xs" /><a href={`/${lang}/profile/${r.person_id}`} class="font-medium text-primary hover:underline">{r.name}</a></div></td>
+            <td class={`${td} text-right tabular-nums`}>{r.confirmed}<div class="serving-frequency" aria-hidden="true"><span style={`width:${r.confirmed / confirmedScale * 100}%`}></span></div></td>
             <td class={`${td} text-right tabular-nums`}>{r.upcoming}</td>
             <td class={`${td} text-right tabular-nums text-ink-subtle`}>{r.declines}</td>
             <td class={`${td} text-ink-muted tabular-nums`}>{r.last_served ? formatDate(r.last_served, lang) : '—'}</td>
@@ -52,3 +56,12 @@ const rows = await listServeReport(db, addDays(today, -months * 30), today);
     {rows.length === 0 && <p class="px-4 py-6 text-center text-ink-subtle">{t(lang, 'admin.reports.none')}</p>}
   </div>
 </Admin>
+
+<style>
+.report-window { display:flex;flex-wrap:wrap;gap:.75rem;align-items:end;margin-top:1.5rem;padding:1rem;background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-lg); }
+.report-window label span { display:block;font-size:.75rem;font-weight:600;margin-bottom:.4rem; }
+.report-window input { width:150px;padding:.5rem .75rem;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md); }
+.report-window button { background:var(--color-primary);color:var(--color-on-primary);padding:.55rem 1rem;border-radius:var(--radius-md);font-size:.8rem;font-weight:600; }
+.serving-frequency { height:5px;width:80px;margin-top:.5rem;margin-left:auto;background:var(--color-surface-sunken);border-radius:3px;overflow:hidden; }
+.serving-frequency span { display:block;height:100%;background:var(--color-primary); }
+</style>

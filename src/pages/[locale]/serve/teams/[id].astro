@@ -1,4 +1,9 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import MinistrySearch from '../../../../components/ministry/MinistrySearch.astro';
+import AvatarInitials from '../../../../components/AvatarInitials.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Team detail. View: members of this team + admins (others bounce back to the
 // directory). Edit (leaders of THIS team + admins): review pending applications
 // (approve/reject → team_applications status + decided_by/at), recruit from the
@@ -113,19 +118,18 @@ const [pendingApps, allPeople, potential] = await Promise.all([
   canEdit ? listPendingApplicationsForTeams(db, [teamId], locale) : Promise.resolve([] as ApplicationRow[]),
   canEdit ? listActivePeople(db) : Promise.resolve([] as PersonOption[]),
   canEdit && team.category
-    ? listPotentialVolunteers(db, team.category, teamId)
+    ? listPotentialVolunteers(db, team.category, teamId, Astro.locals.dbBackend)
     : Promise.resolve([] as PotentialVolunteer[]),
 ]);
 const memberIds = new Set(members.map((m) => m.person_id));
 const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
+const copy = ministryCopy(locale);
 ---
 
 <Base title={team.name} locale={locale} noindex>
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
   <div class="container-content max-w-content py-12">
-    <a href={localePath(locale, '/serve/teams')} class="text-sm text-ink-muted hover:text-primary">
-      ← {t(locale, 'serve.teams.title')}
-    </a>
-    <h1 class="mt-2 font-display text-heading-md font-bold">{team.name}</h1>
+    <MinistryHeader title={team.name} eyebrow={copy.teams} description={copy.teamIntro}>
     {
       team.ministry_slug && team.ministry_name && (
         <p class="mt-1 text-sm">
@@ -135,13 +139,24 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
         </p>
       )
     }
+    </MinistryHeader>
+    <dl class="mw-metrics">
+      <div><dt>{copy.people}</dt><dd>{members.length}</dd></div>
+      <div><dt>{copy.roles}</dt><dd>{positions.length}</dd></div>
+      {canEdit && <div><dt>{copy.pendingReview}</dt><dd>{pendingApps.length}</dd></div>}
+    </dl>
+    <nav class="mw-section-nav" aria-label={copy.teams}>
+      {pendingApps.length > 0 && <a href="#team-requests">{copy.requests} ({pendingApps.length})</a>}
+      <a href="#team-people">{copy.people}</a><a href="#team-roles">{copy.roles}</a>
+      {canEdit && potential.length > 0 && <a href="#team-recruit">{copy.recruit}</a>}
+    </nav>
 
     {invited && <p class="mt-4 rounded-md border border-success bg-success-soft px-4 py-2 text-sm text-success">{t(locale, 'invite.sent')}</p>}
     {inviteFailed && <p class="mt-4 rounded-md border border-danger bg-danger-soft px-4 py-2 text-sm text-danger">{t(locale, 'invite.failed')}</p>}
 
     {
       pendingApps.length > 0 && (
-        <section class="mt-6 rounded-lg border border-warn bg-warn-soft p-6">
+        <section class="mt-6 mw-panel" id="team-requests">
           <h2 class="mb-4 font-display text-lg font-semibold text-warn">
             {t(locale, 'serve.teams.pendingApps')} ({pendingApps.length})
           </h2>
@@ -149,7 +164,7 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
             {pendingApps.map((app) => (
               <li class="rounded-md border border-border bg-surface-raised p-4">
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-bold">{app.person_name}</span>
+                  <span class="mw-identity"><AvatarInitials name={app.person_name} sizeClass="h-9 w-9 text-xs" /><strong>{app.person_name}</strong></span>
                   {app.person_email && <span class="text-sm text-ink-muted">{app.person_email}</span>}
                   {app.position_name && (
                     <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
@@ -176,15 +191,16 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
       )
     }
 
-    <section class="mt-8">
+    <section class="mt-8" id="team-people">
       <h2 class="mb-3 font-display text-lg font-semibold">
         {t(locale, 'serve.teams.members')} ({members.length})
       </h2>
-      <ul class="divide-y divide-border rounded-lg border border-border bg-surface-raised">
+      <div class="mw-toolbar"><MinistrySearch target="team-roster" label={copy.searchPeople} locale={locale} /></div>
+      <ul class="mw-roster space-y-2" id="team-roster">
         {
           members.map((m) => (
-            <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
-              <span class="font-medium">{m.display_name}</span>
+            <li class="flex flex-wrap items-center gap-2 text-sm" data-ministry-item={m.display_name}>
+              <span class="mw-identity"><AvatarInitials name={m.display_name} sizeClass="h-9 w-9 text-xs" /><strong>{m.display_name}</strong></span>
               {m.is_leader === 1 && (
                 <span class="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-on-primary-soft">
                   {t(locale, 'serve.teams.leader')}
@@ -234,7 +250,7 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
 
     {
       canEdit && potential.length > 0 && (
-        <section class="mt-8 rounded-lg border border-accent-soft bg-surface-raised p-6">
+        <section class="mt-8 mw-panel" id="team-recruit">
           <h2 class="font-display text-lg font-semibold">
             {t(locale, 'serve.teams.potential')} ({potential.length})
           </h2>
@@ -279,7 +295,7 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
       )
     }
 
-    <section class="mt-8">
+    <section class="mt-8 mw-panel" id="team-roles">
       <h2 class="mb-3 font-display text-lg font-semibold">{t(locale, 'serve.teams.positions')}</h2>
       {
         positions.length === 0 ? (
@@ -296,4 +312,5 @@ const addablePeople = allPeople.filter((p) => !memberIds.has(p.id));
       }
     </section>
   </div>
+</MinistryWorkspace>
 </Base>

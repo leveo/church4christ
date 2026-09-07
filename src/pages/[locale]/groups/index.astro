@@ -5,6 +5,9 @@
 // visibility, only on the viewer's own membership) with an admin badge and a
 // link straight to the manage console for groups the viewer administers.
 // Owned by the `groups` module — the middleware 404s this route when it's off.
+import LibraryHeading from '../../../components/public/LibraryHeading.astro';
+import DesignImage from '../../../components/ui/DesignImage.astro';
+import { frontdoorCopy } from '../../../i18n/designFrontdoor';
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
@@ -38,17 +41,12 @@ function excerpt(text: string, max = 140): string {
 ---
 
 <Base title={t(locale, 'groups.title')} locale={locale}>
-  <div class="bg-primary-soft text-on-primary-soft">
-    <div class="container-content py-12">
-      <h1 class="font-display text-display-lg font-bold">{t(locale, 'groups.title')}</h1>
-      <p class="mt-3 text-lg">{t(locale, 'groups.intro')}</p>
-    </div>
-  </div>
+  <div class="container-content"><LibraryHeading eyebrow={frontdoorCopy(locale).fellowships} title={t(locale, 'groups.title')} description={t(locale, 'groups.intro')} image="groups" /></div>
 
   <div class="container-content py-10">
     {
       user && (
-        <section class="mb-10">
+        <section class="my-group-section mb-10">
           <h2 class="font-display text-heading-sm font-semibold">{t(locale, 'groups.myGroups')}</h2>
           {myGroups.length === 0 ? (
             <p class="mt-2 text-ink-muted">{t(locale, 'groups.myGroupsEmpty')}</p>
@@ -87,13 +85,14 @@ function excerpt(text: string, max = 140): string {
         publicGroups.length === 0 ? (
           <p class="mt-2 text-ink-muted">{t(locale, 'groups.empty')}</p>
         ) : (
-          <div class="mt-4 grid gap-6 sm:grid-cols-2">
+          <div class="mt-4 grid gap-6 lg:grid-cols-2">
             {publicGroups.map((g) => (
               <a
                 href={localePath(locale, `/groups/${g.id}`)}
-                class="block rounded-lg border border-border bg-surface-raised p-6 hover:shadow-md hover:border-border-strong transition-shadow"
+                class="group-discovery-card"
               >
-                <h3 class="font-display text-heading-sm font-semibold">{g.name}</h3>
+                <DesignImage image={g.kind === 'sunday_school' ? 'learning' : 'groups'} class="group-card-photo" />
+                <div class="group-card-copy"><h3 class="font-display text-heading-sm font-semibold">{g.name}</h3>
                 {(g.kind === 'sunday_school' || g.term_label) && (
                   <div class="mt-2 flex flex-wrap items-center gap-2">
                     {g.kind === 'sunday_school' && (
@@ -105,7 +104,7 @@ function excerpt(text: string, max = 140): string {
                 {g.description && <p class="mt-2 text-sm text-ink-muted">{excerpt(g.description)}</p>}
                 <p class="mt-4 text-sm font-semibold text-ink-subtle">
                   {t(locale, 'groups.memberCount', { n: g.member_count })}
-                </p>
+                </p></div>
               </a>
             ))}
           </div>
@@ -114,3 +113,12 @@ function excerpt(text: string, max = 140): string {
     </section>
   </div>
 </Base>
+
+<style>
+.my-group-section { padding:1.5rem;background:var(--color-primary-soft);border-radius:var(--radius-lg); }
+.group-discovery-card { display:grid;grid-template-columns:150px minmax(0,1fr);overflow:hidden;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface-raised); }
+.group-discovery-card:hover { border-color:var(--color-primary); }
+.group-discovery-card :global(.group-card-photo) { width:100%;height:100%;min-height:210px;object-fit:cover; }
+.group-card-copy { padding:1.5rem;min-width:0; }
+@media(max-width:640px) { .group-discovery-card { grid-template-columns:90px minmax(0,1fr); } .group-card-copy { padding:1rem; } }
+</style>

@@ -1,8 +1,9 @@
 ---
 import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
-import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, LOCALES } from '../../lib/locales';
+import ConfirmationPanel from '../../components/ui/ConfirmationPanel.astro';
+import { tokenPagePresentation } from '../../lib/tokenPagePresentation';
+import { DEFAULT_LOCALE } from '../../lib/locales';
 import { consumeToken, peekToken } from '../../lib/auth';
 import { getPersonById } from '../../lib/db';
 import { getEnabledModules } from '../../lib/modules';
@@ -10,7 +11,7 @@ import { mintSession, sessionCookie } from '../../lib/session';
 
 // Two-step consumption: GET only *peeks* (mail scanners prefetch links and would
 // otherwise burn a single-use token); the explicit POST consumes and signs in.
-// This route is locale-free, so the page renders bilingually (en + zh stacked).
+// This locale-free page follows the request language; successful redirects use the person's saved language.
 const raw = Astro.params.token ?? '';
 const vars = env as unknown as { SESSION_SECRET?: string };
 const db = Astro.locals.db;
@@ -45,44 +46,14 @@ if (Astro.request.method === 'POST') {
   state = (await peekToken(db, raw, 'login')) !== null ? 'confirm' : 'error';
 }
 
-const title = LOCALES.map((l) => t(l, state === 'confirm' ? 'auth.confirm.title' : 'auth.error.title')).join(' · ');
+const presentation = tokenPagePresentation(Astro.request, 'auth', state);
 ---
-<Base title={title} locale={DEFAULT_LOCALE} noindex>
-  <section class="container-narrow py-16 text-center">
-    {
-      state === 'confirm' ? (
-        <>
-          {LOCALES.map((l) => (
-            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.confirm.title')}</h1>
-              <p class="mt-2 text-ink-muted">{t(l, 'auth.confirm.body', { site: t(l, 'site.name') })}</p>
-            </div>
-          ))}
-          <form method="post" class="mt-4">
-            <button
-              type="submit"
-              class="rounded-full bg-primary text-on-primary font-semibold px-8 py-3 hover:bg-primary-hover"
-            >
-              {LOCALES.map((l) => t(l, 'auth.confirm.button')).join(' / ')}
-            </button>
-          </form>
-        </>
-      ) : (
-        <>
-          {LOCALES.map((l) => (
-            <div class="mb-6" lang={l === 'zh' ? 'zh-Hans' : 'en'}>
-              <h1 class="font-display text-heading-sm font-semibold">{t(l, 'auth.error.title')}</h1>
-              <p class="mt-2 text-ink-muted">{t(l, 'auth.error.body')}</p>
-            </div>
-          ))}
-          <a
-            href={`/${DEFAULT_LOCALE}/signin`}
-            class="inline-block rounded-full bg-primary text-on-primary font-semibold px-6 py-3 hover:bg-primary-hover"
-          >
-            {LOCALES.map((l) => t(l, 'auth.error.retry')).join(' / ')}
-          </a>
-        </>
-      )
-    }
-  </section>
+<Base title={presentation.title} locale={presentation.locale} noindex>
+  <ConfirmationPanel title={presentation.title} body={presentation.body}>
+    {state === 'confirm' ? (
+      <form method="post"><button type="submit">{presentation.action}</button></form>
+    ) : (
+      <a href={presentation.retryHref}>{presentation.action}</a>
+    )}
+  </ConfirmationPanel>
 </Base>

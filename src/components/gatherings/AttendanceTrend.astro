@@ -1,0 +1,38 @@
+---
+import type { Locale } from '../../lib/locales';
+import type { ServiceAttendanceReportRow } from '../../lib/serviceAttendanceDb';
+import { formatDate } from '../../lib/dates';
+import { gatheringsCopy } from '../../i18n/designGatherings';
+import { buildAttendanceTrend } from './attendanceTrend';
+interface Props { rows: ServiceAttendanceReportRow[]; locale: Locale }
+const { rows, locale } = Astro.props;
+const copy = gatheringsCopy(locale);
+const trend = buildAttendanceTrend(rows);
+const axisMax = Math.max(1, Math.ceil(trend.max / 10) * 10);
+const colors = ['var(--color-primary)', 'var(--color-info)', 'var(--color-accent)', 'var(--color-warn)', 'var(--color-success)'];
+const stamp = (day: string) => Date.parse(`${day}T00:00:00Z`);
+const first = stamp(trend.dates[0] ?? '2000-01-01');
+const last = stamp(trend.dates.at(-1) ?? '2000-01-01');
+const x = (day: string) => first === last ? 410 : 48 + (stamp(day) - first) / (last - first) * 724;
+const y = (value: number) => 214 - value / axisMax * 184;
+const ticks = [...new Set([0, Math.round(axisMax / 2), axisMax])];
+const labelDates = trend.dates.filter((_, index) => index % Math.max(1, Math.ceil(trend.dates.length / 6)) === 0 || index === trend.dates.length - 1);
+---
+{trend.dates.length > 0 && <figure class="attendance-trend" aria-labelledby="attendance-trend-title">
+  <figcaption><h3 id="attendance-trend-title">{copy.attendanceTrend}</h3><p>{copy.attendanceTrendHint}</p></figcaption>
+  <div class="trend-scroll"><svg viewBox="0 0 800 260" role="img" aria-label={copy.chartDescription}>
+    {ticks.map((tick) => <g><line x1="48" x2="772" y1={y(tick)} y2={y(tick)} stroke="var(--color-border)" /><text x="36" y={y(tick) + 4} text-anchor="end">{tick}</text></g>)}
+    {labelDates.map((date) => <text x={x(date)} y="244" text-anchor="middle">{date.slice(5).replace('-', '/')}</text>)}
+    {trend.series.map((series, index) => <g>
+      <polyline points={series.points.map((point) => `${x(point.date)},${y(point.value)}`).join(' ')} fill="none" stroke={colors[index % colors.length]} stroke-width="2.5" stroke-linejoin="round" stroke-dasharray={index >= colors.length ? '5 4' : undefined} />
+      {series.points.map((point) => <circle cx={x(point.date)} cy={y(point.value)} r="4" fill={colors[index % colors.length]}><title>{`${series.name} · ${formatDate(point.date, locale)}: ${point.value}`}</title></circle>)}
+    </g>)}
+  </svg></div>
+  <ul aria-label={copy.chartSeries}>{trend.series.map((series, index) => <li><span style={`background: ${colors[index % colors.length]}`} aria-hidden="true"></span>{series.name}</li>)}</ul>
+</figure>}
+<style>
+  .attendance-trend { margin-top: 1.5rem; padding: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+  h3 { font-weight: 650; font-size: .875rem; } figcaption p { margin-top: .35rem; font-size: .75rem; line-height: 1.6; color: var(--color-ink-muted); }
+  .trend-scroll { overflow-x: auto; margin-top: 1rem; } svg { width: 100%; min-width: 480px; } text { fill: var(--color-ink-muted); font-size: 11px; font-family: var(--font-body); }
+  ul { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-top: .75rem; list-style: none; font-size: .75rem; } li { display: flex; align-items: center; gap: .5rem; } li span { width: .65rem; height: .65rem; border-radius: var(--radius-full); }
+</style>

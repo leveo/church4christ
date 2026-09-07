@@ -97,20 +97,43 @@ describe('Postgres-backed aggregate Attendance parity', () => {
       service_type_id: String(service), attendance_date: day, adult_count: String(count), recorded_by_person_id: '999',
     }).toString();
 
+    // The relative Sunday demo seed can land on the church's current day while
+    // UTC is already Monday. Own these date-scoped fixtures so the first POST
+    // is an insert, and the child total includes only this case's check-ins.
+    await withPg(async (sql) => {
+      await sql.unsafe('DELETE FROM service_attendance WHERE service_type_id IN (1,2) AND attendance_date=$1', [day]);
+      await sql.unsafe('DELETE FROM checkins WHERE event_id=1 AND checkin_date=$1', [day]);
+      expect(await sql.unsafe('SELECT 1 FROM service_attendance WHERE service_type_id IN (1,2) AND attendance_date=$1', [day])).toHaveLength(0);
+    });
+
     expect(await consumeStatus(await post('/admin/attendance/count', countBody(1, 140), { cookie: attendance }))).toBe(303);
+    const first = await withPg(async (sql) => {
+      const [row] = await sql.unsafe<{
+        adult_count: number; recorded_by_person_id: number; updated_by_person_id: number; created_at: string;
+      }[]>(`SELECT adult_count,recorded_by_person_id,updated_by_person_id,created_at FROM service_attendance
+        WHERE service_type_id=1 AND attendance_date=$1`, [day]);
+      return {
+        adultCount: Number(row.adult_count), recordedBy: Number(row.recorded_by_person_id),
+        updatedBy: Number(row.updated_by_person_id), createdAt: row.created_at,
+      };
+    });
+    expect(first).toEqual({ adultCount: 140, recordedBy: 60, updatedBy: 60, createdAt: expect.any(String) });
     expect(await consumeStatus(await post('/admin/attendance/count', countBody(1, 141), { cookie: admin }))).toBe(303);
     expect(await consumeStatus(await post('/admin/attendance/count', countBody(2, 110), { cookie: attendance }))).toBe(303);
 
     await withPg(async (sql) => {
-      const [adult] = await sql.unsafe<{ adult_count: number; recorded_by_person_id: number; updated_by_person_id: number }[]>(
-        `SELECT adult_count,recorded_by_person_id,updated_by_person_id FROM service_attendance
+      const [adult] = await sql.unsafe<{
+        adult_count: number; recorded_by_person_id: number; updated_by_person_id: number; created_at: string;
+      }[]>(
+        `SELECT adult_count,recorded_by_person_id,updated_by_person_id,created_at FROM service_attendance
          WHERE service_type_id=1 AND attendance_date=$1`, [day],
       );
       expect({
         adultCount: Number(adult.adult_count),
         recordedBy: Number(adult.recorded_by_person_id),
         updatedBy: Number(adult.updated_by_person_id),
-      }).toEqual({ adultCount: 141, recordedBy: 60, updatedBy: 1 });
+        createdAt: adult.created_at,
+      }).toEqual({ ...first, adultCount: 141, updatedBy: 1 });
 
       await sql.unsafe(`INSERT INTO checkin_events (id,name,weekday,active) VALUES (91,'Inactive Room',NULL,0)`);
       await sql.unsafe(`INSERT INTO checkin_events (id,name,weekday,active) VALUES (92,'Empty Room',NULL,1)`);

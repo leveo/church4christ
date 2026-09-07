@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Testimony review queue (console class — re-checks editor∪admin, 403s a bare
 // team leader). Lists pending testimonies with a locale badge + body preview and
 // two no-JS POST actions on an `_action` field: approve (publish now) / return.
@@ -67,11 +70,15 @@ try {
 const isLong = (s: string) => [...s].length > 200;
 const preview = (s: string) => [...s].slice(0, 200).join('');
 const dateOf = (utc: string) => utc.slice(0, 10);
+const copy = ministryCopy(lang);
 ---
 
 <Admin title={t(lang, 'admin.testimonies.title')}>
-  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.testimonies.title')}</h1>
-  <p class="mt-1 text-ink-muted">{t(lang, 'admin.testimonies.intro', { count: pending.length })}</p>
+<MinistryWorkspace locale={lang} variant="admin">
+  <MinistryHeader title={t(lang, 'admin.testimonies.title')} eyebrow={copy.pendingReview} description={copy.reviewIntro}>
+    <p class="text-sm text-ink-muted">{t(lang, 'admin.testimonies.intro', { count: pending.length })}</p>
+    <a href={`/${lang}/serve/testimonies`} class="text-sm font-semibold text-primary hover:underline">{copy.publishedStories} →</a>
+  </MinistryHeader>
   {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.testimonies.dbError')}</p>}
   {showErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.testimonies.actionError')}</p>}
   {approved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.testimonies.approved')}</p>}
@@ -83,7 +90,7 @@ const dateOf = (utc: string) => utc.slice(0, 10);
         {t(lang, 'admin.testimonies.empty')}
       </p>
     ) : (
-      <div class="mt-6 space-y-4">
+      <div class="mw-stories mt-6">
         {pending.map((ti) => (
           <article class="rounded-lg border border-border bg-surface-raised p-5">
             <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -108,7 +115,7 @@ const dateOf = (utc: string) => utc.slice(0, 10);
               <p class="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{ti.body}</p>
             )}
 
-            <div class="mt-4 flex flex-wrap gap-2">
+            <div class="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
               <form method="post">
                 <input type="hidden" name="_action" value="approve" />
                 <input type="hidden" name="id" value={ti.id} />
@@ -137,4 +144,5 @@ const dateOf = (utc: string) => utc.slice(0, 10);
   }
 
   <p class="mt-6 text-xs text-ink-subtle">{t(lang, 'admin.testimonies.reviewedHint')}</p>
+</MinistryWorkspace>
 </Admin>

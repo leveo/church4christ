@@ -7,6 +7,8 @@
 // no button) when the setting is unset or the read fails.
 import { render } from 'astro:content';
 import { env } from 'cloudflare:workers';
+import LibraryHeading from '../../components/public/LibraryHeading.astro';
+import { frontdoorCopy } from '../../i18n/designFrontdoor';
 import Base from '../../layouts/Base.astro';
 import ContentPage from '../../components/ContentPage.astro';
 import { localePath, parseLocale } from '../../lib/locales';
@@ -72,14 +74,12 @@ try {
 {
   givingOn ? (
     <Base title={t(locale, 'give.title')} locale={locale}>
-      <div class="bg-primary-soft text-on-primary-soft">
-        <div class="container-content py-12">
-          <h1 class="font-display text-display-lg font-bold">{t(locale, 'give.title')}</h1>
-          <p class="mt-3 text-lg">{t(locale, 'give.intro')}</p>
-        </div>
-      </div>
+      <div class="container-content"><LibraryHeading eyebrow={frontdoorCopy(locale).giving} title={t(locale, 'give.title')} description={t(locale, 'give.intro')} image="family" /></div>
+      <div class="container-content giving-layout">
+        <aside class="giving-story prose"><Content /></aside>
+        <div class="giving-form">
+        <h2 class="font-display text-heading-sm font-semibold">{frontdoorCopy(locale).giftDetails}</h2>
 
-      <div class="container-content max-w-xl py-10">
         <form method="post" action="/api/giving/checkout" class="mt-6 space-y-4">
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="checkoutRequestId" value={checkoutIdentity.requestId} />
@@ -140,10 +140,11 @@ try {
             {t(locale, 'give.submit')}
           </button>
         </form>
+        </div>
       </div>
     </Base>
   ) : (
-    <ContentPage
+    <ContentPage image="family" eyebrow={frontdoorCopy(locale).giving}
       title={entry.data.title}
       description={entry.data.description}
       locale={locale}
@@ -172,3 +173,13 @@ try {
     </ContentPage>
   )
 }
+
+<style>
+.giving-layout { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1fr); gap:4rem; padding-bottom:4rem; align-items:start; }
+.giving-form { border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:2rem;background:var(--color-surface-raised); }
+.giving-form fieldset { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem; }
+.giving-form fieldset label { padding:.8rem .5rem;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface); }
+.giving-form fieldset label:has(input:checked) { border-color:var(--color-primary);background:var(--color-primary-soft);color:var(--color-on-primary-soft); }
+.giving-form button { width:100%;justify-content:center;min-height:46px; }
+@media(max-width:700px) { .giving-layout { grid-template-columns:1fr;gap:1.5rem; } .giving-form { padding:1.25rem; } .giving-story { order:2; } }
+</style>

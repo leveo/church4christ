@@ -13,7 +13,7 @@
 // Authorization stays in the pages: every caller re-checks admin-or-leader of
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
-import type { AppDb } from './appDb';
+import type { AppDb, SnapshotBackend } from './appDb';
 import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
@@ -588,15 +588,21 @@ export async function listPotentialVolunteers(
   db: AppDb,
   category: string,
   excludeTeamId: number,
+  backend: SnapshotBackend = 'd1',
 ): Promise<PotentialVolunteer[]> {
+  // Recommendations are JSON arrays stored in TEXT on both backends, but the
+  // table-valued JSON function is provider-specific. Keep exact element matching.
+  const recommendations = backend === 'supabase'
+    ? 'jsonb_array_elements_text(CAST(gift_results.recommended_json AS jsonb)) AS recommendation(value)'
+    : 'json_each(gift_results.recommended_json) AS recommendation';
   const { results } = await db
     .prepare(
       `WITH candidates AS (
          SELECT person_id, 1 AS via_interest, 0 AS via_gift FROM person_interests WHERE category = ?1
          UNION ALL
          SELECT gift_results.person_id, 0 AS via_interest, 1 AS via_gift
-         FROM gift_results, json_each(gift_results.recommended_json)
-         WHERE json_each.value = ?1
+         FROM gift_results, ${recommendations}
+         WHERE recommendation.value = ?1
            AND gift_results.id = (SELECT id FROM gift_results g2 WHERE g2.person_id = gift_results.person_id
                                   ORDER BY g2.created_at DESC, g2.id DESC LIMIT 1)
        )

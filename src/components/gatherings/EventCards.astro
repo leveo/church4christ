@@ -1,0 +1,20 @@
+---
+import type { Locale } from '../../lib/locales';
+import type { EventCardRow } from '../../lib/publicDb';
+import { t } from '../../lib/i18n';
+import { DESIGN_IMAGES } from '../../lib/designAssets';
+interface Props { events: EventCardRow[]; locale: Locale }
+const { events, locale } = Astro.props;
+---
+<div class="gathering-event-grid">{events.map((event) => <article>
+  <img src={event.imageKey ? `/media/${event.imageKey}` : DESIGN_IMAGES.events} alt="" loading="lazy" width="800" height="500" />
+  <div><h2>{event.title}</h2>{event.blurb && <p>{event.blurb}</p>}{event.url && <a href={event.url} rel="noopener">{t(locale, 'home.eventLink')} <span aria-hidden="true">→</span></a>}</div>
+</article>)}</div>
+<style>
+  .gathering-event-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; }
+  article { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+  img { width: 100%; aspect-ratio: 1.6; object-fit: cover; } article > div { display: flex; flex: 1; flex-direction: column; padding: 1.4rem; }
+  h2 { font-family: var(--font-display); font-size: 1.5rem; font-weight: 550; line-height: 1.3; } p { margin-top: .75rem; font-size: .875rem; line-height: 1.8; color: var(--color-ink-muted); }
+  a { margin-top: 1.2rem; padding-top: .75rem; border-top: 1px solid var(--color-border); color: var(--color-primary); font-size: .8125rem; font-weight: 650; } a:hover { text-decoration: underline; } a span { float: right; }
+  @media (max-width: 900px) { .gathering-event-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } } @media (max-width: 600px) { .gathering-event-grid { grid-template-columns: 1fr; } }
+</style>

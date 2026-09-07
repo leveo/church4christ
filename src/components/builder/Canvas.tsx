@@ -22,6 +22,7 @@ export interface CanvasProps {
   onSelect: (id: string | null) => void;
   onRemove: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
 }
 
 function DropGap({ container, index, draggingType }: { container: ContainerRef; index: number; draggingType: AnyNode['type'] | null }) {
@@ -85,10 +86,11 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
 }
 
 function BlockFrame({
-  node, selected, strings, onSelect, onRemove, onDuplicate, children,
+  node, selected, strings, onSelect, onRemove, onDuplicate, onMove, children,
 }: {
   node: AnyNode; selected: boolean; strings: Record<string, string>;
   onSelect: (id: string) => void; onRemove: (id: string) => void; onDuplicate: (id: string) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
   children: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -99,13 +101,16 @@ function BlockFrame({
     <div
       ref={setNodeRef}
       onClick={(e) => { e.stopPropagation(); onSelect(node.id); }}
-      className={`relative rounded ${isDragging ? 'opacity-40' : ''} ${selected ? 'ring-2 ring-ring' : 'hover:ring-1 hover:ring-border-strong'}`}
+      className={`builder-block relative rounded ${isDragging ? 'opacity-40' : ''} ${selected ? 'ring-2 ring-ring' : 'hover:ring-1 hover:ring-border-strong'}`}
     >
+      <button type="button" className="builder-select-block" aria-label={`${strings.selectBlock}: ${strings['block.' + node.type]}`} aria-pressed={selected} onClick={(event) => { event.stopPropagation(); onSelect(node.id); }}>{strings['block.' + node.type]}</button>
       {selected && (
-        <div className="absolute -top-3 right-2 z-10 flex gap-1 rounded-md border border-border bg-surface-raised px-1 py-0.5 text-xs shadow-sm">
-          <button type="button" className="cursor-grab px-1" title={strings['block.' + node.type]} {...listeners} {...attributes}>⠿</button>
-          <button type="button" className="px-1" title={strings.duplicate} onClick={(e) => { e.stopPropagation(); onDuplicate(node.id); }}>⧉</button>
-          <button type="button" className="px-1 text-danger" title={strings.delete} onClick={(e) => { e.stopPropagation(); onRemove(node.id); }}>✕</button>
+        <div className="builder-block-actions">
+          <button type="button" className="cursor-grab" title={strings['block.' + node.type]} {...listeners} {...attributes}>⠿</button>
+          <button type="button" aria-label={strings.moveUp} title={strings.moveUp} onClick={(event) => { event.stopPropagation(); onMove(node.id, -1); }}>↑</button>
+          <button type="button" aria-label={strings.moveDown} title={strings.moveDown} onClick={(event) => { event.stopPropagation(); onMove(node.id, 1); }}>↓</button>
+          <button type="button" aria-label={strings.duplicate} title={strings.duplicate} onClick={(e) => { e.stopPropagation(); onDuplicate(node.id); }}>⧉</button>
+          <button type="button" className="text-danger" aria-label={strings.delete} title={strings.delete} onClick={(e) => { e.stopPropagation(); onRemove(node.id); }}>✕</button>
         </div>
       )}
       {children}
@@ -124,6 +129,7 @@ export default function Canvas(props: CanvasProps) {
       onSelect={props.onSelect}
       onRemove={props.onRemove}
       onDuplicate={props.onDuplicate}
+      onMove={props.onMove}
     >
       {children}
     </BlockFrame>
@@ -145,7 +151,7 @@ export default function Canvas(props: CanvasProps) {
   );
 
   return (
-    <div className="min-h-[60vh] rounded-xl border border-border bg-surface p-2" onClick={() => props.onSelect(null)}>
+    <div className="builder-canvas min-h-[60vh] rounded-xl border border-border bg-surface p-2" onClick={() => props.onSelect(null)}>
       <DropGap container="root" index={0} draggingType={draggingType} />
       {layout.blocks.map((section: SectionNode, i) => (
         <div key={section.id}>

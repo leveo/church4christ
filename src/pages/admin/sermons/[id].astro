@@ -4,6 +4,11 @@
 // in the parser) → saveSermon (upsert + revision snapshot in one db.batch;
 // duplicate live date → errors.dateTaken); delete → soft delete.
 import Admin from '../../../layouts/Admin.astro';
+import ContentSurface from '../../../components/content/ContentSurface.astro';
+import ContentHeader from '../../../components/content/ContentHeader.astro';
+import PublicationPanel from '../../../components/content/PublicationPanel.astro';
+import FormPreview from '../../../components/content/FormPreview.astro';
+import { contentCopy } from '../../../i18n/designContent';
 import { t } from '../../../lib/i18n';
 import { parseSermonForm } from '../../../lib/validate';
 import { getSermonForEdit, saveSermon, softDeleteSermon, listServiceTypeOptions } from '../../../lib/adminDb';
@@ -110,19 +115,20 @@ const viewHref = publishedNow ? localePath(lang, '/sermons') : null;
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <div class="flex items-center gap-4 text-sm">
+  <ContentSurface>
+  <ContentHeader locale={lang} title={heading} description={contentCopy(lang).sermons}>
+
       {viewHref && <a href={viewHref} class="text-primary hover:underline">{t(lang, 'admin.form.viewOnSite')}</a>}
       {!isNew && <a href={`/admin/revisions/sermon/${id}`} class="text-primary hover:underline">{t(lang, 'admin.form.history')}</a>}
       <a href="/admin/sermons" class="text-primary hover:underline">&larr; {t(lang, 'admin.sermons.back')}</a>
-    </div>
-  </div>
+      </ContentHeader>
 
-  {hasErrors && <p class={`mt-4 max-w-2xl ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+  {hasErrors && <p role="alert" class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
-  <form method="post" class={`mt-6 ${card} grid max-w-2xl gap-4 sm:grid-cols-2`}>
+  <form method="post" id="content-editor-form" class="content-editor">
     <input type="hidden" name="action" value="save" />
+    <div class="content-editor-main"><section id="content-recording" class={`${card} grid gap-4 sm:grid-cols-2`}>
+      <h2 class="sm:col-span-2">{contentCopy(lang).recording}</h2>
 
     <label class="block">
       <span class={lab}>{t(lang, 'admin.sermons.serviceType')} *</span>
@@ -156,7 +162,7 @@ const viewHref = publishedNow ? localePath(lang, '/sermons') : null;
 
     <label class="block sm:col-span-2">
       <span class={lab}>{t(lang, 'admin.sermons.youtube')}</span>
-      <input type="text" name="youtube" value={v.youtube} placeholder={t(lang, 'admin.sermons.youtubePlaceholder')} class={tin} />
+      <input type="text" name="youtube" value={v.youtube} placeholder={t(lang, 'admin.sermons.youtubePlaceholder')} aria-label={t(lang, 'admin.sermons.youtubePlaceholder')} class={tin} />
       {errors.youtube && <span class={errorText}>{t(lang, errors.youtube)}</span>}
     </label>
 
@@ -165,30 +171,18 @@ const viewHref = publishedNow ? localePath(lang, '/sermons') : null;
       <input type="text" name="series" value={v.series} class={tin} />
     </label>
 
-    <div class="sm:col-span-2">
-      <h2 class={h2}>{t(lang, 'admin.form.publishTitle')}</h2>
-      <div class="mt-2 flex gap-6 text-sm">
-        <label class="flex items-center gap-2">
-          <input type="radio" name="status" value="draft" checked={v.status !== 'published'} />
-          {t(lang, 'admin.form.statusDraft')}
-        </label>
-        <label class="flex items-center gap-2">
-          <input type="radio" name="status" value="published" checked={v.status === 'published'} />
-          {t(lang, 'admin.form.statusPublished')}
-        </label>
-      </div>
-    </div>
-
-    <div class="sm:col-span-2">
-      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
-    </div>
+    </section></div>
+    <aside class="content-editor-rail">
+      <PublicationPanel locale={lang} status={v.status} />
+      <FormPreview locale={lang} kind="sermon" />
+    </aside>
   </form>
 
   {
     !isNew && (
       <form
         method="post"
-        class="mt-6 max-w-2xl"
+        class="content-delete"
         onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.sermons.deleteConfirm'))})`}
       >
         <input type="hidden" name="action" value="delete" />
@@ -196,4 +190,5 @@ const viewHref = publishedNow ? localePath(lang, '/sermons') : null;
       </form>
     )
   }
+  </ContentSurface>
 </Admin>

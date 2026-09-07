@@ -1,4 +1,8 @@
 ---
+import GatheringSurface from '../../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../../i18n/designGatherings';
+import AvatarInitials from '../../../../components/AvatarInitials.astro';
+
 // Kiosk page 2: pick children to check in (POST action=checkin), see today's
 // checkins and check a child out with their pickup code (POST action=checkout),
 // and — right after a successful checkin — a confirmation state showing the
@@ -89,6 +93,7 @@ const bigBtn = 'w-full rounded-2xl bg-primary px-8 py-4 text-2xl font-semibold t
 // tablet read from arm's length.
 const kioskNotice =
   'w-full rounded-2xl border border-danger bg-danger-soft px-6 py-4 text-center text-xl text-danger';
+const copy = gatheringsCopy(lang);
 ---
 
 <Kiosk title={t(lang, 'kiosk.title')} lang={lang}>
@@ -100,19 +105,21 @@ const kioskNotice =
     )
   }
 
+  <GatheringSurface mode="kiosk">
+  <ol class="gathering-flow" aria-label={copy.kioskSteps}>{[copy.findHousehold, copy.selectChildren, copy.keepCode].map((label, i) => <li aria-current={i === (confirmation ? 2 : 1) ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
   {
     confirmation ? (
-      <div class="flex w-full flex-col items-center gap-6 text-center">
+      <div class="kiosk-confirmation flex w-full flex-col items-center gap-6 text-center">
         <p class="text-2xl">{t(lang, 'kiosk.codeIntro')}</p>
-        <p class="text-display-lg font-bold tracking-widest">{confirmation.code}</p>
+        <p class="kiosk-pickup-code font-bold tracking-widest">{confirmation.code}</p>
         <p class="text-2xl font-semibold">{confirmation.checkedIn.join(', ')}</p>
         <p class="text-ink-muted">{t(lang, 'kiosk.codeNote')}</p>
         <a href={searchHref} class={bigBtn}>{t(lang, 'kiosk.backToStart')}</a>
       </div>
     ) : (
       <div class="flex w-full flex-col gap-8">
-        <div class="flex items-center justify-between gap-4">
-          <h1 class="font-display text-display-lg font-bold">{household!.name}</h1>
+        <div class="gathering-heading">
+          <div><p class="gathering-eyebrow">{t(lang, 'kiosk.title')}</p><h1>{household!.name}</h1></div>
           <a href={backHref} class="text-lg font-semibold text-primary hover:underline">&larr; {t(lang, 'kiosk.backToStart')}</a>
         </div>
 
@@ -125,17 +132,17 @@ const kioskNotice =
         {events.length === 0 ? (
           household!.children.length > 0 && <p class={kioskNotice}>{t(lang, 'kiosk.noEvents')}</p>
         ) : notCheckedIn.length > 0 && (
-          <form method="post" class="flex w-full flex-col gap-6">
+          <form method="post" class="kiosk-section flex w-full flex-col gap-6">
             <input type="hidden" name="action" value="checkin" />
             <input type="hidden" name="lang" value={lang} />
 
             <h2 class="text-2xl font-semibold">{t(lang, 'kiosk.selectChildren')}</h2>
             <div class="grid grid-cols-2 gap-4">
               {notCheckedIn.map((c) => (
-                <label class="block cursor-pointer">
+                <label class="kiosk-choice block cursor-pointer">
                   <input type="checkbox" name="member" value={c.memberId} class="peer sr-only" />
                   <span class="block rounded-2xl border-2 border-border bg-surface-raised p-6 text-center text-2xl font-bold peer-checked:border-primary peer-checked:bg-primary-soft">
-                    {c.name}
+                    <AvatarInitials name={c.name} sizeClass="h-10 w-10 text-base" />{c.name}
                   </span>
                 </label>
               ))}
@@ -160,9 +167,9 @@ const kioskNotice =
         )}
 
         {checkedIn.length > 0 && (
-          <div class="flex w-full flex-col gap-4">
+          <section class="flex w-full flex-col gap-4" aria-labelledby="kiosk-pickup-heading"><div><h2 id="kiosk-pickup-heading" class="text-xl font-semibold">{copy.pickup}</h2><p class="mt-2 text-base text-ink-muted">{copy.pickupHint}</p></div>
             {checkedIn.map((c) => (
-              <div class="rounded-2xl border-2 border-border bg-surface-raised p-6">
+              <div class="kiosk-section">
                 <div class="flex flex-wrap items-center gap-3">
                   <span class="text-2xl font-bold">{c.name}</span>
                   <span class="rounded-full bg-success-soft px-3 py-1 text-base font-semibold text-success">
@@ -175,13 +182,14 @@ const kioskNotice =
                     {checkoutErrorId === ci.checkinId && (
                       <p class={`mt-2 ${kioskNotice}`}>{t(lang, 'kiosk.wrongCode')}</p>
                     )}
-                    <form method="post" class="mt-2 flex flex-wrap items-center gap-3">
+                    <form method="post" class="kiosk-checkout mt-2 flex flex-wrap items-center gap-3">
                       <input type="hidden" name="action" value="checkout" />
                       <input type="hidden" name="lang" value={lang} />
                       <input type="hidden" name="checkinId" value={ci.checkinId} />
                       <input
                         type="text"
                         name="code"
+                        aria-label={`${t(lang, 'kiosk.enterCode')}: ${c.name}`}
                         maxlength="4"
                         autocapitalize="characters"
                         placeholder={t(lang, 'kiosk.enterCode')}
@@ -195,9 +203,10 @@ const kioskNotice =
                 ))}
               </div>
             ))}
-          </div>
+          </section>
         )}
       </div>
     )
   }
+  </GatheringSurface>
 </Kiosk>

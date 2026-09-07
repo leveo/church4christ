@@ -1,4 +1,8 @@
 ---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+import { gatheringsCopy } from '../../../i18n/designGatherings';
+import { DESIGN_IMAGES } from '../../../lib/designAssets';
+
 // Events admin (console class — re-checks editor∪admin, 403s a bare team leader).
 // Same inline add/edit model as announcements (?edit=<id>, save/toggle/delete),
 // plus a multipart image upload: a chosen file is validated (type + size),
@@ -116,15 +120,88 @@ const v = echoing
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.events.title');
 const formHeading = editId ? t(lang, 'admin.events.editTitle') : t(lang, 'admin.events.newTitle');
+const copy = gatheringsCopy(lang);
 const h2 = 'font-display text-heading-sm font-bold';
 ---
 
 <Admin title={heading}>
-  <h1 class="font-display text-heading-md font-bold">{heading}</h1>
+  <GatheringSurface>
+  <div class="gathering-heading"><div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{heading}</h1><p class="gathering-intro">{copy.adminEventsIntro}</p></div><a href="?new=1#gathering-event-editor" class={btn}>{t(lang, 'admin.events.newTitle')}</a></div>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
 
+
+  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.events.existing')}</h2>
+  <div class="gathering-table-wrap mt-4">
+    <table class="gathering-table">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.events.colImage')}</th>
+          <th class={th}>{t(lang, 'admin.events.colTitle')}</th>
+          <th class={th}>{t(lang, 'admin.events.colUrl')}</th>
+          <th class={th}>{t(lang, 'admin.events.colWindow')}</th>
+          <th class={th}>{t(lang, 'admin.events.colSort')}</th>
+          <th class={th}>{t(lang, 'admin.events.colActive')}</th>
+          <th class={th}>{t(lang, 'admin.events.colActions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="7">
+                {t(lang, 'admin.events.empty')}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr class="border-t border-border align-top">
+                <td class={td}>
+                  {r.image_key ? (
+                    <img src={`/media/${r.image_key}`} alt="" class="h-14 w-24 rounded border border-border object-cover" loading="lazy" />
+                  ) : (
+                    <img src={DESIGN_IMAGES.events} alt="" class="h-14 w-24 rounded border border-border object-cover" loading="lazy" />
+                  )}
+                </td>
+                <td class={td}>
+                  <div class="font-medium">{r.title_en || '—'}</div>
+                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
+                </td>
+                <td class={`${td} break-all`}>{r.url ?? '—'}</td>
+                <td class={`${td} text-ink-muted`}>{(r.starts_at ?? '…').slice(0, 10)} → {(r.ends_at ?? '…').slice(0, 10)}</td>
+                <td class={td}>{r.sort}</td>
+                <td class={td}>
+                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
+                    {r.active ? t(lang, 'admin.events.active') : t(lang, 'admin.events.inactive')}
+                  </span>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap gap-2">
+                    <a href={`/admin/events?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <a href={`/admin/revisions/event/${r.id}`} class={rowBtn}>{t(lang, 'admin.form.history')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>
+                        {r.active ? t(lang, 'admin.events.deactivate') : t(lang, 'admin.events.activate')}
+                      </button>
+                    </form>
+                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.events.deleteConfirm'))})`}>
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+  <details id="gathering-event-editor" class="gathering-editor" open={Astro.url.searchParams.has('new') || !!editId || hasErrors || rows.length === 0}><summary>{formHeading}</summary>
   <form method="post" enctype="multipart/form-data" class="mt-6 max-w-2xl">
     <section class={`${card} space-y-4`}>
       <h2 class={h2}>{formHeading}</h2>
@@ -204,74 +281,6 @@ const h2 = 'font-display text-heading-sm font-bold';
       </div>
     </section>
   </form>
-
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.events.existing')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.events.colImage')}</th>
-          <th class={th}>{t(lang, 'admin.events.colTitle')}</th>
-          <th class={th}>{t(lang, 'admin.events.colUrl')}</th>
-          <th class={th}>{t(lang, 'admin.events.colWindow')}</th>
-          <th class={th}>{t(lang, 'admin.events.colSort')}</th>
-          <th class={th}>{t(lang, 'admin.events.colActive')}</th>
-          <th class={th}>{t(lang, 'admin.events.colActions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          rows.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan="7">
-                {t(lang, 'admin.events.empty')}
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr class="border-t border-border align-top">
-                <td class={td}>
-                  {r.image_key ? (
-                    <img src={`/media/${r.image_key}`} alt="" class="h-14 w-24 rounded border border-border object-cover" loading="lazy" />
-                  ) : (
-                    <span class="text-ink-subtle">—</span>
-                  )}
-                </td>
-                <td class={td}>
-                  <div class="font-medium">{r.title_en || '—'}</div>
-                  <div class="text-ink-muted">{r.title_zh || '—'}</div>
-                </td>
-                <td class={`${td} break-all`}>{r.url ?? '—'}</td>
-                <td class={`${td} text-ink-muted`}>{(r.starts_at ?? '…').slice(0, 10)} → {(r.ends_at ?? '…').slice(0, 10)}</td>
-                <td class={td}>{r.sort}</td>
-                <td class={td}>
-                  <span class={`${badge} ${r.active ? badgeActive : badgeInactive}`}>
-                    {r.active ? t(lang, 'admin.events.active') : t(lang, 'admin.events.inactive')}
-                  </span>
-                </td>
-                <td class={td}>
-                  <div class="flex flex-wrap gap-2">
-                    <a href={`/admin/events?edit=${r.id}`} class={rowBtn}>{t(lang, 'admin.form.edit')}</a>
-                    <a href={`/admin/revisions/event/${r.id}`} class={rowBtn}>{t(lang, 'admin.form.history')}</a>
-                    <form method="post">
-                      <input type="hidden" name="action" value="toggle" />
-                      <input type="hidden" name="id" value={r.id} />
-                      <button type="submit" class={rowBtn}>
-                        {r.active ? t(lang, 'admin.events.deactivate') : t(lang, 'admin.events.activate')}
-                      </button>
-                    </form>
-                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.events.deleteConfirm'))})`}>
-                      <input type="hidden" name="action" value="delete" />
-                      <input type="hidden" name="id" value={r.id} />
-                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.delete')}</button>
-                    </form>
-                  </div>
-                </td>
-              </tr>
-            ))
-          )
-        }
-      </tbody>
-    </table>
-  </div>
+  </details>
+  </GatheringSurface>
 </Admin>

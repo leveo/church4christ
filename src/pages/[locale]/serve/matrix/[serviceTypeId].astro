@@ -1,4 +1,7 @@
 ---
+import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import { ministryCopy } from '../../../../i18n/designMinistry';
 // Scheduling matrix (team class via route policy): the next 8 plans of one
 // service type × the positions they need, rows grouped by team. Cells show
 // assignee name pills with a status initial (U/C/D, token-colored) plus an
@@ -92,21 +95,18 @@ const statusStyles = {
 const nextFrom = plans.length > 0 ? plans[plans.length - 1].plan_date : from;
 // Page back one ~8-week window (not all the way to today), clamped at today.
 const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56) : today) : null;
+const copy = ministryCopy(locale);
 ---
 
 <Base title={`${t(locale, 'serve.matrix.title')} · ${serviceType.name}`} locale={locale} noindex>
-  <section class="bg-primary text-on-primary">
-    <div class="container-content flex flex-wrap items-center gap-3 py-10">
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-caps text-accent">{t(locale, 'serve.matrix.title')}</p>
-        <h1 class="mt-1 font-display text-heading-md font-bold">{serviceType.name}</h1>
-      </div>
-      <div class="ml-auto flex gap-2 text-sm">
+<MinistryWorkspace locale={locale} audience="serving" variant="work">
+  <MinistryHeader title={serviceType.name} eyebrow={t(locale, 'serve.matrix.title')} description={copy.matrixIntro}>
+      <div class="flex flex-wrap gap-2 text-sm">
         {
           types.length > 1 && (
             <a
               href={localePath(locale, '/serve/matrix')}
-              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.pick')}
             </a>
@@ -116,7 +116,7 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
           prevFrom && (
             <a
               href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${prevFrom}`)}
-              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.prev')}
             </a>
@@ -126,15 +126,14 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
           plans.length === 8 && (
             <a
               href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${nextFrom}`)}
-              class="rounded-full border border-on-primary px-3 py-1.5 hover:bg-primary-hover"
+              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.next')}
             </a>
           )
         }
       </div>
-    </div>
-  </section>
+  </MinistryHeader>
 
   <div class="container-content py-10">
     {
@@ -149,13 +148,22 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
       plans.length === 0 ? (
         <p class="text-ink-muted">{t(locale, 'serve.plans.empty')}</p>
       ) : (
-        <div class="overflow-x-auto rounded-lg border border-border">
+        <>
+        <div class="mw-toolbar">
+          <div class="mw-legend">
+            {(['U', 'C', 'D'] as const).map(status => <span class={`rounded-full border px-2.5 py-1 ${statusStyles[status]}`}>{t(locale, `serve.status.${status}`)}</span>)}
+            <span class="rounded-full border border-dashed border-accent px-2.5 py-1 text-accent">{copy.openSignup}</span>
+          </div>
+          <p class="text-xs text-ink-muted">{copy.matrixScroll}</p>
+        </div>
+        <div class="mw-matrix" tabindex="0" role="region" aria-label={`${serviceType.name} · ${copy.matrix}`}>
           <table class="w-full min-w-[56rem] border-collapse text-sm">
+            <caption class="sr-only">{serviceType.name} · {copy.matrix}</caption>
             <thead>
               <tr class="bg-surface-sunken">
-                <th class="sticky left-0 min-w-36 bg-surface-sunken px-3 py-2.5 text-left" />
+                <th scope="col" class="sticky left-0 min-w-36 bg-surface-sunken px-3 py-2.5 text-left">{copy.position}</th>
                 {plans.map((p) => (
-                  <th class="whitespace-nowrap px-3 py-2.5 text-left font-bold">
+                  <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-left font-bold">
                     <a href={localePath(locale, `/serve/plans/${p.id}`)} class="tabular-nums hover:underline">
                       {p.plan_date.slice(5)}
                     </a>
@@ -181,9 +189,9 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
                       .filter((r) => r.team_id === teamId)
                       .map((r) => (
                         <tr class="border-t border-border align-top">
-                          <td class="sticky left-0 whitespace-nowrap bg-surface-raised px-3 py-2 font-semibold">
+                          <th scope="row" class="sticky left-0 whitespace-nowrap bg-surface-raised px-3 py-2 text-left font-semibold">
                             {r.position_name}
-                          </td>
+                          </th>
                           {plans.map((p) => {
                             const need = needOf(p.id, r.position_id);
                             if (!need) return <td class="bg-surface-sunken/60 px-3 py-2" />;
@@ -198,7 +206,7 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
                                       class={`inline-block w-fit rounded-full border px-2 py-0.5 text-xs font-semibold ${statusStyles[a.status]}`}
                                       title={t(locale, `serve.status.${a.status}`)}
                                     >
-                                      {a.person_name} <span class="opacity-70">{a.status}</span>
+                                      {a.person_name} <span class="sr-only">{t(locale, `serve.status.${a.status}`)}</span><span aria-hidden="true" class="opacity-70">{a.status}</span>
                                     </span>
                                   ))}
                                   {Array.from({ length: Math.max(0, slotsLeft) }).map(() => (
@@ -210,7 +218,7 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
                                           : 'border border-border text-ink-subtle',
                                       ]}
                                     >
-                                      —
+                                      {need.open_signup === 1 ? copy.openSignup : copy.openRole}
                                     </span>
                                   ))}
                                   {canEdit && slotsLeft > 0 && members.length > 0 && (
@@ -220,6 +228,7 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
                                       <input type="hidden" name="position_id" value={r.position_id} />
                                       <select
                                         name="person_id"
+                                        aria-label={`${r.position_name} · ${p.plan_date}`}
                                         class="max-w-28 rounded-md border border-border bg-surface px-1 py-0.5 text-xs"
                                       >
                                         {members
@@ -252,7 +261,9 @@ const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56)
             </tbody>
           </table>
         </div>
+        </>
       )
     }
   </div>
+</MinistryWorkspace>
 </Base>

@@ -21,19 +21,19 @@ Retain selectable Harvest/Midnight themes; renew default Sanctuary with light/da
 
 - [x] 1. Foundation: Sanctuary tokens, public/admin/member shells, grouped contextual menus,
   reusable icons/page anatomy, module accents; token contrast and navigation authorization tests.
-- [ ] 2. Public front door: home, visit/newcomer card, beliefs/staff, sermons, articles,
+- [x] 2. Public front door: home, visit/newcomer card, beliefs/staff, sermons, articles,
   testimonies, ministries/fellowships/groups discovery; packaged image assets and locale-safe demo data.
-- [ ] 3. Content: actionable Sunday workspace, bulletin editor/reader, prayer sheets,
+- [x] 3. Content: actionable Sunday workspace, bulletin editor/reader, prayer sheets,
   sermon editor/library, announcements/events, custom page builder and revisions.
-- [ ] 4. Care: searchable people directory/household details, import/export wizard,
+- [x] 4. Care: searchable people directory/household details, import/export wizard,
   newcomer queue/detail, scoped prayer board; retain create-only imports and consent checks.
-- [ ] 5. Ministry: serving matrix, plans, teams, applications, availability, gifts,
+- [x] 5. Ministry: serving matrix, plans, teams, applications, availability, gifts,
   groups attendance/files/join requests and scoped leader panels.
-- [ ] 6. Gatherings: date-led event discovery, free registration and roster,
+- [x] 6. Gatherings: date-led event discovery, free registration and roster,
   children kiosk/check-out and dashboard, aggregate attendance chart/history correction.
-- [ ] 7. Member/learning: personal dashboard, opportunity discovery, household,
+- [x] 7. Member/learning: personal dashboard, opportunity discovery, household,
   calendar, serving, giving history, scoped prayer, course catalog/player, provider admin.
-- [ ] 8. Operations: offline giving ledger/funds/reconciliation, explainable activity
+- [x] 8. Operations: offline giving ledger/funds/reconciliation, explainable activity
   score, campuses, resource grants, modules/settings/navigation, email and launch readiness.
 - [ ] 9. Release validation: all 21 modules explicitly checked against this inventory;
   English/Chinese desktop/mobile screenshots, keyboard checks, fresh setup/media verification,
@@ -91,11 +91,16 @@ reports remain identity-free. Generated mockup numbers/copy are not product spec
 - PostgreSQL integration: isolated loopback-only PostgreSQL 18 test cluster; 539 tests across 45 suites pass. Built PostgreSQL E2E: 43 tests across 11 files pass (24.81s).
 - Preview-only setup config, secrets, dependency symlink, database/media state and screenshots stay uncommitted. Tracked wrangler configuration restored to the repository default.
 
-## Remaining implementation scope after the first checkpoint
+## Second implementation checkpoint and release review
 
-These modules still require dedicated layouts before this goal is complete:
-- Content administration: bulletin/prayer/sermon editors and libraries; announcement/event editing; custom-page workspace, builder chrome and revision timeline.
-- Ministry and connection: public serving journey, gifts, testimonies, ministries/fellowships, scheduling matrix/plans/teams, group discovery/detail/management, scoped leader views.
-- Gatherings and operations: public events/registration, rosters, children kiosk/admin, service attendance, giving/funds/reconciliation, activity score, learning provider administration, campuses and settings/navigation/readiness.
-- Public evergreen pages: visit/new-here, about/beliefs/staff, giving and authentication/profile details need a consistent final pass.
-- Full-module desktop/mobile/locale review and release integration remain required. Do not treat the first checkpoint as the complete redesign.
+All 21 principal module bodies now have dedicated layouts; see [module-coverage.md](module-coverage.md) for routes and boundaries. The second batch includes the publishing editors and live local previews, page-builder keyboard controls, serving matrix/teams/leader tools, public discovery and welcome forms, gatherings/kiosk, ledgers, provider administration, settings, and utility pages.
+
+- Combined Node/Workers checkpoint: 3,517 passed / 371 skipped, 235 files passed / 38 skipped (325.72s). Astro: 721 files, 0 errors / 0 warnings. Production build and token lint passed.
+- Combined built-worker checkpoint: D1 330/330 across 27 files; PostgreSQL 43/43 across 11 files. This includes six new locale-aware token presentation cases.
+- Actual browser review covers 1280px desktop, 1024px settings, 641px groups and 390px mobile. Verified bulletin preview/repeat rows, page-builder keyboard select/move/undo, gift progress, team search/no-results/reset, ministry wizard focus/review, Chinese navigation, and Sanctuary dark mode. The newcomers scroll container now contains its visually hidden table heading; 390px document width returned from 627px to 375px.
+- Giving summaries show counts instead of combining different currencies. Ledger rows preserve explicit currency; reconciliation amounts are labeled minor units where no currency is supplied. The current-month label uses the existing localized month formatter, not the SQL '-31' query sentinel.
+- Date-dependent attendance E2E fixtures are isolated from demo check-ins during the UTC-Monday/Chicago-Sunday overlap; production count and provenance behavior is unchanged.
+- Actual PostgreSQL children rendering exposed unquoted camelCase aliases. Three query aliases now retain their field names in both providers. Three real PostgreSQL regressions, 26 D1 tests, and one built-child-dashboard regression pass after the minimal query correction.
+- Kiosk browser review found missing theme attributes in its standalone shell. The shell now uses the configured theme/default mode; the existing search → household → pickup-code E2E was observed red and then all six children E2E cases passed. Desktop and 390px household selection now render the packaged illustration, colors, rounded cards and touch controls.
+- PostgreSQL team-detail review found SQLite-only JSON expansion in volunteer suggestions. The query now uses provider-specific JSON expansion with the same exact matching and source/exclusion semantics. Two real PostgreSQL regressions and 14 existing D1 tests pass; actual mobile team detail renders successfully.
+- Release review found that origin/main advanced to 21a01ac (member identity, PR #36). Integrate that upstream change, preserve its identity/security contracts, rerun the combined checks, finish the remaining browser sweep, and publish/merge the verified branch. No release completion is claimed at this checkpoint.

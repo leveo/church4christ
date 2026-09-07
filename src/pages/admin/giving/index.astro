@@ -1,20 +1,22 @@
 ---
 // Giving admin home (finance route class — /admin/giving is admin ∪ finance).
-// Three stacked panels: (1) a GET filter bar (fund / date window / method) that
-// drives the gift ledger and the per-fund totals for that same window; (2) a
-// POST manual-entry form recording a check/cash gift (recordedBy = the acting
+// Giving workspace: GET filters drive the ledger; fund counts use dates only.
+// The POST manual-entry form records a check/cash gift (recordedBy = the acting
 // user) against an active fund, attributed to a member (person_id) or a free-text
 // guest name. Money is integer cents end to end — formatCents is the only place
-// cents become dollars; the amount enters as cents via parseAmountToCents.
+// minor units become a currency amount; the amount enters as cents via parseAmountToCents.
 import Admin from '../../../layouts/Admin.astro';
+import FinanceSurface from '../../../components/finance/FinanceSurface.astro';
+import FinanceHeader from '../../../components/finance/FinanceHeader.astro';
+import { financeCopy } from '../../../i18n/designFinance';
 import { t } from '../../../lib/i18n';
 import { parseManualGiftForm } from '../../../lib/validate';
 import { listFunds, listFundsAdmin } from '../../../lib/fundDb';
 import { listGifts, fundTotals, recordManualGift } from '../../../lib/givingDb';
 import { listPeople } from '../../../lib/adminDb';
-import { isValidDateStr, todayInTz, monthRange } from '../../../lib/dates';
+import { isValidDateStr, todayInTz, monthRange, formatMonth } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
-import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -77,17 +79,16 @@ const [allFunds, activeFunds, people, gifts, totals, monthTotals, ytdTotals] = a
   fundTotals(db, lang, { from: monthStart, to: monthEnd }),
   fundTotals(db, lang, { from: yearStart, to: today }),
 ]);
-// Stat row totals: fundTotals is already per-fund, so sum across funds for the
-// month/YTD window headline figures (no new db query — reuses the same fn the
-// per-fund totals table below calls).
-const monthTotalCents = monthTotals.reduce((sum, r) => sum + r.total_cents, 0);
+// Count-only summaries: online gifts may use different currencies, while
+// fundTotals aggregates money without currency grouping. Do not combine amounts.
+const copy = financeCopy(lang);
 const monthGiftCount = monthTotals.reduce((sum, r) => sum + r.gift_count, 0);
-const ytdTotalCents = ytdTotals.reduce((sum, r) => sum + r.total_cents, 0);
+const ytdGiftCount = ytdTotals.reduce((sum, r) => sum + r.gift_count, 0);
 const stats = [
-  { label: t(lang, 'admin.giving.stats.monthTotal'), value: formatCents(monthTotalCents) },
-  { label: t(lang, 'admin.giving.stats.monthGifts'), value: String(monthGiftCount) },
-  { label: t(lang, 'admin.giving.stats.ytdTotal'), value: formatCents(ytdTotalCents) },
-  { label: t(lang, 'admin.giving.stats.activeFunds'), value: String(activeFunds.length) },
+  { label: t(lang, 'admin.giving.stats.monthGifts'), value: String(monthGiftCount), detail: formatMonth(today.slice(0, 7), lang) },
+  { label: copy.ytdGifts, value: String(ytdGiftCount), detail: `${yearStart} – ${today}` },
+  { label: t(lang, 'admin.giving.stats.activeFunds'), value: String(activeFunds.length), detail: copy.availableForEntry },
+  { label: copy.shown, value: String(gifts.length), detail: copy.filteredLedger },
 ];
 const activePeople = people.filter((p) => p.active === 1);
 // Resolve a member gift's donor from the people we already loaded (listGifts only
@@ -105,38 +106,128 @@ const g = (n: string) => String(fd?.get(n) ?? '');
 const echoing = fd !== null && hasErrors;
 
 const heading = t(lang, 'admin.giving.title');
-const h2 = 'font-display text-heading-sm font-bold';
 const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
 ---
 
 <Admin title={heading}>
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="font-display text-heading-md font-bold">{heading}</h1>
-    <div class="flex items-center gap-3">
-      <a href="/admin/giving/reconcile" class="text-sm text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>
-      <a href="/admin/giving/funds" class={btn}>{t(lang, 'admin.giving.funds')}</a>
+<FinanceSurface>
+  <FinanceHeader locale={lang} title={heading} description={copy.ledgerIntro}>
+    <a href="/admin/giving/reconcile" class="text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>
+    <a href="/admin/giving/funds" class="text-primary hover:underline">{t(lang, 'admin.giving.funds')}</a>
+    <a href="#finance-manual-entry" class={btn}>{copy.entry}</a>
+  </FinanceHeader>
+  {recorded && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.giving.recorded')}</p>}
+  <dl class="finance-summary">
+    {stats.map((s) => <div><dt>{s.label}</dt><dd>{s.value}</dd><dd class="finance-stat-date finance-scope">{s.detail}</dd></div>)}
+  </dl>
+  <p class="finance-scope">{copy.periodScope}</p>
+  <div class="finance-workspace">
+    <div class="finance-main">
+  <form method="get" class="finance-filter" aria-label={t(lang, 'admin.giving.filter')}>
+    <label class="block">
+      <span class={lab}>{t(lang, 'give.fund')}</span>
+      <select name="fund" class={tin}>
+        <option value="" selected={filterFundId === undefined}>{t(lang, 'admin.giving.allFunds')}</option>
+        {allFunds.map((f) => (
+          <option value={f.id} selected={filterFundId === f.id}>{fundLabel(f)}</option>
+        ))}
+      </select>
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.from')}</span>
+      <input type="date" name="from" value={from ?? ''} class={tin} />
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.to')}</span>
+      <input type="date" name="to" value={to ?? ''} class={tin} />
+    </label>
+    <label class="block">
+      <span class={lab}>{t(lang, 'admin.giving.method')}</span>
+      <select name="method" class={tin}>
+        <option value="" selected={filterMethod === undefined}>{t(lang, 'admin.giving.allMethods')}</option>
+        {METHODS.map((m) => (
+          <option value={m} selected={filterMethod === m}>{methodLabel(m)}</option>
+        ))}
+      </select>
+    </label>
+    <button type="submit" class={btn}>{t(lang, 'admin.giving.filter')}</button>
+  </form>
+
+  <div class="finance-section-heading"><h2>{t(lang, 'admin.giving.ledger')}</h2><p>{copy.shown}: {gifts.length}</p></div>
+  <p class="finance-scope">{copy.ledgerScope}</p>
+  <div class="finance-table" role="region" aria-label={t(lang, 'admin.giving.ledger')} tabindex="0">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.giving.colDate')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colDonor')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colMethod')}</th>
+          <th class={th}>{t(lang, 'admin.giving.checkNumber')}</th>
+          <th class={`${th} finance-amount`}>{t(lang, 'admin.giving.colAmount')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          gifts.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="6">
+                {t(lang, 'admin.giving.giftsEmpty')}
+              </td>
+            </tr>
+          ) : (
+            gifts.map((gift) => (
+              <tr class:list={["border-t border-border align-top", { "finance-refunded": gift.status === 'refunded' }]}>
+                <td class={`${td} tabular-nums`}>{(gift.received_on ?? gift.created_at).slice(0, 10)}</td>
+                <td class={td}>{donorOf(gift)}</td>
+                <td class={td}>{gift.fund_name}</td>
+                <td class={td}>
+                  <span class={`${badge} ${gift.status === 'refunded' ? badgeInactive : badgeActive}`}>{methodLabel(gift.method)}</span>
+                  {gift.status === 'refunded' && <span class="finance-refunded-note">{copy.refunded}</span>}
+                </td>
+                <td class={`${td} tabular-nums`}>{gift.check_number || '—'}</td>
+                <td class={`${td} tabular-nums font-medium finance-amount`}>{formatCents(gift.amount_cents, gift.currency)}<span class="block text-xs font-normal text-ink-muted">{gift.currency.toUpperCase()}</span></td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="finance-section-heading"><h2>{copy.fundCounts}</h2></div>
+  <p class="finance-scope">{copy.totalScope} {copy.currencyScope}</p>
+  <div class="finance-table" role="region" aria-label={copy.fundCounts} tabindex="0">
+    <table class="w-full border-collapse">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.giving.fundNumber')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
+          <th class={th}>{t(lang, 'admin.giving.count')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {totals.length === 0 && <tr><td class={`${td} text-ink-muted`} colspan="3">{t(lang, 'admin.giving.giftsEmpty')}</td></tr>}
+        {totals.map((row) => (
+          <tr class="border-t border-border">
+            <td class={`${td} tabular-nums`}>{row.fund_number}</td>
+            <td class={td}>{row.fund_name}</td>
+            <td class={`${td} tabular-nums`}>{row.gift_count}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
     </div>
-  </div>
-
-  {recorded && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.giving.recorded')}</p>}
-
-  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {stats.map((s) => (
-      <div class={card}>
-        <div class="text-xs font-semibold uppercase tracking-caps text-accent">{s.label}</div>
-        <div class="mt-2 text-display-lg font-bold">{s.value}</div>
-      </div>
-    ))}
-  </div>
-
-  {/* (1) Manual entry */}
-  <section class={`mt-6 ${card} max-w-3xl space-y-4`}>
-    <h2 class={h2}>{t(lang, 'admin.giving.record')}</h2>
-    {hasErrors && <p class={noticeErr}>{t(lang, 'admin.giving.recordError')}</p>}
+  <aside id="finance-manual-entry" class="finance-side-form space-y-4" aria-labelledby="finance-entry-heading">
+    <h2 id="finance-entry-heading">{copy.entry}</h2>
+    <p class="finance-scope">{copy.entryHint}</p>
+    {hasErrors && <p class={noticeErr} role="alert">{t(lang, 'admin.giving.recordError')}</p>}
     {activeFunds.length === 0 ? (
       <p class="text-sm text-ink-muted">{t(lang, 'admin.giving.fundsEmpty')}</p>
     ) : (
-      <form method="post" class="grid gap-4 sm:grid-cols-2">
+      <form method="post" class="finance-entry-fields">
         <input type="hidden" name="action" value="record" />
         <label class="block">
           <span class={lab}>{t(lang, 'admin.giving.donor')}</span>
@@ -196,105 +287,9 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
         </div>
       </form>
     )}
-  </section>
+  </aside>
 
-  {/* (2) Filter bar */}
-  <form method="get" class="mt-8 flex flex-wrap items-end gap-3">
-    <label class="block">
-      <span class={lab}>{t(lang, 'give.fund')}</span>
-      <select name="fund" class={tin}>
-        <option value="" selected={filterFundId === undefined}>{t(lang, 'admin.giving.allFunds')}</option>
-        {allFunds.map((f) => (
-          <option value={f.id} selected={filterFundId === f.id}>{fundLabel(f)}</option>
-        ))}
-      </select>
-    </label>
-    <label class="block">
-      <span class={lab}>{t(lang, 'admin.giving.from')}</span>
-      <input type="date" name="from" value={from ?? ''} class={tin} />
-    </label>
-    <label class="block">
-      <span class={lab}>{t(lang, 'admin.giving.to')}</span>
-      <input type="date" name="to" value={to ?? ''} class={tin} />
-    </label>
-    <label class="block">
-      <span class={lab}>{t(lang, 'admin.giving.method')}</span>
-      <select name="method" class={tin}>
-        <option value="" selected={filterMethod === undefined}>{t(lang, 'admin.giving.allMethods')}</option>
-        {METHODS.map((m) => (
-          <option value={m} selected={filterMethod === m}>{methodLabel(m)}</option>
-        ))}
-      </select>
-    </label>
-    <button type="submit" class={btn}>{t(lang, 'admin.giving.filter')}</button>
-  </form>
-
-  {/* (3) Totals by fund */}
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.totals')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.giving.fundNumber')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
-          <th class={th}>{t(lang, 'admin.giving.count')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {totals.map((row) => (
-          <tr class="border-t border-border">
-            <td class={`${td} tabular-nums`}>{row.fund_number}</td>
-            <td class={td}>{row.fund_name}</td>
-            <td class={`${td} tabular-nums`}>{row.gift_count}</td>
-            <td class={`${td} tabular-nums font-medium`}>{formatCents(row.total_cents)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   </div>
-
-  {/* Gift ledger */}
-  <h2 class={`mt-8 ${h2}`}>{t(lang, 'admin.giving.ledger')}</h2>
-  <div class="mt-4 overflow-x-auto rounded-xl border border-border">
-    <table class="w-full border-collapse">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.giving.colDate')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colDonor')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colMethod')}</th>
-          <th class={th}>{t(lang, 'admin.giving.checkNumber')}</th>
-          <th class={th}>{t(lang, 'admin.giving.colAmount')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          gifts.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan="6">
-                {t(lang, 'admin.giving.giftsEmpty')}
-              </td>
-            </tr>
-          ) : (
-            gifts.map((gift) => (
-              <tr class="border-t border-border align-top">
-                <td class={`${td} tabular-nums`}>{(gift.received_on ?? gift.created_at).slice(0, 10)}</td>
-                <td class={td}>{donorOf(gift)}</td>
-                <td class={td}>{gift.fund_name}</td>
-                <td class={td}>
-                  <span class={`${badge} ${gift.status === 'refunded' ? badgeInactive : badgeActive}`}>{methodLabel(gift.method)}</span>
-                </td>
-                <td class={`${td} tabular-nums`}>{gift.check_number || '—'}</td>
-                <td class={`${td} tabular-nums font-medium`}>{formatCents(gift.amount_cents, gift.currency)}</td>
-              </tr>
-            ))
-          )
-        }
-      </tbody>
-    </table>
-  </div>
-
   <script is:inline>
     // Progressive enhancement: hide the check-number field when the method is
     // cash (the server drops it for cash regardless). With JS off it stays visible.
@@ -309,4 +304,5 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
       sync();
     })();
   </script>
+</FinanceSurface>
 </Admin>

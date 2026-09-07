@@ -1,0 +1,32 @@
+---
+import type { Locale } from '../../lib/locales';
+import { ministryCopy } from '../../i18n/designMinistry';
+interface Props { target: string; label: string; locale: Locale }
+const { target, label, locale } = Astro.props;
+const copy = ministryCopy(locale);
+---
+<div data-ministry-search data-target={target} hidden>
+  <label class="mw-search"><span>{label}</span><input type="search" placeholder={copy.searchHint} autocomplete="off" aria-controls={target} /></label>
+  <p class="mw-search-empty" data-search-empty role="status" hidden>{copy.allResults}</p>
+</div>
+<script>
+  for (const control of document.querySelectorAll<HTMLElement>('[data-ministry-search]')) {
+    const target = document.getElementById(control.dataset.target ?? '');
+    const input = control.querySelector('input');
+    const empty = control.querySelector<HTMLElement>('[data-search-empty]');
+    if (!target || !input) continue;
+    const items = [...target.querySelectorAll<HTMLElement>('[data-ministry-item]')];
+    if (items.length === 0) continue;
+    control.hidden = false;
+    input.addEventListener('input', () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      let visible = 0;
+      for (const item of items) {
+        const matches = (item.dataset.ministryItem ?? '').toLocaleLowerCase().includes(query);
+        item.hidden = !matches;
+        if (matches) visible++;
+      }
+      if (empty) empty.hidden = visible !== 0;
+    });
+  }
+</script>

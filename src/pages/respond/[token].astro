@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import ActionReceipt from '../../components/public/ActionReceipt.astro';
 import Base from '../../layouts/Base.astro';
 import { t } from '../../lib/i18n';
 import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
@@ -91,7 +92,7 @@ const message =
         : 'respond.invalid';
 ---
 <Base title={t(locale, 'respond.title')} locale={locale} noindex>
-  <section class="container-narrow py-16 text-center">
+  <ActionReceipt image="worship">
     {
       state === 'show' && summary ? (
         <>
@@ -143,5 +144,5 @@ const message =
         </>
       )
     }
-  </section>
+  </ActionReceipt>
 </Base>

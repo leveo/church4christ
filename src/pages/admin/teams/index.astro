@@ -1,4 +1,8 @@
 ---
+import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
+import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
+import MinistrySearch from '../../../components/ministry/MinistrySearch.astro';
+import { ministryCopy } from '../../../i18n/designMinistry';
 // Teams overview (admin only): a flat list of every serving team across all
 // ministries with member / leader / open-slot counts and soft-delete / restore.
 // Teams are CREATED from a ministry page (or the wizard); this is the retirement
@@ -25,16 +29,21 @@ if (Astro.request.method === 'POST') {
 }
 
 const teams = await listTeamsAdmin(db, lang);
+const copy = ministryCopy(lang);
 ---
 <Admin title={t(lang, 'admin.teams.title')}>
-  <a href="/admin" class="text-sm text-ink-muted hover:text-primary">← {t(lang, 'admin.teams.back')}</a>
-  <h1 class="mt-2 font-display text-heading-md font-bold">{t(lang, 'admin.teams.title')}</h1>
-  <p class="mt-1 text-ink-muted">{t(lang, 'admin.teams.intro')}</p>
+<MinistryWorkspace locale={lang} variant="admin">
+  <MinistryHeader title={t(lang, 'admin.teams.title')} eyebrow={copy.scheduleEyebrow} description={copy.teamAdminIntro} />
+  <dl class="mw-metrics">
+    <div><dt>{copy.currentTeams}</dt><dd>{teams.filter(team => !team.deleted_at).length}</dd></div>
+    <div><dt>{copy.retiredTeams}</dt><dd>{teams.filter(team => team.deleted_at).length}</dd></div>
+  </dl>
+  <div class="mw-toolbar"><MinistrySearch target="admin-team-list" label={copy.searchTeams} locale={lang} /></div>
 
   {teams.length === 0 ? (
     <p class="mt-6 text-sm text-ink-muted">{t(lang, 'admin.teams.none')}</p>
   ) : (
-    <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+    <div class="mw-table-wrap">
       <table class="w-full border-collapse text-sm">
         <thead class="bg-surface-sunken">
           <tr>
@@ -47,9 +56,9 @@ const teams = await listTeamsAdmin(db, lang);
             <th class={th}></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="admin-team-list">
           {teams.map((tm) => (
-            <tr class="border-t border-border">
+            <tr class="border-t border-border" data-ministry-item={`${tm.name} ${tm.ministry_name ?? ''}`}>
               <td class={`${td} font-semibold`}>{tm.name}</td>
               <td class={`${td} text-ink-muted`}>{tm.ministry_name ?? t(lang, 'admin.teams.noMinistry')}</td>
               <td class={`${td} text-center text-ink-muted`}>{tm.member_count}</td>
@@ -74,4 +83,5 @@ const teams = await listTeamsAdmin(db, lang);
       </table>
     </div>
   )}
+</MinistryWorkspace>
 </Admin>

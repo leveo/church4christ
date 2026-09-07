@@ -1,5 +1,7 @@
 ---
 import Admin from '../../../layouts/Admin.astro';
+import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
+import { careToolsCopy } from '../../../i18n/designCareTools';
 import { appendAuditEvent } from '../../../lib/auditDb';
 import { todayInTz } from '../../../lib/dates';
 import { t } from '../../../lib/i18n';
@@ -12,7 +14,7 @@ import {
   type PastoralNotesExportRuntime,
 } from '../../../lib/peopleExportHttp';
 import { buildPastoralNotesExport } from '../../../lib/pastoralNotesExport';
-import { btn, btnSecondary, card } from '../../../lib/adminUi';
+import { btn, btnSecondary } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 
 export const prerender = false;
@@ -49,39 +51,23 @@ if (method === 'POST') {
 const user = Astro.locals.user!;
 const lang: Locale = user.lang ?? 'en';
 const title = t(lang, 'admin.peopleExport.notesTitle');
+const copy = careToolsCopy(lang);
 ---
 
 <Admin title={title}>
-  <main data-pastoral-notes-export class="mx-auto max-w-3xl">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 class="font-display text-heading-md font-bold">{title}</h1>
-        <p class="mt-2 max-w-2xl text-sm text-ink-muted">
-          {t(lang, 'admin.peopleExport.notesBody')}
-        </p>
+  <CareWorkspace variant="notes-export">
+    <main data-pastoral-notes-export>
+      <div class="care-heading"><div><p class="care-eyebrow">{copy.notes}</p><h1>{title}</h1><p class="care-intro">{t(lang, 'admin.peopleExport.notesBody')}</p></div><a href="/admin/people" class={btnSecondary}>&larr; {t(lang, 'admin.peopleExport.back')}</a></div>
+      <div class="care-tools-layout">
+        <section class="care-panel care-notes-confirm" aria-labelledby="notes-export-warning">
+          <p class="care-eyebrow">{copy.notesConfirm}</p><h2 id="notes-export-warning" class="text-danger">{t(lang, 'admin.peopleExport.notesWarning')}</h2>
+          <form method="post" enctype="application/x-www-form-urlencoded">
+            <label class="care-notes-ack"><input type="checkbox" name="acknowledgement" value={PEOPLE_NOTES_ACKNOWLEDGEMENT} required /><span>{t(lang, 'admin.peopleExport.notesAcknowledge')}</span></label>
+            <div class="care-form-actions"><button type="submit" class={btn}>{t(lang, 'admin.peopleExport.notesDownload')}</button></div>
+          </form>
+        </section>
+        <aside class="care-panel care-tools-aside"><h2>{copy.notesNext}</h2><p>{t(lang, 'admin.peopleExport.notesAudit')}</p></aside>
       </div>
-      <a href="/admin/people" class={btnSecondary}>{t(lang, 'admin.peopleExport.back')}</a>
-    </div>
-
-    <section class={`mt-6 ${card} space-y-4`} aria-labelledby="notes-export-warning">
-      <h2 id="notes-export-warning" class="font-display text-heading-sm font-bold text-danger">
-        {t(lang, 'admin.peopleExport.notesWarning')}
-      </h2>
-      <p class="text-sm text-ink-muted">{t(lang, 'admin.peopleExport.notesAudit')}</p>
-
-      <form method="post" enctype="application/x-www-form-urlencoded" class="space-y-4">
-        <label class="flex items-start gap-3 text-sm font-medium">
-          <input
-            type="checkbox"
-            name="acknowledgement"
-            value={PEOPLE_NOTES_ACKNOWLEDGEMENT}
-            required
-            class="mt-1"
-          />
-          <span>{t(lang, 'admin.peopleExport.notesAcknowledge')}</span>
-        </label>
-        <button type="submit" class={btn}>{t(lang, 'admin.peopleExport.notesDownload')}</button>
-      </form>
-    </section>
-  </main>
+    </main>
+  </CareWorkspace>
 </Admin>
