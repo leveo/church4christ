@@ -53,10 +53,14 @@ function stubPlanningCenterPages(): void {
   }));
 }
 
+// Full-fleet passes process 64+ jobs through hundreds of real D1 operations.
+// Allow for shared CI runner variance, matching the Postgres integration budget.
+const fleetSyncTimeout = 20_000;
+
 describe('Planning Center bounded scheduler fairness', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('fairly enqueues and processes all 33 active connections across bounded manual passes', async () => {
+  it('fairly enqueues and processes all 33 active connections across bounded manual passes', { timeout: fleetSyncTimeout }, async () => {
     const fleet = { campusBase: 9_100, connectionBase: 1_711_000_000 };
     await connectionFleet(fleet);
     try {
@@ -116,7 +120,7 @@ describe('Planning Center bounded scheduler fairness', () => {
     }
   });
 
-  it('prioritizes an unattempted 33rd connection over an equal-timestamp failed prefix', async () => {
+  it('prioritizes an unattempted 33rd connection over an equal-timestamp failed prefix', { timeout: fleetSyncTimeout }, async () => {
     const fleet = { campusBase: 9_400, connectionBase: 1_714_000_000 };
     const connections = await connectionFleet(fleet);
     try {
