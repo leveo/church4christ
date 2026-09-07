@@ -1,0 +1,82 @@
+---
+import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
+import { card, btn, th, td } from '../../../../../lib/adminUi';
+import { t } from '../../../../../lib/i18n';
+import { planningCenterCredentials } from '../../../../../lib/planningCenterSync';
+import { env } from 'cloudflare:workers';
+import type { Locale } from '../../../../../lib/locales';
+
+const user = Astro.locals.user!;
+if (!user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+let configured = false;
+try { planningCenterCredentials(env as never); configured = true; } catch { /* status is intentionally generic */ }
+const connections = (await Astro.locals.rawDb.prepare(`SELECT c.id,c.campus_id,c.base_url,c.organization_id,c.state,c.last_error_code,c.last_success_at,
+  (SELECT count(*) FROM planning_center_person_mappings m WHERE m.connection_id=c.id) mapping_count,
+  (SELECT count(*) FROM planning_center_person_mappings m WHERE m.connection_id=c.id AND m.match_state='review') review_count
+  FROM planning_center_connections c ORDER BY c.id`).all<{
+    id: number; campus_id: number; base_url: string; organization_id: string; state: string; last_error_code: string | null;
+    last_success_at: string | null; mapping_count: number; review_count: number;
+  }>()).results;
+const campuses = (await Astro.locals.rawDb.prepare(`SELECT id,name FROM campuses WHERE active=1 ORDER BY id`).all<{ id: number; name: string }>()).results;
+---
+
+<Admin title={lang === 'zh' ? 'Planning Center 同步' : 'Planning Center sync'}>
+  <IdentityWorkspace locale={lang}>
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h1 class="font-display text-heading-md font-bold">{lang === 'zh' ? 'Planning Center 同步' : 'Planning Center sync'}</h1>
+      <p class="mt-2 text-sm text-ink-muted">{lang === 'zh' ? '只显示状态；凭据永不显示或写入数据库。' : 'Status only; credentials are never displayed or stored in the database.'}</p>
+    </div>
+    <button type="button" class={btn} id="planning-center-sync" disabled={!configured}>
+      {lang === 'zh' ? '立即同步（需近期重新验证）' : 'Sync now (recent step-up required)'}
+    </button>
+  </div>
+  <p class="mt-4 text-sm" id="planning-center-result" aria-live="polite"></p>
+  <section class={`mt-6 ${card}`}>
+    <h2 class="font-semibold">{lang === 'zh' ? '配置连接（需要近期重新验证）' : 'Configure connection (recent step-up required)'}</h2>
+    <p class="mt-1 text-sm text-ink-muted">{lang === 'zh' ? '系统只使用官方 API 地址，并在保存前验证组织归属。' : 'The official API endpoint is fixed, and organization ownership is verified before saving.'}</p>
+    <p class="mt-1 text-sm text-ink-muted">{lang === 'zh' ? '更换组织时，先暂停并停用旧连接；历史证据会保留，新连接会获得新的 ID。每个组织只能绑定一个当前校区。' : 'To change organizations, pause and disable the old connection first. Its evidence remains, and the replacement receives a new ID. One organization can have only one current campus binding.'}</p>
+    <form class="mt-4 flex flex-wrap items-end gap-3" id="planning-center-connection-form">
+      <label class="text-sm">{lang === 'zh' ? '校区' : 'Campus'}<select class="ml-2 rounded border border-border p-2" name="campusId">{campuses.map((campus) => <option value={campus.id}>{campus.name} ({campus.id})</option>)}</select></label>
+      <label class="text-sm">{lang === 'zh' ? '组织 ID' : 'Organization ID'}<input class="ml-2 rounded border border-border p-2" name="organizationId" inputmode="numeric" pattern="[0-9]{1,32}" required /></label>
+      <button class={btn} type="submit" disabled={!configured}>{lang === 'zh' ? '验证并保存' : 'Verify and save'}</button>
+    </form>
+    <p class="mt-2 text-sm" id="planning-center-connection-result" aria-live="polite"></p>
+  </section>
+  <section class={`mt-6 ${card}`}>
+    <p class="text-sm">{configured ? (lang === 'zh' ? '凭据已配置' : 'Credentials configured') : (lang === 'zh' ? '凭据未配置' : 'Credentials not configured')}</p>
+    <div class="mt-4 overflow-x-auto"><table class="w-full border-collapse"><thead><tr><th class={th}>ID</th><th class={th}>{lang === 'zh' ? '校区' : 'Campus'}</th><th class={th}>State</th><th class={th}>{lang === 'zh' ? '映射' : 'Mappings'}</th><th class={th}>{lang === 'zh' ? '待审核' : 'Review'}</th><th class={th}>{lang === 'zh' ? '最近成功' : 'Last success'}</th></tr></thead>
+      <tbody>{connections.length === 0 ? <tr><td class={td} colspan="6">{lang === 'zh' ? '尚未配置连接。' : 'No connections configured.'}</td></tr> : connections.map((row) => <tr class="border-t border-border"><td class={td}>{row.id}</td><td class={td}>{row.campus_id}</td><td class={td}>{row.state}{row.last_error_code ? ` · ${row.last_error_code}` : ''}{row.state === 'active' && <button type="button" class="ml-2 underline" data-connection-action="pause" data-connection-id={row.id}>{lang === 'zh' ? '暂停' : 'Pause'}</button>}{row.state === 'paused' && <><button type="button" class="ml-2 underline" data-connection-action="resume" data-connection-id={row.id}>{lang === 'zh' ? '恢复' : 'Resume'}</button><button type="button" class="ml-2 text-danger underline" data-connection-action="disable" data-connection-id={row.id}>{lang === 'zh' ? '停用' : 'Disable'}</button></>}{row.state === 'error' && <><button type="button" class="ml-2 underline" data-connection-action="resume" data-connection-id={row.id}>{lang === 'zh' ? '重试' : 'Retry'}</button><button type="button" class="ml-2 underline" data-connection-action="pause" data-connection-id={row.id}>{lang === 'zh' ? '暂停' : 'Pause'}</button></>}</td><td class={td}>{row.mapping_count}</td><td class={td}>{row.review_count}</td><td class={td}>{row.last_success_at ?? '—'}</td></tr>)}</tbody>
+    </table></div>
+  </section>
+  <script>
+    const button = document.querySelector<HTMLButtonElement>('#planning-center-sync');
+    const result = document.querySelector<HTMLElement>('#planning-center-result');
+    const connectionResult = document.querySelector<HTMLElement>('#planning-center-connection-result');
+    const connectionForm = document.querySelector<HTMLFormElement>('#planning-center-connection-form');
+    connectionForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const response = await fetch('/api/planning-center/connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(new FormData(connectionForm))) });
+        connectionResult!.textContent = response.ok ? 'Saved' : ((await response.json() as { error?: string }).error ?? 'Unable to save');
+        if (response.ok) window.location.reload();
+      } catch { connectionResult!.textContent = 'Unable to save'; }
+    });
+    document.querySelectorAll<HTMLElement>('[data-connection-action]').forEach((element) => element.addEventListener('click', async () => {
+      const action = element.dataset.connectionAction; const connectionId = element.dataset.connectionId;
+      try { const response = await fetch('/api/planning-center/connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, connectionId }) }); if (response.ok) window.location.reload(); else connectionResult!.textContent = 'Unable to update'; } catch { connectionResult!.textContent = 'Unable to update'; }
+    }));
+    button?.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/planning-center/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const body = await response.json() as { error?: string; completed?: number; retried?: number };
+        result!.textContent = response.ok ? `Completed: ${body.completed ?? 0}; retried: ${body.retried ?? 0}` : (body.error ?? 'Unable to sync');
+      } catch { result!.textContent = 'Unable to sync'; }
+      button.disabled = false;
+    });
+  </script>
+  </IdentityWorkspace>
+</Admin>

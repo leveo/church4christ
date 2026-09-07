@@ -1,0 +1,130 @@
+---
+import { env } from 'cloudflare:workers';
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { beginContactChange, completeContactChange, recentStepUpContext } from '../../../lib/identityAccount';
+import { identityTrustedRequestContext, type IdentityAuthEnv } from '../../../lib/identityAuth';
+import { IDENTITY_DEVICE_COOKIE, resolveIdentityDeviceCookie } from '../../../lib/identityDeviceCookie';
+import { sendIdentityContactChangeOtp, sendIdentityOldContactNotice } from '../../../lib/identityNotify';
+import { clearSessionCookie } from '../../../lib/session';
+import { hasRecentStepUp } from '../../../lib/sessionAssurance';
+import { revokeIdentitySessions } from '../../../lib/identitySessionRevocation';
+import type { EmailEnv } from '../../../lib/email';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+
+const parsedLocale = parseLocale(Astro.params.locale ?? '');
+if (!parsedLocale) { Astro.response.status = 404; return Astro.rewrite('/404'); }
+const locale = parsedLocale;
+const user = Astro.locals.user!;
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
+type SecurityEnv = EmailEnv & IdentityAuthEnv;
+const vars = env as unknown as SecurityEnv;
+const db = Astro.locals.db;
+
+async function identityDeviceId(): Promise<string> {
+  const resolved = await resolveIdentityDeviceCookie(vars, Astro.cookies.get(IDENTITY_DEVICE_COOKIE)?.value);
+  if (resolved.replaced) {
+    Astro.cookies.set(IDENTITY_DEVICE_COOKIE, resolved.cookieValue, { path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 365 * 24 * 60 * 60 });
+  }
+  return resolved.deviceId;
+}
+function reauthPath(): string { return localePath(locale, `/reauth?next=${encodeURIComponent(localePath(locale, '/settings/security'))}`); }
+type PageState = 'idle' | 'sent' | 'review' | 'invalid';
+let state: PageState = 'idle'; let operationId = ''; let publicId = '';
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData(); const action = String(fd.get('_action') ?? '');
+  if (!campus) return Astro.redirect(localePath(locale, '/signin'), 303);
+  if (action === 'beginChange' || action === 'signoutAll') {
+    let proof;
+    try { proof = recentStepUpContext(user.id, Astro.locals.assurance!); }
+    catch { return Astro.redirect(reauthPath(), 303); }
+    if (action === 'signoutAll') {
+      const revoked = await revokeIdentitySessions(Astro.locals.rawDb, user.id);
+      if (revoked.revoked) {
+        return new Response(null, { status: 303, headers: {
+          location: localePath(locale, '/signin?signed_out=1'),
+          'set-cookie': clearSessionCookie(import.meta.env.PROD),
+        } });
+      }
+      return Astro.redirect(localePath(locale, '/signin'), 303);
+    }
+    try {
+      const begun = await beginContactChange(db, vars, { campusId: campus.id, personId: user.id, newEmail: String(fd.get('new_email') ?? ''),
+        recentStepUp: proof, requestContext: identityTrustedRequestContext(Astro.request.headers, await identityDeviceId()), source: 'web' });
+      await sendIdentityContactChangeOtp(vars, db, begun.delivery, locale);
+      state = 'sent'; operationId = begun.public.operationId; publicId = begun.delivery.publicId;
+    } catch { state = 'invalid'; }
+  } else if (action === 'completeChange') {
+    operationId = String(fd.get('operation_id') ?? ''); publicId = String(fd.get('public_id') ?? '');
+    const completed = await completeContactChange(db, vars, { campusId: campus.id, personId: user.id, operationId, publicId,
+      code: String(fd.get('code') ?? ''), source: 'web' });
+    if (completed.status === 'changed') {
+      await sendIdentityOldContactNotice(vars, db, { to: completed.notifyOldContact.to, locale });
+      Astro.cookies.set('c4c_session', '', { path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 0 });
+      return Astro.redirect(localePath(locale, '/signin?changed=1'), 303);
+    }
+    state = completed.status === 'review' ? 'review' : 'invalid';
+  }
+}
+
+// shared / reachability is a label for this member's own linked contact only.
+// This query never returns contact values that belong solely to another person.
+type ContactRow = { value: string; kind: 'email' | 'phone'; notificationEnabled: number; isOwner: number; shared: number };
+const { results: contacts } = await db.prepare(`SELECT cp.display_value value,cp.kind,l.notification_enabled AS "notificationEnabled",
+  CASE WHEN o.person_id=?1 THEN 1 ELSE 0 END AS "isOwner",
+  CASE WHEN EXISTS(SELECT 1 FROM person_contact_links other WHERE other.contact_point_id=l.contact_point_id AND other.person_id<>?1 AND other.ended_at IS NULL)
+    OR EXISTS(SELECT 1 FROM household_contact_links h WHERE h.contact_point_id=l.contact_point_id) THEN 1 ELSE 0 END shared
+  FROM person_contact_links l JOIN contact_points cp ON cp.id=l.contact_point_id
+  LEFT JOIN verified_contact_owners o ON o.contact_point_id=l.contact_point_id
+  WHERE l.person_id=?1 AND l.ended_at IS NULL ORDER BY l.is_primary DESC,cp.kind,cp.id`).bind(user.id).all<ContactRow>();
+const assurance = Astro.locals.assurance;
+const recentlyVerified = hasRecentStepUp(assurance);
+const verifiedAt = assurance?.stepUpTime ?? assurance?.authTime ?? null;
+---
+<Member title={t(locale, 'security.title')} locale={locale} active="security">
+  <div class="security-workspace">
+    <MemberPageHeader title={t(locale, 'security.title')} description={t(locale, 'security.intro')} />
+    {state === 'review' && <p class="mt-5 rounded-lg border border-border bg-surface-raised p-4" role="status">{t(locale, 'security.changeReview')}</p>}
+    {state === 'invalid' && <p class="mt-5 rounded-lg border border-danger bg-surface-raised p-4" role="alert">{t(locale, 'security.changeInvalid')}</p>}
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-semibold">{t(locale, 'security.verifiedSignIn')}</h2>
+      {contacts.filter((contact) => contact.isOwner === 1 && contact.kind === 'email').length ? (
+        <ul class="mt-3 space-y-2">{contacts.filter((contact) => contact.isOwner === 1 && contact.kind === 'email').map((contact) => <li class="text-sm">{contact.value}</li>)}</ul>
+      ) : <p class="mt-3 text-sm text-ink-muted">{t(locale, 'security.noVerifiedSignIn')}</p>}
+      <p class="mt-4 text-xs text-ink-muted">{t(locale, 'security.authMethod')}: {assurance?.authMethod ?? 'legacy'} · {t(locale, 'security.verifiedAt')}: {verifiedAt ?? t(locale, 'security.notVerified')}</p>
+    </section>
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-semibold">{t(locale, 'security.contactPoints')}</h2>
+      <p class="mt-2 text-sm text-ink-muted">{t(locale, 'security.contactSharedHint')}</p>
+      <ul class="mt-4 space-y-3">{contacts.filter((contact) => contact.isOwner === 0).map((contact) => (
+        <li class="rounded border border-border p-3 text-sm"><span>{contact.value}</span><span class="ml-2 text-ink-muted">{contact.shared ? t(locale, 'security.contactShared') : t(locale, 'security.contactUnverified')}{contact.notificationEnabled ? ` · ${t(locale, 'security.contactNotification')}` : ''}</span></li>
+      ))}</ul>
+    </section>
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-semibold">{t(locale, 'security.changeEmail')}</h2>
+      {state === 'sent' ? (
+        <form method="post" class="mt-4 space-y-4"><p role="status" class="text-sm text-ink-muted">{t(locale, 'security.changeSent')}</p><input type="hidden" name="_action" value="completeChange" /><input type="hidden" name="operation_id" value={operationId} /><input type="hidden" name="public_id" value={publicId} /><label class="block"><span class="block text-sm font-semibold">{t(locale, 'security.code')}</span><input name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" class="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2" /></label><button class="rounded-full bg-primary px-4 py-2.5 font-semibold text-on-primary">{t(locale, 'security.completeChange')}</button></form>
+      ) : (
+        <form method="post" class="mt-4 flex flex-wrap items-end gap-3"><input type="hidden" name="_action" value="beginChange" /><label class="block"><span class="block text-sm font-semibold">{t(locale, 'security.newEmail')}</span><input type="email" name="new_email" required autocomplete="email" class="mt-1 rounded-md border border-border bg-surface px-3 py-2" /></label><button class="rounded-full bg-primary px-4 py-2.5 font-semibold text-on-primary">{t(locale, 'security.beginChange')}</button>{!recentlyVerified && <a href={reauthPath()} class="text-sm font-semibold text-primary">{t(locale, 'security.stepUpRequired')}</a>}</form>
+      )}
+    </section>
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 class="font-semibold">{t(locale, 'security.signOutAll')}</h2><p class="mt-2 text-sm text-ink-muted">{t(locale, 'security.signOutAllHint')}</p>
+      <form method="post" class="mt-4"><input type="hidden" name="_action" value="signoutAll" /><button class="rounded-full border border-border px-4 py-2.5 font-semibold">{t(locale, 'security.signOutAll')}</button>{!recentlyVerified && <a href={reauthPath()} class="ml-3 text-sm font-semibold text-primary">{t(locale, 'security.stepUpRequired')}</a>}</form>
+    </section>
+  </div>
+</Member>
+
+<style>
+  .security-workspace section { scroll-margin-top: 7rem; }
+  .security-workspace li { overflow-wrap: anywhere; }
+  .security-workspace form label { min-width: 0; max-width: 100%; }
+  .security-workspace input { width: 100%; }
+  .security-workspace button { min-height: 44px; border-radius: var(--radius-md); }
+</style>

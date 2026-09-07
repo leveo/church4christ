@@ -153,7 +153,7 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
   });
 
   beforeEach(async () => {
-    await sql.unsafe('TRUNCATE TABLE household_members, households, people RESTART IDENTITY CASCADE');
+    await sql.unsafe('TRUNCATE TABLE contact_points, household_members, households, people RESTART IDENTITY CASCADE');
   });
 
   afterAll(async () => {
@@ -215,7 +215,7 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
 
     expect(result).toEqual({
       errors: [2, 3].map((row) => ({
-        severity: 'error', code: 'email_exists', row, field: 'email',
+        severity: 'error', code: 'identity_review_required', row, field: 'email',
       })),
       warnings: [{
         severity: 'warning', code: 'household_name_exists', row: 4, field: 'household_name',
@@ -252,8 +252,8 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
 
     expect(result).toEqual({
       errors: [
-        { severity: 'error', code: 'email_exists', row: 2, field: 'email' },
-        { severity: 'error', code: 'email_exists', row: 3, field: 'email' },
+        { severity: 'error', code: 'identity_review_required', row: 2, field: 'email' },
+        { severity: 'error', code: 'identity_review_required', row: 3, field: 'email' },
       ],
       warnings: [
         { severity: 'warning', code: 'household_name_exists', row: 4, field: 'household_name' },
@@ -272,7 +272,8 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
       SELECT id, first_name, last_name, email, role, active, lang,
              birthday, address, membership_status, joined_on,
              finance, super_admin, admin_areas, session_epoch, calendar_token,
-             avatar_url, deleted_at, pending_email, stripe_customer_id
+             avatar_url, deleted_at, pending_email, stripe_customer_id,
+             identity_state, auth_disabled_at, provisional_source
       FROM people ORDER BY id
     `).all<Record<string, unknown>>();
     expect(people.map((person) => ({
@@ -299,7 +300,18 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
       && person.avatar_url === null
       && person.deleted_at === null
       && person.pending_email === null
-      && person.stripe_customer_id === null)).toBe(true);
+      && person.stripe_customer_id === null
+      && person.identity_state === 'provisional'
+      && typeof person.auth_disabled_at === 'string'
+      && person.provisional_source === 'people_import')).toBe(true);
+    const { results: contacts } = await db.prepare(`SELECT p.email,l.notification_enabled,
+      CASE WHEN o.person_id IS NULL THEN 0 ELSE 1 END AS has_owner
+      FROM people p JOIN person_contact_links l ON l.person_id=p.id AND l.ended_at IS NULL
+      JOIN contact_points c ON c.id=l.contact_point_id AND c.kind='email'
+      LEFT JOIN verified_contact_owners o ON o.contact_point_id=c.id
+      ORDER BY p.id`).all<{ notification_enabled: number; has_owner: number }>();
+    expect(contacts).toHaveLength(5);
+    expect(contacts.every((contact) => contact.notification_enabled === 1 && contact.has_owner === 0)).toBe(true);
     expect(people[0]).toMatchObject({
       birthday: '1990-02-03',
       address: "1 Main St?; DROP TABLE people; --",
@@ -520,7 +532,7 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     expect(await tableCounts()).toEqual({ people: 0, households: 0, members: 0 });
   });
 
-  it('executes the maximum model in one 500-statement batch with every value bound', async () => {
+  it('executes the maximum identity-safe model in one batch with every value bound', async () => {
     const records: Array<Partial<Record<PeopleImportHeader, string>>> = [];
     for (let family = 0; family < 100; family += 1) {
       const primary = family * 2;
@@ -543,23 +555,29 @@ describe.skipIf(!hasPg)('people import persistence (Postgres)', () => {
     });
 
     expect(trackingDb.batchCalls).toBe(1);
-    expect(trackingDb.lastBatchSize).toBe(500);
+    expect(trackingDb.lastBatchSize).toBe(900);
     const preflightCalls = trackingDb.prepared.filter((call) => call.operation === 'all');
     const writeCalls = trackingDb.prepared.filter((call) => call.operation === null);
     const personCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO people'));
+    const contactCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO contact_points'));
+    const contactLinkCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO person_contact_links'));
     const householdCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO households'));
     const membershipCalls = writeCalls.filter((call) => call.sql.startsWith('INSERT INTO household_members'));
     const primaryMembershipCalls = membershipCalls.filter((call) => call.sql.includes('currval('));
     const otherMembershipCalls = membershipCalls.filter((call) => !call.sql.includes('currval('));
 
-    expect(preflightCalls).toHaveLength(2);
-    expect(preflightCalls.map((call) => call.values.length)).toEqual([0, 0]);
-    expect(writeCalls).toHaveLength(500);
+    expect(preflightCalls).toHaveLength(3);
+    expect(preflightCalls.map((call) => call.values.length)).toEqual([0, 0, 0]);
+    expect(writeCalls).toHaveLength(900);
     expect(personCalls).toHaveLength(200);
+    expect(contactCalls).toHaveLength(200);
+    expect(contactLinkCalls).toHaveLength(200);
     expect(householdCalls).toHaveLength(100);
     expect(primaryMembershipCalls).toHaveLength(100);
     expect(otherMembershipCalls).toHaveLength(100);
     expect(personCalls.every((call) => call.values.length === 11)).toBe(true);
+    expect(contactCalls.every((call) => call.values.length === 2)).toBe(true);
+    expect(contactLinkCalls.every((call) => call.values.length === 1)).toBe(true);
     expect(householdCalls.every((call) => call.values.length === 3)).toBe(true);
     expect(primaryMembershipCalls.every((call) => call.values.length === 3)).toBe(true);
     expect(otherMembershipCalls.every((call) => call.values.length === 4)).toBe(true);

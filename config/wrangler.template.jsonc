@@ -9,7 +9,20 @@
   "triggers": { "crons": @@CRON_LIST@@ },
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["@@EMAIL_FROM@@"] }],
   "vars": {
+    // IDENTITY_VERIFICATION_SECRET is deliberately a Worker secret binding, never a `vars` value.
+    // Set it with `wrangler secret put IDENTITY_VERIFICATION_SECRET` (32–1024 characters).
+    // IDENTITY_SOURCE_KEY_SECRET is a separate stable Worker secret. Set it with
+    // `wrangler secret put IDENTITY_SOURCE_KEY_SECRET` (32–1024 characters); never rotate it in place.
+    // IDENTITY_SOURCE_KEY_ID is pinned in the database with a secret verification tag.
+    // IDENTITY_RECOVERY_KEY_SECRET is a separately stable Worker secret for recovery veto links
+    // and queued mail. IDENTITY_RECOVERY_KEY_ID is database-pinned; neither rotates in place.
+    // Planning Center uses the two-field PAT (client id + secret) via Basic Auth. Set
+    // PLANNING_CENTER_CLIENT_ID, PLANNING_CENTER_SECRET, and PLANNING_CENTER_WEBHOOK_SECRET
+    // with `wrangler secret put`; never place them in vars, the database, receipts, or logs.
     "APP_ORIGIN": "@@APP_ORIGIN@@",
+    "IDENTITY_SOURCE_KEY_ID": "v1",
+    "IDENTITY_RECOVERY_KEY_ID": "v1",
+    "IDENTITY_RECOVERY_COOLING_HOURS": "24",
     "EMAIL_FROM": "@@EMAIL_FROM@@",
     "DB_BACKEND": "@@DB_BACKEND@@"@@STRIPE_MODE_SUFFIX@@
     // Optional Google Classroom real-time bindings. Set all three together,

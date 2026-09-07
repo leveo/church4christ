@@ -3,11 +3,7 @@
 // network retries converge on one seat and one Stripe idempotency key.
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import {
-  StripeError,
-  createRegistrationCheckoutFromParams,
-  type StripeEnv,
-} from '../../../lib/stripe';
+import { createRegistrationCheckoutFromParams, type StripeEnv } from '../../../lib/stripe';
 import {
   attachRegistrationCheckoutRequest,
   cancelRegistrationCheckoutRequest,
@@ -23,27 +19,12 @@ import {
   createRegistration,
 } from '../../../lib/regDb';
 import { parseLocale, type Locale } from '../../../lib/locales';
+import { continuationPayloadDigest, signedInExistingIdentitySourceContext, signedInIdentitySourceContext, type IdentityBusinessContinuationEnv } from '../../../lib/identityBusinessContinuation';
+import { classifyRegistrationCheckoutFailure } from '../../../lib/registrationCheckoutFailure';
 
 export const prerender = false;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const AMBIGUOUS_4XX = new Set([408, 409, 424, 429]);
-
-export type RegistrationCheckoutFailureAction = 'cancel' | 'recover';
-
-/** Apply the reviewed compensation table without inspecting human messages. */
-export function classifyRegistrationCheckoutFailure(error: unknown): RegistrationCheckoutFailureAction {
-  if (!(error instanceof StripeError)) return 'recover';
-  if (error.stage === 'configuration') return 'cancel';
-  if (error.stage !== 'response') return 'recover';
-  if (error.code === 'stripe_response_invalid' || error.code === 'live_mode_disabled') return 'recover';
-  return error.status !== undefined
-    && error.status >= 400
-    && error.status < 500
-    && !AMBIGUOUS_4XX.has(error.status)
-    ? 'cancel'
-    : 'recover';
-}
+export { classifyRegistrationCheckoutFailure } from '../../../lib/registrationCheckoutFailure';
 
 interface RegistrationSubmitDeps {
   stripeEnv: StripeEnv;
@@ -56,6 +37,10 @@ interface RegistrationSubmitDeps {
   createCheckout: typeof createRegistrationCheckoutFromParams;
   attachRequest: typeof attachRegistrationCheckoutRequest;
   cancelRequest: typeof cancelRegistrationCheckoutRequest;
+  identityEnv: IdentityBusinessContinuationEnv;
+  attachIdentitySource: typeof signedInIdentitySourceContext;
+  attachExistingIdentitySource: typeof signedInExistingIdentitySourceContext;
+  getSessionEpoch(db: App.Locals['db'], personId: number): Promise<number | null>;
 }
 
 const defaultDeps: RegistrationSubmitDeps = {
@@ -69,6 +54,11 @@ const defaultDeps: RegistrationSubmitDeps = {
   createCheckout: createRegistrationCheckoutFromParams,
   attachRequest: attachRegistrationCheckoutRequest,
   cancelRequest: cancelRegistrationCheckoutRequest,
+  identityEnv: env as unknown as IdentityBusinessContinuationEnv,
+  attachIdentitySource: signedInIdentitySourceContext,
+  attachExistingIdentitySource: signedInExistingIdentitySourceContext,
+  getSessionEpoch: (db, personId) => db.prepare('SELECT session_epoch FROM people WHERE id=?1 AND active=1 AND deleted_at IS NULL')
+    .bind(personId).first<number>('session_epoch'),
 };
 
 /** Injectable route factory keeps ordering and failure policy testable without Stripe. */
@@ -87,6 +77,11 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
 
     const eventId = Number(form.get('event_id'));
     if (!Number.isInteger(eventId) || eventId <= 0) return backToList(locale);
+    const user = locals.user;
+    if (!user) return redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/register/${eventId}`)}`);
+    const campusId = locals.campusMode === 'campus' ? locals.campus?.id : 1;
+    const epoch = await deps.getSessionEpoch(locals.db, user.id);
+    if (!campusId || epoch === null || !Number.isSafeInteger(epoch) || epoch < 0) return back(locale, eventId, 'invalid');
 
     const processResolution = async (
       requestId: string,
@@ -140,6 +135,9 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
         return back(locale, eventId, 'invalid');
       }
       try {
+        await deps.attachExistingIdentitySource(locals.rawDb, deps.identityEnv, {
+          campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
+        });
         return await processResolution(
           requestId,
           await deps.continueRequest(locals.db, requestId, eventId),
@@ -153,20 +151,12 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
     if (!event) return back(locale, eventId, 'closed');
     const paid = event.price_cents !== null && event.price_cents > 0;
 
-    const user = locals.user;
     let personId: number | null;
     let name: string;
     let email: string;
-    if (user) {
-      personId = user.id;
-      name = user.displayName;
-      email = user.email;
-    } else {
-      personId = null;
-      name = String(form.get('name') ?? '').trim();
-      email = String(form.get('email') ?? '').trim();
-      if (!name || !EMAIL_RE.test(email)) return back(locale, eventId, 'invalid');
-    }
+    personId = user.id;
+    name = user.displayName;
+    email = user.email;
 
     const questions = await deps.listQuestions(locals.db, locale, eventId);
     const answerForm: Record<string, string | string[]> = {};
@@ -178,8 +168,19 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       return back(locale, eventId, 'invalid');
     }
 
+    let requestId: string;
+    try {
+      requestId = parseCheckoutRequestId(form.get('checkoutRequestId'));
+    } catch {
+      return back(locale, eventId, 'invalid');
+    }
+
     if (!paid) {
       try {
+        await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
+          campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
+          sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: 0, currency: event.currency, locale, answers }), name, email,
+        });
         await deps.createRegistration(locals.db, {
           eventId,
           personId,
@@ -197,12 +198,10 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       return redirect(`/${locale}/register/done?ok=1`);
     }
 
-    let requestId: string;
-    try {
-      requestId = parseCheckoutRequestId(form.get('checkoutRequestId'));
-    } catch {
-      return back(locale, eventId, 'invalid');
-    }
+    await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
+      campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
+      sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: event.price_cents!, currency: event.currency, locale, answers }), name, email,
+    });
 
     let resolution: Awaited<ReturnType<typeof resolveRegistrationCheckoutRequest>>;
     try {

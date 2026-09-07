@@ -1,5 +1,7 @@
 import type { AppDb, AppStatement } from './appDb';
 import { isUniqueViolation } from './adminDb';
+import { emailIdentityCollisionMask } from './identityCollision';
+import { normalizeEmail } from './identityNormalize';
 import type { DbBackend } from './dbProvider';
 import {
   PEOPLE_IMPORT_LIMITS,
@@ -15,6 +17,7 @@ export type { PeopleImportValidationResult } from './peopleImport';
 
 export type PeopleImportDbIssueCode =
   | 'email_exists'
+  | 'identity_review_required'
   | 'household_name_exists'
   | 'issues_truncated';
 
@@ -180,21 +183,18 @@ export async function preflightPeopleImport(
     return { errors: [], warnings: [] };
   }
 
-  const emailCandidates = model.people.map((person) => ({
-    identity: canonicalIdentity(person.email),
-    row: person.row,
-  }));
+  const emailCandidates = model.people.map((person) => ({ identity: person.email, row: person.row }));
   const householdCandidates = model.households.map((household) => ({
     identity: canonicalIdentity(household.name),
     row: householdRow(household),
   }));
-  const existingEmails = await existingIdentities(db, 'email', emailCandidates);
+  const emailCollisions = await emailIdentityCollisionMask(db, emailCandidates.map((candidate) => candidate.identity));
   const existingHouseholds = await existingIdentities(db, 'household_name', householdCandidates);
 
   const issues: PeopleImportDbIssue[] = [];
-  for (const candidate of emailCandidates) {
-    if (!existingEmails.has(candidate.identity)) continue;
-    issues.push({ severity: 'error', code: 'email_exists', row: candidate.row, field: 'email' });
+  for (const [index, candidate] of emailCandidates.entries()) {
+    if (!emailCollisions[index]) continue;
+    issues.push({ severity: 'error', code: 'identity_review_required', row: candidate.row, field: 'email' });
   }
   for (const candidate of householdCandidates) {
     if (!existingHouseholds.has(candidate.identity)) continue;
@@ -210,9 +210,11 @@ export async function preflightPeopleImport(
 
 const PERSON_INSERT_SQL = `INSERT INTO people
   (first_name, last_name, display_name, email, phone, role, active, lang,
-   birthday, address, membership_status, joined_on)
+   birthday, address, membership_status, joined_on,
+   identity_state, auth_disabled_at, provisional_source)
 VALUES
-  (?1, ?2, ?3, ?4, ?5, 'member', ?6, ?7, ?8, ?9, ?10, ?11)`;
+  (?1, ?2, ?3, ?4, ?5, 'member', ?6, ?7, ?8, ?9, ?10, ?11,
+   'provisional', datetime('now'), 'people_import')`;
 
 const HOUSEHOLD_INSERT_SQL =
   'INSERT INTO households (name, address, phone) VALUES (?1, ?2, ?3)';
@@ -233,11 +235,13 @@ function householdIdentityExpression(backend: DbBackend): string {
 }
 
 function personInsert(db: AppDb, person: PeopleImportPerson): AppStatement {
+  const email = normalizeEmail(person.email);
+  if (email === null) throw new PeopleImportPersistenceError();
   return db.prepare(PERSON_INSERT_SQL).bind(
     person.firstName ?? '',
     person.lastName ?? '',
     person.displayName,
-    person.email,
+    email,
     person.phone,
     person.active ? 1 : 0,
     person.language,
@@ -246,6 +250,29 @@ function personInsert(db: AppDb, person: PeopleImportPerson): AppStatement {
     person.membershipStatus,
     person.joinedOn,
   );
+}
+
+function contactPointInsert(db: AppDb, person: PeopleImportPerson): AppStatement {
+  const email = normalizeEmail(person.email);
+  if (email === null) throw new PeopleImportPersistenceError();
+  return db.prepare(`INSERT INTO contact_points(kind,normalized_value,display_value)
+    VALUES('email',?1,?2)`).bind(email, person.email.trim());
+}
+
+function notificationContactLinkInsert(db: AppDb, person: PeopleImportPerson): AppStatement {
+  const email = normalizeEmail(person.email);
+  if (email === null) throw new PeopleImportPersistenceError();
+  return db.prepare(`INSERT INTO person_contact_links
+    (person_id,contact_point_id,kind,source,notification_enabled)
+    SELECT p.id,c.id,'email','people_import',1
+    FROM people p JOIN contact_points c ON c.kind='email' AND c.normalized_value=?1
+    WHERE p.email=?1`).bind(email);
+}
+
+function personStatements(db: AppDb, person: PeopleImportPerson): AppStatement[] {
+  // A plain contact-point insert is an atomic race guard: a canonical contact
+  // appearing after preflight aborts the whole batch instead of auto-linking.
+  return [contactPointInsert(db, person), personInsert(db, person), notificationContactLinkInsert(db, person)];
 }
 
 function householdRole(person: PeopleImportPerson): 'adult' | 'child' {
@@ -367,7 +394,7 @@ export async function commitPeopleImport(
     }
 
     const statements = [
-      ...model.people.map((person) => personInsert(db, person)),
+      ...model.people.flatMap((person) => personStatements(db, person)),
       ...model.households.flatMap((household) =>
         householdStatements(db, identityExpression, household)),
     ];

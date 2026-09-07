@@ -45,10 +45,17 @@ function form(overrides: Record<string, string> = {}): FormData {
   return data;
 }
 
-function context(data: FormData) {
+function context(
+  data: FormData,
+  user: null | { id: number; displayName: string; email: string } = {
+    id: 9,
+    displayName: String(data.get('name') ?? 'Ada Lovelace'),
+    email: String(data.get('email') ?? 'ada@example.com'),
+  },
+) {
   return {
     request: new Request('https://church.example/api/register/submit', { method: 'POST', body: data }),
-    locals: { modules: new Set(['registration']), locale: 'en', user: null, db: {} },
+    locals: { modules: new Set(['registration']), locale: 'en', user, rawDb: {}, campusMode: 'single', db: {} },
   } as never;
 }
 
@@ -74,11 +81,46 @@ function deps(overrides: Record<string, unknown> = {}) {
     })),
     attachRequest: vi.fn(async () => true),
     cancelRequest: vi.fn(async () => true),
+    attachIdentitySource: vi.fn(async () => ({})),
+    attachExistingIdentitySource: vi.fn(async () => ({})),
+    getSessionEpoch: vi.fn(async () => 0),
     ...overrides,
   };
 }
 
 describe('stable registration Checkout browser identity', () => {
+  it.each([
+    ['free', form()],
+    ['paid', form()],
+    ['continue', form({ action: 'continue' })],
+  ])('rejects an anonymous direct %s POST before any business or Stripe work', async (kind, data) => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => event(kind === 'free' ? 0 : 2500)),
+    });
+    const response = await createRegistrationSubmitHandler(dependencies as never)(context(data, null));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/en/signin?next=%2Fen%2Fregister%2F7');
+    expect(dependencies.getOpenEvent).not.toHaveBeenCalled();
+    expect(dependencies.createRegistration).not.toHaveBeenCalled();
+    expect(dependencies.resolveRequest).not.toHaveBeenCalled();
+    expect(dependencies.continueRequest).not.toHaveBeenCalled();
+    expect(dependencies.createCheckout).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['free', form(), 0, 'attachIdentitySource'],
+    ['paid', form(), 2500, 'attachIdentitySource'],
+    ['continue', form({ action: 'continue', identitySource: '0' }), 2500, 'attachExistingIdentitySource'],
+  ] as const)('always attaches signed-in %s registration before its business sink', async (_kind, data, price, attachment) => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => event(price)) });
+    await createRegistrationSubmitHandler(dependencies as never)(context(data));
+    expect(dependencies[attachment]).toHaveBeenCalledOnce();
+    const sink = attachment === 'attachExistingIdentitySource'
+      ? dependencies.continueRequest
+      : price === 0 ? dependencies.createRegistration : dependencies.resolveRequest;
+    expect(dependencies[attachment].mock.invocationCallOrder[0]).toBeLessThan(sink.mock.invocationCallOrder[0]);
+  });
+
   it('keeps a full paid registration form available only for a valid waiting request identity', () => {
     expect(registrationCheckoutRenderPolicy({
       paid: true,
@@ -144,13 +186,13 @@ describe('stable registration Checkout browser identity', () => {
     },
   );
 
-  it('keeps free registration on the existing confirmed flow without requiring a request id', async () => {
+  it('requires the server-rendered idempotent source key before free registration', async () => {
     const dependencies = deps({ getOpenEvent: vi.fn(async () => event(0)) });
     const data = form();
     data.delete('checkoutRequestId');
     const response = await createRegistrationSubmitHandler(dependencies as never)(context(data));
-    expect(response.headers.get('location')).toBe('/en/register/done?ok=1');
-    expect(dependencies.createRegistration).toHaveBeenCalledWith({}, expect.objectContaining({ status: 'confirmed' }));
+    expect(response.headers.get('location')).toBe('/en/register/7?error=invalid');
+    expect(dependencies.createRegistration).not.toHaveBeenCalled();
     expect(dependencies.resolveRequest).not.toHaveBeenCalled();
   });
 

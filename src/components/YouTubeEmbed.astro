@@ -42,15 +42,15 @@ const playLabel = t(locale, 'sermons.play').replace('{title}', () => title);
         src={thumb}
         alt=""
         loading="lazy"
-        class="h-full w-full object-cover"
+        class="relative z-10 h-full w-full object-cover"
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
       />}
-    <div class={`${loadThumbnail ? 'hidden' : 'flex'} h-full w-full items-center justify-center bg-primary-soft text-on-primary-soft`} aria-hidden="true">
-      {posterImage ? <DesignImage image={posterImage} class="h-full w-full object-cover" /> : <svg viewBox="0 0 24 24" class="h-16 w-16 opacity-40" fill="currentColor" aria-hidden="true">
+    <div class={`${loadThumbnail && !posterImage ? 'hidden' : 'flex'} absolute inset-0 h-full w-full items-center justify-center bg-primary-soft text-on-primary-soft`} aria-hidden="true">
+      {posterImage ? <DesignImage image={posterImage} eager class="h-full w-full object-cover" /> : <svg viewBox="0 0 24 24" class="h-16 w-16 opacity-40" fill="currentColor" aria-hidden="true">
         <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
       </svg>}
     </div>
-    <span class="absolute inset-0 grid place-items-center">
+    <span class="absolute inset-0 z-20 grid place-items-center">
       <span
         class="grid h-14 w-14 place-items-center rounded-full bg-accent text-on-accent shadow-md transition-colors group-hover:bg-accent-hover motion-reduce:transition-none"
       >

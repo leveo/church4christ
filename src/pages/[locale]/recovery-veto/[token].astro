@@ -1,0 +1,33 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import ConfirmationPanel from '../../../components/ui/ConfirmationPanel.astro';
+import { btn } from '../../../lib/adminUi';
+import type { IdentityRecoveryKeyEnv } from '../../../lib/identityRecoveryKey';
+import { peekIdentityRecoveryVeto, vetoIdentityRecovery } from '../../../lib/identityRecovery';
+import { t } from '../../../lib/i18n';
+import { parseLocale } from '../../../lib/locales';
+
+Astro.response.headers.set('referrer-policy', 'no-referrer');
+Astro.response.headers.set('cache-control', 'no-store');
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const token = Astro.params.token ?? '';
+const vars = env as unknown as IdentityRecoveryKeyEnv;
+const db = Astro.locals.rawDb;
+let state: 'confirm' | 'done' | 'invalid' = 'invalid';
+if (Astro.request.method === 'POST') {
+  state = (await vetoIdentityRecovery(db, vars, token, new Date().toISOString().slice(0, 19).replace('T', ' '))).vetoed ? 'done' : 'invalid';
+} else {
+  state = (await peekIdentityRecoveryVeto(db, vars, token, new Date().toISOString().slice(0, 19).replace('T', ' '))).valid ? 'confirm' : 'invalid';
+}
+---
+
+<Base title={t(locale, 'recovery.veto.title')} locale={locale} noindex privateMetadata>
+  <ConfirmationPanel title={t(locale, 'recovery.veto.title')} body={t(locale, state === 'confirm' ? 'recovery.veto.body' : state === 'done' ? 'recovery.veto.done' : 'recovery.veto.invalid')} icon="lock">
+    {state === 'confirm' && <form method="post"><button type="submit" class={btn}>{t(locale, 'recovery.veto.submit')}</button></form>}
+  </ConfirmationPanel>
+</Base>

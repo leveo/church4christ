@@ -3,8 +3,9 @@ import { memberNavigation } from '../src/lib/memberNavigation';
 import { moduleForPath } from '../src/lib/modules';
 
 describe('member navigation', () => {
-  it('has a profile destination even without optional modules', () => {
-    expect(memberNavigation(new Set(), 'en').map(link => link.key)).toEqual(['profile']);
+  it('keeps profile and security available without optional modules', () => {
+    expect(memberNavigation(new Set(), 'en').map(link => link.key)).toEqual(['profile', 'security']);
+    expect(memberNavigation(new Set(), 'en').find(link => link.key === 'security')?.href).toBe('/en/settings/security');
   });
   it('does not send portal-only members to serving routes', () => {
     const links = memberNavigation(new Set(['portal']), 'en');

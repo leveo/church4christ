@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertNoScreenshotSessionInBundle } from '../../../scripts/check-production-bundle.mjs';
+import { assertNoScreenshotSessionInBundle, assertNoTestOnlyEmailSinkInBundle } from '../../../scripts/check-production-bundle.mjs';
 
 const roots: string[] = [];
 
@@ -33,5 +33,12 @@ describe('production bundle screenshot-session exclusion', () => {
     expect(pkg.scripts.build).toContain('scripts/check-production-bundle.mjs');
     expect(middleware).toMatch(/if \([^\n]*import\.meta\.env\.DEV[^\n]*\)[\s\S]*await import\('\.\/lib\/screenshotSessionDev'\)/);
     expect(readFileSync('src/lib/session.ts', 'utf8')).not.toContain('verifySessionWithScreenshotFallback');
+  });
+
+  it('rejects any production bundle containing the built-worker email test sink', () => {
+    expect(() => assertNoTestOnlyEmailSinkInBundle(bundle('const binding="EMAIL_E2E_SINK"')))
+      .toThrow(/test-only email sink.*entry\.mjs/i);
+    expect(() => assertNoTestOnlyEmailSinkInBundle(bundle('export const worker = "production"')))
+      .not.toThrow();
   });
 });

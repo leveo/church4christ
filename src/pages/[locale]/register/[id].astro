@@ -113,6 +113,7 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
         {ownsWaitingSeat ? (
           <form method="post" action="/api/register/submit" class="mt-6">
             <input type="hidden" name="locale" value={locale} />
+            {user && <input type="hidden" name="identitySource" value="1" />}
             <input type="hidden" name="event_id" value={event.id} />
             <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
             <input type="hidden" name="action" value="continue" />
@@ -121,8 +122,11 @@ const when = event ? `${formatDate(event.starts_at.slice(0, 10), locale)} ${even
         ) : isFull ? (
           <p class={`${badge} ${badgeInactive} mt-6`}>{t(locale, 'register.full')}</p>
         ) : (
-          <form method="post" action="/api/register/submit" class="mt-6 space-y-4">
+          <form method="post" action={user ? "/api/register/submit" : "/api/identity/continuation/start"} class="mt-6 space-y-4">
             <input type="hidden" name="locale" value={locale} />
+            {!user && <input type="hidden" name="flow" value="registration" />}
+            {user && <input type="hidden" name="identitySource" value="1" />}
+            {!user && <input type="hidden" name="identityIntentId" value={crypto.randomUUID()} />}
             <input type="hidden" name="event_id" value={event.id} />
             <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
 

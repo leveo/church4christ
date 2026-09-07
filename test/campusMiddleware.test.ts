@@ -108,7 +108,7 @@ describe('campus middleware boundary', () => {
     const next = vi.fn(async () => {
       const scoped = ctx.locals.db as AppDb;
       const rows = await scoped.prepare('SELECT starts_at FROM events').all();
-      return Response.json({ rows: rows.results, user: ctx.locals.user });
+      return Response.json({ rows: rows.results, user: ctx.locals.user, assurance: ctx.locals.assurance });
     });
 
     const response = await onRequest(ctx as never, next);
@@ -124,7 +124,14 @@ describe('campus middleware boundary', () => {
         campusMode: 'campus',
         campus: { id: 82001, slug: 'north-mw' },
       },
+      assurance: {
+        schemaVersion: 2,
+        authMethod: 'legacy',
+        authTime: null,
+        stepUpTime: null,
+      },
     });
+    expect((ctx.locals.user as Record<string, unknown>)).not.toHaveProperty('sessionId');
   });
 
   it('denies a non-master user who explicitly selects an unauthorized campus', async () => {

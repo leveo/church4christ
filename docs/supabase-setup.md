@@ -23,6 +23,13 @@ Local Supabase requires a local Postgres/Supabase database or a hosted Supabase 
 Deploying requires both Cloudflare and Supabase. There is no automated D1↔Supabase content
 migration, so this guide does not promise a lossless backend switch for an existing site.
 
+Use **UTC for PostgreSQL sessions**, including a locally hosted test database. Identity
+approval timestamps are stored as UTC text and the current database guards compare them
+with the session clock. Check `SHOW timezone;` with the application connection. If needed,
+set the application's database or connection role to UTC and reconnect before using
+identity approval/recovery. The church's displayed service dates still use the site's
+time-zone rules; they are separate from this database requirement.
+
 > **New to all of this?** Read [`cloudflare-setup.md`](./cloudflare-setup.md) first — it
 > explains, in plain language, what Cloudflare is and how its plan allowances work. Guided
 > setup does not require reading the manual deployment sequence first. If you are tracing

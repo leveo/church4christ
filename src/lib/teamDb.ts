@@ -14,7 +14,6 @@
 // the target team (via SessionUser.leaderTeamIds or planDb.canEditPosition)
 // before invoking a mutation here.
 import type { AppDb, SnapshotBackend } from './appDb';
-import { isUniqueViolation } from './adminDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
 import { listPlans, type PlanListRow } from './planDb';
@@ -482,46 +481,6 @@ export async function createApplication(
 }
 
 /**
- * Signed-out apply support: the person for `email` (stored lowercased), or a
- * minimal new one (display_name = name, role 'member', active 1). An existing
- * row — even a soft-deleted one — is returned as-is: applying must never
- * resurrect or overwrite an account. The UNIQUE(email) race between the SELECT
- * and INSERT resolves by re-reading the winner's row.
- */
-export async function findOrCreatePersonByEmail(
-  db: AppDb,
-  email: string,
-  name: string,
-  phone: string | null,
-): Promise<number> {
-  const normalized = email.trim().toLowerCase();
-  const existing = await db
-    .prepare(`SELECT id FROM people WHERE email = ?`)
-    .bind(normalized)
-    .first<{ id: number }>();
-  if (existing) return existing.id;
-  try {
-    const created = await db
-      .prepare(
-        `INSERT INTO people (display_name, first_name, last_name, email, phone, role, active)
-         VALUES (?1, '', '', ?2, ?3, 'member', 1) RETURNING id`,
-      )
-      .bind(name, normalized, phone)
-      .first<{ id: number }>();
-    return created!.id;
-  } catch (e) {
-    if (isUniqueViolation(e)) {
-      const winner = await db
-        .prepare(`SELECT id FROM people WHERE email = ?`)
-        .bind(normalized)
-        .first<{ id: number }>();
-      if (winner) return winner.id;
-    }
-    throw e;
-  }
-}
-
-/**
  * Approve/reject a pending application. Pass `expectedTeamId` (the team the
  * caller is authorized for) so a leader can't decide another team's application
  * by posting its id. The status flip (guarded by `status = 'P'` so a
@@ -611,7 +570,7 @@ export async function listPotentialVolunteers(
        FROM candidates
        JOIN people ON people.id = candidates.person_id AND people.active = 1 AND people.deleted_at IS NULL
        WHERE people.id NOT IN (SELECT person_id FROM team_members WHERE team_id = ?2)
-       GROUP BY people.id
+       GROUP BY people.id, people.display_name, people.email
        ORDER BY people.display_name`,
     )
     .bind(category, excludeTeamId)
@@ -677,15 +636,19 @@ export async function getMatrix(
       .all<MatrixNeedRow>(),
     db
       .prepare(
-        `SELECT DISTINCT pos.id AS position_id, COALESCE(pos_l.name, pos_d.name) AS position_name,
-                tm.id AS team_id, COALESCE(tm_l.name, tm_d.name) AS team_name
-         FROM plan_positions pp
-         JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
-         ${posJ.joins}
-         JOIN teams tm ON tm.id = pos.team_id AND tm.deleted_at IS NULL
-         ${tmJ.joins}
-         WHERE pp.plan_id IN (${placeholders})
-         ORDER BY tm.sort, tm.id, pos.sort, pos.id`,
+        `SELECT position_id, position_name, team_id, team_name
+         FROM (
+           SELECT DISTINCT pos.id AS position_id, COALESCE(pos_l.name, pos_d.name) AS position_name,
+                  tm.id AS team_id, COALESCE(tm_l.name, tm_d.name) AS team_name,
+                  tm.sort AS team_sort, pos.sort AS position_sort
+           FROM plan_positions pp
+           JOIN positions pos ON pos.id = pp.position_id AND pos.deleted_at IS NULL
+           ${posJ.joins}
+           JOIN teams tm ON tm.id = pos.team_id AND tm.deleted_at IS NULL
+           ${tmJ.joins}
+           WHERE pp.plan_id IN (${placeholders})
+         ) matrix_rows
+         ORDER BY team_sort, team_id, position_sort, position_id`,
       )
       .bind(...ids)
       .all<MatrixRow>(),

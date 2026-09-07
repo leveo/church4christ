@@ -1,0 +1,30 @@
+---
+import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
+import { card, td, th } from '../../../../../lib/adminUi';
+import { getIdentityRecoveryTargetSummary, listAllOpenIdentityRecoveryCases, listOpenIdentityRecoveryCases } from '../../../../../lib/identityRecovery';
+import { t } from '../../../../../lib/i18n';
+import type { Locale } from '../../../../../lib/locales';
+
+const user = Astro.locals.user!;
+if (!user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const campus = Astro.locals.campusMode === 'campus' ? Astro.locals.campus : null;
+const cases = campus
+  ? await listOpenIdentityRecoveryCases(Astro.locals.rawDb, campus.id)
+  : await listAllOpenIdentityRecoveryCases(Astro.locals.rawDb);
+const summaries = new Map((await Promise.all(cases.map(async (item) => [item.id, await getIdentityRecoveryTargetSummary(Astro.locals.rawDb, item.campusId, item.id)] as const))));
+---
+
+<Admin title={t(lang, 'admin.identityRecovery.title')}>
+  <IdentityWorkspace locale={lang}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.identityRecovery.queue')}</h1>
+  <section class={`mt-6 ${card}`}>
+    {cases.length === 0 ? <p class="text-ink-muted">{t(lang, 'admin.identityRecovery.empty')}</p> : (
+      <div class="overflow-x-auto"><table class="w-full border-collapse"><thead><tr><th class={th}>ID</th><th class={th}>Campus</th><th class={th}>{t(lang, 'admin.identityRecovery.target')}</th><th class={th}>State</th></tr></thead>
+        <tbody>{cases.map((item) => <tr><td class={td}><a class="font-semibold text-primary hover:underline" href={`/admin/people/identity/recovery/${item.id}`}>{item.id}</a></td><td class={td}>{item.campusId}</td><td class={td}>{summaries.get(item.id)?.displayName ?? t(lang, 'admin.identityRecovery.unresolvedShort')}</td><td class={td}>{item.holding ? `hold · ${item.notBeforeAt}` : 'review'}</td></tr>)}</tbody>
+      </table></div>
+    )}
+  </section>
+  </IdentityWorkspace>
+</Admin>

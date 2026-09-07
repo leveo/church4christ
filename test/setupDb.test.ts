@@ -3,19 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppDb, AppStatement } from '../src/lib/appDb';
 import { MODULE_KEYS } from '../src/lib/modules';
 import { bootstrapFirstAdmin, initializeModuleSettings } from '../src/lib/setupDb.mjs';
-
-const SETUP_EMAILS = [
-  'admin@setup.test',
-  'member@setup.test',
-  'inactive@setup.test',
-  'deleted@setup.test',
-  'limited@setup.test',
-];
+import { beginSignin, completeSigninLink } from '../src/lib/identityAccount';
+import { identityTrustedRequestContext } from '../src/lib/identityAuth';
 
 beforeEach(async () => {
   await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'module.%'").run();
-  await env.DB.prepare(`DELETE FROM people WHERE email IN (${SETUP_EMAILS.map(() => '?').join(',')})`)
-    .bind(...SETUP_EMAILS).run();
+  // Each case uses a distinct identity; append-only ownership audits must not
+  // be deleted to clean up a previous case.
 });
 
 describe('setup database operations on D1', () => {
@@ -58,6 +52,17 @@ describe('setup database operations on D1', () => {
     const row = await env.DB.prepare('SELECT display_name, lang, super_admin FROM people WHERE email=?')
       .bind('admin@setup.test').first<{ display_name: string; lang: string; super_admin: number }>();
     expect(row).toEqual({ display_name: 'Setup Admin', lang: 'en', super_admin: 1 });
+    const authEnv = { IDENTITY_VERIFICATION_SECRET: 'setup-signin-regression-secret-at-least-thirty-two-characters' };
+    const begun = await beginSignin(env.DB, authEnv, {
+      campusId: 1, email: 'admin@setup.test', now: '2035-01-01 00:00:00',
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': '203.0.113.43' }), 'setup-no-demo'),
+    });
+    expect(begun.delivery).not.toBeNull();
+    const result = await completeSigninLink(env.DB, authEnv, {
+      campusId: 1, publicId: begun.delivery!.publicId, token: begun.delivery!.token, now: '2035-01-01 00:01:00',
+    });
+    expect(result).toMatchObject({ status: 'authenticated', sessionEpoch: 0 });
+    expect((await env.DB.prepare('SELECT email FROM people WHERE id=?').bind((result as { personId: number }).personId).first())?.email).toBe('admin@setup.test');
   });
 
   it('requires explicit promotion and refuses inactive or deleted people', async () => {
@@ -120,7 +125,11 @@ describe('setup database operations on D1', () => {
     });
     const db = {
       prepare: (sql: string) => statement(sql.startsWith('SELECT') ? 'find' : 'insert'),
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
 
     await expect(bootstrapFirstAdmin(db, { email: 'race@setup.test', displayName: 'Race', locale: 'en' }))
@@ -135,7 +144,11 @@ describe('setup database operations on D1', () => {
     });
     const failingDb = {
       prepare: (sql: string) => failingStatement(sql.startsWith('SELECT') ? 'find' : 'insert'),
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
     await expect(bootstrapFirstAdmin(failingDb, { email: 'error@setup.test', displayName: 'Error', locale: 'en' }))
       .rejects.toBe(unrelated);
@@ -173,7 +186,11 @@ describe('setup database operations on D1', () => {
         };
         return statement;
       },
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
 
     await expect(bootstrapFirstAdmin(db, {
@@ -197,7 +214,11 @@ describe('setup database operations on D1', () => {
     });
     const db = {
       prepare: (sql: string) => statement(sql.startsWith('SELECT') ? 'find' : 'insert'),
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
 
     await expect(bootstrapFirstAdmin(db, {
@@ -226,7 +247,11 @@ describe('setup database operations on D1', () => {
         prepared.push(sql);
         return statement(sql.startsWith('SELECT') ? 'find' : sql.startsWith('INSERT') ? 'insert' : 'update');
       },
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
 
     await expect(bootstrapFirstAdmin(db, {
@@ -248,7 +273,11 @@ describe('setup database operations on D1', () => {
     });
     const db = {
       prepare: (sql: string) => statement(sql.startsWith('SELECT') ? 'find' : 'insert'),
-      batch: async () => [],
+      batch: async (statements: AppStatement[]) => {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
     } as AppDb;
 
     await expect(bootstrapFirstAdmin(db, {

@@ -6,9 +6,33 @@
 // so `astro check` doesn't flag them (Vite resolves them to the font stylesheet).
 declare module '@fontsource-variable/*';
 
+declare namespace Cloudflare {
+  interface Env {
+    /** Stable HMAC secret; never rotate in place after source records exist. */
+    IDENTITY_SOURCE_KEY_SECRET?: string;
+    /** Version label pinned with the stable HMAC secret in the database. */
+    IDENTITY_SOURCE_KEY_ID?: string;
+    /** Stable recovery veto/outbox key; independent from OTP verification. */
+    IDENTITY_RECOVERY_KEY_SECRET?: string;
+    /** Version label pinned with the stable recovery key in the database. */
+    IDENTITY_RECOVERY_KEY_ID?: string;
+    /** Planning Center PAT client id; store as a Worker secret, never in DB/vars. */
+    PLANNING_CENTER_CLIENT_ID?: string;
+    /** Planning Center PAT secret; store as a Worker secret, never in DB/vars. */
+    PLANNING_CENTER_SECRET?: string;
+    /** Planning Center webhook HMAC secret; store as a Worker secret. */
+    PLANNING_CENTER_WEBHOOK_SECRET?: string;
+    /** Identifying app + contact URL/email required by Planning Center API. */
+    PLANNING_CENTER_USER_AGENT?: string;
+  }
+}
+
 declare namespace App {
   interface Locals {
     user: import('./lib/types').SessionUser | null;
+    // Authentication evidence is intentionally separate from profile data.
+    // Sensitive mutations must use hasRecentStepUp rather than user presence.
+    assurance: import('./lib/sessionAssurance').SessionAssurance | null;
     locale: import('./lib/locales').Locale;
     theme: string;
     modules: Set<string>;

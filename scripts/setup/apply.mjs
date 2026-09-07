@@ -1,5 +1,5 @@
 import { fingerprintPlan } from './state.mjs';
-import { bootstrapFirstAdmin, initializeModuleSettings } from '../../src/lib/setupDb.mjs';
+import { bootstrapFirstAdmin, initializeModuleSettings, isBootstrapAdminReady } from '../../src/lib/setupDb.mjs';
 import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
 import { ensureHyperdrive } from './providers/postgres.mjs';
 import { validateProviderResources } from './manifest.mjs';
@@ -76,6 +76,9 @@ function commonDatabaseSteps(options) {
       }
       if (outcome.status === 'reactivation-required') {
         throw new Error(`Restore and reactivate ${outcome.email}, then rerun setup; setup will not restore a deleted person automatically`);
+      }
+      if (!await isBootstrapAdminReady(options.db, outcome.email)) {
+        throw new Error(`Administrator ${outcome.email} has no eligible verified sign-in identity. Complete the trusted identity review or recovery workflow, then rerun setup; setup will not claim, transfer, or restore an existing account's contact ownership`);
       }
       return { changed: ['created', 'promoted'].includes(outcome.status) };
     }, options.verify?.['bootstrap-admin'], 'bootstrap-admin'),
@@ -225,8 +228,9 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
         throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand });
       }
     }
+    const evidence = typeof stateStore.getEvidence === 'function' ? await stateStore.getEvidence(name) : null;
     const contextPlan = Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) });
-    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, recovering: completed, managedInstallation });
+    const context = Object.freeze({ plan: contextPlan, resources: resolvedResources, evidence, recovering: completed, managedInstallation });
     let preverified;
     try { preverified = await steps[name].verify(context); }
     catch (error) { throw new SetupApplyError({ step: name, phase: 'preverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
@@ -260,7 +264,7 @@ export async function applySetup(plan, { steps, stateStore, dryRun = false, reru
     }
     let verified;
     try {
-      verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, recovering: completed, managedInstallation }));
+      verified = await steps[name].verify(Object.freeze({ plan: Object.freeze({ ...plan, ...(resolvedResources ? { resources: resolvedResources } : {}) }), resources: resolvedResources, evidence: null, recovering: completed, managedInstallation }));
       if (verified !== true) throw new Error(`Setup step ${name} did not verify after apply`);
     } catch (error) { throw new SetupApplyError({ step: name, phase: 'postverify', completed: results, unchanged: actions.slice(actionIndex + 1), cause: { error, secretValues }, rerunCommand }); }
     try {

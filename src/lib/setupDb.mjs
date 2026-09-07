@@ -73,6 +73,47 @@ export async function initializeModuleSettings(db, moduleKeys, selectedModules) 
   ).bind(...rows.flat()).run();
 }
 
+/** The setup checkpoint proves progress, never current identity ownership. */
+export async function isBootstrapAdminReady(db, value) {
+  const email = normalizedEmail(value);
+  const row = await db.prepare(`SELECT p.id FROM people p
+    JOIN contact_points c ON c.kind='email' AND c.normalized_value=?1
+    JOIN verified_contact_owners o ON o.contact_point_id=c.id AND o.person_id=p.id
+    JOIN person_contact_links l ON l.person_id=p.id AND l.contact_point_id=c.id AND l.kind='email' AND l.ended_at IS NULL
+    JOIN campus_memberships cm ON cm.person_id=p.id AND cm.campus_id=p.home_campus_id AND cm.active=1
+    JOIN campuses campus ON campus.id=cm.campus_id AND campus.active=1
+    LEFT JOIN person_merge_redirects r ON r.loser_person_id=p.id
+    WHERE lower(p.email)=?1 AND p.role='admin' AND p.super_admin=1 AND p.active=1
+      AND p.deleted_at IS NULL AND p.identity_state='active' AND p.auth_disabled_at IS NULL
+      AND r.loser_person_id IS NULL`).bind(email).first();
+  return Number.isSafeInteger(row?.id) && row.id > 0;
+}
+
+// This is a trusted installation operation, not a login or member-import path.
+// The operator already controls the database and explicitly chooses the first
+// administrator. Mint ownership only while creating that new person. A single
+// batch prevents a partial identity; an existing/revoked owner cannot be replaced
+// because generation 1 and expected NULL are guarded by the identity schema.
+async function createSetupAdministrator(db, { email, displayName, locale }) {
+  const target = `FROM people p JOIN contact_points c ON c.kind='email' AND c.normalized_value=?1 WHERE p.email=?1`;
+  await db.batch([
+    db.prepare("INSERT INTO people (display_name,email,role,active,lang,super_admin) VALUES (?,?,'admin',1,?,1)")
+      .bind(displayName, email, locale),
+    db.prepare(`INSERT INTO contact_points(kind,normalized_value,display_value) VALUES('email',?1,?1)
+      ON CONFLICT(kind,normalized_value) DO UPDATE SET display_value=contact_points.display_value`).bind(email),
+    db.prepare(`INSERT INTO person_contact_links(person_id,contact_point_id,kind,source,is_primary,notification_enabled)
+      SELECT p.id,c.id,'email','setup_bootstrap',1,1 ${target}`).bind(email),
+    db.prepare(`INSERT INTO contact_owner_mutation_claims(contact_point_id,generation,expected_person_id,resulting_person_id,operation)
+      SELECT c.id,1,NULL,p.id,'assign' ${target}`).bind(email),
+    db.prepare(`INSERT INTO verified_contact_owners(contact_point_id,person_id,verification_method)
+      SELECT c.id,p.id,'admin_review' ${target}`).bind(email),
+    db.prepare(`INSERT INTO contact_ownership_events(contact_point_id,person_id,event_type,actor_person_id,reason)
+      SELECT c.id,p.id,'verified',p.id,'Trusted CLI administrator bootstrap' ${target}`).bind(email),
+    db.prepare(`INSERT INTO identity_audit_events(campus_id,event_type,actor_person_id,subject_person_id,contact_point_id,metadata_json)
+      SELECT p.home_campus_id,'setup_admin_bootstrapped',p.id,p.id,c.id,'{"reasonCategory":"admin_review"}' ${target}`).bind(email),
+  ]);
+}
+
 /** Create the first admin, or conservatively classify an existing identity. */
 export async function bootstrapFirstAdmin(db, input) {
   const email = normalizedEmail(input?.email);
@@ -111,9 +152,7 @@ export async function bootstrapFirstAdmin(db, input) {
   if (existing) return handleExisting(existing);
 
   try {
-    await db.prepare(
-      "INSERT INTO people (display_name,email,role,active,lang,super_admin) VALUES (?,?,'admin',1,?,1)",
-    ).bind(displayName, email, input.locale).run();
+    await createSetupAdministrator(db, { email, displayName, locale: input.locale });
     return { status: 'created', email };
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;

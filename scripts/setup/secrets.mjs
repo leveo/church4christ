@@ -4,7 +4,12 @@ import { open, readFile } from 'node:fs/promises';
 import { normalizeEmail } from './answers.mjs';
 import { writeAtomic } from './files.mjs';
 
-const MANAGED = new Set(['SESSION_SECRET', 'NEWCOMER_RATE_LIMIT_SECRET', 'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE']);
+const MANAGED = new Set(['SESSION_SECRET', 'NEWCOMER_RATE_LIMIT_SECRET', 'IDENTITY_VERIFICATION_SECRET',
+  'IDENTITY_SOURCE_KEY_SECRET', 'IDENTITY_SOURCE_KEY_ID', 'IDENTITY_RECOVERY_KEY_SECRET', 'IDENTITY_RECOVERY_KEY_ID',
+  'PLANNING_CENTER_CLIENT_ID', 'PLANNING_CENTER_SECRET', 'PLANNING_CENTER_WEBHOOK_SECRET',
+  'PLANNING_CENTER_USER_AGENT',
+  'EMAIL_DEV_LOG', 'AUTH_DEV_BYPASS_EMAIL',
+  'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_MODE']);
 const KEY = /^[A-Z][A-Z0-9_]*$/;
 const LOCAL_HYPERDRIVE = 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE';
 const STRIPE_ENV_KEYS = Object.freeze([
@@ -31,6 +36,14 @@ export function parseDevVars(content) {
       if (found.has(key)) throw new Error(`Duplicate managed .dev.vars key: ${key}`);
       if (!value) throw new Error(`Managed .dev.vars key ${key} has an empty value`);
       if (key === 'SESSION_SECRET' && (value.length < 32 || /\s/.test(value))) throw new Error('SESSION_SECRET must contain at least 32 non-space characters');
+      if (key === 'IDENTITY_VERIFICATION_SECRET' && (value.length < 32 || value.length > 1024 || /[\s\0-\x1f\x7f]/u.test(value))) throw new Error('IDENTITY_VERIFICATION_SECRET must contain 32–1024 non-space characters');
+      if (key === 'IDENTITY_SOURCE_KEY_SECRET' && (value.length < 32 || value.length > 1024 || /[\s\0-\x1f\x7f]/u.test(value))) throw new Error('IDENTITY_SOURCE_KEY_SECRET must contain 32–1024 non-space characters');
+      if (key === 'IDENTITY_SOURCE_KEY_ID' && !/^[a-z0-9][a-z0-9._-]{0,31}$/.test(value)) throw new Error('IDENTITY_SOURCE_KEY_ID must be a lowercase version identifier');
+      if (key === 'IDENTITY_RECOVERY_KEY_SECRET' && (value.length < 32 || value.length > 1024 || /[\s\0-\x1f\x7f]/u.test(value))) throw new Error('IDENTITY_RECOVERY_KEY_SECRET must contain 32–1024 non-space characters');
+      if (key === 'IDENTITY_RECOVERY_KEY_ID' && !/^[a-z0-9][a-z0-9._-]{0,31}$/.test(value)) throw new Error('IDENTITY_RECOVERY_KEY_ID must be a lowercase version identifier');
+      if (['PLANNING_CENTER_CLIENT_ID', 'PLANNING_CENTER_SECRET'].includes(key) && (value.length < 8 || value.length > 4096 || /[\s\0-\x1f\x7f]/u.test(value))) throw new Error(`${key} must contain 8–4096 non-space characters`);
+      if (key === 'PLANNING_CENTER_WEBHOOK_SECRET' && (value.length < 16 || value.length > 4096 || /[\s\0-\x1f\x7f]/u.test(value))) throw new Error('PLANNING_CENTER_WEBHOOK_SECRET must contain 16–4096 non-space characters');
+      if (key === 'PLANNING_CENTER_USER_AGENT' && (value.length < 8 || value.length > 256 || /[\0-\x1f\x7f]/u.test(value) || !/^.{2,120} (?:<(?:https?:\/\/[^ <>]{1,120}|mailto:[^ <>]{3,120})>|\((?:https?:\/\/[^ <>]{1,120}|[^ ()<>@]{1,64}@[^ ()<>]{1,120})\))$/.test(value))) throw new Error('PLANNING_CENTER_USER_AGENT must include an app name and contact URL/email');
       if (key === 'EMAIL_DEV_LOG' && !['0', '1'].includes(value)) throw new Error('EMAIL_DEV_LOG must be 0 or 1');
       if (key === 'AUTH_DEV_BYPASS_EMAIL' && normalizeEmail(value, 'AUTH_DEV_BYPASS_EMAIL') !== value) throw new Error('AUTH_DEV_BYPASS_EMAIL must be normalized');
       found.set(key, value);
@@ -93,13 +106,47 @@ export function verifyLocalSecretsContent(content, adminEmail) {
     const normalizedFileAdmin = normalizeEmail(fileAdmin, 'AUTH_DEV_BYPASS_EMAIL');
     const expected = adminEmail === undefined ? undefined : normalizeEmail(adminEmail, 'admin email');
     return found.get('EMAIL_DEV_LOG') === '1' && fileAdmin === normalizedFileAdmin && (!expected || fileAdmin === expected) &&
-      typeof found.get('SESSION_SECRET') === 'string' && found.get('SESSION_SECRET').length >= 32;
+      typeof found.get('SESSION_SECRET') === 'string' && found.get('SESSION_SECRET').length >= 32 &&
+      typeof found.get('IDENTITY_VERIFICATION_SECRET') === 'string' && found.get('IDENTITY_VERIFICATION_SECRET').length >= 32 &&
+      typeof found.get('IDENTITY_SOURCE_KEY_SECRET') === 'string' && found.get('IDENTITY_SOURCE_KEY_SECRET').length >= 32 &&
+      typeof found.get('IDENTITY_SOURCE_KEY_ID') === 'string' &&
+      typeof found.get('IDENTITY_RECOVERY_KEY_SECRET') === 'string' && found.get('IDENTITY_RECOVERY_KEY_SECRET').length >= 32 &&
+      typeof found.get('IDENTITY_RECOVERY_KEY_ID') === 'string';
   } catch { return false; }
 }
 
 export async function readLocalSecretsStatus(path, adminEmail) {
   try { return verifyLocalSecretsContent(await readFile(path, 'utf8'), adminEmail); }
   catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
+}
+
+export async function readLocalIdentityVerificationSecretStatus(path) {
+  try {
+    const value = parseDevVars(await readFile(path, 'utf8')).get('IDENTITY_VERIFICATION_SECRET');
+    return typeof value === 'string' && value.length >= 32 && value.length <= 1024 && !/[\s\0-\x1f\x7f]/u.test(value);
+  } catch {
+    return false;
+  }
+}
+
+export async function readLocalIdentitySourceKeyStatus(path) {
+  try {
+    const found = parseDevVars(await readFile(path, 'utf8'));
+    const secret = found.get('IDENTITY_SOURCE_KEY_SECRET');
+    const keyId = found.get('IDENTITY_SOURCE_KEY_ID');
+    return typeof secret === 'string' && secret.length >= 32 && secret.length <= 1024
+      && !/[\s\0-\x1f\x7f]/u.test(secret) && typeof keyId === 'string' && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(keyId);
+  } catch { return false; }
+}
+
+export async function readLocalIdentityRecoveryKeyStatus(path) {
+  try {
+    const found = parseDevVars(await readFile(path, 'utf8'));
+    const secret = found.get('IDENTITY_RECOVERY_KEY_SECRET');
+    const keyId = found.get('IDENTITY_RECOVERY_KEY_ID');
+    return typeof secret === 'string' && secret.length >= 32 && secret.length <= 1024
+      && !/[\s\0-\x1f\x7f]/u.test(secret) && typeof keyId === 'string' && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(keyId);
+  } catch { return false; }
 }
 
 function localSecretNames(content) {
@@ -262,6 +309,11 @@ export async function configureSecrets(options) {
     const additions = [];
     if (!existing.has('SESSION_SECRET')) additions.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
     if (!existing.has('NEWCOMER_RATE_LIMIT_SECRET')) additions.push(['NEWCOMER_RATE_LIMIT_SECRET', randomBytes(32).toString('base64url')]);
+    if (!existing.has('IDENTITY_VERIFICATION_SECRET')) additions.push(['IDENTITY_VERIFICATION_SECRET', randomBytes(32).toString('base64url')]);
+    if (!existing.has('IDENTITY_SOURCE_KEY_SECRET')) additions.push(['IDENTITY_SOURCE_KEY_SECRET', randomBytes(32).toString('base64url')]);
+    if (!existing.has('IDENTITY_SOURCE_KEY_ID')) additions.push(['IDENTITY_SOURCE_KEY_ID', 'v1']);
+    if (!existing.has('IDENTITY_RECOVERY_KEY_SECRET')) additions.push(['IDENTITY_RECOVERY_KEY_SECRET', randomBytes(32).toString('base64url')]);
+    if (!existing.has('IDENTITY_RECOVERY_KEY_ID')) additions.push(['IDENTITY_RECOVERY_KEY_ID', 'v1']);
     if (!existing.has('EMAIL_DEV_LOG')) additions.push(['EMAIL_DEV_LOG', '1']);
     additions.push(['AUTH_DEV_BYPASS_EMAIL', adminEmail]);
     if (stripeSecrets) {
@@ -291,6 +343,9 @@ export async function configureSecrets(options) {
   const required = [];
   if (!names.has('SESSION_SECRET')) required.push(['SESSION_SECRET', randomBytes(32).toString('base64url')]);
   if (!names.has('NEWCOMER_RATE_LIMIT_SECRET')) required.push(['NEWCOMER_RATE_LIMIT_SECRET', randomBytes(32).toString('base64url')]);
+  if (!names.has('IDENTITY_VERIFICATION_SECRET')) required.push(['IDENTITY_VERIFICATION_SECRET', randomBytes(32).toString('base64url')]);
+  if (!names.has('IDENTITY_SOURCE_KEY_SECRET')) required.push(['IDENTITY_SOURCE_KEY_SECRET', randomBytes(32).toString('base64url')]);
+  if (!names.has('IDENTITY_RECOVERY_KEY_SECRET')) required.push(['IDENTITY_RECOVERY_KEY_SECRET', randomBytes(32).toString('base64url')]);
   if (stripeSecrets && !names.has('STRIPE_SECRET_KEY')) required.push(['STRIPE_SECRET_KEY', stripeSecrets.secretKey]);
   if (stripeSecrets && !names.has('STRIPE_WEBHOOK_SECRET')) required.push(['STRIPE_WEBHOOK_SECRET', stripeSecrets.webhookSecret]);
   for (const [name, value] of required) {

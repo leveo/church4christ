@@ -45,6 +45,17 @@ UPDATE people SET super_admin = 1 WHERE id = 1;
 INSERT INTO people (id, first_name, last_name, display_name, email, phone, role, lang, super_admin, admin_areas) VALUES
   (11, 'Lydia', 'Kwan', 'Lydia Kwan', 'lydia.kwan@example.com', NULL, 'admin', 'zh', 0, 'groups,events');
 
+-- Development identities explicitly model the legacy-grace ownership proof;
+-- a seed person's people.email alone must never make a magic link eligible.
+INSERT INTO contact_points(kind, normalized_value, display_value)
+  SELECT 'email', lower(email), email FROM people;
+INSERT INTO person_contact_links(person_id, contact_point_id, kind, source, is_primary, notification_enabled)
+  SELECT p.id, c.id, 'email', 'seed_verified_owner', 1, 1
+  FROM people p JOIN contact_points c ON c.kind='email' AND c.normalized_value=lower(p.email);
+INSERT INTO verified_contact_owners(contact_point_id, person_id, verification_method)
+  SELECT c.id, p.id, 'legacy_unique'
+  FROM people p JOIN contact_points c ON c.kind='email' AND c.normalized_value=lower(p.email);
+
 -- Ten ministries with emoji icons and matching categories. Leaders point at the
 -- three team leaders plus the senior pastor for the care ministry.
 INSERT INTO ministries (id, slug, category, icon, leader_person_id, meeting_time, active, sort) VALUES

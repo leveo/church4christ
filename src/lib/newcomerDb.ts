@@ -1268,6 +1268,8 @@ interface CapturedValidatedIntake extends Omit<ValidatedNewcomerIntake, 'answers
 export interface CreateNewcomerSubmissionOptions {
   backend: SnapshotBackend;
   operationId: string;
+  identitySourceRecordId?: number | null;
+  linkedPersonId?: number | null;
 }
 
 export interface NewcomerMutationResult {
@@ -1379,6 +1381,8 @@ async function reconcileCreatedSubmission(
   backend: SnapshotBackend,
   operationId: string,
   answerPayload: string,
+  identitySourceRecordId: number | null,
+  linkedPersonId: number | null,
 ): Promise<ReconciledMutation<CreateNewcomerSubmissionResult>> {
   const payloadCte = createAnswerPayloadCte(backend, '?1');
   try {
@@ -1393,6 +1397,10 @@ async function reconcileCreatedSubmission(
           AND ((CAST(?8 AS INTEGER) IS NULL AND submission.service_type_id IS NULL)
             OR submission.service_type_id=CAST(?8 AS INTEGER))
           AND submission.source=?9
+          AND ((CAST(?12 AS INTEGER) IS NULL AND submission.identity_source_record_id IS NULL)
+            OR submission.identity_source_record_id=CAST(?12 AS INTEGER))
+          AND ((CAST(?13 AS INTEGER) IS NULL AND submission.linked_person_id IS NULL)
+            OR submission.linked_person_id=CAST(?13 AS INTEGER))
           AND ((CAST(?10 AS INTEGER)=1 AND submission.contact_consent_at=submission.created_at)
             OR (CAST(?10 AS INTEGER)=0 AND submission.contact_consent_at IS NULL))
           AND (SELECT COUNT(*) FROM newcomer_activity activity
@@ -1418,7 +1426,7 @@ async function reconcileCreatedSubmission(
     `).bind(
       answerPayload, operationId, captured.name, captured.email, captured.phone,
       captured.locale, captured.visitDate, captured.serviceTypeId, mode,
-      captured.contactConsent ? 1 : 0, actorPersonId,
+      captured.contactConsent ? 1 : 0, actorPersonId, identitySourceRecordId, linkedPersonId,
     ).first<unknown>();
     if (value === null) return { status: 'absent' };
     const row = plainRow(value, ['proof']);
@@ -1443,12 +1451,20 @@ export async function createNewcomerSubmission(
   if (mode === 'staff') assertPrivateAccess(user);
   const captured = safeValidatedIntake(input);
   if (mode === 'public' && !captured.contactConsent) throw new NewcomerInvalidError();
-  const capturedOptions = plainRow(options, ['backend', 'operationId']);
+  const capturedOptions = plainOptionalRow(options,
+    ['backend', 'operationId', 'identitySourceRecordId', 'linkedPersonId'], ['backend', 'operationId']);
   const backend = capturedOptions?.backend === 'd1' || capturedOptions?.backend === 'supabase'
     ? capturedOptions.backend : null;
   const operationId = capturedOptions && typeof capturedOptions.operationId === 'string'
     && RUNTIME_UUID.test(capturedOptions.operationId) ? capturedOptions.operationId : null;
   if (!backend || !operationId) throw new NewcomerInvalidError();
+  const sourceValue = capturedOptions?.identitySourceRecordId == null ? null : integer(capturedOptions.identitySourceRecordId);
+  const personValue = capturedOptions?.linkedPersonId == null ? null : integer(capturedOptions.linkedPersonId);
+  const identitySourceRecordId = sourceValue !== null && sourceValue > 0 ? sourceValue : null;
+  const linkedPersonId = personValue !== null && personValue > 0 ? personValue : null;
+  if ((capturedOptions?.identitySourceRecordId != null && identitySourceRecordId === null)
+    || (capturedOptions?.linkedPersonId != null && linkedPersonId === null)
+    || ((identitySourceRecordId === null) !== (linkedPersonId === null))) throw new NewcomerInvalidError();
   const generated = mutationRuntime(runtime, 1, [operationId]);
   const [activityId] = generated.ids;
   const submissionId = operationId;
@@ -1477,9 +1493,9 @@ export async function createNewcomerSubmission(
       db.prepare(`
       INSERT INTO newcomer_submissions (
         id,name,email,phone,locale,visit_date,service_type_id,contact_consent_at,source,
-        status_id,version,last_mutation_id,created_at,updated_at
+        status_id,version,last_mutation_id,created_at,updated_at,identity_source_record_id,linked_person_id
       )
-      SELECT ?1,?2,?3,?4,?5,?6,CAST(?7 AS INTEGER),?8,?9,status.id,0,NULL,?10,?10
+      SELECT ?1,?2,?3,?4,?5,?6,CAST(?7 AS INTEGER),?8,?9,status.id,0,NULL,?10,?10,?11,?12
       FROM newcomer_statuses status
       WHERE status.active=1 AND status.category='open' AND status.is_initial=1
         AND (CAST(?7 AS INTEGER) IS NULL OR EXISTS (
@@ -1489,6 +1505,7 @@ export async function createNewcomerSubmission(
       `).bind(
         submissionId, captured.name, captured.email, captured.phone, captured.locale,
         captured.visitDate, captured.serviceTypeId, consentAt, mode, generated.now,
+        identitySourceRecordId, linkedPersonId,
       ),
       db.prepare(`
       WITH ${answerPayloadCte}
@@ -1588,6 +1605,7 @@ export async function createNewcomerSubmission(
     if (!dispatched) rethrowMutation(error);
     const reconciled = await reconcileCreatedSubmission(
       db, mode, actorPersonId, captured, backend, operationId, answerPayload,
+      identitySourceRecordId, linkedPersonId,
     );
     if (reconciled.status === 'applied') return reconciled.value;
     if (reconciled.status === 'mismatch') throw new NewcomerConflictError();

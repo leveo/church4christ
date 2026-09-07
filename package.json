@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "npm run tokens && astro build && node scripts/check-production-bundle.mjs",
+    "build:e2e": "npm run tokens && astro build --mode e2e",
     "prepare": "npm run tokens",
     "preview": "npm run build && astro preview",
     "check": "astro check",
@@ -22,8 +23,8 @@
     "docs:generate": "node scripts/docs/generate-capabilities.mjs",
     "docs:check": "node scripts/docs/check-capabilities.mjs",
     "test": "vitest run",
-    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
-    "test:e2e:pg": "npm run build && vitest run --config vitest.e2e.pg.config.ts",
+    "test:e2e": "npm run build:e2e && vitest run --config vitest.e2e.config.ts",
+    "test:e2e:pg": "npm run build:e2e && vitest run --config vitest.e2e.pg.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:migrate:supabase": "node scripts/db/migrate-supabase.mjs",

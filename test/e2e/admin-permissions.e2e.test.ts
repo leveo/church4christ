@@ -9,8 +9,12 @@ import { get, post } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
-async function sessionCookie(id: number, email: string): Promise<string> {
-  const jwt = await mintSession(SECRET, { id, email, sessionEpoch: 0 });
+async function sessionCookie(id: number, email: string, recent = false): Promise<string> {
+  const jwt = await mintSession(
+    SECRET,
+    { id, email, sessionEpoch: 0 },
+    recent ? { authMethod: 'email_otp', authTime: Math.floor(Date.now() / 1000) } : {},
+  );
   return `${SESSION_COOKIE}=${jwt}`;
 }
 
@@ -78,7 +82,7 @@ describe('flags form is super-admin only; grants apply instantly', () => {
     expect(del.status).toBe(403);
   });
   it('super admin grants sermons to lena; she gains access on her next request', async () => {
-    const admin = await sessionCookie(1, 'admin@example.com');
+    const admin = await sessionCookie(1, 'admin@example.com', true);
     const body = new URLSearchParams();
     body.append('action', 'flags');
     body.append('role', 'admin');
@@ -91,7 +95,7 @@ describe('flags form is super-admin only; grants apply instantly', () => {
     expect((await get('/admin/sermons', { cookie: lena })).status).toBe(200);
   });
   it('unchecking super on the last super admin re-renders with an error and keeps the flag', async () => {
-    const admin = await sessionCookie(1, 'admin@example.com');
+    const admin = await sessionCookie(1, 'admin@example.com', true);
     const res = await post(
       '/admin/people/1',
       new URLSearchParams({ action: 'flags', role: 'admin', active: 'on' }).toString(),
@@ -104,6 +108,34 @@ describe('flags form is super-admin only; grants apply instantly', () => {
     const cookie = await sessionCookie(50, 'lena.limited@example.com');
     const html = await (await get('/admin/people/3', { cookie })).text();
     expect(html).not.toContain('name="action" value="flags"');
+  });
+
+  it('rejects a super admin whose session has no recent verified assurance', async () => {
+    const legacyAdmin = await sessionCookie(1, 'admin@example.com');
+    const res = await post(
+      '/admin/people/3',
+      new URLSearchParams({ action: 'flags', role: 'admin', active: 'on' }).toString(),
+      { cookie: legacyAdmin },
+    );
+    expect(res.status).toBe(403);
+    expect((await env.DB.prepare('SELECT role FROM people WHERE id=3').first<{ role: string }>())?.role).toBe('member');
+  });
+
+  it('rejects a missing role without silently clearing the target super-admin flag', async () => {
+    await env.DB.prepare(`UPDATE people SET role='admin',active=1,super_admin=1 WHERE id=50`).run();
+    try {
+      const admin = await sessionCookie(1, 'admin@example.com', true);
+      const res = await post(
+        '/admin/people/50',
+        new URLSearchParams({ action: 'flags', active: 'on' }).toString(),
+        { cookie: admin },
+      );
+      expect(res.status).toBe(400);
+      expect(await env.DB.prepare(`SELECT role,super_admin FROM people WHERE id=50`).first())
+        .toEqual({ role: 'admin', super_admin: 1 });
+    } finally {
+      await env.DB.prepare(`UPDATE people SET role='admin',active=1,super_admin=0 WHERE id=50`).run();
+    }
   });
 });
 
@@ -198,6 +230,64 @@ describe('save action cannot escalate/demote role or active (privilege-escalatio
     expect(res.status).toBe(303);
     const row = await env.DB.prepare('SELECT role FROM people WHERE id = 3').first<{ role: string }>();
     expect(row?.role).toBe('member');
+  });
+
+  it('forged victim email preserves both the legacy carrier and verified auth owner', async () => {
+    const victimId = 3;
+    const owner = await env.DB.prepare(`INSERT INTO contact_points(kind,normalized_value,display_value)
+      VALUES('email','sarah.johnson@example.com','sarah.johnson@example.com')
+      ON CONFLICT(kind,normalized_value) DO UPDATE SET display_value=excluded.display_value RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO person_contact_links(person_id,contact_point_id,kind,source,notification_enabled)
+      VALUES(?1,?2,'email','legacy_backfill',1) ON CONFLICT DO NOTHING`).bind(victimId, owner!.id).run();
+    await env.DB.prepare(`INSERT INTO verified_contact_owners(contact_point_id,person_id,verification_method)
+      VALUES(?1,?2,'legacy_unique') ON CONFLICT DO NOTHING`).bind(owner!.id, victimId).run();
+    const attacker = await env.DB.prepare(`INSERT INTO contact_points(kind,normalized_value,display_value)
+      VALUES('email','route-attacker@example.com','route-attacker@example.com') RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO person_contact_links(person_id,contact_point_id,kind,source,notification_enabled)
+      VALUES(?1,?2,'email','admin_people',1) ON CONFLICT DO NOTHING`).bind(victimId, attacker!.id).run();
+    const cookie = await sessionCookie(51, 'paula.people@example.com');
+    const res = await post('/admin/people/3', new URLSearchParams({
+      action: 'save', role: 'member', active: 'on', display_name: 'Sarah Safe',
+      email: 'route-attacker@example.com', first_name: 'Sarah', last_name: 'Johnson', phone: '', lang: 'en',
+    }).toString(), { cookie });
+    expect(res.status).toBe(303);
+    expect(await env.DB.prepare(`SELECT email FROM people WHERE id=?1`).bind(victimId).first()).toEqual({ email: 'sarah.johnson@example.com' });
+    expect(await env.DB.prepare(`SELECT person_id FROM verified_contact_owners WHERE contact_point_id=?1`).bind(owner!.id).first())
+      .toEqual({ person_id: victimId });
+    expect(await env.DB.prepare(`SELECT person_id FROM verified_contact_owners WHERE contact_point_id=?1`).bind(attacker!.id).first()).toBeNull();
+  });
+
+  it('ignores even a malformed forged email instead of letting it affect demographic validation', async () => {
+    const cookie = await sessionCookie(51, 'paula.people@example.com');
+    const res = await post('/admin/people/3', new URLSearchParams({
+      action: 'save', role: 'admin', display_name: 'Sarah Still Safe', email: 'not-an-email',
+      first_name: 'Sarah', last_name: 'Johnson', phone: '', lang: 'en',
+    }).toString(), { cookie });
+    expect(res.status).toBe(303);
+    expect(await env.DB.prepare(`SELECT display_name,email FROM people WHERE id=3`).first())
+      .toEqual({ display_name: 'Sarah Still Safe', email: 'sarah.johnson@example.com' });
+  });
+
+  it('renders the existing email and verified auth contacts read-only', async () => {
+    const cookie = await sessionCookie(51, 'paula.people@example.com');
+    const html = await (await get('/admin/people/3', { cookie })).text();
+    expect(html).toMatch(/type="email"[^>]*value="sarah\.johnson@example\.com"[^>]*(?:readonly|disabled)/);
+    expect(html).toContain('Verified sign-in contact');
+    expect(html).toContain('Security');
+  });
+
+  it('creates a clean submitted admin as a member with auth disabled and no verified owner', async () => {
+    const cookie = await sessionCookie(51, 'paula.people@example.com');
+    const res = await post('/admin/people/new', new URLSearchParams({
+      action: 'save', role: 'admin', active: 'on', display_name: 'Provisional Route',
+      email: 'route-provisional@example.com', first_name: 'Route', last_name: 'Provisional', phone: '', lang: 'en',
+    }).toString(), { cookie });
+    expect(res.status).toBe(303);
+    const row = await env.DB.prepare(`SELECT id,role,identity_state,auth_disabled_at FROM people WHERE email='route-provisional@example.com'`)
+      .first<{ id: number; role: string; identity_state: string; auth_disabled_at: string | null }>();
+    expect(row).toMatchObject({ role: 'member', identity_state: 'provisional' });
+    expect(row?.auth_disabled_at).not.toBeNull();
+    expect(await env.DB.prepare(`SELECT 1 ok FROM verified_contact_owners WHERE person_id=?1`).bind(row!.id).first()).toBeNull();
   });
 });
 

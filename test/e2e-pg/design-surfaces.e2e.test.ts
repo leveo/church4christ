@@ -154,6 +154,7 @@ describe('PostgreSQL design surfaces: administration', () => {
     '/admin/teams', '/admin/service-types', '/admin/testimonies', '/admin/prayer-wall',
     '/admin/bulletins', '/admin/sermons', '/admin/prayer-sheets',
     '/admin/events', '/admin/announcements', '/admin/pages',
+    '/admin/people/identity/merge', '/admin/people/identity/recovery', '/admin/people/identity/planning-center',
   ])('%s renders its complete page body', async (path) => {
     await rendered(path, 'admin');
   });
@@ -202,6 +203,7 @@ describe('PostgreSQL design surfaces: public and serving', () => {
     '/en/sermons', '/en/articles', '/en/bulletin', '/en/prayer', '/en/events',
     '/en/ministries', '/en/fellowships', '/en/groups', '/en/register',
     '/en/serve', '/en/serve/opportunities', '/en/serve/apply', '/en/serve/gifts', '/en/serve/testimonies',
+    '/en/signin', '/en/signup', '/en/recover', '/en/identity/continue',
   ])('%s renders its complete page body', async (path) => {
     await rendered(path);
   });
@@ -252,7 +254,8 @@ describe('PostgreSQL design surfaces: public and serving', () => {
   it('renders the real free registration and its dynamic question', async () => {
     const html = await rendered(`/en/register/${fixture.registrationId}`);
     expect(html).toContain(fixture.registrationTitle);
-    expect(html).toContain('action="/api/register/submit"');
+    expect(html).toContain('action="/api/identity/continuation/start"');
+    expect(html).toContain('name="flow" value="registration"');
     expect(html).toContain('Dietary needs');
   });
 
@@ -266,8 +269,17 @@ describe('PostgreSQL design surfaces: member portal and learning', () => {
   it.each([
     '/en/my', '/en/my/opportunities', '/en/my/household', '/en/my/events',
     '/en/my/serving', '/en/my/prayer', '/en/my/calendar', '/en/my/blockouts',
-    '/en/my/giving', '/en/learn', '/en/profile',
+    '/en/my/giving', '/en/learn', '/en/profile', '/en/settings/security', '/en/reauth',
   ])('%s renders for the seeded member', async (path) => { await rendered(path, 'member'); });
+
+  it('shows the actual verified sign-in contact on the security page', async () => {
+    const html = await rendered('/en/settings/security', 'member');
+    const sections = html.match(/<section\b[^>]*>[\s\S]*?<\/section>/g) ?? [];
+    const verified = sections.find(section => section.includes(t('en', 'security.verifiedSignIn')));
+    expect(verified).toBeDefined();
+    expect(verified).toContain('sarah.johnson@example.com');
+    expect(verified).not.toContain(t('en', 'security.noVerifiedSignIn'));
+  });
 
   it('renders the enrolled course player with its real lesson and submission snapshot', async () => {
     const html = await rendered(`/en/learn/${fixture.courseId}`, 'member');

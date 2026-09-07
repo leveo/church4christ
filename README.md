@@ -22,12 +22,27 @@ before choosing a production setup.
 | ![The volunteer scheduling matrix](docs/images/serve/matrix.png) | ![The Midnight theme](docs/images/themes/home-midnight-dark.png) | ![The Member Portal dashboard](docs/images/portal/dashboard.png) |
 | ![The English Genesis 1 learner course](docs/images/learning/genesis-1-en.png) | ![The Chinese Genesis 1 learner course](docs/images/learning/genesis-1-zh.png) | ![The Learning provider administration page](docs/images/learning/admin-overview.png) |
 
+**A distinct workspace for every core module.** The default Sanctuary design pairs
+warm ivory surfaces and forest green navigation with layouts suited to each task:
+publishing editors with local previews, people and household records, care queues,
+serving matrices, touch-friendly children's check-in, course players, and finance
+ledgers. Public, member, leader, and administrator menus follow the enabled modules
+and each person's permissions. Harvest and Midnight remain available, with light and
+dark modes. See the [21-module design inventory](docs/design/module-coverage.md).
+
+The screenshots use the repository's fictional demo content. First setup lets you
+include those examples or start without them; both choices keep the same layouts,
+theme, and bundled default images. English pages use English interface and demo copy;
+Chinese pages support Chinese and bilingual content. All 29 interface screenshots were
+recaptured from the running application; see the [capture inventory and regeneration
+command](docs/design/readme-screenshot-inventory.md).
+
 **Grouped navigation.** A fully enabled site condenses its public destinations into
 Welcome, Explore, Connect, and Get Involved. Built-in links stay in their audience
 group, while custom pages and external links appear under More. The order saved in
 Admin → Navigation is preserved inside each group, and empty groups disappear.
 
-![The calmer desktop header with the Connect group open](docs/images/public/grouped-navigation.png)
+![The Connect menu with its own links and community image](docs/images/public/grouped-navigation.png)
 
 Two languages are included out of the box (English and Chinese), along with three
 ready-made looks and a modular starting point for further customization.
@@ -124,6 +139,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
 | [![](docs/images/admin/people-export.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Profiles and households plus canonical create-only CSV export and reusable source-column mapping for migrations. |
+| [![](docs/images/identity/merge-review-queue.jpg)](docs/features/member-identity.md) | **[Member identity safety](docs/features/member-identity.md)** | Proof-bound identity across Giving, Registration, Groups, Teams, Newcomer, imports, and Planning Center; ambiguous duplicates go to review instead of name-only merging, with OTP-bound approval and a guarded 24-hour rollback. |
 | [![](docs/images/groups/member-checklist.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, member checklist, join requests, events, and per-person email-link attendance. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
 | [![](docs/images/admin/attendance-report.png)](docs/features/service-attendance.md) | **[Service attendance](docs/features/service-attendance.md)** | Record aggregate adult totals, derive optional child totals from check-ins, correct history, and download identity-free CSV reports. |
@@ -276,6 +292,11 @@ right in your terminal**. Paste it into the browser and you are in. (For quicker
 testing, setup writes that same address as `AUTH_DEV_BYPASS_EMAIL` in `.dev.vars`, which
 signs you in automatically. Remove that line to test the real sign-in flow.)
 
+In both content modes, setup creates a new administrator and their audited sign-in
+identity together. Reruns preserve existing contact ownership; they do not verify an
+existing email or restore revoked access. If setup reports an identity problem, complete
+the [identity review or recovery workflow](docs/features/member-identity.md) before rerunning.
+
 Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 18
 D1-compatible modules), and **Full Church** (all 21 modules). Portal, Giving, and
 Registration select Supabase automatically; D1-compatible selections choose D1 unless you
@@ -327,6 +348,11 @@ It creates or imports the required resources, writes the generated configuration
 migrations, records all 21 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
+Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning
+Center integration share a proof-bound, review-first identity gateway. It never auto-merges
+people by name or an unverified contact. See [Member identity](docs/features/member-identity.md)
+for the workflow, fraud controls, current migration boundary, and provider verification gap;
+secret setup and rotation rules remain in the [deployment runbook](docs/deploy.md#stable-identity-source-key).
 Deployment is intentionally manual: repository automation tests changes but does not
 publish them or migrate production data for you.
 

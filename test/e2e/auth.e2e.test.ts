@@ -8,10 +8,11 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { get, post } from './helpers';
 import { createLoginToken, createRespondToken, peekToken, sha256Hex } from '../../src/lib/auth';
+import { revokeIdentitySessions } from '../../src/lib/identitySessionRevocation';
 import { SESSION_COOKIE } from '../../src/lib/session';
 
-function rawOf(res: { raw: string } | { rateLimited: true }): string {
-  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: true }): string {
+  if (!('raw' in res)) throw new Error('expected an eligible login token');
   return res.raw;
 }
 
@@ -23,11 +24,18 @@ describe('/auth/[token] magic-link consume', () => {
     // GET only peeks — the token must survive it (mail-scanner prefetch safety).
     const page = await get(`/auth/${raw}`);
     expect(page.status).toBe(200);
+    expect(page.headers.get('cache-control')).toBe('no-store');
+    expect(page.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await page.clone().text()).not.toContain(raw);
     expect(await peekToken(env.DB, raw, 'login')).not.toBeNull();
 
     // POST consumes and establishes the session.
     const consumed = await post(`/auth/${raw}`, '');
     expect(consumed.status).toBe(303);
+    expect(consumed.headers.get('cache-control')).toBe('no-store');
+    expect(consumed.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(consumed.headers.get('x-content-type-options')).toBe('nosniff');
     expect(consumed.headers.get('location')).toBe('/en/my');
     expect(consumed.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
 
@@ -51,6 +59,27 @@ describe('/auth/[token] magic-link consume', () => {
       .run();
     const res = await post(`/auth/${raw}`, '');
     expect(res.headers.get('set-cookie') ?? '').not.toContain(`${SESSION_COOKIE}=`);
+  });
+
+  it('uses a migration-backfilled legacy login epoch before revocation and rejects it after revocation', async () => {
+    const beforeRaw = `precutover-${crypto.randomUUID()}`;
+    await env.DB.prepare(`INSERT INTO tokens(person_id,token_hash,purpose,expires_at)
+      VALUES(3,?1,'login',datetime('now','+15 minutes'))`).bind(await sha256Hex(beforeRaw)).run();
+    // Simulates the 0030 migration over a pre-cutover login token.
+    await env.DB.prepare(`UPDATE tokens SET expected_session_epoch=(SELECT session_epoch FROM people p WHERE p.id=tokens.person_id)
+      WHERE token_hash=?1`).bind(await sha256Hex(beforeRaw)).run();
+    const before = await post(`/auth/${beforeRaw}`, '');
+    expect(before.status).toBe(303);
+    expect(before.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
+
+    const afterRaw = `precutover-after-${crypto.randomUUID()}`;
+    await env.DB.prepare(`INSERT INTO tokens(person_id,token_hash,purpose,expected_session_epoch,expires_at)
+      VALUES(3,?1,'login',(SELECT session_epoch FROM people WHERE id=3),datetime('now','+15 minutes'))`)
+      .bind(await sha256Hex(afterRaw)).run();
+    await expect(revokeIdentitySessions(env.DB, 3)).resolves.toMatchObject({ revoked: true });
+    const after = await post(`/auth/${afterRaw}`, '');
+    expect(after.status).toBe(200);
+    expect(after.headers.get('set-cookie') ?? '').not.toContain(`${SESSION_COOKIE}=`);
   });
 });
 

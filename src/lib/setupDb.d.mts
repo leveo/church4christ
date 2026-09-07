@@ -7,6 +7,8 @@ export function initializeModuleSettings(
   selectedModules: readonly ModuleKey[],
 ): Promise<void>;
 
+export function isBootstrapAdminReady(db: AppDb, email: string): Promise<boolean>;
+
 export type BootstrapStatus =
   | 'created'
   | 'already-admin'

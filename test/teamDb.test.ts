@@ -41,6 +41,7 @@ async function wipe(): Promise<void> {
     env.DB.prepare('DELETE FROM ministries'),
     env.DB.prepare('DELETE FROM service_type_i18n'),
     env.DB.prepare('DELETE FROM service_types'),
+    env.DB.prepare('DELETE FROM person_merge_redirects'),
     env.DB.prepare('DELETE FROM people'),
   ]);
 }

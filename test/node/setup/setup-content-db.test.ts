@@ -1,4 +1,4 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,10 @@ import { applySetup, createD1Steps, createSupabaseSteps } from '../../../scripts
 import { assertDemoSeedTarget } from '../../../scripts/setup/provider-verification.mjs';
 import { buildSetupPlan } from '../../../scripts/setup/plan.mjs';
 import { createStateStore, fingerprintPlan } from '../../../scripts/setup/state.mjs';
+import { renderAnonymousBinds } from '../../../scripts/setup/sql.mjs';
+import { isBootstrapAdminReady } from '../../../src/lib/setupDb.mjs';
+import type { AppDb, AppDbResult, AppStatement } from '../../../src/lib/appDb';
+import { revokeVerifiedContactOwner } from '../../../src/lib/identityDb';
 
 const databases: DatabaseSync[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -19,14 +23,33 @@ function migratedDatabase() {
   for (const file of readdirSync('migrations').filter((name) => name.endsWith('.sql')).sort()) {
     sqlite.exec(readFileSync(resolve('migrations', file), 'utf8'));
   }
-  const db = {
-    prepare(sql: string) {
-      let values: SQLInputValue[] = [];
-      return {
-        bind(...bound: SQLInputValue[]) { values = bound; return this; },
-        async first(column?: string) { const row = sqlite.prepare(sql).get(...values); return (column ? row?.[column] : row) ?? null; },
-        async run() { const result = sqlite.prepare(sql).run(...values); return { success: true, meta: { changes: Number(result.changes) } }; },
+  const db: AppDb = {
+    prepare(sql: string): AppStatement {
+      let values: unknown[] = [];
+      const statement: AppStatement = {
+        bind(...bound: unknown[]) { values = bound; return statement; },
+        async first<T>(column?: string) {
+          const row = sqlite.prepare(renderAnonymousBinds(sql, values)).get();
+          return ((column ? row?.[column] : row) ?? null) as T | null;
+        },
+        async all<T>() {
+          const before = Number(sqlite.prepare('SELECT total_changes() n').get()?.n);
+          const results = sqlite.prepare(renderAnonymousBinds(sql, values)).all();
+          const after = Number(sqlite.prepare('SELECT total_changes() n').get()?.n);
+          return { results: results as T[], success: true, meta: { changes: after - before } };
+        },
+        async run<T>() { return statement.all<T>(); },
       };
+      return statement;
+    },
+    async batch<T>(statements: AppStatement[]) {
+      sqlite.exec('BEGIN');
+      try {
+        const results: AppDbResult<T>[] = [];
+        for (const statement of statements) results.push(await statement.run<T>());
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (error) { sqlite.exec('ROLLBACK'); throw error; }
     },
   };
   return { sqlite, db };
@@ -48,6 +71,53 @@ function plan(demoData: boolean, preset = 'website-community') {
 }
 
 describe('content setup database boundary', () => {
+  it.each([false, true])('recovers a failed administrator checkpoint without regranting ownership (demo=%s)', async (demoData) => {
+    const { sqlite, db } = migratedDatabase();
+    const directory = await mkdtemp(resolve(tmpdir(), 'c4c-identity-checkpoint-'));
+    const statePath = resolve(directory, 'setup-state.json');
+    const resources = { d1DatabaseName: 'content-choice-db', d1DatabaseId: 'local', r2BucketName: 'content-choice-media', hyperdriveId: null };
+    const desired = { ...plan(demoData), resources };
+    const provider = createD1Steps({ db, moduleKeys: catalog.order, runner: { run: vi.fn() },
+      wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', mode: 'local', verify: {
+        migrate: async () => true, seed: async () => false,
+        'initialize-modules': async ({ plan: activePlan }: any) => catalog.order.every((key) =>
+          sqlite.prepare('SELECT value FROM settings WHERE key=?').get(`module.${key}`)?.value === activePlan.moduleSettings[`module.${key}`]),
+        'bootstrap-admin': ({ plan: activePlan }: any) => isBootstrapAdminReady(db, activePlan.adminEmail),
+      } });
+    const applyAdmin = vi.fn(provider['bootstrap-admin'].apply);
+    const steps = { ...Object.fromEntries(desired.actions.map((action: string) => [action, { apply: vi.fn(), verify: async () => true }])),
+      ...provider,
+      seed: { apply: async () => { sqlite.exec(readFileSync('seed/dev-seed.sql', 'utf8')); return { changed: true }; },
+        verify: async () => Boolean(sqlite.prepare("SELECT id FROM people WHERE email='admin@example.com'").get()) },
+      'bootstrap-admin': { ...provider['bootstrap-admin'], apply: applyAdmin },
+    };
+    const store = createStateStore(statePath);
+    const failedCheckpoint = { ...store, async mark(name: string, evidence: unknown) {
+      if (name === 'bootstrap-admin') throw new Error('simulated checkpoint write failure');
+      return store.mark(name, evidence);
+    } };
+    try {
+      await expect(applySetup(desired, { steps, stateStore: failedCheckpoint })).rejects.toMatchObject({ step: 'bootstrap-admin', phase: 'mark' });
+      expect(await isBootstrapAdminReady(db, desired.adminEmail)).toBe(true);
+      expect(sqlite.prepare('SELECT count(*) n FROM people').get()?.n).toBe(demoData ? 12 : 1);
+      expect(sqlite.prepare("SELECT value FROM settings WHERE key='site.demo_content'").get()?.value).toBe(String(demoData));
+      await applySetup(desired, { steps, stateStore: createStateStore(statePath) });
+      expect(applyAdmin).toHaveBeenCalledTimes(1);
+      const changed = { ...plan(demoData, 'website'), resources };
+      expect(fingerprintPlan(changed)).not.toBe(fingerprintPlan(desired));
+      await applySetup(changed, { steps, stateStore: createStateStore(statePath) });
+      expect(applyAdmin).toHaveBeenCalledTimes(1);
+      const owner = sqlite.prepare(`SELECT o.person_id,c.id FROM contact_points c JOIN verified_contact_owners o ON o.contact_point_id=c.id
+        WHERE c.kind='email' AND c.normalized_value=?`).get(desired.adminEmail)!;
+      expect(sqlite.prepare("SELECT count(*) n FROM identity_audit_events WHERE event_type='setup_admin_bootstrapped'").get()?.n).toBe(1);
+      await revokeVerifiedContactOwner(db, { campusId: 1, contactPointId: Number(owner.id),
+        proof: { kind: 'admin', actorPersonId: Number(owner.person_id), reasonCode: 'admin_review' } });
+      await expect(applySetup(changed, { steps, stateStore: createStateStore(statePath) })).rejects.toThrow(/trusted identity review or recovery/i);
+      expect(await isBootstrapAdminReady(db, desired.adminEmail)).toBe(false);
+      expect(sqlite.prepare('SELECT person_id FROM verified_contact_owners WHERE contact_point_id=?').get(owner.id!)).toBeUndefined();
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it.each([null, 'true', 'false'])('preserves managed content choice %s when a real plan change resets completion state', async (savedMarker) => {
     const { sqlite, db } = migratedDatabase();
     const directory = await mkdtemp(resolve(tmpdir(), 'c4c-content-history-'));
@@ -101,7 +171,7 @@ describe('content setup database boundary', () => {
 
   it('records the first choice before module initialization so an interrupted install can resume safely', async () => {
     const { sqlite, db } = migratedDatabase();
-    const failingDb = { prepare(sql: string) {
+    const failingDb = { ...db, prepare(sql: string) {
       if (sql.includes('ON CONFLICT(key) DO UPDATE SET value = excluded.value')) throw new Error('interrupted module initialization');
       return db.prepare(sql);
     } };

@@ -10,6 +10,9 @@ const SCREENSHOT_DEV_MARKERS = Object.freeze([
   'SCREENSHOT_SESSION_SECRET',
   'c4c-learning-screenshot-session-dev-only',
 ]);
+const TEST_ONLY_EMAIL_MARKERS = Object.freeze([
+  'EMAIL_E2E_SINK',
+]);
 
 function filesUnder(root) {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -33,7 +36,21 @@ export function assertNoScreenshotSessionInBundle(root = 'dist') {
   }
 }
 
+/** Fail the production build if the built-worker-only email sink leaks. */
+export function assertNoTestOnlyEmailSinkInBundle(root = 'dist') {
+  const absoluteRoot = resolve(root);
+  if (!existsSync(absoluteRoot)) throw new Error(`Production bundle is missing: ${absoluteRoot}`);
+  for (const path of filesUnder(absoluteRoot)) {
+    if (!TEXT_EXTENSIONS.has(extname(path))) continue;
+    const contents = readFileSync(path, 'utf8');
+    if (TEST_ONLY_EMAIL_MARKERS.some((marker) => contents.includes(marker))) {
+      throw new Error(`Test-only email sink found in production bundle: ${relative(absoluteRoot, path)}`);
+    }
+  }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   assertNoScreenshotSessionInBundle(process.argv[2] ?? 'dist');
-  console.log('production bundle excludes screenshot-only session code');
+  assertNoTestOnlyEmailSinkInBundle(process.argv[2] ?? 'dist');
+  console.log('production bundle excludes screenshot-session and email-test-only code');
 }

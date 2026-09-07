@@ -22,9 +22,11 @@ interface Props {
   locale: Locale;
   noindex?: boolean;
   footer?: boolean;
+  /** Suppress URL-derived SEO links on bearer-token and other secret pages. */
+  privateMetadata?: boolean;
 }
 
-const { title, locale, noindex = false } = Astro.props;
+const { title, locale, noindex = false, privateMetadata = false } = Astro.props;
 const description = Astro.props.description ?? t(locale, 'site.tagline');
 
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
@@ -54,8 +56,8 @@ const fullTitle = `${title} · ${siteName}`;
 // locale against the configured site origin. x-default points at English.
 const site = Astro.site ?? new URL(Astro.url.origin);
 const { rest } = pathWithoutLocale(Astro.url.pathname);
-const canonical = new URL(localePath(locale, rest), site).href;
-const alternates = [
+const canonical = privateMetadata ? null : new URL(localePath(locale, rest), site).href;
+const alternates = privateMetadata ? [] : [
   { hreflang: 'en', href: new URL(localePath('en', rest), site).href },
   { hreflang: 'zh-Hans', href: new URL(localePath('zh', rest), site).href },
   { hreflang: 'x-default', href: new URL(localePath('en', rest), site).href },
@@ -75,8 +77,8 @@ const alternates = [
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
-    <link rel="canonical" href={canonical} />
-    {alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
+    {!privateMetadata && canonical && <link rel="canonical" href={canonical} />}
+    {!privateMetadata && alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script is:inline>
       // No-flash mode: honor a saved choice, else fall back to the settings-driven
@@ -95,7 +97,7 @@ const alternates = [
   </head>
   <body class="min-h-screen flex flex-col">
     <a href="#main" class="skip-link">{t(locale, 'common.skipToContent')}</a>
-    <Header />
+    <Header privateMetadata={privateMetadata} />
     <main id="main" class="flex-1">
       <slot />
     </main>

@@ -1,0 +1,83 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../../layouts/Admin.astro';
+import IdentityWorkspace from '../../../../../components/admin/care/IdentityWorkspace.astro';
+import { btn, card, lab, noticeErr, noticeOk, tin } from '../../../../../lib/adminUi';
+import type { IdentityAuthEnv } from '../../../../../lib/identityAuth';
+import { scheduleIdentityDelivery } from '../../../../../lib/identityDelivery';
+import { approveIdentityRecovery, getIdentityRecoveryCase, getIdentityRecoveryTargetSummary } from '../../../../../lib/identityRecovery';
+import { deliverIdentityRecoveryNotifications } from '../../../../../lib/identityRecoveryOutbox';
+import { t } from '../../../../../lib/i18n';
+import type { Locale } from '../../../../../lib/locales';
+
+const user = Astro.locals.user!;
+if (!user.isSuperAdmin) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.rawDb;
+const caseId = Number(Astro.params.id);
+if (!Number.isSafeInteger(caseId) || caseId <= 0) return new Response(null, { status: 404 });
+const campusId = await db.prepare('SELECT campus_id FROM identity_recovery_cases WHERE id=?1').bind(caseId).first<number>('campus_id');
+if (!campusId) return new Response(null, { status: 404 });
+let recovery = await getIdentityRecoveryCase(db, campusId, caseId);
+if (!recovery) return new Response(null, { status: 404 });
+let targetSummary = await getIdentityRecoveryTargetSummary(db, campusId, caseId);
+let notice: 'holding' | 'completed' | 'blocked' | 'step_up' | null = null;
+let noticeTime = '';
+const contactCategoryLabel = (kind: string) => kind === 'email'
+  ? t(lang, 'admin.identityRecovery.contactEmail')
+  : kind === 'phone' ? t(lang, 'admin.identityRecovery.contactPhone') : t(lang, 'admin.identityRecovery.contactOther');
+const riskCategoryLabel = (risk: 'super_admin' | 'finance' | 'scoped_admin') => risk === 'super_admin'
+  ? t(lang, 'admin.identityRecovery.riskSuperAdmin')
+  : risk === 'finance' ? t(lang, 'admin.identityRecovery.riskFinance') : t(lang, 'admin.identityRecovery.riskScopedAdmin');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const confirmed = String(form.get('confirm_review') ?? '') === 'confirmed';
+  const targetRaw = String(form.get('target_person_id') ?? '').trim();
+  const targetPersonId = targetRaw ? Number(targetRaw) : undefined;
+  const result = confirmed ? await approveIdentityRecovery(db, env as unknown as IdentityAuthEnv, {
+    campusId,
+    caseId,
+    actorPersonId: user.id,
+    assurance: Astro.locals.assurance,
+    now: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    notificationLocale: lang,
+    ...(targetPersonId ? { targetPersonId } : {}),
+  }) : { status: 'blocked' as const, reason: 'stale_review' as const };
+  if (result.status === 'holding') {
+    notice = 'holding'; noticeTime = result.notBeforeAt;
+  } else if (result.status === 'completed') {
+    notice = 'completed';
+  } else if (result.status === 'step_up_required') notice = 'step_up';
+  else notice = 'blocked';
+  recovery = await getIdentityRecoveryCase(db, campusId, caseId);
+  if (!recovery) return new Response(null, { status: 404 });
+  targetSummary = await getIdentityRecoveryTargetSummary(db, campusId, caseId);
+}
+scheduleIdentityDelivery(Astro.locals.cfContext, async () => {
+  await deliverIdentityRecoveryNotifications(db, env, { caseId });
+  return true;
+});
+---
+
+<Admin title={t(lang, 'admin.identityRecovery.title')}>
+  <IdentityWorkspace locale={lang}>
+  <h1 class="font-display text-heading-md font-bold">{t(lang, 'admin.identityRecovery.case', { id: recovery.id })}</h1>
+  {notice === 'holding' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityRecovery.holding', { time: noticeTime })}</p>}
+  {notice === 'completed' && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.identityRecovery.completed')}</p>}
+  {notice === 'blocked' && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.identityRecovery.blocked')}</p>}
+  {notice === 'step_up' && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.identityRecovery.stepUp')}</p>}
+  <section class={`mt-6 ${card}`}>
+    <dl class="grid gap-3 sm:grid-cols-2"><div><dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.identityRecovery.campus')}</dt><dd>{recovery.campusId}</dd></div><div><dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.identityRecovery.state')}</dt><dd>{recovery.state}</dd></div><div><dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.identityRecovery.targetSummary')}</dt><dd>{targetSummary?.displayName ?? t(lang, 'admin.identityRecovery.unresolvedShort')}</dd></div><div><dt class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.identityRecovery.hold')}</dt><dd>{recovery.notBeforeAt ?? '—'}</dd></div></dl>
+    {targetSummary && <div class="mt-4 rounded-md border border-border p-4"><p class="font-semibold">{t(lang, 'admin.identityRecovery.verifiedCategories')}</p><ul class="mt-2 list-disc pl-5">{targetSummary.verifiedContactCategories.map((contact) => <li>{contactCategoryLabel(contact.kind)}: {contact.count}</li>)}</ul><p class="mt-3">{t(lang, 'admin.identityRecovery.activeCampuses', { count: targetSummary.activeCampusCount })}</p><p class="mt-2">{t(lang, 'admin.identityRecovery.riskCategories')}: {targetSummary.riskCategories.length ? targetSummary.riskCategories.map(riskCategoryLabel).join(', ') : t(lang, 'admin.identityRecovery.none')}</p></div>}
+    {recovery.state === 'open' && (
+      <form method="post" class="mt-6 space-y-4">
+        {!recovery.personId && <><p class="text-sm text-danger">{t(lang, 'admin.identityRecovery.unresolved')}</p><label class="block"><span class={lab}>{t(lang, 'admin.identityRecovery.target')}</span><input class={tin} name="target_person_id" type="number" min="1" required /></label></>}
+        <p class="text-sm text-ink-muted">{t(lang, recovery.holding ? 'admin.identityRecovery.secondHelp' : 'admin.identityRecovery.firstHelp')}</p>
+        <label class="flex items-start gap-3"><input name="confirm_review" value="confirmed" type="checkbox" required class="mt-1" /><span class="text-sm">{t(lang, recovery.holding ? 'admin.identityRecovery.confirmSecond' : 'admin.identityRecovery.confirmFirst')}</span></label>
+        <button type="submit" class={btn}>{t(lang, 'admin.identityRecovery.approve')}</button>
+      </form>
+    )}
+  </section>
+  </IdentityWorkspace>
+</Admin>

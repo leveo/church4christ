@@ -61,6 +61,9 @@ const copy = careCopy(lang);
           </>
         )
       }
+      {user.isSuperAdmin && <a href="/admin/people/identity/merge" class={btnSecondary}>{t(lang, 'admin.identityMerge.queue')}</a>}
+      {user.isSuperAdmin && <a href="/admin/people/identity/recovery" class={btnSecondary}>{t(lang, 'admin.identityRecovery.queue')}</a>}
+      {user.isSuperAdmin && <a href="/admin/people/identity/planning-center" class={btnSecondary}>Planning Center</a>}
       {canManagePeople && <a href="/admin/people/new" class={btn}>{t(lang, 'admin.people.new')}</a>}
     </div>
   </div>

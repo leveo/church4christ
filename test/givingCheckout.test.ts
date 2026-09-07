@@ -144,9 +144,13 @@ describe('stable giving Checkout browser identity', () => {
     requestId,
     await signInitialGivingCheckoutProof(SESSION_SECRET, requestId),
   );
-  const context = (data: FormData, user: null | { id: number; displayName: string; email: string } = null) => ({
+  const context = (data: FormData, user: null | { id: number; displayName: string; email: string } = {
+    id: 9,
+    displayName: String(data.get('name') ?? 'Ada Lovelace'),
+    email: String(data.get('email') ?? 'ada@example.com'),
+  }) => ({
     request: new Request('https://church.example/api/giving/checkout', { method: 'POST', body: data }),
-    locals: { modules: new Set(['giving']), locale: 'en', user, db: {} },
+    locals: { modules: new Set(['giving']), locale: 'en', user, rawDb: {}, campusMode: 'single', db: {} },
   } as never);
   const deps = (overrides: Record<string, unknown> = {}) => ({
     sessionSecret: SESSION_SECRET,
@@ -156,7 +160,32 @@ describe('stable giving Checkout browser identity', () => {
     getStripeCustomer: vi.fn(async () => null),
     createOneTimeCheckout: vi.fn(async () => ({ id: 'cs_test_give', url: 'https://checkout.stripe.com/c/pay/cs_test_give' })),
     createRecurringCheckout: vi.fn(async () => ({ id: 'cs_test_give', url: 'https://checkout.stripe.com/c/pay/cs_test_give' })),
+    attachIdentitySource: vi.fn(async () => ({})),
+    getSessionEpoch: vi.fn(async () => 0),
     ...overrides,
+  });
+
+  it('rejects an anonymous direct POST before any business or Stripe work', async () => {
+    const dependencies = deps();
+    const response = await createGivingCheckoutHandler(dependencies as never)(context(await signedForm(), null));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/en/signin?next=%2Fen%2Fgive');
+    expect(dependencies.getFund).not.toHaveBeenCalled();
+    expect(dependencies.getSetting).not.toHaveBeenCalled();
+    expect(dependencies.createOneTimeCheckout).not.toHaveBeenCalled();
+    expect(dependencies.createRecurringCheckout).not.toHaveBeenCalled();
+  });
+
+  it.each(['once', 'month'] as const)('always attaches signed-in %s giving even when the client marker is missing or forged', async (frequency) => {
+    const dependencies = deps();
+    const data = await signedForm();
+    data.set('frequency', frequency);
+    data.set('identitySource', '0');
+    await createGivingCheckoutHandler(dependencies as never)(context(data));
+    expect(dependencies.attachIdentitySource).toHaveBeenCalledOnce();
+    expect(dependencies.attachIdentitySource.mock.invocationCallOrder[0]).toBeLessThan(
+      (frequency === 'once' ? dependencies.createOneTimeCheckout : dependencies.createRecurringCheckout).mock.invocationCallOrder[0],
+    );
   });
 
   it('renders a server-signed checkout identity and accepts query values only after verification', () => {

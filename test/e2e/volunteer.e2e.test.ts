@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { get, icalDate, ORIGIN, post, sunday } from './helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { uploadKey } from '../../src/lib/upload';
+import { beginTeamApplicationIntent } from '../../src/lib/identityBusinessIntent';
+import { identityTrustedRequestContext } from '../../src/lib/identityAuth';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 // Minimal 1x1 PNG. Keep this as a fresh Uint8Array so uploadKey hashes exactly
@@ -97,65 +99,84 @@ describe('/cal/[token].ics (public token feed)', () => {
 });
 
 describe('/en/serve/apply (public)', () => {
-  it('signed-out POST creates a minimal person, a pending application, and a login token; a duplicate is indistinguishable', async () => {
+  it('signed-out POST stages an exact intent and creates no person/application before OTP', async () => {
     const email = 'applicant.e2e@example.com';
+    const intentId = crypto.randomUUID();
+    const applicationsBefore = await env.DB.prepare('SELECT count(*) n FROM team_applications WHERE team_id=2').first<number>('n');
     const res = await post(
       '/en/serve/apply',
-      `team_id=2&name=New+Applicant&email=${encodeURIComponent(email)}&phone=555-0000&message=hi`,
+      new URLSearchParams({ action: 'begin', intent_id: intentId, team_id: '2', name: 'New Applicant',
+        email, phone: '+12125550100', message: 'hi' }).toString(),
     );
-    expect(res.status).toBe(303);
-    const freshLocation = res.headers.get('location')!;
-    expect(freshLocation).toBe('/en/serve/apply?sent=1&signin=1');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    const freshBody = await res.text();
+    expect(freshBody).toContain('name="code"');
+    expect(freshBody).toContain('name="intent_id"');
 
     const person = await env.DB
-      .prepare(`SELECT id, display_name, role, active FROM people WHERE email = ?`)
+      .prepare(`SELECT id FROM people WHERE email = ?`)
       .bind(email)
-      .first<{ id: number; display_name: string; role: string; active: number }>();
-    expect(person).toMatchObject({ display_name: 'New Applicant', role: 'member', active: 1 });
+      .first<{ id: number }>();
+    expect(person).toBeNull();
+    expect(freshBody).toContain('six-digit code');
+    expect(await env.DB.prepare('SELECT count(*) n FROM team_applications WHERE team_id=2').first<number>('n')).toBe(applicationsBefore);
 
-    const app = await env.DB
-      .prepare(`SELECT status, team_id FROM team_applications WHERE person_id = ?`)
-      .bind(person!.id)
-      .first<{ status: string; team_id: number }>();
-    expect(app).toMatchObject({ status: 'P', team_id: 2 });
+    // ANTI-ENUMERATION: a retry remains byte-identical and still produces no
+    // account, application, or login capability from a raw email.
+    const dup = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: intentId,
+      team_id: '2', name: 'New Applicant', email }).toString());
+    expect(dup.status).toBe(200);
+    expect(await dup.text()).toContain('six-digit code');
 
-    // Magic link issued (EMAIL_DEV_LOG=1: mail devlogged, token row persisted).
-    const tokensOf = async () =>
-      (await env.DB
-        .prepare(`SELECT COUNT(*) AS n FROM tokens WHERE person_id = ? AND purpose = 'login'`)
-        .bind(person!.id)
-        .first<{ n: number }>())!.n;
-    expect(await tokensOf()).toBe(1);
-    const freshBody = await (await get(freshLocation)).text();
+    expect(await env.DB.prepare(`SELECT count(*) n FROM people WHERE email=?1`).bind(email).first<number>('n')).toBe(0);
+  });
 
-    // ANTI-ENUMERATION: a second signed-out application for the same team must
-    // be byte-identical to a fresh success — same redirect (no dup flag), same
-    // rendered body — while writing no duplicate row and still sending the
-    // magic link so the person can sign in and see their pending application.
-    const dup = await post(
-      '/en/serve/apply',
-      `team_id=2&name=New+Applicant&email=${encodeURIComponent(email)}`,
-    );
-    expect(dup.status).toBe(303);
-    const dupLocation = dup.headers.get('location')!;
-    expect(dupLocation).toBe(freshLocation);
-    expect(dupLocation).not.toContain('dup');
-    const dupBody = await (await get(dupLocation)).text();
-    expect(dupBody).toBe(freshBody);
+  it('completes the exact staged Team intent through the route and mints one session', async () => {
+    const intentId = crypto.randomUUID(); const email = 'team-route-complete@example.test';
+    const begun = await beginTeamApplicationIntent(env.DB, env as any, {
+      campusId: 1, intentId, teamId: 2, positionId: null, message: 'Route verified', name: 'Route Volunteer',
+      email, phone: null,
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': '203.0.113.230' }), 'team-route-e2e'),
+    });
+    expect(begun.status).toBe('verification_required');
+    if (begun.status !== 'verification_required') return;
+    const response = await post('/en/serve/apply', new URLSearchParams({
+      action: 'verify', intent_id: intentId, public_id: begun.delivery.publicId, code: begun.delivery.code,
+    }).toString());
+    expect(response.status).toBe(303);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(response.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
+    expect(await env.DB.prepare(`SELECT count(*) n FROM team_applications a JOIN people p ON p.id=a.person_id
+      WHERE a.team_id=2 AND p.email=?1`).bind(email).first<number>('n')).toBe(1);
+    const replay = await post('/en/serve/apply', new URLSearchParams({
+      action: 'verify', intent_id: intentId, public_id: begun.delivery.publicId, code: begun.delivery.code,
+    }).toString());
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('set-cookie') ?? '').not.toContain(`${SESSION_COOKIE}=`);
+  });
 
-    const count = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM team_applications WHERE person_id = ?`)
-      .bind(person!.id)
-      .first<{ n: number }>();
-    expect(count?.n).toBe(1); // no duplicate application
-    expect(await tokensOf()).toBe(2); // magic link sent again
+  it('treats an active victim email exactly like an unknown anonymous email', async () => {
+    const beforeApps = await env.DB.prepare(`SELECT count(*) n FROM team_applications WHERE person_id=3 AND team_id=2`).first<number>('n');
+    const beforeTokens = await env.DB.prepare(`SELECT count(*) n FROM tokens WHERE person_id=3 AND purpose='login'`).first<number>('n');
+    const beforeMessages = (await env.DB.prepare(`SELECT count(*) n FROM email_log`).first<number>('n')) ?? 0;
+    const victim = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(),
+      team_id: '2', name: 'Attacker', email: 'sarah.johnson@example.com', message: 'forged' }).toString());
+    const unknown = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(),
+      team_id: '2', name: 'Attacker', email: 'unknown-victim@example.test', message: 'forged' }).toString());
+    expect(victim.status).toBe(200);
+    expect(unknown.status).toBe(200);
+    expect(await env.DB.prepare(`SELECT count(*) n FROM team_applications WHERE person_id=3 AND team_id=2`).first<number>('n')).toBe(beforeApps);
+    expect(await env.DB.prepare(`SELECT count(*) n FROM tokens WHERE person_id=3 AND purpose='login'`).first<number>('n')).toBe(beforeTokens);
+    expect(await env.DB.prepare(`SELECT count(*) n FROM email_log`).first<number>('n')).toBe(beforeMessages + 2);
   });
 
   it('honeypot POST lands on the exact same success state and writes nothing', async () => {
     const res = await post('/en/serve/apply', 'team_id=2&name=Bot&email=bot@example.com&website=spam');
-    expect(res.status).toBe(303);
-    // Same redirect target as a genuine signed-out submission — no tell.
-    expect(res.headers.get('location')).toBe('/en/serve/apply?sent=1&signin=1');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('six-digit code');
     const person = await env.DB
       .prepare(`SELECT id FROM people WHERE email = 'bot@example.com'`)
       .first<{ id: number }>();
@@ -165,8 +186,11 @@ describe('/en/serve/apply (public)', () => {
   it('signed-in POST applies as the session user; a signed-in duplicate shows the friendly note', async () => {
     const cookie = await sessionCookie(5, 'mark.liu@example.com');
     // Team 3 (Hospitality) — mark has no application there in the seed.
-    const res = await post('/en/serve/apply', 'team_id=3&name=Impostor&email=other@example.com', { cookie });
+    const res = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(),
+      team_id: '3', name: 'Impostor', email: 'other@example.com' }).toString(), { cookie });
     expect(res.status).toBe(303);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     expect(res.headers.get('location')).toBe('/en/serve/apply?sent=1');
     const app = await env.DB
       .prepare(`SELECT person_id, status FROM team_applications WHERE team_id = 3 AND person_id = 5`)
@@ -177,11 +201,9 @@ describe('/en/serve/apply (public)', () => {
 
     // Signed-in duplicate → the dup flag and the "already applied" note (the
     // user owns the account, nothing leaks).
-    const dup = await post('/en/serve/apply', 'team_id=3', { cookie });
+    const dup = await post('/en/serve/apply', new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(), team_id: '3' }).toString(), { cookie });
     expect(dup.status).toBe(303);
-    expect(dup.headers.get('location')).toBe('/en/serve/apply?sent=1&dup=1');
-    const dupBody = await (await get(dup.headers.get('location')!, { cookie })).text();
-    expect(dupBody).toContain('You already have an application with this team');
+    expect(dup.headers.get('location')).toBe('/en/serve/apply?sent=1');
 
     // The dup flag is session-gated: hand-typing it anonymously renders the
     // neutral success, not the note.

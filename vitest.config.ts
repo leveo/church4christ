@@ -21,6 +21,7 @@ const NODE_ONLY = [
   'test/node/setup/**/*.test.ts',
   'test/node/serviceAttendancePageSource.test.ts',
   'test/node/activityScorePageSource.test.ts',
+  'test/node/identityAccountSource.test.ts',
   'test/setup/*.test.ts',
 ];
 

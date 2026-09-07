@@ -233,6 +233,7 @@ if (hasGroups) {
       <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
     )}
     <MemberPageHeader title={t(locale, 'profile.title')} description={person.display_name} />
+    <p class="mt-3"><a href={localePath(locale, '/settings/security')} class="font-semibold text-primary hover:underline">{t(locale, 'security.title')}</a></p>
     <nav class="profile-jumps" aria-label={t(locale, 'profile.title')}><a href="#identity">{t(locale, 'profile.name')}</a>{hasPeople && <a href="#household">{t(locale, 'profile.household.title')}</a>}<a href="#interests">{t(locale, 'profile.interests')}</a></nav>
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'profile.saved')}</p>}

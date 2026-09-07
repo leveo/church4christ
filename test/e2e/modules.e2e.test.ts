@@ -33,8 +33,8 @@ function modulesBody(disabled: string[]): string {
   return body.toString();
 }
 
-function rawOf(res: { raw: string } | { rateLimited: true }): string {
-  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: true }): string {
+  if (!('raw' in res)) throw new Error('expected an eligible login token');
   return res.raw;
 }
 

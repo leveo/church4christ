@@ -11,7 +11,8 @@ describe('Newcomer route source boundaries', () => {
     expect(publicSource).toContain("headers.get('CF-Connecting-IP')");
     expect(publicSource).not.toContain('X-Forwarded-For');
     expect(publicSource).toContain('consumeNewcomerPublicRateLimit');
-    expect(publicSource).toContain('createNewcomerSubmission');
+    expect(publicSource).toContain('createNewcomerObservationIntent');
+    expect(publicSource).not.toContain('createNewcomerSubmission');
     expect(publicSource).not.toMatch(/INSERT INTO people|createNewcomerVisitor|linkNewcomerPerson/);
     expect(publicSource).toContain("headers.set('Cache-Control', 'no-store')");
   });

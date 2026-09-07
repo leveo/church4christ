@@ -84,9 +84,10 @@ describe('runtime setup hardening', () => {
     await expect(probeDeployResources({ runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', manifest: { site: { slug: 'church' }, database: 'd1', resources: { d1DatabaseName: 'church-db', d1DatabaseId: 'd1-id', r2BucketName: 'church-media', hyperdriveId: null } } as any })).rejects.toThrow(/deployment/i);
   });
 
-  it('checks SESSION_SECRET remotely and R2 objects without logging object bytes', async () => {
-    const secretRunner = { run: vi.fn(async () => ({ stdout: '[{"name":"SESSION_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 })) };
+  it('checks deploy secret metadata and R2 objects without logging object bytes', async () => {
+    const secretRunner = { run: vi.fn(async () => ({ stdout: '[{"name":"SESSION_SECRET","type":"secret_text"},{"name":"IDENTITY_VERIFICATION_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 })) };
     await expect(hasDeploySecret({ runner: secretRunner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', name: 'SESSION_SECRET' })).resolves.toBe(true);
+    await expect(hasDeploySecret({ runner: secretRunner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', name: 'IDENTITY_VERIFICATION_SECRET' })).resolves.toBe(true);
     const objectRunner = { run: vi.fn(async (_file: string, _args: string[]) => ({ stdout: 'binary bytes', stderr: '', exitCode: 0 })) };
     await expect(probeR2Object({ runner: objectRunner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', bucket: 'media', key: 'uploads/a.webp', mode: 'local' })).resolves.toBe(true);
     expect(objectRunner.run.mock.calls[0][1]).toContain('--pipe');
@@ -100,6 +101,26 @@ describe('runtime setup hardening', () => {
     } as any);
     expect(findings).toContainEqual(expect.objectContaining({ code: 'services.email-unverified', severity: 'warning' }));
     expect(findings).not.toContainEqual(expect.objectContaining({ code: 'services.email-ok' }));
+  });
+
+  it('classifies deploy identity secret metadata as unverifiable without a same-run attestation', async () => {
+    const runner = { run: vi.fn(async (_file: string, args: string[]) => args[0] === 'secret'
+      ? { stdout: '[{"name":"IDENTITY_VERIFICATION_SECRET","type":"secret_text"}]', stderr: '', exitCode: 0 }
+      : { stdout: '', stderr: '', exitCode: 0 }) };
+    const manifest: any = { mode: 'deploy', database: 'd1', site: { slug: 'x' }, resources: { r2BucketName: 'x-media', d1DatabaseName: 'x-db', d1DatabaseId: 'id' } };
+    await expect(buildServicePresence(manifest, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {} }))
+      .resolves.toMatchObject({ identityVerificationSecretStatus: 'unverifiable' });
+    const now = Date.now();
+    const attestation = { generatedAt: new Date(now - 1_000).toISOString(), expiresAt: new Date(now + 15 * 60_000 - 1_000).toISOString() };
+    await expect(buildServicePresence(manifest, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {}, identityVerificationSecretAttestation: attestation, identityVerificationRuntimeStatus: 'unverifiable' }))
+      .resolves.toMatchObject({ identityVerificationSecretStatus: 'valid' });
+    await expect(buildServicePresence(manifest, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {}, identityVerificationSecretAttestation: attestation, identityVerificationRuntimeStatus: 'invalid' }))
+      .resolves.toMatchObject({ identityVerificationSecretStatus: 'invalid' });
+    await expect(buildServicePresence(manifest, { runner, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {}, identityVerificationSecretAttestation: { generatedAt: new Date(now - 15 * 60_000 - 1_000).toISOString(), expiresAt: new Date(now - 1_000).toISOString() }, identityVerificationRuntimeStatus: 'unverifiable' }))
+      .resolves.toMatchObject({ identityVerificationSecretStatus: 'unverifiable' });
+    const noRemote = { run: vi.fn(async (_file: string, args: string[]) => args[0] === 'secret' ? { stdout: '[]', stderr: '', exitCode: 0 } : { stdout: '', stderr: '', exitCode: 0 }) };
+    await expect(buildServicePresence(manifest, { runner: noRemote, wranglerBin: 'wrangler', configPath: 'wrangler.jsonc', hostEnv: {}, identityVerificationRuntimeStatus: 'valid' }))
+      .resolves.toMatchObject({ identityVerificationSecretStatus: 'unverifiable' });
   });
 
   it('requires multiple canonical demo sentinels, not an unrelated admin email', async () => {
@@ -204,11 +225,15 @@ describe('runtime setup hardening', () => {
 
   it('strictly verifies local managed secrets and exact admin identity', () => {
     const strong = 'x'.repeat(32);
-    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(true);
-    expect(verifyLocalSecretsContent(`SESSION_SECRET=weak\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
-    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=0\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
-    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`, 'admin@example.test')).toBe(false);
-    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`)).toBe(true);
+    const source = `IDENTITY_SOURCE_KEY_SECRET=${strong}\nIDENTITY_SOURCE_KEY_ID=v1\n`;
+    const recovery = `IDENTITY_RECOVERY_KEY_SECRET=${strong}\nIDENTITY_RECOVERY_KEY_ID=v1\n`;
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=${strong}\n${source}${recovery}EMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(true);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=weak\nIDENTITY_VERIFICATION_SECRET=${strong}\n${source}EMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=weak\n${source}EMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=${strong}\nIDENTITY_SOURCE_KEY_SECRET=weak\nIDENTITY_SOURCE_KEY_ID=v1\nEMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=${strong}\n${source}EMAIL_DEV_LOG=0\nAUTH_DEV_BYPASS_EMAIL=admin@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=${strong}\n${source}EMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`, 'admin@example.test')).toBe(false);
+    expect(verifyLocalSecretsContent(`SESSION_SECRET=${strong}\nIDENTITY_VERIFICATION_SECRET=${strong}\n${source}${recovery}EMAIL_DEV_LOG=1\nAUTH_DEV_BYPASS_EMAIL=other@example.test\n`)).toBe(true);
   });
 
   it('requires a real local Supabase connection source and returns a nonsecret handoff reference', async () => {

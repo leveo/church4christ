@@ -35,8 +35,8 @@ async function sessionCookie(id: number, email: string): Promise<string> {
   return `${SESSION_COOKIE}=${jwt}`;
 }
 
-function rawOf(res: { raw: string } | { rateLimited: true }): string {
-  if ('rateLimited' in res) throw new Error('expected a token, got rateLimited');
+function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: true }): string {
+  if (!('raw' in res)) throw new Error('expected an eligible login token');
   return res.raw;
 }
 
@@ -287,36 +287,30 @@ describe('decline → leaders notified', () => {
   });
 });
 
-// ── Checklist 5: signed-out apply → leader notification + magic link ──
+// ── Checklist 5: unverified signed-out apply fails closed ──
 describe('apply → leader notification email', () => {
-  it('a signed-out application writes the appReceived devlog row to the team leader (plus P row + login token)', async () => {
+  it('does not turn a raw signed-out email into an identity, application, or login token', async () => {
     const before = await maxEmailLogId();
     const email = 'sweep.applicant@example.com';
     const res = await post(
       '/en/serve/apply',
-      `team_id=2&name=Sweep+Applicant&email=${encodeURIComponent(email)}`,
+      new URLSearchParams({ action: 'begin', intent_id: crypto.randomUUID(), team_id: '2',
+        name: 'Sweep Applicant', email }).toString(),
     );
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/en/serve/apply?sent=1&signin=1');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('name="code"');
 
     const person = await env.DB
       .prepare(`SELECT id FROM people WHERE email = ?`)
       .bind(email)
       .first<{ id: number }>();
-    expect(person).not.toBeNull();
-    expect(
-      await count(`SELECT COUNT(*) AS n FROM team_applications WHERE person_id = ? AND team_id = 2 AND status = 'P'`, person!.id),
-    ).toBe(1);
-    expect(
-      await count(`SELECT COUNT(*) AS n FROM tokens WHERE person_id = ? AND purpose = 'login'`, person!.id),
-    ).toBe(1);
-    // Ben leads the AV Team → the received notice lands in his devlog.
+    expect(person).toBeNull();
     expect(
       await count(
         `SELECT COUNT(*) AS n FROM email_log WHERE id > ? AND kind = 'appReceived' AND status = 'devlog' AND to_email = 'ben.wu@example.com'`,
         before,
       ),
-    ).toBe(1);
+    ).toBe(0);
   });
 });
 

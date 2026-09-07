@@ -12,6 +12,9 @@ import DesignImage from './ui/DesignImage.astro';
 import type { DesignImage as DesignImageKey } from '../lib/designAssets';
 import LocaleSwitch from './LocaleSwitch.astro';
 
+interface Props { privateMetadata?: boolean }
+const { privateMetadata = false } = Astro.props;
+
 const locale = Astro.locals.locale;
 const home = localePath(locale, '/');
 const give = localePath(locale, '/give');
@@ -84,7 +87,7 @@ const memberPath = modules.has('serve') ? '/my' : '/my/opportunities';
           </button>
         )
       }
-      <LocaleSwitch />
+      {!privateMetadata && <LocaleSwitch />}
       <a
         href={memberHome ? localePath(locale, memberPath) : give}
         class="px-4 py-2 rounded-md bg-primary text-on-primary font-semibold hover:bg-primary-hover"
@@ -143,7 +146,7 @@ const memberPath = modules.has('serve') ? '/my' : '/my/opportunities';
               </button>
             )
           }
-          <LocaleSwitch />
+          {!privateMetadata && <LocaleSwitch />}
         </div>
       </div>
     </nav>
