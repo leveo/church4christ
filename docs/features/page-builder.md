@@ -17,7 +17,7 @@ dragging blocks over writing Markdown.
   (side-by-side layout), Heading, Text, Image, Button, Spacer, and Divider. A section can
   hold columns and other blocks; columns hold everything else.
 - **Bilingual by design.** Every piece of text — headings, paragraphs, button labels,
-  image alt text — has its own English and 中文 version, switched with one toggle at the
+  image alt text — has its own English and Chinese version, switched with one toggle at the
   top of the screen. If a Chinese field is left blank, the page quietly shows the English
   version instead, so a half-translated page never shows a blank spot to a visitor.
 - **Always on-theme.** Backgrounds, widths, alignment, and sizes are chosen from dropdown
@@ -42,7 +42,7 @@ panel on the right. Delete or duplicate a block with the buttons on that panel. 
 redo are always available if a change does not look right.
 
 **Entering text in two languages.** A language toggle near the top switches the whole
-editor between English and 中文. Type your English copy, flip the toggle, and type the
+editor between English and Chinese. Type your English copy, flip the toggle, and type the
 Chinese version for the same blocks — the layout does not change, only which language's
 words you are typing.
 
