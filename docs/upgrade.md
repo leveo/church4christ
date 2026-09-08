@@ -11,6 +11,12 @@ recovery.
 
 ## 1. Identify what will change
 
+The current dependency security refresh requires `npm ci` and a fresh build before
+deployment; it does not require a database migration, reseeding, or new secrets.
+Keep Vitest on 4.x because the installed Cloudflare Workers test pool requires it.
+For npm 12, `package.json` records exact native install-script approvals; review
+and update those approvals when changing esbuild, workerd, or sharp versions.
+
 Record all of the following in the change ticket or maintenance notes:
 
 - the currently deployed commit or immutable tag and the proposed target commit or tag;

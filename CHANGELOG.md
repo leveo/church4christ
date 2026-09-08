@@ -10,6 +10,15 @@ than published to npm.
 
 ## [Unreleased]
 
+### Security
+
+- Upgrade Astro, its Cloudflare/React adapters, Wrangler, the Workers test pool,
+  and affected transitive dependencies to clear the 13 npm audit findings.
+  Keep Vitest on its compatible 4.x release line. Pin native install-script
+  approvals for npm 12. Operator impact: run `npm ci`, rebuild, and follow the
+  normal deployment process to use the patched packages. No database migration,
+  reseeding, secret, or application configuration change is required.
+
 ### Changed
 
 - Renewed all 21 core modules with Sanctuary typography, forest-green navigation,
