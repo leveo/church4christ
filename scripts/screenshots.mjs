@@ -132,6 +132,7 @@ const MIN_BYTES = 20 * 1024;
 //            development-only screenshot secret (all authenticated README rows)
 //   openDisclosure — open this desktop header group before capture; missing
 //            disclosure is an error rather than a closed-navigation screenshot
+//   openDetails — selectors for native details panels to open before capture
 //   waitForSelector — wait for a client-rendered editor before validating/capture
 //   postForm — after load, click every element matching `checkAll` (if given)
 //            then `requestSubmit()` the element matching `form` and wait for
@@ -350,6 +351,10 @@ export const README_DIAGRAMS = Object.freeze([
 export const CAPTURE_ROWS = Object.freeze([
   ...LEGACY_CAPTURE_ROWS.map((row) => README_CAPTURE_ROWS.find((readme) => readme.out === row.out) ?? row),
   ...README_CAPTURE_ROWS.filter((row) => !LEGACY_CAPTURE_ROWS.some((legacy) => legacy.out === row.out)),
+  readmeShot('/admin/onboarding', 'admin/onboarding-readiness.png', 'Launch checklist', { actor: 'admin' }),
+  readmeShot('/admin/activity-score', 'admin/activity-score-overview.png', 'Activity score', { actor: 'admin', requiredTexts: ['Member activity', 'Source coverage'], rejectionTexts: ['The activity score report could not be loaded.'] }),
+  readmeShot('/admin/activity-score', 'admin/activity-score-calculation.png', 'Activity score', { actor: 'admin', anchor: 'Member activity', openDetails: ['.activity-people-table tbody tr:first-child details'], requiredTexts: ['Show calculation'] }),
+  readmeShot('/admin/activity-score', 'admin/activity-score-model.png', 'Activity score', { actor: 'admin', anchor: 'Scoring model', openDetails: ['.activity-config'], requiredTexts: ['Scoring model'] }),
 ]);
 
 export function selectScreenshotRows(argv) {
@@ -603,6 +608,14 @@ async function capture(cdp, base, row) {
       }, sessionId);
       if (result.value !== true) throw new Error(`${row.out}: required disclosure ${JSON.stringify(row.openDisclosure)} was not found`);
       await sleep(100);
+    }
+
+    for (const selector of row.openDetails ?? []) {
+      const { result } = await send('Runtime.evaluate', {
+        expression: `(()=>{const d=document.querySelector(${JSON.stringify(selector)});if(!(d instanceof HTMLDetailsElement))return false;d.open=true;return d.open;})()`,
+        returnByValue: true,
+      }, sessionId);
+      if (result.value !== true) throw new Error(`${row.out}: required details panel ${JSON.stringify(selector)} was not found`);
     }
 
     // Anchored shots frame a below-the-fold panel (e.g. the household / notes

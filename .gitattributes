@@ -1,0 +1,5 @@
+# Keep executable scripts, generated documentation, and the setup baseline stable
+# across Windows and Unix checkouts. Setup fingerprints wrangler.jsonc exactly.
+*.mjs text eol=lf
+*.md text eol=lf
+wrangler.jsonc text eol=lf

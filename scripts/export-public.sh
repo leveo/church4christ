@@ -8,8 +8,8 @@
 #   * Only files tracked at HEAD ship (git archive), so gitignored/untracked local
 #     state — node_modules/, dist/, .wrangler/, .dev.vars, .superpowers/ — never
 #     leaks into the export.
-#   * docs/superpowers/ (internal design history, which IS tracked in this repo) is
-#     stripped from the export.
+#   * Internal agent artifacts are ignored by the repository; the export also
+#     strips docs/superpowers/ defensively when exporting an older revision.
 #   * The export is a standalone git repo with exactly one commit and no upstream
 #     history or session metadata.
 #
@@ -33,7 +33,7 @@ TARGET="$(cd "$TARGET" && pwd)"
 # 1. Export tracked files at HEAD only.
 git archive --format=tar HEAD | tar -x -C "$TARGET"
 
-# 2. Strip internal design history (tracked, so it rode along in the archive).
+# 2. Defensively strip internal design history from older revisions.
 rm -rf "$TARGET/docs/superpowers"
 
 # 3. Fresh single-commit history — no upstream metadata, no session trailers.
