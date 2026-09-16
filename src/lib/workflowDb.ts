@@ -319,13 +319,13 @@ export async function updateWorkflowTask(
   const dueAt = input.dueAt === undefined ? task.due_at : utcTime(input.dueAt);
   const reset = assigneeId !== task.assignee_id || dueAt !== task.due_at;
   const now = new Date().toISOString();
-  await db.batch([
+  const results = await db.batch([
     db
       .prepare(
         `UPDATE workflow_tasks SET status=?,notes=?,assignee_id=?,reminder_enabled=?,updated_by=?,updated_at=?,due_at=?,
       delivery_state=CASE WHEN ?=1 THEN 'pending' ELSE delivery_state END,
       delivery_attempts=CASE WHEN ?=1 THEN 0 ELSE delivery_attempts END,
-      next_reminder_at=CASE WHEN ?=1 THEN ? ELSE next_reminder_at END WHERE id=? AND delivery_state<>'sending' AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id=workflow_tasks.run_id AND r.status<>'cancelled')`,
+      next_reminder_at=CASE WHEN ?=1 THEN ? ELSE next_reminder_at END WHERE id=? AND (?=1 OR assignee_id=?) AND delivery_state<>'sending' AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id=workflow_tasks.run_id AND r.status<>'cancelled')`,
       )
       .bind(
         input.status,
@@ -344,6 +344,8 @@ export async function updateWorkflowTask(
         reset ? 1 : 0,
         dueAt,
         id,
+        actor.canManage ? 1 : 0,
+        actor.personId,
       ),
     db
       .prepare(
@@ -356,12 +358,10 @@ export async function updateWorkflowTask(
       )
       .bind(task.run_id, task.run_id),
   ]);
-  const changed = await db
-    .prepare('SELECT updated_at FROM workflow_tasks WHERE id=?')
-    .bind(id)
-    .first<{ updated_at: string }>();
-  if (changed?.updated_at !== now)
-    throw new Error('A reminder is being delivered. Try again shortly.');
+  if (results[0].meta.changes !== 1)
+    throw new Error(
+      'The task changed or a reminder is being delivered. Reload and try again.',
+    );
 }
 export async function cancelWorkflow(
   db: AppDb,

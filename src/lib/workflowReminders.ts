@@ -40,8 +40,8 @@ export async function enrollCampusWorkflows(
       `SELECT wt.id AS template_id,wt.campus_id,cm.person_id FROM workflow_templates wt
     JOIN campus_memberships cm ON cm.campus_id=wt.campus_id AND cm.active=1
     JOIN campuses c ON c.id=wt.campus_id AND c.active=1
-    JOIN people p ON p.id=cm.person_id AND p.deleted_at IS NULL
-    JOIN people a ON a.id=wt.default_assignee_id AND a.deleted_at IS NULL
+    JOIN people p ON p.id=cm.person_id AND p.active=1 AND p.deleted_at IS NULL
+    JOIN people a ON a.id=wt.default_assignee_id AND a.active=1 AND a.deleted_at IS NULL
     JOIN campus_memberships am ON am.campus_id=wt.campus_id AND am.person_id=a.id AND am.active=1
     WHERE wt.enabled=1 AND wt.trigger_type='member_added' AND wt.fellowship_id IS NULL
     AND (NOT EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=wt.campus_id) OR EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=wt.campus_id AND m.module_key='groups' AND m.enabled=1))
@@ -131,8 +131,8 @@ export async function runWorkflowReminders(
         `SELECT t.title,t.due_at,p.email,p.display_name,c.slug AS campus_slug
       FROM workflow_tasks t JOIN workflow_runs r ON r.id=t.run_id AND r.status='active'
       JOIN workflow_templates wt ON wt.id=r.template_id AND wt.enabled=1
-      JOIN people p ON p.id=t.assignee_id AND p.deleted_at IS NULL
-      JOIN people subject ON subject.id=r.person_id AND subject.deleted_at IS NULL
+      JOIN people p ON p.id=t.assignee_id AND p.active=1 AND p.deleted_at IS NULL
+      JOIN people subject ON subject.id=r.person_id AND subject.active=1 AND subject.deleted_at IS NULL
       JOIN campuses c ON c.id=t.campus_id AND c.active=1
       WHERE t.id=? AND t.lease_token=? AND t.status IN ('pending','in_progress') AND t.reminder_enabled=1
       AND (r.fellowship_id IS NULL OR (EXISTS(SELECT 1 FROM fellowships f WHERE f.id=r.fellowship_id AND f.active=1)

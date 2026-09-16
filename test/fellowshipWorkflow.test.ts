@@ -40,6 +40,9 @@ beforeEach(async () => {
   ])
     await env.DB.prepare(`DELETE FROM ${table}`).run();
   await env.DB.prepare('UPDATE campus_memberships SET active=1').run();
+  await env.DB.prepare(
+    'UPDATE people SET active=1 WHERE id IN (99001,99002)',
+  ).run();
   await env.DB.exec(
     "INSERT OR IGNORE INTO people (id,display_name,email) VALUES (99001,'Care Coordinator','care@example.test'),(99002,'New Member','member@example.test'); INSERT OR IGNORE INTO campuses (id,slug,name) VALUES (99002,'east-test','East Campus');",
   );
@@ -281,7 +284,9 @@ describe('direct campus workflows and delivery safeguards', () => {
     });
     await env.DB.prepare(
       "UPDATE workflow_templates SET created_at='2026-09-18 00:00:00' WHERE id=?",
-    ).bind(laterTemplate).run();
+    )
+      .bind(laterTemplate)
+      .run();
     await enrollCampusWorkflows({}, env.DB);
     await enrollCampusWorkflows({}, env.DB);
     expect(await listWorkflowTasks(db)).toHaveLength(1);
@@ -303,6 +308,48 @@ describe('direct campus workflows and delivery safeguards', () => {
       send,
     });
     expect(send).not.toHaveBeenCalled();
+  });
+  it('rejects an old assignee update when reassignment wins the write race', async () => {
+    const { task } = await campusRun();
+    const batch = db.batch.bind(db);
+    vi.spyOn(db, 'batch').mockImplementationOnce(async (statements) => {
+      await env.DB.prepare(
+        'UPDATE workflow_tasks SET assignee_id=99002 WHERE id=?',
+      )
+        .bind(task.id)
+        .run();
+      return batch(statements);
+    });
+    await expect(
+      updateWorkflowTask(
+        db,
+        task.id,
+        { status: 'completed', notes: 'Stale update' },
+        { personId: 99001, canManage: false },
+      ),
+    ).rejects.toThrow('The task changed');
+    const current = (await listWorkflowTasks(db))[0];
+    expect(current.assignee_id).toBe(99002);
+    expect(current.status).toBe('pending');
+    expect(current.notes).toBe('');
+  });
+  it('suppresses reminders and new assignments for globally inactive people', async () => {
+    const { task } = await campusRun();
+    await env.DB.prepare('UPDATE people SET active=0 WHERE id=99001').run();
+    const send = vi.fn().mockResolvedValue(true);
+    await runWorkflowReminders({ WORKFLOW_EMAIL_ENABLED: '1' }, env.DB, {
+      now: '2026-09-16T16:00:00Z',
+      send,
+    });
+    expect(send).not.toHaveBeenCalled();
+    await expect(
+      updateWorkflowTask(
+        db,
+        task.id,
+        { status: 'pending', notes: '', assigneeId: 99001 },
+        { personId: 99002, canManage: true },
+      ),
+    ).rejects.toThrow('active member');
   });
   it('never automatically resends when a worker loses an in-flight delivery', async () => {
     const { task } = await campusRun();

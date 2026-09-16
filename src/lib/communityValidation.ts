@@ -36,7 +36,9 @@ export async function requirePerson(
   requireCampus(db);
   if (
     !(await db
-      .prepare('SELECT id FROM people WHERE id=? AND deleted_at IS NULL')
+      .prepare(
+        'SELECT id FROM people WHERE id=? AND active=1 AND deleted_at IS NULL',
+      )
       .bind(positiveId(personId))
       .first())
   ) {
