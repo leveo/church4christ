@@ -1,7 +1,6 @@
 import { defineConfig } from 'vitest/config';
-// In @cloudflare/vitest-pool-workers@0.17.0, both `cloudflareTest` and
-// `readD1Migrations` are exported from the package's main entrypoint (there is
-// no `/config` subpath export) — same deviation as the reference stack config.
+// `cloudflareTest` and `readD1Migrations` use the package's main entrypoint;
+// the installed Workers pool does not export a `/config` subpath.
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 
 // Pure-node tests — no `cloudflare:test` imports; they exercise build scripts

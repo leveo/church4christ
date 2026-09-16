@@ -7,6 +7,10 @@ This guide gets you set up and explains those rules.
 
 ## Getting set up
 
+Start with [Setup for people and AI agents](docs/setup.md) for the shared installation
+contract, complete noninteractive commands, expected results, and troubleshooting. AI
+coding agents should also read [AGENTS.md](AGENTS.md).
+
 You need [Node.js](https://nodejs.org/) 22.22.1+. Then:
 
 ```bash

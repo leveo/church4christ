@@ -47,7 +47,7 @@ the official provider API remains authoritative and every pass stays bounded.
 ![Learning administrator overview showing the fictional Canvas connection, active status, provider controls, and the Genesis 1 manual synchronization action](../images/learning/admin-overview.png)
 
 The screenshot intentionally uses a fictional local Canvas snapshot: **Local fictional Canvas
-snapshot / 本地虚构 Canvas 快照** from demo data. Every provider launch shown by that snapshot
+snapshot** from demo data. Every provider launch shown by that snapshot
 uses the reserved non-production host `https://canvas-learning.example.test`; the demo has no
 provider credentials and assumes no provider network. Do not treat its health, OAuth, or
 manual-sync buttons as a connected service. Replace it with an authorized real provider

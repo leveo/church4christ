@@ -1,6 +1,5 @@
 // Page-builder layout tree: types + the validation gate between untrusted
-// island JSON and the server renderer (spec: docs/superpowers/specs/
-// 2026-07-10-page-builder-design.md). Pure and dependency-free so the same
+// island JSON and the server renderer. Pure and dependency-free so the same
 // module runs in workerd (save/render) and the browser island (canvas).
 // Containment: sections at top level only; columns only inside sections;
 // leaves inside sections or columns. Text is localized per-field ({en,zh}),

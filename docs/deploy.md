@@ -1,5 +1,9 @@
 # Deploying to Cloudflare
 
+Start with [Setup for people and AI agents](setup.md) to choose the installation path,
+collect required inputs, and preview a complete setup plan. This runbook covers the
+deployment-specific infrastructure and operational checks.
+
 This is the full, from-scratch walkthrough to put Church4Christ online on Cloudflare's
 platform, with your own domain. The base Worker, D1, and R2 resources can start within free
 allowances; production email and usage beyond plan limits can require a paid plan. It takes

@@ -32,6 +32,46 @@ or its explanation.
 Scores do not send messages, change roles, create care tasks, or make any other automatic
 decision.
 
+## Workflow
+
+![Activity Score workflow: configure a rolling window and weights, read bounded participation evidence, calculate dimension scores, and present an explainable report for human review; unavailable sources are excluded and remaining weights are renormalized](../images/diagrams/activity-score-workflow.png)
+
+1. A super administrator chooses the rolling window, eligible membership statuses, enabled
+   dimensions, targets, and weights.
+2. The report reads bounded, person-linked evidence for the current and previous windows.
+   Unavailable dimensions are excluded and the remaining weights are renormalized. If no
+   source remains, the report shows no scores.
+3. Each dimension uses its attendance ratio or count against a target. The weighted result
+   produces a score from 0 to 100 and a comparison with the preceding window.
+4. An authorized administrator reviews trends, bands, coverage, and individual calculations.
+   Any pastoral follow-up remains a human decision.
+
+## Administrator experience
+
+These real local-D1 screenshots use fictional demo members and the default 90-day model:
+Group attendance and Confirmed serving each have weight 50. Registration and Learning are
+disabled in this model. Results vary with the capture date and available participation records.
+
+### Report overview
+
+![Activity Score admin report with church-wide average, comparison-window change, eligible population, score bands, and source coverage](../images/admin/activity-score-overview.png)
+
+### Member calculations
+
+Use **Show calculation** to inspect the counts, denominators or targets, dimension scores,
+and weights behind a member's result.
+
+![Member activity table with a native calculation disclosure expanded to show the evidence and weights behind a score](../images/admin/activity-score-calculation.png)
+
+### Scoring model
+
+Super administrators expand **Scoring model** to configure the window, eligibility, score
+thresholds, and dimensions. Saving uses the revision checks described below.
+
+![Expanded Scoring model panel showing the rolling window, membership eligibility, thresholds, and dimension settings](../images/admin/activity-score-model.png)
+
+See the [feature visual capture notes](../design/feature-visuals.md) to reproduce these images.
+
 ## Access and configuration
 
 The **Activity Score** grant lets a limited admin view `/admin/activity-score`. A super admin

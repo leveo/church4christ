@@ -1,7 +1,11 @@
 # Church4Christ
 
-**An open-source bilingual church website and church-management foundation for
-customized implementations.**
+**An AI-native, open-source bilingual church website and church-management foundation
+for customized implementations.**
+
+**Start here: [Setup for people and AI agents](docs/setup.md).** Choose a local preview
+or deployment, run the guided installer or complete machine-readable commands, and verify
+the result with the shared launch checklist. Coding agents begin with [AGENTS.md](AGENTS.md).
 
 Church4Christ combines a bilingual public site with an admin system for content,
 prayer care, volunteer scheduling, people, and households. Optional modules add a
@@ -89,6 +93,14 @@ does not remove security or operational upkeep. See
 
 ## Build it with an AI assistant
 
+AI-native setup means people and agents use the same documented installer, feature catalog,
+readiness checks, and explicit handoff. The [setup guide](docs/setup.md) lists required inputs,
+copyable commands, expected JSON results, and recovery steps. Start an assistant with:
+
+> "Read AGENTS.md and docs/setup.md. Set up a local Website + Community demo, verify the
+> site and administrator pages, then report the URL, enabled features, and remaining
+> readiness checks."
+
 You do not have to make every change by hand. This repository is organized so an AI coding
 assistant can follow the plain-English guides in [`docs/features/`](docs/features/) and
 work against extensive automated test coverage. That can lower customization and
@@ -103,8 +115,8 @@ language, and let it do the editing. Some real examples you could paste in:
 
 > "Add a Spanish (`es`) locale following `docs/i18n.md`."
 
-> "Set up my church's name, address, and service times in the seed data, then deploy
-> following `docs/deploy.md`."
+> "Follow docs/setup.md to configure our church with no demo content. Show the setup
+> plan and readiness results, then prepare deployment using docs/deploy.md."
 
 The same workflow can help with maintenance: describe a change, inspect the proposed
 diff, test it locally, and deploy only after the result has been reviewed. AI assistance
@@ -139,7 +151,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/prayer-wall.png)](docs/features/prayer-wall.md) | **[Prayer wall](docs/features/prayer-wall.md)** | Receive prayer requests and work them on a simple board, privately. |
 | [![](docs/images/serve/matrix.png)](docs/features/volunteer-serve.md) | **[Volunteer scheduling](docs/features/volunteer-serve.md)** | Plan a month of serving at a glance; volunteers confirm by email, no login. |
 | [![](docs/images/admin/people-export.png)](docs/features/people-households.md) | **[People & households](docs/features/people-households.md)** | Profiles and households plus canonical create-only CSV export and reusable source-column mapping for migrations. |
-| [![](docs/images/identity/merge-review-queue.jpg)](docs/features/member-identity.md) | **[Member identity safety](docs/features/member-identity.md)** | Proof-bound identity across Giving, Registration, Groups, Teams, Newcomer, imports, and Planning Center; ambiguous duplicates go to review instead of name-only merging, with OTP-bound approval and a guarded 24-hour rollback. |
+| [![](docs/images/identity/merge-review-queue.jpg)](docs/features/member-identity.md) | **[Member identity safety](docs/features/member-identity.md)** | Proof-bound identity across Giving, Registration, Groups, Teams, Newcomer, and imports; ambiguous duplicates go to review instead of name-only merging, with OTP-bound approval and a guarded 24-hour rollback. |
 | [![](docs/images/groups/member-checklist.png)](docs/features/groups.md) | **[Groups](docs/features/groups.md)** | Small groups with a public directory, member checklist, join requests, events, and per-person email-link attendance. |
 | [![](docs/images/admin/children-dashboard.png)](docs/features/children-checkin.md) | **[Children's check-in](docs/features/children-checkin.md)** | A touch-friendly kiosk where parents check kids in and out with a pickup code, plus weekly attendance charts. |
 | [![](docs/images/admin/attendance-report.png)](docs/features/service-attendance.md) | **[Service attendance](docs/features/service-attendance.md)** | Record aggregate adult totals, derive optional child totals from check-ins, correct history, and download identity-free CSV reports. |
@@ -189,7 +201,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
 
-### Learning beyond Sunday / 主日之后继续学习
+### Learning beyond Sunday
 
 Version 1.1 adds the optional **Learning** module for Sunday school,
 discipleship, and other ministries that continue between meetings. Learners get
@@ -205,9 +217,9 @@ scheduled reconciliation feed only the activity metadata Church4Christ needs.
 
 ![Google Classroom and Church4Christ Canvas feed privacy-bounded course metadata into the bilingual learner experience](docs/images/learning/learning-flow.png)
 
-| English learner view | 中文学员页面 | Provider administration |
+| English learner view | Chinese learner view | Provider administration |
 |---|---|---|
-| [![Genesis 1 course in English](docs/images/learning/genesis-1-en.png)](docs/images/learning/genesis-1-en.png) | [![中文《创世记第一章》课程](docs/images/learning/genesis-1-zh.png)](docs/images/learning/genesis-1-zh.png) | [![Google Classroom and Canvas connection administration](docs/images/learning/admin-overview.png)](docs/images/learning/admin-overview.png) |
+| [![Genesis 1 course in English](docs/images/learning/genesis-1-en.png)](docs/images/learning/genesis-1-en.png) | [![Genesis 1 course in Chinese](docs/images/learning/genesis-1-zh.png)](docs/images/learning/genesis-1-zh.png) | [![Google Classroom and Canvas connection administration](docs/images/learning/admin-overview.png)](docs/images/learning/admin-overview.png) |
 
 See the **[Learning feature guide](docs/features/learning.md)** for provider
 setup, privacy boundaries, synchronization budgets, the Genesis 1 demo, and the
