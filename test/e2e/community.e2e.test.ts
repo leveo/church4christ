@@ -10,6 +10,35 @@ async function cookie(id: number, email: string) {
   return `${SESSION_COOKIE}=${token}; c4c_campus=main`;
 }
 describe('community management in the built Worker', () => {
+  it('keeps the chosen campus when navigating from the community chooser to workflows', async () => {
+    const admin = (await cookie(1, 'admin@example.com')).replace(
+      'c4c_campus=main',
+      'c4c_campus=all',
+    );
+    const chooser = await get('/admin/community', { cookie: admin });
+    const html = await chooser.text();
+    const campusForm = html.match(
+      /<form[^>]*action="\/campus\/switch"[^>]*>[\s\S]*?name="campus" value="main"[\s\S]*?<\/form>/,
+    )?.[0];
+    expect(campusForm).toContain('name="next" value="/admin/community"');
+    const switched = await post(
+      '/campus/switch',
+      'campus=main&next=%2Fadmin%2Fcommunity',
+      { cookie: admin },
+    );
+    expect(switched.status).toBe(303);
+    expect(switched.headers.get('set-cookie')).toContain('c4c_campus=main');
+    const scopedCookie = `${admin.split(';')[0]}; ${switched.headers.get('set-cookie')!.split(';')[0]}`;
+    const community = await get(switched.headers.get('location')!, {
+      cookie: scopedCookie,
+    });
+    expect(await community.text()).toContain(
+      'Groups managed directly by this campus',
+    );
+    const workflows = await get('/admin/workflows', { cookie: scopedCookie });
+    expect(workflows.status).toBe(200);
+    expect(await workflows.text()).toContain('Start a workflow');
+  });
   it('renders campus management and workflows for a groups administrator', async () => {
     const admin = await cookie(1, 'admin@example.com');
     for (const path of [
@@ -95,7 +124,7 @@ describe('community management in the built Worker', () => {
       "SELECT id FROM workflow_tasks WHERE title='Welcome contact'",
     ).first<{ id: string }>();
     const response = await post(
-      '/en/my/workflows',
+      '/en/my/workflows?campus=main',
       new URLSearchParams({
         action: 'task',
         task_id: task!.id,
@@ -105,6 +134,9 @@ describe('community management in the built Worker', () => {
       { cookie: member },
     );
     expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      '/en/my/workflows?saved=1&campus=main',
+    );
     expect(
       await env.DB.prepare('SELECT status FROM workflow_tasks WHERE id=?')
         .bind(task!.id)

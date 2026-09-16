@@ -37,7 +37,7 @@ if(Astro.request.method==='POST') {
       await retryWorkflowReminder(db,task.id);
     } else if(action==='cancel'&&form.has('confirm_cancel')) await cancelWorkflow(db,String(form.get('run_id')),user.id);
     else throw new Error('Choose a valid action.');
-    return Astro.redirect(`/admin/workflows?${fellowshipId?`fellowship=${fellowshipId}&`:''}saved=1`,303);
+    return Astro.redirect(`/admin/workflows?${fellowshipId?`fellowship=${fellowshipId}&`:''}campus=${encodeURIComponent(campus.slug)}&saved=1`,303);
   } catch(e) { error=e instanceof Error && !/SQL|constraint|D1_|postgres/i.test(e.message)?e.message:'The workflow could not be saved. Check the selected records and try again.'; }
 }
 const fellowships=campus?await listFellowships(db):[];

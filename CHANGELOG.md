@@ -10,6 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
+### Fixed
+
+- Community workspace entry buttons now persist the selected campus through the existing
+  campus switch endpoint, so navigation to fellowships, groups, and workflows keeps its
+  context. Workflow save redirects also retain the selected campus, including email links.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added

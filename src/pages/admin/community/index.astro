@@ -28,7 +28,7 @@ if(Astro.request.method==='POST') {
       if(role!=='member'&&role!=='coordinator') throw new Error('Choose a valid role.');
       await saveFellowshipMember(db,fellowshipId,positiveId(form.get('person_id')),role,form.get('active')==='1');
     } else throw new Error('Choose a valid action.');
-    return Astro.redirect(`/admin/community?${fellowshipId?`fellowship=${fellowshipId}&`:''}saved=1`,303);
+    return Astro.redirect(`/admin/community?${fellowshipId?`fellowship=${fellowshipId}&`:''}campus=${encodeURIComponent(campus.slug)}&saved=1`,303);
   } catch(e) { error=e instanceof Error && !/SQL|constraint|D1_|postgres/i.test(e.message)?e.message:'The change could not be saved. Check the selected records and use a unique slug.'; }
 }
 const fellowships=campus?await listFellowships(db):[];
@@ -48,7 +48,7 @@ const context=fellowshipId?`?fellowship=${fellowshipId}`:'';
     <header><p class="text-sm font-semibold text-primary">Community management</p><h1 class="font-display text-heading-md font-bold">{heading}</h1><p class="mt-2 text-ink-muted">Manage members, groups, and follow-up in one place. A campus can work directly with groups; fellowships are optional.</p></header>
     {error&&<p role="alert" class={noticeErr}>{error}</p>}
     {Astro.url.searchParams.has('saved')&&<p role="status" class={noticeOk}>Changes saved.</p>}
-    {!campus ? <section class={card}><h2 class="text-xl font-semibold">Choose a campus</h2><div class="mt-4 flex flex-wrap gap-3">{campuses.filter(c=>c.active===1).map(c=><a class={btn} href={`/admin/community?campus=${c.slug}`}>{c.name}</a>)}</div></section> : <>
+    {!campus ? <section class={card}><h2 class="text-xl font-semibold">Choose a campus</h2><div class="mt-4 flex flex-wrap gap-3">{campuses.filter(c=>c.active===1).map(c=><form method="post" action="/campus/switch"><input type="hidden" name="campus" value={c.slug}/><input type="hidden" name="next" value="/admin/community"/><button class={btn}>{c.name}</button></form>)}</div></section> : <>
       <nav class="flex flex-wrap gap-3" aria-label="Community"><a class={btn} href="/admin/community">Campus overview</a>{fellowships.filter(f=>f.active===1||f.id===fellowshipId).map(f=><a class="rounded-lg border border-border px-4 py-2" aria-current={f.id===fellowshipId?'page':undefined} href={`/admin/community?fellowship=${f.id}`}>{f.name}{f.active===0?' (Archived)':''}</a>)}<a class="rounded-lg border border-border px-4 py-2" href={`/admin/workflows${context}`}>Workflows</a></nav>
       <div class="grid gap-4 sm:grid-cols-3">{[{label:'Members',value:members.filter(m=>m.active===1).length},{label:selected?'Groups':'Direct campus groups',value:groups.length},{label:'Open follow-up tasks',value:tasks.filter(t=>['pending','in_progress'].includes(t.status)&&t.run_status==='active').length}].map(s=><div class={card}><p class="text-sm text-ink-muted">{s.label}</p><p class="mt-2 font-display text-3xl font-bold">{s.value}</p></div>)}</div>
       {selected&&<p class={card}>{selected.description}<br/><span class="text-sm text-ink-muted">{selected.meeting_details}</span></p>}

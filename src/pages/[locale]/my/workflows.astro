@@ -14,7 +14,7 @@ if(Astro.request.method==='POST') {
     const form=await Astro.request.formData();
     if(form.get('action')!=='task') throw new Error('Choose a valid action.');
     await updateWorkflowTask(db,String(form.get('task_id')),{status:String(form.get('status')) as WorkflowTask['status'],notes:String(form.get('notes')??'')},{personId:user.id,canManage:false});
-    return Astro.redirect(`/${locale}/my/workflows?saved=1`,303);
+    return Astro.redirect(`/${locale}/my/workflows?saved=1${Astro.locals.campus?`&campus=${encodeURIComponent(Astro.locals.campus.slug)}`:''}`,303);
   } catch { error='Unable to update this task. Check that it is still assigned to you and try again.'; }
 }
 const tasks=await listWorkflowTasks(db,{assigneeId:user.id});
