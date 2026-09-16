@@ -26,6 +26,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   groups: Object.freeze([
     'groups', 'group_members', 'group_join_requests', 'group_events', 'group_event_occurrences',
     'group_attendance', 'group_attendance_tokens',
+    'fellowships', 'fellowship_groups', 'fellowship_members', 'workflow_templates', 'workflow_runs', 'workflow_tasks',
   ]),
   people: Object.freeze([
     'households', 'household_members', 'person_notes', 'audit_events', 'people_import_mappings',

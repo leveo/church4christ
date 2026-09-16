@@ -1,0 +1,86 @@
+---
+import { env } from 'cloudflare:workers';
+import type { WorkflowEmailEnv } from '../../../lib/workflowReminders';
+import Admin from '../../../layouts/Admin.astro';
+import WorkflowTasks from '../../../components/community/WorkflowTasks.astro';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { listFellowships,listCommunityMembers } from '../../../lib/fellowshipDb';
+import { positiveId,requireFellowship } from '../../../lib/communityValidation';
+import { createWorkflowTemplate,listWorkflowTemplates,setWorkflowTemplateEnabled,startWorkflow,listWorkflowTasks,updateWorkflowTask,cancelWorkflow,retryWorkflowReminder,type WorkflowTask } from '../../../lib/workflowDb';
+import { btn,card,lab,tin,noticeErr,noticeOk } from '../../../lib/adminUi';
+const user=Astro.locals.user;
+if(!user||!hasAreaAccess(user,'groups')) return new Response(null,{status:403});
+const db=Astro.locals.db; const campus=Astro.locals.campus;
+let fellowshipId:number|null=null;
+try { if(Astro.url.searchParams.get('fellowship')) fellowshipId=positiveId(Astro.url.searchParams.get('fellowship')); if(campus) await requireFellowship(db,fellowshipId); }
+catch { return new Response('Community not found.',{status:404}); }
+let error='';
+let requestKey:string=crypto.randomUUID();
+if(Astro.request.method==='POST') {
+  if(!campus) return new Response('Select a campus before making changes.',{status:400});
+  try {
+    const form=await Astro.request.formData(); const action=form.get('action');
+    if(action==='template') {
+      const titles=form.getAll('step_title').map(String); const days=form.getAll('step_days').map(String);
+      await createWorkflowTemplate(db,{name:String(form.get('name')??''),fellowshipId,trigger:String(form.get('trigger')) as 'manual'|'member_added',enabled:form.has('enabled'),assigneeId:form.get('default_assignee_id')?positiveId(form.get('default_assignee_id')):null,
+        steps:titles.map((title,i)=>({title,daysAfterStart:/^\d+$/.test(days[i]??'')?Number(days[i]):NaN}))});
+    } else if(action==='start') {
+      requestKey=String(form.get('request_key')??'');
+      if(!/^[0-9a-f-]{36}$/.test(requestKey)) throw new Error('Reload this page before starting a workflow.');
+      const start=String(form.get('start_at')??'');
+      await startWorkflow(db,{templateId:positiveId(form.get('template_id')),fellowshipId,personId:positiveId(form.get('person_id')),assigneeId:positiveId(form.get('assignee_id')),requestKey,startAt:start?`${start}Z`:undefined});
+    } else if(action==='task') await updateWorkflowTask(db,String(form.get('task_id')),{status:String(form.get('status')) as WorkflowTask['status'],notes:String(form.get('notes')??''),assigneeId:positiveId(form.get('assignee_id')),reminderEnabled:form.has('reminder_enabled'),dueAt:`${String(form.get('due_at'))}Z`},{personId:user.id,canManage:true});
+    else if(action==='toggle') await setWorkflowTemplateEnabled(db,positiveId(form.get('template_id')),form.get('enabled')==='1');
+    else if(action==='retry') {
+      const task=(await listWorkflowTasks(db)).find(t=>t.id===form.get('task_id'));
+      if(!task || (task.delivery_state==='uncertain'&&!form.has('acknowledge_duplicate'))) throw new Error('Confirm the possible duplicate delivery before retrying.');
+      await retryWorkflowReminder(db,task.id);
+    } else if(action==='cancel'&&form.has('confirm_cancel')) await cancelWorkflow(db,String(form.get('run_id')),user.id);
+    else throw new Error('Choose a valid action.');
+    return Astro.redirect(`/admin/workflows?${fellowshipId?`fellowship=${fellowshipId}&`:''}saved=1`,303);
+  } catch(e) { error=e instanceof Error && !/SQL|constraint|D1_|postgres/i.test(e.message)?e.message:'The workflow could not be saved. Check the selected records and try again.'; }
+}
+const fellowships=campus?await listFellowships(db):[];
+const selected=fellowships.find(f=>f.id===fellowshipId);
+const templates=campus?(await listWorkflowTemplates(db)).filter(t=>t.fellowship_id===fellowshipId):[];
+const people=campus?(await listCommunityMembers(db,null)).filter(p=>p.active===1):[];
+const tasks=campus?await listWorkflowTasks(db,{fellowshipId}):[];
+const emailEnabled=(env as WorkflowEmailEnv).WORKFLOW_EMAIL_ENABLED==='1';
+---
+<Admin title="Community workflows">
+  <div class="space-y-6">
+    <header><p class="text-sm font-semibold text-primary">{selected?.name??campus?.name??'Community management'}</p><h1 class="font-display text-heading-md font-bold">Workflows</h1><p class="mt-2 text-ink-muted">Turn welcome visits, care check-ins, and group follow-up into an assigned plan.</p></header>
+    {error&&<p role="alert" class={noticeErr}>{error}</p>}{Astro.url.searchParams.has('saved')&&<p role="status" class={noticeOk}>Changes saved.</p>}
+    {!campus?<p class={card}><a class="text-primary underline" href="/admin/community">Choose a campus to manage its workflows.</a></p>:<>
+      <nav class="flex flex-wrap gap-3" aria-label="Workflow community"><a class={btn} href="/admin/workflows">Campus workflows</a>{fellowships.filter(f=>f.active===1).map(f=><a class="rounded-lg border border-border px-4 py-2" href={`/admin/workflows?fellowship=${f.id}`} aria-current={fellowshipId===f.id?'page':undefined}>{f.name}</a>)}<a class="rounded-lg border border-border px-4 py-2" href={`/admin/community${fellowshipId?`?fellowship=${fellowshipId}`:''}`}>Community overview</a></nav>
+      <p class={card}>{emailEnabled?'Automatic email reminders are enabled. The scheduler checks due tasks hourly.':'Automatic email reminders are off. Tasks can still be assigned and completed.'} <a class="text-primary underline" href="/en/my/workflows">View my tasks</a></p>
+      <div class="grid items-start gap-6 lg:grid-cols-2">
+        <section class={card}><h2 class="text-xl font-semibold">Start a workflow</h2><p class="mt-2 text-sm text-ink-muted">Create a personal follow-up plan from an enabled template.</p>
+          <form method="post" class="mt-4 space-y-4"><input type="hidden" name="action" value="start"/><input type="hidden" name="request_key" value={requestKey}/><label class="block"><span class={lab}>Template</span><select class={tin} name="template_id" required><option value="">Choose a template</option>{templates.filter(t=>t.enabled===1).map(t=><option value={t.id}>{t.name}</option>)}</select></label><label class="block"><span class={lab}>Person to follow up with</span><select class={tin} name="person_id" required><option value="">Choose a campus member</option>{people.map(p=><option value={p.id}>{p.display_name}</option>)}</select></label><label class="block"><span class={lab}>Assign steps to</span><select class={tin} name="assignee_id" required><option value="">Choose an assignee</option>{people.map(p=><option value={p.id}>{p.display_name}</option>)}</select></label><label class="block"><span class={lab}>Start date and time (UTC)</span><input class={tin} type="datetime-local" name="start_at" value={new Date().toISOString().slice(0,16)} required/></label><button class={btn} disabled={!templates.some(t=>t.enabled===1)}>Start workflow</button></form>
+        </section>
+        <details class={card} open={templates.length===0}><summary class="cursor-pointer text-xl font-semibold">Create a template</summary><form method="post" class="mt-4 space-y-4"><input type="hidden" name="action" value="template"/>
+          <label class="block"><span class={lab}>Template name</span><input class={tin} name="name" maxlength="120" required placeholder="New member welcome"/></label><label class="block"><span class={lab}>Trigger</span><select class={tin} name="trigger"><option value="manual">Start manually</option><option value="member_added">When a member joins this {selected?'fellowship':'campus'}</option></select></label><label class="block"><span class={lab}>Default assignee for automatic follow-up</span><select class={tin} name="default_assignee_id"><option value="">{selected?.coordinator_id?'Use fellowship coordinator':'Choose an assignee'}</option>{people.map(p=><option value={p.id}>{p.display_name}</option>)}</select></label>
+          <p class="text-sm text-ink-muted">Automatic campus workflows apply to memberships created after the template. Existing members can be enrolled manually. Templates snapshot their steps into each new plan.</p>
+          <fieldset><legend class={lab}>Steps and days after start</legend><div id="workflow-steps" class="space-y-3"><div class="flex gap-2"><input class={tin} aria-label="Step title" name="step_title" required maxlength="160" placeholder="Make first contact"/><input class={`${tin} max-w-24`} aria-label="Days after start" name="step_days" type="number" min="0" max="365" required value="0"/><button type="button" data-remove-step class="text-sm underline">Remove</button></div></div><button type="button" id="add-workflow-step" class="mt-3 text-primary underline">Add step</button></fieldset>
+          <label class="flex items-center gap-2"><input type="checkbox" name="enabled" checked/>Enable template</label><button class={btn}>Create template</button>
+        </form></details>
+      </div>
+      <section class={card}><h2 class="text-xl font-semibold">Templates</h2>{!templates.length&&<p class="mt-3 text-ink-muted">Create your first template above.</p>}<ul class="mt-3 divide-y divide-border">{templates.map(template=><li class="flex flex-wrap items-center justify-between gap-3 py-3"><div><p class="font-semibold">{template.name}</p><p class="text-sm text-ink-muted">{template.trigger_type==='manual'?'Manual start':'New member follow-up'} · {template.enabled===1?'Enabled':'Paused'} · {JSON.parse(template.steps_json).length} steps</p></div><form method="post"><input type="hidden" name="action" value="toggle"/><input type="hidden" name="template_id" value={template.id}/><input type="hidden" name="enabled" value={template.enabled===1?'0':'1'}/><button class="text-primary underline">{template.enabled===1?'Pause':'Enable'}</button></form></li>)}</ul><p class="mt-3 text-sm text-ink-muted">Pausing a template stops automatic enrollment and reminders for its plans. Tasks remain available to complete.</p></section>
+      <WorkflowTasks tasks={tasks} canManage people={people}/>
+    </>}
+  </div>
+</Admin>
+<script>
+  const steps=document.getElementById('workflow-steps');
+  document.getElementById('add-workflow-step')?.addEventListener('click',()=>{
+    if(!steps || steps.children.length>=20) return;
+    const row=steps.firstElementChild?.cloneNode(true) as HTMLElement|undefined;
+    if(!row) return;
+    row.querySelectorAll('input').forEach(input=>{ input.value=input.type==='number'?'7':''; });
+    steps.appendChild(row); row.querySelector('input')?.focus();
+  });
+  steps?.addEventListener('click',event=>{
+    const target=event.target;
+    if(target instanceof HTMLElement && target.hasAttribute('data-remove-step') && steps.children.length>1) target.parentElement?.remove();
+  });
+</script>

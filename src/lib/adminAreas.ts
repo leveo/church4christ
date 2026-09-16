@@ -72,6 +72,8 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   ['/admin/people/export-notes', 'people'],
   ['/admin/people', 'people-basic'],
   ['/admin/groups', 'groups'],
+  ['/admin/community', 'groups'],
+  ['/admin/workflows', 'groups'],
   ['/admin/children', 'children'],
   ['/admin/attendance', 'attendance'],
   ['/admin/activity-score', 'activity-score'],

@@ -1,3 +1,4 @@
+import { runCommunityWorkflowPass } from './lib/workflowReminders';
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
 import { sendAttendanceEmails } from './lib/groupAttendance';
@@ -50,7 +51,7 @@ export default {
       case ATTENDANCE_CRON: {
         const { db, end } = openDb(env as never);
         ctx.waitUntil((async () => {
-          try { await sendAttendanceEmails(vars, db); }
+          try { await Promise.all([sendAttendanceEmails(vars, db), runCommunityWorkflowPass(env as never, db)]); }
           finally {
             try { await enqueueDuePlanningCenterSyncJobs(db); await runPlanningCenterSyncPass(env as never, db); }
             finally {

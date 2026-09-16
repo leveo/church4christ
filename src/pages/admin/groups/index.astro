@@ -8,6 +8,8 @@
 // over every group plus who its admins are, for the site administrator.
 // Same inline add/edit model as announcements/events (?edit=<id>, save/delete),
 // soft delete only (groups.deleted_at — membership rows are kept).
+import { listCommunityGroups, listFellowships, assignFellowshipGroup } from '../../../lib/fellowshipDb';
+import { positiveId } from '../../../lib/communityValidation';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { parseGroupForm } from '../../../lib/groupForms';
@@ -38,6 +40,11 @@ if (Astro.request.method === 'POST') {
     const action = String(fd.get('action') ?? '');
     const idRaw = String(fd.get('id') ?? '');
     const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+    if (action === 'community') {
+      try { await assignFellowshipGroup(db, fd.get('fellowship_id') ? positiveId(fd.get('fellowship_id')) : null, positiveId(fd.get('id'))); }
+      catch { return new Response('Select a valid campus, group, and fellowship.', { status: 400 }); }
+      return Astro.redirect('/admin/groups?saved=1', 303);
+    }
     if (action === 'delete' && id !== null) {
       await softDeleteGroup(db, id);
       return Astro.redirect('/admin/groups?deleted=1', 303);
@@ -56,6 +63,9 @@ if (Astro.request.method === 'POST') {
 }
 
 const rows = await listGroups(db);
+const communities = await listFellowships(db);
+const communityGroups = await listCommunityGroups(db);
+const groupCommunity = new Map(communityGroups.map(g => [g.id, g]));
 // Admin names per group for the "Admins" column — small admin console list, one
 // listMembers call per row (reusing the shared roster query rather than a
 // bespoke bulk SQL statement).
@@ -92,6 +102,7 @@ const h2 = 'font-display text-heading-sm font-bold';
 
 <Admin title={heading}>
   <div class="flex flex-wrap items-center justify-between gap-4"><h1 class="font-display text-heading-md font-bold">{heading}</h1><a href="#group-editor" class={btn}>{t(lang, 'admin.groups.newTitle')}</a></div>
+  <p class="mt-3 text-sm text-ink-muted"><a class="text-primary underline" href="/admin/community">Manage campuses and optional fellowships</a> · <a class="text-primary underline" href="/admin/workflows">Follow-up workflows</a></p>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {deleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.deleted')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
@@ -123,6 +134,8 @@ const h2 = 'font-display text-heading-sm font-bold';
                   <a href={`/admin/groups/${r.id}`} class="font-medium text-primary hover:underline">
                     {r.name}
                   </a>
+                  <p class="mt-1 text-xs text-ink-muted">{groupCommunity.get(r.id)?.fellowship_name ?? 'Campus directly'}</p>
+                  {Astro.locals.campus && <form method="post" class="mt-2 flex flex-wrap gap-2"><input type="hidden" name="action" value="community"/><input type="hidden" name="id" value={r.id}/><select class={tin} name="fellowship_id" aria-label={`Community for ${r.name}`}><option value="">Campus directly</option>{communities.filter(f=>f.active===1).map(f=><option value={f.id} selected={groupCommunity.get(r.id)?.fellowship_id===f.id}>{f.name}</option>)}</select><button class={rowBtn}>Assign</button></form>}
                 </td>
                 <td class={td}>
                   <span class={`${badge} ${r.is_public ? badgeActive : badgeInactive}`}>

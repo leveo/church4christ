@@ -108,3 +108,7 @@ AUTH_DEV_BYPASS_EMAIL=admin@example.com
 # any is unset the backup cron skips gracefully. Production uses
 # `wrangler secret put D1_EXPORT_TOKEN`.
 # D1_EXPORT_TOKEN=
+
+# Community workflow reminders (hourly). Default off; set to 1 after sender setup.
+# Uses the existing EMAIL binding and EMAIL_FROM. No live email is sent in tests.
+WORKFLOW_EMAIL_ENABLED=0

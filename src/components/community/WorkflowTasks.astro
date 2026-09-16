@@ -1,0 +1,26 @@
+---
+import type { WorkflowTask } from '../../lib/workflowDb';
+import { btn,card,lab,tin } from '../../lib/adminUi';
+interface Props { tasks:WorkflowTask[]; canManage?:boolean; people?:{id:number;display_name:string}[] }
+const {tasks,canManage=false,people=[]}=Astro.props;
+---
+<section class="space-y-4">
+  <h2 class="text-xl font-semibold">Follow-up tasks</h2>
+  <p class="text-sm text-ink-muted">Up to 500 tasks, ordered by due date. Reminders stop when tasks are completed or cancelled.</p>
+  {!tasks.length&&<p class={card}>No tasks yet. Start a workflow to create a follow-up plan.</p>}
+  {tasks.map(task=><details class={card} open={['pending','in_progress'].includes(task.status)}>
+    <summary class="cursor-pointer"><span class="font-semibold">{task.title}</span><span class="ml-3 text-sm text-ink-muted">{task.status.replaceAll('_',' ')} · {task.run_name}</span><p class="mt-2 text-sm text-ink-muted">{task.person_name} · Assigned to {task.assignee_name} · Due {task.due_at.slice(0,16).replace('T',' ')} UTC</p></summary>
+    <form method="post" class="mt-4 grid gap-3 sm:grid-cols-2"><input type="hidden" name="action" value="task"/><input type="hidden" name="task_id" value={task.id}/>
+      <label><span class={lab}>Status</span><select class={tin} name="status" disabled={task.run_status==='cancelled'}>{['pending','in_progress','completed',...(canManage?['cancelled']:[])].map(status=><option selected={task.status===status} value={status}>{status.replaceAll('_',' ')}</option>)}</select></label>
+      {canManage&&<label><span class={lab}>Assigned to</span><select class={tin} name="assignee_id">{people.map(p=><option value={p.id} selected={task.assignee_id===p.id}>{p.display_name}</option>)}</select></label>}
+      {canManage&&<label><span class={lab}>Due date and time (UTC)</span><input class={tin} type="datetime-local" name="due_at" required value={task.due_at.slice(0,16)}/></label>}
+      <label class="sm:col-span-2"><span class={lab}>Follow-up notes</span><textarea class={tin} name="notes" maxlength="2000" rows="2" disabled={task.run_status==='cancelled'}>{task.notes}</textarea></label>
+      {canManage&&<label class="flex items-center gap-2"><input type="checkbox" name="reminder_enabled" checked={task.reminder_enabled===1}/>Email reminder when due, then daily while open</label>}
+      <div class="sm:col-span-2"><button class={btn} disabled={task.run_status==='cancelled'}>Save task</button></div>
+    </form>
+    {canManage&&<div class="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4 text-sm"><span>Email: {task.delivery_state} · {task.delivery_attempts} consecutive failed or current attempts{task.last_sent_at?` · Last sent ${task.last_sent_at.slice(0,16).replace('T',' ')} UTC`:''}</span>
+      {['failed','uncertain'].includes(task.delivery_state)&&<form method="post"><input type="hidden" name="action" value="retry"/><input type="hidden" name="task_id" value={task.id}/>{task.delivery_state==='uncertain'&&<label class="mr-3"><input type="checkbox" name="acknowledge_duplicate" required/>I understand the earlier email may have been sent.</label>}<button class="text-primary underline">Retry reminder</button></form>}
+      {task.run_status==='active'&&<form method="post"><input type="hidden" name="action" value="cancel"/><input type="hidden" name="run_id" value={task.run_id}/><label class="mr-3"><input type="checkbox" name="confirm_cancel" required/>Cancel all open steps in this workflow</label><button class="text-primary underline">Cancel workflow</button></form>}
+    </div>}
+  </details>)}
+</section>

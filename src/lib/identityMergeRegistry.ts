@@ -30,6 +30,12 @@ const ref = (
 ): IdentityMergeReference => ({ table, column, policy, notes, ...(backend ? { backend } : {}) });
 
 export const IDENTITY_MERGE_REFERENCE_REGISTRY: readonly IdentityMergeReference[] = [
+  ref('fellowships', 'coordinator_id', 'hard_conflict', 'Community coordination requires explicit reassignment before an identity merge.'),
+  ref('fellowship_members', 'person_id', 'hard_conflict', 'Fellowship membership collisions require explicit review before an identity merge.'),
+  ref('workflow_templates', 'default_assignee_id', 'hard_conflict', 'Automatic follow-up ownership requires explicit reassignment before an identity merge.'),
+  ref('workflow_runs', 'person_id', 'hard_conflict', 'Follow-up subjects require explicit review before an identity merge.'),
+  ref('workflow_tasks', 'assignee_id', 'hard_conflict', 'Task ownership requires explicit reassignment before an identity merge.'),
+  ref('workflow_tasks', 'updated_by', 'historical_preserve', 'Task update attribution stays with the original operator.'),
   ref('activity_score_config', 'updated_by_person_id', 'operational_actor_repoint', 'Current configuration attribution follows the canonical operator.'),
   ref('audit_events', 'actor_person_id', 'historical_preserve', 'Immutable export audit attribution remains on the original identity.'),
   ref('blockout_dates', 'person_id', 'dedupe_then_repoint', 'Overlapping person blockouts must be deduplicated before reassignment.'),

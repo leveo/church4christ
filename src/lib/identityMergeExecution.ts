@@ -177,6 +177,11 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
     'SELECT COUNT(*) n FROM team_members WHERE person_id=?1 AND is_leader=1' },
   { referenceKey: 'people.merged_into_person_id', sql: () =>
     'SELECT COUNT(*) n FROM people WHERE merged_into_person_id=?1' },
+  { referenceKey: 'fellowships.coordinator_id', sql: () => 'SELECT COUNT(*) n FROM fellowships WHERE coordinator_id=?1' },
+  { referenceKey: 'fellowship_members.person_id', sql: () => 'SELECT COUNT(*) n FROM fellowship_members WHERE person_id=?1' },
+  { referenceKey: 'workflow_templates.default_assignee_id', sql: () => 'SELECT COUNT(*) n FROM workflow_templates WHERE default_assignee_id=?1' },
+  { referenceKey: 'workflow_runs.person_id', sql: () => 'SELECT COUNT(*) n FROM workflow_runs WHERE person_id=?1' },
+  { referenceKey: 'workflow_tasks.assignee_id', sql: () => 'SELECT COUNT(*) n FROM workflow_tasks WHERE assignee_id=?1' },
   // Closed, intentionally unsupported mutable references. A non-zero loser
   // count blocks the preview; no generic identifier or partial handler exists.
   { referenceKey: 'activity_score_config.updated_by_person_id', sql: () =>

@@ -2,7 +2,7 @@ import { localePath, type Locale } from './locales';
 import { t } from './i18n';
 import { moduleForPath } from './modules';
 
-export type MemberNavKey = 'dashboard' | 'opportunities' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer' | 'learning' | 'blockouts' | 'profile' | 'security';
+export type MemberNavKey = 'workflows' | 'dashboard' | 'opportunities' | 'household' | 'giving' | 'groups' | 'events' | 'serving' | 'calendar' | 'prayer' | 'learning' | 'blockouts' | 'profile' | 'security';
 export interface MemberNavLink { key: MemberNavKey; href: string; label: string; icon: string }
 export function memberNavigation(modules: ReadonlySet<string>, locale: Locale): MemberNavLink[] {
   const candidates: { key: MemberNavKey; path: string; label: string; icon: string; requires?: string[] }[] = [
@@ -11,6 +11,7 @@ export function memberNavigation(modules: ReadonlySet<string>, locale: Locale): 
     { key: 'household', path: '/my/household', label: 'portal.nav.household', icon: 'people' },
     { key: 'calendar', path: '/my/calendar', label: 'portal.nav.calendar', icon: 'calendar' },
     { key: 'serving', path: '/my/serving', label: 'portal.nav.serving', icon: 'serve', requires: ['serve'] },
+    { key: 'workflows', path: '/my/workflows', label: 'My follow-up tasks', icon: 'calendar', requires: ['groups'] },
     { key: 'groups', path: '/groups', label: 'portal.nav.groups', icon: 'people' },
     { key: 'learning', path: '/learn', label: 'learning.title', icon: 'book' },
     { key: 'events', path: '/my/events', label: 'portal.nav.events', icon: 'calendar', requires: ['registration'] },
@@ -23,5 +24,5 @@ export function memberNavigation(modules: ReadonlySet<string>, locale: Locale): 
   return candidates.filter(({ path, requires = [] }) => {
     const owner = moduleForPath(path);
     return (owner === null || modules.has(owner)) && requires.every(key => modules.has(key));
-  }).map(({ key, path, label, icon }) => ({ key, href: localePath(locale, path), label: t(locale, label), icon }));
+  }).map(({ key, path, label, icon }) => ({ key, href: localePath(locale, path), label: key === 'workflows' ? label : t(locale, label), icon }));
 }

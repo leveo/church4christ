@@ -161,6 +161,7 @@ const failed = Astro.url.searchParams.has('error');
         <section class={`${card} space-y-5`}>
           <div>
             <h2 class="font-display text-xl font-bold">{t(lang, 'admin.campuses.memberships')}</h2>
+            <p class="mt-2"><a class="text-primary underline" href={`/admin/community?campus=${selected.slug}`}>Open community workspace</a> · <a class="text-primary underline" href={`/admin/workflows?campus=${selected.slug}`}>Manage campus workflows</a></p>
             <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.campuses.memberIntro')}</p>
           </div>
           <form method="post" class="space-y-4">

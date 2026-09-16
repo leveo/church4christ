@@ -1,0 +1,28 @@
+---
+import Member from '../../../layouts/Member.astro';
+import WorkflowTasks from '../../../components/community/WorkflowTasks.astro';
+import { parseLocale } from '../../../lib/locales';
+import { listWorkflowTasks,updateWorkflowTask,type WorkflowTask } from '../../../lib/workflowDb';
+import { noticeErr,noticeOk } from '../../../lib/adminUi';
+const locale=parseLocale(Astro.params.locale ?? 'en') ?? 'en';
+const user=Astro.locals.user;
+if(!user) return Astro.redirect(`/${locale}/signin`);
+const db=Astro.locals.db;
+let error='';
+if(Astro.request.method==='POST') {
+  try {
+    const form=await Astro.request.formData();
+    if(form.get('action')!=='task') throw new Error('Choose a valid action.');
+    await updateWorkflowTask(db,String(form.get('task_id')),{status:String(form.get('status')) as WorkflowTask['status'],notes:String(form.get('notes')??'')},{personId:user.id,canManage:false});
+    return Astro.redirect(`/${locale}/my/workflows?saved=1`,303);
+  } catch { error='Unable to update this task. Check that it is still assigned to you and try again.'; }
+}
+const tasks=await listWorkflowTasks(db,{assigneeId:user.id});
+---
+<Member active="workflows" title="My follow-up tasks" locale={locale} noindex>
+  <div class="member-content space-y-6">
+    <header><h1 class="font-display text-heading-md font-bold">My follow-up tasks</h1><p class="mt-2 text-ink-muted">Your assigned community follow-up, with due dates and a place to record progress.</p></header>
+    {error&&<p role="alert" class={noticeErr}>{error}</p>}{Astro.url.searchParams.has('saved')&&<p role="status" class={noticeOk}>Task updated.</p>}
+    <WorkflowTasks tasks={tasks}/>
+  </div>
+</Member>

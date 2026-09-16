@@ -43,7 +43,8 @@ describe('Learning credential local configuration', () => {
       worker.indexOf('case BACKUP_CRON:'),
     );
     expect(worker).toContain("const GOOGLE_CLASSROOM_REGISTRATION_CRON = '15,45 * * * *'");
-    expect(attendanceCase).toContain('await sendAttendanceEmails(vars, db)');
+    expect(attendanceCase).toContain('sendAttendanceEmails(vars, db)');
+    expect(attendanceCase).toContain('runCommunityWorkflowPass(env as never, db)');
     expect(attendanceCase).toContain('await runIdentityRecoveryNotificationSweep(env as never, db)');
     expect(attendanceCase).toContain('})().finally(end)');
     expect(attendanceCase).not.toContain('runGoogleClassroomRegistrationRenewalPass');

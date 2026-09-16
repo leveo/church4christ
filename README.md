@@ -441,3 +441,7 @@ church, open an issue and let's talk.
 ---
 
 Built with care, and with the help of AI, for churches and nonprofits everywhere.
+
+### Community management and workflows
+
+Campuses can manage groups and member follow-up directly. Optional fellowships add a community layer with independent membership and child groups. Reusable workflows provide assigned steps, due dates, completion tracking, and Cloudflare email reminders. See the [community workflow guide](docs/features/community-workflows.md) for setup, permissions, and delivery controls.

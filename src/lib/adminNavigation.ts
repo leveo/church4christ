@@ -13,7 +13,7 @@ const GROUPS: readonly { key: AdminGroupKey; icon: string; routes: readonly stri
   { key: 'workspace', icon: 'home', routes: ['/admin'] },
   { key: 'content', icon: 'book', routes: ['/admin/bulletins', '/admin/sermons', '/admin/prayer-sheets', '/admin/testimonies', '/admin/pages', '/admin/announcements', '/admin/events'] },
   { key: 'care', icon: 'people', routes: ['/admin/people', '/admin/newcomers', '/admin/prayer-wall'] },
-  { key: 'ministry', icon: 'serve', routes: ['/admin/groups', '/admin/ministries', '/admin/teams', '/admin/service-types', '/admin/learning', '/admin/reports'] },
+  { key: 'ministry', icon: 'serve', routes: ['/admin/community', '/admin/workflows', '/admin/groups', '/admin/ministries', '/admin/teams', '/admin/service-types', '/admin/learning', '/admin/reports'] },
   { key: 'operations', icon: 'chart', routes: ['/admin/children', '/admin/attendance', '/admin/activity-score', '/admin/giving', '/admin/registration', '/admin/stripe-events'] },
   { key: 'system', icon: 'settings', routes: ['/admin/settings', '/admin/navigation', '/admin/campuses', '/admin/onboarding'] },
 ];
