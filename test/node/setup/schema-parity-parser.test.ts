@@ -252,7 +252,7 @@ describe('final D1 schema parser', () => {
 
   it('models every actual D1 trigger, including guarded service-attendance and newcomer bodies', () => {
     const schema = finalSchema();
-    expect([...schema.triggers.keys()]).toEqual([
+    expect([...schema.triggers.keys()].sort()).toEqual([
       'service_checkin_links_no_overlap_insert',
       'service_checkin_links_close_only',
       'service_checkin_links_no_delete',
@@ -527,7 +527,7 @@ describe('final D1 schema parser', () => {
       'planning_center_webhook_receipts_append_only_delete',
       'planning_center_external_evidence_append_only_update',
       'planning_center_external_evidence_append_only_delete',
-    ]);
+    ].sort());
     expect(schema.triggers.get('service_checkin_links_no_overlap_insert')).toMatchObject({
       table: 'service_type_checkin_events',
       timing: 'before',

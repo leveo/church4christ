@@ -283,3 +283,16 @@ Code rollback and data recovery are different operations:
 If compatibility is uncertain, stop writes and restore the matched set: application revision,
 database, R2 objects, configuration, and secrets. Validate that set in isolation before
 redirecting production traffic.
+
+## Upgrading 1.1.0 to 1.2.0
+
+Back up the matched database, R2 media, Worker revision, and configuration. Apply every
+outstanding migration from `0027_multi_campus.sql` through `0038_community_workflows.sql`
+in numeric order for the selected backend before deploying 1.2.0. Keep the original files
+and migration ledger intact. Follow-up tables are additive; existing groups remain campus
+groups. Do not seed production or create example fellowships during upgrade.
+
+Verify `/admin/community`, `/admin/workflows`, and `/en/my/workflows` with the correct
+campus and permissions. Keep reminders off until the sending domain and `EMAIL_FROM`
+are verified; then explicitly set `WORKFLOW_EMAIL_ENABLED=1`. See
+[community workflows](features/community-workflows.md) for retry, pause, and recovery behavior.

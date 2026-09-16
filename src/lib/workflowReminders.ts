@@ -37,15 +37,19 @@ export async function enrollCampusWorkflows(
   if (!modules.has('groups')) return;
   const pending = await rawDb
     .prepare(
-      `SELECT DISTINCT wt.campus_id,cm.person_id FROM workflow_templates wt
+      `SELECT wt.id AS template_id,wt.campus_id,cm.person_id FROM workflow_templates wt
     JOIN campus_memberships cm ON cm.campus_id=wt.campus_id AND cm.active=1
     JOIN campuses c ON c.id=wt.campus_id AND c.active=1
+    JOIN people p ON p.id=cm.person_id AND p.deleted_at IS NULL
+    JOIN people a ON a.id=wt.default_assignee_id AND a.deleted_at IS NULL
+    JOIN campus_memberships am ON am.campus_id=wt.campus_id AND am.person_id=a.id AND am.active=1
     WHERE wt.enabled=1 AND wt.trigger_type='member_added' AND wt.fellowship_id IS NULL
+    AND (NOT EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=wt.campus_id) OR EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=wt.campus_id AND m.module_key='groups' AND m.enabled=1))
     AND cm.created_at>=wt.created_at AND NOT EXISTS (
       SELECT 1 FROM workflow_runs r WHERE r.template_id=wt.id AND r.person_id=cm.person_id)
-    ORDER BY wt.campus_id,cm.person_id LIMIT 20`,
+    ORDER BY wt.id,cm.person_id LIMIT 5`,
     )
-    .all<{ campus_id: number; person_id: number }>();
+    .all<{ template_id: number; campus_id: number; person_id: number }>();
   for (const row of pending.results) {
     if (
       !(await getEffectiveCampusModules(rawDb, row.campus_id, modules)).has(
@@ -59,6 +63,7 @@ export async function enrollCampusWorkflows(
         db,
         null,
         row.person_id,
+        row.template_id,
       );
       if (statements.length) await db.batch(statements);
     } catch {
@@ -95,6 +100,7 @@ export async function runWorkflowReminders(
     JOIN campuses c ON c.id=t.campus_id AND c.active=1
     WHERE t.status IN ('pending','in_progress') AND t.reminder_enabled=1 AND t.next_reminder_at<=?
     AND t.delivery_state IN ('pending','sent','failed') AND t.delivery_attempts<?
+    AND (NOT EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=t.campus_id) OR EXISTS(SELECT 1 FROM campus_modules m WHERE m.campus_id=t.campus_id AND m.module_key='groups' AND m.enabled=1))
     AND (r.fellowship_id IS NULL OR EXISTS (SELECT 1 FROM fellowships f WHERE f.id=r.fellowship_id AND f.active=1))
     ORDER BY t.next_reminder_at,t.id LIMIT ${BATCH_SIZE}`,
     )

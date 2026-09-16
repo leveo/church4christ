@@ -13,7 +13,7 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-The **current source release is 1.1**. Church4Christ is an open-source foundation,
+The **current source release is 1.2**. Church4Christ is an open-source foundation,
 not a turnkey managed service. Local evaluation is free, and some deployments
 can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on

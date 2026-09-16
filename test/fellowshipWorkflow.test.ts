@@ -271,6 +271,17 @@ describe('direct campus workflows and delivery safeguards', () => {
     await env.DB.prepare(
       "UPDATE campus_memberships SET created_at='2026-09-17 00:00:00' WHERE person_id=99002",
     ).run();
+    const laterTemplate = await createWorkflowTemplate(db, {
+      name: 'Later campus journey',
+      fellowshipId: null,
+      trigger: 'member_added',
+      steps: steps.slice(0, 1),
+      enabled: true,
+      assigneeId: 99001,
+    });
+    await env.DB.prepare(
+      "UPDATE workflow_templates SET created_at='2026-09-18 00:00:00' WHERE id=?",
+    ).bind(laterTemplate).run();
     await enrollCampusWorkflows({}, env.DB);
     await enrollCampusWorkflows({}, env.DB);
     expect(await listWorkflowTasks(db)).toHaveLength(1);

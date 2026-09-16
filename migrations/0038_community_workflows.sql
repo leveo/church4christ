@@ -66,6 +66,7 @@ CREATE INDEX idx_workflow_tasks_assignee ON workflow_tasks(campus_id,assignee_id
 CREATE INDEX idx_workflow_runs_scope ON workflow_runs(campus_id,fellowship_id,status);
 
 -- Keep the identity merge inventory exhaustive; mutable community references require review.
+DROP TRIGGER person_merge_registry_keys_append_only_insert;
 INSERT INTO person_merge_registry_keys(reference_key,policy) VALUES
   ('fellowships.coordinator_id','hard_conflict'),
   ('fellowship_members.person_id','hard_conflict'),
@@ -73,3 +74,5 @@ INSERT INTO person_merge_registry_keys(reference_key,policy) VALUES
   ('workflow_runs.person_id','hard_conflict'),
   ('workflow_tasks.assignee_id','hard_conflict'),
   ('workflow_tasks.updated_by','historical_preserve');
+CREATE TRIGGER person_merge_registry_keys_append_only_insert BEFORE INSERT ON person_merge_registry_keys
+BEGIN SELECT RAISE(ABORT,'person_merge_registry_keys_append_only'); END;

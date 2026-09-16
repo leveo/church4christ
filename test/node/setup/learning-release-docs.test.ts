@@ -42,11 +42,11 @@ const syncBudgetSection = deploy.slice(deploy.indexOf('Manual sync is an authent
 const retentionSection = learning.slice(learning.indexOf('## Retention, deletion'), learning.indexOf('## Canvas provenance'));
 
 describe('v1.1.0 Learning release contract', () => {
-  it('keeps package metadata exact while presenting README release copy as 1.1 only', () => {
-    expect(packageMetadata).toMatchObject({ version: '1.1.0', private: true });
-    expect(lockMetadata.version).toBe('1.1.0');
-    expect(lockMetadata.packages['']?.version).toBe('1.1.0');
-    expect(readme).toContain('The **current source release is 1.1**.');
+  it('keeps current package metadata and README release copy in sync', () => {
+    expect(packageMetadata).toMatchObject({ version: '1.2.0', private: true });
+    expect(lockMetadata.version).toBe('1.2.0');
+    expect(lockMetadata.packages['']?.version).toBe('1.2.0');
+    expect(readme).toContain('The **current source release is 1.2**.');
     expect(readme).not.toMatch(/\b1\.0(?:\.0)?\b/);
     expect(changelog.indexOf('## [Unreleased]')).toBeLessThan(changelog.indexOf('## [1.1.0] - 2026-08-18'));
   });
@@ -162,9 +162,9 @@ describe('v1.1.0 Learning release contract', () => {
     expect(learning).toMatch(/corresponding source/i);
   });
 
-  it('updates the maintainer process for 1.1.0 without creating a release automatically', () => {
-    expect(release).toMatch(/v1\.1\.0/);
-    expect(release).toMatch(/npm version 1\.1\.0 --no-git-tag-version/);
+  it('updates the maintainer process for 1.2.0 without creating a release automatically', () => {
+    expect(release).toMatch(/v1\.2\.0/);
+    expect(release).toMatch(/npm version 1\.2\.0 --no-git-tag-version/);
     expect(release).toMatch(/0017[\s\S]{0,160}0026/);
     expect(release).toMatch(/no release is created|does not authorize/i);
     expect(release).toMatch(/do not (?:push|create)[^\n]*(?:tag|release)|never[^\n]*force-push/i);

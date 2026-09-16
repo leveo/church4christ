@@ -10,6 +10,33 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-15
+
+### Added
+
+- Campus community workspaces can directly manage Groups and member follow-up. Optional
+  Fellowships add independent membership, meeting details, a default coordinator, and child
+  groups. Existing groups remain directly managed by their campus until explicitly assigned.
+- Reusable campus and fellowship workflows provide manual and new-member enrollment,
+  assigned steps, due dates, progress notes, completion, cancellation, and reminder controls.
+  Members receive a private task workspace. All new interface and email copy is English.
+- Cloudflare email reminders use the existing hourly cron and EMAIL binding, with atomic
+  delivery claims, failed-send backoff, pause controls, and explicit recovery for uncertain
+  delivery. Reminders are disabled unless WORKFLOW_EMAIL_ENABLED=1.
+
+### Upgrade notes
+
+- From 1.1.0, apply all outstanding forward migrations 0027 through 0038 for the selected
+  backend before deploying 1.2.0. These include the existing campus, identity, and Planning
+  Center updates as well as 0038_community_workflows.sql on D1 and Supabase/PostgreSQL.
+- Preserve existing database, R2, authentication secrets, and provider configuration; use
+  [the upgrade runbook](docs/upgrade.md). This release does not reseed church data.
+- Review [community workflows](docs/features/community-workflows.md) before enabling email.
+  Confirm the sending domain, EMAIL_FROM, and APP_ORIGIN. No new cron trigger is required.
+- Community administrators need the existing Groups grant. A fellowship coordinator label
+  does not grant admin privileges. Identity merges with community references require review.
+
+
 ### Security
 
 - Upgrade Astro, its Cloudflare/React adapters, Wrangler, the Workers test pool,

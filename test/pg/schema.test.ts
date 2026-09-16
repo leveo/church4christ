@@ -738,7 +738,7 @@ describe.skipIf(!hasPg)('Postgres schema port', () => {
     const rows = await sql.unsafe(`
       SELECT tbl.relname AS table_name, idx.relname AS index_name,
         indexes.indisunique,
-        EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = indexes.indexrelid) AS is_constraint,
+        EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = indexes.indexrelid AND con.contype IN ('p','u','x')) AS is_constraint,
         ARRAY(
           SELECT regexp_replace(
             pg_get_indexdef(indexes.indexrelid, position, true),

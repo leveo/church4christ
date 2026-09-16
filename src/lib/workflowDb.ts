@@ -220,13 +220,17 @@ export async function buildAutomaticWorkflowStatements(
   db: AppDb,
   fellowshipId: number | null,
   personId: number,
+  templateId?: number,
 ): Promise<AppStatement[]> {
   const templates = await db
     .prepare(
       `SELECT * FROM workflow_templates WHERE enabled=1 AND trigger_type='member_added'
-    AND fellowship_id ${fellowshipId === null ? 'IS NULL' : '= ?'}`,
+    AND fellowship_id ${fellowshipId === null ? 'IS NULL' : '= ?'} ${templateId === undefined ? '' : 'AND id=?'}`,
     )
-    .bind(...(fellowshipId === null ? [] : [fellowshipId]))
+    .bind(
+      ...(fellowshipId === null ? [] : [fellowshipId]),
+      ...(templateId === undefined ? [] : [templateId]),
+    )
     .all<WorkflowTemplate>();
   const statements: AppStatement[] = [];
   for (const template of templates.results) {
