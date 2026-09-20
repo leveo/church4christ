@@ -7,8 +7,8 @@
  * Plain Node ESM, zero dependencies. generateCss + contrastViolations are
  * exported as pure functions for tests.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** (foreground | background) semantic-key pairs gated at ratio >= 4.5. */
@@ -66,6 +66,59 @@ function luminance({ r, g, b }) {
 function contrastRatio(a, b) {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Validated local overlay; shipped theme objects remain untouched. */
+export function applyLocalBranding(themes, branding) {
+  if (branding === null) return themes;
+  if (!branding || typeof branding !== 'object' || Array.isArray(branding) ||
+      Object.keys(branding).sort().join('|') !== 'primaryColor|schemaVersion|secondaryColor|theme' ||
+      branding.schemaVersion !== 1 || branding.theme !== 'sanctuary' ||
+      !/^#[\da-f]{6}$/i.test(branding.primaryColor) || !/^#[\da-f]{6}$/i.test(branding.secondaryColor)) {
+    throw new Error('Invalid .church/branding.json; expected schemaVersion 1, theme sanctuary, and two #RRGGBB colors');
+  }
+  if (!themes.some((theme) => theme.name === branding.theme)) throw new Error('Local branding requires the Sanctuary theme');
+  const mix = (hex, other, amount) => {
+    const a = parseColor(hex); const b = parseColor(other);
+    return `#${['r', 'g', 'b'].map((channel) => Math.round(a[channel] * (1 - amount) + b[channel] * amount).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+  };
+  const onColor = (hex) => contrastRatio(parseColor(hex), parseColor('#FFFFFF')) >= MIN_RATIO ? '#FFFFFF' : '#000000';
+  return themes.map((theme) => {
+    if (theme.name !== branding.theme) return theme;
+    const customized = structuredClone(theme);
+    for (const [mode, colors] of Object.entries(customized.modes)) {
+      for (const [token, hex] of [['primary', branding.primaryColor], ['accent', branding.secondaryColor]]) {
+        colors[token] = hex.toUpperCase();
+        colors[`on-${token}`] = onColor(hex);
+        // Hover/active move toward the opposite of the selected text color,
+        // increasing its contrast even at the light/dark decision boundary.
+        const toward = colors[`on-${token}`] === '#FFFFFF' ? '#000000' : '#FFFFFF';
+        colors[`${token}-hover`] = mix(hex, toward, 0.12);
+        if (token === 'primary') colors[`${token}-active`] = mix(hex, toward, 0.22);
+        colors[`${token}-soft`] = mix(hex, mode === 'light' ? '#FFFFFF' : '#000000', 0.85);
+        colors[`on-${token}-soft`] = onColor(colors[`${token}-soft`]);
+      }
+      colors.ring = colors.primary;
+      colors['footer-bg'] = colors.primary;
+      colors['footer-ink'] = colors['on-primary'];
+    }
+    return customized;
+  });
+}
+
+export function readLocalBranding(root) {
+  const file = join(root, '.church/branding.json');
+  try {
+    const stats = lstatSync(file);
+    const path = relative(realpathSync(root), realpathSync(file));
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 4096 || path.startsWith('..') || isAbsolute(path)) {
+      throw new Error('Local branding must be a regular JSON file inside the repository, smaller than 4 KiB');
+    }
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 /**
@@ -188,10 +241,10 @@ function main() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const foundation = JSON.parse(readFileSync(join(root, 'design/foundation.json'), 'utf8'));
   const themesDir = join(root, 'design/themes');
-  const themes = readdirSync(themesDir)
+  const themes = applyLocalBranding(readdirSync(themesDir)
     .filter((f) => f.endsWith('.json'))
     .sort()
-    .map((f) => JSON.parse(readFileSync(join(themesDir, f), 'utf8')));
+    .map((f) => JSON.parse(readFileSync(join(themesDir, f), 'utf8'))), readLocalBranding(root));
 
   const violations = contrastViolations(themes);
   if (violations.length > 0) {

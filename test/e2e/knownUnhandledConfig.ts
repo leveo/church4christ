@@ -16,8 +16,11 @@ const READER_CONTEXT = [
 
 /**
  * Locate the exact generated frame for postgres.js's Cloudflare socket reader.
- * Closing that reader intentionally rejects its pending read with
- * "Stream was cancelled.". The package source path is lost after bundling, so
+ * Explicit socket.close() rejects an outstanding read with "Stream was cancelled."
+ * or "This socket has been closed.", depending on workerd's version. This is
+ * reproducible after a successful TCP echo, without a failed query. postgres.js
+ * can emit the rejection after its close handler removes the error listener.
+ * The package source path is lost after bundling, so
  * the Vitest config derives an allowlist from the dependency's full emitted
  * code block instead of trusting an arbitrary bundled function named `read`.
  */

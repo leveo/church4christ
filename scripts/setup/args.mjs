@@ -2,6 +2,8 @@ import { parseArgs } from 'node:util';
 import { normalizeSetupAnswers } from './answers.mjs';
 
 export const SETUP_HELP = `Usage: npm run setup -- [options]
+  --preferences .church/preferences.json
+      Import browser onboarding choices for first setup; explicit flags override them
   --mode local|deploy
   --preset website|website-community|full-church
   --modules key,key,... (repeatable)
@@ -15,7 +17,7 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
   --backend d1|supabase
   --demo-data | --no-demo-data
       Include fictional demo content or start without it; both keep the bundled design
-      Noninteractive default: --no-demo-data
+      Noninteractive default without --preferences: --no-demo-data
   --yes --dry-run --json --force-config --promote-existing-admin
   --allow-hyperdrive-secret-in-argv
       Explicitly permit Wrangler to receive a Supabase URL in its argv when creating deploy Hyperdrive
@@ -31,6 +33,7 @@ export function parseSetupArgs(argv, catalog) {
     allowPositionals: false,
     options: {
       help: { type: 'boolean' },
+      preferences: { type: 'string' },
       mode: { type: 'string' },
       preset: { type: 'string' },
       modules: { type: 'string', multiple: true },
@@ -82,7 +85,7 @@ export function parseSetupArgs(argv, catalog) {
     .filter(Boolean)
     .filter((value, index, all) => all.indexOf(value) === index);
   const answers = normalizeSetupAnswers({
-    mode: values.mode,
+    mode: values.mode ?? (values.preferences ? 'local' : undefined),
     preset: values.preset,
     modules: values.modules ? modules : undefined,
     siteSlug: values['site-slug'],
@@ -97,6 +100,7 @@ export function parseSetupArgs(argv, catalog) {
   }, catalog);
   return {
     ...answers,
+    preferences: values.preferences,
     help: values.help ?? false,
     yes: values.yes ?? false,
     dryRun: values['dry-run'] ?? false,

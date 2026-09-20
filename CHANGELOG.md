@@ -10,6 +10,46 @@ than published to npm.
 
 ## [Unreleased]
 
+### Added
+
+- `npm run onboard` opens a local browser form for church, nonprofit, or campus identity,
+  primary and secondary colors, a PNG/JPEG/WebP logo, language, first administrator,
+  initial content, and feature checkboxes. It recommends the D1-backed Website + Community
+  selection; Supabase-only modules require an explicit advanced choice. Preferences and
+  uploaded logos stay in Git-ignored `.church/` files and can be reopened in later sessions.
+- The existing installer accepts `--preferences .church/preferences.json` for both dry-run
+  plans and setup. Initial setup applies identity and logo settings and stores brand colors
+  locally for design-token generation. README, AGENTS.md, CLAUDE.md, and the setup guide
+  describe the browser-first workflow and preference reuse by coding agents.
+
+### Changed
+
+- Refresh npm dependencies, including Astro 7.3.3, React 19.3.0, Tailwind CSS 4.3.3,
+  Wrangler 4.135.0, and current compatible adapters, fonts, types, and utilities.
+  Replace `@cloudflare/vitest-pool-workers` with its official successor,
+  `@cloudflare/vitest-plugin` 1.1.13. Keep TypeScript 6.0.3 and Vitest 4.1.11 because
+  the Astro checker and Cloudflare test plugin do not yet support their newer major
+  versions. Pin the checker's language server to 2.16.16 to avoid false frontmatter
+  parsing errors in 2.17.0; see the
+  [dependency compatibility notes](docs/upgrade.md#1-identify-what-will-change).
+- Recognize the updated workerd socket-close message in the existing narrowly scoped
+  PostgreSQL end-to-end test cleanup filter. Other unhandled errors still fail the suite.
+
+### Operator impact
+
+- Run `npm ci` and rebuild after pulling the dependency refresh. Node.js 22.22.1 remains
+  the minimum runtime. This refresh adds no database migration, reseeding, bindings,
+  secrets, or deployment procedure changes; use the existing upgrade runbook.
+- Onboarding only saves local preferences; it does not create resources or deploy a site.
+  Existing installations need no migration, reseeding, new binding, or secret for this
+  workflow. Use the existing upgrade/configuration process for subsequent site changes;
+  saving new preferences does not overwrite the installed brand.
+- Preserve `.church/preferences.json`, its uploaded logo, and `.church/branding.json`
+  when moving an organization's build to another machine. Initial setup generates brand
+  tokens; `npm run tokens` and production builds regenerate them from the local brand file.
+  Organization type and time zone remain preference context for further customization;
+  this form does not change the application's scheduling time zone.
+
 ### Fixed
 
 - Community workspace entry buttons now persist the selected campus through the existing

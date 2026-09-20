@@ -12,11 +12,13 @@ export function buildSetupRerunCommand(plan, controls = {}) {
   if (values.some((value) => typeof value !== 'string' || !value || /[\r\n\0]/.test(value))) {
     throw new TypeError('normalized setup plan contains an invalid recovery value');
   }
+  const requestedModules = plan.onboarding?.requestedModules ?? plan.modules;
   const featureArgs = Array.isArray(plan.modules) && plan.modules.length && plan.modules.every((value) => typeof value === 'string' && value)
-    ? ['--modules', plan.modules.join(',')]
+    ? plan.onboarding && plan.preset ? ['--preset', plan.preset] : ['--modules', requestedModules.join(',')]
     : null;
   if (!featureArgs) throw new TypeError('normalized setup plan features are required for recovery');
   const args = [
+    ...(plan.onboarding?.source ? ['--preferences', plan.onboarding.source] : []),
     '--mode', plan.mode, ...featureArgs,
     '--site-slug', plan.site.slug,
     '--church-name', plan.site.name,
@@ -24,11 +26,11 @@ export function buildSetupRerunCommand(plan, controls = {}) {
     '--admin-email', plan.adminEmail,
     '--admin-name', plan.adminName,
   ];
-  if (plan.mode === 'deploy') {
+  if (plan.mode === 'deploy' || plan.onboarding) {
     if (typeof plan.site.appOrigin !== 'string' || typeof plan.site.emailFrom !== 'string') throw new TypeError('deploy recovery values are required');
     args.push('--app-origin', plan.site.appOrigin, '--email-from', plan.site.emailFrom);
   }
-  args.push('--backend', plan.backend);
+  if (!plan.onboarding || plan.providerSelectionReason === 'explicit-override') args.push('--backend', plan.backend);
   args.push(plan.demoData === true ? '--demo-data' : '--no-demo-data');
   if (controls.forceConfig === true) args.push('--force-config');
   if (controls.promoteExistingAdmin === true) args.push('--promote-existing-admin');

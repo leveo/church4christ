@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { installKnownUnhandledFilter } from '../../e2e/knownUnhandled';
+import { createKnownUnhandledErrorFilter, installKnownUnhandledFilter } from '../../e2e/knownUnhandled';
 import {
   discoverPostgresCfReaderFrames,
   ignoreKnownUnhandledError as ignoreConfiguredUnhandledError,
@@ -67,18 +67,21 @@ describe('test runner hardening', () => {
     expect(unrelated.defaultPrevented).toBe(false);
   });
 
-  it('limits the Postgres socket-cancellation exception to the postgres.js CF reader', () => {
+  it.each([
+    ['legacy cancellation', Error, 'Stream was cancelled.'],
+    ['closed socket', TypeError, 'This socket has been closed.'],
+  ] as const)('limits the Postgres %s exception to the postgres.js CF reader', (_label, ErrorType, message) => {
     const target = new EventTarget();
     installKnownUnhandledFilter(target);
-    const postgresCancellation = new Error('Stream was cancelled.');
+    const postgresCancellation = new ErrorType(message);
     postgresCancellation.stack =
-      'Error: Stream was cancelled.\n    at read (node_modules/postgres/cf/polyfills.js:201:33)';
-    const unrelatedCancellation = new Error('Stream was cancelled.');
+      `${ErrorType.name}: ${message}\n    at read (node_modules/postgres/cf/polyfills.js:201:33)`;
+    const unrelatedCancellation = new ErrorType(message);
     unrelatedCancellation.stack =
-      'Error: Stream was cancelled.\n    at read (src/lib/unrelated-reader.ts:10:2)';
-    const unrelatedBundledCancellation = new Error('Stream was cancelled.');
+      `${ErrorType.name}: ${message}\n    at read (src/lib/unrelated-reader.ts:10:2)`;
+    const unrelatedBundledCancellation = new ErrorType(message);
     unrelatedBundledCancellation.stack =
-      'Error: Stream was cancelled.\n    at read (/workspace/dist/server/chunks/modules_unrelated.mjs:42:7)';
+      `${ErrorType.name}: ${message}\n    at read (/workspace/dist/server/chunks/modules_unrelated.mjs:42:7)`;
     const known = rejectionEvent(postgresCancellation);
     const unrelated = rejectionEvent(unrelatedCancellation);
     const unrelatedBundled = rejectionEvent(unrelatedBundledCancellation);
@@ -89,6 +92,21 @@ describe('test runner hardening', () => {
     expect(unrelated.defaultPrevented).toBe(false);
     expect(target.dispatchEvent(unrelatedBundled)).toBe(true);
     expect(unrelatedBundled.defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    ['wrong error type', new Error('This socket has been closed.'), 'read'],
+    ['wrong cancellation type', new TypeError('Stream was cancelled.'), 'read'],
+    ['different socket failure', new TypeError('Socket connection failed.'), 'read'],
+    ['extra error detail', new TypeError('This socket has been closed. Query failed.'), 'read'],
+    ['socket write failure', new TypeError('This socket has been closed.'), 'write'],
+  ])('preserves an unrelated postgres failure: %s', (_label, reason, frame) => {
+    const target = new EventTarget();
+    installKnownUnhandledFilter(target);
+    reason.stack = `${reason.name}: ${reason.message}\n    at ${frame} (node_modules/postgres/cf/polyfills.js:201:33)`;
+    const event = rejectionEvent(reason);
+    expect(target.dispatchEvent(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('derives an exact bundled postgres.js reader frame from dependency-specific code', () => {
@@ -108,9 +126,17 @@ describe('test runner hardening', () => {
     ].join('\n');
     writeFileSync(join(chunks, 'modules_probe.mjs'), bundle);
 
-    expect([...discoverPostgresCfReaderFrames(root)]).toEqual([
+    const frames = discoverPostgresCfReaderFrames(root);
+    expect([...frames]).toEqual([
       'dist/server/chunks/modules_probe.mjs:5:28',
     ]);
+    const filter = createKnownUnhandledErrorFilter(frames);
+    for (const reason of [new Error('Stream was cancelled.'), new TypeError('This socket has been closed.')]) {
+      reason.stack = `${reason.name}: ${reason.message}\n    at read (/workspace/dist/server/chunks/modules_probe.mjs:5:28)`;
+      expect(filter(reason)).toBe(false);
+      reason.stack = `${reason.name}: ${reason.message}\n    at read (/workspace/dist/server/chunks/modules_probe.mjs:5:29)`;
+      expect(filter(reason)).toBeUndefined();
+    }
     // The configured filter is generated from the real current build and must
     // not infer arbitrary bundled read frames from the error text alone.
     const unrelated = new Error('Stream was cancelled.');

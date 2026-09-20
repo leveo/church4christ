@@ -3,9 +3,17 @@
 **An AI-native, open-source bilingual church website and church-management foundation
 for customized implementations.**
 
-**Start here: [Setup for people and AI agents](docs/setup.md).** Choose a local preview
-or deployment, run the guided installer or complete machine-readable commands, and verify
-the result with the shared launch checklist. Coding agents begin with [AGENTS.md](AGENTS.md).
+**See the demo: [church4christ.yunfei-song.com](https://church4christ.yunfei-song.com).**
+
+[![Watch the Built Around Your Ministry promotional video](https://church4christ.yunfei-song.com/C4C-modular-Poster.jpg)](https://church4christ.yunfei-song.com/C4C-modular-Voice.mp4)
+
+Watch **[Built Around Your Ministry](https://church4christ.yunfei-song.com/C4C-modular-Voice.mp4)**,
+the demo site's promotional video (MP4).
+
+**Start here: [Setup for people and AI agents](docs/setup.md).** Run `npm run onboard`
+to choose your organization's identity, colors, logo, and first features in a local browser
+page, then pass the saved preferences to the existing installer. Coding agents begin with
+[AGENTS.md](AGENTS.md); Claude also reads [CLAUDE.md](CLAUDE.md).
 
 Church4Christ combines a bilingual public site with an admin system for content,
 prayer care, volunteer scheduling, people, and households. Optional modules add a
@@ -93,13 +101,17 @@ does not remove security or operational upkeep. See
 
 ## Build it with an AI assistant
 
-AI-native setup means people and agents use the same documented installer, feature catalog,
-readiness checks, and explicit handoff. The [setup guide](docs/setup.md) lists required inputs,
-copyable commands, expected JSON results, and recovery steps. Start an assistant with:
+People and agents share the same browser onboarding, installer, feature catalog, and
+readiness checks. [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) tell an assistant to inspect
+the installation first, launch `npm run onboard` for a fresh setup without preferences,
+and let you complete the form. Your answers stay in the Git-ignored
+`.church/preferences.json`; later sessions read that file to follow your identity, brand,
+and feature choices. The [setup guide](docs/setup.md) includes the commands and recovery steps.
+Start an assistant with:
 
-> "Read AGENTS.md and docs/setup.md. Set up a local Website + Community demo, verify the
-> site and administrator pages, then report the URL, enabled features, and remaining
-> readiness checks."
+> "Read AGENTS.md and docs/setup.md. Start the browser onboarding so I can choose our
+> organization's branding and first features. Use my saved preferences to set up a local
+> preview, verify the site and administrator pages, then report the URL and remaining checks."
 
 You do not have to make every change by hand. This repository is organized so an AI coding
 assistant can follow the plain-English guides in [`docs/features/`](docs/features/) and
@@ -256,9 +268,9 @@ default D1 backend simply do not see the portal controls or routes. Learn more i
 
 ## Try it in 5 minutes (on your own computer)
 
-You can run the whole site locally — with realistic sample content — before you commit
-to anything. You will need [Node.js](https://nodejs.org/) 22.22.1 or newer installed. The guided
-setup asks which initial feature set you want and chooses D1 or Supabase from that choice.
+You can run the site locally, with optional fictional sample content, before choosing a
+deployment. You will need [Node.js](https://nodejs.org/) 22.22.1 or newer installed. Browser
+onboarding recommends **Website + Community** with **Cloudflare D1** for the first launch.
 
 ![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](docs/images/diagrams/setup-paths-overview.png)
 
@@ -268,15 +280,35 @@ git clone https://github.com/leveo/church4christ.git
 cd church4christ
 npm ci
 
-# 2. Choose features, create the database, and bootstrap the first admin
-npm run setup
+# 2. Open the local browser form, complete it, and save your preferences
+npm run onboard
 
-# 3. For D1, start it (always follow the exact handoff setup prints)
+# 3. Review the plan, then initialize with those same preferences
+node scripts/setup/index.mjs --preferences .church/preferences.json --yes --dry-run --json
+node scripts/setup/index.mjs --preferences .church/preferences.json --yes --json
+
+# 4. For D1, start it (always follow the exact handoff setup prints)
 npm run dev
 ```
 
+The form asks whether this is a church, nonprofit, or campus, and collects the name,
+tagline, address, time zone, primary and secondary colors, optional PNG/JPEG/WebP logo
+(up to 2 MiB), language, first administrator, and demo-content choice. Check only the
+features you need.
+The recommended selection uses D1 as its database; the application still runs on
+Cloudflare Workers and stores media in R2. **Member Portal, Giving, and Registration**
+are advanced options requiring an explicit switch to Supabase-compatible PostgreSQL.
+
+Saving writes `.church/preferences.json` and any uploaded logo under `.church/`, which
+Git ignores. It does not create databases or deploy a site. Run `npm run onboard` again to
+reload and edit the saved preferences. Keep the terminal running while filling out the
+form; stop it with Ctrl+C when finished. To open the printed URL yourself, use
+`npm run onboard -- --no-open`; to choose a port, add `--port 4310`. The direct entry point
+is `node scripts/onboard/index.mjs`. See [the setup guide](docs/setup.md) for what the
+installer applies and how agents use the remaining preferences.
+
 If you install with `npm ci --ignore-scripts`, run `npm run tokens` manually before
-`npm run setup` or `npm run dev`.
+the installer or `npm run dev`.
 
 For local Supabase, the handoff instead exports
 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in the host shell before
@@ -289,8 +321,9 @@ examples. Its media step copies the generated image pack from `seed/media/` into
 No demo content creates the database schema, operational defaults, church settings, module
 selection, and first administrator without sample business records.
 
-For scripted setup, pass `--demo-data` or `--no-demo-data`; omitting both in noninteractive
-setup keeps the existing no-demo default. The flags cannot be combined. Repeating the same
+The preferences file records the form's demo-content choice. For setup with explicit CLI
+answers, pass `--demo-data` or `--no-demo-data`; omitting both in noninteractive setup keeps
+the existing no-demo default. The flags cannot be combined. Repeating the same
 setup preserves the recorded content choice and existing records. `--no-demo-data` does
 not clear an existing database, and setup refuses to add demo data over existing people.
 Use a separate fresh workspace/database to try the other starting mode.
@@ -309,8 +342,9 @@ identity together. Reruns preserve existing contact ownership; they do not verif
 existing email or restore revoked access. If setup reports an identity problem, complete
 the [identity review or recovery workflow](docs/features/member-identity.md) before rerunning.
 
-Setup offers **Website** (8 focused publishing modules), **Website + Community** (all 18
-D1-compatible modules), and **Full Church** (all 21 modules). Portal, Giving, and
+The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
+publishing modules), **Website + Community** (all 18 D1-compatible modules), and
+**Full Church** (all 21 modules). Portal, Giving, and
 Registration select Supabase automatically; D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
