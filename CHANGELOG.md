@@ -32,6 +32,8 @@ than published to npm.
   versions. Pin the checker's language server to 2.16.16 to avoid false frontmatter
   parsing errors in 2.17.0; see the
   [dependency compatibility notes](docs/upgrade.md#1-identify-what-will-change).
+- Recognize the updated workerd socket-close message in the existing narrowly scoped
+  PostgreSQL end-to-end test cleanup filter. Other unhandled errors still fail the suite.
 
 ### Operator impact
 
