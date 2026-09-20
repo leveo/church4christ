@@ -37,6 +37,7 @@ import { applyAfterProviderPreflight, assertDemoSeedTarget } from './provider-ve
 import { parseJsoncObject } from './jsonc.mjs';
 import { redact } from './redact.mjs';
 import { resolveProvider } from './resolve-provider.mjs';
+import { assertOnboardingInstallation, createOnboardingStep, loadSetupPreferences, mergePreferenceAnswers, withOnboardingPlan } from './onboarding.mjs';
 
 const MISSING_FLAGS = Object.freeze({
   mode: '--mode', featureChoice: '--preset or --modules', siteSlug: '--site-slug',
@@ -90,6 +91,12 @@ export function formatPlan(plan) {
     `Dependency additions: ${dependencies}`,
     `Provider reasons: ${reasons}`,
     `Actions: ${plan.actions.join(' -> ')}`,
+    ...(plan.onboarding ? [
+      `Onboarding preferences: ${plan.onboarding.source}`,
+      `Initial branding: ${plan.onboarding.branding.primaryColor} / ${plan.onboarding.branding.secondaryColor}; logo: ${plan.onboarding.branding.logo?.path ?? 'none'}; local palette: ${plan.onboarding.brandingFile}`,
+      plan.onboarding.application,
+      plan.onboarding.agentPreferences,
+    ] : []),
     ...existing,
   ].join('\n');
 }
@@ -193,6 +200,7 @@ export function formatResult(result) {
     `Sign-in email: ${handoff.adminEmail}`,
     `Enabled capabilities: ${handoff.capabilities.join(', ')}`,
     `Optional integration limitations: ${handoff.limitations.length ? handoff.limitations.join(', ') : 'none'}`,
+    ...(handoff.onboarding ? [`Branding: ${handoff.onboarding.brandingFile}; ${handoff.onboarding.note}`] : []),
   ].join('\n');
 }
 
@@ -202,6 +210,11 @@ export function buildHandoff(plan, doctor, { supabaseSecretSource } = {}) {
     url: plan.site.appOrigin,
     adminEmail: plan.adminEmail,
     capabilities: Object.freeze([...plan.modules]),
+    ...(plan.onboarding ? { onboarding: Object.freeze({
+      source: plan.onboarding.source,
+      brandingFile: plan.onboarding.brandingFile,
+      note: 'Initial branding applied once. Keep the local palette for future builds; npm run tokens rebuilds it. Organization type and timezone remain agent customization preferences.',
+    }) } : {}),
     startCommand: plan.mode === 'local'
       ? plan.backend === 'supabase'
         ? supabaseSecretSource === 'environment'
@@ -502,6 +515,17 @@ async function applyDefaultSetup(plan, options, catalog) {
       return (await readLocalStripeClassification(resolve(root, '.dev.vars'))).classification === 'test';
     }),
     ...providerSteps,
+    ...(plan.onboarding ? { 'initialize-branding': createOnboardingStep({
+      root,
+      db,
+      buildTokens: () => runner.run(process.execPath, ['scripts/build-tokens.mjs'], { cwd: root }),
+      uploadObject: ({ key, filePath, contentType }) => runner.run(wranglerBin, [
+        'r2', 'object', 'put', `${plan.resources?.r2BucketName ?? `${plan.site.slug}-media`}/${key}`,
+        '--file', filePath, '--content-type', contentType,
+        plan.mode === 'local' ? '--local' : '--remote', '--config', configPath,
+        ...(plan.mode === 'local' && persistTo ? ['--persist-to', persistTo] : []),
+      ]),
+    }) } : {}),
     'seed-media': step(async ({ plan: activePlan }) => {
       const mediaPlan = loadMediaPlan({ root, includePortalFiles: activePlan.modules.includes('portal') });
       const bucket = activePlan.resources?.r2BucketName ?? `${activePlan.site.slug}-media`;
@@ -568,7 +592,7 @@ async function applyDefaultSetup(plan, options, catalog) {
 export async function runSetup(argv, deps) {
   if (!Array.isArray(argv) || argv.some((value) => typeof value !== 'string')) throw new TypeError('setup argv must be a string array');
   if (!deps || typeof deps !== 'object' || !deps.catalog) throw new TypeError('setup dependencies and catalog are required');
-  const parsed = parseSetupArgs(argv, deps.catalog);
+  let parsed = parseSetupArgs(argv, deps.catalog);
   requireDeps(deps, ['output']);
   if (parsed.help) {
     deps.output(SETUP_HELP);
@@ -579,6 +603,13 @@ export async function runSetup(argv, deps) {
     const doctor = await deps.doctor({ strict: parsed.strict });
     deps.output(parsed.json ? JSON.stringify(doctor) : deps.formatDoctor(doctor));
     return doctor.exitCode;
+  }
+
+  let preferences;
+  if (parsed.preferences !== undefined) {
+    requireDeps(deps, ['loadPreferences']);
+    preferences = await deps.loadPreferences(parsed.preferences);
+    parsed = mergePreferenceAnswers(parsed, preferences, deps.catalog);
   }
 
   let answers;
@@ -628,7 +659,12 @@ export async function runSetup(argv, deps) {
     if (typeof error?.code === 'string') Object.defineProperty(safe, 'code', { value: error.code });
     throw safe;
   }
-  const plan = buildSetupPlan(answers, deps.catalog, currentState);
+  let plan = buildSetupPlan(answers, deps.catalog, currentState);
+  if (preferences) {
+    plan = withOnboardingPlan(plan, preferences, parsed.preferences, normalized.modules);
+    requireDeps(deps, ['assertOnboardingInstallation']);
+    await deps.assertOnboardingInstallation(plan, currentState);
+  }
   if (parsed.dryRun) {
     deps.output(parsed.json
       ? JSON.stringify({ schemaVersion: 1, kind: 'setup-plan', plan })
@@ -870,6 +906,8 @@ async function createDefaultDeps() {
     output,
     errorOutput,
     inspectExisting,
+    loadPreferences: (source) => loadSetupPreferences(resolve(process.cwd()), source, catalog),
+    assertOnboardingInstallation: (plan, state) => assertOnboardingInstallation(resolve(process.cwd()), plan, state),
     preflightConfig: async ({ plan, currentState, forceConfig, secretValues }) => {
       const current = await readFile('wrangler.jsonc', 'utf8').catch((error) => {
         if (error?.code === 'ENOENT') return null;

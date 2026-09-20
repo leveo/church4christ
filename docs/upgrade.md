@@ -11,11 +11,30 @@ recovery.
 
 ## 1. Identify what will change
 
-The current dependency security refresh requires `npm ci` and a fresh build before
-deployment; it does not require a database migration, reseeding, or new secrets.
-Keep Vitest on 4.x because the installed Cloudflare Workers test pool requires it.
-For npm 12, `package.json` records exact native install-script approvals; review
-and update those approvals when changing esbuild, workerd, or sharp versions.
+The current dependency refresh requires `npm ci` and a fresh `npm run build` before
+deployment. It adds no database migration, reseeding, bindings, secrets, or deployment
+procedure changes. The minimum Node.js runtime remains 22.22.1.
+
+The test integration now uses `@cloudflare/vitest-plugin` 1.1.13, the official replacement
+for `@cloudflare/vitest-pool-workers`. Its configuration and test API are unchanged; custom
+test configurations must update package imports and type references as described in the
+[Cloudflare migration guide](https://developers.cloudflare.com/workers/testing/vitest-integration/migration-guides/migrate-to-vitest-plugin/).
+Keep Vitest on 4.1.11 because the
+[plugin's published peer dependencies](https://registry.npmjs.org/@cloudflare/vitest-plugin/1.1.13)
+require `^4.1.0`. Keep TypeScript on 6.0.3 because
+[`@astrojs/check` 0.9.10](https://registry.npmjs.org/@astrojs/check/0.9.10)
+supports TypeScript `^5.0.0 || ^6.0.0`. Revisit these compatibility limits before moving to
+Vitest 5 or TypeScript 7; installing either with forced peer resolution is not a supported
+upgrade path.
+
+The checker also pins its `@astrojs/language-server` dependency to `2.16.16`.
+Version `2.17.0` introduces a parser regression for valid TypeScript non-null assertions
+inside template strings in Astro frontmatter, causing false errors on the registration
+page. Remove the override only after a newer checker parser passes `npm run check`;
+the application continues to use Astro 7.3.3.
+
+For npm 12, `package.json` records exact native install-script approvals; review and update
+those approvals when changing esbuild, workerd, or sharp versions.
 
 Record all of the following in the change ticket or maintenance notes:
 
@@ -71,6 +90,10 @@ Back up:
 3. **Configuration** — preserve the deployed commit, `church.config.json`,
    `.church/setup-state.json`, `wrangler.jsonc`, custom source and design files,
    domain/routes, bindings, schedules, and provider resource identifiers.
+   If browser onboarding was used, also preserve `.church/preferences.json`, its uploaded
+   logo, and `.church/branding.json`. These files are Git-ignored; the brand file is needed
+   when generating tokens or building the same brand on another machine. Reopening the
+   form only saves preferences and is not an upgrade or a way to reapply initial branding.
 4. **Secrets inventory** — record which secret names and provider-side values must exist, but
    do not put secret values in Git, a ticket, a changelog, `wrangler.jsonc`, or the backup
    manifest. Store values only in the approved secret manager.

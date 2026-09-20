@@ -6,7 +6,7 @@ const STATE_V1_KEYS = ['schemaVersion', 'planFingerprint', 'completed'];
 const STATE_V2_KEYS = ['schemaVersion', 'installationOrigin', 'planFingerprint', 'completed'];
 const RECORD_KEYS = ['at', 'evidence'];
 const STEP = /^[a-z][a-z0-9-]*$/;
-const KNOWN_STEPS = new Set(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
+const KNOWN_STEPS = new Set(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-branding', 'initialize-modules', 'bootstrap-admin', 'doctor']);
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const RESOURCE_KEYS = ['d1DatabaseName', 'd1DatabaseId', 'r2BucketName', 'hyperdriveId'];
 const RESOURCE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;

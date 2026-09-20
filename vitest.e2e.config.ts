@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 // Both helpers use the main package entrypoint, as in vitest.config.ts.
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandledConfig';
 
 // End-to-end suite: exercises the BUILT Astro worker via SELF.fetch (real

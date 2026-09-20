@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 // Use the main package entrypoint, as in vitest.config.ts.
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { ignoreKnownUnhandledError } from './test/e2e/knownUnhandledConfig';
 
 // Postgres-backed e2e smoke: drives the BUILT worker (SELF.fetch) with the Supabase

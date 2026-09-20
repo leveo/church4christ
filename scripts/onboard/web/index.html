@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="sanctuary" data-mode="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Welcome · Church4Christ</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/tokens.css">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to setup</a>
+    <header class="site-header">
+      <div class="wordmark"><span class="brand-mark" aria-hidden="true">c4c</span><span>Church4Christ</span></div>
+      <div class="header-tools">
+        <span class="local-badge" data-i18n="localBadge">Local setup</span>
+        <label class="visually-hidden" for="ui-language" data-i18n="uiLanguage">Wizard language</label>
+        <select id="ui-language"><option value="en" lang="en">English</option><option value="zh" lang="zh">中文</option></select>
+      </div>
+    </header>
+    <main id="main" class="layout" tabindex="-1">
+      <aside class="intro">
+        <p class="eyebrow" data-i18n="eyebrow">A place for your community</p>
+        <h1 data-i18n="heading">Make it<br>your own.</h1>
+        <p class="intro-copy" data-i18n="intro">Start with your people, your identity, and the tools you need first. We’ll keep your choices on this computer for the setup that follows.</p>
+        <nav aria-label="Setup steps" id="step-nav"><ol class="step-list" id="steps"></ol></nav>
+        <div class="local-note"><span class="local-dot" aria-hidden="true"></span><p data-i18n="privacy">Your preferences stay in this repository’s local .church folder. You can revisit them anytime.</p></div>
+      </aside>
+      <section class="workspace" aria-labelledby="step-title">
+        <div id="loading" class="loading" role="status" data-i18n="loading">Getting your workspace ready…</div>
+        <div id="error" class="notice error" role="alert" tabindex="-1" hidden></div>
+        <div id="installation-note" class="notice" hidden data-i18n="existingNote">This repository already has an installation. Saving updates your local preferences only. Follow docs/upgrade.md before applying changes.</div>
+        <form id="wizard" hidden>
+          <div class="step-heading"><p class="eyebrow" id="step-count"></p><h2 id="step-title" tabindex="-1"></h2><p id="step-description" class="muted"></p></div>
+          <div id="step-content"></div>
+          <footer class="form-footer"><button type="button" class="button secondary" id="back" data-i18n="back">Back</button><span class="footer-hint" data-i18n="footerHint">You can change these choices later.</span><button type="submit" class="button primary" id="next" data-i18n="continue">Continue</button></footer>
+        </form>
+        <section id="success" hidden aria-labelledby="success-title"></section>
+        <p id="live-status" class="visually-hidden" aria-live="polite"></p>
+      </section>
+    </main>
+    <footer class="page-footer"><span>Church4Christ</span><span data-i18n="pageFooter">Built to serve churches, nonprofits, and campuses.</span></footer>
+    <noscript>This local wizard needs JavaScript. Enable JavaScript and reopen the URL printed by npm run onboard. 此本地向导需要 JavaScript。请启用 JavaScript，然后重新打开 npm run onboard 输出的网址。</noscript>
+  </body>
+</html>

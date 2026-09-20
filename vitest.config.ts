@@ -1,7 +1,6 @@
 import { defineConfig } from 'vitest/config';
-// `cloudflareTest` and `readD1Migrations` use the package's main entrypoint;
-// the installed Workers pool does not export a `/config` subpath.
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+// Configure the Workers runtime through Cloudflare's Vitest plugin.
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 
 // Pure-node tests — no `cloudflare:test` imports; they exercise build scripts
 // that do real filesystem reads/writes (readFileSync/writeFileSync) and call

@@ -6,7 +6,7 @@ import { validateProviderResources } from './manifest.mjs';
 import { SetupApplyError } from './failure.mjs';
 export { SetupApplyError } from './failure.mjs';
 
-export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-modules', 'bootstrap-admin', 'doctor']);
+export const SETUP_ACTION_ORDER = Object.freeze(['verify-provider', 'ensure-resources', 'write-manifest', 'write-config', 'configure-secrets', 'migrate', 'seed', 'seed-media', 'initialize-branding', 'initialize-modules', 'bootstrap-admin', 'doctor']);
 
 function validateResolvedResources(resources, plan) {
   validateProviderResources(resources, plan.backend, { requireBindingIds: true });
