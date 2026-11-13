@@ -35,6 +35,8 @@ const PUBLIC_EXACT = new Set([
   '/api/health/identity-verification',
   '/api/learning/google/pubsub',
   '/healthz',
+  '/robots.txt',
+  '/sitemap.xml',
   '/404',
 ]);
 

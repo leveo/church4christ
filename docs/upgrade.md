@@ -319,3 +319,19 @@ Verify `/admin/community`, `/admin/workflows`, and `/en/my/workflows` with the c
 campus and permissions. Keep reminders off until the sending domain and `EMAIL_FROM`
 are verified; then explicitly set `WORKFLOW_EMAIL_ENABLED=1`. See
 [community workflows](features/community-workflows.md) for retry, pause, and recovery behavior.
+
+## Upgrading 1.2.0 to 1.3.0
+
+Version 1.3.0 adds no database migration, binding, secret, cron trigger, or reseeding step.
+Back up as usual, run `npm ci` so the refreshed dependencies are installed, rebuild, and
+deploy with your normal process. Node.js 22.22.1 remains the minimum runtime.
+
+Before deploying, confirm `vars.APP_ORIGIN` is the domain visitors use. Canonical links,
+`/robots.txt`, and `/sitemap.xml` are now generated from it; the old static
+`public/robots.txt` is removed. See [Search engines](deploy.md#search-engines) for the
+optional verification variables and sitemap submission.
+
+`npm run onboard` only saves local preferences under the Git-ignored `.church/` directory.
+It does not change an existing installation's brand, features, or data. Preserve
+`.church/preferences.json`, any uploaded logo, and `.church/branding.json` when moving a
+build to another machine.

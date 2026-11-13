@@ -35,7 +35,7 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-The **current source release is 1.2**. Church4Christ is an open-source foundation,
+The **current source release is 1.3**. Church4Christ is an open-source foundation,
 not a turnkey managed service. Local evaluation is free, and some deployments
 can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
@@ -508,6 +508,41 @@ better operating model are laid out in
 [**`docs/why-this-stack.md`**](docs/why-this-stack.md). For the technical picture, see
 [`docs/architecture.md`](docs/architecture.md),
 [`docs/design-system.md`](docs/design-system.md), and [`docs/i18n.md`](docs/i18n.md).
+
+---
+
+## FAQ
+
+**What is Church4Christ?**
+An open-source church management system (ChMS) and church CMS. It combines a bilingual
+English/Chinese church website with staff tools for people and households, groups,
+volunteer scheduling, children's check-in, attendance, newcomer follow-up, and prayer care.
+
+**Is there a free, open-source alternative to Planning Center?**
+Church4Christ is one option. The source code is free under GPL-3.0 and you host it
+yourself on Cloudflare Workers. It covers people, groups, check-in, volunteer scheduling,
+attendance, and a church website, and can read Planning Center People through an
+optional read-only sync while you transition. It does not have Planning Center's mobile
+apps, SMS, or worship song planning. See
+[Looking for an open-source Planning Center alternative?](#looking-for-an-open-source-planning-center-alternative)
+
+**Is it free?**
+The software is free. Hosting, email, database, and domain services may cost money
+depending on your setup and usage; some small deployments fit within provider free
+allowances. See [Deployment profiles and costs](#deployment-profiles-and-costs).
+
+**Does it support Chinese or bilingual churches?**
+Yes. Every page is available in English and Chinese, with one-click Simplified-to-Traditional
+conversion. Other languages can be added; see [docs/i18n.md](docs/i18n.md).
+
+**Can a small church without a developer run it?**
+It works best when a technically comfortable staff member, volunteer, or partner owns
+deployment and updates. The browser onboarding and AI-assistant guides lower that effort,
+but someone still has to review changes, back up data, and deploy.
+
+**What is it built with?**
+Astro on Cloudflare Workers, with Cloudflare D1 or Supabase/PostgreSQL for data and
+Cloudflare R2 for media. Public pages ship no client-side framework.
 
 ---
 
