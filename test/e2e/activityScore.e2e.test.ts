@@ -120,6 +120,8 @@ describe('Activity Score built-worker access and rendering', () => {
   });
 
   it('renders privacy-bounded Learning submission evidence through the built Worker', async () => {
+    // Inside the 60-day scoring window whatever day CI runs.
+    const recentSubmission = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await env.DB.batch([
       env.DB.prepare(`UPDATE people SET membership_status='member', active=1, deleted_at=NULL WHERE id=1`),
       env.DB.prepare(`INSERT INTO learning_provider_connections
@@ -144,7 +146,7 @@ describe('Activity Score built-worker access and rendering', () => {
         (id,connection_id,provider,source_event_id,event_type,person_id,identity_link_id,
          enrollment_id,course_id,activity_id,activity_kind,occurred_at)
         VALUES ('built-score-event',19610,'google_classroom','built-score-event','assignment_submitted',
-          1,19640,19650,19630,19660,'assignment','2026-08-18T12:00:00Z')`),
+          1,19640,19650,19630,19660,'assignment',?1)`).bind(recentSubmission),
     ]);
     const admin = await sessionCookie(1, 'admin@example.com');
     const revision = await env.DB.prepare(
