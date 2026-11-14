@@ -126,6 +126,35 @@ export function pickPair(
   return isChinese(locale) ? zhValue || enValue || '' : enValue || zhValue || '';
 }
 
+/** Authored text keyed by locale code, e.g. `{ en: 'Home', zh: '首页' }`. */
+export type LocaleText = Partial<Record<SupportedLocale, string>>;
+
+/**
+ * Validate an untrusted `{[locale]: text}` map: a plain object whose keys are all
+ * SUPPORTED locales (unknown keys reject; supported-but-disabled keys are fine,
+ * since disabling a language never deletes content) and whose values are strings
+ * of at most `max` characters. Returns a fresh copy, or null when invalid.
+ */
+export function parseLocaleText(x: unknown, max: number, trim = false): LocaleText | null {
+  if (typeof x !== 'object' || x === null || Array.isArray(x)) return null;
+  const out: LocaleText = {};
+  for (const [key, value] of Object.entries(x)) {
+    if (!isSupportedLocale(key) || typeof value !== 'string') return null;
+    const text = trim ? value.trim() : value;
+    if (text.length > max) return null;
+    out[key] = text;
+  }
+  return out;
+}
+
+/** First non-empty text along the fallback chain (requested, default, en). */
+export function pickLocaleText(text: LocaleText, locale: string): string {
+  for (const code of fallbackChain(locale)) {
+    if (text[code]) return text[code] as string;
+  }
+  return '';
+}
+
 /** Resolve authored locale fields without borrowing Chinese text for English
  *  pages. Chinese pages retain the English fallback. Values stay unchanged. */
 export function pickLocalizedText(

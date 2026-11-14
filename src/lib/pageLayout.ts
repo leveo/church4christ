@@ -2,10 +2,14 @@
 // island JSON and the server renderer. Pure and dependency-free so the same
 // module runs in workerd (save/render) and the browser island (canvas).
 // Containment: sections at top level only; columns only inside sections;
-// leaves inside sections or columns. Text is localized per-field ({en,zh}),
+// leaves inside sections or columns. Text is localized per-field ({[locale]: text}),
 // structure is shared across locales by design.
 
-export interface L10nString { en: string; zh: string }
+/** `en` and `zh` are always present (legacy shape); other supported locales are optional. */
+
+import { parseLocaleText, type LocaleText } from './locales';
+
+export type L10nString = { en: string; zh: string } & LocaleText;
 export type Align = 'left' | 'center' | 'right';
 export type LeafType = 'heading' | 'text' | 'image' | 'button' | 'spacer' | 'divider';
 
@@ -41,14 +45,16 @@ const fail = (error: string): Fail => ({ ok: false, error });
 
 // --- tiny structural checkers (no schema lib: 8 node shapes don't earn one) ---
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
-const isL10n = (x: unknown, max: number): x is L10nString =>
-  isObj(x) && typeof x.en === 'string' && typeof x.zh === 'string' && x.en.length <= max && x.zh.length <= max;
+const isL10n = (x: unknown, max: number): x is L10nString => {
+  const map = parseLocaleText(x, max);
+  return map !== null && typeof map.en === 'string' && typeof map.zh === 'string';
+};
 const oneOf = <T,>(x: unknown, values: readonly T[]): x is T => values.includes(x as T);
 
 const ALIGNS = ['left', 'center', 'right'] as const;
 
-/** Copy only {en, zh} so unknown keys inside an l10n object are dropped too. */
-const l10nCopy = (x: L10nString): L10nString => ({ en: x.en, zh: x.zh });
+/** Copy the validated map (isL10n already rejected unknown locale keys). */
+const l10nCopy = (x: L10nString): L10nString => ({ ...x });
 
 // Validate AND rebuild a leaf from only its known fields (strict allowlist):
 // unknown node types or bad props return null; unknown/extra keys never make

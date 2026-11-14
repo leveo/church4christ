@@ -2,8 +2,7 @@
 // settings key `nav.items`; when unset or unparsable the hardcoded default
 // (the pre-customization menu) is used, so a bad save can never blank the nav.
 import type { AppDb } from './appDb';
-import type { Locale } from './locales';
-import { localePath, pickLocalizedText } from './locales';
+import { localePath, type Locale, parseLocaleText, pickLocaleText, type LocaleText } from './locales';
 import { t } from './i18n';
 import { MODULE_KEYS, MODULES } from './modules';
 import { getSetting } from './settings';
@@ -31,7 +30,7 @@ export const BUILTIN_NAV: { key: string; path: string }[] = [
 export type NavItem =
   | { type: 'builtin'; key: string }
   | { type: 'page'; slug: string }
-  | { type: 'link'; url: string; label: { en: string; zh: string } };
+  | { type: 'link'; url: string; label: { en: string; zh: string } & LocaleText };
 
 export const DEFAULT_NAV: NavItem[] = BUILTIN_NAV.map((b) => ({ type: 'builtin' as const, key: b.key }));
 
@@ -56,10 +55,10 @@ export function parseNavItems(raw: string): NavItem[] {
     } else if (o.type === 'page' && typeof o.slug === 'string' && SLUG_RE.test(o.slug)) {
       items.push({ type: 'page', slug: o.slug });
     } else if (o.type === 'link' && typeof o.url === 'string' && SAFE_URL.test(o.url) && o.label && typeof o.label === 'object') {
-      const l = o.label as Record<string, unknown>;
-      const en = typeof l.en === 'string' ? l.en.trim() : '';
-      const zh = typeof l.zh === 'string' ? l.zh.trim() : '';
-      if (en || zh) items.push({ type: 'link', url: o.url, label: { en, zh } });
+      // {[locale]: text}: unknown locale keys make the entry invalid; disabled-but-
+      // supported keys are kept. en/zh are always present (legacy shape).
+      const map = parseLocaleText(o.label, 1000, true);
+      if (map && Object.values(map).some(Boolean)) items.push({ type: 'link', url: o.url, label: { en: '', zh: '', ...map } });
     }
   }
   return items;
@@ -173,7 +172,7 @@ export async function resolveNav(db: AppDb, locale: Locale, modules: Set<string>
       if (!title) continue;
       out.push({ label: title, href: localePath(locale, `/p/${item.slug}`) });
     } else {
-      const label = pickLocalizedText(item.label, locale);
+      const label = pickLocaleText(item.label, locale);
       if (!label) continue;
       out.push({ label, href: item.url });
     }
