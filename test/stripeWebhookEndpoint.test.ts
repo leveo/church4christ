@@ -209,7 +209,7 @@ describe('handleStripeWebhookRequest', () => {
     const LIVE_ENV = { ...ENV, STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_secret', STRIPE_LIVE_CONFIRMED: '1' } as const;
 
     it('accepts a live event and rejects a test event (no crossover either way)', async () => {
-      const receive = vi.fn(async () => ({ kind: 'inserted', status: 'pending', outcome: null } as const));
+      const receive = vi.fn(async (..._args: unknown[]) => ({ kind: 'inserted', status: 'pending', outcome: null } as const));
       const live = await signed(stripeEvent('invoice.paid', { id: 'in_live' }, { id: 'evt_live_ok', livemode: true }));
       expect(await responseText(await handleStripeWebhookRequest(live, deps({ env: LIVE_ENV, receive })))).toEqual([200, 'received']);
       expect(receive).toHaveBeenCalledTimes(1);
