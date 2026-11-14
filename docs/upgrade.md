@@ -336,7 +336,25 @@ It does not change an existing installation's brand, features, or data. Preserve
 `.church/preferences.json`, any uploaded logo, and `.church/branding.json` when moving a
 build to another machine.
 
-## Unreleased: Member Portal on D1
+## Upgrading 1.3.0 to 1.4.0
+
+Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.
+Back up as usual, run `npm ci`, rebuild, and deploy with your normal process.
+
+The new `checkin`, `volunteer-scheduling`, and `small-groups` presets only affect new
+installations. An existing installation keeps its recorded preset and module settings; turn
+modules on or off in **Settings → Modules** as before.
+
+## Upgrading 1.4.0 to 1.5.0
+
+Version 1.5.0 adds forward migrations `0039` and `0040` on both backends. Apply them in order
+before deploying: on D1, `0039_member_portal_d1.sql` and `0040_service_planning.sql`; on
+Supabase, `0039_giving_production.sql` and `0040_service_planning.sql`. Run `npm ci` so the new
+`qrcode-generator` dependency is installed. Member Portal and Service Planning stay off on an
+existing installation until an administrator turns them on, and Stripe stays in test mode until
+you opt into live mode. The sections below give the details.
+
+### Member Portal on D1
 
 The Member Portal now runs on the default Cloudflare D1 database. This adds one forward D1
 migration, `migrations/0039_member_portal_d1.sql`, which creates the `group_files` and
@@ -353,7 +371,7 @@ turns on Member Portal in **Settings → Modules**. On D1 the
 event-scope prayers, event administrators, and My registrations stay unavailable because
 they depend on Registration, which remains Supabase-only.
 
-## Unreleased: Production Giving
+### Production Giving
 
 This adds one forward PostgreSQL migration, `migrations-supabase/0039_giving_production.sql`,
 for installations with Giving. D1 has no Giving tables and no new D1 migration is needed for it.
@@ -378,7 +396,7 @@ for installations with Giving. D1 has no Giving tables and no new D1 migration i
 There is no new cron trigger: annual statements are delivered by the existing five-minute job.
 To roll back the application, redeploy the previous build; the new columns and tables are
 additive and the previous build ignores them (it only reads the widened constraints' old values).
-## Unreleased: Service Planning
+### Service Planning
 
 Service Planning adds one forward migration on each backend, `migrations/0040_service_planning.sql`
 (D1) and `migrations-supabase/0040_service_planning.sql` (Supabase). It creates
@@ -399,12 +417,3 @@ already exist, so upgrading does not switch the module on. It changes no other t
    by the existing daily reminder job; no cron trigger, binding, or secret is added.
 
 No preset changes, so an installation's recorded module list stays valid.
-
-## Upgrading 1.3.0 to 1.4.0
-
-Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.
-Back up as usual, run `npm ci`, rebuild, and deploy with your normal process.
-
-The new `checkin`, `volunteer-scheduling`, and `small-groups` presets only affect new
-installations. An existing installation keeps its recorded preset and module settings; turn
-modules on or off in **Settings → Modules** as before.

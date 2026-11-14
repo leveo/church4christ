@@ -10,9 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
-Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on-d1),
-[Production Giving](docs/upgrade.md#unreleased-production-giving),
-[Service Planning](docs/upgrade.md#unreleased-service-planning).
+## [1.5.0] - 2026-11-14
+
+Upgrade notes: [Upgrading 1.4.0 to 1.5.0](docs/upgrade.md#upgrading-140-to-150):
+[Member Portal on D1](docs/upgrade.md#member-portal-on-d1),
+[Production Giving](docs/upgrade.md#production-giving),
+[Service Planning](docs/upgrade.md#service-planning).
 
 ### Added
 
