@@ -139,9 +139,10 @@ transition. People are brought across with the CSV importer and its reusable col
 mappings.
 
 **What it does not replace yet.** There is no native mobile app, no SMS messaging, and
-no worship service or song planning. Online card giving and paid event registration
-through Stripe are preview/test-only; the giving module records checks and cash in an
-offline ledger. Church4Christ is a foundation your team runs and maintains, not a
+no worship service or song planning. Online giving through Stripe (cards and bank debits)
+runs in test mode until you complete the go-live checklist; paid event registration
+shares the same Stripe mode. The giving module also records checks and cash in an offline
+ledger and produces annual giving statements. Church4Christ is a foundation your team runs and maintains, not a
 hosted service with vendor support.
 
 Planning Center and the other product names above are trademarks of their respective
@@ -240,8 +241,8 @@ Every feature has its own plain-English guide. Start with any of these:
 |  | **[Activity score](docs/features/activity-score.md)** | Combine selected person-linked activities into explainable member scores and a church-wide engagement summary. |
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Learning](docs/features/learning.md)** | Continue Sunday school and discipleship between meetings with bilingual videos, files, assignments, quizzes, and provider-synchronized status. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
-| [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: record checks and cash in an offline ledger. Preview/test-only: Stripe online checkout. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export. Preview/test-only: paid Stripe checkout. |
+| [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export, plus paid Stripe checkout in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
@@ -345,7 +346,7 @@ You can run the site locally, with optional fictional sample content, before cho
 deployment. You will need [Node.js](https://nodejs.org/) 22.22.1 or newer installed. Browser
 onboarding recommends **Website + Community** with **Cloudflare D1** for the first launch.
 
-![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](docs/images/diagrams/setup-paths-overview.png)
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe starts in test mode](docs/images/diagrams/setup-paths-overview.png)
 
 ```bash
 # 1. Get the code and install it
@@ -445,7 +446,7 @@ pricing pages before deployment.
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
 | **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 19 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
-| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 21 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
+| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 21 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe starts in test mode; live mode is an explicit opt-in. |
 
 Provider free allowances can be useful for evaluation or modest deployments, but they are
 not a promise that a production service will remain free. Budget for technical ownership,
@@ -491,16 +492,17 @@ needs both Cloudflare and Supabase. There is no automated D1↔Supabase content 
 so choose the production database before entering real content. See
 [**`docs/supabase-setup.md`**](docs/supabase-setup.md).
 
-**Stripe payment paths are Preview/test-only.** The Giving offline ledger and free
-Registration flow are implemented, but online gifts and paid registrations must not be
-treated as production payment features. Giving and Registration are Supabase-only; D1 does
-not support those modules. When setup asks for either module, import only an `sk_test_…`
-key and `whsec_…` signing secret with the one-shot
-`CHURCH_SETUP_STRIPE_SECRET_KEY` and `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment
-variables. Setup stores the runtime secrets automatically and rejects live keys. Signed live
-events are rejected with `400 live_mode_disabled` before storage, while the
-Supabase-backed Worker runs durable recovery every five minutes. See the Supabase guide
-for the exact command.
+**Stripe starts in test mode; live mode is an explicit opt-in.** Stripe hosts payment pages,
+receipts, the Billing Portal, refunds, and disputes; this application stores only amounts,
+funds, dates, status, and Stripe ids. Giving and Registration are Supabase-only; D1 does not
+support those modules. When setup asks for either module, import an `sk_test_…` key and
+`whsec_…` signing secret with the one-shot `CHURCH_SETUP_STRIPE_SECRET_KEY` and
+`CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment variables; setup stores the runtime secrets
+and writes `STRIPE_MODE=test`. To take real donations, follow the go-live checklist in the
+Supabase guide (live key, webhook at API version `2025-03-31.basil`, `STRIPE_MODE=live`
+plus `STRIPE_LIVE_CONFIRMED=1`). An event whose mode does not match the configured mode is
+rejected, and the Supabase-backed Worker runs durable recovery every five minutes. Local
+tests do not prove live Stripe delivery.
 
 ---
 

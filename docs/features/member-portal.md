@@ -116,8 +116,8 @@ its records and R2 objects.
 **My Events** lists the member's existing registration records. When the separate
 Registration module is enabled, it also shows events currently open for registration
 and links to the public registration flow. The public Events module (`/events`) remains
-a separate publishing feature. Paid Registration and online Giving are Preview/test-only
-in this repository; the screenshot uses fictional test data, not a production charge.
+a separate publishing feature. Paid Registration and online Giving use the configured Stripe mode (test
+by default); the screenshot uses fictional test data, not a production charge.
 
 ![David Chen's registration history and events currently open for registration](../images/portal/events.png)
 

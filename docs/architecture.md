@@ -191,7 +191,7 @@ the provider-specific D1 backup or Supabase Stripe recovery job.
 | `0 * * * *` | D1 and Supabase | Hourly group-attendance tracking email; skips when Groups is disabled |
 | `15,45 * * * *` | D1 and Supabase | Split Learning work: `:15` tries one durable Canvas token revocation then Google Classroom registration cleanup/renewal; `:45` fairly reconciles one active mapped course; disabled or unconfigured providers skip safely |
 | `0 9 * * *` | D1 only | Export D1 → `backups/YYYY-MM-DD.sql` in R2 |
-| `*/5 * * * *` | Supabase only | Preview/test-only Stripe webhook inbox and Checkout recovery; processing honors enabled Giving and Registration modules |
+| `*/5 * * * *` | Supabase only | Stripe webhook inbox and Checkout recovery, then a bounded drain of the giving-statement outbox; processing honors enabled Giving and Registration modules |
 
 The backup **skips gracefully** (logs a line, no error) when its account/database/token
 config is absent, so the demo deploy runs all its crons without backups configured. See

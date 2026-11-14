@@ -1,178 +1,206 @@
-# Giving (manual ledger and Stripe checkout Preview)
+# Giving (online and offline gifts, annual statements)
 
-> **Preview — Stripe test mode only.** The offline/manual ledger is implemented for recording
-> checks and cash. Online one-time and recurring checkout is a test-only preview: use Stripe
-> test credentials and test cards, and do not use this path to collect funds.
+> **Giving takes real donations through Stripe when you opt into live mode.** Stripe
+> collects card and bank details on its own hosted pages; this application stores only
+> amounts, funds, dates, status, and Stripe ids. Test mode stays the default until you
+> deliberately go live (see the [go-live checklist](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration)).
 
 ## What it does
 
-**Giving** provides an implemented ledger for checks and cash, with funds, finance-team entry,
-household history, and totals. It also includes a Preview of one-time and recurring Stripe
-checkout so a team can evaluate the flow with test-mode data. Those online paths create test
-charges only and are not a production donation service.
+**Giving** records every gift in one ledger: online one-time and recurring gifts through
+Stripe, plus checks and cash your finance team keys in by hand. It adds funds, a household
+giving history, per-fund totals, a CSV export, and an **annual giving statement** donors can
+print.
 
-It brings together four things a church normally juggles across a card reader, a
-spreadsheet, and a separate donor app:
+**Everything Stripe can do stays at Stripe.** That is a deliberate rule:
 
-- **Online checkout Preview.** With Stripe test mode configured, a guest can exercise a
-  one-time test checkout without an account, and a signed-in member can also preview weekly
-  or monthly recurring checkout. Stripe handles test-card details; this flow must not be used
-  for production donations.
-- **Funds you define.** Split giving into the funds that match your church — **General**,
-  **Missions**, **Building**, and any others — each with a number for your bookkeeping and a
-  name in both English and Chinese. Givers pick the fund they want to support.
-- **Offline gifts, recorded by hand.** Checks and cash never touch Stripe, so your finance
-  team keys them into the same ledger: who gave, which fund, how much, the date received,
-  and the check number. These manual records are the implemented path for actual gifts;
-  Stripe-generated rows in this repository are test-mode records.
-- **A giving history each family can see.** Every signed-in member has a private **My
-  giving** page showing their household's manual gifts, any test-mode Stripe entries and
-  recurring subscriptions, and a year-by-year total.
+- **Payment details.** Donors pay on Stripe-hosted Checkout (cards, wallets, and ACH bank
+  debits `us_bank_account`, per what you enable in the Stripe dashboard). Card and bank
+  details never touch this application or its database.
+- **Receipts.** Stripe emails a receipt for each payment (one-time gifts send it to the
+  donor's email; subscription invoices follow your Stripe email settings). The app does not
+  send per-payment receipts.
+- **Changing a recurring gift.** A donor opens Stripe's **Billing Portal** from **My giving**
+  to change the amount, update the payment method, or cancel.
+- **Failed recurring payments.** Stripe's own dunning emails the donor. The app only marks
+  the subscription **past due**.
+- **Refunds and disputes.** You issue them in Stripe; the ledger follows automatically.
 
-Because money is involved, the module keeps test-card details at Stripe, excludes refunds
-from totals, and limits a giver to their own household's history. These protections do not
-change the Stripe Preview into a live-payment feature.
+What this application adds on top:
+
+- **Funds you define** — General, Missions, Building, and any others, each with a number, a
+  name and an optional description in English and Chinese, a **default** flag (preselected on
+  the give form), and a **tax-deductible** flag (only deductible funds appear on statements).
+- **Offline gifts** — checks and cash recorded by hand, in your giving currency, with an
+  audit row for who recorded each one.
+- **A giving history each family can see** — a private **My giving** page with the
+  household's gifts (pending, refunded, and disputed gifts are labeled), recurring gifts, and
+  year totals.
+- **Annual giving statements** — a printable page per donor per year, plus an admin action
+  that emails everyone a link to theirs.
+
+Because money is involved, the module excludes refunded and disputed money from totals,
+keeps **test-mode** Stripe rows separate from real money, and limits a giver to their own
+household's history.
 
 ## How your team uses it
 
-**A member or guest previews online checkout.** With Stripe test credentials configured, the
-public giving page at `/give` shows a short form: pick a fund, enter a test amount, choose
-one-time or (once signed in) weekly or monthly, and continue to Stripe test checkout. A guest
-can exercise the one-time flow; a signed-in member can exercise the recurring flow. When the
-test checkout succeeds, its test record lands in the ledger automatically.
+**A member or guest gives online.** The public giving page at `/give` shows a short form:
+pick a fund, enter an amount, choose one-time or (once signed in) weekly, monthly, or
+yearly, and continue to Stripe's secure checkout. A guest can give once; recurring giving
+needs a signed-in member. If Stripe is not configured for the current mode, the form is
+hidden and the page explains that online giving is not available yet. After paying, the
+thank-you page explains that **Stripe emails the receipt** and that the annual statement
+will be in **My giving**.
 
 ![The online giving form](../images/giving/give-form.png)
 
+**Bank (ACH) gifts take days.** Checkout reports an ACH payment as unpaid until the bank
+debit settles. The ledger shows it as **Pending** (never counted), then **Succeeded** when
+Stripe confirms, or **Failed** if the debit fails or is returned. The recorded date is the
+day Stripe confirmed payment.
+
 **The finance team records checks and cash.** The giving admin page at `/admin/giving` has a
-**Record a gift** form for everything that came in offline. Choose the giver from your
-member list (or type a guest's name), pick the fund, enter the amount, mark it a check or
-cash, add the check number and the date it was received, and save. Below the form, a
-filterable **ledger** lists manual gifts alongside any Stripe test records, and a **Totals by
-fund** table adds up what each fund has received over the date window you choose. A row of
-summary cards above the form shows this month's total and gift count, the year-to-date
-total, and how many funds are active, at a glance.
+**Record a gift** form for everything that came in offline. Choose the giver (or type a
+guest's name), pick the fund, enter the amount in your giving currency, mark it a check or
+cash, add the check number and the date received, and save. Below it, a filterable **ledger**
+lists every gift with its status (pending, failed, refunded, partly refunded, disputed) and
+labels **Test** rows from Stripe test mode. **Totals by fund** are net of refunds and shown
+per currency. **Export CSV** downloads the (filtered) ledger for admins and finance users,
+within the current campus.
 
 ![The giving admin: record a check or cash gift, with the filterable ledger and per-fund totals below](../images/admin/giving.png)
 
-**Setting up funds.** On `/admin/giving/funds` an admin adds each fund with a number, an
-English name, and a Chinese name, and can deactivate a fund without deleting it (its past
-gifts stay in the ledger). Deactivated funds simply stop appearing as a choice for new
-gifts.
+**Setting up funds.** On `/admin/giving/funds` an admin adds each fund with a number, a name
+and description in English and Chinese, and can mark one fund as the **default** and decide
+whether it is **tax-deductible**. A fund can be deactivated without deleting it. Saving or
+toggling a fund writes an audit row, as does each manual gift.
 
 ![Managing the funds a church gives to](../images/admin/giving-funds.png)
 
-**What a giver sees.** A signed-in member's **My giving** page at `/my/giving` has three
-parts: their **test-mode recurring gifts** with a status and a **Manage** button, their
-**household's giving history** (manual entries plus any Stripe test entries, including test
-refunds), and a **per-year total**. For a test subscription, the Manage button opens Stripe's
-test-mode billing portal, where the flow for updating a test card or cancelling can be
-evaluated.
+**Annual giving statements.** Under `/admin/giving/statements`:
+
+1. Fill in the statement details once: your **legal name**, **tax ID**, an optional note,
+   and the "no goods or services were provided" wording (a default is used when blank).
+   The address comes from your site settings.
+2. Choose a year and **Queue statements**. Every donor with an email and tax-deductible gifts
+   that year gets one queued email. The existing five-minute job sends about ten per run,
+   retries failures with a growing delay, and shows progress and failures on the page.
+3. Each email links to the donor's **printable statement** at
+   `/my/giving/statement/<year>`: legal name, address, tax ID, the donor, a per-fund and
+   per-currency total, and the no-goods wording. No attachment is sent.
+
+A statement counts only **live** money: succeeded gifts (manual gifts count as live), net of
+refunds, in tax-deductible funds, bucketed by calendar year **in the church time zone**
+(America/Chicago) using the date Stripe reports the payment — so a gift paid at 11:30 pm on
+Dec 31 counts in that year. Pending, failed, disputed, and test-mode gifts are excluded.
+A household owner's statement covers the household; anyone else sees only their own gifts.
+
+**What a giver sees.** **My giving** at `/my/giving` shows recurring gifts with a status and a
+**Manage** button that opens Stripe's Billing Portal, the household's gift history, a
+per-year total, and a link to each year's statement.
 
 ![A member's household giving history and recurring gifts](../images/giving/my-giving.png)
 
-**Checking test records (reconciliation).** Stripe test data can occasionally drift out of
-sync with the local ledger — for example, when a webhook never arrived or a test refund was
-issued in Stripe. The **Reconcile** page at `/admin/giving/reconcile` cross-checks the ledger
-against test-mode Stripe data and flags a missing record, an amount mismatch, or a refund
-status mismatch. It is read-only and optional; without the connection, the page shows setup
-notes instead of failing.
+**Checking records (reconciliation).** The optional **Reconcile** page at
+`/admin/giving/reconcile` cross-checks the ledger against Stripe through a read-only
+connection and flags a missing record, an amount mismatch, or a refund the ledger missed. It
+is read-only; without the connection it shows setup notes.
 
 **Who can see the money.** Giving figures are sensitive, so access is deliberately narrow:
 
-- The **giving admin** pages (record gifts, funds, reconcile) are open only to an **admin**
-   or to someone with the **finance** flag set on their profile. An admin turns that flag on
-   from a person's page in `/admin/people`, so a church treasurer can manage giving without
-  being made a full site admin. This is a shared **payment operations** permission: when
-  paid Registration is enabled, it also grants Stripe recovery and registration-payment
+- The **giving admin** pages (record gifts, funds, statements, export, reconcile) are open
+  only to an **admin** or to someone with the **finance** flag set on their profile. An admin
+  turns that flag on from a person's page in `/admin/people`, so a church treasurer can manage
+  giving without being a full site admin. This is a shared **payment operations** permission:
+  when paid Registration is enabled, it also grants Stripe recovery and registration-payment
   cancellation authority.
-- The **My giving** page shows a giver only their **own household's** gifts — never another
-  family's. Someone with no household sees just their own.
-- **Refunds** stay visible in a giver's history (so the refund is honest), but never count
-  toward any total.
+- **My giving** and the statement page show a giver only their **own household's** gifts
+  (a household owner) or their own (anyone else) — never another family's.
+- Refunds and disputes stay visible in a giver's history so it is honest, but never count
+  toward totals or statements.
 
 ## How it fits together
 
-Offline checks and cash are keyed into the implemented ledger by the finance team. Stripe
-test checkouts can also create test records in that ledger so the online, recurring, portal,
-webhook, and reconciliation flows can be previewed without collecting funds.
+Online gifts start at Stripe Checkout. Stripe sends signed webhook events to
+`/api/stripe/webhook`; the app stores each event durably, then writes or updates the ledger
+idempotently. Offline gifts are keyed in by the finance team into the same ledger.
 
 ![How online, offline, and recurring gifts flow into one ledger](../images/diagrams/giving.svg)
 
+How events change the ledger:
+
+| Stripe event | Ledger effect |
+| --- | --- |
+| `checkout.session.completed` (card, paid) | Succeeded gift, dated from Stripe |
+| `checkout.session.completed` (ACH, unpaid) | Pending gift (not counted) |
+| `checkout.session.async_payment_succeeded` | Pending becomes succeeded, dated from Stripe |
+| `checkout.session.async_payment_failed`, `charge.failed` (ACH) | Gift becomes failed |
+| `invoice.paid` | Succeeded gift for a recurring payment; the PaymentIntent is learned from the invoice |
+| `invoice.payment_failed` | Recurring gift becomes past due (Stripe emails the donor) |
+| `customer.subscription.updated` / `.deleted` | Amount, interval, fund, and status follow Stripe |
+| `charge.refunded` | `refunded_cents` is recorded; the gift becomes refunded only when fully refunded |
+| `charge.dispute.created` | Gift becomes disputed (excluded) |
+| `charge.dispute.closed` | Won: back to succeeded. Lost: stays disputed |
+
+Refunds and disputes are matched to **your** gifts by the database (PaymentIntent, charge,
+then invoice, then a Stripe invoice lookup), not by metadata, so a refund on a subscription
+payment is found. A charge that matches no gift (a registration payment, another app on the
+same Stripe account) is ignored. Every row records whether it is live or test, and an event
+whose mode differs from the configured mode is rejected.
+
 ## Setting it up
 
-Giving is **Supabase (Postgres)-only in the current implementation**. The module gate keeps it
-off in the D1 configuration as a current repository boundary. Stand up the Supabase backend first (see
-[`docs/supabase-setup.md`](../supabase-setup.md)), then configure the optional test Preview:
+Giving is **Supabase (Postgres)-only**; the module gate keeps it off in the D1
+configuration. Stand up the Supabase backend first (see
+[`docs/supabase-setup.md`](../supabase-setup.md)), then follow **Stripe setup and go-live**
+there. In short:
 
-1. **Import Stripe test credentials through setup.** Get an `sk_test_…` key and the test
-   endpoint's `whsec_…` signing secret, then pass them only to the setup process:
+1. Start in **test mode** with an `sk_test_…` key and a test webhook endpoint; pass them only
+   to the setup installer, which stores them under the runtime secret names:
 
    ```bash
    CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
    CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
    npm run setup
    ```
+2. Add your funds on `/admin/giving/funds`, fill in the statement details, and mark your
+   treasurer with the finance flag.
+3. When ready for real donations, work through the go-live checklist (webhook at API version
+   `2025-03-31.basil`, Stripe receipt emails, Billing Portal configuration, live key,
+   `STRIPE_MODE=live` plus `STRIPE_LIVE_CONFIRMED=1`). Switching modes is explicit and
+   reversible; test and live data never mix.
+4. Optionally set `giving.currency` (default `usd`; for example `cad`) in site settings.
 
-   These `CHURCH_SETUP_STRIPE_*` names are one-shot setup inputs. Setup stores them under
-   the runtime secret names automatically; do not rename them to ambient `STRIPE_*`
-   variables before running setup. Live keys are rejected, and a separately signed live
-   webhook receives `400 live_mode_disabled` without being stored. Until the test
-   credentials are set, the online form is inert — offline recording still works.
-2. **Point a Stripe test-mode webhook at your site.** In the Stripe dashboard's test mode,
-   add a webhook endpoint
-   at `https://your-site/api/stripe/webhook` and subscribe it to all eight shared events:
-   `checkout.session.completed`, `checkout.session.expired`,
-   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
-   `invoice.paid`, `charge.refunded`, `customer.subscription.updated`, and
-   `customer.subscription.deleted`. This is how a completed or asynchronous payment, an
-   expiry, a monthly renewal, a refund, or a canceled subscription reaches the app. Use the endpoint's signing secret as the
-   `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` input in step 1.
-3. **Choose your currency (optional).** Gifts default to US dollars. To use another currency,
-   set the `giving.currency` site setting to its three-letter code (for example `cad`).
-4. **Add your funds** on `/admin/giving/funds`, and **mark your treasurer** with the finance
-   flag on their person page so they can manage giving.
+The Supabase worker runs durable webhook and Checkout recovery, and drains the statement
+outbox, every five minutes (no extra schedule). Admins and finance users can inspect bounded
+receipts and retry or dismiss eligible events at `/admin/stripe-events`; raw customer and
+payment payloads are never shown there.
 
-The Supabase worker runs durable webhook and Checkout recovery every five minutes. Admins
-and finance users can inspect bounded receipts and retry or dismiss eligible test events at
-`/admin/stripe-events`; raw customer and payment payloads are never shown there. The current
-D1 implementation does not enable Giving or Stripe operations.
-
-Reconciliation is an optional part of the Preview: a team can expose test-mode Stripe data to
-Supabase read-only to exercise the Reconcile page's drift checks. The offline/manual ledger
-does not require that connection.
+> Local fixtures and tests do not prove live Stripe delivery, receipt emails, or payment
+> processing. Verify each with a real small live gift after go-live.
 
 ## For developers
 
-- **Backend gating:** `giving` is Supabase-only in the current implementation
-  (`requiresBackend: 'supabase'` in `src/lib/modules.ts`) — the enablement filter
-  force-disables it on D1 regardless of its settings row. It owns the `/give/checkout`,
-  `/my/giving`, `/api/giving`, and `/admin/giving` route prefixes and softly `uses` the
-  `people` module.
-- **Schema:** `migrations-supabase/0002_giving.sql` adds `funds` + `fund_i18n`, `gifts`, and
-  `recurring_gifts`, plus the `finance` and `stripe_customer_id` columns on `people`
-  (`migrations/0004_giving_people.sql` mirrors those two columns on D1, harmless there).
-  Money is **integer cents** in every table and function; `gifts` carries two partial unique
-  indexes (`stripe_payment_intent_id`, `stripe_invoice_id`) so a redelivered webhook dedups.
-- **Data libraries:** `src/lib/fundDb.ts` (fund CRUD + the localized en-fallback join),
-  `src/lib/givingDb.ts` (the ledger, per-fund and per-year totals, the household-scoped
-  self-service reads, the recurring lifecycle, and the idempotent webhook writers),
-  `src/lib/givingReconcile.ts` (the optional Stripe-FDW drift audit), and the pure Stripe
-  client in `src/lib/stripe.ts` (fetch-based, Workers-compatible, secret never logged).
-- **Checkout + webhook:** `src/pages/api/giving/checkout.ts` (one-time vs recurring session,
-  guest-recurring bounces to sign-in), `src/pages/api/giving/portal.ts` (Stripe billing
-  portal launch), and `src/pages/api/stripe/webhook.ts` → `src/lib/givingWebhook.ts` (one
-  verified event in, a short outcome out; a foreign or malformed event always resolves to
-  `ignored`, never a 500, and only a transient DB-connectivity error asks Stripe to retry).
-- **Privacy lives in the reads, not the pages.** `listHouseholdGifts` / `householdYearTotals`
-  scope to the viewer's *live* household (soft-deleted households drop out), falling back to
-  the viewer alone; totals count only `succeeded` money, so refunds are excluded there but
-  still returned to the ledger. Every admin function assumes the calling page has already
-  gated to `admin ∪ finance`.
-- **Demo data:** `seed/giving-seed.sql` (Postgres-only, applied by
-  `scripts/db/seed-supabase.mjs` after `dev-seed.sql`) seeds three funds, a dozen gifts
-  across every method and several households plus a guest, and one active recurring
-  subscription — all with fictional data, obviously-fake Stripe ids, and relative dates.
-- **Tests:** the `test/pg/` suites against real Postgres —
-  `fundDb.test.ts`, `givingDb.test.ts`, `givingWebhook.test.ts`, `givingReconcile.test.ts`,
-  `givingSchema.test.ts`, `money.test.ts`, `stripe.test.ts` — plus the giving smoke checks in
-  `test/e2e-pg/smoke.test.ts`. See [Modules](modules.md) for the on/off behavior.
+- **Backend gating:** `giving` is Supabase-only (`requiresBackend: 'supabase'`). It owns the
+  `/give/checkout`, `/my/giving`, `/api/giving`, and `/admin/giving` prefixes.
+- **Schema:** `migrations-supabase/0002_giving.sql` (funds, gifts, recurring gifts) and
+  `0039_giving_production.sql`, which adds `gifts.livemode`, `paid_at`, `refunded_cents`,
+  `stripe_charge_id`, the `us_bank_account` method and `disputed` status, `recurring_gifts.livemode`
+  and the `year` interval, `stripe_customers` (one customer per person per mode),
+  fund description / `is_default` / `tax_deductible`, `giving_statement_outbox`, and
+  `giving_audit_events`. Money is **integer cents** everywhere. `people.stripe_customer_id`
+  is a legacy test-mode read fallback only.
+- **Modes:** `src/lib/stripe.ts` — `STRIPE_MODE` is `test` or `live`; live needs an
+  `sk_live_`/`rk_live_` key, a `whsec_` secret, and `STRIPE_LIVE_CONFIRMED=1`. Every request
+  pins `Stripe-Version: 2025-03-31.basil`. Objects and events must carry a `livemode`
+  equal to the configured mode.
+- **Data libraries:** `fundDb.ts`, `givingDb.ts` (ledger, totals, statements, idempotent
+  webhook writers), `givingWebhook.ts` (event dispatcher), `givingStatements.ts` (outbox),
+  `givingExport.ts` (CSV), `givingAudit.ts`, `givingReconcile.ts`.
+- **Year bucketing:** one SQL rule in `givingDb.ts` (`EFFECTIVE_DATE`): `received_on` for
+  manual gifts, else `paid_at` converted from UTC to the church time zone.
+- **Tests:** `test/pg/givingProduction.test.ts` (webhook flows, statements, outbox, CSV),
+  `givingWebhook.test.ts`, `givingDb.test.ts`, `stripe.test.ts`, and the e2e checks in
+  `test/e2e-pg/`. They use injected Stripe fetchers and a mocked mailer: they do not prove
+  live Stripe or email delivery.

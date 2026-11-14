@@ -353,6 +353,32 @@ turns on Member Portal in **Settings → Modules**. On D1 the
 event-scope prayers, event administrators, and My registrations stay unavailable because
 they depend on Registration, which remains Supabase-only.
 
+## Unreleased: Production Giving
+
+This adds one forward PostgreSQL migration, `migrations-supabase/0039_giving_production.sql`,
+for installations with Giving. D1 has no Giving tables and no new D1 migration is needed for it.
+
+1. Back up the Supabase database as usual (see section 2).
+2. Apply the migration with your normal Supabase migration step **before** deploying the new
+   build. It adds gift columns, widens the gift method/status and recurring interval checks, and
+   creates `stripe_customers`, `giving_statement_outbox`, and `giving_audit_events`. It marks
+   existing manual (check/cash) gifts as live, leaves existing Stripe gifts as test, and
+   backfills each Stripe gift's `paid_at` from its creation time.
+3. Deploy. The installation stays in **test mode**; nothing changes for donors until you opt
+   into live mode. `STRIPE_MODE` accepts `test` or `live`; live also requires
+   `STRIPE_LIVE_CONFIRMED=1`, a live key, and a live webhook secret.
+4. Update the Stripe webhook endpoint's events to the twelve listed in
+   [`supabase-setup.md`](supabase-setup.md#7c-the-webhook-endpoint), at API version
+   `2025-03-31.basil`. Run `npm run doctor`; it warns when stored events came from another API
+   version.
+5. Before going live, follow the go-live checklist in `supabase-setup.md` (it includes draining
+   Registration checkout requests that are still in `creating`).
+6. Re-running setup on a live installation preserves the live opt-in in `wrangler.jsonc`.
+
+There is no new cron trigger: annual statements are delivered by the existing five-minute job.
+To roll back the application, redeploy the previous build; the new columns and tables are
+additive and the previous build ignores them (it only reads the widened constraints' old values).
+
 ## Upgrading 1.3.0 to 1.4.0
 
 Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.

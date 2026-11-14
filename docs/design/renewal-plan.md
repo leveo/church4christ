@@ -44,7 +44,7 @@ Retain selectable Harvest/Midnight themes; renew default Sanctuary with light/da
 
 No changes to frozen migrations. No exposure of private member/prayer data through public
 pages. Menus retain module and area/role gates. No local homework submission or grading:
-learning submission remains provider-authoritative. Stripe remains preview/test-only.
+learning submission remains provider-authoritative. Stripe starts in test mode; live mode is an explicit opt-in.
 Giving/prayers/pastoral notes stay excluded from activity scoring. Aggregate attendance
 reports remain identity-free. Generated mockup numbers/copy are not product specifications.
 

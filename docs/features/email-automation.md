@@ -23,8 +23,8 @@ production recipient coverage. Check the current
 When production email is configured, the site can send transactional messages for sign-in,
 scheduling, volunteer responses, attendance links, application results, reminders, and the
 weekly digest. With D1, the provider-specific fourth schedule is a nightly database backup to
-R2. With Supabase, the fourth schedule instead runs the Preview/test-mode Stripe recovery path
-every five minutes.
+R2. With Supabase, the fourth schedule instead runs the Stripe recovery path and delivers queued giving
+statements every five minutes.
 
 Every send request passes through one place in the code. That single door records each send
 attempt consistently and prevents a provider error from crashing a separate database write.
@@ -70,12 +70,13 @@ row is evidence of a send attempt, not proof that the message reached an inbox.
 (`0 13 * * *`), the weekly **digest** (`0 14 * * 4`), and an hourly **attendance-email** pass
 (`0 * * * *`) that attempts to send eligible group admins a tracker link after a meeting. The
 fourth trigger is provider-specific: D1 runs a nightly database **backup** (`0 9 * * *`) to R2,
-while Supabase runs the Preview/test-mode Stripe recovery path every five minutes
-(`*/5 * * * *`).
+while Supabase runs the Stripe recovery path every five minutes
+(`*/5 * * * *`), followed by a bounded batch of queued annual giving-statement emails.
 
-Neither provider-specific trigger sends email. The D1 backup skips itself quietly if backup
-credentials are not configured. The Supabase recovery trigger belongs only to the repository's
-Stripe Preview/test path; it does not make live payments production-ready.
+The D1 backup trigger sends no email and skips itself quietly if backup credentials are not
+configured. The Supabase trigger sends only the queued annual giving statements (about ten per
+run, with retries and backoff, from the `giving_statement_outbox`); Stripe sends donor
+receipts and failed-payment notices itself.
 
 **Development mode.** When the site is running locally with `EMAIL_DEV_LOG=1`, messages are
 printed to the `npm run dev` terminal (magic link included) and marked as `devlog` in the log,
@@ -113,7 +114,7 @@ dev-log and remote-send branches on the right, and each provider's distinct four
   (`15,45 * * * *`) that retries one durable Canvas disconnect before Google Classroom renewal. D1's
   fifth trigger is backup (`0 9 * * *`) via `src/lib/backup.ts`
   (`runBackup`, D1 → R2, skips gracefully without `D1_EXPORT_TOKEN`). Supabase's fifth trigger
-  is the Preview/test-mode Stripe recovery path (`*/5 * * * *`).
+  is the Stripe recovery path plus the giving-statement outbox drain (`*/5 * * * *`).
 - **Rules, templates, log:** `src/lib/emailSettingsDb.ts` (`listRules`, `setRule`, templates,
   `listEmailLog`, `fillTemplate`) behind `src/components/admin/EmailTab.astro`.
 - **Tests:** `test/email.test.ts`, `test/notify.test.ts`, `test/digest.test.ts`,

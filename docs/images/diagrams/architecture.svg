@@ -80,8 +80,8 @@
 
   <text x="460" y="458" font-size="12" font-weight="700" fill="#31487A">Provider-specific fourth schedule</text>
   <text x="460" y="480" font-size="11.5" fill="#565B6B">D1: nightly backup · 0 9 * * * → R2</text>
-  <text x="460" y="500" font-size="11.5" fill="#565B6B">Supabase: Preview/test Stripe recovery · */5 * * * *</text>
-  <text x="460" y="518" font-size="10.8" fill="#8A5A2B">Recovery is test-only; it does not enable live payments.</text>
+  <text x="460" y="500" font-size="11.5" fill="#565B6B">Supabase: Stripe recovery + statement emails · */5 * * * *</text>
+  <text x="460" y="518" font-size="10.8" fill="#8A5A2B">Live payments need the explicit go-live opt-in.</text>
 
   <line x1="355" y1="410" x2="355" y2="386" stroke="#565B6B" stroke-width="2" marker-end="url(#arrow)"/>
   <polyline points="808,480 864,480 864,288 854,288" fill="none" stroke="#2F7A4D" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowG)"/>

@@ -1,11 +1,11 @@
-# Supabase setup — Giving and Registration (Stripe Preview/test only)
+# Supabase setup — Giving and Registration (Stripe test and live)
 
 Setup is capability-driven: selections among the 19 D1-compatible modules (including
 **Member Portal**) choose D1 unless you explicitly override the backend. **Giving** and
 **Registration** require Postgres, so setup selects **Supabase** when either is enabled.
-Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
-the runtime rejects live-mode events. It is not a production payment path. Production
-email remains on the Cloudflare Email binding. Before remote sending, the sender domain
+Stripe runs in **test mode by default**: the installer accepts test keys, and live mode is a
+separate, explicit opt-in described in [section 7](#7-stripe-setup-and-go-live-giving-and-registration).
+Production email remains on the Cloudflare Email binding. Before remote sending, the sender domain
 must use Cloudflare DNS and be
 [onboarded for Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/);
 arbitrary recipients then require the current Workers Paid plan.
@@ -53,9 +53,9 @@ Registration-dependent parts of Member Portal); the other 19 modules work on eit
 | **Extra accounts to create** | None — just Cloudflare | A Supabase account |
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
 | **Giving — offline/manual ledger** | Not available | **Implemented** |
-| **Giving — Stripe online/recurring** | Not available | **Preview/test-only**; live payments unavailable |
+| **Giving — Stripe online/recurring** | Not available | **Implemented** — test mode by default; live mode after the go-live checklist |
 | **Registration — free events** | Not available | **Implemented** |
-| **Registration — paid via Stripe** | Not available | **Preview/test-only**; live payments unavailable |
+| **Registration — paid via Stripe** | Not available | **Implemented** — shares the same Stripe mode; verify with the checklist before live use |
 | **Member Portal** (household, groups, calendar, prayer) | **Available** (without event prayers, event admins, or My registrations) | **Available** (complete) |
 | **Other 19 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
@@ -155,7 +155,7 @@ Now open `wrangler.jsonc` and make four changes:
    ```
 
    This preserves daily serving reminders, the weekly serving digest, and hourly group
-   attendance, then adds the Supabase Preview/test-only Stripe recovery pass. Remove the
+   attendance, then adds the Supabase Stripe recovery pass (which also sends queued giving statements). Remove the
    D1-only nightly backup cron `0 9 * * *`; do not keep it alongside the five-minute
    recovery cron.
 
@@ -244,42 +244,22 @@ trusted with both kinds of payment operation.
 
 ---
 
-## 7. Stripe Preview setup (test-only, for Giving and Registration)
+## 7. Stripe setup and go-live (Giving and Registration)
 
-This integration is for previewing and testing the payment flows only. It accepts Stripe
-test-mode credentials and does not support live production payments. In test mode, card
-details are handled by **Stripe**, not by this application.
+Stripe owns the payment page, card and bank details, receipts, the Billing Portal,
+refunds, and disputes. This application stores only amounts, funds, dates, status, and
+Stripe ids. Both Giving and Registration use the same Stripe mode (`STRIPE_MODE`).
+
+### 7a. Start in test mode
 
 1. **Create a Stripe account** at [stripe.com](https://stripe.com/) and stay in **test
-   mode** (the toggle in the dashboard) while you try things out — test-mode keys and
-   webhooks are completely separate from live ones, so you can experiment safely.
-
-2. **Get your test secret key.** In the Stripe dashboard → **Developers → API keys**, copy
-   the test **Secret key** beginning `sk_test_…`. Church4Christ intentionally rejects every
-   other prefix.
-
-3. **Add the webhook endpoint.** In **Developers → Webhooks → Add endpoint**, set the
-   endpoint URL to:
-
-   ```
-   https://<your-site>/api/stripe/webhook
-   ```
-
-   Subscribe it to exactly these eight events (this one endpoint serves both Giving and
-   Registration — each event tells the app what happened):
-
-   - `checkout.session.completed` — a card gift or a paid registration succeeded
-   - `checkout.session.expired` — someone abandoned a registration checkout; frees the seat
-   - `checkout.session.async_payment_succeeded` — delayed payment succeeded; fulfills the gift or registration
-   - `checkout.session.async_payment_failed` — delayed registration payment failed; frees the seat
-   - `invoice.paid` — a recurring gift renewed
-   - `charge.refunded` — a gift was refunded
-   - `customer.subscription.updated` — a recurring gift's status changed
-   - `customer.subscription.deleted` — a recurring gift was canceled
-
-   After creating the test endpoint, Stripe shows a **Signing secret** (`whsec_…`).
-
-4. **Import both values in one setup run.** Use the dedicated one-shot environment names:
+   mode** (the dashboard toggle). Test and live keys, webhooks, and customers are
+   completely separate.
+2. **Copy the test secret key** (`sk_test_…`) from **Developers → API keys**.
+3. **Add a test webhook endpoint** (**Developers → Webhooks → Add endpoint**) at
+   `https://<your-site>/api/stripe/webhook`, with **API version `2025-03-31.basil`**, and the
+   events listed in [7c](#7c-the-webhook-endpoint). Copy its signing secret (`whsec_…`).
+4. **Import both values in one setup run:**
 
    ```bash
    CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
@@ -287,29 +267,115 @@ details are handled by **Stripe**, not by this application.
    npm run setup
    ```
 
-   Setup validates the pair before making changes, registers both values for redaction,
-   and stores them under the runtime secret names automatically. Do not expose them as
-   ambient `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` inputs to setup. A partial pair
-   or a live key is rejected before local or deployed configuration is changed.
+   Setup validates the pair, registers both values for redaction, stores them under the
+   runtime secret names, and writes `STRIPE_MODE=test` into the generated configuration.
+   A partial pair or a live key is rejected by this setup input.
+5. **Choose your currency (optional).** Gifts default to US dollars; set the
+   `giving.currency` site setting to a three-letter code (for example `cad`).
 
-5. **Turn on the Customer Portal.** In **Settings → Billing → Customer portal**, activate
-   it and save. This is what powers the **Manage** button on a member's *My giving* page,
-   where they can update their card or cancel a recurring gift themselves.
+### 7b. Go-live checklist
 
-6. **Choose your currency (optional).** Gifts default to US dollars. To use another
-   currency, sign in as an admin and set the `giving.currency` site setting to its
-   three-letter code (for example `cad` or `eur`).
+Do these in order. Nothing here is proven by the repository's tests; confirm each in Stripe.
 
-7. **Keep test mode visible.** The operations page at `/admin/stripe-events` labels every
-   screen and action **Stripe test mode** and provides no live-mode switch. Even when a
-   live event is separately signed with the configured webhook secret, the endpoint returns
-   exactly `400 live_mode_disabled` before durable storage.
+1. **Finish a test-mode rehearsal:** a card gift, an ACH gift, a recurring gift, a portal
+   change, a refund, and a statement preview.
+2. **Drain Registration checkout requests.** Open `/admin/stripe-events` in test mode and
+   resolve every request still in **creating** (or **attached**) — reconcile it, or cancel the
+   pending registration. A request created with a test key cannot complete under a live key.
+3. **Activate your Stripe account** for live payments (business details, bank account).
+4. **Create the live webhook endpoint** in Stripe's live mode at
+   `https://<your-site>/api/stripe/webhook`, **API version `2025-03-31.basil`** (the version
+   this release pins), subscribed to the exact events in 7c. Copy its live `whsec_…`.
+   The doctor warns when stored events were delivered at a different version.
+5. **Create a live key:** a standard secret key (`sk_live_…`) or, preferably, a
+   **restricted key** (`rk_live_…`); see the permission list in 7d.
+6. **Enable Stripe customer receipt emails** (**Settings → Customer emails**): "Successful
+   payments", plus invoice/receipt emails for subscriptions, and "Refunds". The app sends
+   no per-payment receipt; one-time gifts also pass the donor's email as the receipt
+   address.
+7. **Configure the Billing Portal** (**Settings → Billing → Customer portal**). Allow donors to
+   **update the amount** (quantity/price change **only within the giving product**), **update
+   the payment method**, and **cancel the subscription**; do not allow other products,
+   plan switches to other intervals, or promotion codes. Turn on dunning emails for failed
+   recurring payments (**Settings → Billing → Subscriptions and emails**), since the app sends
+   none.
+8. **Enable the payment methods** you want in **Settings → Payment methods** (cards,
+   wallets, and ACH Direct Debit `us_bank_account`). Checkout offers whatever is enabled.
+9. **Store the live secrets and opt in.** Store the live key and live webhook secret as the
+   Worker secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (for example
+   `npx wrangler secret put STRIPE_SECRET_KEY`), then set both variables in the generated
+   `wrangler.jsonc` `vars`:
+
+   ```jsonc
+   "STRIPE_MODE": "live",
+   "STRIPE_LIVE_CONFIRMED": "1"
+   ```
+
+   `STRIPE_LIVE_CONFIRMED=1` is the explicit opt-in: live mode without it never uses a live
+   key and the webhook rejects events. Rerunning setup preserves this opt-in; it will not
+   revert you to test mode. Deploy.
+10. **Verify with a small live gift.** Give a small real amount, confirm it appears as a live
+    ledger row, that Stripe's receipt arrives, then refund it in Stripe and confirm the ledger
+    shows the refund. Run `npm run doctor` and confirm there are no Stripe warnings.
+
+### 7c. The webhook endpoint
+
+One endpoint serves Giving and Registration. Subscribe it to exactly these twelve events:
+
+| Event | Why |
+| --- | --- |
+| `checkout.session.completed` | A gift or paid registration succeeded (or an ACH gift is pending) |
+| `checkout.session.expired` | An abandoned registration checkout frees its seat |
+| `checkout.session.async_payment_succeeded` | A delayed payment (ACH) settled |
+| `checkout.session.async_payment_failed` | A delayed payment failed |
+| `invoice.paid` | A recurring gift renewed |
+| `invoice.payment_failed` | A recurring payment failed (marks the gift past due; Stripe emails the donor) |
+| `charge.refunded` | A refund, partial or full |
+| `charge.failed` | A bank debit failed or was returned after being recorded |
+| `charge.dispute.created` | A dispute was opened |
+| `charge.dispute.closed` | A dispute was won or lost |
+| `customer.subscription.updated` | A portal change to amount, interval, or status |
+| `customer.subscription.deleted` | A recurring gift was canceled |
+
+An event whose mode (`livemode`) differs from the configured mode is rejected: a test event
+under live mode, or a live event under test mode, returns `400 livemode_mismatch` and is not
+stored. **Replay, reconcile, and attach** on `/admin/stripe-events` work in either configured
+mode and are labeled with it.
+
+### 7d. Restricted key permissions (`rk_live_`)
+
+If you use a restricted key, grant only: **Checkout Sessions: Write**, **Customer portal
+sessions (Billing portal): Write**, **Customers: Read**, **Subscriptions: Read**, **Invoices:
+Read** (includes invoice payments), and **Charges and PaymentIntents: Read**. A missing
+permission appears as a 403 in the Stripe request log; add it and retry.
+
+### 7e. Switching modes, key rotation, and runbooks
+
+- **Switching between test and live.** Set `STRIPE_MODE` (and `STRIPE_LIVE_CONFIRMED=1` for
+  live) together with the matching key and webhook secret. Test and live rows, customers,
+  and totals stay separate: each gift records `livemode`, each person has one Stripe customer
+  **per mode**, and statements count live money only. Switching back to test is safe.
+- **Rotating the secret key.** Create the new key in Stripe, run
+  `npx wrangler secret put STRIPE_SECRET_KEY`, deploy, confirm a small request works, then
+  roll or delete the old key. Webhook secret rotation: Stripe signs with both secrets during
+  the overlap, and the verifier accepts either, so update `STRIPE_WEBHOOK_SECRET` before the
+  old one expires.
+- **Refund runbook.** Refund in the Stripe dashboard. The `charge.refunded` event records the
+  refunded amount; a full refund marks the gift **Refunded**, a partial refund leaves it
+  succeeded with the amount netted out of totals and statements. Nothing is done in the app.
+- **Dispute runbook.** A `charge.dispute.created` event marks the gift **Disputed** (out of
+  totals and statements) and Stripe emails you. Respond in Stripe. A won dispute returns the
+  gift to succeeded; a lost one stays disputed. If a statement for that year was already
+  sent, issue a corrected one by queueing a new batch.
+- **A bank (ACH) gift that never settles.** It stays **Pending**; the failure event flips it
+  to **Failed**. Pending money is never counted.
 
 The generated Supabase Worker runs webhook-inbox and pending-Checkout recovery on
-`*/5 * * * *` (every five minutes). The page above gives admins and finance users bounded,
+`*/5 * * * *` (every five minutes) and, on the same tick, drains queued giving statements
+(about ten emails per run). The operations page gives admins and finance users bounded,
 audited recovery controls without rendering raw webhook payloads, Checkout request JSON,
 customer email, secrets, or Checkout URLs. D1 does not support Giving, Registration, Stripe
-operations, or this recovery schedule.
+operations, or this schedule.
 
 See [`docs/features/giving.md`](./features/giving.md) and
 [`docs/features/registration.md`](./features/registration.md) for how each module works
@@ -322,8 +388,9 @@ day to day.
 Once giving is enabled, you can turn on the **Reconcile** page (`/admin/giving/reconcile`),
 which cross-checks your local ledger against Stripe and flags any drift — a gift Stripe has
 but your ledger is missing, or the reverse. This is an optional audit convenience for the
-Preview/test-mode checkout flow; without it, test checkouts still work but are not
-cross-checked through the Reconcile page. It does not make the payment path live-ready.
+Stripe checkout flow; without it, online gifts still work but are not cross-checked
+through the Reconcile page. Use a restricted, read-only key for the matching mode (test
+data for test mode, live data for live mode).
 
 It uses Supabase's **Stripe Foreign Data Wrapper** to read your Stripe data read-only. The
 project ships the setup SQL as an example file:
@@ -428,7 +495,7 @@ site still runs on Cloudflare, exactly as `deploy.md` describes:
   `EMAIL_DEV_LOG=1` remains a terminal-only local-development aid.
 - **Scheduled jobs (crons)** — daily serving reminders, the weekly serving digest, and
   hourly group-attendance mail use the shared Cloudflare schedules. Generated Supabase
-  configuration also runs the Preview/test-only Stripe inbox and Checkout recovery every
+  configuration also runs the Stripe inbox, Checkout recovery, and giving-statement delivery every
   five minutes; payment processing honors the enabled Giving and Registration modules.
 - **Hyperdrive** — lives in your Cloudflare account and is what connects the Worker to
   Supabase.
