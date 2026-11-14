@@ -5,11 +5,12 @@
 // Drives system Chrome in headless mode over the Chrome DevTools Protocol (CDP)
 // via Node's built-in global WebSocket + fetch — no third-party dependency. It
 // contains the CAPTURE_ROWS manifest below and captures rows selected with `--only` at
-// a fixed 1280x800 viewport. The manifest intentionally mixes D1/Supabase and
+// a 1280x800 desktop viewport, or at a 375x812 phone viewport (2x, mobile emulation) for rows
+// that carry MOBILE_VIEWPORT (see MOBILE_CAPTURE_ROWS). The manifest intentionally mixes D1/Supabase and
 // several signed-in identities, so an unfiltered run is rejected before Chrome
 // starts or any file is written. Regeneration is split into the precise passes
 // documented below. Every capture is written under docs/images/** and asserted
-// to be exactly 1280x800 and larger than 20 KB (guards against blank captures).
+// to be exactly its row's viewport size (1280x800, or 750x1624 for phone rows) and larger than 20 KB (guards against blank captures).
 //
 // PREREQUISITES
 //   1. A migrated and seeded dev server matching the selected rows is running.
@@ -95,6 +96,8 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
+  DESKTOP_VIEWPORT,
+  MOBILE_VIEWPORT,
   assertExpectedScreenshotPage,
   requireLocalScreenshotBase,
   requireScreenshotOnly,
@@ -103,7 +106,29 @@ import {
 import { mintScreenshotSession, requireScreenshotSessionEnvironment } from './lib/screenshot-session.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const VIEWPORT = { width: 1280, height: 800 };
+const VIEWPORT = DESKTOP_VIEWPORT;
+
+/** Per-row viewport: rows are desktop (1280x800) unless they carry MOBILE_VIEWPORT. */
+export function viewportOf(row) {
+  return row.viewport ?? VIEWPORT;
+}
+
+/** Pixel size the PNG/JPEG must have for a row (CSS size times device scale factor). */
+export function expectedImageSize(row) {
+  const viewport = viewportOf(row);
+  const scale = viewport.deviceScaleFactor ?? 1;
+  return { width: viewport.width * scale, height: viewport.height * scale };
+}
+
+/** Throws when the page is wider than the viewport (horizontal page scroll). */
+export function assertNoHorizontalOverflow(row, metrics) {
+  if (!metrics || !Number.isFinite(metrics.scrollWidth) || !Number.isFinite(metrics.innerWidth)) {
+    throw new Error(`${row.out}: could not measure horizontal overflow`);
+  }
+  if (metrics.scrollWidth > metrics.innerWidth) {
+    throw new Error(`${row.out}: horizontal overflow, document scrollWidth ${metrics.scrollWidth} > viewport ${metrics.innerWidth}${metrics.widest ? ` (widest: ${metrics.widest})` : ''}`);
+  }
+}
 const MIN_BYTES = 20 * 1024;
 
 // --- config -----------------------------------------------------------------
@@ -348,9 +373,34 @@ export const README_DIAGRAMS = Object.freeze([
   'docs/images/diagrams/setup-paths-overview.png',
 ]);
 
+// Phone captures (375x812 at 2x, mobile emulation) for the children's check-in and
+// volunteer scheduling work. Each row carries MOBILE_VIEWPORT, which also turns on the
+// horizontal-overflow check in capture(). Output lives in docs/images/mobile/. Two passes:
+//   admin pass  (AUTH_DEV_BYPASS_EMAIL=admin@example.com):
+//     --only mobile/kiosk-search.png,mobile/kiosk-code.png,mobile/children-today.png
+//   sarah pass  (AUTH_DEV_BYPASS_EMAIL=sarah.johnson@example.com):
+//     --only mobile/serve-matrix.png,mobile/my-calendar.png,mobile/my-blockouts.png,mobile/planning-run-sheet.png
+// kiosk-code performs the real check-in that children-today then lists, so keep that order.
+export const MOBILE_CAPTURE_ROWS = Object.freeze([
+  { path: '/kiosk/devkiosk1234567890abcdef12345678/?lang=en&q=Chen', out: 'docs/images/mobile/kiosk-search.png', viewport: MOBILE_VIEWPORT, expectedText: 'Chen' },
+  {
+    path: '/kiosk/devkiosk1234567890abcdef12345678/household/1?lang=en&q=Chen',
+    out: 'docs/images/mobile/kiosk-code.png',
+    viewport: MOBILE_VIEWPORT,
+    postForm: { checkAll: 'input[name="member"]', form: 'form[method="post"]' },
+  },
+  { path: '/admin/children?tab=today', out: 'docs/images/mobile/children-today.png', admin: true, viewport: MOBILE_VIEWPORT, expectedText: 'Child' },
+  { path: '/en/serve/matrix/1', out: 'docs/images/mobile/serve-matrix.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Sunday Worship (English)' },
+  { path: '/en/my/calendar', out: 'docs/images/mobile/my-calendar.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Calendar' },
+  { path: '/en/my/blockouts', out: 'docs/images/mobile/my-blockouts.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Add' },
+  // Seeded Christmas Service run sheet (planning_events id 31000 in seed/dev-seed.sql); Sarah coordinates it.
+  { path: '/en/planning/31000', out: 'docs/images/mobile/planning-run-sheet.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Christmas Service' },
+]);
+
 export const CAPTURE_ROWS = Object.freeze([
   ...LEGACY_CAPTURE_ROWS.map((row) => README_CAPTURE_ROWS.find((readme) => readme.out === row.out) ?? row),
   ...README_CAPTURE_ROWS.filter((row) => !LEGACY_CAPTURE_ROWS.some((legacy) => legacy.out === row.out)),
+  ...MOBILE_CAPTURE_ROWS,
   readmeShot('/admin/onboarding', 'admin/onboarding-readiness.png', 'Launch checklist', { actor: 'admin' }),
   readmeShot('/admin/activity-score', 'admin/activity-score-overview.png', 'Activity score', { actor: 'admin', requiredTexts: ['Member activity', 'Source coverage'], rejectionTexts: ['The activity score report could not be loaded.'] }),
   readmeShot('/admin/activity-score', 'admin/activity-score-calculation.png', 'Activity score', { actor: 'admin', anchor: 'Member activity', openDetails: ['.activity-people-table tbody tr:first-child details'], requiredTexts: ['Show calculation'] }),
@@ -489,7 +539,8 @@ export function screenshotImageDimensions(buf, format) {
 export function screenshotClip(row, anchorY) {
   if (!row.anchor) return undefined;
   if (!Number.isFinite(anchorY) || anchorY < 0) throw new Error(`${row.out}: required anchor ${JSON.stringify(row.anchor)} was not found`);
-  return { x: 0, y: Math.max(0, anchorY - (row.anchorMargin ?? 40)), width: VIEWPORT.width, height: VIEWPORT.height, scale: 1 };
+  const viewport = viewportOf(row);
+  return { x: 0, y: Math.max(0, anchorY - (row.anchorMargin ?? 40)), width: viewport.width, height: viewport.height, scale: 1 };
 }
 
 export async function createScreenshotTarget({ send }) {
@@ -516,8 +567,9 @@ async function capture(cdp, base, row) {
     await send('Page.enable', {}, sessionId);
     await send('Network.enable', {}, sessionId);
     await send('Runtime.enable', {}, sessionId);
+    const viewport = viewportOf(row);
     await send('Emulation.setDeviceMetricsOverride',
-      { width: VIEWPORT.width, height: VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sessionId);
+      { width: viewport.width, height: viewport.height, deviceScaleFactor: viewport.deviceScaleFactor ?? 1, mobile: viewport.mobile === true }, sessionId);
 
     if (row.sessionIdentity) {
       const value = await mintScreenshotSession(process.env, row.sessionIdentity);
@@ -641,10 +693,19 @@ async function capture(cdp, base, row) {
     // below the live viewport in an anchored shot. External video thumbnails
     // may remain pending; the product's packaged poster is already visible.
     const { result: mediaState } = await send('Runtime.evaluate', {
-      expression: `(async()=>{const top=${clip?.y ?? 0};const bottom=top+${VIEWPORT.height};const images=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return r.width>0&&r.height>0&&r.top+scrollY<bottom&&r.bottom+scrollY>top&&new URL(img.currentSrc||img.src,location.href).origin===location.origin;});const ready=Promise.all(images.map(async img=>{img.loading='eager';await img.decode();})).then(()=>true);return Promise.race([ready,new Promise(resolve=>setTimeout(()=>resolve(false),10000))]);})()`,
+      expression: `(async()=>{const top=${clip?.y ?? 0};const bottom=top+${viewportOf(row).height};const images=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return r.width>0&&r.height>0&&r.top+scrollY<bottom&&r.bottom+scrollY>top&&new URL(img.currentSrc||img.src,location.href).origin===location.origin;});const ready=Promise.all(images.map(async img=>{img.loading='eager';await img.decode();})).then(()=>true);return Promise.race([ready,new Promise(resolve=>setTimeout(()=>resolve(false),10000))]);})()`,
       awaitPromise: true, returnByValue: true,
     }, sessionId);
     if (mediaState.value !== true) throw new Error(`${row.out}: local capture media did not decode`);
+
+    // Phone rows must not scroll sideways: fail loudly instead of shipping a clipped shot.
+    if (row.viewport?.mobile === true) {
+      const { result: overflow } = await send('Runtime.evaluate', {
+        expression: `(()=>{const iw=innerWidth;let widest='';let max=0;for(const e of document.querySelectorAll('body *')){const r=e.getBoundingClientRect();if(r.width>0&&r.right>max&&getComputedStyle(e).position!=='fixed'){max=r.right;widest=e.tagName.toLowerCase()+(e.className&&typeof e.className==='string'?'.'+e.className.trim().split(/\\s+/)[0]:'');}}return {scrollWidth:document.documentElement.scrollWidth,innerWidth:iw,widest};})()`,
+        returnByValue: true,
+      }, sessionId);
+      assertNoHorizontalOverflow(row, overflow.value);
+    }
 
     const format = screenshotFormat(row.out);
     const { data } = await send('Page.captureScreenshot',
@@ -652,8 +713,9 @@ async function capture(cdp, base, row) {
     const buf = Buffer.from(data, 'base64');
 
     const { width, height } = screenshotImageDimensions(buf, format);
-    if (width !== VIEWPORT.width || height !== VIEWPORT.height) {
-      throw new Error(`${row.out}: expected ${VIEWPORT.width}x${VIEWPORT.height}, got ${width}x${height}`);
+    const expected = expectedImageSize(row);
+    if (width !== expected.width || height !== expected.height) {
+      throw new Error(`${row.out}: expected ${expected.width}x${expected.height}, got ${width}x${height}`);
     }
     if (buf.length < MIN_BYTES) {
       throw new Error(`${row.out}: ${buf.length} bytes < ${MIN_BYTES} (likely blank)`);
@@ -709,7 +771,7 @@ async function main() {
     await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
   }
   if (failures) { console.error(`\n${failures} capture(s) failed.`); process.exit(1); }
-  console.log(`\nAll ${pages.length} captures passed (1280x800, >20KB).`);
+  console.log(`\nAll ${pages.length} captures passed (1280x800 desktop or 375x812 phone at 2x, >20KB).`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -1,3 +1,16 @@
+// The only two capture viewports: the 1280x800 desktop frame and a 375x812
+// phone frame (2x pixel density, mobile emulation). Anything else is rejected.
+export const DESKTOP_VIEWPORT = Object.freeze({ width: 1280, height: 800 });
+export const MOBILE_VIEWPORT = Object.freeze({ width: 375, height: 812, mobile: true, deviceScaleFactor: 2 });
+
+export function isAllowedViewport(viewport) {
+  if (!viewport || typeof viewport !== 'object') return false;
+  const keys = Object.keys(viewport).sort().join('|');
+  const matches = (allowed) => keys === Object.keys(allowed).sort().join('|')
+    && Object.entries(allowed).every(([key, value]) => viewport[key] === value);
+  return matches(DESKTOP_VIEWPORT) || matches(MOBILE_VIEWPORT);
+}
+
 const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
 export function requireScreenshotOnly(argv) {
@@ -82,7 +95,7 @@ export function validateScreenshotManifest(rows) {
     if (typeof row.path !== 'string' || !row.path.startsWith('/') || typeof row.out !== 'string' || !row.out.startsWith('docs/images/') || outputs.has(row.out)) throw new TypeError('screenshot path/output is invalid or duplicated');
     outputs.add(row.out);
     if (!['en', 'zh'].includes(row.locale) || !['d1', 'supabase', 'either'].includes(row.backend) || !['public', 'admin', 'member'].includes(row.identity)) throw new TypeError(`screenshot locale/backend/identity is invalid: ${row.out}`);
-    if (row.viewport?.width !== 1280 || row.viewport?.height !== 800) throw new TypeError(`screenshot viewport is invalid: ${row.out}`);
+    if (!isAllowedViewport(row.viewport)) throw new TypeError(`screenshot viewport is invalid: ${row.out}`);
     if (typeof row.expectedText !== 'string' || !row.expectedText || !Array.isArray(row.rejectionTexts) || row.rejectionTexts.length === 0 || row.rejectionTexts.some((x) => typeof x !== 'string' || !x)) throw new TypeError(`screenshot markers are invalid: ${row.out}`);
   }
   return rows;
