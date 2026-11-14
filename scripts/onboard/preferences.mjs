@@ -35,13 +35,14 @@ function logoReference(value) {
   return { path: logo.path, mimeType: logo.mimeType };
 }
 
-export function defaultPreferences(catalog) {
+export function defaultPreferences(catalog, preset = 'website-community') {
+  if (!Object.hasOwn(catalog.presets ?? {}, preset)) throw new Error(`Unknown preset: ${preset}`);
   return {
     schemaVersion: 1,
     organization: { type: 'church', name: '', tagline: '', address: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
     branding: { primaryColor: '#183D35', secondaryColor: '#C29A5B', logo: null },
     setup: { siteSlug: '', locale: 'en', adminName: '', adminEmail: '', demoData: true,
-      modules: [...catalog.presets['website-community'].modules] },
+      modules: [...catalog.presets[preset].modules] },
   };
 }
 

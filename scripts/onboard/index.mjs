@@ -12,6 +12,7 @@ Use the existing setup installer to review and apply those preferences afterward
 
   --no-open       Print the URL without opening a browser (headless/remote sessions)
   --port NUMBER   Choose a loopback port; default 0 finds an available port
+  --preset KEY    Pre-check a setup preset's features (default website-community)
   --help         Show this help
 
 The server binds to 127.0.0.1 only. Press Ctrl+C when finished.
@@ -19,13 +20,13 @@ The server binds to 127.0.0.1 only. Press Ctrl+C when finished.
 
 export function parseOnboardArgs(argv) {
   const { values } = parseArgs({ args: argv, strict: true, allowPositionals: false, options: {
-    help: { type: 'boolean' }, 'no-open': { type: 'boolean' }, port: { type: 'string' },
+    help: { type: 'boolean' }, 'no-open': { type: 'boolean' }, port: { type: 'string' }, preset: { type: 'string' },
   } });
   if (values.help) return { help: true };
   if (values.port !== undefined && !/^\d{1,5}$/.test(values.port)) throw new Error('--port must be an integer from 0 to 65535');
   const port = Number(values.port ?? 0);
   if (port > 65535) throw new Error('--port must be an integer from 0 to 65535');
-  return { help: false, open: !values['no-open'], port };
+  return { help: false, open: !values['no-open'], port, ...(values.preset !== undefined ? { preset: values.preset } : {}) };
 }
 
 export function openBrowser(url) {
@@ -43,7 +44,7 @@ async function main() {
   const args = parseOnboardArgs(process.argv.slice(2));
   if (args.help) { console.log(ONBOARD_HELP); return; }
   const root = fileURLToPath(new URL('../../', import.meta.url));
-  const session = await startOnboardingServer({ root, port: args.port });
+  const session = await startOnboardingServer({ root, port: args.port, preset: args.preset });
   console.log(`\nChurch4Christ — let's make it yours\n\n${session.url}\n\nPreferences stay in this checkout's .church/ directory.\nKeep this terminal open; press Ctrl+C after saving.\n`);
   let stopping = false;
   const stop = async () => { if (stopping) return; stopping = true; await session.close(); };

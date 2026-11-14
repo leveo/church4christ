@@ -83,4 +83,16 @@ describe('onboard CLI', () => {
     for (const port of ['-1', '65536', '3.2', 'NaN']) expect(() => parseOnboardArgs(['--port', port])).toThrow();
     expect(() => parseOnboardArgs(['--host', '0.0.0.0'])).toThrow();
   });
+
+  it('accepts a setup preset that pre-checks the form features', async () => {
+    expect(parseOnboardArgs(['--preset', 'checkin'])).toEqual({ help: false, open: true, port: 0, preset: 'checkin' });
+    const root = await mkdtemp(join(tmpdir(), 'c4c-onboard-preset-'));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const server = await startOnboardingServer({ root, catalog, preset: 'checkin' });
+    cleanup.push(() => server.close());
+    const headers = { Authorization: `Bearer ${server.token}`, Origin: server.origin };
+    const state = await (await fetch(`${server.origin}/api/state`, { headers })).json() as { defaults: { setup: { modules: string[] } } };
+    expect(state.defaults.setup.modules).toEqual(['people', 'children']);
+    await expect(startOnboardingServer({ root, catalog, preset: 'missing' })).rejects.toThrow(/Unknown preset/);
+  });
 });

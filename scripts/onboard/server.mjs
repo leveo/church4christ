@@ -47,12 +47,12 @@ export async function hasExistingInstallation(root) {
   return false;
 }
 
-export async function startOnboardingServer({ root, catalog, port = 0 }) {
+export async function startOnboardingServer({ root, catalog, port = 0, preset = 'website-community' }) {
   catalog ??= JSON.parse(await readFile(new URL('../../config/capabilities.json', import.meta.url), 'utf8'));
   const foundation = JSON.parse(await readFile(new URL('../../design/foundation.json', import.meta.url), 'utf8'));
   const theme = JSON.parse(await readFile(new URL('../../design/themes/sanctuary.json', import.meta.url), 'utf8'));
   const tokenCss = generateCss(foundation, [theme]);
-  const defaults = defaultPreferences(catalog);
+  const defaults = defaultPreferences(catalog, preset);
   defaults.branding.primaryColor = theme.modes.light.primary;
   defaults.branding.secondaryColor = theme.modes.light.accent;
   // Fail visibly on corrupt local preferences rather than silently replacing them.
