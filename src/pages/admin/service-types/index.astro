@@ -7,7 +7,7 @@ import { ministryCopy } from '../../../i18n/designMinistry';
 // they are created and retired (soft delete). Ported from the reference stack.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import { pickLocalizedText, type Locale } from '../../../lib/locales';
+import { pickPair, type Locale } from '../../../lib/locales';
 import { listServiceTypesAdmin, saveServiceType, softDeleteServiceType } from '../../../lib/teamDb';
 import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
 
@@ -57,7 +57,7 @@ const copy = ministryCopy(lang);
     {types.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.serviceTypes.none')}</p>}
     {types.map((st) => (
       <details class="mw-disclosure" open={errKey !== null}>
-      <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickLocalizedText({ en: st.name_en, zh: st.name_zh }, lang) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
+      <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickPair(lang, st.name_en, st.name_zh) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
       <form method="post" class="mw-disclosure-content flex flex-wrap items-end gap-3">
         <input type="hidden" name="id" value={st.id} />
         <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required value={st.name_en ?? ''} class={tin} /></label>

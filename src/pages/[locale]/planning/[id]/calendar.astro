@@ -6,7 +6,7 @@
 // coordinators; others get 404.
 import Member from '../../../../layouts/Member.astro';
 import PlanningHeader from '../../../../components/planning/PlanningHeader.astro';
-import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { localePath, parseLocale, pickPair } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { addDays, formatDate, isValidDateStr, todayInTz } from '../../../../lib/dates';
 import { btnSecondary, lab, tin } from '../../../../lib/adminUi';
@@ -62,7 +62,7 @@ const fmtRange = (a: { start: string; end: string }) => `${a.start}–${a.end}`;
 ---
 <Member active="planning" title={t(locale, 'planning.tab.calendar')} locale={locale} noindex>
   <div class="member-content planning-page">
-    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
+    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {pickPair(locale, event.title_en, event.title_zh)}</a>
     <PlanningHeader locale={locale} event={event} current="calendar" manager={true} />
     <p class="mt-4 text-sm text-ink-muted">{t(locale, 'planning.cal.intro')}</p>
 
@@ -92,7 +92,7 @@ const fmtRange = (a: { start: string; end: string }) => `${a.start}–${a.end}`;
         return (
           <section class:list={['cal-day', day.date === today && 'cal-today']}>
             <h3><time datetime={day.date}>{formatDate(day.date, locale)}</time></h3>
-            {here.map((s) => <p class="cal-session">{s.start_time} {pickLocalizedText({ en: s.title_en, zh: s.title_zh }, locale)}</p>)}
+            {here.map((s) => <p class="cal-session">{s.start_time} {pickPair(locale, s.title_en, s.title_zh)}</p>)}
             {!detailed && day.people.length > 0 && (
               <p class="text-sm text-ink-muted">{t(locale, 'planning.cal.counts', { blocked, available })}</p>
             )}

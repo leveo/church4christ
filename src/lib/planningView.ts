@@ -3,7 +3,7 @@
 // belongs to the viewing person.
 import type { AppDb } from './appDb';
 import type { Locale } from './db';
-import { pickLocalizedText } from './locales';
+import { pickPair } from './locales';
 import {
   getEvent,
   listItems,
@@ -47,8 +47,8 @@ export async function loadRunSheetView(
   const rows = items.map((item, index) => ({
     item,
     timing: timings[index],
-    title: pickLocalizedText({ en: item.title_en, zh: item.title_zh }, locale),
-    details: pickLocalizedText({ en: item.details_en, zh: item.details_zh }, locale),
+    title: pickPair(locale, item.title_en, item.title_zh),
+    details: pickPair(locale, item.details_en, item.details_zh),
     owner: [
       item.owner_team_id !== null ? teamName.get(item.owner_team_id) : null,
       item.owner_person_id !== null ? personName.get(item.owner_person_id) : null,

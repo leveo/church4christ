@@ -7,7 +7,7 @@
 import { env } from 'cloudflare:workers';
 import Member from '../../../../layouts/Member.astro';
 import PlanningHeader from '../../../../components/planning/PlanningHeader.astro';
-import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { localePath, parseLocale, pickPair } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { btn, btnDanger, btnSecondary, lab, noticeErr, noticeOk, rowBtn, tin } from '../../../../lib/adminUi';
 import {
@@ -147,7 +147,7 @@ const kindLabel = (k: string) => t(locale, `planning.kind.${k}`);
 const rev = event.revision;
 const confirmAttr = (key: string) => `return confirm(${JSON.stringify(t(locale, key))})`;
 ---
-<Member active="planning" title={pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)} locale={locale} noindex>
+<Member active="planning" title={pickPair(locale, event.title_en, event.title_zh)} locale={locale} noindex>
   <div class="member-content planning-page">
     <a href={localePath(locale, role === 'admin' ? '/admin/planning' : '/my')} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {t(locale, 'planning.title')}</a>
     <PlanningHeader locale={locale} event={event} current="manage" manager={true} />
@@ -274,7 +274,7 @@ const confirmAttr = (key: string) => `return confirm(${JSON.stringify(t(locale, 
       <form method="post" class="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-raised p-4">
         <input type="hidden" name="_action" value="copy" /><input type="hidden" name="rev" value={rev} />
         <label class="block min-w-48 flex-1"><span class={lab}>{t(locale, 'planning.rs.copyFrom')}</span>
-          <select name="source_id" class={tin}>{otherEvents.filter((e) => e.id !== eventId).map((e) => <option value={e.id}>{e.event_date} · {pickLocalizedText({ en: e.title_en, zh: e.title_zh }, locale)}</option>)}</select>
+          <select name="source_id" class={tin}>{otherEvents.filter((e) => e.id !== eventId).map((e) => <option value={e.id}>{e.event_date} · {pickPair(locale, e.title_en, e.title_zh)}</option>)}</select>
         </label>
         <button class={btnSecondary} disabled={otherEvents.filter((e) => e.id !== eventId).length === 0}>{t(locale, 'planning.rs.copy')}</button>
       </form>

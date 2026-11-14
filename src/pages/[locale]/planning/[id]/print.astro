@@ -4,7 +4,7 @@
 // notes; everyone who can see the event may print the plain version. The
 // browser's print dialog does the rest: @media print hides the site chrome.
 import Base from '../../../../layouts/Base.astro';
-import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { localePath, parseLocale, pickPair } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { formatDate } from '../../../../lib/dates';
 import { btn, btnSecondary } from '../../../../lib/adminUi';
@@ -29,8 +29,8 @@ if (!event || !role) {
 const leader = Astro.url.searchParams.get('leader') === '1' && canManage(role);
 const view = await loadRunSheetView(db, event.id, locale, { personId: user.id, teamIds: user.memberTeamIds });
 const rows = view?.rows ?? [];
-const title = pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale);
-const location = pickLocalizedText({ en: event.location_en, zh: event.location_zh }, locale);
+const title = pickPair(locale, event.title_en, event.title_zh);
+const location = pickPair(locale, event.location_en, event.location_zh);
 const back = localePath(locale, canManage(role) ? `/planning/${event.id}/manage` : `/planning/${event.id}`);
 const sheetLink = (l: boolean) => localePath(locale, `/planning/${event.id}/print${l ? '?leader=1' : ''}`);
 ---
