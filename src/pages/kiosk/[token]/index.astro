@@ -50,7 +50,7 @@ const copy = gatheringsCopy(lang);
   <GatheringSurface mode="kiosk">
   <div class="flex w-full items-center justify-between">
     <p class="text-base font-semibold text-primary">{t(lang, 'kiosk.title')}</p>
-    <a href={toggleHref} class="rounded-2xl px-4 py-2 text-lg font-semibold text-primary hover:underline">
+    <a href={toggleHref} class="inline-flex min-h-11 items-center rounded-2xl px-4 py-2 text-lg font-semibold text-primary hover:underline active:bg-primary-soft">
       {t(lang, 'kiosk.langToggle')}
     </a>
   </div>
@@ -68,9 +68,14 @@ const copy = gatheringsCopy(lang);
           <label for="kiosk-household-search">{copy.findHousehold}</label>
           <input
             id="kiosk-household-search"
-            type="text"
+            type="search"
             name="q"
             value={q}
+            enterkeyhint="search"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             placeholder={t(lang, 'kiosk.searchPlaceholder')}
             class="w-full rounded-2xl border border-border bg-surface px-6 py-4 text-2xl focus:border-primary focus:outline-none"
             autofocus

@@ -27,6 +27,7 @@ import {
   type RosterRow,
   type WeeklyStats,
 } from '../../../lib/checkinDb';
+import { qrSvg } from '../../../lib/qr';
 import { ensureKioskToken, regenerateKioskToken } from '../../../lib/kioskToken';
 import { card, th, td, tin, lab, btn, btnSecondary, btnDanger, badge, badgeActive, badgeInactive } from '../../../lib/adminUi';
 
@@ -109,6 +110,7 @@ else if (tab === 'events') events = await listEventsAdmin(db);
 else if (tab === 'kiosk') kioskToken = await ensureKioskToken(db);
 
 const kioskUrl = kioskToken ? `${Astro.url.origin}/kiosk/${kioskToken}` : '';
+const kioskQr = kioskUrl ? qrSvg(kioskUrl, t(lang, 'admin.children.kiosk.qrLabel')) : '';
 const last4Weeks = stats ? stats.weeks.slice(-4) : [];
 
 /** 'YYYY-MM-DD' -> 'M/D', for the compact per-event week columns. */
@@ -195,7 +197,34 @@ const copy = gatheringsCopy(lang);
 
     {
       tab === 'today' && (
-        <section aria-labelledby="children-today-heading"><div class="gathering-section-heading"><h2 id="children-today-heading">{copy.todayRoster}</h2><p class="text-xs text-ink-muted">{formatDate(today, lang)}</p></div><div class="gathering-table-wrap">
+        <section aria-labelledby="children-today-heading"><div class="gathering-section-heading"><h2 id="children-today-heading">{copy.todayRoster}</h2><p class="text-xs text-ink-muted">{formatDate(today, lang)}</p></div>
+        <ul class="grid gap-3 sm:hidden" data-roster-cards>
+          {roster.length === 0 ? (
+            <li class={`${card} text-sm text-ink-muted`}>{t(lang, 'admin.children.today.empty')}</li>
+          ) : (
+            roster.map((row) => (
+              <li class="rounded-lg border border-border bg-surface-raised p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="gathering-identity min-w-0 font-semibold"><AvatarInitials name={row.childName} sizeClass="h-10 w-10 text-sm" /><span class="break-words">{row.childName}</span></div>
+                  <p class="shrink-0 rounded-md bg-primary-soft px-3 py-1 font-mono text-2xl font-bold tabular-nums text-on-primary-soft" aria-label={t(lang, 'admin.children.today.code')}>{row.securityCode}</p>
+                </div>
+                <p class="mt-2 text-sm text-ink-muted">{row.householdName} · {row.eventName}</p>
+                <dl class="mt-3 flex gap-6 text-sm">
+                  <div><dt class="text-xs text-ink-muted">{t(lang, 'admin.children.today.in')}</dt><dd class="tabular-nums">{timeOf(row.checkedInAt)}</dd></div>
+                  <div><dt class="text-xs text-ink-muted">{t(lang, 'admin.children.today.out')}</dt><dd class="tabular-nums">{timeOf(row.checkedOutAt)}</dd></div>
+                </dl>
+                {row.checkedOutAt === null && (
+                  <form method="post" class="mt-3">
+                    <input type="hidden" name="action" value="checkout" />
+                    <input type="hidden" name="checkinId" value={row.checkinId} />
+                    <button type="submit" class={`${btnSecondary} w-full`}>{t(lang, 'admin.children.today.checkout')}</button>
+                  </form>
+                )}
+              </li>
+            ))
+          )}
+        </ul>
+        <div class="gathering-table-wrap hidden sm:block">
           <table class="gathering-table">
             <thead class="bg-surface-sunken">
               <tr>
@@ -348,6 +377,13 @@ const copy = gatheringsCopy(lang);
               <button type="button" data-copy-target="kiosk-url" class={btnSecondary}>{t(lang, 'admin.children.kiosk.copy')}</button>
             </div>
           </label>
+
+          {kioskQr && (
+            <figure class="mt-5 flex items-center gap-4">
+              <div class="h-36 w-36 shrink-0 rounded-md border border-border bg-white p-2 text-black" set:html={kioskQr} />
+              <figcaption class="text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.qrHint')}</figcaption>
+            </figure>
+          )}
 
           <details class="mt-6">
             <summary class="cursor-pointer text-sm font-semibold text-danger">{t(lang, 'admin.children.kiosk.regenerate')}</summary>
