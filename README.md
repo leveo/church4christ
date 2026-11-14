@@ -149,6 +149,24 @@ owners. Church4Christ is an independent project and is not affiliated with them.
 
 ---
 
+## Just need one part?
+
+Start small and grow later. Each single-feature edition installs this repository with only
+one area turned on, using the default Cloudflare D1 database:
+
+| If you need | Start with | Preset |
+|---|---|---|
+| A kids check-in kiosk | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
+| Volunteer scheduling | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
+| Small group management | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| A church website and CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
+
+The editions contain no separate code, so there is nothing extra to maintain. You can also
+skip them and run `npm run onboard -- --preset checkin` here. Turn on more features any time
+in **Settings → Modules**. See [single-feature editions](docs/editions.md).
+
+---
+
 ## Build it with an AI assistant
 
 People and agents share the same browser onboarding, installer, feature catalog, and
