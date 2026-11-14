@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Try the live demo
+    url: https://church4christ.yunfei-song.com
+    about: Explore the public sandbox with fictional data before opening an issue.
+  - name: Setup guide for people and AI agents
+    url: https://github.com/leveo/church4christ/blob/main/docs/setup.md
+    about: Installation and configuration questions are often answered here.
+  - name: Report a security vulnerability
+    url: https://github.com/leveo/church4christ/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.

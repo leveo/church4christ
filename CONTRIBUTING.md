@@ -168,7 +168,8 @@ Before you open a PR, confirm:
 
 Be kind, be respectful, assume good faith. Harassment or discrimination of any kind is not
 tolerated. We are building tools to serve churches and nonprofits; treat contributors the
-way you would treat a fellow volunteer.
+way you would treat a fellow volunteer. The full text and reporting steps are in
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 ## Licensing of contributions
 
