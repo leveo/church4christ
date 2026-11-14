@@ -1,3 +1,4 @@
+import { normalizeLocaleAnswers } from './locales.mjs';
 const EMAIL_LOCAL = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/;
 const EMAIL_DOMAIN_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 
@@ -69,15 +70,21 @@ export function normalizeSetupAnswers(input, catalog) {
 
   const mode = optionalIdentifier(input.mode, '--mode');
   const preset = optionalIdentifier(input.preset, '--preset');
-  const locale = optionalIdentifier(input.locale, '--locale');
+  const localeInput = optionalIdentifier(input.locale, '--locale');
+  const { locales: resolvedLocales, defaultLocale, alias } = normalizeLocaleAnswers({
+    locale: localeInput,
+    locales: input.locales,
+    defaultLocale: optionalIdentifier(input.defaultLocale, '--default-locale'),
+  });
+  // `locale` stays the installation default language for every existing consumer.
+  const locale = defaultLocale;
+  // The single-language alias carries no separate set: plan code derives [locale].
+  const locales = alias ? undefined : resolvedLocales;
   const backendOverride = optionalIdentifier(input.backendOverride, '--backend');
   const siteSlug = optionalIdentifier(input.siteSlug, '--site-slug');
 
   if (mode && mode !== 'local' && mode !== 'deploy') {
     throw new Error('--mode must be local or deploy');
-  }
-  if (locale && locale !== 'en' && locale !== 'zh') {
-    throw new Error('--locale must be en or zh');
   }
   if (backendOverride && backendOverride !== 'd1' && backendOverride !== 'supabase') {
     throw new Error('--backend must be d1 or supabase');
@@ -111,6 +118,7 @@ export function normalizeSetupAnswers(input, catalog) {
     siteSlug,
     churchName: optionalString(input.churchName, '--church-name'),
     locale,
+    ...(locales ? { locales } : {}),
     adminEmail: normalizeEmail(input.adminEmail, '--admin-email'),
     adminName: optionalString(input.adminName, '--admin-name'),
     appOrigin: normalizeOrigin(input.appOrigin, mode),

@@ -6,6 +6,7 @@ import raw from '../../../config/capabilities.json';
 import {
   manifestFromPlan,
   renderManifest,
+  manifestLocales,
   validateManifest,
 } from '../../../scripts/setup/manifest.mjs';
 import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
@@ -61,6 +62,25 @@ const plan = {
 
 const manifest = () => manifestFromPlan(plan, raw);
 
+describe('installation manifest schema versions', () => {
+  const v1 = () => {
+    const { locales: _ignored, ...site } = manifest().site as Record<string, unknown>;
+    return { ...manifest(), schemaVersion: 1, site };
+  };
+
+  it('writes schemaVersion 2 with the enabled languages (single-language alias by default)', () => {
+    expect(manifest()).toMatchObject({ schemaVersion: 2, site: { locale: plan.site.locale, locales: [plan.site.locale] } });
+    const explicit = manifestFromPlan({ ...plan, site: { ...plan.site, locale: 'en', locales: ['en', 'zh'] } }, raw);
+    expect(explicit.site).toMatchObject({ locale: 'en', locales: ['en', 'zh'] });
+  });
+
+  it('still reads a v1 manifest and reports it as the legacy en+zh pair', () => {
+    expect(validateManifest(v1(), raw)).toEqual(v1());
+    expect(manifestLocales(v1())).toEqual({ locales: ['en', 'zh'], defaultLocale: plan.site.locale });
+    expect(manifestLocales(manifest())).toEqual({ locales: [plan.site.locale], defaultLocale: plan.site.locale });
+  });
+});
+
 describe('installation manifest', () => {
   it('renders deterministic, secret-free versioned JSON', () => {
     const one = renderManifest(plan, raw);
@@ -68,7 +88,7 @@ describe('installation manifest', () => {
     expect(one).toBe(renderManifest(plan, raw));
     expect(one.endsWith('\n')).toBe(true);
     expect(validateManifest(JSON.parse(one), raw)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       database: 'd1',
     });
     expect(one).not.toMatch(/password|secret|connection/i);
@@ -88,7 +108,12 @@ describe('installation manifest', () => {
     ['unknown top-level field', { ...manifest(), token: 'credential' }],
     ['unknown site field', { ...manifest(), site: { ...manifest().site, password: 'x' } }],
     ['unknown resource field', { ...manifest(), resources: { ...manifest().resources, apiKey: 'x' } }],
-    ['wrong schema', { ...manifest(), schemaVersion: 2 }],
+    ['wrong schema', { ...manifest(), schemaVersion: 3 }],
+    ['v2 without locales', { ...manifest(), site: (({ locales, ...rest }) => rest)(manifest().site) }],
+    ['unsupported locale in set', { ...manifest(), site: { ...manifest().site, locales: ['en', 'xx'] } }],
+    ['default outside enabled set', { ...manifest(), site: { ...manifest().site, locale: 'en', locales: ['zh'] } }],
+    ['duplicate locales', { ...manifest(), site: { ...manifest().site, locales: ['en', 'en'] } }],
+    ['v1 with locales', { ...manifest(), schemaVersion: 1 }],
     ['unknown module', { ...manifest(), modules: ['not-a-module'] }],
     ['module incompatible with D1', { ...manifest(), modules: ['giving'] }],
     ['duplicate module', { ...manifest(), modules: ['sermons', 'sermons'] }],

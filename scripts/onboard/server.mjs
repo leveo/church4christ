@@ -4,6 +4,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { generateCss } from '../build-tokens.mjs';
 import { resolveProvider } from '../setup/resolve-provider.mjs';
+import { SUPPORTED_LOCALES } from '../setup/locales.mjs';
 import { defaultPreferences, normalizePreferences, readPreferences, savePreferences, readLogo, PREFERENCES_PATH } from './preferences.mjs';
 
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
@@ -72,7 +73,7 @@ export async function startOnboardingServer({ root, catalog, port = 0, preset = 
         const authorization = Buffer.from(req.headers.authorization ?? '');
         if (authorization.length !== expectedAuthorization.length || !timingSafeEqual(authorization, expectedAuthorization)) throw httpError('Open the full onboarding URL printed in your terminal', 401);
         if (req.method === 'GET' && url.pathname === '/api/state') {
-          return reply(res, 200, { catalog, defaults, preferences: await readPreferences(root, catalog), existingInstallation: await hasExistingInstallation(root) });
+          return reply(res, 200, { catalog, locales: SUPPORTED_LOCALES, defaults, preferences: await readPreferences(root, catalog), existingInstallation: await hasExistingInstallation(root) });
         }
         if (req.method === 'GET' && url.pathname === '/api/logo') {
           const preferences = await readPreferences(root, catalog);

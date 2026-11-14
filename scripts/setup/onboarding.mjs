@@ -33,12 +33,15 @@ export function mergePreferenceAnswers(parsed, preferences, catalog) {
     modules: preferences.setup.modules,
     siteSlug: preferences.setup.siteSlug,
     churchName: preferences.organization.name,
-    locale: preferences.setup.locale,
+    locales: preferences.setup.locales,
+    defaultLocale: preferences.setup.defaultLocale,
     adminEmail: preferences.setup.adminEmail,
     adminName: preferences.setup.adminName,
     demoData: preferences.setup.demoData,
   };
   if (parsed.preset || parsed.modules !== undefined) delete values.modules;
+  // Any explicit language flag replaces the saved language choice as a whole.
+  if (parsed.locale !== undefined || parsed.locales !== undefined) { delete values.locales; delete values.defaultLocale; }
   for (const [key, value] of Object.entries(parsed)) {
     if (value !== undefined && key !== 'demoData') values[key] = value;
   }
@@ -108,6 +111,7 @@ export function onboardingSettings(plan) {
     'site.tagline.en': organization.tagline,
     'site.tagline.zh': organization.tagline,
     'site.address': organization.address,
+    'locale.enabled': JSON.stringify(plan.site.locales ?? [plan.site.locale]),
     'locale.default': plan.site.locale,
     'theme.name': 'sanctuary',
     'theme.default_mode': 'light',

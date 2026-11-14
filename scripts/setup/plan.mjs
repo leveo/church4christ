@@ -109,6 +109,7 @@ export function buildSetupPlan(answers, catalog, currentState = {}) {
       slug: normalized.siteSlug,
       name: normalized.churchName,
       locale: normalized.locale,
+      ...(normalized.locales ? { locales: normalized.locales } : {}),
       appOrigin: normalized.appOrigin ?? 'http://localhost:4321',
       emailFrom: normalized.emailFrom ?? `serve@${normalized.siteSlug}.invalid`,
     },

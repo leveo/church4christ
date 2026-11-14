@@ -1,5 +1,6 @@
 import { normalizeEmail, normalizeOrigin } from './answers.mjs';
 import { resolveProvider } from './resolve-provider.mjs';
+import { LEGACY_ENABLED_LOCALES, SUPPORTED_LOCALE_CODES } from './locales.mjs';
 
 const TOP_LEVEL_KEYS = [
   'schemaVersion',
@@ -11,7 +12,10 @@ const TOP_LEVEL_KEYS = [
   'demoData',
   'resources',
 ];
+// v1 recorded only the default language; v2 adds the enabled set (`locales`).
 const SITE_KEYS = ['slug', 'name', 'locale', 'appOrigin', 'emailFrom'];
+const SITE_KEYS_V2 = [...SITE_KEYS, 'locales'];
+export const MANIFEST_SCHEMA_VERSION = 2;
 const RESOURCE_KEYS = ['d1DatabaseName', 'd1DatabaseId', 'r2BucketName', 'hyperdriveId'];
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RESOURCE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -59,9 +63,11 @@ export function validateProviderResources(resources, database, { requireBindingI
 
 export function validateManifest(value, catalog) {
   requireExactKeys(value, TOP_LEVEL_KEYS, 'manifest');
-  requireExactKeys(value.site, SITE_KEYS, 'manifest site');
+  if (![1, MANIFEST_SCHEMA_VERSION].includes(value.schemaVersion)) {
+    throw new Error('church.config.json schemaVersion must be 1 or 2');
+  }
+  requireExactKeys(value.site, value.schemaVersion === 1 ? SITE_KEYS : SITE_KEYS_V2, 'manifest site');
 
-  if (value.schemaVersion !== 1) throw new Error('church.config.json schemaVersion must be 1');
   if (!['local', 'deploy'].includes(value.mode)) throw new Error('manifest mode must be local or deploy');
   if (!['d1', 'supabase'].includes(value.database)) throw new Error('manifest database must be d1 or supabase');
   if (typeof value.demoData !== 'boolean') throw new Error('manifest demoData must be boolean');
@@ -90,7 +96,17 @@ export function validateManifest(value, catalog) {
 
   if (!SLUG.test(value.site.slug ?? '')) throw new Error('manifest site.slug is invalid');
   if (typeof value.site.name !== 'string' || !value.site.name.trim()) throw new Error('manifest site.name is invalid');
-  if (!['en', 'zh'].includes(value.site.locale)) throw new Error('manifest site.locale must be en or zh');
+  if (!SUPPORTED_LOCALE_CODES.includes(value.site.locale)) {
+    throw new Error(`manifest site.locale must be one of: ${SUPPORTED_LOCALE_CODES.join(', ')}`);
+  }
+  if (value.schemaVersion === MANIFEST_SCHEMA_VERSION) {
+    const { locales } = value.site;
+    if (!Array.isArray(locales) || locales.length === 0 || new Set(locales).size !== locales.length
+      || locales.some((code) => !SUPPORTED_LOCALE_CODES.includes(code))) {
+      throw new Error('manifest site.locales must list unique supported languages');
+    }
+    if (!locales.includes(value.site.locale)) throw new Error('manifest site.locale must be one of site.locales');
+  }
   try {
     const canonicalOrigin = normalizeOrigin(value.site.appOrigin, value.mode, 'manifest site.appOrigin');
     if (!canonicalOrigin || canonicalOrigin !== value.site.appOrigin) throw new Error();
@@ -123,7 +139,7 @@ export function manifestFromPlan(plan, catalog) {
         hyperdriveId: null,
       };
   return validateManifest({
-    schemaVersion: 1,
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
     mode: plan.mode,
     site: {
       slug: plan.site.slug,
@@ -131,6 +147,7 @@ export function manifestFromPlan(plan, catalog) {
       locale: plan.site.locale,
       appOrigin: plan.site.appOrigin,
       emailFrom: plan.site.emailFrom,
+      locales: [...(plan.site.locales ?? [plan.site.locale])],
     },
     preset: plan.preset,
     modules: [...plan.modules],
@@ -142,4 +159,12 @@ export function manifestFromPlan(plan, catalog) {
 
 export function renderManifest(plan, catalog) {
   return `${JSON.stringify(manifestFromPlan(plan, catalog), null, 2)}\n`;
+}
+
+/** Enabled languages recorded by a manifest of either version. A v1 manifest
+ *  predates the enabled set: it means the legacy en+zh pair with its default. */
+export function manifestLocales(manifest) {
+  return manifest.schemaVersion === 1
+    ? { locales: [...LEGACY_ENABLED_LOCALES], defaultLocale: manifest.site.locale }
+    : { locales: [...manifest.site.locales], defaultLocale: manifest.site.locale };
 }
