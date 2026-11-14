@@ -136,6 +136,8 @@ jobs:
         run: node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1
 
       - name: End-to-end tests (Postgres worker)
+        # Normally about a minute; fail fast and name the step if a run ever stalls.
+        timeout-minutes: 10
         run: npm run test:e2e:pg
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
