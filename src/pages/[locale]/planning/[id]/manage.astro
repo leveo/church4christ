@@ -13,13 +13,14 @@ import { btn, btnDanger, btnSecondary, lab, noticeErr, noticeOk, rowBtn, tin } f
 import {
   addCoordinator,
   addItem,
-  copyRunSheet,
   deleteItem,
   getEvent,
   getLinkedPlan,
   ITEM_KINDS,
   listCoordinators,
   listEvents,
+  listItems,
+  listPeopleByIds,
   listLinkablePlans,
   listPeopleLite,
   listTeams,
@@ -30,7 +31,7 @@ import {
   updateItem,
   type EventStatus,
 } from '../../../../lib/planningDb';
-import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { callableScope, canManage, copyRunSheetChecked, manageableEventIds, planningRole, restrictOwners, teamAllowed } from '../../../../lib/planningAccess';
 import { parseEventForm, parseItemForm } from '../../../../lib/planningForms';
 import { cancelEventSessions } from '../../../../lib/planningService';
 import { loadRunSheetView } from '../../../../lib/planningView';
@@ -52,6 +53,10 @@ if (!event0 || !canManage(role)) {
   return Astro.rewrite('/404');
 }
 const eventId = event0.id;
+// Non-admin coordinators may only attach people and teams from teams they lead
+// or that already own items; adding people and coordinators is admin-only.
+const scope = await callableScope(db, user, eventId);
+const isAdminRole = role === 'admin';
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 const here = (query = '') => localePath(locale, `/planning/${eventId}/manage${query}`);
 
@@ -78,13 +83,16 @@ if (Astro.request.method === 'POST') {
     }
   } else if (action === 'add_item') {
     const parsed = parseItemForm(fd);
-    if (parsed.ok) return outcome(await addItem(db, eventId, rev, parsed.data));
+    if (parsed.ok) return outcome(await addItem(db, eventId, rev, restrictOwners(scope, parsed.data)));
     errors = parsed.errors;
     echo = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
   } else if (action === 'edit_item') {
     const itemId = idOf(fd.get('item_id'));
     const parsed = parseItemForm(fd);
-    if (itemId && parsed.ok) return outcome(await updateItem(db, eventId, itemId, rev, parsed.data));
+    if (itemId && parsed.ok) {
+      const existing = (await listItems(db, eventId)).find((i) => i.id === itemId) ?? null;
+      return outcome(await updateItem(db, eventId, itemId, rev, restrictOwners(scope, parsed.data, existing)));
+    }
     if (!parsed.ok) errors = parsed.errors;
     editingItem = itemId;
   } else if (action === 'delete_item') {
@@ -97,14 +105,14 @@ if (Astro.request.method === 'POST') {
   } else if (action === 'copy') {
     const sourceId = idOf(fd.get('source_id'));
     if (sourceId) {
-      const result = await copyRunSheet(db, eventId, sourceId, rev);
+      const result = await copyRunSheetChecked(db, user, eventId, sourceId, rev);
       return Astro.redirect(here(result.ok ? `?copied=${result.copied ?? 0}` : result.reason === 'conflict' ? '?error=conflict' : '?error=missing'), 303);
     }
-  } else if (action === 'add_coordinator') {
+  } else if (action === 'add_coordinator' && isAdminRole) {
     const personId = idOf(fd.get('person_id'));
     if (personId) await addCoordinator(db, eventId, personId);
     return Astro.redirect(here('?saved=1#coordinators'), 303);
-  } else if (action === 'remove_coordinator') {
+  } else if (action === 'remove_coordinator' && isAdminRole) {
     const personId = idOf(fd.get('person_id'));
     if (personId) await removeCoordinator(db, eventId, personId);
     return Astro.redirect(here('?saved=1#coordinators'), 303);
@@ -112,7 +120,7 @@ if (Astro.request.method === 'POST') {
 }
 
 const event = (await getEvent(db, eventId))!;
-const [view, teams, people, coordinators, plan, plans, otherEvents] = await Promise.all([
+const [view, allTeams, allPeople, coordinators, plan, plans, candidateEvents] = await Promise.all([
   loadRunSheetView(db, eventId, locale, null),
   listTeams(db, locale),
   listPeopleLite(db),
@@ -122,6 +130,13 @@ const [view, teams, people, coordinators, plan, plans, otherEvents] = await Prom
   listEvents(db, { limit: 60 }),
 ]);
 const rows = view?.rows ?? [];
+const teams = allTeams.filter((tm) => teamAllowed(scope, tm.id) || rows.some((r) => r.item.owner_team_id === tm.id));
+const currentOwners = rows.map((r) => r.item.owner_person_id).filter((x): x is number => x !== null);
+const people = scope.people === null
+  ? allPeople
+  : await listPeopleByIds(db, [...new Set([...scope.people, ...currentOwners])]);
+const manageable = await manageableEventIds(db, user, candidateEvents.map((e) => e.id));
+const otherEvents = candidateEvents.filter((e) => manageable.has(e.id));
 const summary = view!.summary;
 const saved = Astro.url.searchParams.has('saved');
 const copied = Astro.url.searchParams.get('copied');
@@ -272,16 +287,16 @@ const confirmAttr = (key: string) => `return confirm(${JSON.stringify(t(locale, 
         {coordinators.map((p) => (
           <li class="flex items-center justify-between gap-3 py-2 text-sm">
             <span>{p.display_name}</span>
-            <form method="post"><input type="hidden" name="_action" value="remove_coordinator" /><input type="hidden" name="person_id" value={p.id} /><button class={`${rowBtn} planning-touch text-danger`}>{t(locale, 'planning.coord.remove')}</button></form>
+            {isAdminRole && <form method="post"><input type="hidden" name="_action" value="remove_coordinator" /><input type="hidden" name="person_id" value={p.id} /><button class={`${rowBtn} planning-touch text-danger`}>{t(locale, 'planning.coord.remove')}</button></form>}
           </li>
         ))}
         {coordinators.length === 0 && <li class="py-2 text-sm text-ink-muted">{t(locale, 'planning.coord.none')}</li>}
       </ul>
-      <form method="post" class="mt-3 flex flex-wrap items-end gap-3">
+      {isAdminRole && <form method="post" class="mt-3 flex flex-wrap items-end gap-3">
         <input type="hidden" name="_action" value="add_coordinator" />
-        <label class="block min-w-48 flex-1"><span class={lab}>{t(locale, 'planning.coord.add')}</span><select name="person_id" class={tin}>{people.map((p) => <option value={p.id}>{p.display_name}</option>)}</select></label>
+        <label class="block min-w-48 flex-1"><span class={lab}>{t(locale, 'planning.coord.add')}</span><select name="person_id" class={tin}>{allPeople.map((p) => <option value={p.id}>{p.display_name}</option>)}</select></label>
         <button class={btnSecondary}>{t(locale, 'planning.coord.addButton')}</button>
-      </form>
+      </form>}
     </section>
   </div>
 </Member>

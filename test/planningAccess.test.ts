@@ -5,8 +5,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { adminAreaForPath, hasAreaAccess } from '../src/lib/adminAreas';
 import { classifyRoute, canAccess } from '../src/lib/routePolicy';
 import { moduleForPath } from '../src/lib/modules';
-import { addCoordinator, createEvent, createSession, addSessionPeople, setEventStatus, addItem } from '../src/lib/planningDb';
-import { canManage, isPlanningAdmin, planningRole } from '../src/lib/planningAccess';
+import { addCoordinator, createEvent, createSession, addSessionPeople, setEventStatus, addItem, loadPersonFacts } from '../src/lib/planningDb';
+import { callableScope, canManage, copyRunSheetChecked, isPlanningAdmin, manageableEventIds, planningRole, restrictOwners, restrictPeople, teamAllowed } from '../src/lib/planningAccess';
 import type { SessionUser } from '../src/lib/types';
 
 const db = env.DB;
@@ -117,5 +117,65 @@ describe('planning admin area and route policy', () => {
     expect(classifyRoute('/planning/3/manage')).toBe('authed');
     expect(canAccess('authed', null)).toBe(false);
     expect(canAccess('authed', user(5))).toBe(true);
+  });
+});
+
+describe('coordinator scope, copy permission, and availability privacy', () => {
+  it('limits a non-admin coordinator to teams they lead or that own items, and lets admins call anyone', async () => {
+    await db.batch([
+      db.prepare(`INSERT INTO people (id, display_name, email, active) VALUES (306, 'Led Member', 'led@example.com', 1)`),
+      db.prepare(`INSERT INTO teams (id) VALUES (802)`),
+      db.prepare(`INSERT INTO team_members (team_id, person_id, is_leader) VALUES (802, 301, 1), (802, 306, 0)`),
+    ]);
+    const scope = await callableScope(db, user(301), eventId);
+    expect(scope.teams).toEqual(new Set([802, 801])); // led team + owner team of an item
+    expect(scope.people).toEqual(new Set([301, 306, 304]));
+    expect(restrictPeople(scope, [301, 306, 304, 305, 302])).toEqual([301, 306, 304]);
+    expect(teamAllowed(scope, 802)).toBe(true);
+    expect(teamAllowed(scope, 999)).toBe(false);
+    const open = await callableScope(db, user(1, { isAdmin: true, role: 'admin', isSuperAdmin: true }), eventId);
+    expect(open).toEqual({ people: null, teams: null });
+    expect(restrictPeople(open, [305])).toEqual([305]);
+  });
+
+  it('strips owners a coordinator may not attach but keeps ones already on the item', async () => {
+    await db.prepare(`INSERT OR IGNORE INTO people (id, display_name, email, active) VALUES (306, 'Led Member', 'led@example.com', 1)`).run();
+    await db.prepare(`INSERT OR IGNORE INTO teams (id) VALUES (802)`).run();
+    await db.prepare(`INSERT OR IGNORE INTO team_members (team_id, person_id, is_leader) VALUES (802, 301, 1), (802, 306, 0)`).run();
+    const scope = await callableScope(db, user(301), eventId);
+    const data = { owner_person_id: 305, owner_team_id: 999 };
+    expect(restrictOwners(scope, data)).toEqual({ owner_person_id: null, owner_team_id: null });
+    expect(restrictOwners(scope, data, { owner_person_id: 305, owner_team_id: 999 })).toEqual(data);
+    expect(restrictOwners(scope, { owner_person_id: 306, owner_team_id: 802 })).toEqual({ owner_person_id: 306, owner_team_id: 802 });
+  });
+
+  it('copies a run sheet only when the user manages both events', async () => {
+    const mk = () => createEvent(db, {
+      title_en: 'Copy', title_zh: '', event_date: '2030-11-01', start_time: '09:00', end_time: null,
+      location_en: '', location_zh: '', notes_en: '', notes_zh: '', plan_id: null,
+    }, null);
+    const source = await mk();
+    await addItem(db, source, 1, {
+      kind: 'segment', duration_min: 5, fixed_start_time: null, title_en: 'Secret', title_zh: '', details_en: '', details_zh: '',
+      owner_team_id: null, owner_person_id: null, owner_label: null, cue_notes: 'LEADER-ONLY',
+    });
+    const target = await mk();
+    await addCoordinator(db, target, 301); // coordinates the target only
+    expect(await copyRunSheetChecked(db, user(301), target, source, 1)).toEqual({ ok: false, reason: 'forbidden' });
+    expect(await copyRunSheetChecked(db, user(305), target, source, 1)).toEqual({ ok: false, reason: 'forbidden' });
+    await addCoordinator(db, source, 301);
+    expect(await copyRunSheetChecked(db, user(301), target, source, 1)).toMatchObject({ ok: true, copied: 1 });
+    const admin = user(1, { isAdmin: true, role: 'admin', isSuperAdmin: true });
+    expect(await manageableEventIds(db, user(301), [source, target, eventId])).toEqual(new Set([source, target, eventId]));
+    expect(await manageableEventIds(db, user(305), [source, target])).toEqual(new Set());
+    expect(await manageableEventIds(db, admin, [source, target])).toEqual(new Set([source, target]));
+  });
+
+  it('never reads availability notes when loading facts for planners', async () => {
+    await db.prepare(`INSERT OR IGNORE INTO people (id, display_name, email, active) VALUES (306, 'Led Member', 'led@example.com', 1)`).run();
+    await db.prepare(`INSERT INTO availability_windows (person_id, starts_on, ends_on, start_minute, end_minute, note) VALUES (306, '2030-12-01', '2030-12-01', 600, 700, 'PRIVATE-NOTE')`).run();
+    const facts = (await loadPersonFacts(db, [306], '2030-12-01', '2030-12-01')).get(306)!;
+    expect(facts.windows).toHaveLength(1);
+    expect(JSON.stringify(facts)).not.toContain('PRIVATE-NOTE');
   });
 });

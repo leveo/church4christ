@@ -152,6 +152,45 @@ describe('planning writes', () => {
   });
 });
 
+describe('coordinator scope', () => {
+  it('lets a coordinator call people from teams they lead but not arbitrary members', async () => {
+    const cookie = await sarah(); // leads the Worship team: Mark (5) and Amy (7) are members, Joshua (10, AV team) is not
+    await post('/en/planning/31000/sessions', '_action=add_person&session_id=31101&person_id=10', { cookie });
+    await post('/en/planning/31000/sessions', '_action=add_person&session_id=31101&person_id=7', { cookie });
+    const rows = await env.DB.prepare('SELECT person_id FROM planning_session_people WHERE session_id = 31101').all<{ person_id: number }>();
+    const ids = rows.results.map((r) => r.person_id);
+    expect(ids).toContain(7);
+    expect(ids).not.toContain(10);
+  });
+
+  it('rejects a team the coordinator neither leads nor sees as an owner', async () => {
+    await env.DB.prepare(`INSERT INTO teams (id) VALUES (77)`).run();
+    await env.DB.prepare(`INSERT INTO team_members (team_id, person_id) VALUES (77, 4)`).run();
+    await post('/en/planning/31000/sessions', '_action=add_team&session_id=31101&team_id=77', { cookie: await sarah() });
+    const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_session_people WHERE session_id = 31101 AND person_id = 4').first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+
+  it('keeps coordinator management admin-only and blocks copying from an unmanaged event', async () => {
+    const cookie = await sarah();
+    await post('/en/planning/31000/manage', '_action=add_coordinator&person_id=9', { cookie });
+    expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_event_coordinators WHERE person_id = 9').first<{ n: number }>())?.n).toBe(0);
+    const other = await env.DB.prepare(`INSERT INTO planning_events (title_en, event_date, start_time) VALUES ('Private', '2031-02-01', '09:00') RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO planning_items (event_id, sort, title_en, cue_notes) VALUES (?, 10, 'Hidden item', 'LEADER-ONLY')`).bind(other!.id).run();
+    const res = await post('/en/planning/31000/manage', `_action=copy&rev=1&source_id=${other!.id}`, { cookie });
+    expect(res.headers.get('location')).toBe('/en/planning/31000/manage?error=missing');
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM planning_items WHERE event_id = 31000 AND title_en = 'Hidden item'").first<{ n: number }>())?.n).toBe(0);
+    const page = await (await get('/en/planning/31000/manage', { cookie })).text();
+    expect(page).not.toContain('Private');
+    expect(page).not.toContain('add_coordinator');
+  });
+
+  it('shows the availability calendar without private window notes', async () => {
+    const html = await (await get('/en/planning/31000/calendar?view=week&date=' + new Date().toISOString().slice(0, 10), { cookie: await sarah() })).text();
+    expect(html).not.toContain('Prefers evenings');
+  });
+});
+
 describe('planning admin', () => {
   it('creates an event and sends the admin to its coordinator page', async () => {
     const body = new URLSearchParams({ _action: 'create', title_en: 'Easter Service', event_date: '2031-04-20', start_time: '09:30', end_time: '11:00' });

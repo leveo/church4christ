@@ -11,7 +11,7 @@ import { t } from '../../../../lib/i18n';
 import { addDays, formatDate, isValidDateStr, todayInTz } from '../../../../lib/dates';
 import { btnSecondary, lab, tin } from '../../../../lib/adminUi';
 import { getEvent, listSessions } from '../../../../lib/planningDb';
-import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { callableScope, canManage, planningRole, restrictPeople } from '../../../../lib/planningAccess';
 import { buildTeamCalendar, listEventTeam } from '../../../../lib/planningCalendar';
 import { monthDates, weekDates } from '../../../../lib/planningModel';
 
@@ -35,7 +35,10 @@ const view = q.get('view') === 'month' ? 'month' : 'week';
 const dateParam = q.get('date') ?? '';
 const anchor = isValidDateStr(dateParam) ? dateParam : event.event_date;
 const who = q.get('who') ?? 'all';
-const team = await listEventTeam(db, event.id);
+// Availability is shown only for people this user may call (admins: everyone), as status only.
+const scope = await callableScope(db, user, event.id);
+const visible = new Set(restrictPeople(scope, (await listEventTeam(db, event.id)).map((p) => p.id)));
+const team = (await listEventTeam(db, event.id)).filter((p) => visible.has(p.id));
 const chosen = who === 'me' ? team.filter((p) => p.id === user.id) : /^\d+$/.test(who) ? team.filter((p) => p.id === Number(who)) : team;
 const meInTeam = team.some((p) => p.id === user.id);
 const dates = view === 'month' ? monthDates(anchor.slice(0, 7)) : weekDates(anchor);

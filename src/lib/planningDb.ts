@@ -840,7 +840,8 @@ export async function loadPersonFacts(
       .all<BlockoutRowFact>(),
     db
       .prepare(
-        `SELECT ${WINDOW_COLS} FROM availability_windows
+        // The private note is deliberately not selected: planners only ever see status.
+        `SELECT id, person_id, starts_on, ends_on, weekdays, start_minute, end_minute FROM availability_windows
          WHERE person_id IN (${marks}) AND ends_on >= ? AND starts_on <= ?`,
       )
       .bind(...ids, dateFrom, dateTo)

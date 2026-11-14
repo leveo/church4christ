@@ -27,7 +27,7 @@ import {
   setCallTime,
   type SessionInput,
 } from '../../../../lib/planningDb';
-import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { callableScope, canManage, planningRole, restrictPeople, teamAllowed } from '../../../../lib/planningAccess';
 import { parseFindTimeQuery, parseSessionForm } from '../../../../lib/planningForms';
 import { cancelSession, noticeAddedPeople, saveSession, scheduleSession, type ScheduleResult } from '../../../../lib/planningService';
 import { findCandidates } from '../../../../lib/planningModel';
@@ -49,6 +49,9 @@ if (!event0 || !canManage(role)) {
 }
 const event = event0;
 const mail = env as unknown as EmailEnv;
+// Non-admin coordinators may only call people from teams they lead or that own
+// run-sheet items, and only see availability status for those people.
+const scope = await callableScope(db, user, event.id);
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 const here = (query = '') => localePath(locale, `/planning/${event.id}/sessions${query}`);
 // A session id from a form only counts when it belongs to THIS event.
@@ -102,10 +105,10 @@ if (Astro.request.method === 'POST') {
     if (session) {
       if (action === 'add_team') {
         const teamId = idOf(fd.get('team_id'));
-        if (teamId) await addSessionPeople(db, session.id, await listTeamMemberIds(db, teamId));
+        if (teamId && teamAllowed(scope, teamId)) await addSessionPeople(db, session.id, restrictPeople(scope, await listTeamMemberIds(db, teamId)));
       } else {
         const personId = idOf(fd.get('person_id'));
-        if (personId) await addSessionPeople(db, session.id, [personId]);
+        if (personId) await addSessionPeople(db, session.id, restrictPeople(scope, [personId]));
       }
       await noticeAddedPeople(mail, db, session.id);
       return Astro.redirect(here(`?saved=1#session-${session.id}`), 303);
@@ -127,11 +130,13 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const [sessions, teams, everyone] = await Promise.all([listSessions(db, event.id), listTeams(db, locale), listPeopleLite(db)]);
+const [sessions, allTeams, allPeople] = await Promise.all([listSessions(db, event.id), listTeams(db, locale), listPeopleLite(db)]);
+const teams = allTeams.filter((tm) => teamAllowed(scope, tm.id));
+const everyone = scope.people === null ? allPeople : allPeople.filter((p) => scope.people!.has(p.id));
 const detail = await Promise.all(
   sessions.map(async (s) => {
     const people = await listSessionPeople(db, s.id);
-    const check = s.status === 'cancelled' ? null : await checkSession(db, s, people.map((p) => p.person_id));
+    const check = s.status === 'cancelled' ? null : await checkSession(db, s, restrictPeople(scope, people.map((p) => p.person_id)));
     return { s, people, check };
   }),
 );
@@ -139,7 +144,7 @@ const detail = await Promise.all(
 // Find a time for one session (its called people), from ?find=ID plus the form's query.
 const findId = idOf(Astro.url.searchParams.get('find'));
 const findSession = findId ? sessions.find((s) => s.id === findId) ?? null : null;
-const findPeople = findSession ? detail.find((d) => d.s.id === findSession.id)?.people ?? [] : [];
+const findPeople = (findSession ? detail.find((d) => d.s.id === findSession.id)?.people ?? [] : []).filter((p) => scope.people === null || scope.people.has(p.person_id));
 const hasQuery = Astro.url.searchParams.has('from');
 const findParsed = findSession && hasQuery ? parseFindTimeQuery(Astro.url.searchParams) : null;
 let candidates: ReturnType<typeof findCandidates> = [];
@@ -161,7 +166,7 @@ const prefill = {
 const nameOf = new Map<number, string>();
 if (failure && 'blocked' in failure) for (const p of await listPeopleByIds(db, [...failure.blocked, ...failure.busy])) nameOf.set(p.id, p.display_name);
 if (failure && failure.ok === false && failure.error === 'unknown') for (const p of await listPeopleByIds(db, failure.unknown)) nameOf.set(p.id, p.display_name);
-const names = (ids: number[]) => ids.map((pid) => nameOf.get(pid) ?? `#${pid}`).join(', ');
+const names = (ids: number[]) => restrictPeople(scope, ids).map((pid) => nameOf.get(pid) ?? `#${pid}`).join(', ');
 const statusCls = { draft: badgeInactive, scheduled: badgeActive, cancelled: badgeScheduled } as const;
 const slotCls = { blocked: 'sl-blocked', busy: 'sl-busy', available: 'sl-available', unknown: 'sl-unknown' } as const;
 const fmtDay = (d: string) => formatDate(d, locale);
@@ -196,7 +201,7 @@ const err = (field: string) => (errors[field] ? t(locale, errors[field]) : null)
               {people.map((p) => (
                 <li class="flex flex-wrap items-center gap-2 py-2 text-sm">
                   <span class="min-w-0 flex-1 basis-32">{p.display_name}</span>
-                  {check && <span class={`sl-chip ${slotCls[check.statuses[p.person_id]]}`}>{t(locale, `planning.slot.${check.statuses[p.person_id]}`)}</span>}
+                  {check && check.statuses[p.person_id] && <span class={`sl-chip ${slotCls[check.statuses[p.person_id]]}`}>{t(locale, `planning.slot.${check.statuses[p.person_id]}`)}</span>}
                   <form method="post" class="flex items-center gap-2">
                     <input type="hidden" name="_action" value="call_time" /><input type="hidden" name="session_id" value={s.id} /><input type="hidden" name="person_id" value={p.person_id} />
                     <input type="time" name="call_time" value={p.call_time ?? ''} aria-label={t(locale, 'planning.sessions.callTime')} class={`${tin} w-32`} />
