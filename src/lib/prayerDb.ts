@@ -4,7 +4,8 @@
 // Supabase: migrations-supabase/0009) — reachable only when the portal is on.
 // Event scope depends on Registration (reg_events / registrations / event_admins),
 // which is Supabase-only: every function that could touch those tables takes a
-// `registration` flag (default true = the Supabase full-install behavior). Callers
+// `registration` flag (default false, so a caller that forgets it never queries
+// Registration tables; the Supabase full install passes true). Callers
 // pass `modules.has('registration')`; when false, no query references reg_*,
 // registrations or event_admins and scope='event' is rejected.
 //
@@ -82,7 +83,7 @@ function prayerSelect(registration: boolean): string {
 export interface PrayerOptions {
   registration?: boolean;
 }
-const regOn = (opts?: PrayerOptions): boolean => opts?.registration ?? true;
+const regOn = (opts?: PrayerOptions): boolean => opts?.registration ?? false;
 
 const MAX_BODY = 2000;
 
