@@ -142,6 +142,9 @@ export const IDENTITY_MERGE_REFERENCE_REGISTRY: readonly IdentityMergeReference[
   ref('gifts', 'recorded_by', 'historical_preserve', 'Manual gift recorder attribution remains historically exact.', 'postgres'),
   ref('recurring_gifts', 'person_id', 'hard_conflict', 'Recurring giving ownership conflicts require explicit resolution.', 'postgres'),
   ref('registrations', 'person_id', 'subject_repoint', 'Registration attribution follows the canonical member.', 'postgres'),
+  ref('stripe_customers', 'person_id', 'hard_conflict', 'A donor Stripe customer mapping never silently transfers between people.', 'postgres'),
+  ref('giving_audit_events', 'actor_person_id', 'historical_preserve', 'Giving audit actor attribution remains historically exact.', 'postgres'),
+  ref('giving_statement_outbox', 'person_id', 'historical_preserve', 'Statement delivery history remains attached to the original recipient.', 'postgres'),
   ref('church_private.stripe_checkout_requests', 'last_action_by', 'historical_preserve', 'Private Stripe action attribution remains historically exact.', 'postgres'),
   ref('church_private.stripe_webhook_events', 'last_action_by', 'historical_preserve', 'Private Stripe webhook attribution remains historically exact.', 'postgres'),
 ];

@@ -122,6 +122,8 @@ export const POSTGRES_ONLY_CAMPUS_SCOPED_TABLES = [
   'fund_i18n',
   'gifts',
   'recurring_gifts',
+  'giving_statement_outbox',
+  'giving_audit_events',
   'reg_events',
   'reg_event_i18n',
   'reg_questions',

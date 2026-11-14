@@ -19,6 +19,9 @@ const SUPABASE_ONLY_TABLES = new Set([
   'fund_i18n',
   'gifts',
   'recurring_gifts',
+  'stripe_customers',
+  'giving_statement_outbox',
+  'giving_audit_events',
   // Registration
   'reg_events',
   'reg_event_i18n',

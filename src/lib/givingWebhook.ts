@@ -19,16 +19,36 @@
 // its attached Checkout session id). Every other kind resolves to 'ignored'.
 import type { AppDb } from './appDb';
 import type { ModuleKey } from './modules';
-import { retrieveSubscription, StripeError, type StripeEnv } from './stripe';
+import {
+  findInvoiceIdsByPaymentIntent,
+  livemodeMatches,
+  retrieveInvoiceWithPayments,
+  retrieveSubscription,
+  StripeError,
+  stripeMode,
+  type StripeEnv,
+} from './stripe';
 import type { StripeDispatchResult } from './stripeWebhookInbox';
 import {
-  insertCardGift,
-  markGiftRefunded,
-  giftStatusByPaymentIntent,
-  upsertRecurringGift,
-  setRecurringStatus,
+  applyGiftRefund,
+  backfillGiftStripeIds,
+  findGiftByCharge,
+  findGiftByInvoice,
+  findGiftByPaymentIntent,
+  getFundCampus,
   getRecurringBySubscription,
+  insertCardGift,
+  markAchGiftFailed,
+  markGiftDisputed,
+  markRecurringPastDue,
+  reinstateDisputedGift,
+  setRecurringStatus,
   setStripeCustomer,
+  settlePendingGift,
+  syncRecurringGift,
+  unixToUtcSql,
+  upsertRecurringGift,
+  type GiftIdentity,
 } from './givingDb';
 import {
   applyRegistrationCheckoutSession,
@@ -209,12 +229,14 @@ interface RecurringParams {
   fundId: number;
   amountCents: number;
   currency: string;
-  interval: 'week' | 'month';
-  status: string;
+  interval: 'week' | 'month' | 'year';
+  status: string | null;
+  campusMeta: unknown;
 }
 
-/** Build the recurring-gift row from a retrieved subscription object, or null
- *  when it is not one of ours / is missing a field we require. */
+/** Build the recurring-gift fields from a retrieved subscription object, or null
+ *  when it is not one of ours / is missing a field we require. `status` is null
+ *  for a Stripe state we do not track (leave an existing row's status alone). */
 function recurringFromSub(sub: Record<string, unknown>): RecurringParams | null {
   if (metaKind(sub) !== 'gift') return null;
   const meta = getMeta(sub);
@@ -226,16 +248,31 @@ function recurringFromSub(sub: Record<string, unknown>): RecurringParams | null 
   const amountCents = typeof price?.unit_amount === 'number' ? price.unit_amount : null;
   const recurring = price?.recurring as { interval?: unknown } | undefined;
   const interval = recurring?.interval;
-  if (amountCents === null || (interval !== 'week' && interval !== 'month')) return null;
+  if (amountCents === null || (interval !== 'week' && interval !== 'month' && interval !== 'year')) return null;
   return {
     personId,
     fundId,
     amountCents,
     currency: strOr(price?.currency, 'usd'),
     interval,
-    status: mapStatus(sub.status) ?? 'active',
+    status: mapStatus(sub.status),
+    campusMeta: meta.campus_id,
   };
 }
+
+/** Validate the campus a gift/subscription is written to. The fund is authoritative
+ *  (it must exist); metadata.campus_id, when present, must agree with it. A legacy
+ *  session without campus_id inherits the fund's campus. Null means reject. */
+async function resolveCampus(deps: WebhookDeps, fundId: number, campusMeta: unknown): Promise<number | null> {
+  const fundCampus = await getFundCampus(deps.db, fundId);
+  if (fundCampus === null) return null;
+  if (campusMeta === undefined || campusMeta === null || campusMeta === '') return fundCampus;
+  const claimed = intOrNull(campusMeta);
+  return claimed === fundCampus ? fundCampus : null;
+}
+
+/** True when the runtime is configured for Stripe live mode. */
+const isLive = (deps: WebhookDeps): boolean => stripeMode(deps.env) === 'live';
 
 // ── per-event handlers ─────────────────────────────────────────────────────────
 function registrationResult(
@@ -277,9 +314,66 @@ async function applyRegistrationSession(
   return registrationResult(transition, action);
 }
 
+type PaymentSessionOutcome = 'succeeded' | 'pending' | 'failed';
+
+/**
+ * Record a one-time gift Checkout Session in the state Stripe reports. Card
+ * payments arrive 'paid'; ACH (us_bank_account) completes 'unpaid' and settles
+ * days later via async_payment_succeeded / async_payment_failed. Every call is an
+ * idempotent insert-then-guarded-transition, so the three events converge on one
+ * row whatever order they arrive in, and a settled gift is never downgraded.
+ * paid_at is Stripe's own event time, never the insert time.
+ */
+async function recordPaymentSession(
+  deps: WebhookDeps,
+  session: Record<string, unknown>,
+  outcome: PaymentSessionOutcome,
+  method: 'card' | 'us_bank_account',
+  eventTime: string | null,
+): Promise<StripeDispatchResult> {
+  const meta = getMeta(session);
+  const fundId = intOrNull(meta.fund_id);
+  const amountTotal = session.amount_total;
+  const paymentIntentId = paymentIntentIdOrNull(session.payment_intent);
+  if (fundId === null || typeof amountTotal !== 'number' || paymentIntentId === null) return ignored();
+  const campusId = await resolveCampus(deps, fundId, meta.campus_id);
+  if (campusId === null) return ignored('campus_mismatch');
+  const personId = intOrNull(meta.person_id);
+  const details = session.customer_details as { email?: unknown } | undefined;
+  const paidAt = outcome === 'succeeded' ? eventTime : null;
+  await checked(deps);
+  await insertCardGift(deps.db, {
+    personId,
+    donorName: strOrNull(meta.donor_name),
+    donorEmail: strOrNull(details?.email) ?? strOrNull(meta.donor_email),
+    fundId,
+    amountCents: amountTotal,
+    currency: strOr(session.currency, 'usd'),
+    sessionId: strOrNull(session.id),
+    paymentIntentId,
+    method,
+    status: outcome,
+    paidAt,
+    livemode: isLive(deps),
+    campusId,
+  });
+  if (outcome !== 'pending') {
+    await checked(deps);
+    await settlePendingGift(deps.db, paymentIntentId, { status: outcome, paidAt });
+  }
+  const customerId = strOrNull(session.customer);
+  if (outcome !== 'failed' && personId !== null && customerId) {
+    await checked(deps);
+    await setStripeCustomer(deps.db, personId, customerId, isLive(deps), campusId);
+  }
+  return processed(outcome === 'pending' ? 'gift_pending' : outcome === 'failed' ? 'gift_failed' : 'gift_recorded');
+}
+
 async function onCheckoutCompleted(
   deps: WebhookDeps,
   session: Record<string, unknown>,
+  eventType: string,
+  eventTime: string | null,
 ): Promise<StripeDispatchResult> {
   if (metaKind(session) === 'registration') {
     if (session.payment_status !== 'paid') return ignored('awaiting_async_payment');
@@ -289,36 +383,16 @@ async function onCheckoutCompleted(
   const mode = session.mode;
 
   if (mode === 'payment') {
-    // Only a SETTLED payment books a gift. A completed session whose payment is
-    // still processing (async payment methods) or otherwise not 'paid' must not
-    // record money — Stripe re-fires completion when it settles. Require the
-    // concrete PaymentIntent id before any checkpoint/write: it is the durable
-    // idempotency key that closes the expired-lease double-insert gap.
-    if (session.payment_status !== 'paid') return ignored('awaiting_async_payment');
-    const meta = getMeta(session);
-    const fundId = intOrNull(meta.fund_id);
-    const amountTotal = session.amount_total;
-    const paymentIntentId = paymentIntentIdOrNull(session.payment_intent);
-    if (fundId === null || typeof amountTotal !== 'number' || paymentIntentId === null) return ignored();
-    const personId = intOrNull(meta.person_id);
-    const details = session.customer_details as { email?: unknown } | undefined;
-    await checked(deps);
-    await insertCardGift(deps.db, {
-      personId,
-      donorName: strOrNull(meta.donor_name),
-      donorEmail: strOrNull(details?.email) ?? strOrNull(meta.donor_email),
-      fundId,
-      amountCents: amountTotal,
-      currency: strOr(session.currency, 'usd'),
-      sessionId: strOrNull(session.id),
-      paymentIntentId,
-    });
-    const customerId = strOrNull(session.customer);
-    if (personId !== null && customerId) {
-      await checked(deps);
-      await setStripeCustomer(deps.db, personId, customerId);
+    const asyncSettled = eventType === 'checkout.session.async_payment_succeeded';
+    if (session.payment_status === 'paid') {
+      return recordPaymentSession(deps, session, 'succeeded', asyncSettled ? 'us_bank_account' : 'card', eventTime);
     }
-    return processed('gift_recorded');
+    // 'unpaid' is how Checkout reports a bank debit that is still processing: book
+    // it as PENDING money (never counted) and wait for the async settle event.
+    if (session.payment_status === 'unpaid' && !asyncSettled) {
+      return recordPaymentSession(deps, session, 'pending', 'us_bank_account', eventTime);
+    }
+    return ignored('awaiting_async_payment');
   }
 
   if (mode === 'subscription') {
@@ -328,13 +402,21 @@ async function onCheckoutCompleted(
     const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const rec = recurringFromSub(sub);
     if (!rec) return ignored();
+    const campusId = await resolveCampus(deps, rec.fundId, rec.campusMeta);
+    if (campusId === null) return ignored('campus_mismatch');
     await checked(deps);
-    await upsertRecurringGift(deps.db, { ...rec, subscriptionId: subId });
+    await upsertRecurringGift(deps.db, {
+      ...rec,
+      status: rec.status ?? 'active',
+      subscriptionId: subId,
+      livemode: isLive(deps),
+      campusId,
+    });
     // The money rows come from invoice.paid; here we only persist the customer.
     const customerId = strOrNull(session.customer) ?? strOrNull(sub.customer);
     if (customerId) {
       await checked(deps);
-      await setStripeCustomer(deps.db, rec.personId, customerId);
+      await setStripeCustomer(deps.db, rec.personId, customerId, isLive(deps), campusId);
     }
     return processed('recurring_started');
   }
@@ -342,13 +424,44 @@ async function onCheckoutCompleted(
   return ignored();
 }
 
-async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>): Promise<StripeDispatchResult> {
+/** An ACH Checkout whose bank debit failed: the pending gift becomes failed. */
+async function onAsyncPaymentFailed(
+  deps: WebhookDeps,
+  session: Record<string, unknown>,
+  eventTime: string | null,
+): Promise<StripeDispatchResult> {
+  if (getMeta(session).kind !== 'gift' || session.mode !== 'payment') return ignored();
+  return recordPaymentSession(deps, session, 'failed', 'us_bank_account', eventTime);
+}
+
+/**
+ * Learn the PaymentIntent behind an invoice-keyed gift. Current API versions do not
+ * put it on the invoice.paid payload, so expand the invoice's payments. Best effort:
+ * refunds and disputes still attribute through the invoice without it.
+ */
+async function backfillInvoicePaymentIntent(deps: WebhookDeps, invoiceId: string): Promise<void> {
+  const gift = await findGiftByInvoice(deps.db, invoiceId);
+  if (!gift || gift.stripe_payment_intent_id) return;
+  try {
+    const expanded = await retrieveInvoiceWithPayments(deps.env, invoiceId, { fetcher: deps.fetcher });
+    const pi = paymentIntentIdOrNull(invoicePaymentIntentId(expanded));
+    if (pi) await backfillGiftStripeIds(deps.db, gift.id, { paymentIntentId: pi });
+  } catch (error) {
+    if (!(error instanceof StripeError)) throw error;
+  }
+}
+
+async function onInvoicePaid(
+  deps: WebhookDeps,
+  invoice: Record<string, unknown>,
+  eventTime: string | null,
+): Promise<StripeDispatchResult> {
   const subId = invoiceSubscriptionId(invoice);
   if (!subId) return ignored(); // one-time payments emit no invoice — be defensive
   const amountPaid = invoice.amount_paid;
   if (!Number.isInteger(amountPaid) || (amountPaid as number) <= 0) return ignored();
   const invoiceId = expandableId(invoice.id);
-  const paymentIntentId = invoicePaymentIntentId(invoice);
+  const paymentIntentId = paymentIntentIdOrNull(invoicePaymentIntentId(invoice));
   if (!invoiceId && !paymentIntentId) return ignored();
   let rec = await getRecurringBySubscription(deps.db, subId);
   if (!rec) {
@@ -358,10 +471,20 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
     const sub = await retrieveSubscription(deps.env, subId, { fetcher: deps.fetcher });
     const built = recurringFromSub(sub);
     if (!built) return ignored();
+    const campusId = await resolveCampus(deps, built.fundId, built.campusMeta);
+    if (campusId === null) return ignored('campus_mismatch');
     await checked(deps);
-    await upsertRecurringGift(deps.db, { ...built, subscriptionId: subId });
-    rec = { person_id: built.personId, fund_id: built.fundId };
+    await upsertRecurringGift(deps.db, {
+      ...built,
+      status: built.status ?? 'active',
+      subscriptionId: subId,
+      livemode: isLive(deps),
+      campusId,
+    });
+    rec = { person_id: built.personId, fund_id: built.fundId, campus_id: campusId };
   }
+  const transitions = invoice.status_transitions as { paid_at?: unknown } | undefined;
+  const chargeId = typeof invoice.charge === 'string' ? invoice.charge : null; // pre-Basil shape only
   await checked(deps);
   await insertCardGift(deps.db, {
     personId: rec.person_id,
@@ -374,8 +497,24 @@ async function onInvoicePaid(deps: WebhookDeps, invoice: Record<string, unknown>
     paymentIntentId,
     invoiceId,
     subscriptionId: subId,
+    chargeId,
+    paidAt: unixToUtcSql(transitions?.paid_at) ?? eventTime,
+    livemode: isLive(deps),
+    campusId: rec.campus_id,
   });
+  if (invoiceId && !paymentIntentId) {
+    await checked(deps);
+    await backfillInvoicePaymentIntent(deps, invoiceId);
+  }
   return processed('gift_recorded');
+}
+
+/** Stripe emails the donor itself (dunning); we only mirror the state. No email from here. */
+async function onInvoicePaymentFailed(deps: WebhookDeps, invoice: Record<string, unknown>): Promise<StripeDispatchResult> {
+  const subId = invoiceSubscriptionId(invoice);
+  if (!subId) return ignored();
+  await checked(deps);
+  return (await markRecurringPastDue(deps.db, subId)) ? processed('recurring_past_due') : ignored('recurring_not_active');
 }
 
 /** A Checkout session expired. Only registration sessions hold a seat, so only
@@ -386,6 +525,54 @@ async function onCheckoutExpired(
 ): Promise<StripeDispatchResult> {
   if (metaKind(session) !== 'registration') return ignored();
   return applyRegistrationSession(deps, session, 'cancel');
+}
+
+// ── refunds, disputes, bank failures: attribute by the database, not metadata ──
+interface ChargeRef {
+  chargeId: string | null;
+  paymentIntentId: string | null;
+  /** Pre-Basil charges expose the invoice id directly. */
+  invoiceId: string | null;
+  /** Allow the Stripe invoice-payments lookup (skipped for noisy event types). */
+  lookup: boolean;
+}
+
+/**
+ * Find OUR gift behind a Stripe charge. Order: stored charge id, PaymentIntent,
+ * `charge.invoice` against gifts.stripe_invoice_id, then (current API) the Stripe
+ * invoice-payments lookup by PaymentIntent. A hit back-fills the missing ids so the
+ * next event resolves directly. No match means the charge is not ours (a
+ * registration, another app on the same Stripe account): the caller ignores it.
+ */
+async function attributeGift(deps: WebhookDeps, ref: ChargeRef): Promise<GiftIdentity | null> {
+  let gift: GiftIdentity | null = null;
+  if (ref.chargeId) gift = await findGiftByCharge(deps.db, ref.chargeId);
+  if (!gift && ref.paymentIntentId) gift = await findGiftByPaymentIntent(deps.db, ref.paymentIntentId);
+  if (!gift && ref.invoiceId) gift = await findGiftByInvoice(deps.db, ref.invoiceId);
+  if (!gift && ref.paymentIntentId && ref.lookup) {
+    await checked(deps);
+    const invoiceIds = await findInvoiceIdsByPaymentIntent(deps.env, ref.paymentIntentId, { fetcher: deps.fetcher });
+    for (const invoiceId of invoiceIds) {
+      gift = await findGiftByInvoice(deps.db, invoiceId);
+      if (gift) break;
+    }
+  }
+  if (gift && (!gift.stripe_payment_intent_id || !gift.stripe_charge_id)) {
+    await backfillGiftStripeIds(deps.db, gift.id, {
+      paymentIntentId: ref.paymentIntentId,
+      chargeId: ref.chargeId,
+    });
+  }
+  return gift;
+}
+
+function chargeRef(charge: Record<string, unknown>, lookup: boolean): ChargeRef {
+  return {
+    chargeId: strOrNull(charge.id),
+    paymentIntentId: paymentIntentIdOrNull(expandableId(charge.payment_intent)),
+    invoiceId: expandableId(charge.invoice),
+    lookup,
+  };
 }
 
 /** True when a charge.refunded event represents a FULL refund. Stripe sets
@@ -400,43 +587,112 @@ function isFullRefund(charge: Record<string, unknown>): boolean {
 }
 
 async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>): Promise<StripeDispatchResult> {
-  const pi = strOrNull(charge.payment_intent);
-  if (!pi) return ignored();
-  // Only a FULL refund zeroes a gift's contribution. A partial refund ($50 on a
-  // $1000 gift) must NOT flip status to 'refunded' — that would drop the whole
-  // $1000 out of fundTotals/householdYearTotals (both filter status='succeeded'),
-  // understating fund totals and the donor's tax statement. On a partial refund
-  // we leave the gift 'succeeded' (a partial-refund ledger field is out of scope).
-  if (!isFullRefund(charge)) return ignored();
-  // markGiftRefunded is scoped to our gifts by PI. A signed internal full refund
-  // that cannot yet see its gift is deferred for replay.
+  const amountRefunded = charge.amount_refunded;
+  if (typeof amountRefunded !== 'number' || !Number.isInteger(amountRefunded) || amountRefunded < 0) return ignored();
+  const gift = await attributeGift(deps, chargeRef(charge, true));
+  if (!gift) {
+    // A charge we tagged as a gift whose row is not visible yet: replay later.
+    // Anything else is foreign traffic and is ignored, never retried.
+    return metaKind(charge) === 'gift' ? deferred('gift_not_visible') : ignored('not_our_charge');
+  }
+  const full = isFullRefund(charge);
   await checked(deps);
-  const moved = await markGiftRefunded(deps.db, pi);
-  if (moved) return processed('refunded');
-  const status = await giftStatusByPaymentIntent(deps.db, pi);
-  return status === 'refunded'
-    ? processed('refunded')
-    : deferred('gift_not_visible');
+  await applyGiftRefund(deps.db, gift.id, { amountRefundedCents: amountRefunded, fullyRefunded: full });
+  return processed(full ? 'refunded' : 'partial_refund');
 }
 
-async function onSubscriptionChange(deps: WebhookDeps, sub: Record<string, unknown>): Promise<StripeDispatchResult> {
+async function onDispute(
+  deps: WebhookDeps,
+  dispute: Record<string, unknown>,
+  closed: boolean,
+): Promise<StripeDispatchResult> {
+  const gift = await attributeGift(deps, {
+    chargeId: expandableId(dispute.charge),
+    paymentIntentId: paymentIntentIdOrNull(expandableId(dispute.payment_intent)),
+    invoiceId: null,
+    lookup: true,
+  });
+  if (!gift) return ignored('not_our_charge');
+  await checked(deps);
+  if (!closed) {
+    await markGiftDisputed(deps.db, gift.id);
+    return processed('disputed');
+  }
+  // Closed: won (or a warning that closed without escalating) is money in hand
+  // again; lost stays 'disputed' so it never reaches totals or statements.
+  if (dispute.status === 'won' || dispute.status === 'warning_closed') {
+    await reinstateDisputedGift(deps.db, gift.id);
+    return processed('dispute_won');
+  }
+  return processed(dispute.status === 'lost' ? 'dispute_lost' : 'dispute_closed');
+}
+
+/** A bank debit failed after we recorded it (pending or even settled): not money in hand. */
+async function onChargeFailed(deps: WebhookDeps, charge: Record<string, unknown>): Promise<StripeDispatchResult> {
+  const gift = await attributeGift(deps, chargeRef(charge, false));
+  if (!gift) return ignored('not_our_charge');
+  await checked(deps);
+  return (await markAchGiftFailed(deps.db, gift.id)) ? processed('gift_failed') : ignored();
+}
+
+async function onSubscriptionChange(
+  deps: WebhookDeps,
+  sub: Record<string, unknown>,
+  type: string,
+): Promise<StripeDispatchResult> {
   if (metaKind(sub) !== 'gift') return ignored();
   const subId = strOrNull(sub.id);
-  const status = mapStatus(sub.status);
-  if (!subId || !status) return ignored();
+  const status = type === 'customer.subscription.deleted' ? 'canceled' : mapStatus(sub.status);
+  if (!subId) return ignored();
+  // customer.subscription.updated also carries what the Billing Portal can change:
+  // the amount (price), the interval, and our fund metadata.
+  const built = type === 'customer.subscription.updated' ? recurringFromSub(sub) : null;
+  if (built) {
+    const campusId = await resolveCampus(deps, built.fundId, built.campusMeta);
+    if (campusId === null) return ignored('campus_mismatch');
+    await checked(deps);
+    const synced = await syncRecurringGift(deps.db, subId, {
+      amountCents: built.amountCents,
+      currency: built.currency,
+      interval: built.interval,
+      fundId: built.fundId,
+      status: built.status,
+    });
+    if (!synced) {
+      await upsertRecurringGift(deps.db, {
+        ...built,
+        status: built.status ?? 'active',
+        subscriptionId: subId,
+        livemode: isLive(deps),
+        campusId,
+      });
+    }
+    return processed('subscription_synced');
+  }
+  if (!status) return ignored();
   await checked(deps);
   await setRecurringStatus(deps.db, subId, status);
   return processed('status_synced');
 }
 
+const CHARGE_EVENT_TYPES = new Set([
+  'charge.refunded',
+  'charge.failed',
+  'charge.dispute.created',
+  'charge.dispute.closed',
+]);
+
 /**
  * Handle one verified Stripe event. Returns a short outcome string for logs
- * ('gift_recorded' | 'recurring_started' | 'refunded' | 'status_synced' |
+ * ('gift_recorded' | 'gift_pending' | 'recurring_started' | 'refunded' | ... |
  * 'ignored'). Every unrecognized type — and every gift event that fails the
- * metadata/shape checks above — resolves to 'ignored' without throwing.
+ * metadata/shape checks above — resolves to 'ignored' without throwing. An event
+ * whose livemode does not equal the configured mode is ignored (no crossover).
  */
 export async function handleStripeEvent(deps: WebhookDeps, event: Record<string, unknown>): Promise<StripeDispatchResult> {
   const type = typeof event.type === 'string' ? event.type : '';
+  if (!livemodeMatches(deps.env, event.livemode)) return ignored('livemode_mismatch');
+  const eventTime = unixToUtcSql(event.created);
   const data = event.data as { object?: Record<string, unknown> } | undefined;
   const object = data?.object ?? {};
   const kind = metaKind(object);
@@ -444,35 +700,42 @@ export async function handleStripeEvent(deps: WebhookDeps, event: Record<string,
     || type === 'checkout.session.async_payment_succeeded'
     || type === 'checkout.session.async_payment_failed'
     || type === 'checkout.session.expired'
-    || type === 'charge.refunded'
     || type === 'customer.subscription.updated'
     || type === 'customer.subscription.deleted';
-  const requiredModule: ModuleKey | null = type === 'invoice.paid'
-    ? 'giving'
-    : moduleAwareType && kind === 'gift'
-      ? 'giving'
-      : moduleAwareType && kind === 'registration'
-        ? 'registration'
-        : null;
+  let requiredModule: ModuleKey | null = null;
+  if (type === 'invoice.paid' || type === 'invoice.payment_failed') requiredModule = 'giving';
+  else if (CHARGE_EVENT_TYPES.has(type)) {
+    // Registration charges are handled by the registration flow, never as gifts.
+    if (kind === 'registration') return ignored();
+    requiredModule = 'giving';
+  } else if (moduleAwareType && kind === 'gift') requiredModule = 'giving';
+  else if (moduleAwareType && kind === 'registration') requiredModule = 'registration';
   if (requiredModule && !deps.modules.has(requiredModule)) return ignored('module_disabled');
 
   switch (type) {
     case 'checkout.session.completed':
     case 'checkout.session.async_payment_succeeded':
-      return onCheckoutCompleted(deps, object);
+      return onCheckoutCompleted(deps, object, type, eventTime);
     case 'checkout.session.async_payment_failed':
       if (kind === 'registration') return applyRegistrationSession(deps, object, 'cancel');
-      return ignored(kind === 'gift' ? 'awaiting_async_payment' : 'ignored');
+      return kind === 'gift' ? onAsyncPaymentFailed(deps, object, eventTime) : ignored();
     case 'checkout.session.expired':
       return onCheckoutExpired(deps, object);
     case 'invoice.paid':
-      return onInvoicePaid(deps, object);
+      return onInvoicePaid(deps, object, eventTime);
+    case 'invoice.payment_failed':
+      return onInvoicePaymentFailed(deps, object);
     case 'charge.refunded':
-      if (kind !== 'gift') return ignored();
       return onChargeRefunded(deps, object);
+    case 'charge.failed':
+      return onChargeFailed(deps, object);
+    case 'charge.dispute.created':
+      return onDispute(deps, object, false);
+    case 'charge.dispute.closed':
+      return onDispute(deps, object, true);
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
-      return onSubscriptionChange(deps, object);
+      return onSubscriptionChange(deps, object, type);
     default:
       return ignored();
   }

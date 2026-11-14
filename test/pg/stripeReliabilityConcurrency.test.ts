@@ -406,8 +406,7 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
     expect(await sqlA.unsafe(
       `SELECT id FROM gifts WHERE stripe_payment_intent_id='pi_reliability_crash'`,
     )).toHaveLength(1);
-    expect(await sqlA.unsafe(`SELECT stripe_customer_id FROM people WHERE id=1`))
-      .toEqual([{ stripe_customer_id: null }]);
+    expect(await sqlA.unsafe(`SELECT customer_id FROM stripe_customers WHERE person_id=1`)).toEqual([]);
 
     const [pending] = await sqlA.unsafe(
       `SELECT next_attempt_at FROM church_private.stripe_webhook_events WHERE event_id=$1`,
@@ -428,12 +427,12 @@ describe.skipIf(!hasPg)('Stripe crash and concurrency reliability (Postgres)', (
       }, storedEvent),
     })).toEqual({ state: 'processed', outcome: 'gift_recorded' });
 
-    expect(resumedCheckpoints).toBe(2);
+    expect(resumedCheckpoints).toBe(3); // gift insert, pending->settled guard, customer save
     expect(await sqlA.unsafe(
       `SELECT id FROM gifts WHERE stripe_payment_intent_id='pi_reliability_crash'`,
     )).toHaveLength(1);
-    expect(await sqlA.unsafe(`SELECT stripe_customer_id FROM people WHERE id=1`))
-      .toEqual([{ stripe_customer_id: 'cus_pi_reliability_crash' }]);
+    expect(await sqlA.unsafe(`SELECT customer_id, livemode FROM stripe_customers WHERE person_id=1`))
+      .toEqual([{ customer_id: 'cus_pi_reliability_crash', livemode: false }]);
     expect(await sqlA.unsafe(
       `SELECT status,attempt_count FROM church_private.stripe_webhook_events WHERE event_id=$1`,
       [eventId],

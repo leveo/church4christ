@@ -755,8 +755,12 @@ export interface FundFormInput {
   fund_number: string;
   name_en: string;
   name_zh: string;
+  description_en: string;
+  description_zh: string;
   active: boolean;
   sort: number;
+  is_default: boolean;
+  tax_deductible: boolean;
 }
 
 /** Fund create/edit form: fund_number + English name required; the Chinese name
@@ -768,10 +772,17 @@ export function parseFundForm(fd: FormData): FormResult<FundFormInput> {
   const name_en = str(fd, 'name_en');
   if (!name_en) errors.name_en = ERR.required;
   const name_zh = str(fd, 'name_zh');
+  const description_en = str(fd, 'description_en').slice(0, 500);
+  const description_zh = str(fd, 'description_zh').slice(0, 500);
   const active = checkbox(fd, 'active');
+  const is_default = checkbox(fd, 'is_default');
+  const tax_deductible = checkbox(fd, 'tax_deductible');
   const sort = sortOf(fd, errors);
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, data: { fund_number, name_en, name_zh, active, sort } };
+  return {
+    ok: true,
+    data: { fund_number, name_en, name_zh, description_en, description_zh, active, sort, is_default, tax_deductible },
+  };
 }
 
 export interface ManualGiftInput {

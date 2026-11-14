@@ -8,6 +8,8 @@ import type { Locale } from './locales';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_TZ = 'America/Chicago';
+/** The church's fixed reporting time zone (statements and year totals bucket here). */
+export const CHURCH_TZ = DEFAULT_TZ;
 
 /** Strict YYYY-MM-DD that is also a real calendar date. */
 export function isValidDateStr(s: string): boolean {

@@ -61,7 +61,15 @@ describe('identity merge reference registry', () => {
   it('seeds exactly the static registry keys accepted by reassignment journals', async () => {
     const rows = await env.DB.prepare('SELECT reference_key,policy FROM person_merge_registry_keys ORDER BY reference_key')
       .all<{ reference_key: string; policy: string }>();
+    // PostgreSQL-only tables added after the frozen D1 history (production Giving,
+    // migrations-supabase/0039) are registered for PostgreSQL only; D1 has no such tables.
+    const POSTGRES_ONLY_AFTER_D1_FREEZE = new Set([
+      'stripe_customers.person_id',
+      'giving_statement_outbox.person_id',
+      'giving_audit_events.actor_person_id',
+    ]);
     const expected = [...IDENTITY_MERGE_REFERENCE_REGISTRY, ...IDENTITY_MERGE_TEXT_ACTOR_REGISTRY]
+      .filter(({ table, column }) => !POSTGRES_ONLY_AFTER_D1_FREEZE.has(mergeReferenceKey(table, column)))
       .map(({ table, column, policy }) => ({ reference_key: mergeReferenceKey(table, column), policy }))
       .sort((left, right) => left.reference_key.localeCompare(right.reference_key));
     expect([...rows.results].sort((left, right) => left.reference_key.localeCompare(right.reference_key))).toEqual(expected);

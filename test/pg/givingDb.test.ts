@@ -16,15 +16,25 @@ import {
   fundTotals,
   listHouseholdGifts,
   householdYearTotals,
+  listPersonGifts,
+  personYearTotals,
   listRecurringForPerson,
   insertCardGift,
-  markGiftRefunded,
+  findGiftByPaymentIntent,
+  applyGiftRefund,
   upsertRecurringGift,
   setRecurringStatus,
   getRecurringBySubscription,
   setStripeCustomer,
   getStripeCustomer,
 } from '../../src/lib/givingDb';
+
+/** Full-refund helper mirroring what the webhook does (attribute by PI, apply the refund). */
+async function markGiftRefunded(db: AppDb, paymentIntentId: string): Promise<boolean> {
+  const gift = await findGiftByPaymentIntent(db, paymentIntentId);
+  if (!gift || gift.status !== 'succeeded') return false;
+  return applyGiftRefund(db, gift.id, { amountRefundedCents: gift.amount_cents, fullyRefunded: true });
+}
 
 // Seed households: 1 Chen (person 2 David + 7 Amy + dependent), 2 Lin (4 + 9),
 // 3 Zhao (10). Household-less real people: 1, 3, 5, 6, 8.
@@ -183,6 +193,70 @@ describe.skipIf(!hasPg)('givingDb (Postgres)', () => {
     expect(byYear['2026']).toBe(3000); // refund excluded
   });
 
+  // ── Person-scoped readers (own gifts only, even inside a household) ───────────
+  it('listPersonGifts is person-scoped and keeps refunded, pending, and disputed rows visible', async () => {
+    const fund = await saveFund(db, { fund_number: 'G550', name_en: 'Own', name_zh: '自己', active: 1, sort: 20 });
+    // Household 1: David (2) and Amy (7). Amy must not see David's gift.
+    const mine = await recordManualGift(db, { personId: 7, fundId: fund, amountCents: 1000, method: 'cash', receivedOn: '2026-01-01', recordedBy: 1, currency: 'usd' });
+    const theirs = await recordManualGift(db, { personId: 2, fundId: fund, amountCents: 2000, method: 'cash', receivedOn: '2026-01-02', recordedBy: 1, currency: 'usd' });
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 500, currency: 'usd', sessionId: null, paymentIntentId: 'pi_own_refunded' });
+    await markGiftRefunded(db, 'pi_own_refunded');
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 600, currency: 'usd', sessionId: null, paymentIntentId: 'pi_own_pending', method: 'us_bank_account', status: 'pending' });
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 700, currency: 'usd', sessionId: null, paymentIntentId: 'pi_own_failed', status: 'failed' });
+
+    const own = (await listPersonGifts(db, 'en', 7)).filter((g) => g.fund_id === fund);
+    expect(own.map((g) => g.id)).toContain(mine);
+    expect(own.map((g) => g.id)).not.toContain(theirs);
+    expect(own.map((g) => g.status).sort()).toEqual(['pending', 'refunded', 'succeeded']); // failed attempts stay hidden
+    const refunded = own.find((g) => g.status === 'refunded')!;
+    expect(refunded).toMatchObject({ fund_name: 'Own', giver_name: 'Amy Chen', refunded_cents: 500 });
+    expect(own.find((g) => g.id === mine)!.gift_date).toBe('2026-01-01');
+  });
+
+  it('personYearTotals sums live succeeded money per year net of refunds, scoped to the person', async () => {
+    await sql.unsafe('DELETE FROM gifts WHERE person_id IN (2, 7)');
+    const fund = await saveFund(db, { fund_number: 'G560', name_en: 'Yearly Own', name_zh: '年度个人', active: 1, sort: 21 });
+    await recordManualGift(db, { personId: 7, fundId: fund, amountCents: 1000, method: 'cash', receivedOn: '2025-06-01', recordedBy: 1, currency: 'usd' });
+    await recordManualGift(db, { personId: 7, fundId: fund, amountCents: 2000, method: 'cash', receivedOn: '2026-01-01', recordedBy: 1, currency: 'usd' });
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 9999, currency: 'usd', sessionId: null, paymentIntentId: 'pi_year_own_refund', livemode: true, paidAt: '2026-02-01 12:00:00' });
+    await markGiftRefunded(db, 'pi_year_own_refund');
+    // A partial refund nets out; a test-mode gift is hidden unless asked for.
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 4000, currency: 'usd', sessionId: null, paymentIntentId: 'pi_year_own_part', livemode: true, paidAt: '2026-03-01 12:00:00' });
+    await applyGiftRefund(db, (await findGiftByPaymentIntent(db, 'pi_year_own_part'))!.id, { amountRefundedCents: 1500, fullyRefunded: false });
+    await insertCardGift(db, { personId: 7, donorName: null, donorEmail: null, fundId: fund, amountCents: 300, currency: 'usd', sessionId: null, paymentIntentId: 'pi_year_own_test', livemode: false, paidAt: '2026-04-01 12:00:00' });
+    await recordManualGift(db, { personId: 2, fundId: fund, amountCents: 5000, method: 'cash', receivedOn: '2026-01-01', recordedBy: 1, currency: 'usd' }); // housemate: not in Amy's person totals
+
+    const byYear = (rows: Array<{ year: string; total_cents: number }>) => Object.fromEntries(rows.map((t) => [t.year, t.total_cents]));
+    expect(byYear(await personYearTotals(db, 7))).toEqual({ '2025': 1000, '2026': 2000 + 2500 });
+    expect(byYear(await personYearTotals(db, 7, { includeTest: true }))).toEqual({ '2025': 1000, '2026': 2000 + 2500 + 300 });
+  });
+
+  // ── Fund metadata ────────────────────────────────────────────────────────────
+  it('funds carry a localized description, one default per campus, and a tax-deductible flag', async () => {
+    const a = await saveFund(db, { fund_number: 'G580', name_en: 'Alpha', name_zh: '甲', description_en: 'English words', description_zh: '', active: 1, sort: 30, is_default: true });
+    const b = await saveFund(db, { fund_number: 'G581', name_en: 'Beta', name_zh: '乙', description_en: 'Beta words', description_zh: '乙的说明', active: 1, sort: 31, is_default: true, tax_deductible: false, actorPersonId: 1 });
+    const { listFunds, getFund, listFundsAdmin } = await import('../../src/lib/fundDb');
+    expect((await getFund(db, 'en', a))!.is_default).toBe(false); // moved to Beta
+    const beta = (await getFund(db, 'zh', b))!;
+    expect(beta).toMatchObject({ is_default: true, tax_deductible: false, description: '乙的说明' });
+    // A zh row without its own description falls back to English.
+    expect((await getFund(db, 'zh', a))!.description).toBe('English words');
+    expect((await listFunds(db, 'en', { activeOnly: true }))[0].id).toBe(b); // the default sorts first
+    const admin = (await listFundsAdmin(db)).find((f) => f.id === b)!;
+    expect(admin).toMatchObject({ description_en: 'Beta words', description_zh: '乙的说明', is_default: true });
+    expect(await sql.unsafe("SELECT 1 FROM giving_audit_events WHERE action = 'fund_saved' AND ref_id = $1", [b])).toHaveLength(1);
+    await expect(sql.unsafe(`UPDATE funds SET is_default = true WHERE id = ${a}`)).rejects.toThrow(); // one default per campus
+    await saveFund(db, { id: b, fund_number: 'G581', name_en: 'Beta', name_zh: '乙', active: 1, sort: 31, is_default: false });
+  });
+
+  it('recordManualGift writes an audit row and records the configured currency', async () => {
+    const fund = await saveFund(db, { fund_number: 'G590', name_en: 'Audit', name_zh: '审计', active: 1, sort: 40 });
+    const id = await recordManualGift(db, { personId: 3, fundId: fund, amountCents: 1500, method: 'check', checkNumber: '9', receivedOn: '2026-05-01', recordedBy: 1, currency: 'cad' });
+    const audit = await sql.unsafe("SELECT actor_person_id, amount_cents, currency FROM giving_audit_events WHERE action = 'manual_gift_recorded' AND ref_id = $1", [id]);
+    expect(audit).toEqual([{ actor_person_id: 1, amount_cents: 1500, currency: 'cad' }]);
+    expect((await sql.unsafe('SELECT currency, livemode FROM gifts WHERE id = $1', [id]))[0]).toEqual({ currency: 'cad', livemode: true });
+  });
+
   // ── Webhook idempotency ──────────────────────────────────────────────────────
   it('insertCardGift is idempotent on a redelivered payment_intent_id', async () => {
     const fund = await saveFund(db, { fund_number: 'G700', name_en: 'Card', name_zh: '刷卡', active: 1, sort: 9 });
@@ -219,7 +293,7 @@ describe.skipIf(!hasPg)('givingDb (Postgres)', () => {
     const fund = await saveFund(db, { fund_number: 'G900', name_en: 'Monthly', name_zh: '每月', active: 1, sort: 12 });
     await upsertRecurringGift(db, { personId: 10, fundId: fund, amountCents: 2500, currency: 'usd', interval: 'month', subscriptionId: 'sub_r', status: 'active' });
 
-    expect(await getRecurringBySubscription(db, 'sub_r')).toEqual({ person_id: 10, fund_id: fund });
+    expect(await getRecurringBySubscription(db, 'sub_r')).toEqual({ person_id: 10, fund_id: fund, campus_id: 1 });
 
     let list = await listRecurringForPerson(db, 'en', 10);
     let row = list.find((r) => r.fund_name === 'Monthly')!;
@@ -233,15 +307,34 @@ describe.skipIf(!hasPg)('givingDb (Postgres)', () => {
 
     // Status sync (subscription.deleted → canceled).
     await setRecurringStatus(db, 'sub_r', 'canceled');
-    expect(await getRecurringBySubscription(db, 'sub_r')).toEqual({ person_id: 10, fund_id: fund });
+    expect(await getRecurringBySubscription(db, 'sub_r')).toEqual({ person_id: 10, fund_id: fund, campus_id: 1 });
     expect((await listRecurringForPerson(db, 'en', 10)).find((r) => r.fund_name === 'Monthly')!.status).toBe('canceled');
 
     expect(await getRecurringBySubscription(db, 'sub_unknown')).toBeNull();
   });
 
-  it('setStripeCustomer / getStripeCustomer round-trip on the people row', async () => {
-    expect(await getStripeCustomer(db, 8)).toBeNull();
-    await setStripeCustomer(db, 8, 'cus_abc123');
-    expect(await getStripeCustomer(db, 8)).toBe('cus_abc123');
+  it('setStripeCustomer / getStripeCustomer keep one customer per person PER MODE', async () => {
+    expect(await getStripeCustomer(db, 8, false)).toBeNull();
+    await setStripeCustomer(db, 8, 'cus_test_abc', false);
+    await setStripeCustomer(db, 8, 'cus_live_abc', true);
+    expect(await getStripeCustomer(db, 8, false)).toBe('cus_test_abc');
+    expect(await getStripeCustomer(db, 8, true)).toBe('cus_live_abc');
+    // Re-saving the same mode replaces in place (no second row).
+    await setStripeCustomer(db, 8, 'cus_test_def', false);
+    expect(await getStripeCustomer(db, 8, false)).toBe('cus_test_def');
+    const rows = await sql.unsafe('SELECT livemode FROM stripe_customers WHERE person_id = 8');
+    expect(rows).toHaveLength(2);
+  });
+
+  it('getStripeCustomer reads the legacy people column for TEST mode only', async () => {
+    await sql.unsafe(`UPDATE people SET stripe_customer_id = 'cus_legacy' WHERE id = 5`);
+    expect(await getStripeCustomer(db, 5, false)).toBe('cus_legacy');
+    expect(await getStripeCustomer(db, 5, true)).toBeNull();
+  });
+
+  it('a customer id already owned by another person is left alone instead of failing', async () => {
+    await setStripeCustomer(db, 3, 'cus_shared', false);
+    await expect(setStripeCustomer(db, 1, 'cus_shared', false)).resolves.toBeUndefined();
+    expect(await getStripeCustomer(db, 1, false)).toBeNull();
   });
 });

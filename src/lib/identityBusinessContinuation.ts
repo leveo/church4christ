@@ -11,7 +11,7 @@ import {
 import { completeVerifiedSignup, prepareSignup } from './identityAccount';
 import { consumeIdentityOtpDeliveryRetryLimit, type IdentityAuthEnv, type IdentityTrustedRequestContext } from './identityAuth';
 import { getStripeCustomer } from './givingDb';
-import { createOneTimeCheckout, createRegistrationCheckoutFromParams, type StripeEnv } from './stripe';
+import { createOneTimeCheckout, createRegistrationCheckoutFromParams, stripeMode, type StripeEnv } from './stripe';
 import {
   attachRegistrationCheckoutRequest,
   cancelRegistrationCheckoutRequest,
@@ -592,7 +592,8 @@ export async function completeGivingContinuation(db: AppDb, env: IdentityBusines
   try {
     const session = await createOneTimeCheckout(env, { amountCents: child.amount_cents, currency: child.currency, fundId: child.fund_id,
       fundName: fund.name, locale: child.locale, personId: auth.personId, donorName: person.display_name, donorEmail: person.email,
-      customerId: await getStripeCustomer(db, auth.personId) }, { requestId: parseCheckoutRequestId(child.checkout_request_id) });
+      customerId: await getStripeCustomer(db, auth.personId, stripeMode(env) === 'live'), campusId: intent.campus_id },
+      { requestId: parseCheckoutRequestId(child.checkout_request_id) });
     await markGivingConsumed(db, intent, auth.personId, session, claim.claimHash!);
     return { status: 'redirect', personId: auth.personId, sessionEpoch: auth.sessionEpoch, sessionId: session.id, url: session.url };
   } catch {
