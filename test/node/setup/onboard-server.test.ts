@@ -91,7 +91,7 @@ describe('onboard CLI', () => {
     const server = await startOnboardingServer({ root, catalog, preset: 'checkin' });
     cleanup.push(() => server.close());
     const headers = { Authorization: `Bearer ${server.token}`, Origin: server.origin };
-    const state = await (await fetch(`${server.origin}/api/state`, { headers })).json();
+    const state = await (await fetch(`${server.origin}/api/state`, { headers })).json() as { defaults: { setup: { modules: string[] } } };
     expect(state.defaults.setup.modules).toEqual(['people', 'children']);
     await expect(startOnboardingServer({ root, catalog, preset: 'missing' })).rejects.toThrow(/Unknown preset/);
   });
