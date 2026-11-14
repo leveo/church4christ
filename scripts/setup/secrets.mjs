@@ -201,7 +201,7 @@ export async function readLocalStripeClassification(path) {
   const validWebhook = normalizedWebhook.startsWith('whsec_') && normalizedWebhook.length > 'whsec_'.length && !/[\s\0]/.test(normalizedWebhook);
   if (!secretKey && !webhookSecret) classification = 'missing';
   else if (normalizedKey.startsWith('sk_test_') && normalizedKey.length > 'sk_test_'.length && !/[\s\0]/.test(normalizedKey) && validWebhook) classification = 'test';
-  else if (normalizedKey.startsWith('sk_live_') && normalizedKey.length > 'sk_live_'.length && !/[\s\0]/.test(normalizedKey) && validWebhook) classification = 'live';
+  else if (/^(?:sk|rk)_live_/.test(normalizedKey) && normalizedKey.length > 'sk_live_'.length && !/[\s\0]/.test(normalizedKey) && validWebhook) classification = 'live';
   return Object.freeze({ classification, ...presence });
 }
 

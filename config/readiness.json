@@ -66,9 +66,9 @@
       "selectors": { "capabilities": [], "services": ["worker", "email", "r2", "hyperdrive", "stripe"] }, "surfaces": ["cli", "admin"],
       "title": { "en": "Origin, domain, and delivery", "zh": "网址、网域与邮件发送" },
       "description": { "en": "Verify runtime bindings and production delivery outside the application.", "zh": "在应用外验证运行绑定与正式发送。" },
-      "remediation": { "en": "Verify the domain, bindings, email, storage, and payment test mode.", "zh": "验证网域、绑定、邮件、存储与付款测试模式。" },
+      "remediation": { "en": "Verify the domain, bindings, email, storage, and the Stripe payment mode (test, or live after the go-live checklist).", "zh": "验证网域、绑定、邮件、存储与 Stripe 付款模式（测试，或完成上线检查后的正式模式）。" },
       "adminPath": null, "manualVersion": 1,
-      "legacyCodes": ["services.worker", "services.worker-ok", "services.r2", "services.r2-ok", "services.d1", "services.d1-ok", "services.hyperdrive", "services.hyperdrive-ok", "services.email", "services.email-dev", "services.email-ok", "services.email-unverified", "services.identity-verification-secret", "services.identity-verification-secret-ok", "services.identity-verification-secret-invalid", "services.identity-verification-secret-unverifiable", "services.identity-source-key", "services.identity-source-key-ok", "services.identity-source-key-invalid", "services.identity-source-key-unverifiable", "services.identity-recovery-key", "services.identity-recovery-key-ok", "services.identity-recovery-key-invalid", "services.identity-recovery-key-unverifiable", "services.stripe-absent", "services.stripe-partial", "services.stripe-mode", "services.stripe-live", "services.stripe-unknown", "services.stripe-unverifiable", "services.stripe-ok", "services.required-unsupported", "services.exception"]
+      "legacyCodes": ["services.worker", "services.worker-ok", "services.r2", "services.r2-ok", "services.d1", "services.d1-ok", "services.hyperdrive", "services.hyperdrive-ok", "services.email", "services.email-dev", "services.email-ok", "services.email-unverified", "services.identity-verification-secret", "services.identity-verification-secret-ok", "services.identity-verification-secret-invalid", "services.identity-verification-secret-unverifiable", "services.identity-source-key", "services.identity-source-key-ok", "services.identity-source-key-invalid", "services.identity-source-key-unverifiable", "services.identity-recovery-key", "services.identity-recovery-key-ok", "services.identity-recovery-key-invalid", "services.identity-recovery-key-unverifiable", "services.stripe-absent", "services.stripe-partial", "services.stripe-mode", "services.stripe-live", "services.stripe-live-ok", "services.stripe-unknown", "services.stripe-unverifiable", "services.stripe-ok", "services.required-unsupported", "services.exception"]
     },
     {
       "id": "routes-jobs", "category": "operations", "severity": "warning",
@@ -94,7 +94,7 @@
       "description": { "en": "Verify connectivity, migrations, and required tables.", "zh": "验证连接、迁移与必要数据表。" },
       "remediation": { "en": "Apply forward migrations and rerun doctor.", "zh": "应用向前迁移后重新运行 doctor。" },
       "adminPath": null, "manualVersion": null,
-      "legacyCodes": ["database.connectivity", "database.exception", "database.tables", "database.migrations", "database.d1-migrations-unavailable", "database.ok"]
+      "legacyCodes": ["database.connectivity", "database.exception", "database.tables", "database.migrations", "database.stripe-api-version", "database.d1-migrations-unavailable", "database.ok"]
     },
     {
       "id": "backups", "category": "operations", "severity": "warning",

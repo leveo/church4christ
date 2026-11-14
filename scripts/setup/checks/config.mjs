@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { renderWrangler } from '../render-wrangler.mjs';
+import { preservedStripeMode, renderWrangler } from '../render-wrangler.mjs';
 import { result } from '../readiness.mjs';
 import { parseJsoncObject } from '../jsonc.mjs';
 
@@ -113,13 +113,13 @@ export async function checkConfig(options) {
     checks.push(result('config.binding', 'error', 'The configured database binding does not match the selected provider.', 'Rerun setup to restore the DB or HYPERDRIVE binding.'));
   }
   const stripeModeOk = options.manifest.database === 'supabase'
-    ? parsed.vars?.STRIPE_MODE === 'test'
-    : !Object.hasOwn(parsed.vars ?? {}, 'STRIPE_MODE');
+    ? parsed.vars?.STRIPE_MODE === 'test' || (parsed.vars?.STRIPE_MODE === 'live' && parsed.vars?.STRIPE_LIVE_CONFIRMED === '1')
+    : !Object.hasOwn(parsed.vars ?? {}, 'STRIPE_MODE') && !Object.hasOwn(parsed.vars ?? {}, 'STRIPE_LIVE_CONFIRMED');
   if (!stripeModeOk) {
-    checks.push(result('config.stripe-mode', 'error', 'STRIPE_MODE must be test for Supabase and absent for D1.', 'Rerun setup to restore the provider-specific test-mode marker.'));
+    checks.push(result('config.stripe-mode', 'error', 'STRIPE_MODE must be test, or live together with STRIPE_LIVE_CONFIRMED=1, for Supabase and absent for D1.', 'Rerun setup to restore the test-mode marker, or set both STRIPE_MODE=live and STRIPE_LIVE_CONFIRMED=1 as the documented go-live opt-in.'));
   }
   let desired;
-  try { desired = renderWrangler(options.template, options.manifest); } catch {
+  try { desired = renderWrangler(options.template, options.manifest, { stripeMode: preservedStripeMode(options.config) }); } catch {
     return [result('config.render', 'error', 'The desired Wrangler configuration cannot be rendered.', 'Repair the manifest and setup template before rerunning doctor.')];
   }
   if (options.config !== desired) {

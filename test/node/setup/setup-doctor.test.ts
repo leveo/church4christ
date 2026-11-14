@@ -7,7 +7,7 @@ import { checkConfig } from '../../../scripts/setup/checks/config.mjs';
 import { ALWAYS_REQUIRED_TABLES, PRIVATE_TABLES_BY_CAPABILITY, SUPABASE_TABLES_BY_CAPABILITY, TABLES_BY_CAPABILITY, checkDatabase, missingRequiredTables, qualifiedBaseTableNames } from '../../../scripts/setup/checks/database.mjs';
 import { checkServices } from '../../../scripts/setup/checks/services.mjs';
 import { runDoctor } from '../../../scripts/setup/doctor.mjs';
-import { renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
+import { preservedStripeMode, renderWrangler } from '../../../scripts/setup/render-wrangler.mjs';
 import { verifyMigrationCompleteness } from '../../../scripts/setup/verification.mjs';
 import { readFile, readdir } from 'node:fs/promises';
 
@@ -61,6 +61,7 @@ const SUPABASE_MIGRATIONS = [
   '0036_identity_merge_execution.sql',
   '0037_planning_center.sql',
   '0038_community_workflows.sql',
+  '0039_giving_production.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -132,6 +133,7 @@ function fakeDb(manifest: any = baseManifest, overrides: Record<string, unknown>
               ? visible
               : visible.map(({ table_schema, table_name }) => ({ table_schema, table_name })));
           }
+          if (sql.includes('church_private.stripe_webhook_events')) return rowResult((overrides.apiVersions as any) ?? []);
           if (sql === 'SELECT name FROM _migrations ORDER BY name') return rowResult((overrides.migrations as any) ?? SUPABASE_MIGRATIONS.map((name) => ({ name })));
           throw new Error(`unexpected all query: ${sql}`);
         },
@@ -260,6 +262,33 @@ describe('doctor generated configuration check', () => {
       .toEqual(['config.stripe-mode', 'config.drift']);
   });
 
+  it('accepts and preserves an explicit Stripe live opt-in, and rejects live without confirmation', async () => {
+    const template = await readFile('config/wrangler.template.jsonc', 'utf8');
+    const workerSource = await readFile('src/worker.ts', 'utf8');
+    const supabase: any = {
+      ...baseManifest, database: 'supabase', preset: 'full-church', modules: [...catalog.presets['full-church'].modules],
+      resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' },
+    };
+    const testConfig = renderWrangler(template, supabase);
+    const live = testConfig.replace(', "STRIPE_MODE": "test"', ', "STRIPE_MODE": "live", "STRIPE_LIVE_CONFIRMED": "1"');
+    expect(preservedStripeMode(testConfig)).toBe('test');
+    expect(preservedStripeMode(live)).toBe('live');
+    expect(preservedStripeMode(null as any)).toBe('test');
+    // Rerendering from an existing live config keeps live; the default is still test.
+    expect(renderWrangler(template, supabase, { stripeMode: preservedStripeMode(live) })).toBe(live);
+    expect(renderWrangler(template, supabase)).toBe(testConfig);
+    expect(await checkConfig({ manifest: supabase, template, config: live, workerSource, hostEnv: {} })).toEqual([
+      expect.objectContaining({ code: 'config.ok' }),
+    ]);
+    // live without STRIPE_LIVE_CONFIRMED=1 is not an opt-in.
+    const unconfirmed = testConfig.replace(', "STRIPE_MODE": "test"', ', "STRIPE_MODE": "live"');
+    expect(preservedStripeMode(unconfirmed)).toBe('test');
+    expect((await checkConfig({ manifest: supabase, template, config: unconfirmed, workerSource, hostEnv: {} })).map((entry) => entry.code))
+      .toEqual(['config.stripe-mode', 'config.drift']);
+    // D1 never renders or accepts a Stripe mode.
+    expect(renderWrangler(template, baseManifest as any, { stripeMode: 'live' })).not.toContain('STRIPE_');
+  });
+
   it('accepts only the recorded baseline local D1 identifier as preserved legacy storage identity', async () => {
     const template = await readFile('config/wrangler.template.jsonc', 'utf8');
     const workerSource = await readFile('src/worker.ts', 'utf8');
@@ -304,6 +333,18 @@ describe('doctor database check', () => {
     const supabase = { ...baseManifest, preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const pg = await checkDatabase({ db: fakeDb(supabase), catalog, manifest: supabase, readDir: async () => [SUPABASE_MIGRATIONS.at(-1)!, SUPABASE_MIGRATIONS.at(-2)!, SUPABASE_MIGRATIONS[0], 'ignore.example', ...SUPABASE_MIGRATIONS.slice(1, -2)] });
     expect(pg).toEqual([expect.objectContaining({ code: 'database.ok', severity: 'info' })]);
+  });
+
+  it('warns when stored Stripe webhook events used a different API version than the pinned one', async () => {
+    const supabase = { ...baseManifest, preset: 'full-church', modules: [...catalog.presets['full-church'].modules], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
+    const readDir = async () => SUPABASE_MIGRATIONS;
+    const stale = await checkDatabase({ db: fakeDb(supabase, { apiVersions: [{ api_version: '2024-06-20' }] }), catalog, manifest: supabase, readDir });
+    expect(stale).toContainEqual(expect.objectContaining({ code: 'database.stripe-api-version', severity: 'warning', remediation: expect.stringContaining('2025-03-31.basil') }));
+    expect(stale.some((entry) => entry.severity === 'error')).toBe(false);
+    // The doctor's pinned version equals the runtime constant.
+    const { STRIPE_API_VERSION } = await import('../../../src/lib/stripe');
+    expect(STRIPE_API_VERSION).toBe('2025-03-31.basil');
+    expect(stale[0].message).toContain(STRIPE_API_VERSION);
   });
 
   it('uses machine-readable D1 migration output when Wrangler advertises it and fails on pending files', async () => {
@@ -543,6 +584,19 @@ describe('doctor capability services check', () => {
     }
     const deploy = await checkServices({ catalog, manifest: { ...full, mode: 'deploy' }, presence: { ...basePresence, stripeClassification: 'unverifiable', stripeModeTest: true, stripeClassificationVerifiable: false } });
     expect(deploy).toContainEqual(expect.objectContaining({ code: 'services.stripe-unverifiable', severity: 'warning', message: expect.stringMatching(/test mode.*value.*unverifiable/i) }));
+  });
+
+  it('reports an explicit live mode honestly: live keys pass, test keys or partial pairs fail', async () => {
+    const full: any = { ...baseManifest, database: 'supabase', modules: [...catalog.presets['full-church'].modules], resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'hd' } };
+    const basePresence = { worker: true, r2: true, hyperdrive: true, email: true, emailDevLog: false, identityVerificationSecretStatus: 'valid' as const, identitySourceKeyStatus: 'valid' as const, identityRecoveryKeyStatus: 'valid' as const, stripeSecretKey: true, stripeWebhookSecret: true, backup: false };
+    const live = (classification: string, verifiable = true) => checkServices({ catalog, manifest: full, presence: { ...basePresence, stripeClassification: classification, stripeModeTest: false, stripeModeLive: true, stripeClassificationVerifiable: verifiable } });
+    expect(await live('live')).toContainEqual(expect.objectContaining({ code: 'services.stripe-live-ok', severity: 'info' }));
+    expect(await live('test')).toContainEqual(expect.objectContaining({ code: 'services.stripe-unknown', severity: 'error' }));
+    expect(await live('unknown')).toContainEqual(expect.objectContaining({ code: 'services.stripe-unknown', severity: 'error' }));
+    expect(await live('unverifiable', false)).toContainEqual(expect.objectContaining({ code: 'services.stripe-unverifiable', severity: 'warning' }));
+    // A live key while the runtime is still in test mode remains an error.
+    const mismatch = await checkServices({ catalog, manifest: full, presence: { ...basePresence, stripeClassification: 'live', stripeModeTest: true, stripeClassificationVerifiable: true } });
+    expect(mismatch).toContainEqual(expect.objectContaining({ code: 'services.stripe-live', severity: 'error' }));
   });
 
   it('fails missing mandatory email/Stripe and unknown required services instead of silently ignoring them', async () => {
