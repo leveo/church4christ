@@ -28,7 +28,7 @@ function fakeDb() {
 describe('shared media setup', () => {
   it('recomputes every content-addressed key in the repository manifest', async () => {
     const plan = loadMediaPlan({ root: process.cwd() });
-    expect(plan.assets).toHaveLength(18);
+    expect(plan.assets).toHaveLength(19);
     expect(plan.objects).toEqual([]);
     expect(plan.assets.every((asset: any) => asset.key.startsWith('uploads/'))).toBe(true);
     expect(plan.assets.every((asset: any) => typeof asset.contentBase64 === 'string' && !('filePath' in asset))).toBe(true);

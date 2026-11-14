@@ -16,7 +16,7 @@ h3 { font-size: var(--text-lg); margin-bottom: .6rem; }
 button:disabled { cursor: default; opacity: .55; }
 .site-header { max-width: var(--container-wide); margin: auto; padding: 1.75rem 3rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .wordmark { display: flex; align-items: center; gap: .7rem; text-decoration: none; color: var(--color-ink); font-weight: 650; font-size: var(--text-base); }
-.brand-mark { width: 2.25rem; height: 2.25rem; display: grid; place-items: center; background: var(--color-primary); color: var(--color-on-primary); border-radius: var(--radius-sm); font-family: var(--font-display); font-size: var(--text-sm); }
+.brand-mark { width: 2.25rem; height: 2.25rem; display: block; object-fit: contain; }
 .header-tools { display: flex; align-items: center; gap: 1.2rem; }
 .header-tools select { width: auto; min-height: 2.35rem; background: transparent; }
 .local-badge { color: var(--color-ink-muted); font-size: var(--text-xs); }

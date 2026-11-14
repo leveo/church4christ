@@ -73,6 +73,11 @@ describe('onboarding local HTTP boundary', () => {
     expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
     expect(await page.text()).toContain('Church4Christ');
     expect(await (await fetch(`${s.origin}/tokens.css`)).text()).toContain('--color-primary');
+    const mark = await fetch(`${s.origin}/favicon.svg`);
+    expect(mark.status).toBe(200);
+    expect(mark.headers.get('content-type')).toBe('image/svg+xml');
+    expect(await mark.text()).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    expect((await fetch(`${s.origin}/web/index.html`)).status).toBe(404);
   });
 });
 

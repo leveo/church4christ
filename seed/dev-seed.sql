@@ -497,10 +497,12 @@ INSERT INTO media (r2_key, filename, content_type, size, uploaded_by) VALUES
   ('uploads/06eabb4919549133-avatar-faithful-wang.webp', 'avatar-faithful-wang.webp', 'image/webp', 1082376, 'admin@example.com'),
   ('uploads/c0126d218e4f4462-avatar-amy-chen.webp', 'avatar-amy-chen.webp', 'image/webp', 964960, 'admin@example.com'),
   ('uploads/624b72ae921a3faf-avatar-ben-wu.webp', 'avatar-ben-wu.webp', 'image/webp', 840180, 'admin@example.com'),
-  ('uploads/05218adece952076-avatar-esther-lin.webp', 'avatar-esther-lin.webp', 'image/webp', 930548, 'admin@example.com');
+  ('uploads/05218adece952076-avatar-esther-lin.webp', 'avatar-esther-lin.webp', 'image/webp', 930548, 'admin@example.com'),
+  ('uploads/335be4f5f7b390dc-church4christ-mark.webp', 'church4christ-mark.webp', 'image/webp', 20248, 'admin@example.com');
 
 INSERT INTO settings (key, value) VALUES
-  ('site.hero_image_key', 'uploads/c69a962386c72642-hero-worship-gathering.webp');
+  ('site.hero_image_key', 'uploads/c69a962386c72642-hero-worship-gathering.webp'),
+  ('site.logo_image_key', 'uploads/335be4f5f7b390dc-church4christ-mark.webp');
 
 UPDATE events SET image_key = 'uploads/40f5b98116a62896-event-summer-bible-camp.webp' WHERE id = 1;
 UPDATE events SET image_key = 'uploads/642d06377d239e71-event-baptism-sunday.webp' WHERE id = 2;
