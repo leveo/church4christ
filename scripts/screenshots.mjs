@@ -373,6 +373,12 @@ export const README_DIAGRAMS = Object.freeze([
   'docs/images/diagrams/setup-paths-overview.png',
 ]);
 
+// Project brand artwork shown in the README. Maintained by hand in docs/images/brand/,
+// never captured from a page.
+export const README_BRAND_IMAGES = Object.freeze([
+  'docs/images/brand/church4christ-logo.png',
+]);
+
 // Phone captures (375x812 at 2x, mobile emulation) for the children's check-in and
 // volunteer scheduling work. Each row carries MOBILE_VIEWPORT, which also turns on the
 // horizontal-overflow check in capture(). Output lives in docs/images/mobile/. Two passes:
