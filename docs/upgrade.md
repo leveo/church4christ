@@ -335,3 +335,12 @@ optional verification variables and sitemap submission.
 It does not change an existing installation's brand, features, or data. Preserve
 `.church/preferences.json`, any uploaded logo, and `.church/branding.json` when moving a
 build to another machine.
+
+## Upgrading 1.3.0 to 1.4.0
+
+Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.
+Back up as usual, run `npm ci`, rebuild, and deploy with your normal process.
+
+The new `checkin`, `volunteer-scheduling`, and `small-groups` presets only affect new
+installations. An existing installation keeps its recorded preset and module settings; turn
+modules on or off in **Settings → Modules** as before.

@@ -1,11 +1,11 @@
-# v1.3.0 source release process
+# v1.4.0 source release process
 
-Church4Christ `v1.3.0` is a maintainer-created source checkpoint for operators who need a
-reviewed revision with browser onboarding and the refreshed dependency set. Version `v1.0.0` remains the historical
+Church4Christ `v1.4.0` is a maintainer-created source checkpoint for operators who need a
+reviewed revision with focused setup presets and single-feature editions. Version `v1.0.0` remains the historical
 initial open-source checkpoint. Neither version makes the private package publishable, promises
 managed upgrades, or removes the need to test custom implementations.
 
-No release is created merely because `package.json` currently says `1.3.0`. The immutable
+No release is created merely because `package.json` currently says `1.4.0`. The immutable
 upgrade-rehearsal baseline for 1.0.0 is commit
 `b85ad362b9f879408797270929c52dab7ad39d1d`; a version becomes a release only when a maintainer
 completes the process below and deliberately creates an immutable tag and corresponding GitHub
@@ -38,10 +38,11 @@ Supabase/Postgres's `_migrations` table.
 
 Version 1.2.0 adds forward files `0027` through `0038`, including optional fellowship and campus workflows.
 Version 1.3.0 adds no migrations; `0038` remains the latest forward file on both backends.
+Version 1.4.0 adds no migrations either; `0038` is still the latest forward file.
 
 ## Prepare the release pull request
 
-1. Confirm that the release target is exactly `v1.3.0` and that the 1.2.0 → 1.3.0 upgrade
+1. Confirm that the release target is exactly `v1.4.0` and that the 1.3.0 → 1.4.0 upgrade
    adds no migration after `0038_community_workflows.sql` on either backend.
    Keep the historical 1.0.0 baseline rehearsal as an additional forward-upgrade check.
 2. Move the reviewed `Unreleased` entries into a dated version section and create a new empty
@@ -49,7 +50,7 @@ Version 1.3.0 adds no migrations; `0038` remains the latest forward file on both
 3. Update the private package metadata without creating a tag:
 
    ```bash
-   npm version 1.3.0 --no-git-tag-version
+   npm version 1.4.0 --no-git-tag-version
    ```
 
    Review both `package.json` and `package-lock.json`. Keep `"private": true`; this repository
@@ -82,10 +83,11 @@ After the release-preparation pull request is merged and the exact `main` commit
 a maintainer must explicitly:
 
 1. verify that the commit contains the intended version and changelog section;
-2. create an annotated `v1.3.0` tag on that exact commit;
+2. create an annotated `v1.4.0` tag on that exact commit;
 3. push the tag without force;
 4. create the GitHub Release from the matching changelog text and link the upgrade runbook;
-5. verify the published tag and Release both resolve to the reviewed commit.
+5. verify the published tag and Release both resolve to the reviewed commit;
+6. render and publish the [single-feature editions](editions.md) pinned to the new tag.
 
 Tags and published release notes are immutable records. Never move, replace, or force-push a
 release tag, and never silently rewrite released migration history or artifacts. Correct an

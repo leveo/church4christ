@@ -10,6 +10,10 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-14
+
+Upgrade notes: [Upgrading 1.3.0 to 1.4.0](docs/upgrade.md#upgrading-130-to-140).
+
 ### Added
 
 - Three focused setup presets: `checkin` (People & Households, Children Check-in),
