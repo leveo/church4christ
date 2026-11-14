@@ -18,7 +18,7 @@ import { localePath, parseLocale } from '../../../../lib/locales';
 import { t } from '../../../../lib/i18n';
 import { assignPerson, canEditPosition } from '../../../../lib/planDb';
 import { getMatrix, listServiceTypes, listTeamMembers } from '../../../../lib/teamDb';
-import { addDays, isValidDateStr, todayInTz } from '../../../../lib/dates';
+import { addDays, formatDateWithWeekday, weekdayShort, isValidDateStr, todayInTz } from '../../../../lib/dates';
 import { sendSchedulingRequest } from '../../../../lib/notify';
 import { type EmailEnv } from '../../../../lib/email';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
@@ -96,6 +96,7 @@ const nextFrom = plans.length > 0 ? plans[plans.length - 1].plan_date : from;
 // Page back one ~8-week window (not all the way to today), clamped at today.
 const prevFrom = from > today ? (addDays(from, -56) > today ? addDays(from, -56) : today) : null;
 const copy = ministryCopy(locale);
+const weekdayOf = (d: string) => weekdayShort(d, locale);
 ---
 
 <Base title={`${t(locale, 'serve.matrix.title')} · ${serviceType.name}`} locale={locale} noindex>
@@ -106,7 +107,7 @@ const copy = ministryCopy(locale);
           types.length > 1 && (
             <a
               href={localePath(locale, '/serve/matrix')}
-              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
+              class="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.pick')}
             </a>
@@ -116,7 +117,7 @@ const copy = ministryCopy(locale);
           prevFrom && (
             <a
               href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${prevFrom}`)}
-              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
+              class="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.prev')}
             </a>
@@ -126,7 +127,7 @@ const copy = ministryCopy(locale);
           plans.length === 8 && (
             <a
               href={localePath(locale, `/serve/matrix/${serviceTypeId}?from=${nextFrom}`)}
-              class="rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
+              class="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-ink hover:bg-surface-raised"
             >
               {t(locale, 'serve.matrix.next')}
             </a>
@@ -154,9 +155,67 @@ const copy = ministryCopy(locale);
             {(['U', 'C', 'D'] as const).map(status => <span class={`rounded-full border px-2.5 py-1 ${statusStyles[status]}`}>{t(locale, `serve.status.${status}`)}</span>)}
             <span class="rounded-full border border-dashed border-accent px-2.5 py-1 text-accent">{copy.openSignup}</span>
           </div>
-          <p class="text-xs text-ink-muted">{copy.matrixScroll}</p>
+          <p class="hidden text-xs text-ink-muted md:block">{copy.matrixScroll}</p>
         </div>
-        <div class="mw-matrix" tabindex="0" role="region" aria-label={`${serviceType.name} · ${copy.matrix}`}>
+        <div class="grid gap-4 md:hidden" data-matrix-stacked>
+          {plans.map((p) => (
+            <section class="rounded-lg border border-border bg-surface-raised" aria-labelledby={`matrix-date-${p.id}`}>
+              <h2 id={`matrix-date-${p.id}`} class="border-b border-border bg-surface-sunken px-4 py-3 text-base font-bold">
+                <a href={localePath(locale, `/serve/plans/${p.id}`)} class="inline-flex min-h-11 items-center hover:underline">{formatDateWithWeekday(p.plan_date, locale)}</a>
+              </h2>
+              {teams.map(([teamId, teamName]) => {
+                const canEdit = hasAreaAccess(user, 'serve') || user.leaderTeamIds.includes(teamId);
+                const members = membersByTeam.get(teamId) ?? [];
+                const teamRows = rows.filter((r) => r.team_id === teamId && needOf(p.id, r.position_id));
+                if (teamRows.length === 0) return null;
+                return (
+                  <div class="px-4 py-3">
+                    <h3 class="text-xs font-bold uppercase tracking-caps text-ink-subtle">{teamName}</h3>
+                    <ul class="mt-2 grid gap-4">
+                      {teamRows.map((r) => {
+                        const need = needOf(p.id, r.position_id)!;
+                        const cell = cellAssignments(p.id, r.position_id);
+                        const active = cell.filter((a) => a.status !== 'D').length;
+                        const slotsLeft = need.needed - active;
+                        return (
+                          <li>
+                            <p class="text-sm font-semibold">{r.position_name}</p>
+                            <div class="mt-1 flex flex-wrap gap-1.5">
+                              {cell.map((a) => (
+                                <span class={`inline-block rounded-full border px-3 py-1 text-sm font-semibold ${statusStyles[a.status]}`}>
+                                  {a.person_name} <span>{t(locale, `serve.status.${a.status}`)}</span>
+                                </span>
+                              ))}
+                              {Array.from({ length: Math.max(0, slotsLeft) }).map(() => (
+                                <span class:list={['inline-block rounded-full px-3 py-1 text-sm', need.open_signup === 1 ? 'border border-dashed border-accent text-accent' : 'border border-border text-ink-subtle']}>
+                                  {need.open_signup === 1 ? copy.openSignup : copy.openRole}
+                                </span>
+                              ))}
+                            </div>
+                            {canEdit && slotsLeft > 0 && members.length > 0 && (
+                              <form method="post" class="mt-2 flex gap-2">
+                                <input type="hidden" name="_action" value="assign" />
+                                <input type="hidden" name="plan_id" value={p.id} />
+                                <input type="hidden" name="position_id" value={r.position_id} />
+                                <select name="person_id" aria-label={`${r.position_name} · ${p.plan_date}`} class="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-surface px-3 text-base">
+                                  {members.filter((m) => !cell.some((a) => a.person_id === m.person_id && a.status !== 'D')).map((m) => (
+                                    <option value={m.person_id}>{m.display_name}</option>
+                                  ))}
+                                </select>
+                                <button type="submit" class="min-h-11 shrink-0 rounded-md bg-primary px-4 text-sm font-bold text-on-primary hover:bg-primary-hover">{t(locale, 'serve.matrix.assignLabel')}</button>
+                              </form>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+        <div class="mw-matrix hidden md:block" tabindex="0" role="region" aria-label={`${serviceType.name} · ${copy.matrix}`}>
           <table class="w-full min-w-[56rem] border-collapse text-sm">
             <caption class="sr-only">{serviceType.name} · {copy.matrix}</caption>
             <thead>
@@ -166,6 +225,7 @@ const copy = ministryCopy(locale);
                   <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-left font-bold">
                     <a href={localePath(locale, `/serve/plans/${p.id}`)} class="tabular-nums hover:underline">
                       {p.plan_date.slice(5)}
+                      <span class="block text-xs font-normal text-ink-muted">{weekdayOf(p.plan_date)}</span>
                     </a>
                   </th>
                 ))}
