@@ -15,6 +15,8 @@ import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { getSiteIdentity } from '../lib/settings';
 import { t } from '../lib/i18n';
+import { env } from 'cloudflare:workers';
+import { publicOrigin, siteVerificationTags } from '../lib/seo';
 
 interface Props {
   title: string;
@@ -53,8 +55,10 @@ try {
 const fullTitle = `${title} · ${siteName}`;
 
 // Canonical + hreflang alternates: strip the locale prefix, then re-prefix each
-// locale against the configured site origin. x-default points at English.
-const site = Astro.site ?? new URL(Astro.url.origin);
+// locale against this deployment's public origin (APP_ORIGIN, else the request
+// origin). x-default points at English.
+const seoEnv = env as unknown as { APP_ORIGIN?: string; GOOGLE_SITE_VERIFICATION?: string; BING_SITE_VERIFICATION?: string };
+const site = new URL(publicOrigin(seoEnv.APP_ORIGIN, Astro.url));
 const { rest } = pathWithoutLocale(Astro.url.pathname);
 const canonical = privateMetadata ? null : new URL(localePath(locale, rest), site).href;
 const alternates = privateMetadata ? [] : [
@@ -62,6 +66,18 @@ const alternates = privateMetadata ? [] : [
   { hreflang: 'zh-Hans', href: new URL(localePath('zh', rest), site).href },
   { hreflang: 'x-default', href: new URL(localePath('en', rest), site).href },
 ];
+// Social previews and search-console ownership tags only on indexable pages.
+const indexable = !privateMetadata && !noindex;
+const verificationTags = indexable ? siteVerificationTags(seoEnv) : [];
+const websiteJsonLd = indexable && rest === '/'
+  ? JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      name: siteName,
+      url: new URL(localePath(locale, '/'), site).href,
+      inLanguage: locale === 'zh' ? 'zh-Hans' : 'en',
+    }).replace(/</gu, '\\u003c')
+  : null;
 ---
 
 <!doctype html>
@@ -79,6 +95,21 @@ const alternates = privateMetadata ? [] : [
     {noindex && <meta name="robots" content="noindex" />}
     {!privateMetadata && canonical && <link rel="canonical" href={canonical} />}
     {!privateMetadata && alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
+    {indexable && canonical && (
+      <>
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content={siteName} />
+        <meta property="og:title" content={fullTitle} />
+        <meta property="og:description" content={description} />
+        <meta property="og:url" content={canonical} />
+        <meta property="og:locale" content={locale === 'zh' ? 'zh_CN' : 'en_US'} />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={fullTitle} />
+        <meta name="twitter:description" content={description} />
+      </>
+    )}
+    {verificationTags.map((tag) => <meta name={tag.name} content={tag.content} />)}
+    {websiteJsonLd && <script type="application/ld+json" set:html={websiteJsonLd} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script is:inline>
       // No-flash mode: honor a saved choice, else fall back to the settings-driven

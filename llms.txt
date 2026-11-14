@@ -1,0 +1,34 @@
+# Church4Christ
+
+> Church4Christ is open-source church management software (ChMS) and a church CMS with a bilingual English/Chinese church website. It is a self-hosted, modular alternative to hosted church platforms such as Planning Center, built with Astro on Cloudflare Workers, Cloudflare D1 or Supabase/PostgreSQL, and Cloudflare R2. License: GPL-3.0. Source: https://github.com/leveo/church4christ. Demo: https://church4christ.yunfei-song.com.
+
+It is intended for small and mid-size churches, fellowships, and nonprofits, especially bilingual and immigrant congregations, that have a technically comfortable person or partner to deploy and maintain it. It is source code you host, not a managed service.
+
+Implemented capabilities: public church website with three themes, sermons, bulletins, events, articles, testimonies, and a drag-and-drop page builder; people and households with CSV import and export; groups and fellowships; volunteer scheduling with email confirmation; children's check-in kiosk; service attendance; newcomer follow-up; prayer wall; community workflows with email reminders; multi-campus; activity scores; a Learning module connected to Google Classroom or Canvas; optional member portal, offline giving ledger, and free event registration (Supabase backend); optional read-only Planning Center People synchronization.
+
+Not included: native mobile apps, SMS messaging, and worship service or song planning. Online card giving and paid registration through Stripe are preview/test-only.
+
+## Docs
+
+- [README](https://github.com/leveo/church4christ/blob/main/README.md): overview, feature list, comparison, costs, and quick start
+- [Setup guide](https://github.com/leveo/church4christ/blob/main/docs/setup.md): installation for people and AI coding agents
+- [Deploy](https://github.com/leveo/church4christ/blob/main/docs/deploy.md): Cloudflare deployment, email, domains, Planning Center sync, search engines
+- [Architecture](https://github.com/leveo/church4christ/blob/main/docs/architecture.md): how the Worker, database backends, and modules fit together
+- [Why this stack](https://github.com/leveo/church4christ/blob/main/docs/why-this-stack.md): design rationale and when a managed platform fits better
+- [Upgrade](https://github.com/leveo/church4christ/blob/main/docs/upgrade.md): upgrade runbook between versions
+
+## Features
+
+- [Modules](https://github.com/leveo/church4christ/blob/main/docs/features/modules.md): switching optional capabilities on and off
+- [People and households](https://github.com/leveo/church4christ/blob/main/docs/features/people-households.md)
+- [Groups](https://github.com/leveo/church4christ/blob/main/docs/features/groups.md)
+- [Volunteer scheduling](https://github.com/leveo/church4christ/blob/main/docs/features/volunteer-serve.md)
+- [Children's check-in](https://github.com/leveo/church4christ/blob/main/docs/features/children-checkin.md)
+- [Member portal](https://github.com/leveo/church4christ/blob/main/docs/features/member-portal.md)
+- [Giving](https://github.com/leveo/church4christ/blob/main/docs/features/giving.md)
+- [Two languages](https://github.com/leveo/church4christ/blob/main/docs/features/i18n.md)
+
+## Optional
+
+- [Changelog](https://github.com/leveo/church4christ/blob/main/CHANGELOG.md)
+- [Contributing](https://github.com/leveo/church4christ/blob/main/CONTRIBUTING.md)

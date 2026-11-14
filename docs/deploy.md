@@ -608,6 +608,26 @@ Using `church.yunfei-song.com` as the example:
    an address on that domain, then `npm run deploy` again so the running Worker knows its own
    origin (this matters for CSRF checks and absolute links).
 
+### Search engines
+
+`APP_ORIGIN` also sets the canonical links, Open Graph URLs, `/robots.txt`, and
+`/sitemap.xml`, so set it to the domain visitors use. The sitemap lists the public landing
+pages of enabled modules and published custom pages in both languages; signed-in, admin,
+token, and kiosk pages are excluded and disallowed in `robots.txt`.
+
+To verify ownership with an HTML meta tag instead of DNS, add the token (only the
+`content` value) as a plain Worker variable and redeploy:
+
+```jsonc
+"vars": {
+  "GOOGLE_SITE_VERIFICATION": "token-from-google-search-console",
+  "BING_SITE_VERIFICATION": "token-from-bing-webmaster-tools"
+}
+```
+
+Then submit `https://<your-domain>/sitemap.xml` in Google Search Console and Bing
+Webmaster Tools. A DNS-verified domain property needs no meta tag.
+
 ## 8. Sign in as the first admin
 
 `npm run setup` creates or explicitly promotes the first administrator through the same

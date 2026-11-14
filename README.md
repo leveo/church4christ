@@ -1,7 +1,21 @@
-# Church4Christ
+# Church4Christ: open-source church management software and church website
 
-**An AI-native, open-source bilingual church website and church-management foundation
-for customized implementations.**
+[![CI](https://github.com/leveo/church4christ/actions/workflows/ci.yml/badge.svg)](https://github.com/leveo/church4christ/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/leveo/church4christ?label=release)](https://github.com/leveo/church4christ/releases)
+[![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Built with Astro](https://img.shields.io/badge/built%20with-Astro-ff5d01.svg)](https://astro.build/)
+[![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020.svg)](https://workers.cloudflare.com/)
+[![English | 中文](https://img.shields.io/badge/i18n-English%20%7C%20%E4%B8%AD%E6%96%87-2b7a4b.svg)](docs/i18n.md)
+
+**An AI-native, open-source church management system (ChMS) and church CMS with a
+bilingual (English/Chinese) church website. A self-hosted, modular Planning Center
+alternative for small and mid-size churches, fellowships, and nonprofits, built on Astro
+and Cloudflare Workers.**
+
+People and households, groups, volunteer scheduling, children's check-in, attendance,
+newcomer follow-up, prayer care, sermons, bulletins, events, and an optional member
+portal, giving ledger, and event registration, in one codebase you can read, change,
+and host yourself. [中文简介](#中文简介)
 
 **See the demo: [church4christ.yunfei-song.com](https://church4christ.yunfei-song.com).**
 
@@ -21,7 +35,7 @@ member portal and other church-management workflows. The project aims to lower t
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-The **current source release is 1.2**. Church4Christ is an open-source foundation,
+The **current source release is 1.3**. Church4Christ is an open-source foundation,
 not a turnkey managed service. Local evaluation is free, and some deployments
 can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
@@ -96,6 +110,42 @@ for dependency updates, security review and configuration, monitoring, backups a
 testing, and deploying fixes. The architecture reduces some infrastructure work, but it
 does not remove security or operational upkeep. See
 [**`docs/why-this-stack.md`**](docs/why-this-stack.md) for the design rationale.
+
+## Looking for an open-source Planning Center alternative?
+
+Many churches searching for a free or self-hosted alternative to Planning Center,
+Breeze, Church Community Builder, or similar hosted church management software want two
+things: control over their own data and a website that shares the same records.
+Church4Christ covers much of the everyday church-management ground in one self-hosted
+application:
+
+| Common ChMS need | Church4Christ |
+|---|---|
+| People and households directory | [People & households](docs/features/people-households.md) with CSV import, saved source-column mappings, and export |
+| Small groups | [Groups](docs/features/groups.md) with a public directory, join requests, events, and attendance |
+| Volunteer scheduling | [Volunteer scheduling](docs/features/volunteer-serve.md) with a monthly matrix and email confirmation, no login needed |
+| Children's check-in | [Kiosk check-in](docs/features/children-checkin.md) with pickup codes and attendance charts |
+| Attendance and engagement | [Service attendance](docs/features/service-attendance.md) and [activity scores](docs/features/activity-score.md) |
+| Newcomer and care follow-up | [Newcomer queue](docs/features/newcomers.md), [prayer wall](docs/features/prayer-wall.md), and [community workflows](docs/features/community-workflows.md) |
+| Church website and CMS | [Public site, themes, sermons, bulletins, and page builder](docs/features/public-site-and-themes.md) |
+| Member self-service | [Member portal](docs/features/member-portal.md) (requires the Supabase/PostgreSQL backend) |
+| Multiple campuses | [Multi-campus](docs/features/multi-campus.md) with campus-isolated data and roles |
+
+**Moving from Planning Center gradually.** An optional, read-only
+[Planning Center People synchronization](docs/deploy.md#9-optional-configure-planning-center-synchronization)
+links Planning Center person records to existing Church4Christ people, sending
+ambiguous matches to human review, so both systems can run side by side during a
+transition. People are brought across with the CSV importer and its reusable column
+mappings.
+
+**What it does not replace yet.** There is no native mobile app, no SMS messaging, and
+no worship service or song planning. Online card giving and paid event registration
+through Stripe are preview/test-only; the giving module records checks and cash in an
+offline ledger. Church4Christ is a foundation your team runs and maintains, not a
+hosted service with vendor support.
+
+Planning Center and the other product names above are trademarks of their respective
+owners. Church4Christ is an independent project and is not affiliated with them.
 
 ---
 
@@ -212,6 +262,10 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
 <!-- capabilities:end -->
+
+### Community management and workflows
+
+Campuses can manage groups and member follow-up directly. Optional fellowships add a community layer with independent membership and child groups. Reusable workflows provide assigned steps, due dates, completion tracking, and Cloudflare email reminders. See the [community workflow guide](docs/features/community-workflows.md) for setup, permissions, and delivery controls.
 
 ### Learning beyond Sunday
 
@@ -457,6 +511,59 @@ better operating model are laid out in
 
 ---
 
+## FAQ
+
+**What is Church4Christ?**
+An open-source church management system (ChMS) and church CMS. It combines a bilingual
+English/Chinese church website with staff tools for people and households, groups,
+volunteer scheduling, children's check-in, attendance, newcomer follow-up, and prayer care.
+
+**Is there a free, open-source alternative to Planning Center?**
+Church4Christ is one option. The source code is free under GPL-3.0 and you host it
+yourself on Cloudflare Workers. It covers people, groups, check-in, volunteer scheduling,
+attendance, and a church website, and can read Planning Center People through an
+optional read-only sync while you transition. It does not have Planning Center's mobile
+apps, SMS, or worship song planning. See
+[Looking for an open-source Planning Center alternative?](#looking-for-an-open-source-planning-center-alternative)
+
+**Is it free?**
+The software is free. Hosting, email, database, and domain services may cost money
+depending on your setup and usage; some small deployments fit within provider free
+allowances. See [Deployment profiles and costs](#deployment-profiles-and-costs).
+
+**Does it support Chinese or bilingual churches?**
+Yes. Every page is available in English and Chinese, with one-click Simplified-to-Traditional
+conversion. Other languages can be added; see [docs/i18n.md](docs/i18n.md).
+
+**Can a small church without a developer run it?**
+It works best when a technically comfortable staff member, volunteer, or partner owns
+deployment and updates. The browser onboarding and AI-assistant guides lower that effort,
+but someone still has to review changes, back up data, and deploy.
+
+**What is it built with?**
+Astro on Cloudflare Workers, with Cloudflare D1 or Supabase/PostgreSQL for data and
+Cloudflare R2 for media. Public pages ship no client-side framework.
+
+---
+
+## 中文简介
+
+**Church4Christ 是一套开源的教会管理系统（ChMS）和教会网站（教会 CMS），中英双语，
+可以自己部署，是 Planning Center 等托管服务之外的一个开源选择。** 适合中小型教会、
+团契和非营利机构，尤其是双语和移民教会。
+
+- **公开网站**：首页、讲道、周报、活动、见证、文章，三套主题，简繁一键转换。
+- **教会管理**：会友与家庭、小组、团契、服事排班、儿童报到、崇拜出席、新朋友跟进、祷告墙、
+  工作流程提醒、多堂点（multi-campus）。
+- **可选模块**：会友平台、奉献记账、活动报名（需要 Supabase/PostgreSQL）。
+- **Planning Center**：可选的只读 People 同步，方便两套系统并行、逐步迁移；会友资料用 CSV 导入。
+- **技术栈**：Astro + Cloudflare Workers，数据库用 D1 或 Supabase，媒体存 R2，GPL-3.0 许可。
+
+快速开始：`npm ci`，再运行 `npm run onboard`，在浏览器里填写教会名称、颜色、Logo 和要启用的功能。
+详细步骤见 [安装指南](docs/setup.md)，中英文界面说明见 [docs/i18n.md](docs/i18n.md)。
+
+---
+
 ## License
 
 Church4Christ is free and open-source software under the **[GNU General Public License
@@ -487,7 +594,3 @@ church, open an issue and let's talk.
 ---
 
 Built with care, and with the help of AI, for churches and nonprofits everywhere.
-
-### Community management and workflows
-
-Campuses can manage groups and member follow-up directly. Optional fellowships add a community layer with independent membership and child groups. Reusable workflows provide assigned steps, due dates, completion tracking, and Cloudflare email reminders. See the [community workflow guide](docs/features/community-workflows.md) for setup, permissions, and delivery controls.

@@ -10,6 +10,8 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-13
+
 ### Added
 
 - `npm run onboard` opens a local browser form for church, nonprofit, or campus identity,
@@ -21,9 +23,19 @@ than published to npm.
   plans and setup. Initial setup applies identity and logo settings and stores brand colors
   locally for design-token generation. README, AGENTS.md, CLAUDE.md, and the setup guide
   describe the browser-first workflow and preference reuse by coding agents.
+- Every deployment now serves a generated `/robots.txt` and `/sitemap.xml`. The sitemap
+  lists public landing pages for enabled modules and published custom pages in English and
+  Chinese with hreflang alternates; robots.txt names the sitemap and disallows admin,
+  signed-in, token, kiosk, and API paths. Indexable public pages add Open Graph and Twitter
+  card tags, and the home page adds a schema.org `WebSite` description.
+- Optional `GOOGLE_SITE_VERIFICATION` and `BING_SITE_VERIFICATION` Worker variables render
+  search-console ownership meta tags; malformed values are ignored.
 
 ### Changed
 
+- Canonical, hreflang, and Open Graph URLs now use the deployment's `APP_ORIGIN` (falling
+  back to the request origin) instead of the build-time `site` in `astro.config.mjs`, so
+  each church's pages point at its own domain.
 - Refresh npm dependencies, including Astro 7.3.3, React 19.3.0, Tailwind CSS 4.3.3,
   Wrangler 4.135.0, and current compatible adapters, fonts, types, and utilities.
   Replace `@cloudflare/vitest-pool-workers` with its official successor,
@@ -35,11 +47,15 @@ than published to npm.
 - Recognize the updated workerd socket-close message in the existing narrowly scoped
   PostgreSQL end-to-end test cleanup filter. Other unhandled errors still fail the suite.
 
-### Operator impact
+### Upgrade notes
 
-- Run `npm ci` and rebuild after pulling the dependency refresh. Node.js 22.22.1 remains
-  the minimum runtime. This refresh adds no database migration, reseeding, bindings,
-  secrets, or deployment procedure changes; use the existing upgrade runbook.
+- From 1.2.0, no database migration is added: the latest forward migration remains
+  `0038_community_workflows.sql` on both backends. Run `npm ci` and rebuild after pulling
+  the dependency refresh. Node.js 22.22.1 remains the minimum runtime. No reseeding,
+  bindings, secrets, or deployment procedure changes are needed; follow
+  [the upgrade runbook](docs/upgrade.md#upgrading-120-to-130).
+- Confirm `vars.APP_ORIGIN` is the domain visitors use: canonical links, `/robots.txt`, and
+  `/sitemap.xml` now come from it. Then submit `/sitemap.xml` to search consoles if wanted.
 - Onboarding only saves local preferences; it does not create resources or deploy a site.
   Existing installations need no migration, reseeding, new binding, or secret for this
   workflow. Use the existing upgrade/configuration process for subsequent site changes;
@@ -49,6 +65,16 @@ than published to npm.
   tokens; `npm run tokens` and production builds regenerate them from the local brand file.
   Organization type and time zone remain preference context for further customization;
   this form does not change the application's scheduling time zone.
+
+### Documentation
+
+- README now leads with what the project is (open-source church management software,
+  church CMS, and a self-hosted Planning Center alternative), adds project badges, a
+  feature comparison with its current gaps, an FAQ, and a Chinese summary. `package.json`
+  gains description, keywords, homepage, repository, and issue links; it stays private.
+- Add `llms.txt` and `CITATION.cff` at the repository root, a 1280×640 social preview image
+  at `docs/images/social/social-preview.png`, and a "Search engines" section in the
+  deployment guide.
 
 ### Fixed
 

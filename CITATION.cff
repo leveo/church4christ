@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use or refer to Church4Christ, please cite it as below."
+type: software
+title: "Church4Christ: open-source church management software and church website"
+abstract: >-
+  Open-source church management software (ChMS) and church CMS with a bilingual
+  English/Chinese church website. A self-hosted, modular Planning Center alternative
+  built on Astro and Cloudflare Workers.
+authors:
+  - name: "Church4Christ contributors"
+    website: "https://github.com/leveo/church4christ/graphs/contributors"
+repository-code: "https://github.com/leveo/church4christ"
+url: "https://church4christ.yunfei-song.com"
+license: GPL-3.0-only
+version: 1.3.0
+date-released: "2026-11-13"
+keywords:
+  - church management software
+  - church CMS
+  - ChMS
+  - Planning Center alternative
+  - church website
+  - bilingual
+  - Astro
+  - Cloudflare Workers
