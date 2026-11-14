@@ -19,6 +19,10 @@ export const LEGACY_ENABLED_LOCALES = Object.freeze(['en', 'zh']);
  * `--locale x` means `--locales x --default-locale x`. Without an explicit default,
  * the first listed language is the default.
  */
+/**
+ * @param {{ locale?: string | null, locales?: string | string[], defaultLocale?: string | null }} input
+ * @param {string} [label]
+ */
 export function normalizeLocaleAnswers({ locale, locales, defaultLocale }, label = '--locales') {
   const list = typeof locales === 'string' ? locales.split(',') : locales;
   const given = Array.isArray(list)
