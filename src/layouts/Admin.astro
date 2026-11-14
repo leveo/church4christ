@@ -254,6 +254,10 @@ const navigationGroups = groupAdminLinks(sections.flatMap(section => section.chi
       </main>
     </div>
     <script>
+      import { initConfirm } from '../lib/confirm-client';
+      initConfirm();
+    </script>
+    <script>
       // Repeat-rows editor island (ported from the reference stack): progressive
       // enhancement over a <template data-repeat-template> plus [data-repeat-row]
       // rows with add / remove / move-up / move-down controls. Add clones the

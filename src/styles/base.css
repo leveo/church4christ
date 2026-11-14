@@ -315,11 +315,13 @@
   .workspace-mobile-nav { display: none; }
   @media (max-width: 1023px) {
     .workspace-shell { display: block; }
-    .workspace-sidebar { position: relative; height: auto; overflow: visible; }
-    .workspace-brand { padding: 1rem; }
+    .workspace-sidebar { position: sticky; top: 0; z-index: 40; height: auto; overflow: visible; min-height: 3.75rem; }
+    .workspace-brand { padding: .75rem 1rem; min-height: 3.75rem; padding-right: 4.5rem; }
     .workspace-desktop-nav, .workspace-sidebar-footer { display: none; }
     .workspace-mobile-nav { display: block; }
-    .workspace-mobile-nav > summary { position: absolute; right: 1rem; top: 1.25rem; display: flex; align-items: center; gap: .75rem; padding: .4rem; cursor: pointer; }
+    .workspace-mobile-nav > summary { position: absolute; right: .5rem; top: .5rem; display: flex; align-items: center; justify-content: center; gap: .75rem; min-height: 2.75rem; min-width: 2.75rem; padding: .4rem .75rem; cursor: pointer; }
+    .workspace-nav-children a { min-height: 2.75rem; display: flex; align-items: center; }
+    .workspace-nav-heading { min-height: 2.75rem; }
     .workspace-mobile-nav > nav { padding-bottom: 1rem; max-height: 70dvh; overflow-y: auto; }
     .workspace-topbar { padding: .65rem 1rem; min-height: 60px; gap: .75rem; flex-wrap: wrap; }
     .workspace-main { padding: 1.5rem 1rem; }
