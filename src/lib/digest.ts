@@ -3,6 +3,7 @@
 // admin Email tab controls. Ported from the reference stack's src/lib/digest.ts, adapted to
 // church-cms: names come from *_i18n companion tables (English used for the mail
 // variables), sendEmail takes (env, db, msg), and dates run in America/Chicago.
+import { emailLanguagesFor } from './emailLocales';
 import type { AppDb } from './appDb';
 import { addDays, todayInTz } from './dates';
 import { i18nJoin } from './db';
@@ -84,8 +85,8 @@ export async function sendWeeklyDigest(env: EmailEnv, db: AppDb, now: Date = new
   const sent: string[] = [];
   for (const rows of byPerson.values()) {
     const { person_name, email } = rows[0];
-    const only = rows[0].lang === 'en' || rows[0].lang === 'zh' ? (rows[0].lang as Locale) : null;
-    const langs: Locale[] = only ? [only] : ['zh', 'en'];
+    const langs: Locale[] = await emailLanguagesFor(db, rows[0].lang);
+    const only: Locale | null = langs.length === 1 ? langs[0] : null;
     const lines = rows.map((r) => {
       const respond = r.status === 'U' ? ' ' + langs.map((l) => t(l, 'email.digestRespond')).join(' ') : '';
       return `${r.plan_date} — ${r.position_name} (${r.team_name}) · ${r.service_type_name}${respond}`;

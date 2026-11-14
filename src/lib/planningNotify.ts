@@ -9,6 +9,8 @@ import { getEffectiveCampusModules } from './campusDb';
 import { todayInTz, addDays } from './dates';
 import { getEnabledModules } from './modules';
 import { bilingualEmail } from './notify';
+import { pickPair } from './locales';
+import { emailLanguagesFor } from './emailLocales';
 import { getEvent, getRule, getSession, listSessionPeople, type PlanningEvent, type PlanningSession, type RuleKey } from './planningDb';
 import { parseHM } from './planningModel';
 import type { Locale } from './locales';
@@ -24,13 +26,9 @@ const KIND_LOG: Record<PlanningNoticeKind, string> = {
   remind: 'planningRemind',
 };
 
-function toLang(lang: string | null): Locale | null {
-  return lang === 'en' || lang === 'zh' ? lang : null;
-}
 
 function both(en: string, zh: string, only: Locale | null): string {
-  if (only === 'zh') return zh || en;
-  if (only === 'en') return en || zh;
+  if (only) return pickPair(only, en, zh);
   return en && zh && en !== zh ? `${en} / ${zh}` : en || zh;
 }
 
@@ -85,7 +83,8 @@ async function sendOne(
   person: { person_id: number; display_name: string; email: string | null; lang: string | null; call_time: string | null },
   kind: PlanningNoticeKind,
 ): Promise<boolean> {
-  const only = toLang(person.lang);
+  const langs = await emailLanguagesFor(db, person.lang);
+  const only: Locale | null = langs.length === 1 ? langs[0] : null;
   const call = person.call_time && parseHM(person.call_time) !== null ? person.call_time : session.start_time;
   const built = bilingualEmail({
     subjectKey: `planning.email.${kind}Subject`,
@@ -101,6 +100,7 @@ async function sendOne(
     },
     link: `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/planning/${event.id}`,
     only,
+    langs,
   });
   const ok = await sendEmail(env, db, {
     to: person.email!,
