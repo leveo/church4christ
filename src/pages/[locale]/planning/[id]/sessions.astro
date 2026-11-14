@@ -175,7 +175,7 @@ const err = (field: string) => (errors[field] ? t(locale, errors[field]) : null)
 ---
 <Member active="planning" title={t(locale, 'planning.tab.sessions')} locale={locale} noindex>
   <div class="member-content planning-page">
-    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
+    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
     <PlanningHeader locale={locale} event={event} current="sessions" manager={true} />
 
     {Astro.url.searchParams.has('saved') && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.saved')}</p>}

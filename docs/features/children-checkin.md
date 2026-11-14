@@ -56,7 +56,16 @@ past check-ins stay exactly as they were.
 
 **Setting up the kiosk device.** The **Kiosk** tab shows the tablet's URL and a copy
 button. If a tablet is lost or a device is retired, **regenerating** the link
-immediately shuts out the old one — the new URL is the only way in from then on.
+immediately shuts out the old one — the new URL is the only way in from then on. The tab
+also shows a QR code for the same link, so a tablet can open it by scanning instead of typing.
+
+**On a phone.** The kiosk and the admin console both work at phone width. On the **Today**
+tab each check-in becomes a card with the child's name, the large pickup code, the in and out
+times, and a full-width **Check out** button, so staff can release a child from a phone
+without scrolling sideways. The kiosk keeps its search box at the top of the screen and asks
+the phone keyboard for a search key rather than a return key.
+
+![Today's roster as cards on a phone](../images/mobile/children-today.png)
 
 ## How it fits together
 

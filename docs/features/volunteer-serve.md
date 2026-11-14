@@ -90,6 +90,16 @@ still unconfirmed as their service approaches, and a weekly digest listing each 
 for the coming week. These run on their own; a leader never has to send them by hand. (Which
 reminders run is controlled on the Email tab — see [Email and automation](email-automation.md).)
 
+**On a phone.** The scheduling matrix turns into one card per service date: the date with its
+weekday, then each position, who is serving with their status, and a full-size assign control
+for leaders. Accept, decline and claim buttons, the blockout form, and the personal calendar are
+all sized for thumbs. The calendar shows your agenda first with the month as compact day dots,
+and offers a Subscribe link, an **Add to Google Calendar** link, and a copy button. Declining
+asks for confirmation, and the Accept or Decline link in the request email shows the weekday,
+date and service time.
+
+![The scheduling matrix on a phone](../images/mobile/serve-matrix.png)
+
 ## How it fits together
 
 The diagram shows the four building blocks across the top, how a plan turns into assignments,

@@ -323,7 +323,7 @@ const copy = gatheringsCopy(lang);
                             <input type="hidden" name="action" value="toggle-event" />
                             <input type="hidden" name="id" value={ev.id} />
                             <input type="hidden" name="active" value={ev.active === 1 ? '0' : '1'} />
-                            <button type="submit" class="text-xs font-semibold text-ink-muted hover:text-danger">
+                            <button type="submit" class="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-ink-muted hover:text-danger">
                               {t(lang, ev.active === 1 ? 'admin.children.events.deactivate' : 'admin.children.events.reactivate')}
                             </button>
                           </form>
@@ -379,9 +379,9 @@ const copy = gatheringsCopy(lang);
           </label>
 
           {kioskQr && (
-            <figure class="mt-5 flex items-center gap-4">
+            <figure class="mt-5 flex flex-wrap items-center gap-4">
               <div class="h-36 w-36 shrink-0 rounded-md border border-border bg-white p-2 text-black" set:html={kioskQr} />
-              <figcaption class="text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.qrHint')}</figcaption>
+              <figcaption class="min-w-0 flex-1 basis-40 text-sm text-ink-muted">{t(lang, 'admin.children.kiosk.qrHint')}</figcaption>
             </figure>
           )}
 

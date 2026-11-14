@@ -382,7 +382,7 @@ export const README_DIAGRAMS = Object.freeze([
 //     --only mobile/serve-matrix.png,mobile/my-calendar.png,mobile/my-blockouts.png,mobile/planning-run-sheet.png
 // kiosk-code performs the real check-in that children-today then lists, so keep that order.
 export const MOBILE_CAPTURE_ROWS = Object.freeze([
-  { path: '/kiosk/devkiosk1234567890abcdef12345678/?lang=en&q=Chen', out: 'docs/images/mobile/kiosk-search.png', viewport: MOBILE_VIEWPORT, expectedText: 'Chen' },
+  { path: '/kiosk/devkiosk1234567890abcdef12345678/?lang=en&q=Chen', out: 'docs/images/mobile/kiosk-search.png', viewport: MOBILE_VIEWPORT },
   {
     path: '/kiosk/devkiosk1234567890abcdef12345678/household/1?lang=en&q=Chen',
     out: 'docs/images/mobile/kiosk-code.png',
@@ -390,9 +390,9 @@ export const MOBILE_CAPTURE_ROWS = Object.freeze([
     postForm: { checkAll: 'input[name="member"]', form: 'form[method="post"]' },
   },
   { path: '/admin/children?tab=today', out: 'docs/images/mobile/children-today.png', admin: true, viewport: MOBILE_VIEWPORT, expectedText: 'Child' },
-  { path: '/en/serve/matrix/1', out: 'docs/images/mobile/serve-matrix.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Sunday Worship (English)' },
-  { path: '/en/my/calendar', out: 'docs/images/mobile/my-calendar.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Calendar' },
-  { path: '/en/my/blockouts', out: 'docs/images/mobile/my-blockouts.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Add' },
+  { path: '/en/serve/matrix/1', out: 'docs/images/mobile/serve-matrix.png', anchor: 'day, ', anchorMargin: 20, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Sunday Worship (English)' },
+  { path: '/en/my/calendar', out: 'docs/images/mobile/my-calendar.png', anchor: 'This month', anchorMargin: 60, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Calendar' },
+  { path: '/en/my/blockouts', out: 'docs/images/mobile/my-blockouts.png', anchor: 'Add a blockout', anchorMargin: 20, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Add' },
   // Seeded Christmas Service run sheet (planning_events id 31000 in seed/dev-seed.sql); Sarah coordinates it.
   { path: '/en/planning/31000', out: 'docs/images/mobile/planning-run-sheet.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Christmas Service' },
 ]);

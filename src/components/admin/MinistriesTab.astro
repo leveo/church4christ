@@ -131,7 +131,7 @@ const editOf = (id: number) => editRows.find((r) => r.id === id);
               }
               <label class="block">
                 <span class={lab}>{coverSrc ? t(lang, 'admin.console.changeCover') : t(lang, 'admin.console.coverImage')}</span>
-                <input type="file" name="cover_image" accept="image/jpeg,image/png,image/webp,image/gif" class="w-full text-sm" />
+                <input type="file" name="cover_image" accept="image/jpeg,image/png,image/webp,image/gif" class="w-full text-base sm:text-sm" />
               </label>
               <label class="flex min-h-11 items-center gap-2 text-sm">
                 <input type="checkbox" name="remove_cover" class="h-5 w-5" /> {t(lang, 'admin.console.removeCover')}

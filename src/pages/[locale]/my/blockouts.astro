@@ -54,7 +54,7 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
 
 <Member active="blockouts" title={t(locale, 'my.blockouts')} locale={locale} noindex>
   <div class="member-content">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <a href={localePath(locale, '/my')} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
     <MemberPageHeader title={t(locale, 'my.blockouts')} />
     {Astro.locals.modules.has('planning') && <p class="mt-2"><a href={localePath(locale, '/my/availability')} class="text-sm font-semibold text-primary hover:underline">{t(locale, 'planning.availability.link')}</a></p>}
 

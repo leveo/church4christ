@@ -183,7 +183,7 @@ const weekdayOf = (d: string) => weekdayShort(d, locale);
                             <div class="mt-1 flex flex-wrap gap-1.5">
                               {cell.map((a) => (
                                 <span class={`inline-block rounded-full border px-3 py-1 text-sm font-semibold ${statusStyles[a.status]}`}>
-                                  {a.person_name} <span>{t(locale, `serve.status.${a.status}`)}</span>
+                                  {a.person_name} <span class="opacity-80">· {t(locale, `serve.status.${a.status}`)}</span>
                                 </span>
                               ))}
                               {Array.from({ length: Math.max(0, slotsLeft) }).map(() => (

@@ -302,7 +302,7 @@ const copy = ministryCopy(lang);
     )}
   </MinistryHeader>
 
-  <nav class="mt-5 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border sm:flex-wrap sm:overflow-visible" aria-label={t(lang, 'admin.console.title')}>
+  <nav data-console-tabs class="mt-5 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border sm:flex-wrap sm:overflow-visible" aria-label={t(lang, 'admin.console.title')}>
     {tabs.filter((tb) => tb.show).map((tb) => (
       <a href={`/admin/ministries?tab=${tb.id}${scopeQ}`}
          aria-current={tab === tb.id ? 'page' : undefined}
@@ -328,3 +328,8 @@ const copy = ministryCopy(lang);
   </div>
 </MinistryWorkspace>
 </Admin>
+
+<script>
+  // On phones the tab strip scrolls sideways; keep the current tab in view.
+  document.querySelector('[data-console-tabs] [aria-current="page"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+</script>

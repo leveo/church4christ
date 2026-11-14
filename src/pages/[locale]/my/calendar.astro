@@ -99,8 +99,8 @@ const googleUrl = webcalUrl ? `https://calendar.google.com/calendar/r?cid=${enco
     <div class="mt-2 flex items-center gap-4">
       <h2 class="text-xl font-semibold">{formatMonth(ym, locale)}</h2>
       <div class="ml-auto flex gap-2 text-sm">
-        <a href={localePath(locale, `/my/calendar?month=${prev}`)} class={btnSecondary}>{t(locale, 'my.cal.prev')}</a>
-        <a href={localePath(locale, `/my/calendar?month=${next}`)} class={btnSecondary}>{t(locale, 'my.cal.next')}</a>
+        <a href={localePath(locale, `/my/calendar?month=${prev}`)} class={`${btnSecondary} whitespace-nowrap`}>{t(locale, 'my.cal.prev')}</a>
+        <a href={localePath(locale, `/my/calendar?month=${next}`)} class={`${btnSecondary} whitespace-nowrap`}>{t(locale, 'my.cal.next')}</a>
       </div>
     </div>
 

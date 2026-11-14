@@ -149,7 +149,7 @@ const confirmAttr = (key: string) => `return confirm(${JSON.stringify(t(locale, 
 ---
 <Member active="planning" title={pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)} locale={locale} noindex>
   <div class="member-content planning-page">
-    <a href={localePath(locale, role === 'admin' ? '/admin/planning' : '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'planning.title')}</a>
+    <a href={localePath(locale, role === 'admin' ? '/admin/planning' : '/my')} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {t(locale, 'planning.title')}</a>
     <PlanningHeader locale={locale} event={event} current="manage" manager={true} />
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.saved')}</p>}

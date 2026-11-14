@@ -49,6 +49,15 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
 
 ### Changed
 
+- Children's check-in and volunteer scheduling now work at phone width (375px): Today
+  check-ins are cards with a full-width Check out button, the scheduling matrix and the
+  availability grid become per-date and per-member cards, kiosk inputs open the right phone
+  keyboard, and buttons, inputs and the admin top bar meet touch-size targets with 16px
+  inputs. The Kiosk tab shows a QR code of the kiosk link, drawn on the server with the new
+  `qrcode-generator` dependency (MIT, no dependencies). Forms that carried a `data-confirm`
+  message (deleting a team or service type) now actually ask before submitting. The Accept or
+  Decline email shows a short button instead of the raw link. Installing the update needs
+  `npm ci` only; there are no migrations or settings to change.
 - `portal` no longer requires the Supabase backend; only Giving and Registration do. A
   portal-only selection now resolves to D1, and a selection that also includes Giving or
   Registration still resolves to Supabase.

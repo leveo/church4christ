@@ -64,3 +64,16 @@ describe('phone keyboards for serve forms', () => {
     expect(serviceTypes).toContain('type="number" inputmode="numeric"');
   });
 });
+
+import workspace from '../src/components/ministry/MinistryWorkspace.astro?raw';
+import surface from '../src/components/gatherings/GatheringSurface.astro?raw';
+
+describe('shared workspace phone rules', () => {
+  it('lifts ministry buttons and inputs to touch size and 16px on phones', () => {
+    expect(workspace).toMatch(/max-width: 800px\) \{ \.ministry-workspace :global\(button\), \.ministry-workspace :global\(select\) \{ min-height: 2\.75rem/);
+    expect(workspace).toContain('font-size: max(1rem, 16px)');
+  });
+  it('lets the kiosk panel shrink so the QR and URL never force horizontal scroll', () => {
+    expect(surface).toContain('.gathering-kiosk-panel > *) { min-width: 0; }');
+  });
+});

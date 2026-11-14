@@ -54,7 +54,7 @@ const saved = Astro.url.searchParams.has('saved');
 ---
 <Member active="availability" title={t(locale, 'planning.availability.title')} locale={locale} noindex>
   <div class="member-content availability-page">
-    <a href={localePath(locale, '/my/blockouts')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.blockouts')}</a>
+    <a href={localePath(locale, '/my/blockouts')} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.blockouts')}</a>
     <MemberPageHeader title={t(locale, 'planning.availability.title')} description={t(locale, 'planning.availability.intro')} />
 
     {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.saved')}</p>}

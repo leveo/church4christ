@@ -325,6 +325,7 @@
     .workspace-mobile-nav > nav { padding-bottom: 1rem; max-height: 70dvh; overflow-y: auto; }
     .workspace-topbar { padding: .65rem 1rem; min-height: 60px; gap: .75rem; flex-wrap: wrap; }
     .workspace-main { padding: 1.5rem 1rem; }
+    .workspace-campus select { font-size: 1rem; min-height: 2.75rem; }
     .workspace-email, .workspace-page-title { display: none; }
   }
 }

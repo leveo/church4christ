@@ -62,7 +62,7 @@ const fmtRange = (a: { start: string; end: string }) => `${a.start}–${a.end}`;
 ---
 <Member active="planning" title={t(locale, 'planning.tab.calendar')} locale={locale} noindex>
   <div class="member-content planning-page">
-    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
+    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
     <PlanningHeader locale={locale} event={event} current="calendar" manager={true} />
     <p class="mt-4 text-sm text-ink-muted">{t(locale, 'planning.cal.intro')}</p>
 

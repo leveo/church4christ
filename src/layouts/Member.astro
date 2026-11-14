@@ -23,8 +23,8 @@ const user = Astro.locals.user;
     <div class="member-main"><slot /></div>
   </div>
   <div class="member-footer container-wide">
-    <a href={localePath(locale, '/')}>{t(locale, 'admin.nav.viewSite')}</a>
-    <a href={localePath(locale, '/privacy')}>{memberCopy(locale).privacy}</a>
+    <a class="inline-flex min-h-11 items-center" href={localePath(locale, '/')}>{t(locale, 'admin.nav.viewSite')}</a>
+    <a class="inline-flex min-h-11 items-center" href={localePath(locale, '/privacy')}>{memberCopy(locale).privacy}</a>
     <div class="ml-auto"><ModeToggle /></div>
   </div>
 </Base>

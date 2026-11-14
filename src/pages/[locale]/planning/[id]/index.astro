@@ -38,7 +38,7 @@ const notes = pickLocalizedText({ en: event.notes_en, zh: event.notes_zh }, loca
 ---
 <Member active="planning" title={pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)} locale={locale} noindex>
   <div class="member-content">
-    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <a href={localePath(locale, '/my')} class="inline-flex min-h-11 items-center text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
     <PlanningHeader locale={locale} event={event} current="view" manager={manager} />
 
     {event.status === 'cancelled' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.view.cancelled')}</p>}
