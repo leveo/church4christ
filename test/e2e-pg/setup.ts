@@ -32,8 +32,21 @@ const sql = postgres(hyperdrive.connectionString, {
   fetch_types: false,
   prepare: false,
   onnotice: () => {},
+  // This module runs at top level, outside any Vitest hook timeout. A lock held by
+  // a connection left over from the previous file once stalled TRUNCATE until the
+  // CI job limit cancelled it; bounded waits make that fail loudly instead.
+  connection: { lock_timeout: '20s', statement_timeout: '120s' },
 });
 try {
+  // Files run serially, so any other session on this database belongs to an
+  // earlier file (for example a worker request still inside a transaction). End
+  // those sessions before taking TRUNCATE's exclusive locks.
+  await sql.unsafe(
+    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+     WHERE datname = current_database() AND pid <> pg_backend_pid()
+       AND backend_type = 'client backend' AND state <> 'idle'`,
+  );
+
   // Clear private rows before public rows because both private tables reference
   // public records. Keep the qualified order explicit so later private tables
   // cannot survive this per-file reset accidentally.
