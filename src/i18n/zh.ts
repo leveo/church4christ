@@ -2187,6 +2187,7 @@ export default {
   'admin.settings.modeLight': '浅色',
   'admin.settings.modeDark': '深色',
   'admin.settings.localeDefault': '默认语言',
+  'admin.localeFields.default': '默认',
   'admin.settings.languagesTitle': '语言',
   'admin.settings.languagesIntro': '选择访客可以使用的语言。页面和邮件会依次回退到访客的语言、默认语言、英文。关闭某种语言只会隐藏它，不会删除任何内容。',
   'admin.settings.localeEnabled': '启用的语言',

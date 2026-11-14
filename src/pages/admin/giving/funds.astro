@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 // Funds admin (finance route class — /admin/giving is admin ∪ finance-flagged).
 // Inline add/edit model like the events console: a create form doubling as an
 // editor (?edit=<id>), plus a per-row activate/deactivate toggle. A fund carries
@@ -171,27 +172,8 @@ const copy = financeCopy(lang);
           {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
         </label>
       </div>
-      <div class="finance-entry-fields">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundNameEn')}</span>
-          <input name="name_en" value={v.nameEn} class={tin} />
-          {errors.name_en && <span class={errorText}>{t(lang, errors.name_en)}</span>}
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundNameZh')}</span>
-          <input name="name_zh" value={v.nameZh} class={tin} />
-        </label>
-      </div>
-      <div class="finance-entry-fields">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundDescriptionEn')}</span>
-          <textarea name="description_en" rows="2" maxlength="500" class={tin}>{v.descEn}</textarea>
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.giving.fundDescriptionZh')}</span>
-          <textarea name="description_zh" rows="2" maxlength="500" class={tin}>{v.descZh}</textarea>
-        </label>
-      </div>
+      <LocaleFields name="name" label={t(lang, 'admin.giving.fundNameEn')} values={{ en: v.nameEn, zh: v.nameZh }} lang={lang} error={errors.name_en} />
+      <LocaleFields name="description" label={t(lang, 'admin.giving.fundDescriptionEn')} values={{ en: v.descEn, zh: v.descZh }} lang={lang} multiline rows={2} maxlength={500} />
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
       </label>

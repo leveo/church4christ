@@ -2192,6 +2192,7 @@ export default {
   'admin.settings.modeLight': 'Light',
   'admin.settings.modeDark': 'Dark',
   'admin.settings.localeDefault': 'Default language',
+  'admin.localeFields.default': 'Default',
   'admin.settings.languagesTitle': 'Languages',
   'admin.settings.languagesIntro': 'Choose the languages visitors can use. Pages and emails fall back from the visitor\'s language to the default language, then English. Turning a language off hides it; no content is deleted.',
   'admin.settings.localeEnabled': 'Enabled languages',
