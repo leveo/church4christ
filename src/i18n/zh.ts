@@ -1827,6 +1827,7 @@ export default {
   'portal.events.title': '活动',
   'portal.events.mine': '我的报名',
   'portal.events.mineEmpty': '你还没有报名任何活动。',
+  'portal.events.registrationOff': '本站未启用活动报名，因此这里没有可显示的报名记录。',
   'portal.events.status.pending': '待处理',
   'portal.events.status.confirmed': '已确认',
   'portal.events.open': '开放报名',

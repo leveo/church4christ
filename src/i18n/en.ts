@@ -1830,6 +1830,7 @@ export default {
   'portal.events.title': 'Events',
   'portal.events.mine': 'My registrations',
   'portal.events.mineEmpty': "You haven't registered for any events yet.",
+  'portal.events.registrationOff': 'Event registration is not enabled on this site, so there are no registrations to show here.',
   'portal.events.status.pending': 'Pending',
   'portal.events.status.confirmed': 'Confirmed',
   'portal.events.open': 'Open for registration',

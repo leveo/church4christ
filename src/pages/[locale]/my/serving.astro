@@ -9,7 +9,7 @@
 //
 // The accept/decline/claim POST handler is DELIBERATELY duplicated from
 // my/index.astro rather than shared: /my must stay self-sufficient (it also runs
-// standalone on the D1 backend, without the `portal` module), so its handler
+// standalone without the `portal` module), so its handler
 // can't depend on this portal-only page or vice versa. Keep the two in sync by
 // hand if the response/claim semantics ever change.
 import { env } from 'cloudflare:workers';
@@ -33,6 +33,11 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = Astro.locals.db;
+// The nav already hides this page without Volunteer Scheduling; match it here.
+if (!Astro.locals.modules.has('serve')) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
 
 const idOf = (v: FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;

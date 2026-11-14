@@ -25,8 +25,11 @@ if (!locale) {
 const user = Astro.locals.user!;
 const db = Astro.locals.db;
 
-const myRegistrations = await listRegistrationsForPerson(db, locale, user.id, user.email);
-const openEvents = Astro.locals.modules.has('registration') ? await listOpenEvents(db, locale) : [];
+// Registration is Supabase-only. With it off (always on D1) no registrations
+// table is read and the page shows an informational state instead of a 500.
+const registrationOn = Astro.locals.modules.has('registration');
+const myRegistrations = registrationOn ? await listRegistrationsForPerson(db, locale, user.id, user.email) : [];
+const openEvents = registrationOn ? await listOpenEvents(db, locale) : [];
 
 const statusChip: Record<'pending' | 'confirmed', string> = {
   pending: 'bg-warn-soft text-warn',
@@ -47,7 +50,9 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
     <section class="mt-8">
       <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.events.mine')}</h2>
       {
-        myRegistrations.length === 0 ? (
+        !registrationOn ? (
+          <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.events.registrationOff')}</p>
+        ) : myRegistrations.length === 0 ? (
           <p class="mt-3 text-sm text-ink-muted">{t(locale, 'portal.events.mineEmpty')}</p>
         ) : (
           <ul class="mt-4 flex flex-col gap-4">
@@ -71,7 +76,7 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
     </section>
 
     {
-      Astro.locals.modules.has('registration') && (
+      registrationOn && (
         <section class="mt-10">
           <h2 class="font-display text-lg font-semibold">{t(locale, 'portal.events.open')}</h2>
           {openEvents.length === 0 ? (

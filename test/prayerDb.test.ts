@@ -2,14 +2,13 @@
 // layer: post eligibility per scope, scoped tab visibility, the approver's
 // moderation queue, decide/delete authority, and the event_admins helpers.
 //
-// Fusion note: this repo's `groups`/`group_members`/`people` ARE real D1 tables
-// (migrations/0006_groups.sql, 0003_people.sql), so — like groupFiles.test.ts —
-// membership uses the real groupDb tables directly. Only the Supabase-only
-// tables (prayer_items/event_admins and the reg_events/reg_event_i18n/
-// registrations they lean on, all in migrations-supabase/0009 / 0003 with no D1
-// counterpart) are CREATE TABLE IF NOT EXISTS'd here, matching the PG DDL minus
-// identity (plain INTEGER PRIMARY KEY). The real PG DDL is covered by the pg e2e
-// suite (Task 6).
+// Fusion note: this repo's `groups`/`group_members`/`people` and (since
+// migrations/0039) `prayer_items` ARE real D1 tables, so membership and prayer
+// rows use the real tables directly. Only the Supabase-only Registration tables
+// the event scope leans on (event_admins, reg_events, reg_event_i18n,
+// registrations) are CREATE TABLE IF NOT EXISTS'd here. The registration-off
+// behavior is covered by test/portalD1.test.ts, which has no such stubs. The real
+// PG DDL is covered by the pg e2e suite.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {

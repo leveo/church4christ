@@ -50,8 +50,8 @@ const ym = `${year}-${String(month).padStart(2, '0')}`;
 const { start: monthStart, end: monthEnd } = monthRange(ym);
 
 // Portal group-event occurrences + (when registration is also on) the viewer's
-// own event registrations, gated on the module so the D1 backend (portal always
-// off there) never adds those marks. Ported from the reference /my/calendar,
+// own event registrations, gated on the modules so a site without the portal (or
+// without Registration, which is Supabase-only) never adds those marks. Ported from the reference /my/calendar,
 // swapping the occurrence source to this repo's materialized occurrences.
 const hasPortal = Astro.locals.modules.has('portal');
 const hasRegistration = hasPortal && Astro.locals.modules.has('registration');

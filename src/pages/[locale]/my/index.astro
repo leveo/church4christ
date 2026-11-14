@@ -5,13 +5,13 @@
 // the calendar / giving / blockouts / profile pages. Ported from the reference
 // stack's src/pages/my/index.astro.
 //
-// Portal card row (member portal): when the `portal` module is on (supabase-only
+// Portal card row (member portal): when the `portal` module is on (D1 and Supabase
 // — see modules.ts), a card row above the schedule surfaces the viewer's
 // household, groups (via the public groups module's listGroupsForPerson), any
 // pending join requests for groups they administer, and — when `registration` is
 // also on — their next upcoming event registrations. Every read is gated on the
-// module check so the D1 backend (portal/registration always off there) never
-// touches those tables. The pending-approvals card is structured so a later task
+// module checks so a site with registration off (always the case on D1) never
+// touches the Registration tables. The pending-approvals card is structured so a later task
 // can fold prayer-item approvals into it.
 //
 // Authorization: respondToAssignment is called with the SESSION user's id — its
@@ -84,9 +84,9 @@ if (Astro.request.method === 'POST') {
 
 const claimed = Astro.url.searchParams.get('claimed') === '1';
 const today = todayInTz();
-// The portal-gated card row below reads household/group/registration data that
-// lives only on the supabase backend — module gating keeps those queries off D1
-// (portal always off there, see modules.ts) so it never touches those tables.
+// The portal-gated card row below reads household/group data (both backends) and
+// registration data (Supabase-only: the `registration` module is always off on D1,
+// see modules.ts), so registration and event-admin queries are gated separately.
 const hasPortal = Astro.locals.modules.has('portal');
 const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
 // listPendingForApprover receives the whole user so only a super admin gets
@@ -98,7 +98,7 @@ const [assignments, openSlots, applications, household, myGroups, upcomingRegist
   hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
   hasPortal ? listGroupsForPerson(db, user.id) : Promise.resolve([]),
   hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
-  hasPortal ? listPendingForApprover(db, user.id, user, locale) : Promise.resolve([]),
+  hasPortal ? listPendingForApprover(db, user.id, user, locale, { registration: hasRegistration }) : Promise.resolve([]),
 ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');

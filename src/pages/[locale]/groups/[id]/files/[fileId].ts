@@ -7,9 +7,8 @@ export const prerender = false;
 
 // Auth-gated R2 download for a group file (every /media/ object is public; this
 // is the codebase's ONE exception). /groups is groups-module-owned and runs on
-// D1 too, but group_files is Supabase-only — so the FIRST gate is the portal
-// module: with it off the table does not exist and the route must 404 before any
-// query. Then we fail closed on a missing user, validate the ids, and defer the
+// both backends, and group_files belongs to the portal — so the FIRST gate is the
+// portal module: with it off the route must 404 before any query. Then we fail closed on a missing user, validate the ids, and defer the
 // ACL (member ∪ site-admin-with-groups-grant) to getGroupFileForDownload.
 export const GET: APIRoute = async ({ params, locals }) => {
   if (!locals.modules.has('portal')) return new Response('Not found', { status: 404 });

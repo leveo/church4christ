@@ -83,8 +83,8 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
   // Portal additions: group routine-event occurrences, and — when registration
   // is also on — the person's own event registrations. Gated on locals.modules,
   // which the middleware computes (and backend-filters) for EVERY request, this
-  // public feed route included, so a D1 church (portal force-disabled there)
-  // leaves the serving section above byte-identical. `from` (30 days of history)
+  // public feed route included, so a church without the portal module leaves
+  // the serving section above byte-identical. `from` (30 days of history)
   // doubles as both windows' lower bound; occurrences run to +180 days.
   if (locals.modules.has('portal')) {
     const to = addDays(todayInTz(), 180);

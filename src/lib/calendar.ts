@@ -4,7 +4,7 @@
 export interface DayMark {
   statuses: ('U' | 'C' | 'D')[];
   blocked: boolean;
-  /** Portal event titles landing on this day (Member Portal Phase 4 — empty/absent on D1). */
+  /** Portal event titles landing on this day (Member Portal Phase 4 — empty/absent when the portal is off). */
   events?: string[];
   /** Portal group-meeting labels landing on this day (Member Portal Phase 4 — empty/absent on D1). */
   meetings?: string[];
