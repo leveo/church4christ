@@ -1,6 +1,6 @@
 # Supabase setup — Giving and Registration (Stripe Preview/test only)
 
-Setup is capability-driven: selections among the 19 D1-compatible modules (including
+Setup is capability-driven: selections among the 20 D1-compatible modules (including
 **Member Portal**) choose D1 unless you explicitly override the backend. **Giving** and
 **Registration** require Postgres, so setup selects **Supabase** when either is enabled.
 Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
