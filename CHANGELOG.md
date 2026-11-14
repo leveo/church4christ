@@ -10,9 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
-Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on-d1),
-[Production Giving](docs/upgrade.md#unreleased-production-giving),
-[Service Planning](docs/upgrade.md#unreleased-service-planning).
+## [1.5.0] - 2026-11-14
+
+Upgrade notes: [Upgrading 1.4.0 to 1.5.0](docs/upgrade.md#upgrading-140-to-150):
+[Member Portal on D1](docs/upgrade.md#member-portal-on-d1),
+[Production Giving](docs/upgrade.md#production-giving),
+[Service Planning](docs/upgrade.md#service-planning).
 
 ### Added
 
@@ -47,6 +50,10 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
   Volunteering that works on D1 and Supabase. See
   [`docs/features/service-planning.md`](docs/features/service-planning.md).
 
+- The Supabase setup guide opens its Stripe section with a short, no-code overview for churches
+  and nonprofits, linking Stripe's official pages for account activation, the nonprofit fee
+  discount, receipts, the customer portal, ACH, keys, webhooks, and test cards.
+
 ### Changed
 
 - Children's check-in and volunteer scheduling now work at phone width (375px): Today
@@ -76,6 +83,12 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
 - The thank-you page says Stripe emails the receipt (the app never sent one).
 - `people.stripe_customer_id` is now a legacy test-mode read fallback; customers live in
   `stripe_customers`, one per person per mode.
+
+### Fixed
+
+- The children's Kiosk tab QR label and hint, and the "My giving" link on the giving thank-you
+  page, showed raw dictionary keys. A new test fails when any literal translation key used in
+  source is missing from either dictionary.
 
 ### Operator impact
 

@@ -250,6 +250,43 @@ Stripe owns the payment page, card and bank details, receipts, the Billing Porta
 refunds, and disputes. This application stores only amounts, funds, dates, status, and
 Stripe ids. Both Giving and Registration use the same Stripe mode (`STRIPE_MODE`).
 
+### Setting up Stripe for a church or nonprofit
+
+Stripe setup is mostly filling in forms. You need no code and no Stripe developer
+experience. Most of the work is done once in Stripe's own dashboard, and this
+project's installer imports the two values it needs. At a high level:
+
+1. **Create a free Stripe account** at
+   [dashboard.stripe.com/register](https://dashboard.stripe.com/register). You can explore
+   test mode right away, before giving Stripe any business details.
+2. **Activate the account for real payments** by entering your organization's legal name,
+   EIN or other tax number, address, a representative, and the bank account that receives
+   donations. See Stripe's guide,
+   [Activate your account](https://docs.stripe.com/get-started/account/activate).
+3. **Ask Stripe for the nonprofit fee discount** if you qualify. Stripe offers lower
+   processing fees to registered nonprofits in supported countries whose Stripe volume is
+   at least 80% tax-deductible donations. You request it from Stripe support with your
+   account ID and tax documents, such as your IRS 501(c)(3) letter. See
+   [Fee discount for nonprofit organizations](https://support.stripe.com/questions/fee-discount-for-nonprofit-organizations)
+   and [Stripe for nonprofits](https://stripe.com/industries/nonprofits).
+4. **Turn on donor receipts and the donor portal** in the Stripe dashboard:
+   [email receipts](https://docs.stripe.com/receipts) and the
+   [customer portal](https://docs.stripe.com/customer-management/activate-no-code-customer-portal),
+   which donors use to change or cancel recurring gifts.
+5. **Optional: bank (ACH) giving.** Lower-fee bank payments for larger gifts are
+   available through Stripe's
+   [ACH Direct Debit](https://docs.stripe.com/payments/ach-direct-debit); Checkout offers it
+   automatically once it is enabled.
+6. **Connect Church4Christ**: copy an [API key](https://docs.stripe.com/keys), add one
+   [webhook endpoint](https://docs.stripe.com/webhooks), and give both to the installer, as
+   shown in 7a. Rehearse with [Stripe's test cards](https://docs.stripe.com/testing), then
+   follow the go-live checklist in 7b.
+
+Stripe's eligibility rules and fees can change, so confirm the current terms on the linked
+Stripe pages. Stripe's help article
+[How to accept donations through Stripe](https://support.stripe.com/questions/how-to-accept-donations-through-stripe)
+gives the same overview in Stripe's own words.
+
 ### 7a. Start in test mode
 
 1. **Create a Stripe account** at [stripe.com](https://stripe.com/) and stay in **test

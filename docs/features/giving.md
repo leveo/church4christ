@@ -154,7 +154,12 @@ whose mode differs from the configured mode is rejected.
 Giving is **Supabase (Postgres)-only**; the module gate keeps it off in the D1
 configuration. Stand up the Supabase backend first (see
 [`docs/supabase-setup.md`](../supabase-setup.md)), then follow **Stripe setup and go-live**
-there. In short:
+there. Setting up Stripe itself takes forms, not code. Create an account, activate it with
+your organization's details and bank account, and, if you qualify, ask Stripe for its
+[nonprofit fee discount](https://support.stripe.com/questions/fee-discount-for-nonprofit-organizations).
+The step-by-step overview with Stripe's official links is in
+[Setting up Stripe for a church or nonprofit](../supabase-setup.md#setting-up-stripe-for-a-church-or-nonprofit).
+Then, in this project:
 
 1. Start in **test mode** with an `sk_test_…` key and a test webhook endpoint; pass them only
    to the setup installer, which stores them under the runtime secret names:
