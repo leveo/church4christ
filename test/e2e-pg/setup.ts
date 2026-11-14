@@ -35,7 +35,7 @@ const sql = postgres(hyperdrive.connectionString, {
   // This module runs at top level, outside any Vitest hook timeout. A lock held by
   // a connection left over from the previous file once stalled TRUNCATE until the
   // CI job limit cancelled it; bounded waits make that fail loudly instead.
-  connection: { lock_timeout: '20s', statement_timeout: '120s' },
+  connection: { lock_timeout: 20_000, statement_timeout: 120_000 }, // milliseconds
 });
 try {
   // Files run serially, so any other session on this database belongs to an
