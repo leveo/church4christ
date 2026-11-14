@@ -17,7 +17,7 @@ newcomer follow-up, prayer care, sermons, bulletins, events, and an optional mem
 portal, giving ledger, and event registration, in one codebase you can read, change,
 and host yourself. [中文简介](#中文简介)
 
-**See the demo: [church4christ.yunfei-song.com](https://church4christ.yunfei-song.com).**
+**Website: [church4christ.org](https://church4christ.org) · Live demo: [demo.church4christ.org](https://demo.church4christ.org).**
 
 [![Watch the Built Around Your Ministry promotional video](https://church4christ.yunfei-song.com/C4C-modular-Poster.jpg)](https://church4christ.yunfei-song.com/C4C-modular-Voice.mp4)
 
