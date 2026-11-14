@@ -14,10 +14,15 @@ import {
   createRegistrationCheckoutFromParams,
   createPortalSession,
   requireRegistrationCheckoutSession,
-  requireTestCheckoutSession,
+  requireCheckoutSession,
   retrieveCheckoutSession,
   retrieveSubscription,
   verifyStripeWebhook,
+  livemodeMatches,
+  stripeConfiguredMode,
+  findInvoiceIdsByPaymentIntent,
+  retrieveInvoiceWithPayments,
+  STRIPE_API_VERSION,
   type StripeEnv,
 } from '../../src/lib/stripe';
 import { buildRegistrationCheckoutParams } from '../../src/lib/stripeCheckoutRequests';
@@ -52,14 +57,14 @@ const CHECKOUT_SESSION = {
   id: 'cs_test_fixture',
   url: 'https://checkout.stripe.com/c/pay/cs_test_fixture',
   mode: 'payment' as const,
-  livemode: false as const,
+  livemode: false,
   status: null,
   payment_status: null,
   payment_intent: null,
   amount_total: 5000,
   currency: 'usd',
   metadata: {
-    kind: 'gift', fund_id: '7', person_id: '42',
+    kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false',
     donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
   },
 };
@@ -130,7 +135,7 @@ describe('stripeRequest', () => {
     expect(calls[0].init?.body).toBe('mode=payment');
   });
 
-  it.each(['sk_live_secret', 'rk_test_secret', 'secret', ''])('rejects key %j before fetch', async (key) => {
+  it.each(['sk_live_secret', 'rk_test_secret', 'secret', ''])('rejects key %j under test mode before fetch', async (key) => {
     const { fn, calls } = mockFetch(json({ id: 'obj_1' }));
     await expect(
       stripeRequest({ ...ENV, STRIPE_SECRET_KEY: key }, 'checkout/sessions', {}, { fetcher: fn }),
@@ -138,12 +143,112 @@ describe('stripeRequest', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it.each([undefined, '', 'live', 'TEST'])('rejects non-test mode %j before fetch', async (mode) => {
+  it.each([undefined, '', 'TEST', 'Live', 'prod'])('rejects invalid mode marker %j before fetch', async (mode) => {
     const { fn, calls } = mockFetch(json({ id: 'obj_1' }));
     await expect(
       stripeRequest({ ...ENV, STRIPE_MODE: mode }, 'checkout/sessions', {}, { fetcher: fn }),
-    ).rejects.toMatchObject({ code: 'stripe_test_mode_required', stage: 'configuration' });
+    ).rejects.toMatchObject({ code: 'stripe_mode_invalid', stage: 'configuration' });
     expect(calls).toHaveLength(0);
+  });
+
+  it('pins the Stripe-Version header on POST and GET requests', async () => {
+    const { fn, calls } = mockFetch(() => json({ id: 'obj_1' }));
+    await stripeRequest(ENV, 'checkout/sessions', {}, { fetcher: fn });
+    await retrieveSubscription(ENV, 'sub_1', { fetcher: fn });
+    expect(headersOf(calls[0])['Stripe-Version']).toBe(STRIPE_API_VERSION);
+    expect(headersOf(calls[1])['Stripe-Version']).toBe('2025-03-31.basil');
+  });
+
+  describe('live mode', () => {
+    const LIVE: StripeEnv = {
+      STRIPE_MODE: 'live',
+      STRIPE_SECRET_KEY: 'sk_live_secret',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live',
+      STRIPE_LIVE_CONFIRMED: '1',
+      APP_ORIGIN: 'https://church.example',
+    };
+
+    it('requires an sk_live_/rk_live_ key and sends it with the pinned version', async () => {
+      const { fn, calls } = mockFetch(() => json({ id: 'obj_1' }));
+      await stripeRequest(LIVE, 'checkout/sessions', {}, { fetcher: fn });
+      await stripeRequest({ ...LIVE, STRIPE_SECRET_KEY: 'rk_live_restricted' }, 'checkout/sessions', {}, { fetcher: fn });
+      expect(headersOf(calls[0]).Authorization).toBe('Bearer sk_live_secret');
+      expect(headersOf(calls[1]).Authorization).toBe('Bearer rk_live_restricted');
+      for (const key of ['sk_test_secret', 'rk_test_secret', 'secret', '']) {
+        await expect(
+          stripeRequest({ ...LIVE, STRIPE_SECRET_KEY: key }, 'checkout/sessions', {}, { fetcher: fn }),
+        ).rejects.toMatchObject({ code: 'stripe_live_key_required', stage: 'configuration' });
+      }
+      expect(calls).toHaveLength(2);
+    });
+
+    it.each([undefined, '', '0', 'true', 'yes'])('refuses live without the explicit opt-in (%j)', async (flag) => {
+      const { fn, calls } = mockFetch(json({ id: 'obj_1' }));
+      await expect(
+        stripeRequest({ ...LIVE, STRIPE_LIVE_CONFIRMED: flag }, 'checkout/sessions', {}, { fetcher: fn }),
+      ).rejects.toMatchObject({ code: 'stripe_live_not_confirmed', stage: 'configuration' });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('a test key never works under a live marker and vice versa', async () => {
+      const { fn } = mockFetch(json({ id: 'obj_1' }));
+      await expect(
+        stripeRequest({ ...ENV, STRIPE_SECRET_KEY: 'sk_live_secret' }, 'checkout/sessions', {}, { fetcher: fn }),
+      ).rejects.toMatchObject({ code: 'stripe_test_key_required' });
+    });
+
+    it('stripeConfiguredMode needs mode + matching key + whsec_ (+ opt-in for live)', () => {
+      expect(stripeConfiguredMode(ENV)).toBe('test');
+      expect(stripeConfiguredMode(LIVE)).toBe('live');
+      expect(stripeConfiguredMode({ ...LIVE, STRIPE_LIVE_CONFIRMED: undefined })).toBeNull();
+      expect(stripeConfiguredMode({ ...LIVE, STRIPE_SECRET_KEY: 'sk_test_x' })).toBeNull();
+      expect(stripeConfiguredMode({ ...LIVE, STRIPE_WEBHOOK_SECRET: 'nope' })).toBeNull();
+      expect(stripeConfiguredMode({ ...ENV, STRIPE_SECRET_KEY: 'sk_live_x' })).toBeNull();
+      expect(stripeConfiguredMode({})).toBeNull();
+    });
+
+    it('livemodeMatches enforces event/object livemode equals the configured mode', () => {
+      expect(livemodeMatches(ENV, false)).toBe(true);
+      expect(livemodeMatches(ENV, true)).toBe(false);
+      expect(livemodeMatches(LIVE, true)).toBe(true);
+      expect(livemodeMatches(LIVE, false)).toBe(false);
+      expect(livemodeMatches(LIVE, undefined)).toBe(false);
+      expect(livemodeMatches({}, false)).toBe(false);
+    });
+
+    it('Checkout objects must match the configured mode and id prefix (no crossover)', async () => {
+      const liveSession = { ...CHECKOUT_SESSION, id: 'cs_live_fixture', livemode: true, url: 'https://checkout.stripe.com/c/pay/cs_live_fixture' };
+      const ok = mockFetch(json(liveSession));
+      await expect(retrieveCheckoutSession(LIVE, 'cs_live_fixture', { fetcher: ok.fn })).resolves.toMatchObject({ id: 'cs_live_fixture' });
+      // A test object under live config, a live object under test config, and ids of the wrong prefix.
+      expect(() => requireCheckoutSession(CHECKOUT_SESSION, 'live')).toThrow(expect.objectContaining({ code: 'livemode_mismatch' }));
+      expect(() => requireCheckoutSession(liveSession, 'test')).toThrow(expect.objectContaining({ code: 'livemode_mismatch' }));
+      expect(() => requireCheckoutSession({ ...liveSession, id: 'cs_test_x' }, 'live')).toThrow(
+        expect.objectContaining({ code: 'stripe_response_invalid' }),
+      );
+      await expect(retrieveCheckoutSession(LIVE, 'cs_test_fixture', { fetcher: ok.fn })).rejects.toMatchObject({
+        code: 'stripe_session_id_invalid',
+      });
+    });
+
+    it('live Checkout metadata records livemode:true and the campus', async () => {
+      const { fn, calls } = mockFetch(json({
+        ...CHECKOUT_SESSION,
+        id: 'cs_live_1',
+        livemode: true,
+        url: 'https://checkout.stripe.com/c/pay/cs_live_1',
+        metadata: { ...CHECKOUT_SESSION.metadata, campus_id: '4', livemode: 'true' },
+      }));
+      await createOneTimeCheckout(LIVE, {
+        amountCents: 5000, currency: 'usd', fundId: 7, fundName: 'General', locale: 'en', personId: 42,
+        donorName: 'Ada Lovelace', donorEmail: 'ada@example.com', customerId: 'cus_9', campusId: 4,
+      }, { fetcher: fn, requestId: REQUEST_ID });
+      const b = bodyEntries(calls[0]);
+      expect(b['metadata[livemode]']).toBe('true');
+      expect(b['metadata[campus_id]']).toBe('4');
+      expect(b['payment_intent_data[metadata][campus_id]']).toBe('4');
+      expect(headersOf(calls[0]).Authorization).toBe('Bearer sk_live_secret');
+    });
   });
 
   it('sends a validated idempotency key and forwards the abort signal', async () => {
@@ -258,9 +363,9 @@ describe('Checkout response contract', () => {
     }],
   ] as const;
 
-  it.each(requests)('%s rejects livemode:true before other response defects', async (_name, request) => {
+  it.each(requests)('%s rejects livemode:true under test mode before other response defects', async (_name, request) => {
     await expect(request({ livemode: true })).rejects.toMatchObject({
-      code: 'live_mode_disabled',
+      code: 'livemode_mismatch',
       stage: 'response',
     });
   });
@@ -289,13 +394,13 @@ describe('Checkout response contract', () => {
     ['metadata', { ['x'.repeat(129)]: 'value' }],
     ['metadata', { kind: 'x'.repeat(501) }],
   ])('rejects an invalid %s field without coercion', (field, value) => {
-    expect(() => requireTestCheckoutSession({ ...CHECKOUT_SESSION, [field]: value })).toThrow(
+    expect(() => requireCheckoutSession({ ...CHECKOUT_SESSION, [field]: value }, 'test')).toThrow(
       expect.objectContaining({ code: 'stripe_response_invalid', stage: 'response' }),
     );
   });
 
   it('accepts the complete nullable test-mode Checkout shape', () => {
-    expect(requireTestCheckoutSession(CHECKOUT_SESSION)).toEqual(CHECKOUT_SESSION);
+    expect(requireCheckoutSession(CHECKOUT_SESSION, 'test')).toEqual(CHECKOUT_SESSION);
   });
 
   it('requires exact test registration identity and payment fields for recovery', () => {
@@ -374,6 +479,14 @@ describe('createOneTimeCheckout', () => {
     donorEmail: 'ada@example.com',
   };
 
+  it('never sends payment_method_types (automatic methods) and passes the receipt email', async () => {
+    const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_auto', url: 'https://checkout.stripe.com/c/pay/cs_test_auto' }));
+    await createOneTimeCheckout(ENV, { ...base, customerId: 'cus_123' }, { fetcher: fn, requestId: REQUEST_ID });
+    const b = bodyEntries(calls[0]);
+    expect(Object.keys(b).some((k) => k.startsWith('payment_method_types'))).toBe(false);
+    expect(b['payment_intent_data[receipt_email]']).toBe('ada@example.com');
+  });
+
   it('signed-in donor with a saved customer → customer set, no email/creation', async () => {
     const { fn, calls } = mockFetch(checkoutJson({ id: 'cs_test_1', url: 'https://checkout.stripe.com/c/pay/cs_test_1' }));
     const out = await createOneTimeCheckout(ENV, { ...base, customerId: 'cus_123' }, { fetcher: fn, requestId: REQUEST_ID });
@@ -393,9 +506,16 @@ describe('createOneTimeCheckout', () => {
       'metadata[person_id]': '42',
       'metadata[donor_name]': 'Ada Lovelace',
       'metadata[donor_email]': 'ada@example.com',
+      'metadata[campus_id]': '1',
+      'metadata[livemode]': 'false',
+      // Stripe emails the per-payment receipt; no payment_method_types is sent so
+      // Checkout offers every dashboard-enabled method (cards, ACH, wallets).
+      'payment_intent_data[receipt_email]': 'ada@example.com',
       'payment_intent_data[metadata][kind]': 'gift',
       'payment_intent_data[metadata][fund_id]': '7',
       'payment_intent_data[metadata][person_id]': '42',
+      'payment_intent_data[metadata][campus_id]': '1',
+      'payment_intent_data[metadata][livemode]': 'false',
       customer: 'cus_123',
     });
   });
@@ -414,7 +534,7 @@ describe('createOneTimeCheckout', () => {
     const { fn, calls } = mockFetch(checkoutJson({
       id: 'cs_test_3',
       metadata: {
-        kind: 'gift', fund_id: '7', person_id: '',
+        kind: 'gift', fund_id: '7', person_id: '', campus_id: '1', livemode: 'false',
         donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
       },
     }));
@@ -465,7 +585,7 @@ describe('createOneTimeCheckout', () => {
       amount_total: 5000,
       currency: 'usd',
       metadata: {
-        kind: 'gift', fund_id: '7', person_id: '42',
+        kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false',
         donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
       },
     }));
@@ -498,13 +618,13 @@ describe('createOneTimeCheckout', () => {
     { mode: 'subscription' },
     { amount_total: 9999 },
     { currency: 'cad' },
-    { metadata: { kind: 'gift', fund_id: '8', person_id: '42', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
-    { metadata: { kind: 'gift', fund_id: '7', person_id: '99', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
-    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Wrong', donor_email: 'ada@example.com' } },
-    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Ada Lovelace' } },
+    { metadata: { kind: 'gift', fund_id: '8', person_id: '42', campus_id: '1', livemode: 'false', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '99', campus_id: '1', livemode: 'false', donor_name: 'Ada Lovelace', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false', donor_name: 'Wrong', donor_email: 'ada@example.com' } },
+    { metadata: { kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false', donor_name: 'Ada Lovelace' } },
     {
       metadata: {
-        kind: 'gift', fund_id: '7', person_id: '42', donor_name: 'Ada Lovelace',
+        kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false', donor_name: 'Ada Lovelace',
         donor_email: 'ada@example.com', unexpected: 'value',
       },
     },
@@ -514,7 +634,7 @@ describe('createOneTimeCheckout', () => {
       amount_total: 5000,
       currency: 'usd',
       metadata: {
-        kind: 'gift', fund_id: '7', person_id: '42',
+        kind: 'gift', fund_id: '7', person_id: '42', campus_id: '1', livemode: 'false',
         donor_name: 'Ada Lovelace', donor_email: 'ada@example.com',
       },
     };
@@ -544,7 +664,7 @@ describe('createRecurringCheckout', () => {
         url: 'https://checkout.stripe.com/c/pay/cs_test_r',
         mode: 'subscription',
         amount_total: 2000,
-        metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+        metadata: { kind: 'gift', fund_id: '3', person_id: '9', campus_id: '1', livemode: 'false' },
       }),
     );
     const out = await createRecurringCheckout(ENV, { ...base, customerId: 'cus_9' }, {
@@ -565,11 +685,29 @@ describe('createRecurringCheckout', () => {
       'subscription_data[metadata][kind]': 'gift',
       'subscription_data[metadata][fund_id]': '3',
       'subscription_data[metadata][person_id]': '9',
+      'subscription_data[metadata][campus_id]': '1',
+      'subscription_data[metadata][livemode]': 'false',
       'metadata[kind]': 'gift',
       'metadata[fund_id]': '3',
       'metadata[person_id]': '9',
+      'metadata[campus_id]': '1',
+      'metadata[livemode]': 'false',
       customer: 'cus_9',
     });
+  });
+
+  it('supports a yearly interval', async () => {
+    const { fn, calls } = mockFetch(
+      checkoutJson({
+        id: 'cs_test_y',
+        url: 'https://checkout.stripe.com/c/pay/cs_test_y',
+        mode: 'subscription',
+        amount_total: 2000,
+        metadata: { kind: 'gift', fund_id: '3', person_id: '9', campus_id: '1', livemode: 'false' },
+      }),
+    );
+    await createRecurringCheckout(ENV, { ...base, interval: 'year', customerId: 'cus_9' }, { fetcher: fn, requestId: REQUEST_ID });
+    expect(bodyEntries(calls[0])['line_items[0][price_data][recurring][interval]']).toBe('year');
   });
 
   it('without a customer → customer_email and never customer_creation', async () => {
@@ -577,7 +715,7 @@ describe('createRecurringCheckout', () => {
       id: 'cs_test_r2',
       mode: 'subscription',
       amount_total: 2000,
-      metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+      metadata: { kind: 'gift', fund_id: '3', person_id: '9', campus_id: '1', livemode: 'false' },
     }));
     await createRecurringCheckout(ENV, { ...base, customerId: null }, { fetcher: fn, requestId: REQUEST_ID });
     const b = bodyEntries(calls[0]);
@@ -599,14 +737,14 @@ describe('createRecurringCheckout', () => {
     { mode: 'payment' },
     { amount_total: 9999 },
     { currency: 'cad' },
-    { metadata: { kind: 'gift', fund_id: '4', person_id: '9' } },
-    { metadata: { kind: 'gift', fund_id: '3', person_id: '10' } },
+    { metadata: { kind: 'gift', fund_id: '4', person_id: '9', campus_id: '1', livemode: 'false' } },
+    { metadata: { kind: 'gift', fund_id: '3', person_id: '10', campus_id: '1', livemode: 'false' } },
   ])('fails closed on mismatched recurring Checkout response %#', async (override) => {
     const valid = {
       mode: 'subscription',
       amount_total: 2000,
       currency: 'usd',
-      metadata: { kind: 'gift', fund_id: '3', person_id: '9' },
+      metadata: { kind: 'gift', fund_id: '3', person_id: '9', campus_id: '1', livemode: 'false' },
     };
     const { fn } = mockFetch(checkoutJson({ ...valid, ...override }));
     await expect(createRecurringCheckout(ENV, base, { fetcher: fn, requestId: REQUEST_ID }))
@@ -844,5 +982,26 @@ describe('verifyStripeWebhook', () => {
     const notJson = 'this is not json';
     const sig = await signStripe(secret, notJson, now);
     expect(await verifyStripeWebhook(notJson, sig, secret, 300, now)).toBeNull();
+  });
+});
+
+// ── Basil-era invoice reads ───────────────────────────────────────────────────
+describe('invoice payment lookups', () => {
+  it('finds the invoice ids behind a PaymentIntent via invoice_payments', async () => {
+    const { fn, calls } = mockFetch(() => json({ data: [{ invoice: 'in_1' }, { invoice: { id: 'in_2' } }, { invoice: null }] }));
+    await expect(findInvoiceIdsByPaymentIntent(ENV, 'pi_9', { fetcher: fn })).resolves.toEqual(['in_1', 'in_2']);
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe('/v1/invoice_payments');
+    expect(url.searchParams.get('payment[type]')).toBe('payment_intent');
+    expect(url.searchParams.get('payment[payment_intent]')).toBe('pi_9');
+    expect(headersOf(calls[0])['Stripe-Version']).toBe(STRIPE_API_VERSION);
+  });
+
+  it('expands payments when retrieving an invoice', async () => {
+    const { fn, calls } = mockFetch(() => json({ id: 'in_1' }));
+    await retrieveInvoiceWithPayments(ENV, 'in_1', { fetcher: fn });
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe('/v1/invoices/in_1');
+    expect(url.searchParams.get('expand[0]')).toBe('payments');
   });
 });

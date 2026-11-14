@@ -8,7 +8,7 @@ export function classifyRegistrationCheckoutFailure(error: unknown): Registratio
   if (!(error instanceof StripeError)) return 'recover';
   if (error.stage === 'configuration') return 'cancel';
   if (error.stage !== 'response') return 'recover';
-  if (error.code === 'stripe_response_invalid' || error.code === 'live_mode_disabled') return 'recover';
+  if (error.code === 'stripe_response_invalid' || error.code === 'livemode_mismatch') return 'recover';
   return error.status !== undefined && error.status >= 400 && error.status < 500 && !AMBIGUOUS_4XX.has(error.status)
     ? 'cancel' : 'recover';
 }

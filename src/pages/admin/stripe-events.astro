@@ -46,7 +46,8 @@ const requestStateRaw = Astro.url.searchParams.get('requestState') ?? '';
 const requestState = REQUEST_STATES.find((state) => state === requestStateRaw);
 const eventPage = numberParam(Astro.url.searchParams.get('eventPage'));
 const requestPage = numberParam(Astro.url.searchParams.get('requestPage'));
-const testMode = t(lang, 'admin.stripe.testMode');
+// Every screen and action is labeled with the configured Stripe mode.
+const testMode = t(lang, stripeEnv.STRIPE_MODE === 'live' ? 'admin.stripe.liveMode' : 'admin.stripe.testMode');
 const copy = financeCopy(lang);
 
 if (Astro.request.method === 'POST') {
@@ -226,7 +227,7 @@ const queryHref = (overrides: Record<string, string | number | undefined>) => {
           <details class="finance-investigation-actions" open>
             <summary>{copy.recovery}</summary>
             {(row.state === 'creating' || row.state === 'attached') && <form method="post"><input type="hidden" name="action" value="reconcile" /><input type="hidden" name="requestId" value={row.requestId} /><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.reconcile')}</button></form>}
-            {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="attach" /><input type="hidden" name="requestId" value={row.requestId} /><label class="block"><span class={lab}>{t(lang, 'admin.stripe.sessionId')}</span><input name="sessionId" required pattern="cs_test_[A-Za-z0-9_]+" class={tin} /></label><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.attach')}</button></form>}
+            {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="attach" /><input type="hidden" name="requestId" value={row.requestId} /><label class="block"><span class={lab}>{t(lang, 'admin.stripe.sessionId')}</span><input name="sessionId" required pattern="cs_(test|live)_[A-Za-z0-9_]+" class={tin} /></label><button class={btnSecondary}>{testMode} · {t(lang, 'admin.stripe.attach')}</button></form>}
             {row.state === 'manual_review' && <form method="post" class="space-y-2"><input type="hidden" name="action" value="cancel" /><input type="hidden" name="requestId" value={row.requestId} /><label class="block"><span class={lab}>{t(lang, 'admin.stripe.confirmCancel', { id: row.registrationId })}</span><code class="block mb-2 text-xs break-all">cancel-registration-{row.registrationId}</code><input name="confirmation" required placeholder={`cancel-registration-${row.registrationId}`} class={tin} /></label><button class={btnDanger}>{testMode} · {t(lang, 'admin.stripe.cancel')}</button></form>}
           </details>
         </div>

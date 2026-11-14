@@ -11,6 +11,8 @@ import {
   createRegistrationCheckoutFromParams,
   requireRegistrationCheckoutSession,
   retrieveCheckoutSession,
+  stripeConfiguredMode,
+  stripeMode,
   StripeError,
   type StripeCheckoutSession,
   type StripeEnv,
@@ -74,8 +76,9 @@ function boundedError(error: unknown, env: StripeEnv & DbEnv): string {
   return 'checkout_recovery_failed';
 }
 
-function expectedSession(claim: RegistrationCheckoutRecoveryClaim, sessionId?: string) {
+function expectedSession(env: StripeEnv, claim: RegistrationCheckoutRecoveryClaim, sessionId?: string) {
   return {
+    mode: stripeMode(env) ?? undefined,
     requestId: claim.requestId,
     registrationId: claim.registrationId,
     amountCents: claim.amountCents,
@@ -219,7 +222,7 @@ async function processClaim(
         return { requestId: activeClaim.requestId, state: 'not_claimed' };
       }
       const createdRaw = await createCheckout(deps.env, activeClaim.requestJson, { requestId: activeClaim.requestId });
-      const created = requireRegistrationCheckoutSession(createdRaw, expectedSession(activeClaim));
+      const created = requireRegistrationCheckoutSession(createdRaw, expectedSession(deps.env, activeClaim));
       sessionId = created.id;
       const attachedVersion = toDbTime(addMs(now, 1));
       const nextReconcileAt = toDbTime(addMs(now, ATTACHED_RETRY_MS));
@@ -251,7 +254,7 @@ async function processClaim(
       return { requestId: activeClaim.requestId, state: 'not_claimed' };
     }
     const retrievedRaw = await retrieveCheckout(deps.env, sessionId, {});
-    const retrieved = requireRegistrationCheckoutSession(retrievedRaw, expectedSession(activeClaim, sessionId));
+    const retrieved = requireRegistrationCheckoutSession(retrievedRaw, expectedSession(deps.env, activeClaim, sessionId));
     return applySession(db, activeClaim, retrieved, now, actorId, deps.env);
   } catch (error) {
     return scheduleAmbiguous(db, activeClaim, now, error, actorId, deps.env);
@@ -280,8 +283,7 @@ async function processRequest(
 export async function drainStripeCheckoutRecovery(
   deps: StripeCheckoutRecoveryDeps,
 ): Promise<StripeCheckoutRecoveryResult[]> {
-  if (deps.env.STRIPE_MODE !== 'test' || !deps.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ||
-      !deps.env.STRIPE_WEBHOOK_SECRET?.startsWith('whsec_')) return [];
+  if (stripeConfiguredMode(deps.env) === null) return [];
   const opened = (deps.openDb ?? openDb)(deps.env);
   let ids: string[];
   try {
@@ -322,7 +324,7 @@ export async function attachVerifiedCheckoutSession(
   actorId: number,
 ): Promise<{ state: 'applied' | 'not_claimed' | 'invalid' }> {
   const requestId = parseCheckoutRequestId(requestIdValue);
-  if (!/^cs_test_[A-Za-z0-9_]{1,240}$/.test(sessionId)) return { state: 'invalid' };
+  if (!/^cs_(?:test|live)_[A-Za-z0-9_]{1,240}$/.test(sessionId)) return { state: 'invalid' };
   if (!Number.isSafeInteger(actorId) || actorId <= 0) throw new Error('checkout_actor_invalid');
   const opened = (deps.openDb ?? openDb)(deps.env);
   try {
@@ -332,7 +334,7 @@ export async function attachVerifiedCheckoutSession(
     if (!claimed) return { state: 'not_claimed' };
     try {
       const raw = await (deps.retrieveCheckout ?? retrieveCheckoutSession)(deps.env, sessionId, {});
-      const session = requireRegistrationCheckoutSession(raw, expectedSession(claimed, sessionId));
+      const session = requireRegistrationCheckoutSession(raw, expectedSession(deps.env, claimed, sessionId));
       const action = recoveryAction(session);
       if (!action || (action === 'attach_open' && session.url === null)) {
         const restored = await releaseRegistrationCheckoutRecoveryClaim(opened.db, claimed, {

@@ -158,7 +158,7 @@ describe('handleStripeWebhookRequest', () => {
     expect(receive).not.toHaveBeenCalled();
   });
 
-  it('rejects a signed live envelope before receipt, dispatch, domain mutation, scheduling, or log leakage', async () => {
+  it('rejects a signed live envelope in test mode before receipt, dispatch, domain mutation, scheduling, or log leakage', async () => {
     const receive = vi.fn();
     const domainMutation = vi.fn();
     const process = vi.fn(async () => {
@@ -186,7 +186,7 @@ describe('handleStripeWebhookRequest', () => {
 
     try {
       expect(await responseText(await handleStripeWebhookRequest(request, deps({ receive, process, waitUntil }))))
-        .toEqual([400, 'live_mode_disabled']);
+        .toEqual([400, 'livemode_mismatch']);
       expect(receive).not.toHaveBeenCalled();
       expect(process).not.toHaveBeenCalled();
       expect(domainMutation).not.toHaveBeenCalled();
@@ -203,6 +203,41 @@ describe('handleStripeWebhookRequest', () => {
       warn.mockRestore();
       error.mockRestore();
     }
+  });
+
+  describe('live mode', () => {
+    const LIVE_ENV = { ...ENV, STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_secret', STRIPE_LIVE_CONFIRMED: '1' } as const;
+
+    it('accepts a live event and rejects a test event (no crossover either way)', async () => {
+      const receive = vi.fn(async () => ({ kind: 'inserted', status: 'pending', outcome: null } as const));
+      const live = await signed(stripeEvent('invoice.paid', { id: 'in_live' }, { id: 'evt_live_ok', livemode: true }));
+      expect(await responseText(await handleStripeWebhookRequest(live, deps({ env: LIVE_ENV, receive })))).toEqual([200, 'received']);
+      expect(receive).toHaveBeenCalledTimes(1);
+      expect(receive.mock.calls[0][1]).toMatchObject({ eventId: 'evt_live_ok', livemode: true });
+
+      const test = await signed(stripeEvent('invoice.paid', { id: 'in_test' }, { id: 'evt_test_in_live', livemode: false }));
+      const blocked = vi.fn();
+      expect(await responseText(await handleStripeWebhookRequest(test, deps({ env: LIVE_ENV, receive: blocked }))))
+        .toEqual([400, 'livemode_mismatch']);
+      expect(blocked).not.toHaveBeenCalled();
+    });
+
+    it('does not accept any event when live mode lacks the explicit STRIPE_LIVE_CONFIRMED opt-in', async () => {
+      const receive = vi.fn();
+      const unconfirmed = { ...LIVE_ENV, STRIPE_LIVE_CONFIRMED: undefined };
+      const live = await signed(stripeEvent('invoice.paid', { id: 'in_live' }, { id: 'evt_live_unconfirmed', livemode: true }));
+      expect(await responseText(await handleStripeWebhookRequest(live, deps({ env: unconfirmed as never, receive }))))
+        .toEqual([400, 'webhook_not_configured']);
+      expect(receive).not.toHaveBeenCalled();
+    });
+
+    it('rejects events when STRIPE_MODE is not test or live', async () => {
+      const receive = vi.fn();
+      const event = await signed(stripeEvent('invoice.paid', { id: 'in_x' }, { id: 'evt_bad_mode' }));
+      expect(await responseText(await handleStripeWebhookRequest(event, deps({ env: { ...ENV, STRIPE_MODE: 'TEST' } as never, receive }))))
+        .toEqual([400, 'livemode_mismatch']);
+      expect(receive).not.toHaveBeenCalled();
+    });
   });
 
   it('returns 500 when durable receipt storage fails without scheduling', async () => {
