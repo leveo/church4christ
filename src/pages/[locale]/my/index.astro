@@ -133,6 +133,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     <MemberPageHeader title={t(locale, 'my.welcome', { name: user.displayName })} description={memberCopy(locale).welcomeBody} eyebrow={memberCopy(locale).welcome}>
       <a href={localePath(locale, '/my/calendar')} class={btn}>{t(locale, 'my.calendar')}</a>
       <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
+      {Astro.locals.modules.has('planning') && <a href={localePath(locale, '/my/availability')} class={btnSecondary}>{t(locale, 'planning.availability.nav')}</a>}
     </MemberPageHeader>
     <dl class="member-summary">
       <div><dt>{t(locale, 'my.pending')}</dt><dd>{pending.length}</dd></div>

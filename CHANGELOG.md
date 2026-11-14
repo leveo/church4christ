@@ -11,7 +11,8 @@ than published to npm.
 ## [Unreleased]
 
 Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on-d1),
-[Production Giving](docs/upgrade.md#unreleased-production-giving).
+[Production Giving](docs/upgrade.md#unreleased-production-giving),
+[Service Planning](docs/upgrade.md#unreleased-service-planning).
 
 ### Added
 
@@ -37,6 +38,14 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
   gifts use the `giving.currency` setting; totals are per currency and net of refunds; CSV
   export of gifts; audit rows for manual gifts, fund edits, statement batches, and exports.
 - PostgreSQL migration `0039_giving_production.sql` (details under Operator impact).
+- **Service Planning** (`planning`, 服事流程): a timed run sheet for each service or event
+  (live start times, fixed starts, overrun and overlap warnings, leader-only cue notes, print
+  view, copy from a previous event), rehearsal sessions with called people and call times,
+  member availability windows, a "find a time" search that ranks slots by conflicts, a team
+  availability calendar, rehearsals and run-sheet duties in the member calendar and calendar
+  feed, and automatic email on schedule, change, cancel, and a reminder. It is a new module in
+  Volunteering that works on D1 and Supabase. See
+  [`docs/features/service-planning.md`](docs/features/service-planning.md).
 
 ### Changed
 
@@ -83,6 +92,17 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
   `charge.dispute.closed` are new).
 - No new bindings, secrets, or cron triggers. Statement emails ride the existing
   `*/5 * * * *` Supabase schedule.
+- Service Planning: apply the new migration `0040_service_planning.sql` with your normal
+  migration step before deploying: `npm run db:migrate:remote` on D1 and
+  `npm run db:migrate:supabase` on Supabase (numbered `0040` there as well, after Production Giving's
+  `0039`). It adds seven
+  `planning_*` / `availability_windows` tables with `campus_id`, four default notification
+  rules, and registers the new person references with the identity merge inventory. On an
+  existing installation it also records `module.planning = 0`, so the module stays off until
+  an administrator turns it on in **Settings → Modules**; a fresh installation follows the
+  setup choices, and no preset includes Service Planning.
+- Service Planning adds the `planning` administrator area, grantable on a person's page.
+  Reminder emails use the existing daily reminder cron (`0 13 * * *`).
 
 ## [1.4.0] - 2026-11-14
 

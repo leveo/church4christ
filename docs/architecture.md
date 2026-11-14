@@ -131,6 +131,7 @@ run on either of two databases:
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
+| `planning` | Service Planning | 服事流程 | Either |
 <!-- capabilities:end -->
 
 **Which backend runs** is the `DB_BACKEND` var: `getBackend` (`src/lib/dbProvider.ts`) reads

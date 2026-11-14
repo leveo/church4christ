@@ -1,0 +1,104 @@
+---
+// Printable run sheet: time | duration | item | owner | notes. The leader print
+// (?leader=1, coordinators and planning admins only) adds the leader-only cue
+// notes; everyone who can see the event may print the plain version. The
+// browser's print dialog does the rest: @media print hides the site chrome.
+import Base from '../../../../layouts/Base.astro';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { formatDate } from '../../../../lib/dates';
+import { btn, btnSecondary } from '../../../../lib/adminUi';
+import { getEvent } from '../../../../lib/planningDb';
+import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { loadRunSheetView } from '../../../../lib/planningView';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const id = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+const event = id !== null ? await getEvent(db, id) : null;
+const role = event ? await planningRole(db, user, event) : null;
+if (!event || !role) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const leader = Astro.url.searchParams.get('leader') === '1' && canManage(role);
+const view = await loadRunSheetView(db, event.id, locale, { personId: user.id, teamIds: user.memberTeamIds });
+const rows = view?.rows ?? [];
+const title = pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale);
+const location = pickLocalizedText({ en: event.location_en, zh: event.location_zh }, locale);
+const back = localePath(locale, canManage(role) ? `/planning/${event.id}/manage` : `/planning/${event.id}`);
+const sheetLink = (l: boolean) => localePath(locale, `/planning/${event.id}/print${l ? '?leader=1' : ''}`);
+---
+<Base title={title} locale={locale} noindex footer={false}>
+  <div class="run-print container-wide">
+    <div class="run-toolbar">
+      <a href={back} class={btnSecondary}>← {t(locale, 'planning.print.back')}</a>
+      {canManage(role) && <a href={sheetLink(!leader)} class={btnSecondary}>{leader ? t(locale, 'planning.print.plain') : t(locale, 'planning.print.leader')}</a>}
+      <button type="button" data-run-print class={btn}>{t(locale, 'planning.print.print')}</button>
+    </div>
+    <h1>{title}</h1>
+    <p class="run-meta">{formatDate(event.event_date, locale)} · {event.start_time}{event.end_time ? `–${event.end_time}` : ''}{location && ` · ${location}`}{leader && ` · ${t(locale, 'planning.print.leaderTag')}`}</p>
+    <table class="run-table">
+      <thead>
+        <tr>
+          <th scope="col">{t(locale, 'planning.rs.time')}</th>
+          <th scope="col">{t(locale, 'planning.rs.duration')}</th>
+          <th scope="col">{t(locale, 'planning.rs.item')}</th>
+          <th scope="col">{t(locale, 'planning.rs.owner')}</th>
+          <th scope="col">{t(locale, 'planning.rs.notes')}</th>
+          {leader && <th scope="col">{t(locale, 'planning.rs.cue')}</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr class:list={[r.item.kind === 'heading' && 'run-heading']}>
+            <td class="tabular-nums">{r.timing.start}</td>
+            <td class="tabular-nums">{r.item.duration_min > 0 ? t(locale, 'planning.rs.min', { n: r.item.duration_min }) : ''}</td>
+            <td><strong>{r.title}</strong></td>
+            <td>{r.owner}</td>
+            <td class="run-notes">{r.details}</td>
+            {leader && <td class="run-notes">{r.item.cue_notes}</td>}
+          </tr>
+        ))}
+        {rows.length === 0 && <tr><td colspan={leader ? 6 : 5}>{t(locale, 'planning.rs.empty')}</td></tr>}
+      </tbody>
+    </table>
+    <p class="run-meta">{t(locale, 'planning.rs.total', { total: view?.summary.totalMin ?? 0, end: view?.summary.end ?? '' })}</p>
+  </div>
+</Base>
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-run-print]').forEach((button) => {
+    button.addEventListener('click', () => window.print());
+  });
+</script>
+<style>
+  .run-print { padding-top: 1.5rem; padding-bottom: 3rem; }
+  .run-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
+  .run-toolbar :global(a), .run-toolbar :global(button) { min-height: 2.75rem; }
+  .run-meta { margin-top: .25rem; color: var(--color-ink-muted); font-size: .9rem; }
+  .run-table { width: 100%; margin-top: 1rem; border-collapse: collapse; }
+  .run-table th { text-align: left; padding: .5rem .6rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 2px solid var(--color-border-strong, var(--color-border)); }
+  .run-table td { padding: .5rem .6rem; border-bottom: 1px solid var(--color-border); vertical-align: top; font-size: .9rem; }
+  .run-heading td { background: var(--color-surface-sunken); font-weight: 600; }
+  .run-notes { white-space: pre-line; color: var(--color-ink-muted); }
+  @media (max-width: 639px) {
+    .run-table, .run-table tbody, .run-table tr, .run-table td { display: block; }
+    .run-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .run-table tr { padding: .6rem 0; border-bottom: 1px solid var(--color-border); }
+    .run-table td { border: 0; padding: .1rem 0; }
+  }
+  @media print {
+    :global(body:has(.run-print) > header), :global(body:has(.run-print) > footer), :global(body:has(.run-print) > .skip-link), :global(body:has(.run-print) header) { display: none !important; }
+    .run-toolbar { display: none; }
+    .run-print { padding: 0; }
+    .run-table, .run-table tbody, .run-table tr { display: revert; }
+    .run-table td { display: table-cell; }
+    .run-table thead { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+    .run-table tr { break-inside: avoid; }
+  }
+</style>

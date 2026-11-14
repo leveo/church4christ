@@ -1,6 +1,6 @@
 # Supabase setup — Giving and Registration (Stripe test and live)
 
-Setup is capability-driven: selections among the 19 D1-compatible modules (including
+Setup is capability-driven: selections among the 20 D1-compatible modules (including
 **Member Portal**) choose D1 unless you explicitly override the backend. **Giving** and
 **Registration** require Postgres, so setup selects **Supabase** when either is enabled.
 Stripe runs in **test mode by default**: the installer accepts test keys, and live mode is a
@@ -72,7 +72,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Giving and Registration are **force-disabled on D1**, even if legacy
-settings say they are on. New setup writes explicit selected settings for all 21 modules.
+settings say they are on. New setup writes explicit selected settings for all 22 modules.
 
 ---
 

@@ -1,0 +1,46 @@
+---
+// Shared header for the planning event pages: title, status badge, and the tab
+// links a coordinator moves between. Participants only see the plain title.
+import { t } from '../../lib/i18n';
+import { localePath, pickLocalizedText, type Locale } from '../../lib/locales';
+import { formatDate } from '../../lib/dates';
+import { badge, badgeActive, badgeInactive, badgeScheduled } from '../../lib/adminUi';
+import type { PlanningEvent } from '../../lib/planningDb';
+
+interface Props {
+  locale: Locale;
+  event: PlanningEvent;
+  current: 'view' | 'manage' | 'sessions' | 'calendar';
+  manager: boolean;
+}
+const { locale, event, current, manager } = Astro.props;
+const title = pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale);
+const statusCls = event.status === 'published' ? badgeActive : event.status === 'cancelled' ? badgeScheduled : badgeInactive;
+const base = `/planning/${event.id}`;
+const tabs = [
+  { key: 'view', href: base, label: t(locale, 'planning.tab.view') },
+  ...(manager
+    ? [
+        { key: 'manage', href: `${base}/manage`, label: t(locale, 'planning.tab.manage') },
+        { key: 'sessions', href: `${base}/sessions`, label: t(locale, 'planning.tab.sessions') },
+        { key: 'calendar', href: `${base}/calendar`, label: t(locale, 'planning.tab.calendar') },
+      ]
+    : []),
+];
+---
+<header class="planning-header">
+  <p class="text-sm text-ink-muted">{formatDate(event.event_date, locale)} · {event.start_time}{event.end_time ? `–${event.end_time}` : ''}</p>
+  <h1>{title}</h1>
+  <p><span class={`${badge} ${statusCls}`}>{t(locale, `planning.status.${event.status}`)}</span></p>
+  <nav class="planning-tabs" aria-label={t(locale, 'planning.title')}>
+    {tabs.map((tab) => <a href={localePath(locale, tab.href)} aria-current={tab.key === current ? 'page' : undefined}>{tab.label}</a>)}
+    {manager && <a href={localePath(locale, `${base}/print`)}>{t(locale, 'planning.tab.print')}</a>}
+  </nav>
+</header>
+<style>
+  .planning-header { margin-top: 1rem; }
+  .planning-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+  .planning-tabs a { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: .9rem; font-weight: 600; color: var(--color-ink-muted); }
+  .planning-tabs a:hover { background: var(--color-surface-sunken); color: var(--color-ink); }
+  .planning-tabs a[aria-current] { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+</style>

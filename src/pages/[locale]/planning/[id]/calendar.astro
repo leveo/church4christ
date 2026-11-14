@@ -1,0 +1,138 @@
+---
+// Team availability calendar for one event: week or month, for the whole event
+// team, just me, or one person. Shows each person's blockouts, other commitments,
+// and available windows (never the private note on a window), plus this event's
+// rehearsal sessions. In-page authorization: planning admins and this event's
+// coordinators; others get 404.
+import Member from '../../../../layouts/Member.astro';
+import PlanningHeader from '../../../../components/planning/PlanningHeader.astro';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { addDays, formatDate, isValidDateStr, todayInTz } from '../../../../lib/dates';
+import { btnSecondary, lab, tin } from '../../../../lib/adminUi';
+import { getEvent, listSessions } from '../../../../lib/planningDb';
+import { callableScope, canManage, planningRole, restrictPeople } from '../../../../lib/planningAccess';
+import { buildTeamCalendar, listEventTeam } from '../../../../lib/planningCalendar';
+import { monthDates, weekDates } from '../../../../lib/planningModel';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const id = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+const event = id !== null ? await getEvent(db, id) : null;
+const role = event ? await planningRole(db, user, event) : null;
+if (!event || !canManage(role)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const q = Astro.url.searchParams;
+const view = q.get('view') === 'month' ? 'month' : 'week';
+const dateParam = q.get('date') ?? '';
+const anchor = isValidDateStr(dateParam) ? dateParam : event.event_date;
+const who = q.get('who') ?? 'all';
+// Availability is shown only for people this user may call (admins: everyone), as status only.
+const scope = await callableScope(db, user, event.id);
+const visible = new Set(restrictPeople(scope, (await listEventTeam(db, event.id)).map((p) => p.id)));
+const team = (await listEventTeam(db, event.id)).filter((p) => visible.has(p.id));
+const chosen = who === 'me' ? team.filter((p) => p.id === user.id) : /^\d+$/.test(who) ? team.filter((p) => p.id === Number(who)) : team;
+const meInTeam = team.some((p) => p.id === user.id);
+const dates = view === 'month' ? monthDates(anchor.slice(0, 7)) : weekDates(anchor);
+const [days, sessions] = await Promise.all([buildTeamCalendar(db, chosen, dates), listSessions(db, event.id)]);
+const sessionsOn = (date: string) => sessions.filter((s) => s.session_date === date && s.status !== 'cancelled');
+
+const step = view === 'month'
+  ? (n: number) => {
+      const [y, m] = anchor.slice(0, 7).split('-').map(Number);
+      const d = new Date(Date.UTC(y, m - 1 + n, 1));
+      return d.toISOString().slice(0, 10);
+    }
+  : (n: number) => addDays(anchor, 7 * n);
+const link = (over: Record<string, string>) => {
+  const p = new URLSearchParams({ view, date: anchor, who, ...over });
+  return localePath(locale, `/planning/${event.id}/calendar?${p.toString()}`);
+};
+const detailed = view === 'week' || who !== 'all';
+const today = todayInTz();
+const fmtRange = (a: { start: string; end: string }) => `${a.start}–${a.end}`;
+---
+<Member active="planning" title={t(locale, 'planning.tab.calendar')} locale={locale} noindex>
+  <div class="member-content planning-page">
+    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
+    <PlanningHeader locale={locale} event={event} current="calendar" manager={true} />
+    <p class="mt-4 text-sm text-ink-muted">{t(locale, 'planning.cal.intro')}</p>
+
+    <form method="get" class="mt-4 flex flex-wrap items-end gap-3">
+      <label class="block"><span class={lab}>{t(locale, 'planning.cal.view')}</span>
+        <select name="view" class={tin}><option value="week" selected={view === 'week'}>{t(locale, 'planning.cal.week')}</option><option value="month" selected={view === 'month'}>{t(locale, 'planning.cal.month')}</option></select></label>
+      <label class="block"><span class={lab}>{t(locale, 'planning.cal.date')}</span><input type="date" name="date" value={anchor} class={tin} /></label>
+      <label class="block min-w-40"><span class={lab}>{t(locale, 'planning.cal.who')}</span>
+        <select name="who" class={tin}>
+          <option value="all" selected={who === 'all'}>{t(locale, 'planning.cal.whoAll')}</option>
+          {meInTeam && <option value="me" selected={who === 'me'}>{t(locale, 'planning.cal.whoMe')}</option>}
+          {team.map((p) => <option value={p.id} selected={who === String(p.id)}>{p.display_name}</option>)}
+        </select></label>
+      <button class={btnSecondary}>{t(locale, 'planning.cal.apply')}</button>
+    </form>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <a class={btnSecondary} href={link({ date: step(-1) })}>← {t(locale, 'my.cal.prev')}</a>
+      <a class={btnSecondary} href={link({ date: step(1) })}>{t(locale, 'my.cal.next')} →</a>
+    </div>
+
+    {team.length === 0 && <p class="mt-4 text-sm text-ink-muted">{t(locale, 'planning.cal.noTeam')}</p>}
+    <div class:list={['cal-grid', 'mt-4', view === 'week' ? 'cal-week' : 'cal-month']}>
+      {days.map((day) => {
+        const here = sessionsOn(day.date);
+        const blocked = day.people.filter((p) => p.availability.blocked.length > 0).length;
+        const available = day.people.filter((p) => p.availability.available.length > 0 && p.availability.blocked.length === 0).length;
+        return (
+          <section class:list={['cal-day', day.date === today && 'cal-today']}>
+            <h3><time datetime={day.date}>{formatDate(day.date, locale)}</time></h3>
+            {here.map((s) => <p class="cal-session">{s.start_time} {pickLocalizedText({ en: s.title_en, zh: s.title_zh }, locale)}</p>)}
+            {!detailed && day.people.length > 0 && (
+              <p class="text-sm text-ink-muted">{t(locale, 'planning.cal.counts', { blocked, available })}</p>
+            )}
+            {detailed && (
+              <ul class="cal-people">
+                {day.people.map(({ person, availability: a }) => (
+                  <li>
+                    <span class="cal-name">{person.display_name}</span>
+                    <span class="cal-chips">
+                      {a.blocked.map((b) => <span class="sl-chip sl-blocked">{b.allDay ? t(locale, 'planning.cal.blockedAll') : `${t(locale, 'planning.slot.blocked')} ${fmtRange({ start: b.start!, end: b.end! })}`}</span>)}
+                      {a.busy.map((b) => <span class="sl-chip sl-busy">{t(locale, 'planning.slot.busy')} {fmtRange(b)}</span>)}
+                      {a.available.map((b) => <span class="sl-chip sl-available">{fmtRange(b)}</span>)}
+                      {a.blocked.length + a.busy.length + a.available.length === 0 && <span class="sl-chip sl-unknown">{t(locale, 'planning.slot.unknown')}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  </div>
+</Member>
+<style>
+  .planning-page :global(input), .planning-page :global(select) { font-size: 1rem; min-height: 2.75rem; }
+  .planning-page :global(button), .planning-page :global(a.inline-flex) { min-height: 2.75rem; }
+  .cal-grid { display: grid; gap: .75rem; }
+  .cal-week { grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  .cal-month { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  .cal-day { padding: .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); min-width: 0; }
+  .cal-day h3 { font-size: .85rem; font-weight: 600; margin-bottom: .4rem; }
+  .cal-today { border-color: var(--color-primary); }
+  .cal-session { margin-bottom: .4rem; padding: .25rem .5rem; border-radius: var(--radius-md); background: var(--color-primary-soft); color: var(--color-on-primary-soft); font-size: .8rem; font-weight: 600; }
+  .cal-people { display: grid; gap: .5rem; padding: 0; list-style: none; }
+  .cal-name { display: block; font-size: .8rem; font-weight: 600; overflow-wrap: anywhere; }
+  .cal-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .15rem; }
+  .sl-chip { display: inline-flex; align-items: center; padding: .1rem .5rem; border-radius: var(--radius-full); font-size: .72rem; font-weight: 600; }
+  .sl-blocked { background: var(--color-danger-soft); color: var(--color-danger); }
+  .sl-busy { background: var(--color-warn-soft); color: var(--color-warn); }
+  .sl-available { background: var(--color-success-soft); color: var(--color-success); }
+  .sl-unknown { background: var(--color-surface-sunken); color: var(--color-ink-muted); }
+</style>

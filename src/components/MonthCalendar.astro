@@ -45,6 +45,7 @@ const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
               {mark?.statuses.map(status => <li><span class={`calendar-dot ${dot[status]}`} aria-hidden="true" /><span>{t(locale, `serve.status.${status}`)}</span></li>)}
               {mark?.events?.map(name => <li><span class="calendar-dot bg-info" aria-hidden="true" /><span>{name}</span></li>)}
               {mark?.meetings?.map(name => <li><span class="calendar-dot bg-accent" aria-hidden="true" /><span>{name}</span></li>)}
+              {mark?.planning?.map(name => <li><span class="calendar-dot bg-primary" aria-hidden="true" /><span>{name}</span></li>)}
               {mark?.blocked && <li class="calendar-blocked-label">{t(locale, 'my.cal.blockedOut')}</li>}
             </ul>
           </>}
@@ -59,6 +60,7 @@ const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
   <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-danger" />{t(locale, 'serve.status.D')}</span>
   <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-info" />{t(locale, 'portal.calendar.legendEvent')}</span>
   <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-accent" />{t(locale, 'portal.calendar.legendMeeting')}</span>
+  <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-primary" />{t(locale, 'planning.calendar.legend')}</span>
 </div>
 <style>
   .calendar-frame { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface-raised); }
