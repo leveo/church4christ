@@ -353,6 +353,29 @@ turns on Member Portal in **Settings → Modules**. On D1 the
 event-scope prayers, event administrators, and My registrations stay unavailable because
 they depend on Registration, which remains Supabase-only.
 
+## Unreleased: Service Planning
+
+Service Planning adds one forward migration on each backend, `migrations/0040_service_planning.sql`
+(D1) and `migrations-supabase/0040_service_planning.sql` (Supabase). It creates
+`planning_events`, `planning_event_coordinators`, `planning_items`, `planning_sessions`,
+`planning_session_people`, `availability_windows`, and `planning_notification_rules`, seeds the
+four default notification rules for the main campus, and adds five identity-merge reference keys.
+On an existing installation it also records `module.planning = 0` when module choices or people
+already exist, so upgrading does not switch the module on. It changes no other table or row.
+
+1. Back up as usual (see section 2).
+2. Apply the migration with your normal step, **before** deploying the new build:
+   `npm run db:migrate:remote` (D1) or `npm run db:migrate:supabase` (Supabase). Supabase numbering
+   skips `0039` here because that number belongs to a different change; apply the files in order
+   and do not renumber either.
+3. Deploy. The module is off until an administrator turns on **Service Planning** in
+   **Settings → Modules**. Grant the **Service planning** area on a person's page to let a limited
+   admin manage events; event coordinators need no admin access.
+4. Optional: open **Admin → Service planning** and review the notification rules. Reminders are sent
+   by the existing daily reminder job; no cron trigger, binding, or secret is added.
+
+No preset changes, so an installation's recorded module list stays valid.
+
 ## Upgrading 1.3.0 to 1.4.0
 
 Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.
