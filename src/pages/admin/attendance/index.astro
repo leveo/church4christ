@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
 import { gatheringsCopy } from '../../../i18n/designGatherings';
 import AttendanceTrend from '../../../components/gatherings/AttendanceTrend.astro';
@@ -27,7 +28,7 @@ if (Astro.request.method !== 'GET') {
   return new Response(null, { status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET' } });
 }
 
-const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(user!.lang, Astro.locals.locales);
 const today = todayInTz();
 const parsedWindow = parseAttendanceWindow(Astro.url.searchParams, today);
 let window: AttendanceWindow;

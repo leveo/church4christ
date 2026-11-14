@@ -1,3 +1,4 @@
+import { isChinese } from './locales';
 // Public-site read queries that are DB-driven but not content-collection backed:
 // the announcement ticker, the upcoming-events strip, and the latest sermon. Each
 // applies the visibility rules from the spec — announcements/events are windowed
@@ -86,7 +87,7 @@ type SermonContent = Pick<LatestSermonRow, 'title' | 'scripture' | 'series'>;
 // editorial content, never speaker names, and does not rewrite stored text.
 // Explicit source-language metadata can replace this heuristic in a future schema.
 function sermonMatchesLocale(sermon: SermonContent, locale: Locale): boolean {
-  return locale === 'zh' || isEnglishEditorialText(sermon.title, sermon.scripture, sermon.series);
+  return isChinese(locale) || isEnglishEditorialText(sermon.title, sermon.scripture, sermon.series);
 }
 
 /** The most recent visible sermon. Search beyond newer Chinese rows for en. */
@@ -261,7 +262,7 @@ async function* eligibleBulletinPages(
        LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
     ).bind(...params, pageSize, offset).all<BulletinCandidate>();
 
-    if (locale === 'zh') {
+    if (isChinese(locale)) {
       yield results;
     } else {
       const candidates = results.filter(bulletinEditorialIsEnglish);

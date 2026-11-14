@@ -1,10 +1,10 @@
 ---
 import type { Locale } from '../../lib/locales';
-import { formatDate } from '../../lib/dates';
+import { formatDate, monthShort } from '../../lib/dates';
 interface Props { date: string; locale: Locale }
 const { date, locale } = Astro.props;
 const day = date.slice(0, 10);
-const month = locale === 'zh' ? `${Number(day.slice(5, 7))}月` : new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+const month = monthShort(day, locale);
 ---
 <time class="gathering-date" datetime={day} aria-label={formatDate(day, locale)}><span>{month}</span><strong>{Number(day.slice(8, 10))}</strong><small>{day.slice(0, 4)}</small></time>
 <style>

@@ -20,7 +20,7 @@ import { getEventAdmin, listQuestionsAdmin, listRegistrations, saveQuestions, ca
 import { listEventAdmins, addEventAdmin, removeEventAdmin, listPeopleWithAccount } from '../../../lib/prayerDb';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, btn, btnSecondary, rowBtn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, pickPair } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -78,8 +78,8 @@ if (hasPortal) {
 
 // The event's display title + the localized question label (for roster headers
 // and aligning each answer to its column — the CSV keys by id, the HTML by label).
-const eventTitle = (lang === 'zh' ? event.title_zh || event.title_en : event.title_en) || `#${eventId}`;
-const qLabel = (q: RegQuestionAdmin) => (lang === 'zh' ? q.label_zh || q.label_en : q.label_en);
+const eventTitle = pickPair(lang, event.title_en, event.title_zh) || `#${eventId}`;
+const qLabel = (q: RegQuestionAdmin) => pickPair(lang, q.label_en, q.label_zh);
 
 const types: RegQuestionAdmin['type'][] = ['text', 'textarea', 'select', 'checkbox', 'yesno'];
 const needsOptions = (type: string) => type === 'select' || type === 'checkbox';

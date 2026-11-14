@@ -1,4 +1,4 @@
-import type { Locale } from '../lib/locales';
+import { type Locale, pickByLocale } from '../lib/locales';
 
 const en = {
   eyebrow: 'LIFE TOGETHER',
@@ -102,4 +102,4 @@ const zh: Record<keyof typeof en, string> = {
   chartDescription: '已记录的成人出席人数，准确数据请见历史记录表。',
 };
 
-export const gatheringsCopy = (locale: Locale) => locale === 'zh' ? zh : en;
+export const gatheringsCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);

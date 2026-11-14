@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 // Provider-neutral Learning provider administration.
 import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { operationsCopy } from '../../../i18n/designOperations';
@@ -8,7 +9,7 @@ import { badge, btn, btnSecondary, card, lab, tin } from '../../../lib/adminUi';
 import { t } from '../../../lib/i18n';
 import { listLearningConnections } from '../../../lib/learningConnectionDb';
 import { listLearningAdminSyncCourses } from '../../../lib/learningSyncOrchestration';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, isChinese } from '../../../lib/locales';
 import type { LearningConnectionStatus, LearningErrorCode } from '../../../lib/learningModel';
 
 export const prerender = false;
@@ -27,10 +28,10 @@ if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
     headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
   });
 }
-const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(user!.lang, Astro.locals.locales);
 const connections = await listLearningConnections(Astro.locals.db, { includeDeleted: true, limit: 100 });
 const syncCourses = await listLearningAdminSyncCourses(Astro.locals.db);
-const copy = lang === 'zh' ? {
+const copy = isChinese(lang) ? {
   providers: '学习平台连接',
   none: '尚未连接 Google Classroom 或 Canvas。',
   createCanvas: '连接 Canvas',
@@ -99,12 +100,12 @@ type ConnectionErrorCode =
   | 'google_authorization_failed'
   | 'canvas_authorization_failed'
   | LearningErrorCode;
-const statusLabels: Record<LearningConnectionStatus, string> = lang === 'zh' ? {
+const statusLabels: Record<LearningConnectionStatus, string> = isChinese(lang) ? {
   pending: '等待授权', active: '正常', error: '需要处理', disabled: '已断开',
 } : {
   pending: 'Pending authorization', active: 'Active', error: 'Needs attention', disabled: 'Disconnected',
 };
-const errorMessages: Record<ConnectionErrorCode, string> = lang === 'zh' ? {
+const errorMessages: Record<ConnectionErrorCode, string> = isChinese(lang) ? {
   connection_conflict: '连接已被其他管理员更新；请刷新后重试。',
   connection_invalid: '连接设置无效。',
   credentials_unavailable: '学习平台凭据暂时不可用。',

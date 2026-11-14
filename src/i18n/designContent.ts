@@ -1,4 +1,4 @@
-import type { Locale } from '../lib/locales';
+import { type Locale, pickByLocale } from '../lib/locales';
 
 const en = {
   workspace: 'Church communications', library: 'Content library',
@@ -46,4 +46,4 @@ const zh: typeof en = {
   canvas: '页面画布', canvasHint: '画布用于预览版面。选择区块后可编辑它的属性。',
   moveUp: '上移区块', moveDown: '下移区块', selectBlock: '选择区块',
 };
-export const contentCopy = (locale: Locale) => locale === 'zh' ? zh : en;
+export const contentCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);

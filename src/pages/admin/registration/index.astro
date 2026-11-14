@@ -16,7 +16,7 @@ import { listEventsAdmin, saveEvent } from '../../../lib/regDb';
 import { utcToDatetimeLocal, toUtcSql } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, isChinese } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -129,7 +129,7 @@ const h2 = 'font-display text-heading-sm font-bold';
               <tr class="border-t border-border align-top">
                 <td class={td}>
                   <div class="font-medium">{r.title_en || '—'}</div>
-                  {lang === 'zh' && <div class="text-ink-muted">{r.title_zh || '—'}</div>}
+                  {isChinese(lang) && <div class="text-ink-muted">{r.title_zh || '—'}</div>}
                 </td>
                 <td class={`${td} text-ink-muted tabular-nums`}>{r.starts_at.slice(0, 16)}</td>
                 <td class={`${td} tabular-nums`}>

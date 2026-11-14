@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../../lib/localeSettings';
 import GatheringSurface from '../../../../components/gatherings/GatheringSurface.astro';
 import { gatheringsCopy } from '../../../../i18n/designGatherings';
 import AvatarInitials from '../../../../components/AvatarInitials.astro';
@@ -19,7 +20,7 @@ const db = Astro.locals.db;
 const token = await getKioskToken(db);
 if (!token || Astro.params.token !== token) return new Response(null, { status: 404 });
 
-const lang: Locale = Astro.url.searchParams.get('lang') === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(Astro.url.searchParams.get('lang'), Astro.locals.locales);
 const q = Astro.url.searchParams.get('q') ?? '';
 const backHref = `/kiosk/${token}/?lang=${lang}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
 const searchHref = `/kiosk/${token}/?lang=${lang}`;

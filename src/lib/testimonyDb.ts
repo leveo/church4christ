@@ -1,3 +1,4 @@
+import { pickByLocale } from './locales';
 // Testimonies with a light review workflow. Status: P pending → A approved
 // (public) / R returned. A visitor submits in the current page locale (single
 // localized title/body + the row's `locale`); a reviewer approves (which stamps
@@ -23,7 +24,7 @@ export interface TestimonyInput {
 export async function submitTestimony(db: AppDb, input: TestimonyInput): Promise<number> {
   const authorName = input.author_name.trim()
     ? input.author_name
-    : input.locale === 'zh' ? '匿名' : 'Anonymous';
+    : pickByLocale({ en: 'Anonymous', zh: '匿名' }, input.locale);
   const created = await db
     .prepare(
       `INSERT INTO testimonies (person_id, author_name, locale, title, body, category)

@@ -1,4 +1,6 @@
 ---
+import { type Locale, isChinese } from '../../../../lib/locales';
+import { userLocale } from '../../../../lib/localeSettings';
 import MemberPageHeader from '../../../../components/ui/MemberPageHeader.astro';
 import Admin from '../../../../layouts/Admin.astro';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
@@ -37,8 +39,8 @@ try {
     now: Date.now,
   });
 } catch { return new Response(null, { status: 503 }); }
-const lang = user!.lang === 'zh' ? 'zh' : 'en';
-const copy = lang === 'zh' ? {
+const lang: Locale = userLocale(user!.lang, Astro.locals.locales);
+const copy = isChinese(lang) ? {
   title: '选择 Canvas 课程', intro: '把 Canvas 课程映射到教会的学习事工。',
   program: '学习事工', course: 'Canvas 课程', map: '映射课程', unmap: '取消映射', back: '返回学习设置',
 } : {

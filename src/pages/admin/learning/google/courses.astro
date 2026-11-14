@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../../lib/localeSettings';
 import { env } from 'cloudflare:workers';
 import MemberPageHeader from '../../../../components/ui/MemberPageHeader.astro';
 import Admin from '../../../../layouts/Admin.astro';
@@ -8,7 +9,7 @@ import { listGoogleClassroomCourseOptions } from '../../../../lib/learningGoogle
 import { importLearningCredentialKeyRing } from '../../../../lib/learningCredentials';
 import { googleClassroomPushReadiness } from '../../../../lib/learningGoogleRegistrationLifecycle';
 import { t } from '../../../../lib/i18n';
-import type { Locale } from '../../../../lib/locales';
+import { type Locale, isChinese } from '../../../../lib/locales';
 
 export const prerender = false;
 
@@ -23,8 +24,8 @@ if (!hasAreaAccess(user, 'learning')) {
 if (Astro.request.method !== 'GET' && Astro.request.method !== 'HEAD') {
   return new Response(null, { status: 405, headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' } });
 }
-const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
-const copy = lang === 'zh' ? {
+const lang: Locale = userLocale(user!.lang, Astro.locals.locales);
+const copy = isChinese(lang) ? {
   title: '选择 Google Classroom 课程',
   intro: '选择要映射到 Church4Christ 学习事工的课程。这里只同步课程与学习活动元数据，不导入作业内容、答案或成绩。',
   back: '返回学习设置',

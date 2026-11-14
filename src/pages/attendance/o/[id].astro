@@ -3,6 +3,7 @@ import Base from '../../../layouts/Base.astro';
 import AttendanceSheet from '../../../components/AttendanceSheet.astro';
 import { t } from '../../../lib/i18n';
 import { DEFAULT_LOCALE, type Locale } from '../../../lib/locales';
+import { userLocale } from '../../../lib/localeSettings';
 import { getOccurrenceWithEvent } from '../../../lib/groupEventDb';
 import { listMembers } from '../../../lib/groupDb';
 import { canRecordAttendance, saveAttendance, getAttendanceMap } from '../../../lib/groupAttendance';
@@ -32,7 +33,7 @@ if (!(await canRecordAttendance(db, occurrence.id, user))) {
   return Astro.rewrite('/404');
 }
 
-const locale: Locale = user.lang === 'zh' ? 'zh' : 'en';
+const locale: Locale = userLocale(user.lang, Astro.locals.locales);
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();

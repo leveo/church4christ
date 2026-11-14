@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import ActionReceipt from '../../components/public/ActionReceipt.astro';
 import Base from '../../layouts/Base.astro';
 import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
+import { DEFAULT_LOCALE, type Locale, toSupportedLocale } from '../../lib/locales';
 import { consumeToken, peekToken } from '../../lib/auth';
 import { getPersonById, i18nJoin } from '../../lib/db';
 import { respondToAssignment } from '../../lib/planDb';
@@ -52,7 +52,7 @@ let state: State = 'invalid';
 let summary: Summary | null = null;
 let locale: Locale = DEFAULT_LOCALE;
 
-const langOf = (lang: string | null): Locale => (lang === 'zh' ? 'zh' : 'en');
+const langOf = (lang: string | null): Locale => toSupportedLocale(lang) ?? DEFAULT_LOCALE;
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();

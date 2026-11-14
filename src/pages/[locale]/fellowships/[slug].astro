@@ -2,7 +2,7 @@
 // Single fellowship: meeting details + leaders panel, then the prose body.
 import { render } from 'astro:content';
 import ContentPage from '../../../components/ContentPage.astro';
-import { localePath, parseLocale } from '../../../lib/locales';
+import { localePath, parseLocale, listSeparator, nameWithRole } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { getLocalized } from '../../../lib/content';
 
@@ -24,9 +24,9 @@ const { name, meetingTime, location, audience, leaders } = entry.data;
 
 // Locale-specific punctuation: zh uses the enumeration comma 、 and fullwidth
 // parentheses for leader roles; en uses ', ' and ASCII parentheses.
-const sep = locale === 'zh' ? '、' : ', ';
+const sep = listSeparator(locale);
 const withRole = (l: { name: string; role?: string }) =>
-  l.role ? (locale === 'zh' ? `${l.name}（${l.role}）` : `${l.name} (${l.role})`) : l.name;
+  nameWithRole(locale, l.name, l.role);
 ---
 
 <ContentPage image="groups" title={name} description={audience} locale={locale} translated={translated}>

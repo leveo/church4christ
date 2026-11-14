@@ -2,7 +2,7 @@
 import CareWorkspace from './CareWorkspace.astro';
 import Icon from '../../ui/Icon.astro';
 import { t } from '../../../lib/i18n';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, isChinese } from '../../../lib/locales';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const path = Astro.url.pathname;
@@ -10,11 +10,11 @@ const links = [
   { href: '/admin/people', label: t(locale, 'admin.identityMerge.backToPeople'), icon: 'people' },
   { href: '/admin/people/identity/merge', label: t(locale, 'admin.identityMerge.queue'), icon: 'people' },
   { href: '/admin/people/identity/recovery', label: t(locale, 'admin.identityRecovery.queue'), icon: 'lock' },
-  { href: '/admin/people/identity/planning-center', label: locale === 'zh' ? 'Planning Center 同步' : 'Planning Center sync', icon: 'settings' },
+  { href: '/admin/people/identity/planning-center', label: isChinese(locale) ? 'Planning Center 同步' : 'Planning Center sync', icon: 'settings' },
 ];
 ---
 <CareWorkspace variant="identity">
-  <nav class="identity-navigation" aria-label={locale === 'zh' ? '身份管理' : 'Identity management'}>
+  <nav class="identity-navigation" aria-label={isChinese(locale) ? '身份管理' : 'Identity management'}>
     {links.map(link => <a href={link.href} aria-current={link.href !== '/admin/people' && path.startsWith(link.href) ? 'page' : undefined}><Icon name={link.icon} size={16} />{link.label}</a>)}
   </nav>
   <div class="identity-body"><slot /></div>

@@ -1,3 +1,4 @@
+import { toSupportedLocale } from './locales';
 import { isValidDateStr } from './dates';
 
 const UTF8 = new TextEncoder();
@@ -259,7 +260,7 @@ export function validateNewcomerIntake(
   }
   if (emailAbsent && phoneAbsent) add('newcomer_contact_required', 'input');
 
-  const locale = input.locale === 'en' || input.locale === 'zh' ? input.locale : null;
+  const locale = toSupportedLocale(input.locale);
   if (!locale) add('newcomer_locale_invalid', 'locale');
   const visitDate = typeof input.visitDate === 'string' && isValidDateStr(input.visitDate) ? input.visitDate : null;
   if (!visitDate) add('newcomer_visit_date_invalid', 'visitDate');

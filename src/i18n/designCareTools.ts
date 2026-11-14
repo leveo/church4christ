@@ -1,4 +1,4 @@
-import type { Locale } from '../lib/locales';
+import { type Locale, pickByLocale } from '../lib/locales';
 
 const en = {
   intake: 'RECORD A VISIT',
@@ -84,4 +84,4 @@ const zh: Record<keyof typeof en, string> = {
   notesNext: '确认后下载',
 };
 
-export const careToolsCopy = (locale: Locale) => locale === 'zh' ? zh : en;
+export const careToolsCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);

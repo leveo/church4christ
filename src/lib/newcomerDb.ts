@@ -1,3 +1,4 @@
+import { isSupportedLocale, toSupportedLocale } from './locales';
 import { readSnapshotBatch, type AppDb, type AppDbResult, type SnapshotBackend } from './appDb';
 import { hasAreaAccess } from './adminAreas';
 import { isValidDateStr } from './dates';
@@ -214,7 +215,7 @@ function timestamp(value: unknown, nullable = false): string | null {
 }
 
 function locale(value: unknown): 'en' | 'zh' | null {
-  return value === 'en' || value === 'zh' ? value : null;
+  return toSupportedLocale(value);
 }
 
 function validUuid(value: unknown): value is string {
@@ -222,7 +223,7 @@ function validUuid(value: unknown): value is string {
 }
 
 function assertLocale(value: unknown): asserts value is 'en' | 'zh' {
-  if (value !== 'en' && value !== 'zh') throw new NewcomerInvalidError();
+  if (!isSupportedLocale(value)) throw new NewcomerInvalidError();
 }
 
 function assertPrivateAccess(user: SessionUser | null): asserts user is SessionUser {
@@ -1310,7 +1311,7 @@ function safeValidatedIntake(value: unknown): CapturedValidatedIntake {
     phone = normalized.value;
   }
   if (email === null && phone === null) throw new NewcomerInvalidError();
-  if ((row.locale !== 'en' && row.locale !== 'zh')
+  if (!isSupportedLocale(row.locale)
     || typeof row.visitDate !== 'string' || !isValidDateStr(row.visitDate)
     || typeof row.contactConsent !== 'boolean') throw new NewcomerInvalidError();
   const serviceTypeId = row.serviceTypeId === null ? null : positiveId(row.serviceTypeId);

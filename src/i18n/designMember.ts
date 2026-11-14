@@ -1,3 +1,4 @@
+import { pickByLocale } from '../lib/locales';
 const en = {
   welcome: 'Your week, together.',
   welcomeBody: 'Respond to invitations, see what is coming up, and stay connected with your church community.',
@@ -28,4 +29,4 @@ const zh: typeof en = {
   givingIntro: '清楚查看奉献记录与定期奉献安排。',
   privacy: '隐私政策',
 };
-export const memberCopy = (locale: 'en' | 'zh') => locale === 'zh' ? zh : en;
+export const memberCopy = (locale: 'en' | 'zh') => pickByLocale({ en, zh }, locale);
