@@ -28,7 +28,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 21 modules:**
+**The 22 modules:**
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -54,6 +54,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
+| `planning` | Service Planning | 服事流程 | Either |
 <!-- capabilities:end -->
 
 The `learning` module depends on `people`, works on either database, and is enabled by the
@@ -101,7 +102,8 @@ never get a link to a page that no longer exists:
   **Children off** and Attendance hides its check-in link editor, while historical aggregate
   reports and CSV remain readable. See [Service attendance](service-attendance.md).
 
-The Full Church preset enables all 21 modules; Website enables 8; Website + Community
+The Full Church preset enables 21 modules (every module except Service Planning, which you
+switch on separately in **Settings → Modules**); Website enables 8; Website + Community
 enables 18 of the 19 modules that are compatible with D1 (Member Portal is selected separately). Custom setup can select individual
 modules.
 

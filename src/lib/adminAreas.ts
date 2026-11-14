@@ -26,6 +26,7 @@ export const ADMIN_GRANTABLE_AREAS = [
   'payment-operations',
   'serve',
   'learning',
+  'planning',
 ] as const;
 export type AdminGrantableArea = (typeof ADMIN_GRANTABLE_AREAS)[number];
 
@@ -78,6 +79,7 @@ const AREA_PREFIXES: Array<[string, AdminAreaKey]> = [
   ['/admin/attendance', 'attendance'],
   ['/admin/activity-score', 'activity-score'],
   ['/admin/learning', 'learning'],
+  ['/admin/planning', 'planning'],
   ['/admin/onboarding', 'onboarding'],
   ['/admin/stripe-events', 'payment-operations'],
   ['/admin/giving', 'giving'],

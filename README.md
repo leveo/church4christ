@@ -124,6 +124,7 @@ application:
 | People and households directory | [People & households](docs/features/people-households.md) with CSV import, saved source-column mappings, and export |
 | Small groups | [Groups](docs/features/groups.md) with a public directory, join requests, events, and attendance |
 | Volunteer scheduling | [Volunteer scheduling](docs/features/volunteer-serve.md) with a monthly matrix and email confirmation, no login needed |
+| Service planning | [Run sheets, rehearsals, availability, and calendars](docs/features/service-planning.md) for services and events |
 | Children's check-in | [Kiosk check-in](docs/features/children-checkin.md) with pickup codes and attendance charts |
 | Attendance and engagement | [Service attendance](docs/features/service-attendance.md) and [activity scores](docs/features/activity-score.md) |
 | Newcomer and care follow-up | [Newcomer queue](docs/features/newcomers.md), [prayer wall](docs/features/prayer-wall.md), and [community workflows](docs/features/community-workflows.md) |
@@ -237,6 +238,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/attendance-report.png)](docs/features/service-attendance.md) | **[Service attendance](docs/features/service-attendance.md)** | Record aggregate adult totals, derive optional child totals from check-ins, correct history, and download identity-free CSV reports. |
 | [![](docs/images/admin/newcomers-queue.png)](docs/features/newcomers.md) | **[Newcomer follow-up](docs/features/newcomers.md)** | Receive bilingual consented public cards, triage a scoped staff queue, and hand exact matches into People without leaking notes or answers. |
 | [![](docs/images/admin/onboarding.png)](docs/features/onboarding-readiness.md) | **[Launch readiness](docs/features/onboarding-readiness.md)** | One bilingual checklist shared by setup, doctor, and every real administrator, with super-admin acknowledgements for manual checks. |
+|  | **[Service planning](docs/features/service-planning.md)** | Plan a timed run sheet, rehearsals with the people called, member availability, a find-a-time search, calendars, and automatic email. |
 |  | **[Activity score](docs/features/activity-score.md)** | Combine selected person-linked activities into explainable member scores and a church-wide engagement summary. |
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Learning](docs/features/learning.md)** | Continue Sunday school and discipleship between meetings with bilingual videos, files, assignments, quizzes, and provider-synchronized status. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
@@ -250,7 +252,7 @@ Every feature has its own plain-English guide. Start with any of these:
 **Pick your modules.** Most optional domain capabilities are **modules** you can switch
 off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
 and more. New installations write every module setting explicitly from the setup selection;
-the Full Church demo selects all 21. On older installations only, missing module rows retain
+the Full Church demo selects its 21 (Service Planning is switched on separately). On older installations only, missing module rows retain
 the legacy default-on behavior. A church that wants only service times and sermons can hide
 the rest in a click: the module's pages, links, and emails disappear together, and nothing
 is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -279,6 +281,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
+| `planning` | Service Planning | 服事流程 | Either |
 <!-- capabilities:end -->
 
 ### Community management and workflows
@@ -417,7 +420,7 @@ the [identity review or recovery workflow](docs/features/member-identity.md) bef
 
 The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
 publishing modules), **Website + Community** (18 modules; Member Portal can be added on D1), and
-**Full Church** (all 21 modules). Giving and
+**Full Church** (21 modules; Service Planning is switched on separately). Giving and
 Registration select Supabase automatically; D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
@@ -445,7 +448,7 @@ pricing pages before deployment.
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
 | **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 19 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
-| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 21 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
+| **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for the 21 Full Church modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
 
 Provider free allowances can be useful for evaluation or modest deployments, but they are
 not a promise that a production service will remain free. Budget for technical ownership,
@@ -464,7 +467,7 @@ walkthrough.
 
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
-migrations, records all 21 module settings, and bootstraps the first admin. It then hands
+migrations, records all 22 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
 Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning

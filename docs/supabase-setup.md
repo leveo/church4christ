@@ -72,7 +72,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Giving and Registration are **force-disabled on D1**, even if legacy
-settings say they are on. New setup writes explicit selected settings for all 21 modules.
+settings say they are on. New setup writes explicit selected settings for all 22 modules.
 
 ---
 

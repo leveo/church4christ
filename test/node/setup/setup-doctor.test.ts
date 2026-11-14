@@ -61,6 +61,7 @@ const SUPABASE_MIGRATIONS = [
   '0036_identity_merge_execution.sql',
   '0037_planning_center.sql',
   '0038_community_workflows.sql',
+  '0040_service_planning.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

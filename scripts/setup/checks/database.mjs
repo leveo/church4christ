@@ -52,6 +52,11 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   registration: Object.freeze([
     'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'identity_registration_continuations',
   ]),
+  planning: Object.freeze([
+    'planning_events', 'planning_event_coordinators', 'planning_items', 'planning_sessions',
+    'planning_session_people', 'availability_windows', 'planning_notification_rules',
+    'teams', 'team_members', 'people',
+  ]),
   learning: Object.freeze([
     'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',
     'learning_courses', 'learning_identity_links', 'learning_enrollments', 'learning_activities',
