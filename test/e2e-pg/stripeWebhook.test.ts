@@ -242,7 +242,7 @@ describe('Postgres-backed built worker: Stripe test-mode operations', () => {
     expect(await eventRow(event.id)).toBeNull();
   });
 
-  it('rejects a separately signed live event with the exact response and no receipt', async () => {
+  it('rejects a separately signed live event under test mode with the exact response and no receipt', async () => {
     const response = await signedEvent({
       id: LIVE_EVENT_ID,
       type: 'customer.created',
@@ -252,7 +252,7 @@ describe('Postgres-backed built worker: Stripe test-mode operations', () => {
       data: { object: { id: 'cus_live_e2e' } },
     });
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe('live_mode_disabled');
+    expect(await response.text()).toBe('livemode_mismatch');
     expect(await eventRow(LIVE_EVENT_ID)).toBeNull();
   });
 
