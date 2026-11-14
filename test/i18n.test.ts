@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import en from '../src/i18n/en';
 import zh from '../src/i18n/zh';
-import { t } from '../src/lib/i18n';
+import { isDictLoaded, loadDict, t } from '../src/lib/i18n';
 import {
   ATTENDANCE_FORM_ERROR_CODES,
   type AttendanceFormErrorCode,
@@ -486,5 +486,27 @@ describe('t()', () => {
     // carries all five escapable characters and must be fully escaped.
     const out = t('en', 'Q&A {v}', { v: `<a href="x">&'` });
     expect(out).toBe(`Q&A &lt;a href=&quot;x&quot;&gt;&amp;&#39;`);
+  });
+});
+
+describe('t() fallback chain and dictionary loading', () => {
+  it('returns the raw key when no dictionary in the chain has it', () => {
+    expect(t('zh', 'no.such.key')).toBe('no.such.key');
+    expect(t('en', 'no.such.key')).toBe('no.such.key');
+  });
+
+  it('keeps en and zh resident so t() works without awaiting', async () => {
+    expect(isDictLoaded('en')).toBe(true);
+    expect(isDictLoaded('zh')).toBe(true);
+    await expect(loadDict('zh')).resolves.toBeUndefined();
+    expect(t('zh', 'common.language')).toBe(zh['common.language']);
+    expect(t('en', 'common.language')).toBe(en['common.language']);
+  });
+
+  it('escapes interpolated values but not dictionary text', () => {
+    const key = Object.keys(en).find((k) => /\{\w+\}/.test(en[k]));
+    expect(key).toBeDefined();
+    const name = /\{(\w+)\}/.exec(en[key!])![1];
+    expect(t('en', key!, { [name]: '<b>' })).toContain('&lt;b&gt;');
   });
 });

@@ -5,16 +5,16 @@
 //
 // Every collection entry `id` is '<locale>/<slug>' (the glob loader's folder +
 // filename). Locale resolution: prefer the requested locale's entry, else fall
-// back to the English one with translated=false; English callers always get
-// translated=true when their entry exists.
+// back along the chain (requested -> installation default -> en) with
+// translated=false and `contentLocale` naming the language actually served.
+
+import { fallbackChain } from './locales';
 
 /** Minimal shape these helpers need — Astro's CollectionEntry satisfies it. */
 export interface HasId {
   id: string;
   data?: { demo?: boolean };
 }
-
-const EN = 'en';
 
 /** Split an entry id ('zh/psalms-of-ascent') into its locale + slug parts. */
 export function splitId(id: string): { locale: string; slug: string } {
@@ -29,21 +29,23 @@ export function slugOf(entry: HasId): string {
 }
 
 /**
- * Resolve one slug for `locale` against a flat entry list. Returns the localized
- * entry (translated=true) when present, else the English entry (translated=false),
- * else null when neither exists.
+ * Resolve one slug for `locale` against a flat entry list, walking `chain`
+ * (default: requested -> installation default -> en). Returns the first entry
+ * found; `translated` is true only for the requested locale's own entry and
+ * `contentLocale` is the language of the entry returned. Null when none exists.
  */
 export function getLocalizedFrom<T extends HasId>(
   entries: T[],
   slug: string,
   locale: string,
   includeDemo = true,
-): { entry: T; translated: boolean } | null {
+  chain: readonly string[] = fallbackChain(locale),
+): { entry: T; translated: boolean; contentLocale: string } | null {
   const visible = (entry: T) => includeDemo || entry.data?.demo !== true;
-  const exact = entries.find((e) => e.id === `${locale}/${slug}` && visible(e));
-  if (exact) return { entry: exact, translated: true };
-  const fallback = entries.find((e) => e.id === `${EN}/${slug}` && visible(e));
-  if (fallback) return { entry: fallback, translated: false };
+  for (const code of chain) {
+    const hit = entries.find((e) => e.id === `${code}/${slug}` && visible(e));
+    if (hit) return { entry: hit, translated: code === locale, contentLocale: code };
+  }
   return null;
 }
 
@@ -56,13 +58,14 @@ export function listLocalizedFrom<T extends HasId>(
   entries: T[],
   locale: string,
   includeDemo = true,
-): { entry: T; translated: boolean; slug: string }[] {
+  chain?: readonly string[],
+): { entry: T; translated: boolean; contentLocale: string; slug: string }[] {
   const slugs = new Set<string>();
   for (const e of entries) slugs.add(splitId(e.id).slug);
 
-  const out: { entry: T; translated: boolean; slug: string }[] = [];
+  const out: { entry: T; translated: boolean; contentLocale: string; slug: string }[] = [];
   for (const slug of slugs) {
-    const resolved = getLocalizedFrom(entries, slug, locale, includeDemo);
+    const resolved = getLocalizedFrom(entries, slug, locale, includeDemo, chain);
     if (resolved) out.push({ ...resolved, slug });
   }
   return out;

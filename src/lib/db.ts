@@ -7,7 +7,7 @@
 // names, column names, a Locale) — the validation is defense in depth, never a
 // substitute for parameterizing user input (which does not reach this layer).
 import type { AppDb } from './appDb';
-import { LOCALES, type Locale } from './locales';
+import { fallbackChain, isSupportedLocale, type Locale } from './locales';
 
 export type { Locale };
 
@@ -24,33 +24,42 @@ function assertIdent(value: string, what: string): void {
 
 /**
  * Build the LEFT JOIN + COALESCE fragments for a locale-aware companion table.
- * Emits a localized join (`<alias>_l`, on the requested locale) and a default
- * join (`<alias>_d`, always 'en'); each requested column becomes
- * `COALESCE(<alias>_l.<col>, <alias>_d.<col>) AS <col>`, so a missing localized
- * row transparently falls back to English. The companion table joins its
- * `<fkCol>` back to `<alias>.id`, so callers must alias the base row `<alias>`.
+ * The lookup order is the fallback chain (requested -> installation default -> en),
+ * one join per distinct link: `<alias>_l` (first), `<alias>_d` (second) and
+ * `<alias>_e` (third, only when all three differ). A one-element chain (en with
+ * en as default) joins en twice, so today's SQL is unchanged. Each requested
+ * column becomes `COALESCE(<alias>_l.<col>, <alias>_d.<col>[, <alias>_e.<col>])`.
+ * The companion table joins its `<fkCol>` back to `<alias>.id`, so callers must
+ * alias the base row `<alias>`. Pass a locale (chain derived from the runtime
+ * default) or an explicit chain.
  */
 export function i18nJoin(
   table: string,
   alias: string,
   fkCol: string,
   cols: string[],
-  locale: Locale,
+  localeOrChain: Locale | readonly string[],
 ): { select: string; joins: string } {
-  if (!(LOCALES as readonly string[]).includes(locale)) {
-    throw new Error(`i18nJoin: unsupported locale ${JSON.stringify(locale)}`);
+  if (typeof localeOrChain === 'string' && !isSupportedLocale(localeOrChain)) {
+    throw new Error(`i18nJoin: unsupported locale ${JSON.stringify(localeOrChain)}`);
+  }
+  const requested = typeof localeOrChain === 'string' ? fallbackChain(localeOrChain) : [...localeOrChain];
+  if (requested.length === 0 || !requested.every(isSupportedLocale)) {
+    throw new Error(`i18nJoin: unsupported locale ${JSON.stringify(localeOrChain)}`);
   }
   assertIdent(table, 'table');
   assertIdent(alias, 'alias');
   assertIdent(fkCol, 'fkCol');
   for (const col of cols) assertIdent(col, 'column');
 
+  const chain = requested.length === 1 ? [requested[0], requested[0]] : requested.slice(0, 3);
+  const suffixes = ['l', 'd', 'e'];
   const select = cols
-    .map((col) => `COALESCE(${alias}_l.${col}, ${alias}_d.${col}) AS ${col}`)
+    .map((col) => `COALESCE(${chain.map((_, i) => `${alias}_${suffixes[i]}.${col}`).join(', ')}) AS ${col}`)
     .join(', ');
-  const joins =
-    `LEFT JOIN ${table} ${alias}_l ON ${alias}_l.${fkCol} = ${alias}.id AND ${alias}_l.locale = '${locale}' ` +
-    `LEFT JOIN ${table} ${alias}_d ON ${alias}_d.${fkCol} = ${alias}.id AND ${alias}_d.locale = 'en'`;
+  const joins = chain
+    .map((code, i) => `LEFT JOIN ${table} ${alias}_${suffixes[i]} ON ${alias}_${suffixes[i]}.${fkCol} = ${alias}.id AND ${alias}_${suffixes[i]}.locale = '${code}'`)
+    .join(' ');
   return { select, joins };
 }
 

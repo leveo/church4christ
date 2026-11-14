@@ -5,6 +5,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getPersonByEmail, getPersonById, i18nJoin, listMinistries, type Locale } from '../src/lib/db';
+import { setRuntimeDefaultLocale } from '../src/lib/locales';
 
 // Storage is isolated per test file but not per test in this pool config, so
 // each test starts from a clean slate (children before parents).
@@ -35,6 +36,29 @@ describe('i18nJoin', () => {
     const { joins } = i18nJoin('team_i18n', 't', 'team_id', ['name'], 'en');
     expect(joins).toContain("t_l.locale = 'en'");
     expect(joins).toContain("t_d.locale = 'en'");
+  });
+
+  it('joins the whole fallback chain: requested, default, then en', () => {
+    const { select, joins } = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['zh', 'en']);
+    expect(select).toBe('COALESCE(m_l.name, m_d.name) AS name');
+    expect(joins).toContain("m_l.locale = 'zh'");
+    expect(joins).toContain("m_d.locale = 'en'");
+    const three = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['en', 'zh', 'en']);
+    expect(three.select).toBe('COALESCE(m_l.name, m_d.name, m_e.name) AS name');
+    expect(three.joins).toContain("m_e.locale = 'en'");
+    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['zh', 'fr'])).toThrow();
+    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], [])).toThrow();
+  });
+
+  it('derives the chain from the runtime default when given a bare locale', () => {
+    setRuntimeDefaultLocale('zh');
+    try {
+      const { joins } = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], 'en');
+      expect(joins).toContain("m_l.locale = 'en'");
+      expect(joins).toContain("m_d.locale = 'zh'");
+    } finally {
+      setRuntimeDefaultLocale('en');
+    }
   });
 
   it('throws on a locale outside LOCALES', () => {
