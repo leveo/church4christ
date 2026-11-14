@@ -13,10 +13,13 @@ import { t } from '../../../lib/i18n';
 import { parseManualGiftForm } from '../../../lib/validate';
 import { listFunds, listFundsAdmin } from '../../../lib/fundDb';
 import { listGifts, fundTotals, recordManualGift } from '../../../lib/givingDb';
+import { getSetting } from '../../../lib/settings';
+import { env } from 'cloudflare:workers';
+import { stripeMode, type StripeEnv } from '../../../lib/stripe';
 import { listPeople } from '../../../lib/adminDb';
 import { isValidDateStr, todayInTz, monthRange, formatMonth } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
-import { tin, lab, errorText, btn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, errorText, btn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -25,7 +28,14 @@ if (!user || !(hasAreaAccess(user, 'giving') || user.finance === 1)) return new 
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 
-const METHODS = ['check', 'cash', 'card'] as const;
+const METHODS = ['check', 'cash', 'card', 'us_bank_account'] as const;
+
+// Manual gifts use the church's configured giving currency (never hard-coded).
+const rawCurrency = (await getSetting(db, 'giving.currency', 'usd')).trim().toLowerCase();
+const givingCurrency = /^[a-z]{3}$/.test(rawCurrency) ? rawCurrency : 'usd';
+const mode = stripeMode(env as unknown as StripeEnv);
+// A test-mode deployment shows rehearsal Stripe gifts in totals; live shows real money only.
+const includeTest = mode !== 'live';
 
 let errors: Record<string, string> = {};
 let fd: FormData | null = null;
@@ -45,7 +55,7 @@ if (Astro.request.method === 'POST') {
         receivedOn: parsed.data.receivedOn,
         note: parsed.data.note ?? undefined,
         recordedBy: user.id,
-        currency: 'usd',
+        currency: givingCurrency,
       });
       return Astro.redirect('/admin/giving?recorded=1', 303);
     }
@@ -75,12 +85,12 @@ const [allFunds, activeFunds, people, gifts, totals, monthTotals, ytdTotals] = a
   listFunds(db, lang, { activeOnly: true }),
   listPeople(db, {}),
   listGifts(db, lang, { fundId: filterFundId, from, to, method: filterMethod, limit: 500 }),
-  fundTotals(db, lang, { from, to }),
-  fundTotals(db, lang, { from: monthStart, to: monthEnd }),
-  fundTotals(db, lang, { from: yearStart, to: today }),
+  fundTotals(db, lang, { from, to, includeTest, defaultCurrency: givingCurrency }),
+  fundTotals(db, lang, { from: monthStart, to: monthEnd, includeTest, defaultCurrency: givingCurrency }),
+  fundTotals(db, lang, { from: yearStart, to: today, includeTest, defaultCurrency: givingCurrency }),
 ]);
-// Count-only summaries: online gifts may use different currencies, while
-// fundTotals aggregates money without currency grouping. Do not combine amounts.
+// Count-only stat tiles; the per-fund table below groups money by currency, and
+// amounts in different currencies are never combined.
 const copy = financeCopy(lang);
 const monthGiftCount = monthTotals.reduce((sum, r) => sum + r.gift_count, 0);
 const ytdGiftCount = ytdTotals.reduce((sum, r) => sum + r.gift_count, 0);
@@ -100,6 +110,12 @@ const donorOf = (gift: { person_id: number | null; donor_name: string | null }) 
 };
 const fundLabel = (f: { name_en: string; name_zh: string }) => (lang === 'zh' ? f.name_zh || f.name_en : f.name_en);
 
+const exportParams = new URLSearchParams();
+if (filterFundId !== undefined) exportParams.set('fund', String(filterFundId));
+if (from) exportParams.set('from', from);
+if (to) exportParams.set('to', to);
+const exportQuery = exportParams.size ? `?${exportParams.toString()}` : '';
+const statusLabel = (status: string) => t(lang, `admin.giving.status${status.charAt(0).toUpperCase()}${status.slice(1)}`);
 const recorded = params.get('recorded') === '1';
 const hasErrors = Object.keys(errors).length > 0;
 const g = (n: string) => String(fd?.get(n) ?? '');
@@ -112,11 +128,14 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
 <Admin title={heading}>
 <FinanceSurface>
   <FinanceHeader locale={lang} title={heading} description={copy.ledgerIntro}>
+    <a href="/admin/giving/statements" class="text-primary hover:underline">{t(lang, 'admin.giving.statements')}</a>
+    <a href={`/admin/giving/export.csv${exportQuery}`} class="text-primary hover:underline">{t(lang, 'admin.giving.exportCsv')}</a>
     <a href="/admin/giving/reconcile" class="text-primary hover:underline">{t(lang, 'admin.giving.reconcile')}</a>
     <a href="/admin/giving/funds" class="text-primary hover:underline">{t(lang, 'admin.giving.funds')}</a>
     <a href="#finance-manual-entry" class={btn}>{copy.entry}</a>
   </FinanceHeader>
   {recorded && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.giving.recorded')}</p>}
+  <p class="finance-scope">{mode === 'live' ? t(lang, 'admin.giving.modeLive') : mode === 'test' ? t(lang, 'admin.giving.modeTest') : t(lang, 'admin.giving.stripeNotConfigured')}</p>
   <dl class="finance-summary">
     {stats.map((s) => <div><dt>{s.label}</dt><dd>{s.value}</dd><dd class="finance-stat-date finance-scope">{s.detail}</dd></div>)}
   </dl>
@@ -163,6 +182,7 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
           <th class={th}>{t(lang, 'admin.giving.colDonor')}</th>
           <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
           <th class={th}>{t(lang, 'admin.giving.colMethod')}</th>
+          <th class={th}>{t(lang, 'admin.giving.colStatus')}</th>
           <th class={th}>{t(lang, 'admin.giving.checkNumber')}</th>
           <th class={`${th} finance-amount`}>{t(lang, 'admin.giving.colAmount')}</th>
         </tr>
@@ -171,19 +191,24 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
         {
           gifts.length === 0 ? (
             <tr>
-              <td class={`${td} text-ink-muted`} colspan="6">
+              <td class={`${td} text-ink-muted`} colspan="7">
                 {t(lang, 'admin.giving.giftsEmpty')}
               </td>
             </tr>
           ) : (
             gifts.map((gift) => (
               <tr class:list={["border-t border-border align-top", { "finance-refunded": gift.status === 'refunded' }]}>
-                <td class={`${td} tabular-nums`}>{(gift.received_on ?? gift.created_at).slice(0, 10)}</td>
+                <td class={`${td} tabular-nums`}>{gift.gift_date}</td>
                 <td class={td}>{donorOf(gift)}</td>
                 <td class={td}>{gift.fund_name}</td>
                 <td class={td}>
                   <span class={`${badge} ${gift.status === 'refunded' ? badgeInactive : badgeActive}`}>{methodLabel(gift.method)}</span>
                   {gift.status === 'refunded' && <span class="finance-refunded-note">{copy.refunded}</span>}
+                  {!gift.livemode && <span class={`ml-2 ${badge} ${badgeInactive}`}>{t(lang, 'admin.giving.testBadge')}</span>}
+                </td>
+                <td class={td}>
+                  {gift.status === 'succeeded' && gift.refunded_cents === 0 ? '—' : <span class={`${badge} ${gift.status === 'pending' || gift.status === 'disputed' ? badgeScheduled : badgeInactive}`}>{statusLabel(gift.status)}</span>}
+                  {gift.status === 'succeeded' && gift.refunded_cents > 0 && <span class="block text-xs text-ink-muted">{t(lang, 'admin.giving.partRefund', { amount: formatCents(gift.refunded_cents, gift.currency) })}</span>}
                 </td>
                 <td class={`${td} tabular-nums`}>{gift.check_number || '—'}</td>
                 <td class={`${td} tabular-nums font-medium finance-amount`}>{formatCents(gift.amount_cents, gift.currency)}<span class="block text-xs font-normal text-ink-muted">{gift.currency.toUpperCase()}</span></td>
@@ -204,15 +229,19 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
           <th class={th}>{t(lang, 'admin.giving.fundNumber')}</th>
           <th class={th}>{t(lang, 'admin.giving.colFund')}</th>
           <th class={th}>{t(lang, 'admin.giving.count')}</th>
+          <th class={th}>{t(lang, 'admin.giving.currency')}</th>
+          <th class={`${th} finance-amount`}>{t(lang, 'admin.giving.colAmount')}</th>
         </tr>
       </thead>
       <tbody>
-        {totals.length === 0 && <tr><td class={`${td} text-ink-muted`} colspan="3">{t(lang, 'admin.giving.giftsEmpty')}</td></tr>}
+        {totals.length === 0 && <tr><td class={`${td} text-ink-muted`} colspan="5">{t(lang, 'admin.giving.giftsEmpty')}</td></tr>}
         {totals.map((row) => (
           <tr class="border-t border-border">
             <td class={`${td} tabular-nums`}>{row.fund_number}</td>
             <td class={td}>{row.fund_name}</td>
             <td class={`${td} tabular-nums`}>{row.gift_count}</td>
+            <td class={td}>{row.currency.toUpperCase()}</td>
+            <td class={`${td} tabular-nums finance-amount`}>{formatCents(row.total_cents, row.currency)}</td>
           </tr>
         ))}
       </tbody>
@@ -254,7 +283,7 @@ const methodLabel = (m: string) => t(lang, `giving.method.${m}`);
           {errors.fund_id && <span class={errorText}>{t(lang, errors.fund_id)}</span>}
         </label>
         <label class="block">
-          <span class={lab}>{t(lang, 'give.amount')}</span>
+ <span class={lab}>{t(lang, 'give.amount')} ({givingCurrency.toUpperCase()})</span>
           <input name="amount" inputmode="decimal" value={echoing ? g('amount') : ''} class={tin} />
           {errors.amount && <span class={errorText}>{t(lang, errors.amount)}</span>}
         </label>

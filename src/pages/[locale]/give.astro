@@ -18,6 +18,7 @@ import { getSiteIdentity } from '../../lib/settings';
 import { listFunds } from '../../lib/fundDb';
 import { btn, lab, noticeErr, tin } from '../../lib/adminUi';
 import { selectGivingCheckoutIdentityForRender } from '../../lib/givingCheckout';
+import { stripeConfiguredMode, type StripeEnv } from '../../lib/stripe';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 if (!locale) {
@@ -34,6 +35,10 @@ const givingOn = Astro.locals.modules.has('giving');
 // endpoint bounces validation failures back here as ?error=<code>; every code but
 // the portal-specific `noportal` reads as a generic "check the form" message.
 const user = Astro.locals.user;
+// Hide the form (with a clear message) when Stripe is not configured for the
+// current mode, rather than letting a donor reach a dead checkout.
+const stripeMode = givingOn ? stripeConfiguredMode(env as unknown as StripeEnv) : null;
+const stripeReady = stripeMode !== null;
 const funds = givingOn ? await listFunds(Astro.locals.db, locale, { activeOnly: true }) : [];
 const errParam = givingOn ? Astro.url.searchParams.get('error') : null;
 const sessionSecret = String((env as unknown as { SESSION_SECRET?: string }).SESSION_SECRET ?? '');
@@ -49,6 +54,7 @@ const frequencies = [
   { value: 'once', label: 'give.once', guestOk: true },
   { value: 'week', label: 'give.weekly', guestOk: false },
   { value: 'month', label: 'give.monthly', guestOk: false },
+  { value: 'year', label: 'give.yearly', guestOk: false },
 ];
 const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(localePath(locale, '/give'))}`);
 
@@ -80,7 +86,9 @@ try {
         <div class="giving-form">
         <h2 class="font-display text-heading-sm font-semibold">{frontdoorCopy(locale).giftDetails}</h2>
 
-        <form method="post" action={user ? "/api/giving/checkout" : "/api/identity/continuation/start"} class="mt-6 space-y-4">
+        {!stripeReady && <p class={`mt-6 ${noticeErr}`} role="status">{t(locale, 'give.notConfigured')}</p>}
+        {stripeReady && stripeMode === 'test' && <p class="mt-4 text-sm text-ink-muted">{t(locale, 'give.testModeNotice')}</p>}
+        {stripeReady && (<form method="post" action={user ? "/api/giving/checkout" : "/api/identity/continuation/start"} class="mt-6 space-y-4">
           <input type="hidden" name="locale" value={locale} />
           {user && <input type="hidden" name="identitySource" value="1" />}
           {!user && <input type="hidden" name="flow" value="giving" />}
@@ -93,9 +101,14 @@ try {
             <span class={lab}>{t(locale, 'give.fund')}</span>
             <select name="fund_id" required class={tin}>
               {funds.map((f) => (
-                <option value={f.id}>{f.name}</option>
+                <option value={f.id} selected={f.is_default}>{f.name}</option>
               ))}
             </select>
+            {funds.some((f) => f.description) && (
+              <ul class="mt-2 space-y-1 text-xs text-ink-muted">
+                {funds.filter((f) => f.description).map((f) => <li><strong>{f.name}:</strong> {f.description}</li>)}
+              </ul>
+            )}
           </label>
 
           <label class="block">
@@ -141,7 +154,7 @@ try {
           <button type="submit" class={btn}>
             {t(locale, 'give.submit')}
           </button>
-        </form>
+        </form>)}
         </div>
       </div>
     </Base>
@@ -179,7 +192,7 @@ try {
 <style>
 .giving-layout { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1fr); gap:4rem; padding-bottom:4rem; align-items:start; }
 .giving-form { border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:2rem;background:var(--color-surface-raised); }
-.giving-form fieldset { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem; }
+.giving-form fieldset { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem; }
 .giving-form fieldset label { padding:.8rem .5rem;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface); }
 .giving-form fieldset label:has(input:checked) { border-color:var(--color-primary);background:var(--color-primary-soft);color:var(--color-on-primary-soft); }
 .giving-form button { width:100%;justify-content:center;min-height:46px; }

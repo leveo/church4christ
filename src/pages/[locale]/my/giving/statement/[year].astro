@@ -1,0 +1,131 @@
+---
+// Printable annual giving statement. Authed by the /my route policy and owned by
+// the `giving` module. The scope is derived from the SESSION, never from the URL:
+// a household owner sees the household's statement, anyone else only their own
+// gifts, so no parameter can reach another person's giving. Totals are the
+// tax-deductible, live, net-of-refund money from givingDb.statementTotals, grouped
+// by fund and currency. The church legal name, address, tax ID, and the
+// "no goods or services" wording come from settings. Print CSS hides site chrome.
+import Base from '../../../../../layouts/Base.astro';
+import { parseLocale, localePath } from '../../../../../lib/locales';
+import { t } from '../../../../../lib/i18n';
+import { formatCents } from '../../../../../lib/money';
+import { todayInTz, formatDate } from '../../../../../lib/dates';
+import { statementTotals } from '../../../../../lib/givingDb';
+import { isHouseholdOwner } from '../../../../../lib/portalDb';
+import { getSettings, getSiteIdentity } from '../../../../../lib/settings';
+import { btn, btnSecondary, th, td } from '../../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+const yearParam = Astro.params.year ?? '';
+if (!locale || !/^\d{4}$/.test(yearParam) || Number(yearParam) < 2000) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const year = Number(yearParam);
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+
+const owner = await isHouseholdOwner(db, user.id);
+const [lines, identity, s] = await Promise.all([
+  statementTotals(db, locale, { personId: user.id, household: owner }, year),
+  getSiteIdentity(db, locale),
+  getSettings(db, [
+    'giving.legal_name',
+    'giving.tax_id',
+    `giving.statement_note.${locale}`,
+    'giving.statement_note.en',
+    `giving.statement_no_goods.${locale}`,
+    'giving.statement_no_goods.en',
+  ]),
+]);
+const legalName = s['giving.legal_name'] || identity.name;
+const taxId = s['giving.tax_id'] ?? '';
+const note = s[`giving.statement_note.${locale}`] || s['giving.statement_note.en'] || '';
+const noGoods = s[`giving.statement_no_goods.${locale}`] || s['giving.statement_no_goods.en']
+  || t(locale, 'giving.statement.defaultNoGoods');
+
+// Per-currency grand totals (a statement never adds amounts across currencies).
+const totalsByCurrency = new Map<string, number>();
+for (const line of lines) totalsByCurrency.set(line.currency, (totalsByCurrency.get(line.currency) ?? 0) + line.total_cents);
+const title = t(locale, 'giving.statement.title', { year });
+---
+
+<Base title={title} locale={locale} noindex={true}>
+  <article class="container-content statement">
+    <header class="statement-head">
+      <p class="statement-eyebrow">{t(locale, 'giving.statement.heading')}</p>
+      <h1 class="font-display text-heading-md font-bold">{title}</h1>
+      <p class="mt-3 font-semibold">{legalName}</p>
+      {identity.address && <p class="text-sm text-ink-muted whitespace-pre-line">{identity.address}</p>}
+      {taxId && <p class="text-sm text-ink-muted">{t(locale, 'giving.statement.taxId')}: {taxId}</p>}
+    </header>
+
+    <section class="mt-6">
+      <p class="text-sm"><strong>{t(locale, 'giving.statement.donor')}:</strong> {user.displayName}</p>
+      <p class="text-sm text-ink-muted">{t(locale, owner ? 'giving.statement.householdScope' : 'giving.statement.ownScope')}</p>
+    </section>
+
+    <section class="mt-6">
+      <h2 class="font-display text-lg font-semibold">{t(locale, 'giving.statement.byFund')}</h2>
+      {lines.length === 0 ? (
+        <p class="mt-2 text-sm text-ink-muted">{t(locale, 'giving.statement.empty')}</p>
+      ) : (
+        <div class="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-raised">
+          <table class="w-full">
+            <thead class="border-b border-border bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(locale, 'giving.statement.fund')}</th>
+                <th class={`${th} text-right`}>{t(locale, 'giving.statement.gifts')}</th>
+                <th class={`${th} text-right`}>{t(locale, 'giving.statement.amount')}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+              {lines.map((line) => (
+                <tr>
+                  <td class={td}>{line.fund_name}</td>
+                  <td class={`${td} text-right tabular-nums`}>{line.gift_count}</td>
+                  <td class={`${td} text-right tabular-nums`}>{formatCents(line.total_cents, line.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot class="border-t border-border">
+              {[...totalsByCurrency].map(([currency, total]) => (
+                <tr>
+                  <th class={th} colspan="2">{t(locale, 'giving.statement.total')} ({currency.toUpperCase()})</th>
+                  <td class={`${td} text-right font-semibold tabular-nums`}>{formatCents(total, currency)}</td>
+                </tr>
+              ))}
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+
+    <section class="mt-6 space-y-2 text-sm">
+      <p>{noGoods}</p>
+      {note && <p class="text-ink-muted whitespace-pre-line">{note}</p>}
+      <p class="text-ink-muted">{t(locale, 'giving.statement.scopeNote')}</p>
+      <p class="text-ink-muted">{t(locale, 'giving.statement.prepared', { date: formatDate(todayInTz(), locale) })}</p>
+    </section>
+
+    <div class="statement-actions mt-8 flex flex-wrap gap-3">
+      <button type="button" class={btn} data-print>{t(locale, 'giving.statement.print')}</button>
+      <a href={localePath(locale, '/my/giving')} class={btnSecondary}>{t(locale, 'giving.statement.back')}</a>
+    </div>
+  </article>
+  <script is:inline>
+    document.querySelectorAll('[data-print]').forEach(function (b) { b.addEventListener('click', function () { window.print(); }); });
+  </script>
+</Base>
+
+<style>
+  .statement { max-width: 46rem; padding-block: 2rem 4rem; }
+  .statement-eyebrow { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-muted); }
+  .statement-head { border-bottom: 2px solid var(--color-primary); padding-bottom: 1rem; }
+  @media print {
+    :global(header), :global(footer), :global(nav), .statement-actions { display: none !important; }
+    .statement { max-width: none; padding: 0; }
+    .statement-head { border-bottom-color: var(--color-ink); }
+  }
+</style>

@@ -1,0 +1,159 @@
+---
+// Giving statements admin (finance route class). Two jobs: (1) edit the plain
+// settings that appear on every donor statement (legal name, tax ID, notes, and the
+// no-goods-or-services wording); (2) queue the annual statement email for a year.
+// Queueing only inserts outbox rows; the */5 Stripe recovery cron sends a bounded
+// batch per tick, and this page shows each batch's progress and any failures.
+import Admin from '../../../layouts/Admin.astro';
+import FinanceSurface from '../../../components/finance/FinanceSurface.astro';
+import FinanceHeader from '../../../components/finance/FinanceHeader.astro';
+import { financeCopy } from '../../../i18n/designFinance';
+import { t } from '../../../lib/i18n';
+import { getSettings, setSettings } from '../../../lib/settings';
+import { todayInTz } from '../../../lib/dates';
+import { enqueueStatementBatch, listStatementBatches, listStatementFailures } from '../../../lib/givingStatements';
+import { tin, lab, btn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import type { Locale } from '../../../lib/locales';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+
+const user = Astro.locals.user;
+if (!user || !(hasAreaAccess(user, 'giving') || user.finance === 1)) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const copy = financeCopy(lang);
+
+const KEYS = [
+  'giving.legal_name',
+  'giving.tax_id',
+  'giving.statement_note.en',
+  'giving.statement_note.zh',
+  'giving.statement_no_goods.en',
+  'giving.statement_no_goods.zh',
+] as const;
+
+let yearError = false;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('action') ?? '');
+  if (action === 'settings') {
+    const values: Record<string, string> = {};
+    for (const key of KEYS) values[key] = String(fd.get(key) ?? '').trim().slice(0, 1000);
+    await setSettings(db, values);
+    return Astro.redirect('/admin/giving/statements?saved=1', 303);
+  }
+  if (action === 'queue') {
+    const yearRaw = String(fd.get('year') ?? '').trim();
+    const year = /^\d{4}$/.test(yearRaw) ? Number(yearRaw) : NaN;
+    if (!Number.isInteger(year) || year < 2000 || year > Number(todayInTz().slice(0, 4))) {
+      yearError = true;
+    } else {
+      const { queued } = await enqueueStatementBatch(db, year, user.id);
+      return Astro.redirect(`/admin/giving/statements?queued=${queued}&year=${year}`, 303);
+    }
+  }
+}
+
+const params = Astro.url.searchParams;
+const saved = params.get('saved') === '1';
+const queuedParam = params.get('queued');
+const queued = queuedParam !== null && /^\d{1,6}$/.test(queuedParam) ? Number(queuedParam) : null;
+const defaultYear = Number(todayInTz().slice(0, 4)) - 1;
+const [settings, batches, failures] = await Promise.all([
+  getSettings(db, [...KEYS]),
+  listStatementBatches(db),
+  listStatementFailures(db),
+]);
+const heading = t(lang, 'admin.giving.statements');
+---
+
+<Admin title={heading}>
+<FinanceSurface>
+  <FinanceHeader locale={lang} title={heading} description={t(lang, 'admin.giving.statementsIntro')}>
+    <a href="/admin/giving" class="text-primary hover:underline">&larr; {t(lang, 'admin.giving.ledger')}</a>
+  </FinanceHeader>
+  {saved && <p class={`mt-4 ${noticeOk}`} role="status">{t(lang, 'admin.form.saved')}</p>}
+  {queued !== null && (
+    <p class={`mt-4 ${queued > 0 ? noticeOk : noticeErr}`} role="status">
+      {queued > 0 ? t(lang, 'admin.giving.statementQueued', { count: queued }) : t(lang, 'admin.giving.statementNone')}
+    </p>
+  )}
+  {yearError && <p class={`mt-4 ${noticeErr}`} role="alert">{t(lang, 'admin.giving.statementYearInvalid')}</p>}
+
+  <div class="finance-workspace">
+    <div class="finance-main">
+      <div class="finance-section-heading finance-section-heading-first"><h2>{t(lang, 'admin.giving.statementBatches')}</h2></div>
+      <div class="finance-table" role="region" aria-label={t(lang, 'admin.giving.statementBatches')} tabindex="0">
+        <table class="w-full border-collapse">
+          <thead class="bg-surface-sunken">
+            <tr>
+              <th class={th}>{t(lang, 'admin.giving.statementBatch')}</th>
+              <th class={th}>{t(lang, 'admin.giving.statementYear')}</th>
+              <th class={th}>{t(lang, 'admin.giving.statementSent')}</th>
+              <th class={th}>{t(lang, 'admin.giving.statementPending')}</th>
+              <th class={th}>{t(lang, 'admin.giving.statementFailed')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {batches.length === 0 && <tr><td class={`${td} text-ink-muted`} colspan="5">{t(lang, 'admin.giving.statementNoBatches')}</td></tr>}
+            {batches.map((b) => (
+              <tr class="border-t border-border">
+                <td class={`${td} tabular-nums`}>{b.batch_id.slice(0, 8)} · {b.created_at.slice(0, 10)}</td>
+                <td class={`${td} tabular-nums`}>{b.year}</td>
+                <td class={`${td} tabular-nums`}>{b.sent} / {b.total}</td>
+                <td class={`${td} tabular-nums`}>{Number(b.pending) + Number(b.sending)}</td>
+                <td class={`${td} tabular-nums`}>{b.failed}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {failures.length > 0 && (
+        <>
+          <div class="finance-section-heading"><h2>{t(lang, 'admin.giving.statementFailures')}</h2></div>
+          <ul class="divide-y divide-border rounded-lg border border-border bg-surface-raised text-sm">
+            {failures.map((f) => (
+              <li class="flex flex-wrap gap-3 px-4 py-2">
+                <span class="font-medium">{f.display_name || `#${f.person_id}`}</span>
+                <span class="tabular-nums text-ink-muted">{f.year}</span>
+                <span class="text-ink-muted">{f.last_error ?? ''}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+
+    <aside class="finance-side-form space-y-6">
+      <form method="post" class="space-y-4">
+        <h2>{t(lang, 'admin.giving.statementSend')}</h2>
+        <input type="hidden" name="action" value="queue" />
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.statementYear')}</span>
+          <input name="year" inputmode="numeric" pattern="\d{4}" value={defaultYear} class={tin} required />
+        </label>
+        <button type="submit" class={btn}>{t(lang, 'admin.giving.statementSend')}</button>
+      </form>
+
+      <form method="post" class="space-y-4">
+        <h2>{t(lang, 'admin.giving.statementDetails')}</h2>
+        <p class="finance-scope">{t(lang, 'admin.giving.statementDetailsHint')}</p>
+        <input type="hidden" name="action" value="settings" />
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.legalName')}</span>
+          <input name="giving.legal_name" value={settings['giving.legal_name'] ?? ''} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.taxId')}</span>
+          <input name="giving.tax_id" value={settings['giving.tax_id'] ?? ''} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.statementNoGoodsEn')}</span>
+          <textarea name="giving.statement_no_goods.en" rows="2" class={tin}>{settings['giving.statement_no_goods.en'] ?? ''}</textarea></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.statementNoGoodsZh')}</span>
+          <textarea name="giving.statement_no_goods.zh" rows="2" class={tin}>{settings['giving.statement_no_goods.zh'] ?? ''}</textarea></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.statementNoteEn')}</span>
+          <textarea name="giving.statement_note.en" rows="2" class={tin}>{settings['giving.statement_note.en'] ?? ''}</textarea></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.giving.statementNoteZh')}</span>
+          <textarea name="giving.statement_note.zh" rows="2" class={tin}>{settings['giving.statement_note.zh'] ?? ''}</textarea></label>
+        <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+      </form>
+    </aside>
+  </div>
+</FinanceSurface>
+</Admin>

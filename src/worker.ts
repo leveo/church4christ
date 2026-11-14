@@ -7,6 +7,7 @@ import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
 import { getBackend, openDb } from './lib/dbProvider';
 import { runStripeRecovery } from './lib/stripeRecovery';
+import { runStatementDrain } from './lib/givingStatements';
 import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
 import { runCanvasDisconnectCleanupPass } from './lib/learningCanvasCleanupCron';
 import { runScheduledLearningSyncPass } from './lib/learningSyncOrchestration';
@@ -99,7 +100,20 @@ export default {
         break;
       case STRIPE_RECOVERY_CRON:
         if (getBackend(env as never) !== 'supabase') break;
-        ctx.waitUntil(runStripeRecovery({ env: env as never }));
+        // The annual giving-statement outbox rides this existing tick (no extra
+        // cron): a bounded batch drains after Stripe recovery, in its own
+        // try/finally so a recovery failure never starves statement delivery.
+        ctx.waitUntil((async () => {
+          try {
+            await runStripeRecovery({ env: env as never });
+          } finally {
+            try {
+              await runStatementDrain(env as never);
+            } catch (error) {
+              console.error('giving statement drain failed', error instanceof Error ? error.name : 'unknown');
+            }
+          }
+        })());
         break;
       default:
         console.warn(`unhandled cron trigger: ${controller.cron}`);
