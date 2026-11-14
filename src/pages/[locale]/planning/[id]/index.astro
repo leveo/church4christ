@@ -1,0 +1,68 @@
+---
+// Member view of a planning event: the run sheet with the viewer's own items
+// highlighted, plus the rehearsals they are called to. Cue notes are shown only
+// to coordinators and planning admins. In-page authorization: coordinators,
+// planning admins, and participants of a non-draft event; anyone else gets 404
+// (indistinguishable from a missing event).
+import Member from '../../../../layouts/Member.astro';
+import PlanningHeader from '../../../../components/planning/PlanningHeader.astro';
+import RunSheetTable from '../../../../components/planning/RunSheetTable.astro';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { formatDate } from '../../../../lib/dates';
+import { getEvent } from '../../../../lib/planningDb';
+import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { loadRunSheetView } from '../../../../lib/planningView';
+import { listSessionsForPerson } from '../../../../lib/planningCalendar';
+import { noticeErr } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const id = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+const event = id !== null ? await getEvent(db, id) : null;
+const role = event ? await planningRole(db, user, event) : null;
+if (!event || !role) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const manager = canManage(role);
+const view = await loadRunSheetView(db, event.id, locale, { personId: user.id, teamIds: user.memberTeamIds });
+const mySessions = (await listSessionsForPerson(db, user.id, '0000-01-01', '9999-12-31')).filter((s) => s.event_id === event.id);
+const location = pickLocalizedText({ en: event.location_en, zh: event.location_zh }, locale);
+const notes = pickLocalizedText({ en: event.notes_en, zh: event.notes_zh }, locale);
+---
+<Member active="planning" title={pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)} locale={locale} noindex>
+  <div class="member-content">
+    <a href={localePath(locale, '/my')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.title')}</a>
+    <PlanningHeader locale={locale} event={event} current="view" manager={manager} />
+
+    {event.status === 'cancelled' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.view.cancelled')}</p>}
+    {location && <p class="mt-4 text-sm"><strong>{t(locale, 'planning.f.location')}:</strong> {location}</p>}
+    {notes && <p class="mt-2 whitespace-pre-line text-sm text-ink-muted">{notes}</p>}
+
+    {mySessions.length > 0 && (
+      <section class="mt-6 rounded-lg border border-border bg-surface-raised p-4">
+        <h2 class="font-display font-semibold">{t(locale, 'planning.view.mySessions')}</h2>
+        <ul class="mt-3 divide-y divide-border">
+          {mySessions.map((s) => (
+            <li class="py-3 text-sm">
+              <p class="font-medium">{pickLocalizedText({ en: s.title_en, zh: s.title_zh }, locale)}</p>
+              <p class="text-ink-muted">{formatDate(s.date, locale)} · {s.start_time}–{s.end_time}{s.call_time && ` · ${t(locale, 'planning.view.call', { time: s.call_time })}`}</p>
+              {pickLocalizedText({ en: s.location_en, zh: s.location_zh }, locale) && <p class="text-ink-muted">{pickLocalizedText({ en: s.location_en, zh: s.location_zh }, locale)}</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    <section class="mt-6">
+      <h2 class="mb-3 font-display text-lg font-semibold">{t(locale, 'planning.rs.title')}</h2>
+      <RunSheetTable locale={locale} rows={view?.rows ?? []} showCue={manager} />
+    </section>
+  </div>
+</Member>

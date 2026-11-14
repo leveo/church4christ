@@ -1,0 +1,351 @@
+---
+// Rehearsals and prep sessions for one event: create / edit, choose called
+// people (from teams or individually) with per-person call times, "Find a time"
+// suggestions, and scheduling (publishing) with a conflict re-check. In-page
+// authorization: planning admins and this event's coordinators; others get 404.
+import { env } from 'cloudflare:workers';
+import Member from '../../../../layouts/Member.astro';
+import PlanningHeader from '../../../../components/planning/PlanningHeader.astro';
+import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { formatDate, todayInTz, addDays } from '../../../../lib/dates';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btn, btnDanger, btnSecondary, lab, noticeErr, noticeOk, rowBtn, tin } from '../../../../lib/adminUi';
+import {
+  addSessionPeople,
+  checkSession,
+  createSession,
+  getEvent,
+  getSession,
+  listPeopleByIds,
+  listPeopleLite,
+  listSessionPeople,
+  listSessions,
+  listTeamMemberIds,
+  listTeams,
+  loadPersonFacts,
+  removeSessionPerson,
+  setCallTime,
+  type SessionInput,
+} from '../../../../lib/planningDb';
+import { canManage, planningRole } from '../../../../lib/planningAccess';
+import { parseFindTimeQuery, parseSessionForm } from '../../../../lib/planningForms';
+import { cancelSession, noticeAddedPeople, saveSession, scheduleSession, type ScheduleResult } from '../../../../lib/planningService';
+import { findCandidates } from '../../../../lib/planningModel';
+import type { EmailEnv } from '../../../../lib/email';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const id = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : null;
+const event0 = id !== null ? await getEvent(db, id) : null;
+const role = event0 ? await planningRole(db, user, event0) : null;
+if (!event0 || !canManage(role)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const event = event0;
+const mail = env as unknown as EmailEnv;
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+const here = (query = '') => localePath(locale, `/planning/${event.id}/sessions${query}`);
+// A session id from a form only counts when it belongs to THIS event.
+const ownSession = async (raw: FormDataEntryValue | null) => {
+  const sid = idOf(raw);
+  const session = sid ? await getSession(db, sid) : null;
+  return session && session.event_id === event.id ? session : null;
+};
+
+let errors: Record<string, string> = {};
+let failure: ScheduleResult | null = null;
+let failureSession: number | null = null;
+let echo: Record<string, string> = {};
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('_action') ?? '');
+  if (action === 'create' || action === 'save') {
+    const parsed = parseSessionForm(fd);
+    if (!parsed.ok) {
+      errors = parsed.errors;
+      echo = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
+    } else if (action === 'create') {
+      const sid = await createSession(db, event.id, parsed.data);
+      return Astro.redirect(here(`?saved=1&edit=${sid}#session-${sid}`), 303);
+    } else {
+      const session = await ownSession(fd.get('session_id'));
+      if (session) {
+        const result = await saveSession(mail, db, session.id, parsed.data as SessionInput, fd.get('ack') === '1');
+        if (result.ok) return Astro.redirect(here(`?saved=1#session-${session.id}`), 303);
+        failure = result;
+        failureSession = session.id;
+        echo = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
+      }
+    }
+  } else if (action === 'schedule') {
+    const session = await ownSession(fd.get('session_id'));
+    if (session) {
+      const result = await scheduleSession(mail, db, session.id, fd.get('ack') === '1');
+      if (result.ok) return Astro.redirect(here(`?scheduled=1#session-${session.id}`), 303);
+      failure = result;
+      failureSession = session.id;
+    }
+  } else if (action === 'cancel') {
+    const session = await ownSession(fd.get('session_id'));
+    if (session) {
+      await cancelSession(mail, db, session.id);
+      return Astro.redirect(here(`?cancelled=1#session-${session.id}`), 303);
+    }
+  } else if (action === 'add_team' || action === 'add_person') {
+    const session = await ownSession(fd.get('session_id'));
+    if (session) {
+      if (action === 'add_team') {
+        const teamId = idOf(fd.get('team_id'));
+        if (teamId) await addSessionPeople(db, session.id, await listTeamMemberIds(db, teamId));
+      } else {
+        const personId = idOf(fd.get('person_id'));
+        if (personId) await addSessionPeople(db, session.id, [personId]);
+      }
+      await noticeAddedPeople(mail, db, session.id);
+      return Astro.redirect(here(`?saved=1#session-${session.id}`), 303);
+    }
+  } else if (action === 'remove_person') {
+    const session = await ownSession(fd.get('session_id'));
+    const personId = idOf(fd.get('person_id'));
+    if (session && personId) {
+      await removeSessionPerson(db, session.id, personId);
+      return Astro.redirect(here(`?saved=1#session-${session.id}`), 303);
+    }
+  } else if (action === 'call_time') {
+    const session = await ownSession(fd.get('session_id'));
+    const personId = idOf(fd.get('person_id'));
+    if (session && personId) {
+      await setCallTime(db, session.id, personId, String(fd.get('call_time') ?? '') || null);
+      return Astro.redirect(here(`?saved=1#session-${session.id}`), 303);
+    }
+  }
+}
+
+const [sessions, teams, everyone] = await Promise.all([listSessions(db, event.id), listTeams(db, locale), listPeopleLite(db)]);
+const detail = await Promise.all(
+  sessions.map(async (s) => {
+    const people = await listSessionPeople(db, s.id);
+    const check = s.status === 'cancelled' ? null : await checkSession(db, s, people.map((p) => p.person_id));
+    return { s, people, check };
+  }),
+);
+
+// Find a time for one session (its called people), from ?find=ID plus the form's query.
+const findId = idOf(Astro.url.searchParams.get('find'));
+const findSession = findId ? sessions.find((s) => s.id === findId) ?? null : null;
+const findPeople = findSession ? detail.find((d) => d.s.id === findSession.id)?.people ?? [] : [];
+const hasQuery = Astro.url.searchParams.has('from');
+const findParsed = findSession && hasQuery ? parseFindTimeQuery(Astro.url.searchParams) : null;
+let candidates: ReturnType<typeof findCandidates> = [];
+if (findParsed?.ok && findSession) {
+  const q = findParsed.data;
+  const facts = await loadPersonFacts(db, findPeople.map((p) => p.person_id), q.dateFrom, q.dateTo, findSession.id);
+  candidates = findCandidates({ ...q, weekdays: q.weekdays, people: findPeople.map((p) => p.person_id), facts });
+}
+const today = todayInTz();
+const findValue = (key: string, fallback: string) => Astro.url.searchParams.get(key) ?? fallback;
+
+// Prefill for the edit form: ?edit=ID, with ?date&start&end from a picked candidate.
+const editId = idOf(Astro.url.searchParams.get('edit'));
+const prefill = {
+  date: Astro.url.searchParams.get('date') ?? '',
+  start: Astro.url.searchParams.get('start') ?? '',
+  end: Astro.url.searchParams.get('end') ?? '',
+};
+const nameOf = new Map<number, string>();
+if (failure && 'blocked' in failure) for (const p of await listPeopleByIds(db, [...failure.blocked, ...failure.busy])) nameOf.set(p.id, p.display_name);
+if (failure && failure.ok === false && failure.error === 'unknown') for (const p of await listPeopleByIds(db, failure.unknown)) nameOf.set(p.id, p.display_name);
+const names = (ids: number[]) => ids.map((pid) => nameOf.get(pid) ?? `#${pid}`).join(', ');
+const statusCls = { draft: badgeInactive, scheduled: badgeActive, cancelled: badgeScheduled } as const;
+const slotCls = { blocked: 'sl-blocked', busy: 'sl-busy', available: 'sl-available', unknown: 'sl-unknown' } as const;
+const fmtDay = (d: string) => formatDate(d, locale);
+const val = (key: string, fallback: string) => echo[key] ?? fallback;
+const err = (field: string) => (errors[field] ? t(locale, errors[field]) : null);
+---
+<Member active="planning" title={t(locale, 'planning.tab.sessions')} locale={locale} noindex>
+  <div class="member-content planning-page">
+    <a href={localePath(locale, `/planning/${event.id}/manage`)} class="text-sm text-ink-muted hover:text-primary">← {pickLocalizedText({ en: event.title_en, zh: event.title_zh }, locale)}</a>
+    <PlanningHeader locale={locale} event={event} current="sessions" manager={true} />
+
+    {Astro.url.searchParams.has('saved') && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.saved')}</p>}
+    {Astro.url.searchParams.has('scheduled') && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.sessions.scheduledOk')}</p>}
+    {Astro.url.searchParams.has('cancelled') && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.sessions.cancelledOk')}</p>}
+    {failure && failure.ok === false && failure.error === 'conflict' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.sessions.conflict', { names: names([...failure.blocked, ...failure.busy]) })}</p>}
+    {failure && failure.ok === false && failure.error === 'unknown' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.sessions.unknown', { names: names(failure.unknown) })}</p>}
+    {failure && failure.ok === false && failure.error === 'bad_time' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.err.endBeforeStart')}</p>}
+    {failure && failure.ok === false && failure.error === 'event_cancelled' && <p class={`mt-4 ${noticeErr}`}>{t(locale, 'planning.sessions.eventCancelled')}</p>}
+
+    <ul class="mt-6 grid gap-4">
+      {detail.map(({ s, people, check }) => (
+        <li id={`session-${s.id}`} class="rounded-lg border border-border bg-surface-raised p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <strong class="min-w-0 flex-1 basis-40">{pickLocalizedText({ en: s.title_en, zh: s.title_zh }, locale)}</strong>
+            <span class={`${badge} ${statusCls[s.status]}`}>{t(locale, `planning.session.status.${s.status}`)}</span>
+          </div>
+          <p class="mt-1 text-sm text-ink-muted">{fmtDay(s.session_date)} · {s.start_time}–{s.end_time}{pickLocalizedText({ en: s.location_en, zh: s.location_zh }, locale) && ` · ${pickLocalizedText({ en: s.location_en, zh: s.location_zh }, locale)}`}</p>
+
+          <details class="mt-3" open={people.length > 0 && failureSession === s.id}>
+            <summary class="cursor-pointer text-sm font-semibold text-primary">{t(locale, 'planning.sessions.people', { n: people.length })}</summary>
+            <ul class="mt-2 divide-y divide-border">
+              {people.map((p) => (
+                <li class="flex flex-wrap items-center gap-2 py-2 text-sm">
+                  <span class="min-w-0 flex-1 basis-32">{p.display_name}</span>
+                  {check && <span class={`sl-chip ${slotCls[check.statuses[p.person_id]]}`}>{t(locale, `planning.slot.${check.statuses[p.person_id]}`)}</span>}
+                  <form method="post" class="flex items-center gap-2">
+                    <input type="hidden" name="_action" value="call_time" /><input type="hidden" name="session_id" value={s.id} /><input type="hidden" name="person_id" value={p.person_id} />
+                    <input type="time" name="call_time" value={p.call_time ?? ''} aria-label={t(locale, 'planning.sessions.callTime')} class={`${tin} w-32`} />
+                    <button class={`${rowBtn} planning-touch`}>{t(locale, 'planning.sessions.setCall')}</button>
+                  </form>
+                  <form method="post"><input type="hidden" name="_action" value="remove_person" /><input type="hidden" name="session_id" value={s.id} /><input type="hidden" name="person_id" value={p.person_id} /><button class={`${rowBtn} planning-touch text-danger`}>{t(locale, 'planning.coord.remove')}</button></form>
+                </li>
+              ))}
+              {people.length === 0 && <li class="py-2 text-sm text-ink-muted">{t(locale, 'planning.sessions.noPeople')}</li>}
+            </ul>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <form method="post" class="flex items-end gap-2">
+                <input type="hidden" name="_action" value="add_team" /><input type="hidden" name="session_id" value={s.id} />
+                <label class="block min-w-0 flex-1"><span class={lab}>{t(locale, 'planning.sessions.addTeam')}</span><select name="team_id" class={tin}>{teams.map((tm) => <option value={tm.id}>{tm.name}</option>)}</select></label>
+                <button class={btnSecondary} disabled={teams.length === 0}>{t(locale, 'planning.sessions.add')}</button>
+              </form>
+              <form method="post" class="flex items-end gap-2">
+                <input type="hidden" name="_action" value="add_person" /><input type="hidden" name="session_id" value={s.id} />
+                <label class="block min-w-0 flex-1"><span class={lab}>{t(locale, 'planning.sessions.addPerson')}</span><select name="person_id" class={tin}>{everyone.map((p) => <option value={p.id}>{p.display_name}</option>)}</select></label>
+                <button class={btnSecondary}>{t(locale, 'planning.sessions.add')}</button>
+              </form>
+            </div>
+          </details>
+
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            {s.status !== 'scheduled' && event.status !== 'cancelled' && (
+              <form method="post" class="flex flex-wrap items-center gap-2">
+                <input type="hidden" name="_action" value="schedule" /><input type="hidden" name="session_id" value={s.id} />
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="ack" value="1" class="h-5 w-5" />{t(locale, 'planning.sessions.ack')}</label>
+                <button class={btn}>{t(locale, 'planning.sessions.schedule')}</button>
+              </form>
+            )}
+            {s.status !== 'cancelled' && (
+              <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'planning.sessions.confirmCancel'))})`}>
+                <input type="hidden" name="_action" value="cancel" /><input type="hidden" name="session_id" value={s.id} />
+                <button class={btnDanger}>{t(locale, 'planning.sessions.cancel')}</button>
+              </form>
+            )}
+            <a class={btnSecondary} href={here(`?find=${s.id}#find`)}>{t(locale, 'planning.find.open')}</a>
+            <a class={btnSecondary} href={here(`?edit=${s.id}#edit`)}>{t(locale, 'planning.rs.edit')}</a>
+          </div>
+
+          {editId === s.id && (
+            <form id="edit" method="post" class="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+              <input type="hidden" name="_action" value="save" /><input type="hidden" name="session_id" value={s.id} />
+              <label class="block"><span class={lab}>{t(locale, 'planning.f.titleEn')}</span><input name="title_en" value={val('title_en', s.title_en)} class={tin} />{err('title_en') && <p class="mt-1 text-sm text-danger">{err('title_en')}</p>}</label>
+              <label class="block"><span class={lab}>{t(locale, 'planning.f.titleZh')}</span><input name="title_zh" value={val('title_zh', s.title_zh)} class={tin} /></label>
+              <label class="block"><span class={lab}>{t(locale, 'planning.f.date')}</span><input type="date" name="session_date" required value={val('session_date', prefill.date || s.session_date)} class={tin} />{err('session_date') && <p class="mt-1 text-sm text-danger">{err('session_date')}</p>}</label>
+              <div class="grid grid-cols-2 gap-3">
+                <label class="block"><span class={lab}>{t(locale, 'planning.f.start')}</span><input type="time" name="start_time" required value={val('start_time', prefill.start || s.start_time)} class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'planning.f.end')}</span><input type="time" name="end_time" required value={val('end_time', prefill.end || s.end_time)} class={tin} />{err('end_time') && <p class="mt-1 text-sm text-danger">{err('end_time')}</p>}</label>
+              </div>
+              <label class="block"><span class={lab}>{t(locale, 'planning.f.locationEn')}</span><input name="location_en" value={val('location_en', s.location_en)} class={tin} /></label>
+              <label class="block"><span class={lab}>{t(locale, 'planning.f.locationZh')}</span><input name="location_zh" value={val('location_zh', s.location_zh)} class={tin} /></label>
+              <label class="block"><span class={lab}>{t(locale, 'planning.sessions.noteEn')}</span><textarea name="note_en" rows="2" class={tin}>{val('note_en', s.note_en)}</textarea></label>
+              <label class="block"><span class={lab}>{t(locale, 'planning.sessions.noteZh')}</span><textarea name="note_zh" rows="2" class={tin}>{val('note_zh', s.note_zh)}</textarea></label>
+              {s.status === 'scheduled' && <label class="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" name="ack" value="1" class="h-5 w-5" />{t(locale, 'planning.sessions.ack')}</label>}
+              <div class="sm:col-span-2"><button class={btn}>{t(locale, 'planning.save')}</button>{s.status === 'scheduled' && <span class="ml-3 text-xs text-ink-subtle">{t(locale, 'planning.sessions.changeHint')}</span>}</div>
+            </form>
+          )}
+
+          {findSession?.id === s.id && (
+            <section id="find" class="mt-4 border-t border-border pt-4">
+              <h3 class="font-display font-semibold">{t(locale, 'planning.find.title')}</h3>
+              <p class="mt-1 text-sm text-ink-muted">{t(locale, 'planning.find.intro', { n: findPeople.length })}</p>
+              <form method="get" class="mt-3 grid gap-3 sm:grid-cols-3">
+                <input type="hidden" name="find" value={s.id} />
+                <label class="block"><span class={lab}>{t(locale, 'planning.find.from')}</span><input type="date" name="from" required value={findValue('from', today)} class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'planning.find.to')}</span><input type="date" name="to" required value={findValue('to', addDays(today, 13))} class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'planning.find.duration')}</span><input type="number" inputmode="numeric" name="duration" min="15" max="600" step="15" value={findValue('duration', '90')} class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'planning.find.earliest')}</span><input type="time" name="earliest" value={findValue('earliest', '08:00')} class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'planning.find.latest')}</span><input type="time" name="latest" value={findValue('latest', '21:00')} class={tin} /></label>
+                <fieldset class="sm:col-span-3">
+                  <legend class={lab}>{t(locale, 'planning.find.weekdays')}</legend>
+                  <div class="flex flex-wrap gap-2">{[0, 1, 2, 3, 4, 5, 6].map((d) => <label class="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 text-sm"><input type="checkbox" name="weekday" value={d} checked={Astro.url.searchParams.getAll('weekday').includes(String(d))} class="h-5 w-5" />{t(locale, `planning.weekday.${d}`)}</label>)}</div>
+                </fieldset>
+                <div class="sm:col-span-3"><button class={btn}>{t(locale, 'planning.find.search')}</button></div>
+              </form>
+              {findParsed && !findParsed.ok && <p class={`mt-3 ${noticeErr}`}>{[...new Set(Object.values(findParsed.errors))].map((k) => t(locale, k)).join(' ')}</p>}
+              {findParsed?.ok && candidates.length === 0 && <p class="mt-3 text-sm text-ink-muted">{t(locale, 'planning.find.none')}</p>}
+              {candidates.length > 0 && (
+                <>
+                  <table class="ft-table mt-4">
+                    <thead><tr><th scope="col">{t(locale, 'planning.find.slot')}</th>{findPeople.map((p) => <th scope="col">{p.display_name}</th>)}<th scope="col"><span class="sr-only">{t(locale, 'planning.find.use')}</span></th></tr></thead>
+                    <tbody>
+                      {candidates.map((c) => (
+                        <tr>
+                          <th scope="row">{fmtDay(c.date)}<br />{c.start}–{c.end}</th>
+                          {findPeople.map((p) => <td><span class={`sl-chip ${slotCls[c.statuses[p.person_id]]}`}>{t(locale, `planning.slot.${c.statuses[p.person_id]}`)}</span></td>)}
+                          <td><a class={btnSecondary} href={here(`?edit=${s.id}&date=${c.date}&start=${c.start}&end=${c.end}#edit`)}>{t(locale, 'planning.find.use')}</a></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <ol class="ft-cards mt-4">
+                    {candidates.map((c) => (
+                      <li>
+                        <p class="font-semibold">{fmtDay(c.date)} · {c.start}–{c.end}</p>
+                        <p class="text-sm text-ink-muted">{t(locale, 'planning.find.summary', { blocked: c.conflicts, unknown: c.unknown })}</p>
+                        <ul class="mt-2 grid gap-1">
+                          {findPeople.map((p) => <li class="flex items-center justify-between gap-2 text-sm"><span>{p.display_name}</span><span class={`sl-chip ${slotCls[c.statuses[p.person_id]]}`}>{t(locale, `planning.slot.${c.statuses[p.person_id]}`)}</span></li>)}
+                        </ul>
+                        <a class={`${btnSecondary} mt-3`} href={here(`?edit=${s.id}&date=${c.date}&start=${c.start}&end=${c.end}#edit`)}>{t(locale, 'planning.find.use')}</a>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
+            </section>
+          )}
+        </li>
+      ))}
+      {detail.length === 0 && <li class="text-sm text-ink-muted">{t(locale, 'planning.sessions.none')}</li>}
+    </ul>
+
+    <section class="mt-8 rounded-lg border border-border bg-surface-raised p-4">
+      <h2 class="font-display font-semibold">{t(locale, 'planning.sessions.create')}</h2>
+      <form method="post" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <input type="hidden" name="_action" value="create" />
+        <label class="block"><span class={lab}>{t(locale, 'planning.f.titleEn')}</span><input name="title_en" value={echo.title_en && !editId ? echo.title_en : ''} class={tin} />{!editId && err('title_en') && <p class="mt-1 text-sm text-danger">{err('title_en')}</p>}</label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.f.titleZh')}</span><input name="title_zh" class={tin} /></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.f.date')}</span><input type="date" name="session_date" required value={!editId ? (echo.session_date ?? '') : ''} class={tin} />{!editId && err('session_date') && <p class="mt-1 text-sm text-danger">{err('session_date')}</p>}</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block"><span class={lab}>{t(locale, 'planning.f.start')}</span><input type="time" name="start_time" required class={tin} /></label>
+          <label class="block"><span class={lab}>{t(locale, 'planning.f.end')}</span><input type="time" name="end_time" required class={tin} />{!editId && err('end_time') && <p class="mt-1 text-sm text-danger">{err('end_time')}</p>}</label>
+        </div>
+        <label class="block"><span class={lab}>{t(locale, 'planning.f.locationEn')}</span><input name="location_en" class={tin} /></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.f.locationZh')}</span><input name="location_zh" class={tin} /></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.sessions.noteEn')}</span><textarea name="note_en" rows="2" class={tin}></textarea></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.sessions.noteZh')}</span><textarea name="note_zh" rows="2" class={tin}></textarea></label>
+        <div class="sm:col-span-2"><button class={btn}>{t(locale, 'planning.sessions.createButton')}</button></div>
+      </form>
+    </section>
+  </div>
+</Member>
+<style>
+  .planning-page :global(input), .planning-page :global(select), .planning-page :global(textarea) { font-size: 1rem; min-height: 2.75rem; }
+  .planning-page :global(.planning-touch) { min-height: 2.75rem; padding-inline: .9rem; }
+  .planning-page :global(button), .planning-page :global(summary), .planning-page :global(a.inline-flex) { min-height: 2.75rem; }
+  .planning-page :global(summary) { display: flex; align-items: center; }
+  .sl-chip { display: inline-flex; align-items: center; padding: .15rem .6rem; border-radius: var(--radius-full); font-size: .75rem; font-weight: 600; }
+  .sl-blocked { background: var(--color-danger-soft); color: var(--color-danger); }
+  .sl-busy { background: var(--color-warn-soft); color: var(--color-warn); }
+  .sl-available { background: var(--color-success-soft); color: var(--color-success); }
+  .sl-unknown { background: var(--color-surface-sunken); color: var(--color-ink-muted); }
+  .ft-table { width: 100%; border-collapse: collapse; }
+  .ft-table th, .ft-table td { padding: .5rem .6rem; border: 1px solid var(--color-border); text-align: left; font-size: .85rem; vertical-align: middle; }
+  .ft-table thead th { background: var(--color-surface-sunken); }
+  .ft-cards { display: none; gap: .75rem; padding: 0; list-style: none; }
+  .ft-cards > li { padding: .85rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  @media (max-width: 767px) { .ft-table { display: none; } .ft-cards { display: grid; } }
+</style>

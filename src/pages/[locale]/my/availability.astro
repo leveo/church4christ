@@ -1,0 +1,115 @@
+---
+// Available windows (authed via route policy): a person tells planners when they
+// CAN serve, as one-off dates or weekly windows over a date range. Blockouts
+// stay on /my/blockouts; planners combine both. The note is private to the
+// person. Every write is scoped to the SESSION user's person_id.
+import Member from '../../../layouts/Member.astro';
+import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { btn, btnSecondary, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import { addAvailability, deleteAvailability, listAvailability } from '../../../lib/planningDb';
+import { parseAvailabilityForm } from '../../../lib/planningForms';
+import { formatHM, parseWeekdays } from '../../../lib/planningModel';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const user = Astro.locals.user!;
+const db = Astro.locals.db;
+const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
+
+let errorKeys: string[] = [];
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = fd.get('_action');
+  if (action === 'add') {
+    // A one-off window has no weekdays and no end date; a weekly one repeats on the chosen weekdays.
+    if (fd.get('mode') !== 'weekly') {
+      fd.delete('weekday');
+      fd.set('ends_on', '');
+    }
+    const parsed = parseAvailabilityForm(fd);
+    if (parsed.ok) {
+      const result = await addAvailability(db, user.id, parsed.data);
+      if (result.ok) return Astro.redirect(localePath(locale, '/my/availability?saved=1'), 303);
+      errorKeys = ['planning.availability.limit'];
+    } else {
+      errorKeys = [...new Set(Object.values(parsed.errors))];
+    }
+  } else if (action === 'delete') {
+    const id = idOf(fd.get('id'));
+    if (id) await deleteAvailability(db, user.id, id);
+    return Astro.redirect(localePath(locale, '/my/availability'), 303);
+  }
+}
+
+const today = todayInTz();
+const windows = await listAvailability(db, user.id, today);
+const weekdayLabel = (days: number[]) => (days.length === 0 ? t(locale, 'planning.availability.everyDay') : days.map((d) => t(locale, `planning.weekday.${d}`)).join(' '));
+const saved = Astro.url.searchParams.has('saved');
+---
+<Member active="availability" title={t(locale, 'planning.availability.title')} locale={locale} noindex>
+  <div class="member-content availability-page">
+    <a href={localePath(locale, '/my/blockouts')} class="text-sm text-ink-muted hover:text-primary">← {t(locale, 'my.blockouts')}</a>
+    <MemberPageHeader title={t(locale, 'planning.availability.title')} description={t(locale, 'planning.availability.intro')} />
+
+    {saved && <p class={`mt-4 ${noticeOk}`}>{t(locale, 'planning.saved')}</p>}
+    {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
+
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-4 sm:p-6">
+      <h2 class="mb-3 font-display font-semibold">{t(locale, 'planning.availability.add')}</h2>
+      <form method="post" class="grid gap-4 sm:grid-cols-2">
+        <input type="hidden" name="_action" value="add" />
+        <fieldset class="sm:col-span-2">
+          <legend class={lab}>{t(locale, 'planning.availability.mode')}</legend>
+          <div class="flex flex-wrap gap-3">
+            <label class="avail-choice"><input type="radio" name="mode" value="once" checked />{t(locale, 'planning.availability.once')}</label>
+            <label class="avail-choice"><input type="radio" name="mode" value="weekly" />{t(locale, 'planning.availability.weekly')}</label>
+          </div>
+        </fieldset>
+        <label class="block"><span class={lab}>{t(locale, 'planning.availability.startsOn')}</span><input type="date" name="starts_on" required min={today} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.availability.endsOn')}</span><input type="date" name="ends_on" min={today} class={tin} /><span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'planning.availability.endsHint')}</span></label>
+        <fieldset class="sm:col-span-2">
+          <legend class={lab}>{t(locale, 'planning.availability.weekdays')}</legend>
+          <div class="flex flex-wrap gap-2">{[0, 1, 2, 3, 4, 5, 6].map((d) => <label class="avail-choice"><input type="checkbox" name="weekday" value={d} />{t(locale, `planning.weekday.${d}`)}</label>)}</div>
+          <p class="mt-1 text-xs text-ink-subtle">{t(locale, 'planning.availability.weekdaysHint')}</p>
+        </fieldset>
+        <label class="block"><span class={lab}>{t(locale, 'planning.availability.from')}</span><input type="time" name="start_time" required value="18:00" class={tin} /></label>
+        <label class="block"><span class={lab}>{t(locale, 'planning.availability.to')}</span><input type="time" name="end_time" required value="21:00" class={tin} /></label>
+        <label class="block sm:col-span-2"><span class={lab}>{t(locale, 'planning.availability.note')}</span><input name="note" maxlength="300" class={tin} /><span class="mt-1 block text-xs text-ink-subtle">{t(locale, 'planning.availability.noteHint')}</span></label>
+        <div class="sm:col-span-2"><button class={btn}>{t(locale, 'my.add')}</button></div>
+      </form>
+    </section>
+
+    <ul class="mt-6 grid gap-3">
+      {windows.map((w) => {
+        const days = parseWeekdays(w.weekdays);
+        return (
+          <li class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm">
+            <span class="min-w-0 flex-1 basis-48">
+              <strong class="tabular-nums">{formatDate(w.starts_on, locale)}{w.ends_on !== w.starts_on && ` → ${formatDate(w.ends_on, locale)}`}</strong>
+              <span class="block text-ink-muted">{weekdayLabel(days)} · {formatHM(w.start_minute)}–{formatHM(w.end_minute)}</span>
+              {w.note && <span class="block text-ink-subtle">{w.note}</span>}
+            </span>
+            <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'my.confirmDelete'))})`}>
+              <input type="hidden" name="_action" value="delete" /><input type="hidden" name="id" value={w.id} />
+              <button class={`${btnSecondary} text-danger`}>{t(locale, 'my.delete')}</button>
+            </form>
+          </li>
+        );
+      })}
+      {windows.length === 0 && <li class="text-sm text-ink-muted">{t(locale, 'planning.availability.none')}</li>}
+    </ul>
+    <p class="mt-4 text-xs text-ink-subtle">{t(locale, 'planning.availability.privacy')}</p>
+  </div>
+</Member>
+<style>
+  .availability-page :global(input[type='date']), .availability-page :global(input[type='time']), .availability-page :global(input:not([type])), .availability-page :global(select) { font-size: 1rem; min-height: 2.75rem; }
+  .availability-page :global(button) { min-height: 2.75rem; }
+  .avail-choice { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: 0 .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: .9rem; }
+  .avail-choice input { width: 1.25rem; height: 1.25rem; }
+</style>

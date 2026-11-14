@@ -1,0 +1,126 @@
+---
+// Service Planning admin: every planning event, creating a new one, and the
+// notification rules (publish / change / cancel / reminder lead time). Gated by
+// the `planning` admin area (middleware). Event editing lives on the coordinator
+// page /planning/[id]/manage so admins and coordinators share one editor.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { localePath, pickLocalizedText, type Locale } from '../../../lib/locales';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btn, card, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import {
+  createEvent,
+  listEvents,
+  listLinkablePlans,
+  listRules,
+  RULE_KEYS,
+  setRule,
+  type RuleKey,
+} from '../../../lib/planningDb';
+import { parseEventForm } from '../../../lib/planningForms';
+
+const user = Astro.locals.user!;
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+
+let errors: Record<string, string> = {};
+let echo: Record<string, string> = {};
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  if (fd.get('_action') === 'create') {
+    const parsed = parseEventForm(fd);
+    if (parsed.ok) {
+      const id = await createEvent(db, parsed.data, user.id);
+      return Astro.redirect(localePath(lang, `/planning/${id}/manage`), 303);
+    }
+    errors = parsed.errors;
+    echo = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
+  } else if (fd.get('_action') === 'rules') {
+    for (const key of RULE_KEYS) {
+      await setRule(db, key as RuleKey, fd.get(`enabled_${key}`) === '1', Number(fd.get(`lead_${key}`)) || undefined);
+    }
+    return Astro.redirect('/admin/planning?saved=1', 303);
+  }
+}
+
+const today = todayInTz();
+const [events, rules, plans] = await Promise.all([listEvents(db, { limit: 100 }), listRules(db), listLinkablePlans(db, today)]);
+const upcoming = events.filter((e) => e.event_date >= today).sort((a, b) => a.event_date.localeCompare(b.event_date));
+const past = events.filter((e) => e.event_date < today);
+const saved = Astro.url.searchParams.has('saved');
+const err = (field: string) => (errors[field] ? t(lang, errors[field]) : null);
+const statusCls = { draft: badgeInactive, published: badgeActive, cancelled: badgeScheduled } as const;
+const ruleOf = (key: RuleKey) => rules.find((r) => r.rule_key === key)!;
+---
+<Admin title={t(lang, 'planning.title')}>
+  <div class="planning-admin">
+    <header class="mb-6">
+      <h1 class="font-display text-heading-sm font-bold">{t(lang, 'planning.title')}</h1>
+      <p class="mt-1 max-w-3xl text-sm text-ink-muted">{t(lang, 'planning.admin.intro')}</p>
+    </header>
+    {saved && <p class={`mb-4 ${noticeOk}`}>{t(lang, 'planning.saved')}</p>}
+    {Object.keys(errors).length > 0 && <p class={`mb-4 ${noticeErr}`}>{[...new Set(Object.values(errors))].map((k) => t(lang, k)).join(' ')}</p>}
+
+    {[{ key: 'upcoming', list: upcoming }, { key: 'past', list: past }].map(({ key, list }) => (
+      <section class="mb-8">
+        <h2 class="mb-3 font-display text-lg font-semibold">{t(lang, `planning.admin.${key}`)}</h2>
+        <ul class="grid gap-3">
+          {list.map((e) => (
+            <li class={`${card} !p-4`}>
+              <div class="flex flex-wrap items-center gap-3">
+                <a class="min-w-0 flex-1 basis-48 font-semibold text-primary hover:underline" href={localePath(lang, `/planning/${e.id}/manage`)}>{pickLocalizedText({ en: e.title_en, zh: e.title_zh }, lang)}</a>
+                <span class={`${badge} ${statusCls[e.status]}`}>{t(lang, `planning.status.${e.status}`)}</span>
+              </div>
+              <p class="mt-1 text-sm text-ink-muted">{formatDate(e.event_date, lang)} · {e.start_time}{e.end_time ? `–${e.end_time}` : ''}</p>
+            </li>
+          ))}
+          {list.length === 0 && <li class="text-sm text-ink-muted">{t(lang, 'planning.admin.none')}</li>}
+        </ul>
+      </section>
+    ))}
+
+    <section id="new-event" class={`${card} mb-8`}>
+      <h2 class="mb-3 font-display text-lg font-semibold">{t(lang, 'planning.admin.create')}</h2>
+      <form method="post" class="grid gap-3 sm:grid-cols-2">
+        <input type="hidden" name="_action" value="create" />
+        <label class="block"><span class={lab}>{t(lang, 'planning.f.titleEn')}</span><input name="title_en" value={echo.title_en ?? ''} class={tin} />{err('title_en') && <p class="mt-1 text-sm text-danger">{err('title_en')}</p>}</label>
+        <label class="block"><span class={lab}>{t(lang, 'planning.f.titleZh')}</span><input name="title_zh" value={echo.title_zh ?? ''} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'planning.f.date')}</span><input type="date" name="event_date" required value={echo.event_date ?? ''} class={tin} />{err('event_date') && <p class="mt-1 text-sm text-danger">{err('event_date')}</p>}</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block"><span class={lab}>{t(lang, 'planning.f.start')}</span><input type="time" name="start_time" required value={echo.start_time ?? '10:00'} class={tin} /></label>
+          <label class="block"><span class={lab}>{t(lang, 'planning.f.end')}</span><input type="time" name="end_time" value={echo.end_time ?? ''} class={tin} />{err('end_time') && <p class="mt-1 text-sm text-danger">{err('end_time')}</p>}</label>
+        </div>
+        <label class="block"><span class={lab}>{t(lang, 'planning.f.locationEn')}</span><input name="location_en" value={echo.location_en ?? ''} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'planning.f.locationZh')}</span><input name="location_zh" value={echo.location_zh ?? ''} class={tin} /></label>
+        <label class="block sm:col-span-2"><span class={lab}>{t(lang, 'planning.f.plan')}</span>
+          <select name="plan_id" class={tin}><option value="">{t(lang, 'planning.f.planNone')}</option>{plans.map((p) => <option value={p.id}>{p.plan_date} {p.title ?? ''}</option>)}</select>
+        </label>
+        <div class="sm:col-span-2"><button class={btn}>{t(lang, 'planning.admin.createButton')}</button></div>
+      </form>
+    </section>
+
+    <section class={card}>
+      <h2 class="mb-1 font-display text-lg font-semibold">{t(lang, 'planning.rules.title')}</h2>
+      <p class="mb-4 text-sm text-ink-muted">{t(lang, 'planning.rules.intro')}</p>
+      <form method="post" class="grid gap-3">
+        <input type="hidden" name="_action" value="rules" />
+        {RULE_KEYS.map((key) => (
+          <div class="flex flex-wrap items-center gap-3 rounded-md border border-border p-3">
+            <label class="flex min-w-0 flex-1 basis-56 items-start gap-3">
+              <input type="checkbox" name={`enabled_${key}`} value="1" checked={ruleOf(key).enabled} class="mt-1 h-5 w-5" />
+              <span><strong class="block text-sm">{t(lang, `planning.rules.${key}`)}</strong><span class="block text-xs text-ink-muted">{t(lang, `planning.rules.${key}Hint`)}</span></span>
+            </label>
+            {key === 'remind' && (
+              <label class="block"><span class={lab}>{t(lang, 'planning.rules.leadHours')}</span><input type="number" inputmode="numeric" name="lead_remind" min="1" max="336" value={ruleOf('remind').lead_hours} class={`${tin} w-28`} /></label>
+            )}
+          </div>
+        ))}
+        <div><button class={btn}>{t(lang, 'planning.save')}</button></div>
+      </form>
+    </section>
+  </div>
+</Admin>
+<style>
+  .planning-admin :global(input), .planning-admin :global(select) { font-size: 1rem; min-height: 2.75rem; }
+  .planning-admin :global(button) { min-height: 2.75rem; }
+</style>
