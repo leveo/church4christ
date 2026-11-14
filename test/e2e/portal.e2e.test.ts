@@ -13,7 +13,7 @@ async function sessionCookie(id: number, email: string): Promise<string> {
 }
 
 describe('member portal on D1', () => {
-  it.each(['/en/my/household', '/en/my/prayer', '/en/my/serving', '/en/my/events', '/en/my/groups'])(
+  it.each(['/en/my/household', '/en/my/prayer', '/en/my/serving', '/en/my/events', '/en/my/opportunities'])(
     'serves %s to a signed-in member',
     async (path) => {
       const member = await sessionCookie(3, 'sarah.johnson@example.com');

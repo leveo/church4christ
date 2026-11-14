@@ -51,7 +51,7 @@ describe('catalog-owned docs', () => {
 
     const table = renderCapabilityTable(raw);
     expect(raw.order.every((key) => table.includes(`\`${key}\``))).toBe(true);
-    expect((table.match(/Supabase/g) ?? [])).toHaveLength(3);
+    expect((table.match(/Supabase/g) ?? [])).toHaveLength(2);
   });
 
   it('validates the canonical catalog before rendering', () => {

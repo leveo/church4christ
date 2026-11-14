@@ -63,7 +63,7 @@ the credential key ring, authorize Google Classroom or Canvas, map courses, and 
 For the `learning` provider/privacy boundary and screenshots, see **[Learning](learning.md)** and
 the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
 
-**Two modules need the Supabase database.** Giving and Registration run
+**Giving and Registration need the Supabase database.** They run
 only on the optional **Supabase** backend (see
 [`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**
 database sees their checkboxes **greyed out** in the Modules panel with a note explaining

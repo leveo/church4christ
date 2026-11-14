@@ -125,7 +125,7 @@ describe('full volunteer journey (magic link → pending → accept → iCal)', 
     const raw = rawOf(await createLoginToken(env.DB, 5));
     const consumed = await post(`/auth/${raw}`, '');
     expect(consumed.status).toBe(303);
-    expect(consumed.headers.get('location')).toBe('/zh/my');
+    expect(consumed.headers.get('location')).toBe('/zh/my/opportunities');
     const cookie = cookiePair(consumed.headers.get('set-cookie'));
     expect(cookie).toContain(`${SESSION_COOKIE}=`);
 
