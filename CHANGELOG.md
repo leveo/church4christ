@@ -10,6 +10,14 @@ than published to npm.
 
 ## [Unreleased]
 
+### Changed
+
+- New Church4Christ logo: a teal church and cross sheltering an orange figure that forms a
+  "4". The browser favicon, the onboarding page, the README header, and the 1280×640
+  social preview use it, and the demo seed sets it as the demo church's logo
+  (`site.logo_image_key`). Source files and colors are in `docs/images/brand/`. Existing
+  installations keep their own uploaded logo; only the favicon changes for them.
+
 ## [1.5.0] - 2026-11-14
 
 Upgrade notes: [Upgrading 1.4.0 to 1.5.0](docs/upgrade.md#upgrading-140-to-150):

@@ -1,5 +1,7 @@
 # Church4Christ: open-source church management software and church website
 
+<p align="center"><img src="docs/images/brand/church4christ-logo.png" alt="Church4Christ logo: a church with a cross sheltering a person whose raised arm forms a 4" width="280"></p>
+
 [![CI](https://github.com/leveo/church4christ/actions/workflows/ci.yml/badge.svg)](https://github.com/leveo/church4christ/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/leveo/church4christ?label=release)](https://github.com/leveo/church4christ/releases)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)

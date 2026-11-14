@@ -72,11 +72,16 @@ describe('README capture inventory', () => {
     expect(() => screenshots.selectScreenshotRows(['node', 'scripts/screenshots.mjs', '--only', ''])).toThrow(/matched no pages/);
   });
   test('covers every README image exactly once as a real page or a separately maintained diagram', () => {
-    const images = [...new Set(readFileSync(new URL('../../README.md', import.meta.url), 'utf8').match(/docs\/images\/[^)\s]+/g))].sort();
-    const outputs = [...(screenshots.README_CAPTURE_ROWS ?? []).map((row) => row.out), ...(screenshots.README_DIAGRAMS ?? [])];
+    const images = [...new Set(readFileSync(new URL('../../README.md', import.meta.url), 'utf8').match(/docs\/images\/[^)"\s]+/g))].sort();
+    const outputs = [
+      ...(screenshots.README_CAPTURE_ROWS ?? []).map((row) => row.out),
+      ...(screenshots.README_DIAGRAMS ?? []),
+      ...(screenshots.README_BRAND_IMAGES ?? []),
+    ];
     expect(outputs.sort()).toEqual(images);
     expect(screenshots.README_CAPTURE_ROWS).toHaveLength(29);
     expect(screenshots.README_DIAGRAMS).toHaveLength(4);
+    expect(screenshots.README_BRAND_IMAGES).toEqual(['docs/images/brand/church4christ-logo.png']);
   });
 
   test('requires page markers and dedicated seeded identities for every authenticated README image', () => {

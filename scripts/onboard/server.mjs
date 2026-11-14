@@ -8,9 +8,11 @@ import { defaultPreferences, normalizePreferences, readPreferences, savePreferen
 
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
 const ASSETS = new Map([
-  ['/', ['index.html', 'text/html; charset=utf-8']],
-  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
+  ['/', [new URL('web/index.html', import.meta.url), 'text/html; charset=utf-8']],
+  ['/app.js', [new URL('web/app.js', import.meta.url), 'text/javascript; charset=utf-8']],
+  ['/styles.css', [new URL('web/styles.css', import.meta.url), 'text/css; charset=utf-8']],
+  // The project mark, shared with the application's favicon.
+  ['/favicon.svg', [new URL('../../public/favicon.svg', import.meta.url), 'image/svg+xml']],
 ]);
 const HEADERS = {
   'Cache-Control': 'no-store',
@@ -102,7 +104,7 @@ export async function startOnboardingServer({ root, catalog, port = 0, preset = 
       if (url.pathname === '/tokens.css') return reply(res, 200, tokenCss, 'text/css; charset=utf-8');
       const asset = ASSETS.get(url.pathname);
       if (!asset) throw httpError('Not found', 404);
-      return reply(res, 200, await readFile(new URL(`web/${asset[0]}`, import.meta.url)), asset[1]);
+      return reply(res, 200, await readFile(asset[0]), asset[1]);
     } catch (error) {
       const status = error.status ?? (['EACCES', 'EPERM', 'EIO'].includes(error.code) ? 500 : 400);
       reply(res, status, { error: error.message || 'Unable to save local preferences' });

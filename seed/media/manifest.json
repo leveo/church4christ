@@ -93,6 +93,11 @@
       "file": "avatar-esther-lin.webp",
       "key": "uploads/05218adece952076-avatar-esther-lin.webp",
       "target": { "type": "person", "id": 9 }
+    },
+    {
+      "file": "church4christ-mark.webp",
+      "key": "uploads/335be4f5f7b390dc-church4christ-mark.webp",
+      "target": { "type": "setting", "key": "site.logo_image_key" }
     }
   ]
 }
