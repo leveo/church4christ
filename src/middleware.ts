@@ -12,6 +12,7 @@ import {
 } from './lib/locales';
 import { LEGACY_LOCALE_SETTINGS, getLocaleSettings, type LocaleSettings } from './lib/localeSettings';
 import { loadDict } from './lib/i18n';
+import { sameOriginTarget } from './lib/safeRedirect';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
 import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
@@ -66,6 +67,15 @@ function forbidden(locale: string): Response {
 function hasInvalidLearningLocale(rawPathname: string): boolean {
   const match = rawPathname.match(/^\/([^/]+)\/learn(?:\/[^/]+)?\/?$/);
   return match !== null && parseLocale(match[1]) === null;
+}
+
+function badRequest(): Response {
+  const res = new Response('Bad Request', {
+    status: 400,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  });
+  applySecurityHeaders(res.headers);
+  return res;
 }
 
 function opaqueNotFound(): Response {
@@ -179,7 +189,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
         localeSettings.enabled,
         localeSettings.default,
       );
-      const redirect = context.redirect(`/${target}/`, 302);
+      const redirect = context.redirect(sameOriginTarget(context.url.origin, `/${target}/`) ?? `/${target}/`, 302);
       redirect.headers.set('vary', 'Accept-Language, Cookie');
       applySecurityHeaders(redirect.headers);
       return finish(redirect);
@@ -191,7 +201,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (readsLocale && requestedLang !== null) {
       const clean = new URL(context.url);
       clean.searchParams.delete('setlang');
-      const redirect = context.redirect(`${clean.pathname}${clean.search}`, 302);
+      const cleanTarget = sameOriginTarget(context.url.origin, `${clean.pathname}${clean.search}`);
+      if (!cleanTarget) return finish(badRequest());
+      const redirect = context.redirect(cleanTarget, 302);
       if (isSupportedLocale(requestedLang) && localeSettings.enabled.includes(requestedLang)) {
         redirect.headers.append(
           'set-cookie',
@@ -206,7 +218,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // default locale; an unknown code never reaches here (it is not a locale
     // segment, so the router 404s it as before).
     if (locale && !localeSettings.enabled.includes(locale) && readsLocale) {
-      const redirect = context.redirect(`${localePath(localeSettings.default, rest)}${context.url.search}`, 302);
+      const localeTarget = sameOriginTarget(context.url.origin, `${localePath(localeSettings.default, rest)}${context.url.search}`);
+      if (!localeTarget) return finish(badRequest());
+      const redirect = context.redirect(localeTarget, 302);
       applySecurityHeaders(redirect.headers);
       return finish(redirect);
     }

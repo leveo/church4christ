@@ -10,6 +10,7 @@ import { setRuntimeDefaultLocale } from '../src/lib/locales';
 import { clearModuleCache } from '../src/lib/modules';
 import { clearThemeCache } from '../src/lib/theme';
 import { onRequest } from '../src/middleware';
+import { sameOriginTarget } from '../src/lib/safeRedirect';
 
 const db = env.DB;
 
@@ -120,5 +121,32 @@ describe('language routing middleware', () => {
   it('never sets the cookie on ordinary requests', async () => {
     const { res } = await run('/zh/about', { acceptLanguage: 'zh' });
     expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it.each([
+    '//evil.example/x?setlang=zh',
+    '/\\evil.example/x?setlang=zh',
+    '/%2F%2Fevil.example?setlang=zh',
+    '/%5Cevil.example?setlang=zh',
+    '///evil.example?setlang=zh',
+  ])('keeps the setlang redirect on the same origin for %s', async (path) => {
+    const { res } = await run(path);
+    const location = res.headers.get('location');
+    if (res.status === 400) return;
+    expect(res.status).toBe(302);
+    expect(new URL(location!).origin).toBe('http://localhost');
+  });
+
+  it.each(['//evil.example/about', '/\\evil.example/about'])('keeps the disabled-locale redirect same-origin for %s', async (path) => {
+    await saveLocaleSettings(db, ['en'], 'en');
+    const { res } = await run(`/zh${path}`);
+    expect(new URL(res.headers.get('location')!).origin).toBe('http://localhost');
+  });
+
+  it('sameOriginTarget collapses protocol-relative prefixes', () => {
+    expect(sameOriginTarget('http://localhost', '//evil.example/x?a=1')).toBe('/evil.example/x?a=1');
+    expect(sameOriginTarget('http://localhost', '/\\evil.example')).toBe('/evil.example');
+    expect(sameOriginTarget('http://localhost', '/%2F%2Fevil.example')).toBe('/%2F%2Fevil.example');
+    expect(sameOriginTarget('http://localhost', '/en/about?x=1')).toBe('/en/about?x=1');
   });
 });
