@@ -2,9 +2,7 @@
 // src/lib/locales.ts; config/locales.json mirrors its codes and native names for
 // these plain-Node scripts, and test/node/setup/locales-parity.test.ts keeps the
 // two in lockstep. Adding a language means adding it to both.
-import { readFileSync } from 'node:fs';
-
-const config = JSON.parse(readFileSync(new URL('../../config/locales.json', import.meta.url), 'utf8'));
+import config from '../../config/locales.json' with { type: 'json' };
 
 export const SUPPORTED_LOCALE_CODES = Object.freeze(config.supported.map((entry) => entry.code));
 export const SUPPORTED_LOCALES = Object.freeze(config.supported.map((entry) => Object.freeze({ ...entry })));

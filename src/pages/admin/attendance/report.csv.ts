@@ -1,4 +1,4 @@
-import { userLocale } from '../../../lib/localeSettings';
+import { LEGACY_LOCALE_SETTINGS, userLocale } from '../../../lib/localeSettings';
 import type { APIRoute } from 'astro';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 import { todayInTz } from '../../../lib/dates';
@@ -38,7 +38,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   }
 
   try {
-    const rows = await listServiceAttendanceReport(locals.db, userLocale(user!.lang, locals.locales), parsed.data);
+    const rows = await listServiceAttendanceReport(locals.db, userLocale(user!.lang, locals.locales ?? LEGACY_LOCALE_SETTINGS), parsed.data);
     const csv = serializeServiceAttendanceCsv(rows);
     const bytes = new TextEncoder().encode(csv);
     return new Response(bytes, {
