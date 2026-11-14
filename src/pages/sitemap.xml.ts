@@ -15,7 +15,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   } catch {
     /* custom pages unavailable: still serve the landing pages */
   }
-  return new Response(renderSitemap(origin, pages), {
+  return new Response(renderSitemap(origin, pages, locals.locales.enabled, locals.locales.default), {
     headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' },
   });
 };

@@ -11,12 +11,12 @@ import '@fontsource-variable/space-grotesk';
 import '../styles/base.css';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import { localePath, pathWithoutLocale, type Locale } from '../lib/locales';
+import { localeMeta, pathWithoutLocale, type Locale, type SupportedLocale } from '../lib/locales';
 import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
 import { getSiteIdentity } from '../lib/settings';
 import { t } from '../lib/i18n';
 import { env } from 'cloudflare:workers';
-import { publicOrigin, siteVerificationTags } from '../lib/seo';
+import { pageAlternates, publicOrigin, siteVerificationTags } from '../lib/seo';
 
 interface Props {
   title: string;
@@ -26,9 +26,14 @@ interface Props {
   footer?: boolean;
   /** Suppress URL-derived SEO links on bearer-token and other secret pages. */
   privateMetadata?: boolean;
+  /** Language of the content actually shown when it is a fallback for `locale`;
+   *  points canonical at that language's URL and drops this locale from hreflang. */
+  contentLocale?: SupportedLocale;
 }
 
 const { title, locale, noindex = false, privateMetadata = false } = Astro.props;
+const meta = localeMeta(locale);
+const { enabled: enabledLocales, default: defaultLocale } = Astro.locals.locales;
 const description = Astro.props.description ?? t(locale, 'site.tagline');
 
 const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
@@ -60,12 +65,9 @@ const fullTitle = `${title} · ${siteName}`;
 const seoEnv = env as unknown as { APP_ORIGIN?: string; GOOGLE_SITE_VERIFICATION?: string; BING_SITE_VERIFICATION?: string };
 const site = new URL(publicOrigin(seoEnv.APP_ORIGIN, Astro.url));
 const { rest } = pathWithoutLocale(Astro.url.pathname);
-const canonical = privateMetadata ? null : new URL(localePath(locale, rest), site).href;
-const alternates = privateMetadata ? [] : [
-  { hreflang: 'en', href: new URL(localePath('en', rest), site).href },
-  { hreflang: 'zh-Hans', href: new URL(localePath('zh', rest), site).href },
-  { hreflang: 'x-default', href: new URL(localePath('en', rest), site).href },
-];
+const seoLinks = privateMetadata ? null : pageAlternates(site, rest, locale, enabledLocales, defaultLocale, Astro.props.contentLocale);
+const canonical = seoLinks?.canonical ?? null;
+const alternates = seoLinks?.alternates ?? [];
 // Social previews and search-console ownership tags only on indexable pages.
 const indexable = !privateMetadata && !noindex;
 const verificationTags = indexable ? siteVerificationTags(seoEnv) : [];
@@ -74,15 +76,15 @@ const websiteJsonLd = indexable && rest === '/'
       '@context': 'https://schema.org',
       '@type': 'WebSite',
       name: siteName,
-      url: new URL(localePath(locale, '/'), site).href,
-      inLanguage: locale === 'zh' ? 'zh-Hans' : 'en',
+      url: new URL(`/${locale}/`, site).href,
+      inLanguage: meta.bcp47,
     }).replace(/</gu, '\\u003c')
   : null;
 ---
 
 <!doctype html>
 <html
-  lang={locale === 'zh' ? 'zh-Hans' : 'en'}
+  lang={meta.bcp47}
   data-theme={theme}
   data-mode={defaultMode}
   data-mode-default={defaultMode}
@@ -102,7 +104,7 @@ const websiteJsonLd = indexable && rest === '/'
         <meta property="og:title" content={fullTitle} />
         <meta property="og:description" content={description} />
         <meta property="og:url" content={canonical} />
-        <meta property="og:locale" content={locale === 'zh' ? 'zh_CN' : 'en_US'} />
+        <meta property="og:locale" content={meta.ogLocale} />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={fullTitle} />
         <meta name="twitter:description" content={description} />

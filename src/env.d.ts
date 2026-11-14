@@ -34,6 +34,8 @@ declare namespace App {
     // Sensitive mutations must use hasRecentStepUp rather than user presence.
     assurance: import('./lib/sessionAssurance').SessionAssurance | null;
     locale: import('./lib/locales').Locale;
+    // Installation-wide language settings for this request (enabled set + default).
+    locales: import('./lib/localeSettings').LocaleSettings;
     theme: string;
     modules: Set<string>;
     // Per-request database seam, opened by src/middleware.ts via openDb: `db` is

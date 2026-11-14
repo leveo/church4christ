@@ -3,7 +3,7 @@
 // origin comes from the deployment's APP_ORIGIN (the same value email links use),
 // falling back to the request origin, so canonical URLs, the sitemap, and robots.txt
 // always point at the church's own domain rather than a build-time placeholder.
-import { LOCALES, localePath, type Locale } from './locales';
+import { DEFAULT_LOCALE, LEGACY_ENABLED_LOCALES, SUPPORTED_LOCALES, localeMeta, localePath, type Locale, type SupportedLocale } from './locales';
 import { moduleForPath } from './modules';
 import { classifyRoute } from './routePolicy';
 
@@ -82,31 +82,59 @@ function xmlEscape(value: string): string {
   return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&apos;');
 }
 
-const HREFLANG: Record<Locale, string> = { en: 'en', zh: 'zh-Hans' };
-
 function isoDate(value: string | undefined): string | null {
   if (!value) return null;
   const parsed = new Date(value.includes('T') || value.endsWith('Z') ? value : `${value.replace(' ', 'T')}Z`);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
-/** sitemaps.org XML with one <url> per locale and hreflang alternates. */
-export function renderSitemap(origin: string, pages: readonly SitemapPage[]): string {
+export type HreflangLink = Readonly<{ hreflang: string; href: string }>;
+
+/**
+ * Canonical + hreflang alternates for one page over the ENABLED locales.
+ * `x-default` points at the installation default. When the page is showing
+ * another language's content (`contentLocale` differs from `locale`), its
+ * canonical is that content's own URL and the requested locale is left out of
+ * the alternates so a fallback copy never competes with the original.
+ */
+export function pageAlternates(
+  site: URL,
+  rest: string,
+  locale: Locale,
+  enabled: readonly SupportedLocale[],
+  defaultLocale: SupportedLocale,
+  contentLocale: SupportedLocale = locale,
+): { canonical: string; alternates: HreflangLink[] } {
+  const href = (code: SupportedLocale) => new URL(localePath(code, rest), site).href;
+  const fellBack = contentLocale !== locale;
+  const alternates: HreflangLink[] = enabled
+    .filter((code) => !(fellBack && code === locale))
+    .map((code) => ({ hreflang: localeMeta(code).hreflang, href: href(code) }));
+  alternates.push({ hreflang: 'x-default', href: href(enabled.includes(defaultLocale) ? defaultLocale : enabled[0] ?? DEFAULT_LOCALE) });
+  return { canonical: href(contentLocale), alternates };
+}
+
+/** sitemaps.org XML with one <url> per enabled locale and hreflang alternates. */
+export function renderSitemap(
+  origin: string,
+  pages: readonly SitemapPage[],
+  enabled: readonly SupportedLocale[] = LEGACY_ENABLED_LOCALES,
+  defaultLocale: SupportedLocale = DEFAULT_LOCALE,
+): string {
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
   ];
   for (const page of pages) {
     const lastmod = isoDate(page.lastmod);
-    for (const locale of LOCALES) {
+    const { alternates } = pageAlternates(new URL(origin), page.path, defaultLocale, enabled, defaultLocale);
+    for (const locale of enabled) {
       lines.push('  <url>');
       lines.push(`    <loc>${xmlEscape(new URL(localePath(locale, page.path), origin).href)}</loc>`);
       if (lastmod) lines.push(`    <lastmod>${lastmod}</lastmod>`);
-      for (const alt of LOCALES) {
-        const href = xmlEscape(new URL(localePath(alt, page.path), origin).href);
-        lines.push(`    <xhtml:link rel="alternate" hreflang="${HREFLANG[alt]}" href="${href}"/>`);
+      for (const alt of alternates) {
+        lines.push(`    <xhtml:link rel="alternate" hreflang="${alt.hreflang}" href="${xmlEscape(alt.href)}"/>`);
       }
-      lines.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${xmlEscape(new URL(localePath('en', page.path), origin).href)}"/>`);
       lines.push('  </url>');
     }
   }
@@ -122,7 +150,7 @@ const ROBOTS_LOCALE_DISALLOW = ['/my', '/manage', '/profile', '/settings', '/ide
 
 export function robotsDisallowPaths(): string[] {
   const paths = [...ROBOTS_ROOT_DISALLOW];
-  for (const locale of LOCALES) {
+  for (const locale of SUPPORTED_LOCALES) {
     for (const path of ROBOTS_LOCALE_DISALLOW) paths.push(`/${locale}${path}$`, `/${locale}${path}/`);
   }
   return paths;

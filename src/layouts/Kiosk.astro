@@ -1,4 +1,5 @@
 ---
+import { localeMeta } from '../lib/locales';
 // Minimal full-screen shell for the public /kiosk/<token> pages: reuses
 // Base.astro's <head> essentials (token CSS import, fonts) but skips the
 // header/footer/nav — a kiosk tablet has no site chrome, just the current
@@ -30,7 +31,7 @@ try {
 ---
 
 <!doctype html>
-<html lang={lang === 'zh' ? 'zh-Hans' : 'en'} data-theme={theme} data-mode={defaultMode}>
+<html lang={localeMeta(lang).bcp47} data-theme={theme} data-mode={defaultMode}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
