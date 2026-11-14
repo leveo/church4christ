@@ -2562,6 +2562,8 @@ export default {
   'admin.children.kiosk.regenerate': 'Regenerate link',
   'admin.children.kiosk.regenerateConfirm': 'Regenerating immediately invalidates the old link. Continue?',
   'admin.children.kiosk.instructions': 'Open this link on the kiosk device so families can check in themselves.',
+  'admin.children.kiosk.qrLabel': 'QR code for the kiosk link',
+  'admin.children.kiosk.qrHint': 'Scan this code with the kiosk tablet or a volunteer phone to open the check-in kiosk.',
   'admin.children.weekday.0': 'Sunday',
   'admin.children.weekday.1': 'Monday',
   'admin.children.weekday.2': 'Tuesday',

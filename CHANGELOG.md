@@ -84,6 +84,12 @@ Upgrade notes: [Upgrading 1.4.0 to 1.5.0](docs/upgrade.md#upgrading-140-to-150):
 - `people.stripe_customer_id` is now a legacy test-mode read fallback; customers live in
   `stripe_customers`, one per person per mode.
 
+### Fixed
+
+- The children's Kiosk tab QR label and hint, and the "My giving" link on the giving thank-you
+  page, showed raw dictionary keys. A new test fails when any literal translation key used in
+  source is missing from either dictionary.
+
 ### Operator impact
 
 - D1 installations: apply the new migration `0039_member_portal_d1.sql` with the normal D1

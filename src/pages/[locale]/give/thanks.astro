@@ -28,7 +28,7 @@ const user = Astro.locals.user;
       <a href={localePath(locale, '/')} class={btn}>{t(locale, 'notFound.home')}</a>
       {user && Astro.locals.modules.has('giving') && (
         <a href={localePath(locale, '/my/giving')} class={btnSecondary}>
-          {t(locale, 'modules.giving.label')}
+          {t(locale, 'my.giving.title')}
         </a>
       )}
     </div>

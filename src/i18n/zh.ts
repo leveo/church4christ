@@ -2557,6 +2557,8 @@ export default {
   'admin.children.kiosk.regenerate': '重新生成链接',
   'admin.children.kiosk.regenerateConfirm': '重新生成后旧链接将立即失效，确定继续吗？',
   'admin.children.kiosk.instructions': '将此链接在签到台设备上打开，供家长自助签到使用。',
+  'admin.children.kiosk.qrLabel': '报到机链接的二维码',
+  'admin.children.kiosk.qrHint': '用报到平板或同工的手机扫描此二维码，即可打开儿童报到页面。',
   'admin.children.weekday.0': '周日',
   'admin.children.weekday.1': '周一',
   'admin.children.weekday.2': '周二',
