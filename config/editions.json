@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "mainRepo": "leveo/church4christ",
+  "demoUrl": "https://church4christ.yunfei-song.com/en/sandbox",
+  "editions": [
+    {
+      "repo": "church-checkin",
+      "preset": "checkin",
+      "title": "Open-source church check-in",
+      "tagline": "A kids check-in kiosk for your church. Parents check children in on a tablet and get a pickup code; your children's ministry team sees who is in the room right now.",
+      "description": "Open-source church check-in: a kids check-in kiosk with pickup codes, a live roster, and attendance charts. Self-hosted on Cloudflare, English and Chinese. A Church4Christ edition.",
+      "topics": ["church", "church-checkin", "kids-checkin", "child-check-in", "childrens-ministry", "kiosk", "check-in", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "features": [
+        "**Self-serve kiosk on any tablet browser.** A parent searches by a child's name or their own phone number, taps the children they are dropping off, and checks in.",
+        "**Pickup codes instead of badge printers.** Each check-in gets a 4-character code shown on screen; siblings checked in together share one code, and the code guards checkout.",
+        "**A live roster for staff.** The Today tab lists every check-in with its code and times, with one-click staff checkout when a parent has lost the code.",
+        "**Real numbers.** The dashboard shows this week's count, a 4-week average, distinct children this month, and a 12-week attendance chart.",
+        "**Your classes, your schedule.** Add a class or service, optionally tied to a weekday; retiring one removes it from the kiosk and keeps its history.",
+        "**Lost tablet? Regenerate the link.** The kiosk runs from a private URL; regenerating it shuts the old device out immediately.",
+        "**Families come from People & Households.** Every child recorded under a household can check in; CSV import brings your existing family list in.",
+        "**English and Chinese.** The kiosk switches language with one tap."
+      ],
+      "limits": [
+        "There is no label printing; the pickup code is shown on screen.",
+        "Only children recorded in a household check in. Adult service headcounts come from the separate Service Attendance feature, which uses the service types from Volunteer Scheduling; turn both on later in **Settings → Modules** if you want combined adult and child totals."
+      ],
+      "screenshots": [
+        { "path": "docs/images/public/kiosk-search.png", "alt": "The kiosk: a parent finds their household by name or phone" },
+        { "path": "docs/images/public/kiosk-code.png", "alt": "The pickup code shown right after check-in" },
+        { "path": "docs/images/admin/children-dashboard.png", "alt": "Children's ministry dashboard with the 12-week attendance chart" },
+        { "path": "docs/images/admin/children-today.png", "alt": "Today's live roster with pickup codes and staff checkout" }
+      ],
+      "docs": [
+        { "path": "docs/features/children-checkin.md", "label": "Children's check-in" },
+        { "path": "docs/features/people-households.md", "label": "People & households" },
+        { "path": "docs/features/service-attendance.md", "label": "Service attendance (optional add-on)" }
+      ],
+      "demo": "Choose **Administrator**, then open **Children** in the admin menu. The **Kiosk** tab opens the tablet view.",
+      "zh": {
+        "title": "开源教会儿童报到系统",
+        "summary": "家长在平板上为孩子报到，拿到接送码；儿童事工同工随时看到现在谁在教室里。",
+        "features": [
+          "自助报到机：任何平板浏览器都能用，按孩子姓名或家长电话查找家庭。",
+          "接送码取代打印标签：兄弟姐妹共用一个 4 位码，凭码接走孩子。",
+          "同工管理台：今日实时名单、12 周出席图表、班级管理。",
+          "平板丢失可一键重新生成报到链接，旧设备立即失效。",
+          "家庭资料来自「会友与家庭」，可用 CSV 导入现有名单。",
+          "中英文界面，报到机一键切换语言。"
+        ]
+      }
+    },
+    {
+      "repo": "church-volunteer-scheduling",
+      "preset": "volunteer-scheduling",
+      "title": "Open-source church volunteer scheduling",
+      "tagline": "Schedule worship, kids, hospitality, and tech teams. Volunteers confirm or decline from an email link, block out dates, and subscribe to their serving calendar.",
+      "description": "Open-source church volunteer scheduling: teams, positions, a monthly scheduling matrix, confirm/decline emails, blockout dates, and a spiritual gifts quiz. Self-hosted, English and Chinese. A Church4Christ edition.",
+      "topics": ["church", "volunteer-scheduling", "volunteer-management", "church-volunteers", "scheduling", "worship-team", "rota", "spiritual-gifts", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "features": [
+        "**Ministries, teams, positions, and plans.** A ministry holds teams, a team defines its positions, and a plan is one dated service. A new-ministry wizard sets up a whole area in a few minutes.",
+        "**A scheduling matrix.** Fill a month at a glance; the site warns when someone is already booked that day or has a blockout.",
+        "**Confirm or decline from email.** Each assignment sends a single-use link, no sign-in needed. A decline emails the team's leaders right away.",
+        "**Open slots, blockouts, and availability.** Volunteers claim open slots and mark single days, ranges, or repeating dates away; leaders see who is free across upcoming plans.",
+        "**Plans generated ahead.** Copy a service's needs forward week by week, up to about a year.",
+        "**Reminders and a weekly digest.** Unconfirmed volunteers get a reminder before their service, and everyone gets a weekly list of their serving.",
+        "**Personal schedule and calendar feed.** Each volunteer has a schedule page and a private subscribe link for Apple Calendar, Google Calendar, or Outlook.",
+        "**Apply to serve and a spiritual gifts quiz.** An opportunity board, team applications that leaders approve, and a 40-statement gifts quiz that recommends ministries.",
+        "**English and Chinese** throughout."
+      ],
+      "limits": [
+        "Reminder, digest, and confirm/decline emails need an email provider when deployed; on your own computer, emails print to the terminal instead of being sent.",
+        "Scheduling is per position on dated plans; there is no automatic rotation algorithm that assigns people for you."
+      ],
+      "screenshots": [
+        { "path": "docs/images/serve/matrix.png", "alt": "The scheduling matrix: plans down one axis, positions across the other" },
+        { "path": "docs/images/serve/plan-detail.png", "alt": "A plan with every position and each volunteer's status" },
+        { "path": "docs/images/serve/serve-landing.png", "alt": "The volunteer's serve page with upcoming assignments and open slots" },
+        { "path": "docs/images/serve/gifts-results.png", "alt": "Spiritual gifts quiz results with ministry recommendations" }
+      ],
+      "docs": [
+        { "path": "docs/features/volunteer-serve.md", "label": "Volunteer scheduling" },
+        { "path": "docs/features/email-automation.md", "label": "Email and automation" },
+        { "path": "docs/features/people-households.md", "label": "People & households" }
+      ],
+      "demo": "Choose **Administrator**, then open the **Volunteer Console** in the admin menu. Choose **Member portal** to see the volunteer side: the **Serve** page and the gifts quiz.",
+      "zh": {
+        "title": "开源教会服事排班系统",
+        "summary": "为敬拜、儿童、招待、音控等团队排班；同工从邮件链接确认或婉拒，标记不能服事的日期，并订阅自己的服事日历。",
+        "features": [
+          "事工 → 团队 → 岗位 → 排班计划，新事工向导几分钟建好。",
+          "月度排班矩阵，自动提示重复安排和请假冲突。",
+          "同工从邮件一键确认或婉拒，无需登录；婉拒会立即通知组长。",
+          "空缺认领、请假日期、可服事情况一览。",
+          "自动提醒和每周服事摘要，个人日历可订阅到 Apple / Google / Outlook。",
+          "申请服事、机会看板，以及 40 题恩赐测验推荐适合的事工。"
+        ]
+      }
+    },
+    {
+      "repo": "church-small-groups",
+      "preset": "small-groups",
+      "title": "Open-source small group management for churches",
+      "tagline": "A home for your church's small groups: a public directory, join requests, recurring meetings, and attendance taken from an emailed checklist.",
+      "description": "Open-source small group management for churches: public and private groups, join requests, group leaders, recurring meetings, and attendance tracking. Self-hosted, English and Chinese. A Church4Christ edition.",
+      "topics": ["church", "small-groups", "small-group-management", "church-groups", "bible-study", "group-management", "attendance-tracking", "fellowship", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "features": [
+        "**Public and private groups.** Public groups appear in the directory; private groups are invisible to anyone who is not a member.",
+        "**Join requests.** A visitor signs in with just a name and email (magic link, no password) and taps Request to join; a group leader approves or declines.",
+        "**Group leaders run their own group.** Roster, requests, the public/private switch, and meetings all live on one manage page, with no admin-area access needed.",
+        "**Members without email still count.** Add someone by name only; add an email later and they get a real profile.",
+        "**Recurring meetings.** Weekly, every other week, or monthly meetings are put on the calendar automatically.",
+        "**Attendance without homework.** After a tracked meeting, leaders get an email link to a simple checklist; tick who came and save.",
+        "**Involvement history.** Each person's profile shows their groups and attendance.",
+        "**A fellowship directory** for larger fellowships alongside small groups.",
+        "**English and Chinese** throughout."
+      ],
+      "limits": [
+        "Paid or open sign-up events for a group use the Registration feature, which needs the optional Supabase database. This edition runs on the default Cloudflare D1 database, where that section simply does not appear.",
+        "Attendance emails need an email provider when deployed; on your own computer they print to the terminal."
+      ],
+      "screenshots": [
+        { "path": "docs/images/groups/directory.png", "alt": "The public small groups directory" },
+        { "path": "docs/images/admin/groups.png", "alt": "Creating groups and assigning group leaders" },
+        { "path": "docs/images/groups/member-checklist.png", "alt": "The attendance checklist a group leader fills in after a meeting" },
+        { "path": "docs/images/public/fellowships.png", "alt": "The fellowship directory" }
+      ],
+      "docs": [
+        { "path": "docs/features/groups.md", "label": "Small groups" },
+        { "path": "docs/features/people-households.md", "label": "People & households" }
+      ],
+      "demo": "Open **Groups** in the site menu to see the public directory, then choose **Administrator** and open **Groups** in the admin menu.",
+      "zh": {
+        "title": "开源教会小组管理系统",
+        "summary": "为教会小组建一个家：公开小组目录、加入申请、定期聚会，聚会后用邮件里的清单点名。",
+        "features": [
+          "公开或私密小组，私密小组对非成员完全不可见。",
+          "访客用姓名和邮箱登录（无需密码）即可申请加入，组长审核。",
+          "组长自己管理名单、申请和聚会，不需要后台权限。",
+          "没有邮箱的成员也能只用姓名加入。",
+          "每周、隔周或每月的定期聚会自动排进日历。",
+          "聚会结束后组长收到点名清单链接，勾选即可。",
+          "附带团契目录；中英文界面。"
+        ]
+      }
+    },
+    {
+      "repo": "church-website-cms",
+      "preset": "website",
+      "title": "Open-source church website CMS",
+      "tagline": "A bilingual church website your staff can update without a developer: sermons, events, bulletins, articles, prayer requests, and a block page builder.",
+      "description": "Open-source church website CMS: sermon archive, events, weekly bulletins, articles, prayer wall, and a block page builder. English and Chinese, three themes, self-hosted on Cloudflare. A Church4Christ edition.",
+      "topics": ["church", "church-website", "church-cms", "cms", "sermons", "sermon-archive", "church-bulletin", "events", "page-builder", "website-builder", "church4christ", "self-hosted", "nonprofit", "bilingual", "i18n", "cloudflare-workers", "cloudflare-d1", "astro"],
+      "features": [
+        "**Sermon archive** with search, speakers, and series.",
+        "**Events and announcements** on a public calendar.",
+        "**Weekly bulletins** built and published from the admin area.",
+        "**Bilingual articles** and printable **prayer sheets**.",
+        "**Prayer wall.** Visitors send prayer requests; staff receive and care for them in the admin area.",
+        "**Fellowship directory.**",
+        "**Block page builder** for custom pages, with images stored in Cloudflare R2.",
+        "**English, Simplified Chinese, and Traditional Chinese.** Each page has an English and Chinese version, and readers can switch Chinese text to Traditional with one tap.",
+        "**Three themes with light and dark modes,** all from design tokens, so your colors stay consistent.",
+        "**Staff sign in by magic link,** with no passwords to manage."
+      ],
+      "limits": [
+        "Production email (sign-in links, prayer request notices) needs an email provider; see the main repo's cost notes before deploying.",
+        "This edition starts with website features only. Membership, volunteers, groups, and check-in are part of Church4Christ too and can be turned on later in **Settings → Modules**."
+      ],
+      "screenshots": [
+        { "path": "docs/images/public/home-en.png", "alt": "The English home page" },
+        { "path": "docs/images/public/sermons.png", "alt": "The public sermon archive" },
+        { "path": "docs/images/admin/page-builder.png", "alt": "The block page builder" },
+        { "path": "docs/images/public/events.png", "alt": "The public events calendar" }
+      ],
+      "docs": [
+        { "path": "docs/features/public-site-and-themes.md", "label": "Public site and themes" },
+        { "path": "docs/features/sermons.md", "label": "Sermons" },
+        { "path": "docs/features/bulletins.md", "label": "Bulletins" },
+        { "path": "docs/features/page-builder.md", "label": "Page builder" },
+        { "path": "docs/features/prayer-wall.md", "label": "Prayer wall" }
+      ],
+      "demo": "Choose **Visit the church website** to browse the public pages, or choose **Content editor** to try updating content.",
+      "zh": {
+        "title": "开源教会网站内容管理系统",
+        "summary": "同工不用写代码就能更新的双语教会网站：讲道、活动、周报、文章、祷告事项和区块页面编辑器。",
+        "features": [
+          "可搜索的讲道资料库，活动日历与公告。",
+          "每周周报、双语文章、祷告单。",
+          "祷告墙：访客提交代祷事项，同工在后台跟进。",
+          "区块页面编辑器，自由建立页面。",
+          "英文、简体、繁体中文；三套主题，支持深色模式。",
+          "同工用邮件链接登录，无需密码。"
+        ]
+      }
+    }
+  ]
+}

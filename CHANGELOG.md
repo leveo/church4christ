@@ -10,6 +10,25 @@ than published to npm.
 
 ## [Unreleased]
 
+### Added
+
+- Three focused setup presets: `checkin` (People & Households, Children Check-in),
+  `volunteer-scheduling` (Volunteer Scheduling, Spiritual Gifts, People & Households), and
+  `small-groups` (Groups, Fellowships, People & Households). They run on the default D1
+  database and work with the installer's `--preset` flag.
+- `npm run onboard -- --preset <key>` opens the browser form with that preset's features
+  pre-checked; the form's reset button returns to the same preset.
+- `config/editions.json` and `node scripts/editions/render.mjs` describe and render the
+  single-feature edition repositories. Each edition is a README and agent guide that installs a
+  pinned release of this repository with one preset; editions contain no application code.
+  See [`docs/editions.md`](docs/editions.md).
+
+### Operator impact
+
+None for existing installations: no migrations, bindings, secrets, module defaults, or access
+rules change. Existing presets keep their module lists. A preset's module list is recorded in
+each installation's setup manifest, so the new presets' lists are fixed from this release on.
+
 ## [1.3.0] - 2026-11-13
 
 ### Added

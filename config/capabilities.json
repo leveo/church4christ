@@ -21,6 +21,21 @@
       "labels": { "en": "Full Church", "zh": "完整教会系统" },
       "descriptions": { "en": "Every website, community, portal, giving, and registration capability.", "zh": "包含网站、社群、会友平台、奉献与报名的全部功能。" },
       "modules": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "groups", "people", "children", "attendance", "newcomers", "activity-score", "page-builder", "portal", "giving", "registration", "learning"]
+    },
+    "checkin": {
+      "labels": { "en": "Children Check-in", "zh": "儿童报到" },
+      "descriptions": { "en": "Households, a self-service check-in kiosk, and a children's ministry console.", "zh": "家庭资料、自助报到机与儿童事工管理台。" },
+      "modules": ["people", "children"]
+    },
+    "volunteer-scheduling": {
+      "labels": { "en": "Volunteer Scheduling", "zh": "服事排班" },
+      "descriptions": { "en": "Ministries, teams, serving schedules, reminders, and a spiritual gifts quiz.", "zh": "事工、团队、服事排班、提醒与恩赐探索。" },
+      "modules": ["serve", "gifts", "people"]
+    },
+    "small-groups": {
+      "labels": { "en": "Small Groups", "zh": "小组管理" },
+      "descriptions": { "en": "Small groups with membership, events, and attendance, plus a fellowship directory.", "zh": "小组成员、活动与出席管理，加上团契目录。" },
+      "modules": ["fellowships", "groups", "people"]
     }
   },
   "order": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "groups", "people", "children", "attendance", "newcomers", "activity-score", "page-builder", "portal", "giving", "registration", "learning"],

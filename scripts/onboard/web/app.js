@@ -31,8 +31,8 @@ const messages = {
     logoReadError: 'This image could not be read. Choose a different image.', logoLoading: 'Your logo is still loading. Please wait a moment.', logoLoadError: 'Your saved logo could not be previewed. It will be kept unless you replace or remove it.',
     preview: 'A small preview of your identity', previewName: 'Your community', previewTagline: 'A place to belong.', previewAction: 'Welcome in', previewLogo: 'Organization logo preview',
     recommendedTitle: 'Recommended: Cloudflare D1',
-    recommendedCopy: 'The Website + Community starter keeps your first database on Cloudflare D1. Hosting and media use Cloudflare Workers and R2; optional email and integrations can be configured later.',
-    resetFeatures: 'Restore recommended features', selectedCount: '{count} selected',
+    recommendedCopy: 'This starting set keeps your first database on Cloudflare D1. Hosting and media use Cloudflare Workers and R2; optional email and integrations can be configured later.',
+    resetFeatures: 'Restore the starting features', selectedCount: '{count} selected',
     groups: { content: 'Website & publishing', community: 'People & community', volunteering: 'Volunteering & service' },
     dependencies: 'Requires: {names}', dependencyAdded: 'Required features added: {names}.', dependencyInUse: 'Also selected by: {names}. Deselect those features first to remove this one.',
     advanced: 'Advanced: PostgreSQL features', advancedCopy: 'These features need Supabase-compatible PostgreSQL and additional setup. They are optional and excluded from the recommended D1 starter.',
@@ -83,8 +83,8 @@ const messages = {
     logoReadError: '无法读取这张图片，请选择其他图片。', logoLoading: '标志仍在载入，请稍候。', logoLoadError: '暂时无法预览已保存的标志。除非替换或移除，否则原标志会保留。',
     preview: '你的品牌形象小预览', previewName: '你的社群', previewTagline: '一个让你有归属感的地方。', previewAction: '欢迎来到这里', previewLogo: '组织标志预览',
     recommendedTitle: '推荐：Cloudflare D1',
-    recommendedCopy: '「网站 + 社群管理」起步组合使用 Cloudflare D1 数据库。网站与媒体使用 Cloudflare Workers 和 R2；邮件与其他集成可以日后配置。',
-    resetFeatures: '恢复推荐功能', selectedCount: '已选择 {count} 项',
+    recommendedCopy: '这组起步功能使用 Cloudflare D1 数据库。网站与媒体使用 Cloudflare Workers 和 R2；邮件与其他集成可以日后配置。',
+    resetFeatures: '恢复起步功能', selectedCount: '已选择 {count} 项',
     groups: { content: '网站与内容发布', community: '成员与社群', volunteering: '志愿与服事' },
     dependencies: '需要：{names}', dependencyAdded: '已加入必需功能：{names}。', dependencyInUse: '以下已选功能需要它：{names}。请先取消这些功能。',
     advanced: '进阶：PostgreSQL 功能', advancedCopy: '这些功能需要兼容 Supabase 的 PostgreSQL 与额外配置。它们属于可选功能，不包含在推荐的 D1 起步组合中。',
@@ -474,7 +474,7 @@ function renderFeatures() {
   const reset = el('button', 'text-button', t('resetFeatures'));
   reset.type = 'button';
   reset.addEventListener('click', () => {
-    draft.setup.modules = addDependencies(state.catalog.presets['website-community'].modules);
+    draft.setup.modules = addDependencies(state.defaults.setup.modules);
     clearError();
     $('step-content').replaceChildren();
     renderFeatures();

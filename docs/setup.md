@@ -44,7 +44,9 @@ terminal running while completing the form. Enter:
   up to 2 MiB.
 - **First features:** checkboxes from the shared feature catalog. The default is
   **Website + Community**, using **Cloudflare D1** as the database. Uncheck features you
-  do not need; dependencies are included when required.
+  do not need; dependencies are included when required. To start from a narrower set,
+  open the form with a preset: `npm run onboard -- --preset checkin` (also
+  `volunteer-scheduling`, `small-groups`, or any other preset listed below).
 - **Local preview:** English or Chinese, first-admin name and email, and whether to
   include fictional demo content.
 
@@ -107,6 +109,23 @@ delivery logs the link instead of sending mail. Follow the server's printed log 
 
 If dependencies were installed with `npm ci --ignore-scripts`, run `npm run tokens`
 before setup or the development server.
+
+### Setup presets
+
+`--preset` works with both `npm run onboard` and the installer. Every preset below runs on
+the default Cloudflare D1 database except Full Church.
+
+| Preset | Features |
+|---|---|
+| `website` | Bulletins, sermons, prayer sheets, prayer wall, events, articles, fellowships, page builder |
+| `website-community` | The website features plus volunteers, groups, people, check-in, attendance, newcomers, activity score, and learning (the recommended default) |
+| `full-church` | Every feature, including Member Portal, Giving, and Registration (needs Supabase) |
+| `checkin` | People & Households and Children Check-in |
+| `volunteer-scheduling` | Volunteer Scheduling, Spiritual Gifts, and People & Households |
+| `small-groups` | Groups, Fellowships, and People & Households |
+
+The last three back the [single-feature editions](editions.md). A preset only chooses the
+first features; administrators can turn others on later in **Settings → Modules**.
 
 The original interactive `npm run setup` remains available for terminal-only setup.
 It asks for feature, identity, administrator, and initial-content choices; browser
