@@ -169,7 +169,7 @@ The example values are for a disposable local evaluation, not a production organ
 | --- | --- |
 | Mode and features | `local`, `website-community` |
 | Site identity | `demo-church`, `Demo Church` |
-| Languages | `--locales en,zh` enables languages (first listed is the default unless `--default-locale` is given); `--locale x` is shorthand for `--locales x --default-locale x`. Supported: `en`, `zh` |
+| Languages | `--locales en,zh` enables languages (first listed is the default unless `--default-locale` is given); `--locale x` alone keeps the earlier meaning: English and Chinese enabled with `x` as the default. `--locales` is the explicit way to narrow or widen the set; when both are given `--locales` wins and `--locale` is the default. Supported: `en`, `zh` |
 | First administrator | `First Admin`, `admin@example.com` |
 | Local origin and sender | `http://localhost:4321`, `admin@example.com` |
 | Initial content | Explicitly choose `--demo-data` or `--no-demo-data` |

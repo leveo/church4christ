@@ -1,3 +1,4 @@
+import { LEGACY_ENABLED_LOCALES } from './locales.mjs';
 import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -111,7 +112,7 @@ export function onboardingSettings(plan) {
     'site.tagline.en': organization.tagline,
     'site.tagline.zh': organization.tagline,
     'site.address': organization.address,
-    'locale.enabled': JSON.stringify(plan.site.locales ?? [plan.site.locale]),
+    'locale.enabled': JSON.stringify(plan.site.locales ?? LEGACY_ENABLED_LOCALES),
     'locale.default': plan.site.locale,
     'theme.name': 'sanctuary',
     'theme.default_mode': 'light',

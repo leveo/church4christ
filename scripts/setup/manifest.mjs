@@ -147,7 +147,7 @@ export function manifestFromPlan(plan, catalog) {
       locale: plan.site.locale,
       appOrigin: plan.site.appOrigin,
       emailFrom: plan.site.emailFrom,
-      locales: [...(plan.site.locales ?? [plan.site.locale])],
+      locales: [...(plan.site.locales ?? LEGACY_ENABLED_LOCALES)],
     },
     preset: plan.preset,
     modules: [...plan.modules],

@@ -1,3 +1,4 @@
+import { LEGACY_ENABLED_LOCALES } from './locales.mjs';
 import { fingerprintPlan } from './state.mjs';
 import { bootstrapFirstAdmin, initializeModuleSettings, isBootstrapAdminReady } from '../../src/lib/setupDb.mjs';
 import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
@@ -48,7 +49,7 @@ function commonDatabaseSteps(options) {
           // First initialization also records the chosen languages (never overwrites
           // an existing choice, so an established installation keeps its settings).
           const languageRows = [
-            ['locale.enabled', JSON.stringify(plan?.site?.locales ?? [plan?.site?.locale])],
+            ['locale.enabled', JSON.stringify(plan?.site?.locales ?? LEGACY_ENABLED_LOCALES)],
             ['locale.default', String(plan?.site?.locale)],
           ];
           for (const [languageKey, languageValue] of languageRows) {

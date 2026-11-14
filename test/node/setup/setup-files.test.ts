@@ -68,8 +68,8 @@ describe('installation manifest schema versions', () => {
     return { ...manifest(), schemaVersion: 1, site };
   };
 
-  it('writes schemaVersion 2 with the enabled languages (single-language alias by default)', () => {
-    expect(manifest()).toMatchObject({ schemaVersion: 2, site: { locale: plan.site.locale, locales: [plan.site.locale] } });
+  it('writes schemaVersion 2 with the enabled languages (en+zh unless --locales narrows them)', () => {
+    expect(manifest()).toMatchObject({ schemaVersion: 2, site: { locale: plan.site.locale, locales: ['en', 'zh'] } });
     const explicit = manifestFromPlan({ ...plan, site: { ...plan.site, locale: 'en', locales: ['en', 'zh'] } }, raw);
     expect(explicit.site).toMatchObject({ locale: 'en', locales: ['en', 'zh'] });
   });
@@ -77,7 +77,7 @@ describe('installation manifest schema versions', () => {
   it('still reads a v1 manifest and reports it as the legacy en+zh pair', () => {
     expect(validateManifest(v1(), raw)).toEqual(v1());
     expect(manifestLocales(v1())).toEqual({ locales: ['en', 'zh'], defaultLocale: plan.site.locale });
-    expect(manifestLocales(manifest())).toEqual({ locales: [plan.site.locale], defaultLocale: plan.site.locale });
+    expect(manifestLocales(manifest())).toEqual({ locales: ['en', 'zh'], defaultLocale: plan.site.locale });
   });
 });
 

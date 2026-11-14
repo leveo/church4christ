@@ -14,10 +14,12 @@ export const LEGACY_ENABLED_LOCALES = Object.freeze(['en', 'zh']);
 /**
  * Normalize language answers to { locales, defaultLocale } (or both undefined when
  * nothing was supplied). `locale` is the legacy single-language alias:
- * `--locale x` means `--locales x --default-locale x`. Without an explicit default,
+ * `--locale x` means en+zh enabled with default x. Without an explicit default,
  * the first listed language is the default.
  */
 /**
+ * `locale` alone (or `defaultLocale` alone) keeps the pre-registry meaning: en+zh enabled,
+ * that language the default. `locales` wins when both are given and `locale` is the default.
  * @param {{ locale?: string | null, locales?: string | string[], defaultLocale?: string | null }} input
  * @param {string} [label]
  */
@@ -27,15 +29,20 @@ export function normalizeLocaleAnswers({ locale, locales, defaultLocale }, label
     ? list.map((value) => (typeof value === 'string' ? value.trim() : value)).filter(Boolean)
     : undefined;
   const hasLocale = locale !== undefined && locale !== null && locale !== '';
-  if (hasLocale && (given !== undefined || defaultLocale)) {
-    // Already-normalized answers carry all three consistently; anything else is a conflict.
-    const consistent = (defaultLocale === undefined || defaultLocale === locale) && (given === undefined || given.includes(locale));
-    if (!consistent) throw new Error('--locale cannot be combined with --locales or --default-locale');
-    return normalizeLocaleAnswers({ locales: given, defaultLocale: locale }, label);
+  if (hasLocale && defaultLocale && defaultLocale !== locale) {
+    throw new Error('--locale cannot be combined with a different --default-locale');
   }
-  if (hasLocale) {
-    if (!SUPPORTED_LOCALE_CODES.includes(locale)) throw new Error(`--locale must be one of: ${SUPPORTED_LOCALE_CODES.join(', ')}`);
-    return { locales: [locale], defaultLocale: locale, alias: true };
+  const single = hasLocale ? locale : given === undefined ? defaultLocale : undefined;
+  if (single) {
+    // Legacy single-language form: every installation served en and zh and the
+    // flag only chose the default. An explicit --locales narrows or widens the set.
+    if (!SUPPORTED_LOCALE_CODES.includes(single)) throw new Error(`--locale must be one of: ${SUPPORTED_LOCALE_CODES.join(', ')}`);
+    if (given === undefined) {
+      if (!LEGACY_ENABLED_LOCALES.includes(single)) throw new Error(`--locale must be one of: ${LEGACY_ENABLED_LOCALES.join(', ')}`);
+      return { locales: [...LEGACY_ENABLED_LOCALES], defaultLocale: single, alias: true };
+    }
+    if (!given.includes(single)) throw new Error('--locale and --default-locale must be one of the enabled --locales');
+    return normalizeLocaleAnswers({ locales: given, defaultLocale: single }, label);
   }
   if (given === undefined && !defaultLocale) return { locales: undefined, defaultLocale: undefined, alias: false };
   const unique = [...new Set(given ?? [defaultLocale])];

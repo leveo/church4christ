@@ -417,3 +417,19 @@ already exist, so upgrading does not switch the module on. It changes no other t
    by the existing daily reminder job; no cron trigger, binding, or secret is added.
 
 No preset changes, so an installation's recorded module list stays valid.
+
+## Unreleased: language settings
+
+- **No migration.** Language support adds no database change.
+- **Upgraded installations keep English and Chinese, with English as the default,** until an
+  administrator saves **Settings → Languages**. Nothing new appears and no behavior changes
+  before then.
+- **A legacy `locale.default` row is ignored until then.** It was never read at runtime; only an
+  installation that has saved the new settings (the `locale.enabled` row exists) uses
+  `locale.default`.
+- **New setup flags:** `--locales en,zh` and `--default-locale en`. `--locale x` alone keeps its
+  earlier meaning (English and Chinese enabled, `x` the default); `--locales` narrows or widens
+  the set and wins when both are given. Setup manifests and onboarding preferences move to
+  `schemaVersion: 2`; version 1 files are still read.
+- **Disabling a language never deletes content.** It only hides the language; translations stay
+  stored and reappear when it is enabled again.

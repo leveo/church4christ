@@ -19,7 +19,7 @@ do not create a second provisioning path or replace setup with raw seed commands
    open, run `npm run onboard -- --no-open` and share the printed local URL. The optional
    `--port 4310` selects a port. Running onboarding again reloads the saved answers.
 4. Languages: onboarding offers a **Site languages** multi-select and a default; the installer
-   takes `--locales en,zh --default-locale en` (`--locale x` = `--locales x --default-locale x`).
+   takes `--locales en,zh --default-locale en` (`--locale x` alone = en+zh enabled, default x; `--locales` wins when both are given).
    Later changes go through **Settings → Languages**. Content and emails fall back requested →
    default → English; disabling a language hides it and never deletes content. To add or review
    a language follow [docs/i18n.md](docs/i18n.md#add-a-language-checklist): registry entry

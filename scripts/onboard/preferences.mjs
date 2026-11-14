@@ -79,7 +79,7 @@ export function normalizePreferences(input, catalog) {
   return { schemaVersion: PREFERENCES_SCHEMA_VERSION,
     organization: { type: organization.type, name, tagline: text(organization.tagline, 'Tagline', 240), address: text(organization.address, 'Address', 500), timezone },
     branding: { primaryColor: color(branding.primaryColor, 'Primary color'), secondaryColor: color(branding.secondaryColor, 'Secondary color'), logo: logoReference(branding.logo) },
-    setup: { siteSlug, locales: answers.locales ?? [answers.locale], defaultLocale: answers.locale, adminName, adminEmail: answers.adminEmail, demoData: setup.demoData, modules },
+    setup: { siteSlug, locales: answers.locales ?? LEGACY_ENABLED_LOCALES, defaultLocale: answers.locale, adminName, adminEmail: answers.adminEmail, demoData: setup.demoData, modules },
   };
 }
 

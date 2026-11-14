@@ -19,8 +19,8 @@ do not invent a second provisioning path or replace setup with raw seed commands
   form or invent preferences for them. Use `--no-open` when a browser cannot open, and
   share the printed local URL. Re-running onboarding reloads saved answers.
 - Languages: the onboarding form has a **Site languages** multi-select plus a default. For
-  unattended setup pass `--locales en,zh --default-locale en` (`--locale x` is shorthand for
-  `--locales x --default-locale x`); only languages in `config/locales.json` are accepted. After
+  unattended setup pass `--locales en,zh --default-locale en` (`--locale x` alone means en+zh
+  enabled with default x; `--locales` narrows or widens the set and wins when both are given); only languages in `config/locales.json` are accepted. After
   installation, administrators change them under **Settings → Languages**. Content and emails
   fall back requested → default → English, and disabling a language only hides it: never
   delete content or rows to "remove" a language. Upgraded installations keep English and

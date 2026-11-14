@@ -21,8 +21,8 @@ than published to npm.
   Upgraded installations keep exactly English and Chinese with English as the default; nothing
   changes until an administrator saves new language settings. Disabling a language hides it and
   never deletes content. Setup manifests are `schemaVersion: 2` (version 1 still reads) and
-  onboarding preferences are `schemaVersion: 2` (version 1 still reads). `--locale x` remains as
-  shorthand for `--locales x --default-locale x`. See [docs/i18n.md](docs/i18n.md).
+  onboarding preferences are `schemaVersion: 2` (version 1 still reads). `--locale x` alone keeps its
+  earlier meaning (English and Chinese enabled, x the default); `--locales` narrows or widens the set. See [docs/i18n.md](docs/i18n.md).
 
 ### Changed
 

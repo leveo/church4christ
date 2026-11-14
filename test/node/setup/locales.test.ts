@@ -26,21 +26,30 @@ describe('--locales / --default-locale / --locale', () => {
     expect(answers(['--locales', 'en,zh', '--default-locale', 'zh'])).toMatchObject({ locale: 'zh', locales: ['en', 'zh'] });
   });
 
-  it('keeps --locale x as the alias for --locales x --default-locale x', () => {
+  it('keeps --locale x meaning en+zh enabled with x as the default (pre-registry behavior)', () => {
     const alias = answers(['--locale', 'zh']);
     expect(alias.locale).toBe('zh');
     expect(alias.locales).toBeUndefined();
     const plan = buildSetupPlan({ ...alias, locale: 'zh' }, catalog);
     expect(plan.site.locale).toBe('zh');
+    expect(plan.site.locales).toBeUndefined(); // derived: en+zh
+    expect(answers(['--default-locale', 'zh'])).toMatchObject({ locale: 'zh' });
+    expect(answers(['--default-locale', 'zh']).locales).toBeUndefined();
     const explicit = buildSetupPlan(answers(['--locales', 'zh', '--default-locale', 'zh']), catalog);
     expect(explicit.site).toMatchObject({ locale: 'zh', locales: ['zh'] });
+  });
+
+  it('lets --locales win and uses --locale as the default when both are given', () => {
+    expect(answers(['--locale', 'zh', '--locales', 'en,zh'])).toMatchObject({ locale: 'zh', locales: ['en', 'zh'] });
+    expect(answers(['--locale', 'en', '--locales', 'en'])).toMatchObject({ locale: 'en', locales: ['en'] });
   });
 
   it('rejects unsupported languages, a default outside the list, and mixed forms', () => {
     expect(() => answers(['--locales', 'en,fr'])).toThrow(/unsupported languages: fr/);
     expect(() => answers(['--locale', 'fr'])).toThrow(/locale must be one of/);
     expect(() => answers(['--locales', 'en', '--default-locale', 'zh'])).toThrow(/one of the enabled/);
-    expect(() => answers(['--locale', 'en', '--locales', 'zh'])).toThrow(/cannot be combined/);
+    expect(() => answers(['--locale', 'en', '--locales', 'zh'])).toThrow(/must be one of the enabled/);
+    expect(() => answers(['--locale', 'en', '--default-locale', 'zh'])).toThrow(/different --default-locale/);
   });
 
   it('writes locale.enabled and locale.default for onboarding installs', () => {
