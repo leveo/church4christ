@@ -340,15 +340,16 @@ build to another machine.
 
 The Member Portal now runs on the default Cloudflare D1 database. This adds one forward D1
 migration, `migrations/0039_member_portal_d1.sql`, which creates the `group_files` and
-`prayer_items` tables (each with `campus_id`). It touches no existing table or row.
+`prayer_items` tables (each with `campus_id`). On an existing installation it also records
+`module.portal = 0` when no portal choice is saved yet, so upgrading does not turn the portal
+on by itself. It changes no other table or row.
 Supabase installations are unaffected: there is no PostgreSQL migration and their
 behavior does not change.
 
 For a D1 installation, back up as usual and apply the new migration with your normal D1
 migration step (`npm run db:migrate:remote`) **before** deploying the new build. Previously
-the portal was force-disabled on D1; after this change the `portal` module follows its
-setting, which defaults to on when no `module.portal` row exists. Review **Settings →
-Modules** after upgrading and switch Member Portal off if you do not want it. On D1 the
+the portal was force-disabled on D1. After upgrading it stays off until an administrator
+turns on Member Portal in **Settings → Modules**. On D1 the
 event-scope prayers, event administrators, and My registrations stay unavailable because
 they depend on Registration, which remains Supabase-only.
 

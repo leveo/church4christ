@@ -31,8 +31,9 @@ Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on
 ### Operator impact
 
 - D1 installations: apply the new migration `0039_member_portal_d1.sql` with the normal D1
-  migration step before deploying. The `portal` module, previously force-disabled on D1,
-  now follows its setting (default on when no row exists); review **Settings → Modules**.
+  migration step before deploying. The migration keeps Member Portal off on an existing
+  installation by recording `module.portal = 0` unless a choice is already saved; an
+  administrator turns it on in **Settings → Modules**.
 - Supabase installations are unaffected: there is no PostgreSQL migration.
 - No new bindings, secrets, or cron triggers.
 

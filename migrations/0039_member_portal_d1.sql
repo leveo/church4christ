@@ -39,3 +39,12 @@ CREATE TABLE prayer_items (
 CREATE INDEX idx_prayer_items_scope ON prayer_items(scope, status, deleted_at);
 CREATE INDEX idx_prayer_items_group ON prayer_items(group_id);
 CREATE INDEX idx_prayer_items_event ON prayer_items(reg_event_id);
+
+-- Existing installations keep the portal off until an administrator turns it on
+-- in Settings -> Modules. A fresh database has no module rows and no people yet,
+-- so setup's own module choices apply there. An explicit row is never changed.
+INSERT INTO settings (key, value)
+SELECT 'module.portal', '0'
+WHERE EXISTS (SELECT 1 FROM settings WHERE key LIKE 'module.%')
+   OR EXISTS (SELECT 1 FROM people)
+ON CONFLICT(key) DO NOTHING;
