@@ -49,3 +49,18 @@ describe('volunteer scheduling on a phone', () => {
     expect(opportunities).toContain('formatDateWithWeekday(d.plan_date');
   });
 });
+
+import apply from '../src/pages/[locale]/serve/apply.astro?raw';
+import testimonies from '../src/pages/[locale]/serve/testimonies.astro?raw';
+import serviceTypes from '../src/pages/admin/service-types/index.astro?raw';
+
+describe('phone keyboards for serve forms', () => {
+  it('sets autocomplete, tel and numeric input types', () => {
+    expect(apply).toContain('autocomplete="name"');
+    expect(apply).toContain('autocomplete="email"');
+    expect(apply).toContain('type="tel"');
+    expect(apply).toContain('autocomplete="tel"');
+    expect(testimonies).toContain('autocomplete="name"');
+    expect(serviceTypes).toContain('type="number" inputmode="numeric"');
+  });
+});

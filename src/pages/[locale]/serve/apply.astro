@@ -265,15 +265,15 @@ const copy = ministryCopy(locale);
                 <>
                   <label class="block">
                     <span class={lab}>{t(locale, 'apply.name')} *</span>
-                    <input name="name" required class={tin} />
+                    <input name="name" required autocomplete="name" class={tin} />
                   </label>
                   <label class="block">
                     <span class={lab}>{t(locale, 'apply.email')} *</span>
-                    <input type="email" name="email" required class={tin} />
+                    <input type="email" name="email" required autocomplete="email" inputmode="email" class={tin} />
                   </label>
                   <label class="block">
                     <span class={lab}>{t(locale, 'apply.phone')} ({t(locale, 'my.optional')})</span>
-                    <input name="phone" class={tin} />
+                    <input type="tel" name="phone" autocomplete="tel" inputmode="tel" class={tin} />
                   </label>
                 </>
               )}

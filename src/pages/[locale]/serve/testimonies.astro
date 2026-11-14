@@ -131,7 +131,7 @@ const copy = ministryCopy(locale);
                 <span class={lab}>
                   {t(locale, 'serve.testimonies.name')} ({t(locale, 'my.optional')})
                 </span>
-                <input name="name" value={user?.displayName ?? ''} class={tin} />
+                <input name="name" value={user?.displayName ?? ''} autocomplete="name" class={tin} />
               </label>
               <label class="block">
                 <span class={lab}>{t(locale, 'serve.testimonies.titleField')} *</span>
@@ -141,7 +141,7 @@ const copy = ministryCopy(locale);
                 <span class={lab}>{t(locale, 'serve.testimonies.body')} *</span>
                 <textarea name="body" rows="6" required maxlength={MAX_BODY} class={`${tin} leading-relaxed`} />
               </label>
-              <button type="submit" class={btn}>{t(locale, 'serve.testimonies.submit')}</button>
+              <button type="submit" class={`${btn} w-full sm:w-auto`}>{t(locale, 'serve.testimonies.submit')}</button>
             </form>
           </>
         )

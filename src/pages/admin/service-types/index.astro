@@ -64,7 +64,7 @@ const copy = ministryCopy(lang);
         <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" value={st.name_zh ?? ''} class={tin} /></label>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" value={st.start_time ?? ''} class={tin} /></label>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" value={st.end_time ?? ''} class={tin} /></label>
-        <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" value={st.sort} class={tin} /></label>
+        <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" type="number" inputmode="numeric" value={st.sort} class={tin} /></label>
         <button name="_action" value="save" class={btn}>{t(lang, 'admin.serviceTypes.save')}</button>
         <button name="_action" value="delete" data-confirm={t(lang, 'admin.serviceTypes.confirmDelete')} class={btnDanger}>{t(lang, 'admin.serviceTypes.delete')}</button>
       </form>
@@ -80,7 +80,7 @@ const copy = ministryCopy(lang);
       <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" class={tin} /></label>
       <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" class={tin} /></label>
       <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" class={tin} /></label>
-      <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" value="0" class={tin} /></label>
+      <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" type="number" inputmode="numeric" value="0" class={tin} /></label>
       <button class={btn}>{t(lang, 'admin.serviceTypes.create')}</button>
     </form>
   </section>
