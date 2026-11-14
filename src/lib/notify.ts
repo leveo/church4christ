@@ -139,9 +139,14 @@ interface BilingualArgs {
   bodyKey: string;
   vars?: Record<string, string | number>;
   link?: string;
+  /** Dictionary key for a short button label; when set the HTML shows a styled button instead of the raw URL. */
+  linkLabelKey?: string;
   /** When set, emit only that locale; otherwise stack zh then en. */
   only?: Locale | null;
 }
+
+// Email clients cannot read CSS variables, so the button carries inline literals.
+const EMAIL_BUTTON_STYLE = 'display:inline-block;padding:12px 24px;border-radius:999px;background:#2f4a7d;color:#ffffff;font-weight:600;text-decoration:none'; /* tokens-ok */
 
 /**
  * Build a { subject, html, text } message from dictionary keys. When `only` is a
@@ -149,7 +154,7 @@ interface BilingualArgs {
  * (zh then en). Interpolated `vars` are HTML-escaped by `t()`; the trailing link
  * is appended once (escaped in the HTML anchor).
  */
-export function bilingualEmail({ subjectKey, bodyKey, vars, link, only }: BilingualArgs): {
+export function bilingualEmail({ subjectKey, bodyKey, vars, link, linkLabelKey, only }: BilingualArgs): {
   subject: string;
   html: string;
   text: string;
@@ -160,7 +165,11 @@ export function bilingualEmail({ subjectKey, bodyKey, vars, link, only }: Biling
   const text = link ? `${bodyText}\n\n${link}\n` : `${bodyText}\n`;
   const html =
     langs.map((l) => `<p>${t(l, bodyKey, vars)}</p>`).join('') +
-    (link ? `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>` : '');
+    (link
+      ? linkLabelKey
+        ? `<p><a href="${escapeHtml(link)}" style="${EMAIL_BUTTON_STYLE}">${langs.map((l) => t(l, linkLabelKey)).join(' · ')}</a></p>`
+        : `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`
+      : '');
   return { subject, html, text };
 }
 
@@ -273,6 +282,7 @@ export async function sendSchedulingRequest(env: EmailEnv, db: AppDb, assignment
       bodyKey: 'email.requestBody',
       vars: { name: d.person_name, position: d.position_name, team: d.team_name, date: d.plan_date, service: d.service_type_name },
       link,
+      linkLabelKey: 'email.requestButton',
       only: toLang(d.person_lang),
     });
     await sendEmail(env, db, { to: d.person_email, toName: d.person_name, kind: 'request', detail: `${d.plan_date} ${d.position_name}`, ...built });

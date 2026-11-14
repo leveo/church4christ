@@ -77,5 +77,13 @@ const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
   .calendar-dot { flex: 0 0 5px; width: 5px; height: 5px; border-radius: var(--radius-full); margin-top: .3rem; }
   .calendar-blocked { background: var(--color-surface-sunken); }
   .calendar-blocked-label { color: var(--color-ink-muted); }
-  @media (max-width: 639px) { .month-calendar td { padding: .2rem; height: 85px; } .calendar-day-items li { font-size: .55rem; } .calendar-dot { display: none; } }
+  /* Phones: day number plus colored dots only; the agenda list carries the text. */
+  @media (max-width: 639px) {
+    .month-calendar td { padding: .25rem .1rem; height: 3.5rem; text-align: center; }
+    .month-calendar th { font-size: .75rem; }
+    .calendar-day-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
+    .calendar-day-items li { display: block; }
+    .calendar-day-items li > span:not(.calendar-dot), .calendar-day-items .calendar-blocked-label { display: none; }
+    .calendar-dot { display: block; flex: 0 0 8px; width: 8px; height: 8px; margin-top: 0; }
+  }
 </style>

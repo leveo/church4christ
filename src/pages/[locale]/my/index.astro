@@ -32,7 +32,7 @@ import { getPortalHousehold } from '../../../lib/portalDb';
 import { listGroupsForPerson, listJoinRequests } from '../../../lib/groupDb';
 import { listPendingForApprover } from '../../../lib/prayerDb';
 import { listRegistrationsForPerson } from '../../../lib/regDb';
-import { formatDate, todayInTz } from '../../../lib/dates';
+import { formatDate, formatDateWithWeekday, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
 import { badge, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
@@ -147,7 +147,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     <div class="member-dashboard-grid"><div>
     {
       pending.length > 0 && (
-        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
+        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-4 sm:p-6">
           <h2 class="font-display text-lg font-semibold text-warn">
             {t(locale, 'my.pending')} ({pending.length})
           </h2>
@@ -155,24 +155,25 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
             {pending.map((a) => (
               <li class="rounded-md border border-border bg-surface-raised p-4">
                 <div class="flex flex-wrap items-center gap-2 text-sm">
-                  <span class="font-bold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                  <span class="font-bold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                   <span class="font-medium">{a.position_name}</span>
                   <span class="text-ink-muted">
                     {a.team_name} · {a.service_type_name}
                   </span>
                 </div>
-                <form method="post" class="mt-3 flex flex-wrap items-center gap-2">
+                <form method="post" class="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <input type="hidden" name="assignment_id" value={a.id} />
-                  <button type="submit" name="_action" value="accept" class={btn}>
-                    {t(locale, 'my.accept')}
-                  </button>
                   <input
                     name="reason"
+                    enterkeyhint="done"
                     placeholder={t(locale, 'my.declineReason')}
                     aria-label={t(locale, 'my.declineReason')}
-                    class={`${tin} max-w-56`}
+                    class={`${tin} col-span-2 sm:order-2 sm:max-w-56`}
                   />
-                  <button type="submit" name="_action" value="decline" class={btnSecondary}>
+                  <button type="submit" name="_action" value="accept" class={`${btn} sm:order-1`}>
+                    {t(locale, 'my.accept')}
+                  </button>
+                  <button type="submit" name="_action" value="decline" data-confirm={t(locale, 'my.confirmDecline')} class={`${btnSecondary} sm:order-3`}>
                     {t(locale, 'my.decline')}
                   </button>
                 </form>
@@ -192,12 +193,12 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {upcoming.map((a) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                 <span class="font-medium">{a.position_name}</span>
                 <span class="text-ink-muted">
                   {a.team_name} · {a.service_type_name}
                 </span>
-                <span class="ml-auto">
+                <span class="sm:ml-auto">
                   <StatusBadge status={a.status} locale={locale} />
                 </span>
               </li>
@@ -214,7 +215,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {openSlots.map((s) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(s.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(s.plan_date, locale)}</span>
                 <span class="font-medium">{s.position_name}</span>
                 <span class="text-ink-muted">
                   {s.team_name} · {s.service_type_name}
@@ -222,11 +223,11 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
                 <span class="text-xs text-ink-subtle">
                   {s.taken}/{s.needed}
                 </span>
-                <form method="post" class="ml-auto">
+                <form method="post" class="w-full sm:ml-auto sm:w-auto">
                   <input type="hidden" name="_action" value="claim" />
                   <input type="hidden" name="plan_id" value={s.plan_id} />
                   <input type="hidden" name="position_id" value={s.position_id} />
-                  <button type="submit" class={btn}>{t(locale, 'serve.plans.claim')}</button>
+                  <button type="submit" class={`${btn} w-full sm:w-auto`}>{t(locale, 'serve.plans.claim')}</button>
                 </form>
               </li>
             ))}
@@ -338,4 +339,5 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
   .member-dashboard-aside { margin-top: 2rem; }
   .member-community-photo { height: 200px; margin-top: 1.5rem; overflow: hidden; border-radius: var(--radius-lg); }
   @media (max-width: 767px) { .member-dashboard-grid { grid-template-columns: 1fr; } .member-dashboard-aside { margin-top: .5rem; } }
+  @media (max-width: 639px) { .member-community-photo { display: none; } }
 </style>

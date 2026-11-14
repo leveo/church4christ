@@ -579,6 +579,7 @@ export default {
   'my.pending': '等候你回复',
   'my.accept': '接受',
   'my.decline': '婉拒',
+  'my.confirmDecline': '确定要婉拒这次服事邀请吗？',
   'my.declineReason': '原因（可不填）',
   'my.upcoming': '即将到来的服事',
   'my.noUpcoming': '目前没有安排。',
@@ -614,6 +615,10 @@ export default {
   'my.cal.subscribeIntro': '把你的服事日程加到 Google 或 Apple 日历，日程会自动保持最新。',
   'my.cal.subscribe': '订阅',
   'my.cal.generate': '生成日历链接',
+  'my.cal.google': '添加到 Google 日历',
+  'my.cal.feedLink': '打开订阅链接',
+  'my.cal.copy': '复制链接',
+  'my.cal.copied': '已复制',
   'my.cal.regenerate': '重新生成链接',
   'my.cal.regenerateHint': '重新生成会创建新链接，旧链接将立即失效。',
   'my.cal.blockedOut': '不可服事',
@@ -2022,6 +2027,9 @@ export default {
   'respond.declined': '感谢你的告知，你的回复已记录。',
   'respond.past': '此邀请对应的聚会已经结束。',
   'respond.invalid': '此链接已失效。',
+  'respond.confirmDecline': '确定要婉拒这次服事邀请吗？',
+  'respond.viewServing': '查看我的服事',
+  'respond.viewCalendar': '打开我的日历',
   'respond.retry': '前往登录',
 
   // 通用：修改历史链接 + 仪表板祷告墙卡片
@@ -2186,6 +2194,7 @@ export default {
   'admin.settings.themeName.midnight': '午夜',
 
   // ── Slice 6 · 义工邮件（通知与摘要） ──
+  'email.requestButton': '接受或婉拒',
   'email.requestSubject': '服事邀请：{date}',
   'email.requestBody': '{name} 平安！诚邀您于 {date} 担任 {position} 服事，请点击回复是否方便：',
   'email.declineSubject': '服事空缺通知：{date}',

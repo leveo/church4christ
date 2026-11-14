@@ -581,6 +581,7 @@ export default {
   'my.pending': 'Awaiting your response',
   'my.accept': 'Accept',
   'my.decline': 'Decline',
+  'my.confirmDecline': 'Decline this serving request?',
   'my.declineReason': 'Reason (optional)',
   'my.upcoming': 'Upcoming serving',
   'my.noUpcoming': 'Nothing scheduled yet.',
@@ -616,6 +617,10 @@ export default {
   'my.cal.subscribeIntro': 'Add your serving schedule to Google or Apple Calendar. It stays up to date automatically.',
   'my.cal.subscribe': 'Subscribe',
   'my.cal.generate': 'Generate calendar link',
+  'my.cal.google': 'Add to Google Calendar',
+  'my.cal.feedLink': 'Open feed link',
+  'my.cal.copy': 'Copy link',
+  'my.cal.copied': 'Copied',
   'my.cal.regenerate': 'Regenerate link',
   'my.cal.regenerateHint': 'Regenerating creates a new link and stops the old one from working.',
   'my.cal.blockedOut': 'Blocked out',
@@ -2026,6 +2031,9 @@ export default {
   'respond.declined': 'Thanks for letting us know. Your response has been recorded.',
   'respond.past': 'This request is for a service that has already passed.',
   'respond.invalid': 'This link is no longer valid.',
+  'respond.confirmDecline': 'Decline this serving request?',
+  'respond.viewServing': 'View my serving',
+  'respond.viewCalendar': 'Open my calendar',
   'respond.retry': 'Go to sign-in',
 
   // Shared: History link + dashboard prayer-wall card
@@ -2191,6 +2199,7 @@ export default {
   'admin.settings.themeName.midnight': 'Midnight',
 
   // ── Slice 6 · volunteer emails (notify + digest) ──
+  'email.requestButton': 'Accept or decline',
   'email.requestSubject': 'New serving request for {date}',
   'email.requestBody': 'Hi {name}, we would love to have you serve as {position} on {date}. Please let us know whether you are available:',
   'email.declineSubject': 'A serving spot opened up for {date}',

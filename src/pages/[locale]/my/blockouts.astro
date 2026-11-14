@@ -12,7 +12,7 @@ import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { addBlockout, deleteBlockout, deleteBlockoutSeries, listBlockouts } from '../../../lib/myDb';
 import { parseBlockoutForm } from '../../../lib/validate';
-import { todayInTz } from '../../../lib/dates';
+import { formatDateWithWeekday, todayInTz } from '../../../lib/dates';
 import { btn, lab, noticeErr, tin } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -60,9 +60,9 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
 
     {errorKeys.map((key) => <p class={`mt-4 ${noticeErr}`}>{t(locale, key)}</p>)}
 
-    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-6">
+    <section class="mt-6 rounded-lg border border-border bg-surface-raised p-4 sm:p-6">
       <h2 class="mb-3 font-display font-semibold">{t(locale, 'my.addBlockout')}</h2>
-      <form method="post" class="flex flex-wrap items-end gap-3">
+      <form method="post" class="blockout-form grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <input type="hidden" name="_action" value="add" />
         <label class="block">
           <span class={lab}>{t(locale, 'my.from')}</span>
@@ -80,7 +80,7 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
           <span class={lab}>{t(locale, 'my.timeTo')} ({t(locale, 'my.optional')})</span>
           <input type="time" name="end_time" class={tin} />
         </label>
-        <label class="block min-w-32 flex-1">
+        <label class="block sm:col-span-2">
           <span class={lab}>{t(locale, 'my.reason')} ({t(locale, 'my.optional')})</span>
           <input name="reason" class={tin} />
         </label>
@@ -92,11 +92,11 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
             <option value="biweekly">{t(locale, 'my.repeatBiweekly')}</option>
           </select>
         </label>
-        <label class="block">
+        <label class="blockout-count block">
           <span class={lab}>{t(locale, 'my.repeatCount')}</span>
-          <input type="number" name="count" min="2" max="26" value="4" class={`${tin} w-20`} />
+          <input type="number" inputmode="numeric" name="count" min="2" max="26" value="4" class={tin} />
         </label>
-        <button type="submit" class={btn}>{t(locale, 'my.add')}</button>
+        <button type="submit" class={`${btn} w-full sm:col-span-2 lg:col-span-4 lg:w-auto lg:justify-self-start`}>{t(locale, 'my.add')}</button>
       </form>
       <p class="mt-2 text-xs text-ink-subtle">{t(locale, 'my.blockoutHint')}</p>
     </section>
@@ -106,8 +106,8 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
         blockouts.map((b) => (
           <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
             <span class="font-semibold tabular-nums">
-              {b.start_date}
-              {b.end_date !== b.start_date && ` → ${b.end_date}`}
+              {formatDateWithWeekday(b.start_date, locale, true)}
+              {b.end_date !== b.start_date && ` → ${formatDateWithWeekday(b.end_date, locale, true)}`}
               {b.start_time && b.end_time && ` · ${b.start_time}–${b.end_time}`}
             </span>
             {b.reason && <span class="text-ink-muted">{b.reason}</span>}
@@ -116,11 +116,11 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
                 ↻ {t(locale, 'my.repeatBadge')}
               </span>
             )}
-            <span class="ml-auto flex items-center gap-3">
+            <span class="flex w-full flex-wrap items-center gap-x-3 sm:ml-auto sm:w-auto">
               <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'my.confirmDelete'))})`}>
                 <input type="hidden" name="_action" value="delete" />
                 <input type="hidden" name="id" value={b.id} />
-                <button type="submit" class="text-xs text-danger hover:underline">
+                <button type="submit" class="inline-flex min-h-11 items-center px-2 text-sm text-danger hover:underline">
                   {t(locale, 'my.delete')}
                 </button>
               </form>
@@ -128,7 +128,7 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
                 <form method="post" onsubmit={`return confirm(${JSON.stringify(t(locale, 'my.confirmDelete'))})`}>
                   <input type="hidden" name="_action" value="delete_series" />
                   <input type="hidden" name="group" value={b.recurrence_group} />
-                  <button type="submit" class="text-xs text-danger hover:underline">
+                  <button type="submit" class="inline-flex min-h-11 items-center px-2 text-sm text-danger hover:underline">
                     {t(locale, 'my.deleteSeries')}
                   </button>
                 </form>
@@ -141,3 +141,13 @@ const blockouts = await listBlockouts(db, user.id, todayInTz());
     </ul>
   </div>
 </Member>
+
+<style is:global>
+  /* Repeat count only matters when a repeat is chosen. Guarded so browsers
+     without :has() keep the field visible. */
+  @supports selector(:has(a)) {
+    .blockout-form .blockout-count { display: none; }
+    .blockout-form:has(select[name="repeat"] option[value="weekly"]:checked) .blockout-count,
+    .blockout-form:has(select[name="repeat"] option[value="biweekly"]:checked) .blockout-count { display: block; }
+  }
+</style>
