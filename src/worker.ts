@@ -1,6 +1,7 @@
 import { runCommunityWorkflowPass } from './lib/workflowReminders';
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
+import { sendPlanningReminders } from './lib/planningNotify';
 import { sendAttendanceEmails } from './lib/groupAttendance';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
@@ -40,7 +41,13 @@ export default {
     switch (controller.cron) {
       case REMINDER_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(sendReminders(vars, db).finally(end));
+        // Volunteer reminders and Service Planning rehearsal reminders share the
+        // daily job (no extra cron). Each pass gates on its own module and rules,
+        // and one failing must not stop the other.
+        ctx.waitUntil((async () => {
+          try { await sendReminders(vars, db); }
+          finally { await sendPlanningReminders(vars, db); }
+        })().finally(end));
         break;
       }
       case DIGEST_CRON: {
