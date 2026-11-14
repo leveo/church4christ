@@ -171,6 +171,31 @@ describe('coordinator scope, copy permission, and availability privacy', () => {
     expect(await manageableEventIds(db, admin, [source, target])).toEqual(new Set([source, target]));
   });
 
+  it('drops out-of-scope owners when copying so a coordinator cannot widen their scope', async () => {
+    await db.prepare(`INSERT OR IGNORE INTO teams (id) VALUES (803)`).run();
+    const mk = () => createEvent(db, {
+      title_en: 'E', title_zh: '', event_date: '2030-11-02', start_time: '09:00', end_time: null,
+      location_en: '', location_zh: '', notes_en: '', notes_zh: '', plan_id: null,
+    }, null);
+    const source = await mk();
+    const target = await mk();
+    await addCoordinator(db, source, 301);
+    await addCoordinator(db, target, 301);
+    await addItem(db, source, 1, {
+      kind: 'segment', duration_min: 5, fixed_start_time: null, title_en: 'Owned', title_zh: '', details_en: '', details_zh: '',
+      owner_team_id: 803, owner_person_id: 305, owner_label: 'Guest', cue_notes: '',
+    });
+    const before = await callableScope(db, user(301), target);
+    expect(await copyRunSheetChecked(db, user(301), target, source, 1)).toMatchObject({ ok: true, copied: 1 });
+    const row = await db.prepare(`SELECT owner_team_id, owner_person_id, owner_label FROM planning_items WHERE event_id = ?`).bind(target).first();
+    expect(row).toEqual({ owner_team_id: null, owner_person_id: null, owner_label: 'Guest' });
+    expect(await callableScope(db, user(301), target)).toEqual(before);
+    // An admin copy keeps the owners.
+    const adminTarget = await mk();
+    await copyRunSheetChecked(db, user(1, { isAdmin: true, role: 'admin', isSuperAdmin: true }), adminTarget, source, 1);
+    expect((await db.prepare(`SELECT owner_team_id FROM planning_items WHERE event_id = ?`).bind(adminTarget).first<{ owner_team_id: number }>())?.owner_team_id).toBe(803);
+  });
+
   it('never reads availability notes when loading facts for planners', async () => {
     await db.prepare(`INSERT OR IGNORE INTO people (id, display_name, email, active) VALUES (306, 'Led Member', 'led@example.com', 1)`).run();
     await db.prepare(`INSERT INTO availability_windows (person_id, starts_on, ends_on, start_minute, end_minute, note) VALUES (306, '2030-12-01', '2030-12-01', 600, 700, 'PRIVATE-NOTE')`).run();

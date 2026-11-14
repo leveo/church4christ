@@ -99,7 +99,7 @@ not whether the module exists.
 - **Area registry:** `src/lib/adminAreas.ts` is the pure, tested source of truth.
   `GRANTABLE_AREAS` lists the 16 grantable keys: `bulletins`, `sermons`, `prayer-sheets`,
   `testimonies`, `pages`, `events`, `people`, `groups`, `children`, `giving`, `registration`,
-  `attendance`, `activity-score`, `payment-operations`, `serve`, and the scoped-staff
+  `attendance`, `activity-score`, `payment-operations`, `serve`, `planning`, and the scoped-staff
   `newcomers` grant.
   `newcomers` is the only scoped grant that can also be assigned to a non-admin staff member.
   `AdminAreaKey` extends that with three keys that are never grantable: `prayer-wall` and

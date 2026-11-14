@@ -103,7 +103,10 @@ export async function copyRunSheetChecked(
     planningRole(db, user, { id: sourceEventId }),
   ]);
   if (!canManage(target) || !canManage(source)) return { ok: false as const, reason: 'forbidden' as const };
-  return copyRunSheet(db, targetEventId, sourceEventId, expectedRevision);
+  // Owners copied from the source must not widen what a non-admin coordinator may
+  // call: out-of-scope teams and people are dropped (free-text owner labels stay).
+  const scope = await callableScope(db, user, targetEventId);
+  return copyRunSheet(db, targetEventId, sourceEventId, expectedRevision, (item) => restrictOwners(scope, item));
 }
 
 /** Events (from a candidate list) the user may manage. */

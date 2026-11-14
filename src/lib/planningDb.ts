@@ -558,13 +558,14 @@ export async function copyRunSheet(
   targetEventId: number,
   sourceEventId: number,
   expectedRevision: number,
+  mapItem: (item: PlanningItem) => PlanningItem = (item) => item,
 ): Promise<WriteResult & { copied?: number }> {
   if (targetEventId === sourceEventId) return { ok: false, reason: 'not_found' };
   const source = await getEvent(db, sourceEventId);
   if (!source) return { ok: false, reason: 'not_found' };
   const gate = await bumpRevision(db, targetEventId, expectedRevision);
   if (!gate.ok) return gate;
-  const items = await listItems(db, sourceEventId);
+  const items = (await listItems(db, sourceEventId)).map(mapItem);
   const max = await db
     .prepare(`SELECT COALESCE(MAX(sort), 0) AS m FROM planning_items WHERE event_id = ?`)
     .bind(targetEventId)
