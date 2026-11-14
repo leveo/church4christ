@@ -50,7 +50,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `newcomers` | Newcomer Follow-up | 新朋友跟进 | Either |
 | `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
-| `portal` | Member Portal | 会友平台 | Supabase |
+| `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
@@ -63,11 +63,13 @@ the credential key ring, authorize Google Classroom or Canvas, map courses, and 
 For the `learning` provider/privacy boundary and screenshots, see **[Learning](learning.md)** and
 the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
 
-**Three modules need the Supabase database.** Member Portal, Giving, and Registration run
+**Two modules need the Supabase database.** Giving and Registration run
 only on the optional **Supabase** backend (see
 [`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**
 database sees their checkboxes **greyed out** in the Modules panel with a note explaining
-why, and their pages simply do not exist (404) on D1. Every
+why, and their pages simply do not exist (404) on D1. Member Portal runs on either
+database; on D1 its event-related parts (event-scope prayers, event administrators, and
+"My registrations") are hidden because they depend on Registration. Every
 other module works the same on either database.
 
 **What happens when a module is off.** The capability is hidden everywhere at once, not
@@ -100,7 +102,7 @@ never get a link to a page that no longer exists:
   reports and CSV remain readable. See [Service attendance](service-attendance.md).
 
 The Full Church preset enables all 21 modules; Website enables 8; Website + Community
-enables all 18 modules that are compatible with D1. Custom setup can select individual
+enables 18 of the 19 modules that are compatible with D1 (Member Portal is selected separately). Custom setup can select individual
 modules.
 
 ## How it fits together
@@ -119,7 +121,7 @@ soft-degrade so an off module never leaves a dangling reference.
   `src/lib/modules.ts` for runtime use. It maps each of the 21 keys to the locale-stripped
   route prefixes it owns (public and admin), its
   nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
-  `requiresBackend: 'supabase'` for Portal, Giving, and Registration. `moduleForPath` is the
+  `requiresBackend: 'supabase'` for Giving and Registration. `moduleForPath` is the
   classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts` even
   though `/serve` also matches.
 - **Authoring-only exception:** `page-builder` owns only its `/admin/pages/builder` admin

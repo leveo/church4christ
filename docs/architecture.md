@@ -127,7 +127,7 @@ run on either of two databases:
 | `newcomers` | Newcomer Follow-up | 新朋友跟进 | Either |
 | `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
-| `portal` | Member Portal | 会友平台 | Supabase |
+| `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
@@ -143,10 +143,11 @@ requests) whose `end()` drains it after the response. The middleware opens this 
 request and hands the page `locals.db` and `locals.dbBackend` (`src/middleware.ts`); the
 `scheduled` handler opens its own for the cron jobs that touch data.
 
-**Three modules require Postgres.** `portal`, `giving`, and `registration` are marked
+**Two modules require Postgres.** `giving` and `registration` are marked
 `requiresBackend: 'supabase'` in `src/lib/modules.ts`, and `getEnabledModules` force-disables
-any such module on a mismatched backend — so all three stay off on D1 even when their
-settings row says on. See [`docs/supabase-setup.md`](supabase-setup.md) and
+any such module on a mismatched backend — so both stay off on D1 even when their
+settings row says on. `portal` runs on either backend; its Registration-dependent parts
+are gated on `modules.has('registration')`. See [`docs/supabase-setup.md`](supabase-setup.md) and
 [`docs/features/giving.md`](features/giving.md).
 
 ## Portability and operations

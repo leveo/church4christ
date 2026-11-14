@@ -1,8 +1,8 @@
-# Supabase setup — Portal, Giving, and Registration (Stripe Preview/test only)
+# Supabase setup — Giving and Registration (Stripe Preview/test only)
 
-Setup is capability-driven: selections among the 18 D1-compatible modules choose D1 unless
-you explicitly override the backend. **Member Portal**, **Giving**, and **Registration**
-require Postgres, so setup selects **Supabase** when any of those three modules is enabled.
+Setup is capability-driven: selections among the 19 D1-compatible modules (including
+**Member Portal**) choose D1 unless you explicitly override the backend. **Giving** and
+**Registration** require Postgres, so setup selects **Supabase** when either is enabled.
 Stripe support in this repository is **Preview/test-only**: the setup accepts test keys and
 the runtime rejects live-mode events. It is not a production payment path. Production
 email remains on the Cloudflare Email binding. Before remote sending, the sender domain
@@ -45,8 +45,8 @@ time-zone rules; they are separate from this database requirement.
 
 ## 1. Which database should I pick?
 
-Both offer a Free plan for eligible usage. Choose Supabase to enable Member Portal, Giving,
-or Registration; the other 18 modules work on either database.
+Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or Registration (and the
+Registration-dependent parts of Member Portal); the other 19 modules work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -56,8 +56,8 @@ or Registration; the other 18 modules work on either database.
 | **Giving — Stripe online/recurring** | Not available | **Preview/test-only**; live payments unavailable |
 | **Registration — free events** | Not available | **Implemented** |
 | **Registration — paid via Stripe** | Not available | **Preview/test-only**; live payments unavailable |
-| **Member Portal** (household, groups, calendar, prayer) | Not available | **Available** |
-| **Other 18 modules** | Yes | Yes |
+| **Member Portal** (household, groups, calendar, prayer) | **Available** (without event prayers, event admins, or My registrations) | **Available** (complete) |
+| **Other 19 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
 | **Plan considerations** | Cloudflare allowances and email plan rules apply | Supabase limits, continuity needs, and Cloudflare/email plan rules all apply |
 
@@ -71,7 +71,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [database backups](https://supabase.com/docs/guides/platform/backups), and
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
-Member Portal, Giving, and Registration are **force-disabled on D1**, even if legacy
+Giving and Registration are **force-disabled on D1**, even if legacy
 settings say they are on. New setup writes explicit selected settings for all 21 modules.
 
 ---
@@ -176,8 +176,8 @@ SUPABASE_DB_URL="postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-us
 ```
 
 It prints `applying …` for each new file and finishes with `migrations up to date`. This
-creates every table — the same content tables as D1, **plus** the Portal, Giving, and
-Registration tables. It does **not** load any content; a real deployment starts empty and
+creates every table — the same content tables as D1, **plus** the Giving and
+Registration tables and the Portal's event administrators. It does **not** load any content; a real deployment starts empty and
 you add your church's content through the admin area.
 
 Learning works on this backend with the same provider/privacy boundary as D1. Version 1.1.0

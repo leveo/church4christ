@@ -10,6 +10,32 @@ than published to npm.
 
 ## [Unreleased]
 
+Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on-d1).
+
+### Added
+
+- Member Portal now runs on the default Cloudflare D1 database: households, groups and
+  protected group files, calendar, opportunity discovery, and church, group, and private
+  prayers. New D1 migration `0039_member_portal_d1.sql` adds the `group_files` and
+  `prayer_items` tables. Demo prayer items are part of the D1 demo seed.
+
+### Changed
+
+- `portal` no longer requires the Supabase backend; only Giving and Registration do. A
+  portal-only selection now resolves to D1, and a selection that also includes Giving or
+  Registration still resolves to Supabase.
+- Registration-dependent portal parts (event-scope prayers, event administrators, My
+  registrations) are hidden, and no Registration table is read, when the `registration`
+  module is off. `/my/serving` returns 404 when Volunteer Scheduling is off.
+
+### Operator impact
+
+- D1 installations: apply the new migration `0039_member_portal_d1.sql` with the normal D1
+  migration step before deploying. The `portal` module, previously force-disabled on D1,
+  now follows its setting (default on when no row exists); review **Settings → Modules**.
+- Supabase installations are unaffected: there is no PostgreSQL migration.
+- No new bindings, secrets, or cron triggers.
+
 ## [1.4.0] - 2026-11-14
 
 Upgrade notes: [Upgrading 1.3.0 to 1.4.0](docs/upgrade.md#upgrading-130-to-140).

@@ -128,7 +128,7 @@ application:
 | Attendance and engagement | [Service attendance](docs/features/service-attendance.md) and [activity scores](docs/features/activity-score.md) |
 | Newcomer and care follow-up | [Newcomer queue](docs/features/newcomers.md), [prayer wall](docs/features/prayer-wall.md), and [community workflows](docs/features/community-workflows.md) |
 | Church website and CMS | [Public site, themes, sermons, bulletins, and page builder](docs/features/public-site-and-themes.md) |
-| Member self-service | [Member portal](docs/features/member-portal.md) (requires the Supabase/PostgreSQL backend) |
+| Member self-service | [Member portal](docs/features/member-portal.md) (household, groups, prayer; runs on D1 or Supabase) |
 | Multiple campuses | [Multi-campus](docs/features/multi-campus.md) with campus-isolated data and roles |
 
 **Moving from Planning Center gradually.** An optional, read-only
@@ -275,7 +275,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `newcomers` | Newcomer Follow-up | 新朋友跟进 | Either |
 | `activity-score` | Activity Score | 活跃度评分 | Either |
 | `page-builder` | Page Builder | 页面编辑器 | Either |
-| `portal` | Member Portal | 会友平台 | Supabase |
+| `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
 | `registration` | Registration | 活动报名 | Supabase |
 | `learning` | Learning | 学习 | Either |
@@ -331,9 +331,10 @@ limited to the full `/admin` area.
 
 ![Member opportunity discovery and resource-scoped leader administration workflow](docs/images/diagrams/member-opportunity-workflow.png)
 
-The portal requires the optional **Supabase (Postgres)** backend because it adds member
-relationships, protected group files, and scoped prayer moderation. Churches using the
-default D1 backend simply do not see the portal controls or routes. Learn more in
+The portal runs on both the default D1 backend and the optional **Supabase (Postgres)**
+backend. Households, groups, protected group files, and church/group/private prayer
+moderation work on D1. Event-scope prayers, event administrators, and "My registrations"
+need Registration, which is Supabase-only. Learn more in
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -368,7 +369,7 @@ tagline, address, time zone, primary and secondary colors, optional PNG/JPEG/Web
 (up to 2 MiB), language, first administrator, and demo-content choice. Check only the
 features you need.
 The recommended selection uses D1 as its database; the application still runs on
-Cloudflare Workers and stores media in R2. **Member Portal, Giving, and Registration**
+Cloudflare Workers and stores media in R2. **Giving and Registration**
 are advanced options requiring an explicit switch to Supabase-compatible PostgreSQL.
 
 Saving writes `.church/preferences.json` and any uploaded logo under `.church/`, which
@@ -415,8 +416,8 @@ existing email or restore revoked access. If setup reports an identity problem, 
 the [identity review or recovery workflow](docs/features/member-identity.md) before rerunning.
 
 The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
-publishing modules), **Website + Community** (all 18 D1-compatible modules), and
-**Full Church** (all 21 modules). Portal, Giving, and
+publishing modules), **Website + Community** (18 modules; Member Portal can be added on D1), and
+**Full Church** (all 21 modules). Giving and
 Registration select Supabase automatically; D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
@@ -442,7 +443,7 @@ pricing pages before deployment.
 | Profile | Included scope | Cost and readiness notes |
 |---|---|---|
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
-| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 18 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
+| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 19 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for all 21 modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe payment paths remain Preview/test-only in this repository. |
 
@@ -482,8 +483,8 @@ inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELO
 applying forward migrations. Maintainers preparing a release should follow
 the [release process](docs/release-process.md).
 
-**Choosing your database.** The 18 D1-compatible modules exclude **Member Portal**,
-**Giving**, and **Registration**, which require Postgres. Account requirements follow the
+**Choosing your database.** The 19 D1-compatible modules exclude
+**Giving** and **Registration**, which require Postgres. Account requirements follow the
 mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
 Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase
 needs both Cloudflare and Supabase. There is no automated D1↔Supabase content migration yet,

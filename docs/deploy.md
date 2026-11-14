@@ -22,8 +22,8 @@ hand it this file (see the README's "Build it with an AI assistant").
 
 > **Choose the setup path before you deploy.** For the recommended guided path, stay on
 > this page and run `npm run setup`; it selects D1 for Website / Website + Community and
-> Supabase for Full Church or any custom selection with Member Portal, Giving, or
-> Registration. The manual reference has an explicit [database fork](#manual-database-fork):
+> Supabase for Full Church or any custom selection with Giving or Registration
+> (Member Portal alone stays on D1). The manual reference has an explicit [database fork](#manual-database-fork):
 > D1 uses the numbered D1 steps, while Supabase creates only R2 here, completes the
 > database steps in [`supabase-setup.md`](./supabase-setup.md), and resumes at email setup.
 > There is no automated D1↔Supabase content migration yet.
@@ -37,8 +37,7 @@ first:
 npm run setup
 ```
 
-Choose **Deploy**, then Website (8 modules), Website + Community (all 18 D1-compatible
-modules), Full Church (all 21), or a custom feature list. Setup selects the database,
+Choose **Deploy**, then Website (8 modules), Website + Community (18 modules), Full Church (all 21), or a custom feature list. Setup selects the database,
 creates or imports D1/R2/Hyperdrive resources, writes generated configuration, applies
 migrations, stores explicit module settings, and bootstraps the first admin. It prints the
 next command, normally `npm run deploy`. Verify readiness at any time with:

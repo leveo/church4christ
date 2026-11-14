@@ -19,7 +19,7 @@ do not create a second provisioning path or replace setup with raw seed commands
    open, run `npm run onboard -- --no-open` and share the printed local URL. The optional
    `--port 4310` selects a port. Running onboarding again reloads the saved answers.
 4. Recommend **Website + Community / Cloudflare D1** to start. Workers and R2 are also
-   used. **Member Portal, Giving, and Registration** require an explicit decision to use
+   used. **Giving and Registration** require an explicit decision to use
    Supabase-compatible PostgreSQL and its additional setup inputs.
 5. Preview and inspect the existing installer's plan, then apply the same preferences:
 
