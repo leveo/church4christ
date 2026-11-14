@@ -549,6 +549,15 @@ INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admi
 INSERT INTO group_join_requests (id, group_id, person_id, status) VALUES
   (1, 1, 4, 'pending');
 
+-- Member portal prayer items (church, group, private scopes; the event scope
+-- needs Registration and lives in portal-seed.sql). Approved items carry a named
+-- approver; the pending group item exercises the group leader's queue. The
+-- private item is auto-approved for the personal prayer list demo.
+INSERT INTO prayer_items (id, author_person_id, scope, group_id, reg_event_id, body, status, approved_by, approved_at) VALUES
+  (1, 3, 'church', NULL, NULL, 'Please pray that our church welcomes new neighbors with the love of Christ this month.', 'approved', 1, datetime('now','-2 days')),
+  (2, 5, 'group', 1, NULL, 'Please pray for wisdom as I begin a new season at work and keep joining the Friday study faithfully.', 'pending', NULL, NULL),
+  (4, 7, 'private', NULL, NULL, 'Thank you for God''s faithfulness in our family. Please give us patience and gratitude this week.', 'approved', 7, datetime('now','-1 day'));
+
 INSERT INTO group_events (id, group_id, title, description, location, recurrence, starts_on, start_time, duration_min, ends_on, track_attendance, active) VALUES
   (1, 1, 'Friday Bible Study', 'Weekly study in the Gospel of John with prayer and supper.', 'Fellowship Hall', 'weekly', date('now','weekday 5','-14 days'), '19:00', 90, NULL, 1, 1);
 

@@ -46,9 +46,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   ]),
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
-    'group_members', 'group_files',
-    'event_admins', 'prayer_items', 'households', 'household_members', 'reg_events', 'reg_event_i18n',
-    'registrations',
+    'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
   ]),
   giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
@@ -73,6 +71,8 @@ const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
 });
 const SUPABASE_TABLES_BY_CAPABILITY = Object.freeze({
   groups: Object.freeze(['group_reg_events']),
+  // Event-scope prayers and "My registrations" need Registration, which is Supabase-only.
+  portal: Object.freeze(['event_admins', 'reg_events', 'reg_event_i18n', 'registrations']),
 });
 
 function rows(value, label) {

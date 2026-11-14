@@ -77,7 +77,8 @@ describe('browser onboarding setup import', () => {
     expect(replaced.modules).toEqual(catalog.presets.website.modules);
     expect(replaced.onboarding.organization.name).toBe('Override');
     expect(plan(['--modules', 'bulletins']).modules).toEqual(['bulletins']);
-    expect(plan(['--modules', 'portal']).backend).toBe('supabase');
+    expect(plan(['--modules', 'portal']).backend).toBe('d1');
+    expect(plan(['--modules', 'portal,giving']).backend).toBe('supabase');
   });
 
   it('retains deploy requirements and rejects mixed or invalid explicit flags', () => {

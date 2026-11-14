@@ -224,7 +224,7 @@ describe('buildSetupPlan', () => {
 
   it('refuses an existing D1 to Supabase switch because content migration is not implemented', () => {
     expect(() =>
-      buildSetupPlan({ ...base, modules: ['portal'] }, raw, { existingBackend: 'd1' }),
+      buildSetupPlan({ ...base, modules: ['giving'] }, raw, { existingBackend: 'd1' }),
     ).toThrow(/D1-to-Supabase content migration is not implemented/i);
   });
 

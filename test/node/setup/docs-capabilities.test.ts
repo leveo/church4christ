@@ -37,7 +37,7 @@ describe('catalog-owned docs', () => {
     expect(architecture).not.toMatch(/'d1' for everything else/i);
   });
 
-  it('renders all 21 modules and exactly three Supabase requirements', () => {
+  it('renders all 21 modules and exactly two Supabase requirements', () => {
     expect(raw.order).toHaveLength(21);
     expect(Object.keys(raw.capabilities)).toHaveLength(21);
     expect(new Set(raw.order)).toEqual(new Set(Object.keys(raw.capabilities)));
@@ -47,7 +47,7 @@ describe('catalog-owned docs', () => {
           (raw.capabilities as Record<string, { requiresBackend?: string }>)[key]
             .requiresBackend === 'supabase',
       ),
-    ).toEqual(['portal', 'giving', 'registration']);
+    ).toEqual(['giving', 'registration']);
 
     const table = renderCapabilityTable(raw);
     expect(raw.order.every((key) => table.includes(`\`${key}\``))).toBe(true);

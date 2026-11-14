@@ -17,6 +17,14 @@ describe('resolveProvider', () => {
     });
   });
 
+  it('keeps portal on D1 alone and on Supabase when giving or registration is also selected', () => {
+    expect(resolveProvider(['portal'], undefined, raw)).toMatchObject({ backend: 'd1', reasons: [] });
+    expect(resolveProvider(['portal', 'serve', 'groups'], undefined, raw)).toMatchObject({ backend: 'd1' });
+    expect(resolveProvider(['portal', 'giving'], undefined, raw)).toMatchObject({ backend: 'supabase' });
+    expect(resolveProvider(['portal', 'registration'], undefined, raw)).toMatchObject({ backend: 'supabase' });
+    expect(resolveProvider(['portal'], 'supabase', raw)).toMatchObject({ backend: 'supabase' });
+  });
+
   it('permits an explicit Supabase override for D1-compatible selections', () => {
     expect(resolveProvider(['sermons'], 'supabase', raw)).toMatchObject({
       backend: 'supabase',
@@ -24,7 +32,7 @@ describe('resolveProvider', () => {
     });
   });
 
-  it.each(['portal', 'giving', 'registration'])(
+  it.each(['giving', 'registration'])(
     'selects Supabase when %s is selected',
     (key) => {
       expect(resolveProvider([key], undefined, raw)).toMatchObject({
@@ -35,13 +43,13 @@ describe('resolveProvider', () => {
   );
 
   it('rejects D1 before mutation and lists every incompatible capability', () => {
-    const selected = ['portal', 'giving', 'registration'];
+    const selected = ['giving', 'registration'];
     const catalog = cloneCatalog();
 
     expect(() => resolveProvider(selected, 'd1', catalog)).toThrow(
-      /portal, giving, registration.*require Supabase/i,
+      /giving, registration.*require Supabase/i,
     );
-    expect(selected).toEqual(['portal', 'giving', 'registration']);
+    expect(selected).toEqual(['giving', 'registration']);
     expect(catalog).toEqual(raw);
   });
 
@@ -121,8 +129,8 @@ describe('resolveProvider', () => {
     const catalog = cloneCatalog();
     catalog.capabilities.sermons.requiresBackend = 'd1';
 
-    expect(() => resolveProvider(['sermons', 'portal'], undefined, catalog)).toThrow(
-      /conflicting database requirements.*sermons.*d1.*portal.*supabase/i,
+    expect(() => resolveProvider(['sermons', 'giving'], undefined, catalog)).toThrow(
+      /conflicting database requirements.*sermons.*d1.*giving.*supabase/i,
     );
   });
 

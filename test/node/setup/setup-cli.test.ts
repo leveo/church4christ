@@ -110,10 +110,10 @@ describe('guided setup CLI', () => {
     expect(d.apply).not.toHaveBeenCalled();
   });
 
-  it('D1 override plus portal/giving/registration lists all offenders before mutation', async () => {
+  it('D1 override plus giving/registration lists all offenders before mutation', async () => {
     const d = deps();
-    await expect(runSetup(['--mode', 'local', '--modules', 'portal,giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any))
-      .rejects.toThrow(/portal, giving, registration/);
+    await expect(runSetup(['--mode', 'local', '--modules', 'giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any))
+      .rejects.toThrow(/giving, registration/);
     expect(d.apply).not.toHaveBeenCalled();
   });
 

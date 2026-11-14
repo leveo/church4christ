@@ -564,3 +564,14 @@ describe('demo seed: referential integrity', () => {
     expect(results).toEqual([]);
   });
 });
+
+describe('demo seed: member portal prayer items on D1', () => {
+  it('seeds church, group, and private prayer items without event-scope rows', async () => {
+    const { results } = await env.DB
+      .prepare('SELECT scope, status, reg_event_id, campus_id FROM prayer_items ORDER BY id')
+      .all<{ scope: string; status: string; reg_event_id: number | null; campus_id: number }>();
+    expect(results.map((r) => r.scope)).toEqual(['church', 'group', 'private']);
+    expect(results.every((r) => r.reg_event_id === null && r.campus_id === 1)).toBe(true);
+    expect(results.find((r) => r.scope === 'group')?.status).toBe('pending');
+  });
+});

@@ -346,9 +346,12 @@ describe('doctor database check', () => {
       'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
     ]));
     expect(TABLES_BY_CAPABILITY.portal).toEqual(expect.arrayContaining([
-      'group_members', 'group_files', 'event_admins', 'prayer_items',
-      'households', 'household_members', 'reg_events', 'reg_event_i18n', 'registrations',
+      'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
     ]));
+    expect(TABLES_BY_CAPABILITY.portal).not.toContain('event_admins');
+    expect(SUPABASE_TABLES_BY_CAPABILITY.portal).toEqual([
+      'event_admins', 'reg_events', 'reg_event_i18n', 'registrations',
+    ]);
     expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.attendance).toEqual([

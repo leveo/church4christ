@@ -21,12 +21,9 @@ INSERT INTO event_admins (id, reg_event_id, person_id) VALUES
   (1, 900, 2),
   (2, 910, 7);
 
--- One item for each portal scope provides a useful moderation demo. Approved
--- items have a named approver and timestamp; pending group/event items exercise
--- the leader and event-admin queues. The private item is intentionally approved
--- for the personal prayer list demo.
+-- The event-scoped prayer item needs Registration (events 900/910 above), so it
+-- stays here; the church, group, and private demo items (ids 1, 2, 4) live in
+-- dev-seed.sql because they also run on D1. The pending event item exercises the
+-- event-admin queue.
 INSERT INTO prayer_items (id, author_person_id, scope, group_id, reg_event_id, body, status, approved_by, approved_at) VALUES
-  (1, 3, 'church', NULL, NULL, 'Please pray that our church welcomes new neighbors with the love of Christ this month.', 'approved', 1, datetime('now','-2 days')),
-  (2, 5, 'group', 1, NULL, 'Please pray for wisdom as I begin a new season at work and keep joining the Friday study faithfully.', 'pending', NULL, NULL),
-  (3, 4, 'event', NULL, 900, 'Please pray for safe travel, meaningful conversations, and rest for every family at the retreat.', 'pending', NULL, NULL),
-  (4, 7, 'private', NULL, NULL, 'Thank you for God''s faithfulness in our family. Please give us patience and gratitude this week.', 'approved', 7, datetime('now','-1 day'));
+  (3, 4, 'event', NULL, 900, 'Please pray for safe travel, meaningful conversations, and rest for every family at the retreat.', 'pending', NULL, NULL);

@@ -603,7 +603,7 @@ describe('existing installation import', () => {
   it('defaults a missing legacy backend to D1 and round-trips deployed resources through planning', () => {
     const settings = Object.fromEntries(raw.order.map((key) => [
       `module.${key}`,
-      ['portal', 'giving', 'registration'].includes(key) ? '0' : '1',
+      ['giving', 'registration'].includes(key) ? '0' : '1',
     ]));
     const proposal = importExistingInstallation({
       catalog: raw,
@@ -640,7 +640,7 @@ describe('existing installation import', () => {
     });
     expect(importedPlan.resources).toEqual(proposal.currentState.resources);
     expect(importedManifest.resources).toEqual(proposal.currentState.resources);
-    expect(() => buildSetupPlan({ ...proposal, modules: ['portal'], backendOverride: undefined }, raw, proposal.currentState)).toThrow(
+    expect(() => buildSetupPlan({ ...proposal, modules: ['giving'], backendOverride: undefined }, raw, proposal.currentState)).toThrow(
       /D1-to-Supabase content migration is not implemented/i,
     );
   });

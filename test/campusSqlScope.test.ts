@@ -98,8 +98,7 @@ describe('campus SQL transformation', () => {
       'gifts',
       'reg_events',
       'registrations',
-      'group_files',
-      'prayer_items',
+      'event_admins',
       'church_private.stripe_webhook_events',
       'church_private.stripe_checkout_requests',
     ]));

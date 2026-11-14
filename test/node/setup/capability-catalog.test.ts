@@ -120,11 +120,11 @@ describe('canonical capability catalog', () => {
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toContain('activity-score');
   });
 
-  test('requires Supabase only for portal, giving, and registration', () => {
+  test('requires Supabase only for giving and registration', () => {
     const supabaseOnly = CAPABILITY_KEYS.filter(
       (key) => CAPABILITIES[key].requiresBackend === 'supabase',
     );
-    expect(supabaseOnly).toEqual(['portal', 'giving', 'registration']);
+    expect(supabaseOnly).toEqual(['giving', 'registration']);
   });
 
   test('accepts intentional nested route ownership', () => {
