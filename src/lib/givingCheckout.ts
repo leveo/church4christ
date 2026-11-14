@@ -6,8 +6,8 @@
 import { isCheckoutRequestId, newCheckoutRequestId, parseCheckoutRequestId } from './stripeCheckoutRequests';
 import { sha256Utf8 } from './stripeWebhookInbox';
 
-/** The accepted giving cadences: a one-off gift or a weekly/monthly subscription. */
-export type Frequency = 'once' | 'week' | 'month';
+/** The accepted giving cadences: a one-off gift or a weekly/monthly/yearly subscription. */
+export type Frequency = 'once' | 'week' | 'month' | 'year';
 
 // Stripe's own floor and a sane ceiling, in cents: $1.00 min, $99,999.99 max.
 const MIN_CENTS = 100;
@@ -33,7 +33,7 @@ export function parseAmountToCents(raw: string): number | null {
 /** Whitelist the frequency field; anything unexpected (or missing) is null so the
  *  caller can reject it rather than silently defaulting to a charge cadence. */
 export function parseFrequency(raw: string | null): Frequency | null {
-  return raw === 'once' || raw === 'week' || raw === 'month' ? raw : null;
+  return raw === 'once' || raw === 'week' || raw === 'month' || raw === 'year' ? raw : null;
 }
 
 export interface GivingCheckoutDigestInput {

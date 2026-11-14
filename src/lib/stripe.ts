@@ -16,10 +16,17 @@ import {
 
 export type StripeEnv = {
   STRIPE_MODE?: string;
+  /** Must be exactly '1' before a live key is ever used (explicit go-live opt-in). */
+  STRIPE_LIVE_CONFIRMED?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
 };
+
+export type StripeMode = 'test' | 'live';
+
+/** The Stripe API version every request pins and the webhook endpoint must use. */
+export const STRIPE_API_VERSION = '2025-03-31.basil';
 
 export type StripeErrorStage = 'configuration' | 'transport' | 'response';
 
@@ -68,18 +75,43 @@ export interface StripeCheckoutRequestOptions {
 
 export const STRIPE_REQUEST_TIMEOUT_MS = 10_000;
 
-/** True only for the deliberately supported test-mode runtime configuration. */
-export function stripeTestModeConfigured(env: StripeEnv): boolean {
-  return env.STRIPE_MODE === 'test'
-    && (env.STRIPE_SECRET_KEY?.trim().startsWith('sk_test_') ?? false)
-    && (env.STRIPE_WEBHOOK_SECRET?.trim().startsWith('whsec_') ?? false);
+/** The configured mode marker, or null when STRIPE_MODE is not exactly test|live. */
+export function stripeMode(env: StripeEnv): StripeMode | null {
+  return env.STRIPE_MODE === 'test' || env.STRIPE_MODE === 'live' ? env.STRIPE_MODE : null;
+}
+
+/** Live mode needs an explicit, separate opt-in flag before any live key is used. */
+export function stripeLiveConfirmed(env: StripeEnv): boolean {
+  return env.STRIPE_LIVE_CONFIRMED === '1';
+}
+
+/** True when an object/event `livemode` boolean agrees with the configured mode. */
+export function livemodeMatches(env: StripeEnv, livemode: unknown): boolean {
+  const mode = stripeMode(env);
+  return mode !== null && typeof livemode === 'boolean' && livemode === (mode === 'live');
+}
+
+/**
+ * The configured mode when the full credential set is coherent: a mode marker,
+ * a matching secret key (sk_test_ for test; sk_live_/rk_live_ plus the explicit
+ * live opt-in for live), and a whsec_ webhook secret. Null otherwise.
+ */
+export function stripeConfiguredMode(env: StripeEnv): StripeMode | null {
+  const mode = stripeMode(env);
+  if (!mode) return null;
+  const key = env.STRIPE_SECRET_KEY?.trim() ?? '';
+  const keyOk = mode === 'test'
+    ? key.startsWith('sk_test_')
+    : /^(?:sk|rk)_live_/.test(key) && stripeLiveConfirmed(env);
+  const webhookOk = env.STRIPE_WEBHOOK_SECRET?.trim().startsWith('whsec_') ?? false;
+  return keyOk && webhookOk ? mode : null;
 }
 
 /** Local recovery actions stay available while Stripe credentials rotate. */
 export function stripeAdminActionAllowed(action: string, env: StripeEnv): boolean {
   if (action === 'dismiss' || action === 'cancel') return true;
   if (action === 'replay' || action === 'reconcile' || action === 'attach') {
-    return stripeTestModeConfigured(env);
+    return stripeConfiguredMode(env) !== null;
   }
   return false;
 }
@@ -108,20 +140,45 @@ export function stripeForm(params: Record<string, unknown>): URLSearchParams {
 }
 
 function requireSecret(env: StripeEnv): string {
-  if (env.STRIPE_MODE !== 'test') {
-    throw new StripeError('Stripe test mode is required', {
+  const mode = stripeMode(env);
+  if (!mode) {
+    throw new StripeError('Stripe mode must be test or live', {
       stage: 'configuration',
-      code: 'stripe_test_mode_required',
+      code: 'stripe_mode_invalid',
     });
   }
   const secret = env.STRIPE_SECRET_KEY?.trim() ?? '';
-  if (!secret.startsWith('sk_test_')) {
-    throw new StripeError('A Stripe test secret key is required', {
+  if (mode === 'test') {
+    if (!secret.startsWith('sk_test_')) {
+      throw new StripeError('A Stripe test secret key is required', {
+        stage: 'configuration',
+        code: 'stripe_test_key_required',
+      });
+    }
+    return secret;
+  }
+  if (!/^(?:sk|rk)_live_/.test(secret)) {
+    throw new StripeError('A Stripe live secret or restricted key is required', {
       stage: 'configuration',
-      code: 'stripe_test_key_required',
+      code: 'stripe_live_key_required',
+    });
+  }
+  if (!stripeLiveConfirmed(env)) {
+    throw new StripeError('Stripe live mode requires STRIPE_LIVE_CONFIRMED=1', {
+      stage: 'configuration',
+      code: 'stripe_live_not_confirmed',
     });
   }
   return secret;
+}
+
+function authHeaders(secret: string): Record<string, string> {
+  return { Authorization: `Bearer ${secret}`, 'Stripe-Version': STRIPE_API_VERSION };
+}
+
+/** The canonical public origin used for every Stripe redirect/return URL. */
+export function stripeAppOrigin(env: StripeEnv): string {
+  return requireOrigin(env);
 }
 
 function requireOrigin(env: StripeEnv): string {
@@ -204,7 +261,7 @@ export async function stripeRequest<T = Record<string, unknown>>(
 ): Promise<T> {
   const secret = requireSecret(env);
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${secret}`,
+    ...authHeaders(secret),
     'content-type': 'application/x-www-form-urlencoded',
   };
   if (options.idempotencyKey !== undefined) {
@@ -223,7 +280,7 @@ export interface StripeCheckoutSession {
   id: string;
   url: string | null;
   mode: 'payment' | 'subscription' | null;
-  livemode: false;
+  livemode: boolean;
   status: 'open' | 'complete' | 'expired' | null;
   payment_status: 'paid' | 'unpaid' | 'no_payment_required' | null;
   payment_intent: string | null;
@@ -245,15 +302,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Strictly validate the bounded Checkout fields consumed by recovery code. */
-export function requireTestCheckoutSession(value: unknown): StripeCheckoutSession {
+export function requireCheckoutSession(value: unknown, mode: StripeMode): StripeCheckoutSession {
   if (!isPlainObject(value)) throw invalidCheckoutResponse();
-  if (value.livemode === true) {
-    throw new StripeError('Stripe live mode is disabled', {
+  // No crossover: the object's livemode must equal the configured mode.
+  if (typeof value.livemode === 'boolean' && value.livemode !== (mode === 'live')) {
+    throw new StripeError('Stripe object livemode does not match the configured mode', {
       stage: 'response',
-      code: 'live_mode_disabled',
+      code: 'livemode_mismatch',
     });
   }
-  if (value.livemode !== false || typeof value.id !== 'string' || !/^cs_test_[A-Za-z0-9_]{1,240}$/.test(value.id)) {
+  if (
+    typeof value.livemode !== 'boolean'
+    || typeof value.id !== 'string'
+    || !new RegExp(`^cs_${mode}_[A-Za-z0-9_]{1,240}$`).test(value.id)
+  ) {
     throw invalidCheckoutResponse();
   }
   if (!((typeof value.url === 'string' && value.url.length <= 2048) || value.url === null)) {
@@ -294,8 +356,8 @@ export function requireTestCheckoutSession(value: unknown): StripeCheckoutSessio
   return value as unknown as StripeCheckoutSession;
 }
 
-function requireCheckoutRedirect(value: unknown): { id: string; url: string } {
-  const session = requireTestCheckoutSession(value);
+function requireCheckoutRedirect(value: unknown, mode: StripeMode): { id: string; url: string } {
+  const session = requireCheckoutSession(value, mode);
   return { id: session.id, url: requireCheckoutStripeUrl(session.url) };
 }
 
@@ -322,9 +384,11 @@ export function requireRegistrationCheckoutSession(
     amountCents: number;
     currency: string;
     sessionId?: string;
+    /** The configured mode; defaults to test for legacy callers. */
+    mode?: StripeMode;
   },
 ): StripeCheckoutSession {
-  const session = requireTestCheckoutSession(value);
+  const session = requireCheckoutSession(value, expected.mode ?? 'test');
   const requestId = parseCheckoutRequestId(expected.requestId);
   const expectedMetadata = {
     kind: 'registration',
@@ -361,8 +425,9 @@ function requireGivingCheckoutRedirect(
     currency: string;
     metadata: Record<string, string>;
   },
+  stripeModeValue: StripeMode,
 ): { id: string; url: string } {
-  const session = requireTestCheckoutSession(value);
+  const session = requireCheckoutSession(value, stripeModeValue);
   const metadataKeys = Object.keys(session.metadata);
   const expectedMetadataKeys = Object.keys(expected.metadata);
   if (
@@ -382,23 +447,24 @@ export async function retrieveCheckoutSession(
   id: string,
   options: StripeRequestOptions = {},
 ): Promise<StripeCheckoutSession> {
-  if (typeof id !== 'string' || !/^cs_test_[A-Za-z0-9_]{1,240}$/.test(id)) {
-    throw new StripeError('Invalid test Checkout Session ID', {
+  const secret = requireSecret(env);
+  const mode = stripeMode(env)!;
+  if (typeof id !== 'string' || !new RegExp(`^cs_${mode}_[A-Za-z0-9_]{1,240}$`).test(id)) {
+    throw new StripeError('Invalid Checkout Session ID for the configured mode', {
       stage: 'configuration',
       code: 'stripe_session_id_invalid',
     });
   }
-  const secret = requireSecret(env);
   const response = await stripeFetch(
     options.fetcher ?? fetch,
     `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}`,
     {
       method: 'GET',
-      headers: { Authorization: `Bearer ${secret}` },
+      headers: authHeaders(secret),
       signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
     },
   );
-  return requireTestCheckoutSession(await readResponse<unknown>(response));
+  return requireCheckoutSession(await readResponse<unknown>(response), mode);
 }
 
 /** Guard amounts: Stripe unit_amount must be a positive integer number of cents. */
@@ -416,12 +482,27 @@ function checkoutUrls(origin: string, locale: string): { success_url: string; ca
   };
 }
 
+function givingMetadata(
+  mode: StripeMode,
+  campusId: number,
+  base: Record<string, string | number>,
+): Record<string, string | number> {
+  return { ...base, campus_id: campusId, livemode: String(mode === 'live') };
+}
+
+function assertCampusId(campusId: number): void {
+  if (!Number.isSafeInteger(campusId) || campusId <= 0) throw new Error('campusId must be a positive integer');
+}
+
 /**
- * One-time (payment-mode) Checkout Session. A saved `customerId` is reused
- * directly; otherwise the donor's email prefills checkout. For a signed-in donor
- * without a saved customer we set `customer_creation: 'always'` so Stripe mints a
- * customer we can persist — Stripe rejects that flag when `customer` is already
- * set, so the two branches are mutually exclusive.
+ * One-time (payment-mode) Checkout Session. Stripe owns the payment page: no
+ * `payment_method_types` is sent, so Checkout offers every method enabled in the
+ * Dashboard (cards, wallets, and ACH `us_bank_account`). `receipt_email` makes
+ * Stripe email the per-payment receipt. A saved `customerId` is reused directly;
+ * otherwise the donor's email prefills checkout. For a signed-in donor without a
+ * saved customer we set `customer_creation: 'always'` so Stripe mints a customer
+ * we can persist — Stripe rejects that flag when `customer` is already set, so the
+ * two branches are mutually exclusive.
  */
 export async function createOneTimeCheckout(
   env: StripeEnv,
@@ -435,11 +516,21 @@ export async function createOneTimeCheckout(
     donorName: string;
     donorEmail: string;
     customerId?: string | null;
+    campusId?: number;
   },
   options: StripeCheckoutRequestOptions,
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
+  requireSecret(env);
+  const mode = stripeMode(env)!;
+  const campusId = args.campusId ?? 1;
+  assertCampusId(campusId);
+  const baseMetadata = {
+    kind: 'gift',
+    fund_id: args.fundId,
+    person_id: args.personId ?? '',
+  };
   const params: Record<string, unknown> = {
     mode: 'payment',
     line_items: [
@@ -453,15 +544,14 @@ export async function createOneTimeCheckout(
       },
     ],
     ...checkoutUrls(origin, args.locale),
-    metadata: {
-      kind: 'gift',
-      fund_id: args.fundId,
-      person_id: args.personId ?? '',
+    metadata: givingMetadata(mode, campusId, {
+      ...baseMetadata,
       donor_name: args.donorName,
       donor_email: args.donorEmail,
-    },
+    }),
     payment_intent_data: {
-      metadata: { kind: 'gift', fund_id: args.fundId, person_id: args.personId ?? '' },
+      receipt_email: args.donorEmail,
+      metadata: givingMetadata(mode, campusId, baseMetadata),
     },
   };
   if (args.customerId) {
@@ -477,42 +567,59 @@ export async function createOneTimeCheckout(
     signal: options.signal,
     idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
-  return requireGivingCheckoutRedirect(session, {
-    mode: 'payment',
-    amountCents: args.amountCents,
-    currency: args.currency,
-    metadata: {
-      kind: 'gift',
-      fund_id: String(args.fundId),
-      person_id: args.personId === null ? '' : String(args.personId),
-      donor_name: args.donorName,
-      donor_email: args.donorEmail,
+  return requireGivingCheckoutRedirect(
+    session,
+    {
+      mode: 'payment',
+      amountCents: args.amountCents,
+      currency: args.currency,
+      metadata: {
+        kind: 'gift',
+        fund_id: String(args.fundId),
+        person_id: args.personId === null ? '' : String(args.personId),
+        donor_name: args.donorName,
+        donor_email: args.donorEmail,
+        campus_id: String(campusId),
+        livemode: String(mode === 'live'),
+      },
     },
-  });
+    mode,
+  );
 }
 
 /**
  * Recurring (subscription-mode) Checkout Session. Subscription mode always
  * creates a customer, so `customer_creation` is never set here. A saved
- * `customerId` is reused; otherwise the email prefills checkout.
+ * `customerId` is reused; otherwise the email prefills checkout. Stripe sends the
+ * per-invoice receipts (Dashboard: email customers about successful payments).
  */
 export async function createRecurringCheckout(
   env: StripeEnv,
   args: {
     amountCents: number;
     currency: string;
-    interval: 'week' | 'month';
+    interval: 'week' | 'month' | 'year';
     fundId: number;
     fundName: string;
     locale: string;
     personId: number;
     email: string;
     customerId?: string | null;
+    campusId?: number;
   },
   options: StripeCheckoutRequestOptions,
 ): Promise<{ id: string; url: string }> {
   assertAmount(args.amountCents);
   const origin = requireOrigin(env);
+  requireSecret(env);
+  const mode = stripeMode(env)!;
+  const campusId = args.campusId ?? 1;
+  assertCampusId(campusId);
+  const metadata = givingMetadata(mode, campusId, {
+    kind: 'gift',
+    fund_id: args.fundId,
+    person_id: args.personId,
+  });
   const params: Record<string, unknown> = {
     mode: 'subscription',
     line_items: [
@@ -527,10 +634,8 @@ export async function createRecurringCheckout(
       },
     ],
     ...checkoutUrls(origin, args.locale),
-    subscription_data: {
-      metadata: { kind: 'gift', fund_id: args.fundId, person_id: args.personId },
-    },
-    metadata: { kind: 'gift', fund_id: args.fundId, person_id: args.personId },
+    subscription_data: { metadata },
+    metadata,
   };
   if (args.customerId) {
     params.customer = args.customerId;
@@ -542,16 +647,22 @@ export async function createRecurringCheckout(
     signal: options.signal,
     idempotencyKey: `church4christ:giving:${parseCheckoutRequestId(options.requestId)}`,
   });
-  return requireGivingCheckoutRedirect(session, {
-    mode: 'subscription',
-    amountCents: args.amountCents,
-    currency: args.currency,
-    metadata: {
-      kind: 'gift',
-      fund_id: String(args.fundId),
-      person_id: String(args.personId),
+  return requireGivingCheckoutRedirect(
+    session,
+    {
+      mode: 'subscription',
+      amountCents: args.amountCents,
+      currency: args.currency,
+      metadata: {
+        kind: 'gift',
+        fund_id: String(args.fundId),
+        person_id: String(args.personId),
+        campus_id: String(campusId),
+        livemode: String(mode === 'live'),
+      },
     },
-  });
+    mode,
+  );
 }
 
 /**
@@ -606,7 +717,7 @@ export async function createRegistrationCheckout(
     signal: options.signal,
     idempotencyKey: `church4christ:registration:${requestId}`,
   });
-  return requireCheckoutRedirect(session);
+  return requireCheckoutRedirect(session, stripeMode(env)!);
 }
 
 /** Send the exact canonical parameter map retained by the private request pair. */
@@ -627,6 +738,7 @@ export async function createRegistrationCheckoutFromParams(
     registrationId: Number(params.metadata.registration_id),
     amountCents: expected.unit_amount,
     currency: expected.currency,
+    mode: stripeMode(env) ?? undefined,
   });
   if (session.url === null) throw invalidCheckoutResponse();
   return session as StripeCheckoutSession & { url: string };
@@ -648,19 +760,69 @@ export async function createPortalSession(
   return { url: session.url };
 }
 
+/** GET /v1/<path> with an optional form-style query string. Throws a StripeError on non-2xx. */
+export async function stripeGet<T = Record<string, unknown>>(
+  env: StripeEnv,
+  path: string,
+  query: Record<string, unknown> = {},
+  options: StripeRequestOptions = {},
+): Promise<T> {
+  const secret = requireSecret(env);
+  const qs = stripeForm(query).toString();
+  const res = await stripeFetch(options.fetcher ?? fetch, `https://api.stripe.com/v1/${path}${qs ? `?${qs}` : ''}`, {
+    method: 'GET',
+    headers: authHeaders(secret),
+    signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
+  });
+  return readResponse<T>(res);
+}
+
 /** GET /v1/subscriptions/<id> — read a subscription's current state. */
 export async function retrieveSubscription(
   env: StripeEnv,
   id: string,
   options: StripeRequestOptions = {},
 ): Promise<Record<string, unknown>> {
-  const secret = requireSecret(env);
-  const res = await stripeFetch(options.fetcher ?? fetch, `https://api.stripe.com/v1/subscriptions/${encodeURIComponent(id)}`, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${secret}` },
-    signal: options.signal ?? AbortSignal.timeout(STRIPE_REQUEST_TIMEOUT_MS),
-  });
-  return readResponse<Record<string, unknown>>(res);
+  return stripeGet(env, `subscriptions/${encodeURIComponent(id)}`, {}, options);
+}
+
+/** GET /v1/invoices/<id> with `payments` expanded (Basil exposes payments only on expand). */
+export async function retrieveInvoiceWithPayments(
+  env: StripeEnv,
+  id: string,
+  options: StripeRequestOptions = {},
+): Promise<Record<string, unknown>> {
+  return stripeGet(env, `invoices/${encodeURIComponent(id)}`, { expand: ['payments'] }, options);
+}
+
+/**
+ * GET /v1/invoice_payments filtered to one PaymentIntent — the Basil-era way to
+ * learn which invoice (hence subscription) a charge belongs to, since
+ * `charge.invoice` no longer exists. Returns the matching invoice ids.
+ */
+export async function findInvoiceIdsByPaymentIntent(
+  env: StripeEnv,
+  paymentIntentId: string,
+  options: StripeRequestOptions = {},
+): Promise<string[]> {
+  const body = await stripeGet<{ data?: unknown }>(
+    env,
+    'invoice_payments',
+    { payment: { type: 'payment_intent', payment_intent: paymentIntentId }, limit: 10 },
+    options,
+  );
+  const ids = new Set<string>();
+  if (Array.isArray(body.data)) {
+    for (const item of body.data) {
+      if (!item || typeof item !== 'object') continue;
+      const invoice = (item as Record<string, unknown>).invoice;
+      const id = typeof invoice === 'string'
+        ? invoice
+        : invoice && typeof invoice === 'object' ? (invoice as Record<string, unknown>).id : null;
+      if (typeof id === 'string' && id) ids.add(id);
+    }
+  }
+  return [...ids];
 }
 
 /**

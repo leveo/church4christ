@@ -6,7 +6,7 @@
 
 /** Text input / select / search box. */
 export const tin =
-  'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-primary focus:outline-none';
+  'w-full min-h-11 rounded-md border border-border bg-surface px-3 py-2 text-base sm:min-h-0 sm:text-sm focus:border-primary focus:outline-none';
 /** Field label above an input. */
 export const lab = 'block text-sm font-semibold text-ink-muted mb-1';
 /** Card / section wrapper. */
@@ -16,16 +16,16 @@ export const errorText = 'mt-1 text-sm text-danger';
 
 /** Primary action button. */
 export const btn =
-  'inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:bg-primary-hover';
+  'inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:bg-primary-hover';
 /** Secondary / neutral button. */
 export const btnSecondary =
-  'inline-flex items-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-sunken';
+  'inline-flex min-h-11 items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-sunken';
 /** Destructive button (soft delete). */
 export const btnDanger =
-  'inline-flex items-center rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-soft';
+  'inline-flex min-h-11 items-center justify-center rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-soft';
 /** Compact control for repeat-row add / remove / move. */
 export const rowBtn =
-  'inline-flex items-center rounded-md border border-border px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-surface-sunken';
+  'inline-flex min-h-9 items-center justify-center rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface-sunken';
 
 /** Table header cell. */
 export const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-caps text-ink-subtle';

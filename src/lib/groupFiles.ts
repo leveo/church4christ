@@ -4,7 +4,7 @@
 //   - NOT content-addressed. Keys are random (crypto), so re-uploading the same
 //     bytes never reuses an object across groups — that would both dedupe and
 //     LEAK "this exact file already exists in some group" to any uploader.
-//   - Writes group_files (Supabase-only, migrations-supabase/0009), not media.
+//   - Writes group_files (D1 migrations/0039, Supabase migrations-supabase/0009), not media.
 //   - Allows document types (pdf/office/txt/md), not just images.
 // The download route enforces the ACL via getGroupFileForDownload; this lib holds
 // the validation, storage, ACL query, soft-delete, and listing.

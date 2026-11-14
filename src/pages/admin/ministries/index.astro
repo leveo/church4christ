@@ -296,17 +296,17 @@ const copy = ministryCopy(lang);
     <p class="mw-scope">{scope === 'leader' ? `${user.displayName} · ${t(lang, 'admin.console.scopeLeaderDesc')}` : t(lang, 'admin.console.scopeAdminDesc')}</p>
     {canAdmin && (
       <div class="flex border border-border rounded-full p-0.5 gap-0.5">
-        <a href={`/admin/ministries?tab=${tab}&scope=leader`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'leader' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeLeader')}</a>
-        <a href={`/admin/ministries?tab=${tab}`} class:list={['px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'admin' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeAdmin')}</a>
+        <a href={`/admin/ministries?tab=${tab}&scope=leader`} class:list={['inline-flex min-h-11 items-center px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'leader' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeLeader')}</a>
+        <a href={`/admin/ministries?tab=${tab}`} class:list={['inline-flex min-h-11 items-center px-4 py-1.5 rounded-full text-sm font-semibold', scope === 'admin' ? 'bg-primary text-on-primary' : 'text-ink-muted']}>{t(lang, 'admin.console.scopeAdmin')}</a>
       </div>
     )}
   </MinistryHeader>
 
-  <nav class="mt-5 flex gap-1 flex-wrap border-b border-border" aria-label={t(lang, 'admin.console.title')}>
+  <nav data-console-tabs class="mt-5 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border sm:flex-wrap sm:overflow-visible" aria-label={t(lang, 'admin.console.title')}>
     {tabs.filter((tb) => tb.show).map((tb) => (
       <a href={`/admin/ministries?tab=${tb.id}${scopeQ}`}
          aria-current={tab === tb.id ? 'page' : undefined}
-         class:list={['px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb.id ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}>
+         class:list={['inline-flex min-h-11 shrink-0 items-center px-4 py-2.5 rounded-t-lg text-sm font-semibold -mb-px border-b-2', tab === tb.id ? 'border-primary text-primary' : 'border-transparent text-ink-muted hover:text-ink']}>
         {t(lang, tb.label)}
         {tb.id === 'applications' && pendingBadge > 0 && (
           <span class="ml-1.5 px-1.5 py-px rounded-full bg-primary text-on-primary text-[0.6875rem]">{pendingBadge}</span>
@@ -328,3 +328,8 @@ const copy = ministryCopy(lang);
   </div>
 </MinistryWorkspace>
 </Admin>
+
+<script>
+  // On phones the tab strip scrolls sideways; keep the current tab in view.
+  document.querySelector('[data-console-tabs] [aria-current="page"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+</script>

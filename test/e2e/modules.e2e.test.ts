@@ -142,28 +142,26 @@ describe('Modules panel gates routes, nav, and home sections', () => {
     expect(await (await get('/en/')).text()).toContain('/en/ministries');
   });
 
-  it('post-signin lands on /profile when serve is off (not the 404ing /my), and back on /my when serve is on', async () => {
+  it('post-signin lands on the portal hub when portal is on, else /my, else /profile when serve is off', async () => {
     const admin = await sessionCookie(1, 'admin@example.com');
+    const landing = async (disabled: string[]): Promise<string | null> => {
+      // The POST busts the per-isolate module cache in-process.
+      const res = await post('/admin/settings', modulesBody(disabled), { cookie: admin });
+      expect(res.status).toBe(303);
+      // Person 3 (Sarah) is an active English-preferring member.
+      const token = rawOf(await createLoginToken(env.DB, 3));
+      const consumed = await post(`/auth/${token}`, '');
+      expect(consumed.status).toBe(303);
+      return consumed.headers.get('location');
+    };
 
-    // Serve OFF (the POST busts the per-isolate cache in-process): /my is
-    // serve-owned and 404s, so a magic-link consume must land the member on
-    // their core /profile instead of stranding them.
-    const off = await post('/admin/settings', modulesBody(['serve']), { cookie: admin });
-    expect(off.status).toBe(303);
-
-    // Person 3 (Sarah) is an active English-preferring member.
-    const offToken = rawOf(await createLoginToken(env.DB, 3));
-    const offRes = await post(`/auth/${offToken}`, '');
-    expect(offRes.status).toBe(303);
-    expect(offRes.headers.get('location')).toBe('/en/profile');
-
-    // Serve back ON → the landing returns to /my.
-    const on = await post('/admin/settings', modulesBody([]), { cookie: admin });
-    expect(on.status).toBe(303);
-    const onToken = rawOf(await createLoginToken(env.DB, 3));
-    const onRes = await post(`/auth/${onToken}`, '');
-    expect(onRes.status).toBe(303);
-    expect(onRes.headers.get('location')).toBe('/en/my');
+    // Portal runs on D1 now, so by default a sign-in starts at the opportunity hub.
+    expect(await landing([])).toBe('/en/my/opportunities');
+    // Portal off, serve on → the volunteer dashboard.
+    expect(await landing(['portal'])).toBe('/en/my');
+    // Serve off and portal off: /my is serve-owned and 404s, so a magic-link
+    // consume must land the member on their core /profile instead of stranding them.
+    expect(await landing(['serve', 'portal'])).toBe('/en/profile');
   });
 
   it('disabling people hides the profile household card while the auth basics still render', async () => {

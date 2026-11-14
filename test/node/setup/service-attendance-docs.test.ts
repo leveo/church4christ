@@ -66,10 +66,10 @@ describe('aggregate service attendance documentation', () => {
     expect(readme).toMatch(/Service attendance[^\n]*docs\/features\/service-attendance\.md/i);
     expect(readme).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
     expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?21/);
-    expect(modules).toMatch(/The 21 modules/);
+    expect(modules).toMatch(/The 22 modules/);
     expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
     expect(architecture).toMatch(/`attendance`[^\n]*Service Attendance/);
-    expect(supabase).toMatch(/18 D1-compatible modules/i);
+    expect(supabase).toMatch(/20 D1-compatible modules/i);
 
     for (const text of [readme, modules, deploy, supabase, read('docs/cloudflare-setup.md'), read('docs/why-this-stack.md')]) {
       expect(text).not.toMatch(/all 19 modules|19 module settings|all 16 D1-compatible modules|16 D1-compatible modules|other 16 modules/i);

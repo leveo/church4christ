@@ -1,4 +1,5 @@
 import { validateProviderResources } from './manifest.mjs';
+import { parseJsoncObject } from './jsonc.mjs';
 
 const TOKEN_NAMES = [
   'WORKER_NAME',
@@ -19,7 +20,23 @@ function requireString(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`Wrangler resource requires ${label}`);
 }
 
-export function renderWrangler(template, manifest) {
+/**
+ * The Stripe go-live opt-in an operator already placed in a generated wrangler.jsonc:
+ * 'live' only when STRIPE_MODE is "live" AND STRIPE_LIVE_CONFIRMED is "1"; otherwise
+ * 'test'. The installer provisions test mode; rerunning it must preserve a deliberate
+ * live opt-in rather than silently reverting production to test mode.
+ */
+export function preservedStripeMode(config) {
+  if (typeof config !== 'string') return 'test';
+  try {
+    const vars = parseJsoncObject(config, 'generated Wrangler configuration').vars ?? {};
+    return vars.STRIPE_MODE === 'live' && vars.STRIPE_LIVE_CONFIRMED === '1' ? 'live' : 'test';
+  } catch {
+    return 'test';
+  }
+}
+
+export function renderWrangler(template, manifest, options = {}) {
   if (!manifest || !['d1', 'supabase'].includes(manifest.database)) {
     throw new Error('Wrangler database must be d1 or supabase');
   }
@@ -40,7 +57,11 @@ export function renderWrangler(template, manifest) {
     CRON_LIST: JSON.stringify(manifest.database === 'd1'
       ? ['0 13 * * *', '0 14 * * 4', '0 9 * * *', '0 * * * *', '15,45 * * * *']
       : ['0 13 * * *', '0 14 * * 4', '0 * * * *', '15,45 * * * *', '*/5 * * * *']).replaceAll('","', '", "'),
-    STRIPE_MODE_SUFFIX: manifest.database === 'supabase' ? ', "STRIPE_MODE": "test"' : '',
+    STRIPE_MODE_SUFFIX: manifest.database !== 'supabase'
+      ? ''
+      : options.stripeMode === 'live'
+        ? ', "STRIPE_MODE": "live", "STRIPE_LIVE_CONFIRMED": "1"'
+        : ', "STRIPE_MODE": "test"',
     DATABASE_BLOCK: databaseBlock,
     R2_BUCKET: jsonContent(manifest.resources.r2BucketName),
   };

@@ -1,12 +1,14 @@
 import { runCommunityWorkflowPass } from './lib/workflowReminders';
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
+import { sendPlanningReminders } from './lib/planningNotify';
 import { sendAttendanceEmails } from './lib/groupAttendance';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
 import { clearModuleCache } from './lib/modules';
 import { getBackend, openDb } from './lib/dbProvider';
 import { runStripeRecovery } from './lib/stripeRecovery';
+import { runStatementDrain } from './lib/givingStatements';
 import { runGoogleClassroomRegistrationRenewalPass } from './lib/learningGoogleRegistrationCron';
 import { runCanvasDisconnectCleanupPass } from './lib/learningCanvasCleanupCron';
 import { runScheduledLearningSyncPass } from './lib/learningSyncOrchestration';
@@ -40,7 +42,13 @@ export default {
     switch (controller.cron) {
       case REMINDER_CRON: {
         const { db, end } = openDb(env as never);
-        ctx.waitUntil(sendReminders(vars, db).finally(end));
+        // Volunteer reminders and Service Planning rehearsal reminders share the
+        // daily job (no extra cron). Each pass gates on its own module and rules,
+        // and one failing must not stop the other.
+        ctx.waitUntil((async () => {
+          try { await sendReminders(vars, db); }
+          finally { await sendPlanningReminders(vars, db); }
+        })().finally(end));
         break;
       }
       case DIGEST_CRON: {
@@ -99,7 +107,20 @@ export default {
         break;
       case STRIPE_RECOVERY_CRON:
         if (getBackend(env as never) !== 'supabase') break;
-        ctx.waitUntil(runStripeRecovery({ env: env as never }));
+        // The annual giving-statement outbox rides this existing tick (no extra
+        // cron): a bounded batch drains after Stripe recovery, in its own
+        // try/finally so a recovery failure never starves statement delivery.
+        ctx.waitUntil((async () => {
+          try {
+            await runStripeRecovery({ env: env as never });
+          } finally {
+            try {
+              await runStatementDrain(env as never);
+            } catch (error) {
+              console.error('giving statement drain failed', error instanceof Error ? error.name : 'unknown');
+            }
+          }
+        })());
         break;
       default:
         console.warn(`unhandled cron trigger: ${controller.cron}`);

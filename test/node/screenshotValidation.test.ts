@@ -11,6 +11,45 @@ import { LEARNING_DEMO_CAPTURE_ROWS, LEARNING_DEMO_SCREENSHOTS, RELEASE_SCREENSH
 
 const portalRow = { path: '/en/my', out: 'docs/images/portal/dashboard.png', expectedText: 'Chen Family' };
 
+describe('phone screenshot viewport', () => {
+  const base = { path: '/en/', out: 'docs/images/mobile/x.png', locale: 'en', backend: 'either', identity: 'public', expectedText: 'Home', rejectionTexts: ['Page not found'] };
+  const mobile = { width: 375, height: 812, mobile: true, deviceScaleFactor: 2 };
+
+  test('allows exactly the desktop and the phone viewport', () => {
+    expect(() => validateScreenshotManifest([{ ...base, viewport: { width: 1280, height: 800 } }])).not.toThrow();
+    expect(() => validateScreenshotManifest([{ ...base, viewport: mobile }])).not.toThrow();
+    for (const viewport of [{ width: 375, height: 812 }, { ...mobile, deviceScaleFactor: 3 }, { width: 768, height: 1024 }, { ...mobile, mobile: false }]) {
+      expect(() => validateScreenshotManifest([{ ...base, viewport }])).toThrow(/viewport is invalid/);
+    }
+  });
+
+  test('derives the expected image size from the row viewport and scale factor', () => {
+    expect(screenshots.expectedImageSize({})).toEqual({ width: 1280, height: 800 });
+    expect(screenshots.expectedImageSize({ viewport: mobile })).toEqual({ width: 750, height: 1624 });
+    expect(screenshots.screenshotClip({ out: 'm.png', anchor: 'X', viewport: mobile }, 100)).toEqual({ x: 0, y: 60, width: 375, height: 812, scale: 1 });
+  });
+
+  test('defines the phone rows with the phone viewport under docs/images/mobile', () => {
+    const outs = screenshots.MOBILE_CAPTURE_ROWS.map((row: { out: string }) => row.out);
+    expect(outs).toEqual(expect.arrayContaining([
+      'docs/images/mobile/kiosk-search.png', 'docs/images/mobile/kiosk-code.png', 'docs/images/mobile/children-today.png',
+      'docs/images/mobile/serve-matrix.png', 'docs/images/mobile/my-calendar.png', 'docs/images/mobile/my-blockouts.png',
+      'docs/images/mobile/planning-run-sheet.png',
+    ]));
+    for (const row of screenshots.MOBILE_CAPTURE_ROWS) {
+      expect(row.out.startsWith('docs/images/mobile/')).toBe(true);
+      expect(row.viewport).toEqual(mobile);
+      expect(screenshots.CAPTURE_ROWS).toContain(row);
+    }
+  });
+
+  test('fails loudly on horizontal page overflow', () => {
+    expect(() => screenshots.assertNoHorizontalOverflow({ out: 'm.png' }, { scrollWidth: 375, innerWidth: 375 })).not.toThrow();
+    expect(() => screenshots.assertNoHorizontalOverflow({ out: 'm.png' }, { scrollWidth: 420, innerWidth: 375, widest: 'table.x' })).toThrow(/horizontal overflow.*420.*table\.x/);
+    expect(() => screenshots.assertNoHorizontalOverflow({ out: 'm.png' }, undefined)).toThrow(/could not measure/);
+  });
+});
+
 describe('README capture inventory', () => {
   test('requires the visibly uppercase Worship team in the seeded scheduling matrix', () => {
     const row = screenshots.README_CAPTURE_ROWS.find((row) => row.out === 'docs/images/serve/matrix.png')!;

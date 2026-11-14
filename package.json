@@ -76,6 +76,7 @@
     "astro": "^7.3.3",
     "jose": "^6.2.12",
     "postgres": "^3.4.9",
+    "qrcode-generator": "2.0.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

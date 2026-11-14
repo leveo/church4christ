@@ -10,10 +10,13 @@ the email already attached to their people record, open the link, and continue t
 the page they requested. A direct sign-in starts at the opportunity hub when Portal is
 enabled.
 
-The portal itself is optional and **Supabase (Postgres)-only**. It is force-disabled
-on D1 even if a stale setting says it is on. Groups and Volunteer Scheduling still
-work independently on D1, while Giving and Registration have their own Supabase-only
-module gates. Portal declares soft `uses` of Volunteer Scheduling, Groups, and Learning,
+The portal itself is optional and runs on **both the default Cloudflare D1 database and
+Supabase (Postgres)**. On D1 you get households, groups and protected group files, the
+calendar, opportunity discovery, and church, group, and private prayers. The parts that
+depend on Registration — event-scope prayers, event administrators, and **My events**
+(registrations) — need the Supabase backend, because Registration is Supabase-only and
+stays off on D1. When Registration is off, those controls are hidden and no registration
+data is read. Giving and Registration have their own Supabase-only module gates. Portal declares soft `uses` of Volunteer Scheduling, Groups, and Learning,
 not hard dependencies, so selecting Portal in a custom setup does not automatically
 enable any of them.
 
@@ -101,8 +104,8 @@ group management page.
 
 ![A members-only group file stored in local R2 and uploaded by Ben Wu](../images/portal/group-files.png)
 
-The file bytes live in the `MEDIA` R2 bucket while Postgres stores the group-scoped
-metadata. A download succeeds only for an active member of that group or an authorized
+The file bytes live in the `MEDIA` R2 bucket while the database (D1 or Postgres) stores the
+group-scoped metadata. A download succeeds only for an active member of that group or an authorized
 site administrator. Downloads are private, are never served from the public `/media/`
 route, and are forced to download rather than render inline. Turning Groups off hides
 the directory; turning Portal off removes the protected-file extension while preserving
@@ -113,8 +116,8 @@ its records and R2 objects.
 **My Events** lists the member's existing registration records. When the separate
 Registration module is enabled, it also shows events currently open for registration
 and links to the public registration flow. The public Events module (`/events`) remains
-a separate publishing feature. Paid Registration and online Giving are Preview/test-only
-in this repository; the screenshot uses fictional test data, not a production charge.
+a separate publishing feature. Paid Registration and online Giving use the configured Stripe mode (test
+by default); the screenshot uses fictional test data, not a production charge.
 
 ![David Chen's registration history and events currently open for registration](../images/portal/events.png)
 
@@ -157,10 +160,12 @@ its admin board.
 ### Production or guided setup
 
 1. Follow [`docs/supabase-setup.md`](../supabase-setup.md) and run `npm run setup`.
-   Choose **Full Church** for the complete composition pictured above, or explicitly
-   select **Member Portal + Volunteer Scheduling + Groups + Learning**. Portal's soft
-   `uses` do not auto-enable the other three. Setup selects Supabase, writes the `HYPERDRIVE` and `MEDIA`
-   bindings, runs the current migrations, and records every module setting. Giving and
+   Choose **Full Church** for the complete composition pictured above (it includes Giving and
+   Registration, so setup selects Supabase), or explicitly select **Member Portal +
+   Volunteer Scheduling + Groups + Learning**. Portal's soft `uses` do not auto-enable the
+   other three. A custom selection without Giving or Registration stays on D1 and writes the
+   `DB` and `MEDIA` bindings; one with either selects Supabase and writes `HYPERDRIVE` and
+   `MEDIA`. Setup runs the current migrations and records every module setting. Giving and
    Registration remain independently gated selections.
 2. Configure the production `MEDIA` R2 bucket. Protected group-file rows in Postgres
    are not useful without the matching R2 objects.
@@ -170,17 +175,17 @@ its admin board.
    perform that onboarding.
 4. In **Admin → Settings → Modules**, enable **Member Portal** and each related module
    the church intends to use. Giving and Registration remain Supabase-only and are
-   enabled separately.
+   enabled separately; without Registration the portal's event features stay hidden.
 5. In **Admin → People**, put members in the correct households and designate no more
    than two eligible adult owners. In **Admin → Groups**, appoint group administrators.
-   Designated event administrators are managed from the registration event.
+   Designated event administrators are managed from the registration event (Supabase only).
 6. Deploy, request a real passwordless sign-in link from `/<locale>/signin`, and verify
    one ordinary member, one household owner, one group administrator, one ministry or
    team leader, and one event administrator before inviting the congregation.
 
 ### Local fictional demo
 
-The local demo must use a dedicated test Postgres database—never a production database.
+The local demo uses the checked-in fictional seed. On Supabase it must use a dedicated test Postgres database—never a production database.
 Set `SUPABASE_DB_URL` in the host shell without placing or echoing it in `.dev.vars`, then
 run `npm run setup` in Local mode with demo data. That guided path is provider-aware: for a
 Supabase selection it migrates and seeds Postgres, then stages, uploads, and verifies the
@@ -227,7 +232,7 @@ Portal + Volunteer Scheduling + Groups + Learning. The table below matches
 | Surface | Owning module | Behavior at the boundary |
 |---|---|---|
 | `/my`, `/my/blockouts`, `/my/calendar`, `/cal/*` | `serve` | Volunteer Scheduling must be selected for the dashboard and Calendar; Portal does not enable it automatically. Portal/group/registration records enrich these surfaces only when their modules are also enabled. |
-| `/my/opportunities`, `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated, Supabase-only portal routes. Its `uses` of Groups, Learning, and Volunteer Scheduling are soft composition hints, not auto-enabled dependencies. |
+| `/my/opportunities`, `/my/household`, `/my/events`, `/my/serving`, `/my/prayer`, `/email-change/*` | `portal` | Authenticated portal routes on either backend; `/my/events` shows a notice instead of registrations when Registration is off. Its `uses` of Groups, Learning, and Volunteer Scheduling are soft composition hints, not auto-enabled dependencies. |
 | `/manage`, `/manage/ministries/*` | Portal / enabled opportunity modules | Application-authenticated, resource-scoped leader panel; it does not depend on Cloudflare Zero Trust. |
 | `/groups/*`, `/signup/*`, `/attendance/*` | `groups` | Groups must be selected for the Groups card/tab and directory. It works on either backend; protected file panels/downloads additionally require Portal and R2. |
 | `/events` and `/admin/events` | `events` | Public event and announcement publishing; independent from registration records shown in My Events. |

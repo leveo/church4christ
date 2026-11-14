@@ -5,6 +5,7 @@ import { t } from '../../lib/i18n';
 import { operationsCopy } from '../../i18n/designOperations';
 import type { Locale } from '../../lib/locales';
 import type { AvailabilityData } from '../../lib/planDb';
+import { formatDateWithWeekday, weekdayShort } from '../../lib/dates';
 import { card, tin, btnSecondary, badge, badgeScheduled, badgeActive, badgeInactive } from '../../lib/adminUi';
 
 interface Props {
@@ -36,13 +37,31 @@ const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: ba
   {availability.plans.length === 0 || availability.rows.length === 0 ? (
     <p class="mt-6 text-sm text-ink-muted">{t(lang, teams.length === 0 ? 'admin.console.availNoTeam' : 'admin.console.availNoPlans')}</p>
   ) : (
-    <div class="availability-matrix mt-4 overflow-x-auto rounded-xl border border-border">
+    <>
+    <ul class="mt-4 grid gap-3 sm:hidden" data-availability-cards>
+      {availability.rows.map((row) => (
+        <li class="rounded-lg border border-border bg-surface-raised p-4">
+          <a href={`/${lang}/profile/${row.person_id}`} class="inline-flex min-h-11 items-center text-base font-semibold text-ink hover:text-primary">{row.name}</a>
+          <ul class="mt-1 divide-y divide-border">
+            {row.cells.map((c, i) => (
+              <li class="flex items-center justify-between gap-3 py-2 text-sm">
+                <span class="text-ink-muted">{formatDateWithWeekday(availability.plans[i].plan_date, lang, true)}</span>
+                <span class={`${badge} ${cellCls[c.state]}`}>
+                  {c.state === 'scheduled' ? c.label : c.state === 'blocked' ? t(lang, 'admin.console.availBlocked') : t(lang, 'admin.console.availFree')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+    <div class="availability-matrix mt-4 hidden overflow-x-auto rounded-xl border border-border sm:block">
       <table class="w-full border-collapse text-sm min-w-[36rem]">
         <thead class="bg-surface-sunken">
           <tr>
-            <th class="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.console.member')}</th>
+            <th class="sticky left-0 z-[2] bg-surface-sunken text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.console.member')}</th>
             {availability.plans.map((p) => (
-              <th class="px-2 py-2.5 text-center text-xs font-semibold text-ink-subtle">{p.plan_date.slice(5)}</th>
+              <th class="px-2 py-2.5 text-center text-xs font-semibold text-ink-subtle">{p.plan_date.slice(5)}<span class="block font-normal">{weekdayShort(p.plan_date, lang)}</span></th>
             ))}
           </tr>
         </thead>
@@ -64,12 +83,13 @@ const cellCls = { scheduled: badgeScheduled, available: badgeActive, blocked: ba
         </tbody>
       </table>
     </div>
+    </>
   )}
 </div>
 
 <style>
 .availability-matrix { max-height:68vh;overflow:auto;background:var(--color-surface-raised); }
-.availability-matrix thead { position:sticky;top:0;z-index:1; }
+.availability-matrix thead { position:sticky;top:0;z-index:3; }
 .availability-matrix tbody td:first-child { position:sticky;left:0;background:var(--color-surface-raised); }
 .availability-matrix td { padding-block:1.15rem;border-right:1px solid var(--color-border); }
 </style>

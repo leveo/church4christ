@@ -2,31 +2,45 @@
 // layer: post eligibility per scope, scoped tab visibility, the approver's
 // moderation queue, decide/delete authority, and the event_admins helpers.
 //
-// Fusion note: this repo's `groups`/`group_members`/`people` ARE real D1 tables
-// (migrations/0006_groups.sql, 0003_people.sql), so — like groupFiles.test.ts —
-// membership uses the real groupDb tables directly. Only the Supabase-only
-// tables (prayer_items/event_admins and the reg_events/reg_event_i18n/
-// registrations they lean on, all in migrations-supabase/0009 / 0003 with no D1
-// counterpart) are CREATE TABLE IF NOT EXISTS'd here, matching the PG DDL minus
-// identity (plain INTEGER PRIMARY KEY). The real PG DDL is covered by the pg e2e
-// suite (Task 6).
+// Fusion note: this repo's `groups`/`group_members`/`people` and (since
+// migrations/0039) `prayer_items` ARE real D1 tables, so membership and prayer
+// rows use the real tables directly. Only the Supabase-only Registration tables
+// the event scope leans on (event_admins, reg_events, reg_event_i18n,
+// registrations) are CREATE TABLE IF NOT EXISTS'd here. The registration-off
+// behavior is covered by test/portalD1.test.ts, which has no such stubs. The real
+// PG DDL is covered by the pg e2e suite.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import * as prayer from '../src/lib/prayerDb';
 import {
   addEventAdmin,
-  decidePrayerItem,
-  deletePrayerItem,
   isEventAdmin,
-  listChurchPrayers,
   listEventAdmins,
-  listEventPrayersForPerson,
-  listGroupPrayersForPerson,
-  listMyPrayerItems,
-  listPendingForApprover,
-  postPrayerItem,
   removeEventAdmin,
   type PrayerScope,
 } from '../src/lib/prayerDb';
+
+// This file models an installation with Registration on (the Supabase full
+// install), so every call opts into event scope explicitly. The library default
+// is off; test/portalD1.test.ts covers the D1 path without Registration.
+const REG = { registration: true } as const;
+type Args<F> = F extends (db: never, args: infer A, ...rest: never[]) => unknown ? A : never;
+const postPrayerItem = (db: Parameters<typeof prayer.postPrayerItem>[0], args: Args<typeof prayer.postPrayerItem>) =>
+  prayer.postPrayerItem(db, { ...args, ...REG });
+const decidePrayerItem = (db: Parameters<typeof prayer.decidePrayerItem>[0], args: Args<typeof prayer.decidePrayerItem>) =>
+  prayer.decidePrayerItem(db, { ...args, ...REG });
+const deletePrayerItem = (db: Parameters<typeof prayer.deletePrayerItem>[0], args: Args<typeof prayer.deletePrayerItem>) =>
+  prayer.deletePrayerItem(db, { ...args, ...REG });
+const listChurchPrayers = (db: Parameters<typeof prayer.listChurchPrayers>[0], locale: Parameters<typeof prayer.listChurchPrayers>[1]) =>
+  prayer.listChurchPrayers(db, locale, REG);
+const listGroupPrayersForPerson = (db: Parameters<typeof prayer.listGroupPrayersForPerson>[0], personId: number, locale: Parameters<typeof prayer.listChurchPrayers>[1]) =>
+  prayer.listGroupPrayersForPerson(db, personId, locale, REG);
+const listEventPrayersForPerson = (db: Parameters<typeof prayer.listEventPrayersForPerson>[0], personId: number, email: string, locale: Parameters<typeof prayer.listChurchPrayers>[1]) =>
+  prayer.listEventPrayersForPerson(db, personId, email, locale, REG);
+const listMyPrayerItems = (db: Parameters<typeof prayer.listMyPrayerItems>[0], personId: number, locale: Parameters<typeof prayer.listChurchPrayers>[1]) =>
+  prayer.listMyPrayerItems(db, personId, locale, REG);
+const listPendingForApprover = (db: Parameters<typeof prayer.listPendingForApprover>[0], approverId: number, moderator: Parameters<typeof prayer.listPendingForApprover>[2], locale: Parameters<typeof prayer.listChurchPrayers>[1]) =>
+  prayer.listPendingForApprover(db, approverId, moderator, locale, REG);
 
 await env.DB.prepare(
   `CREATE TABLE IF NOT EXISTS reg_events (

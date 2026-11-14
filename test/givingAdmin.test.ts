@@ -61,7 +61,19 @@ describe('parseFundForm', () => {
   it('accepts a fund with both names, active on, explicit sort', () => {
     const r = parseFundForm(form({ fund_number: 'F1', name_en: 'General', name_zh: '总奉献', active: 'on', sort: '3' }));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data).toEqual({ fund_number: 'F1', name_en: 'General', name_zh: '总奉献', active: true, sort: 3 });
+    if (r.ok) expect(r.data).toEqual({
+        fund_number: 'F1', name_en: 'General', name_zh: '总奉献', description_en: '', description_zh: '',
+        active: true, sort: 3, is_default: false, tax_deductible: false,
+      });
+  });
+
+  it('reads description, default, and tax-deductible fields (checkboxes are off when absent)', () => {
+    const r = parseFundForm(form({
+      fund_number: 'F9', name_en: 'Missions', description_en: ' For missionaries ', description_zh: '宣教士支持',
+      active: 'on', is_default: 'on', tax_deductible: 'on', sort: '1',
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toMatchObject({ description_en: 'For missionaries', description_zh: '宣教士支持', is_default: true, tax_deductible: true });
   });
 
   it('requires fund_number and English name', () => {
@@ -76,7 +88,10 @@ describe('parseFundForm', () => {
   it('allows an empty Chinese name (en fallback), defaulting sort 0 and active false', () => {
     const r = parseFundForm(form({ fund_number: 'F2', name_en: 'Missions' }));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data).toEqual({ fund_number: 'F2', name_en: 'Missions', name_zh: '', active: false, sort: 0 });
+    if (r.ok) expect(r.data).toEqual({
+        fund_number: 'F2', name_en: 'Missions', name_zh: '', description_en: '', description_zh: '',
+        active: false, sort: 0, is_default: false, tax_deductible: false,
+      });
   });
 
   it('rejects a non-integer sort', () => {

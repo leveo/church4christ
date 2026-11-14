@@ -1,15 +1,18 @@
-# Registration (free sign-ups and paid checkout Preview)
+# Registration (free sign-ups and paid checkout)
 
-> **Preview — Stripe test mode only.** Free event registration is implemented and does not
-> require Stripe. Paid registration is a test-only Preview that accepts test credentials and
-> test cards; it must not be used to collect event fees.
+> **Free event registration does not need Stripe.** Paid registration uses the same Stripe
+> mode as Giving: test mode by default, live mode only after the go-live checklist in
+> [`supabase-setup.md`](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration).
+> Paid registration records no live/test marker of its own, so rehearse in test mode, then
+> verify with one small live registration before collecting real fees, and resolve any
+> pending checkout requests before switching modes.
 
 ## What it does
 
 **Registration** lets your church put a free event online and collect sign-ups, custom answers,
 and roster data without Stripe. You create the event, add the questions you need, set a seat
-limit if there is one, and share the link. The same module includes a paid-checkout Preview for
-evaluating the Stripe test flow, but that path is not available for production fees.
+limit if there is one, and share the link. The same module can also take a paid checkout
+through Stripe in the configured Stripe mode.
 
 It brings together the things a church normally patches from a paper sign-up sheet, a
 separate payment link, and a spreadsheet:

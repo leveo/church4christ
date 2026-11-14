@@ -151,6 +151,7 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.attendance'), href: '/admin/attendance', show: isAdmin, module: 'attendance', area: 'attendance' },
   { label: t(lang, 'admin.nav.activityScore'), href: '/admin/activity-score', show: isAdmin, module: 'activity-score', area: 'activity-score' },
   { label: t(lang, 'admin.nav.learning'), href: '/admin/learning', show: isAdmin, module: 'learning', area: 'learning' },
+  { label: t(lang, 'admin.nav.planning'), href: '/admin/planning', show: isAdmin, module: 'planning', area: 'planning' },
   { label: t(lang, 'admin.nav.newcomers'), href: '/admin/newcomers', show: isNewcomerStaff, module: 'newcomers', area: 'newcomers' },
   { label: t(lang, 'admin.nav.onboarding'), href: '/admin/onboarding', show: isAdmin, area: 'onboarding' },
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving', area: 'giving' },
@@ -252,6 +253,10 @@ const navigationGroups = groupAdminLinks(sections.flatMap(section => section.chi
         <slot />
       </main>
     </div>
+    <script>
+      import { initConfirm } from '../lib/confirm-client';
+      initConfirm();
+    </script>
     <script>
       // Repeat-rows editor island (ported from the reference stack): progressive
       // enhancement over a <template data-repeat-template> plus [data-repeat-row]

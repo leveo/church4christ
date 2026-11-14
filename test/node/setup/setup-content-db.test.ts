@@ -180,7 +180,7 @@ describe('content setup database boundary', () => {
     expect(sqlite.prepare("SELECT value FROM settings WHERE key='site.demo_content'").get()?.value).toBe('false');
     await setupSteps('d1', db)['initialize-modules'].apply({ plan: plan(false), managedInstallation: true });
     expect(sqlite.prepare("SELECT value FROM settings WHERE key='site.demo_content'").get()?.value).toBe('false');
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").get()?.count).toBe(21);
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").get()?.count).toBe(22);
   });
 
   it.each(['d1', 'supabase'] as const)('persists both initial choices through the shared %s setup steps', async (backend) => {
@@ -192,7 +192,7 @@ describe('content setup database boundary', () => {
       await steps['bootstrap-admin'].apply(context);
       expect(sqlite.prepare("SELECT value FROM settings WHERE key='site.demo_content'").get()?.value).toBe(String(demoData));
       expect(sqlite.prepare("SELECT value FROM settings WHERE key='site.name.en'").get()?.value).toBe('Our Church');
-      expect(sqlite.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").get()?.count).toBe(21);
+      expect(sqlite.prepare("SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'module.%'").get()?.count).toBe(22);
       expect(sqlite.prepare('SELECT email, role, super_admin FROM people').all()).toEqual([{ email: 'owner@example.test', role: 'admin', super_admin: 1 }]);
     }
   });

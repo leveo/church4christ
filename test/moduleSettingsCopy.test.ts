@@ -21,7 +21,7 @@ describe('settings module presentation', () => {
   });
 
   it('provides exactly one label and description for every displayed module in both dictionaries', () => {
-    expect(CAPABILITY_KEYS).toHaveLength(21);
+    expect(CAPABILITY_KEYS).toHaveLength(22);
     const displayed = MODULE_GROUPS.flatMap((group) => group.keys);
     expect([...displayed].sort()).toEqual([...CAPABILITY_KEYS].sort());
     const expected = CAPABILITY_KEYS.flatMap((key) => [`modules.${key}.label`, `modules.${key}.desc`]).sort();

@@ -1,6 +1,6 @@
 import type { AppDb } from './appDb';
 import type { DbEnv } from './dbProvider';
-import { verifyStripeWebhook, type StripeEnv } from './stripe';
+import { livemodeMatches, verifyStripeWebhook, type StripeEnv } from './stripe';
 import {
   STRIPE_WEBHOOK_MAX_BYTES,
   parseStripeEnvelope,
@@ -70,7 +70,7 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
   return { tooLarge: false, body: new TextDecoder().decode(bytes) };
 }
 
-/** Verify, validate, and durably receive one test-mode event before acknowledging it. */
+/** Verify, validate, and durably receive one event of the configured mode before acknowledging it. */
 export async function handleStripeWebhookRequest(
   request: Request,
   deps: StripeWebhookEndpointDeps,
@@ -92,6 +92,10 @@ export async function handleStripeWebhookRequest(
 
   const secret = deps.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) return new Response('webhook_not_configured', { status: 400 });
+  // A live mode marker without the explicit opt-in never accepts events.
+  if (deps.env.STRIPE_MODE === 'live' && deps.env.STRIPE_LIVE_CONFIRMED !== '1') {
+    return new Response('webhook_not_configured', { status: 400 });
+  }
 
   const event = await verifyStripeWebhook(
     body,
@@ -108,7 +112,8 @@ export async function handleStripeWebhookRequest(
   } catch {
     return new Response('invalid_envelope', { status: 400 });
   }
-  if (envelope.livemode) return new Response('live_mode_disabled', { status: 400 });
+  // No crossover: a test event is rejected in live mode and vice versa.
+  if (!livemodeMatches(deps.env, envelope.livemode)) return new Response('livemode_mismatch', { status: 400 });
 
   const input = receiptInput(body, envelope, await sha256Utf8(body));
   let receipt: StripeReceiptResult;

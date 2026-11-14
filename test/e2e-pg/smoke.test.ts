@@ -124,6 +124,65 @@ describe('Postgres-backed worker: public render path', () => {
   });
 });
 
+describe('Postgres-backed worker: giving statements and export', () => {
+  it('statement page: anon → signin; signed-in → printable statement; malformed year → 404', async () => {
+    const anon = await get('/en/my/giving/statement/2030');
+    expect(anon.status).toBe(303);
+    expect(anon.headers.get('location')).toContain('/signin');
+
+    const cookie = await sessionCookie(1, 'admin@example.com');
+    const ok = await get('/en/my/giving/statement/2030', { cookie });
+    expect(ok.status).toBe(200);
+    const body = await ok.text();
+    expect(body).toContain('Giving statement 2030');
+    expect(body).toContain('No tax-deductible gifts were recorded for this year.');
+    expect(body).toContain('No goods or services were provided in exchange for these contributions.');
+    expect((await get('/en/my/giving/statement/20x0', { cookie })).status).toBe(404);
+  });
+
+  it('statement page only ever shows the signed-in viewer scope, never another person\'s gifts', async () => {
+    const hyperdrive = (env as unknown as { HYPERDRIVE: { connectionString: string } }).HYPERDRIVE;
+    const sql = postgres(hyperdrive.connectionString, { max: 1, fetch_types: false, prepare: false, onnotice: () => {} });
+    try {
+      await sql.unsafe(`INSERT INTO funds (id,fund_number,active,sort) VALUES (99011,'PG-STATEMENT',1,1)`);
+      await sql.unsafe(`INSERT INTO fund_i18n (fund_id,locale,name) VALUES (99011,'en','Statement Fund')`);
+      // Person 3 (Sarah, household-less) gave 123.45; the admin (1) gave nothing.
+      await sql.unsafe(`INSERT INTO gifts (person_id,fund_id,amount_cents,currency,method,status,received_on,livemode)
+        VALUES (3,99011,12345,'usd','check','succeeded','2030-04-01',true)`);
+      const sarah = await (await get('/en/my/giving/statement/2030', { cookie: await sessionCookie(3, 'sarah.johnson@example.com') })).text();
+      expect(sarah).toContain('Statement Fund');
+      expect(sarah).toContain('$123.45');
+      const admin = await (await get('/en/my/giving/statement/2030', { cookie: await sessionCookie(1, 'admin@example.com') })).text();
+      expect(admin).not.toContain('Statement Fund');
+      expect(admin).not.toContain('$123.45');
+    } finally {
+      try {
+        await sql.unsafe('DELETE FROM gifts WHERE fund_id = 99011');
+        await sql.unsafe('DELETE FROM funds WHERE id = 99011');
+      } finally {
+        await sql.end();
+      }
+    }
+  });
+
+  it('CSV export is admin/finance only and formula-safe; statements admin renders', async () => {
+    expect((await get('/admin/giving/export.csv')).status).toBe(303);
+    const member = await get('/admin/giving/export.csv', { cookie: await sessionCookie(3, 'sarah.johnson@example.com') });
+    expect(member.status).not.toBe(200);
+    expect(member.headers.get('content-type') ?? '').not.toContain('text/csv');
+
+    const admin = await get('/admin/giving/export.csv', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(admin.status).toBe(200);
+    expect(admin.headers.get('content-type')).toContain('text/csv');
+    expect(admin.headers.get('cache-control')).toBe('no-store');
+    expect((await admin.text()).split('\r\n')[0]).toContain('Gift ID,Date,Donor');
+
+    const page = await get('/admin/giving/statements', { cookie: await sessionCookie(1, 'admin@example.com') });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Queue statements');
+  });
+});
+
 describe('Postgres-backed worker: admin console (exercises the shortfall query)', () => {
   it('/admin/onboarding renders the shared checklist over Postgres', async () => {
     const res = await get('/admin/onboarding', { cookie: await sessionCookie(1, 'admin@example.com') });
@@ -182,12 +241,13 @@ describe('Postgres-backed worker: admin console (exercises the shortfall query)'
         (99001,'PG-CURRENCY-A',1,1),(99002,'PG-CURRENCY-B',1,2)`);
       await sql.unsafe(`INSERT INTO fund_i18n (fund_id,locale,name) VALUES
         (99001,'en','Currency Alpha'),(99002,'en','Currency Beta')`);
-      await sql.unsafe(`INSERT INTO gifts (fund_id,donor_name,amount_cents,currency,method,status,received_on,created_at) VALUES
-        (99001,'Smoke USD gift',1234,'usd','cash','succeeded','2031-03-10','2031-03-11 12:00:00'),
-        (99001,'Smoke EUR gift',4567,'eur','card','succeeded',NULL,'2031-03-10 12:00:00'),
-        (99001,'Smoke refunded gift',500,'usd','card','refunded',NULL,'2031-03-10 13:00:00'),
-        (99001,'Smoke outside window',9000,'usd','cash','succeeded','2031-03-09','2031-03-10 12:00:00'),
-        (99002,'Smoke other fund',2000,'eur','cash','succeeded','2031-03-10','2031-03-10 12:00:00')`);
+      // livemode: manual and real gifts are live; the EUR card row is a Stripe TEST row (labeled in the ledger).
+      await sql.unsafe(`INSERT INTO gifts (fund_id,donor_name,amount_cents,currency,method,status,received_on,created_at,livemode,refunded_cents) VALUES
+        (99001,'Smoke USD gift',1234,'usd','cash','succeeded','2031-03-10','2031-03-11 12:00:00',true,0),
+        (99001,'Smoke EUR gift',4567,'eur','card','succeeded',NULL,'2031-03-10 12:00:00',false,0),
+        (99001,'Smoke refunded gift',500,'usd','card','refunded',NULL,'2031-03-10 13:00:00',true,500),
+        (99001,'Smoke outside window',9000,'usd','cash','succeeded','2031-03-09','2031-03-10 12:00:00',true,0),
+        (99002,'Smoke other fund',2000,'eur','cash','succeeded','2031-03-10','2031-03-10 12:00:00',true,0)`);
 
       const ledgerPath = '/admin/giving?fund=99001&from=2031-03-10&to=2031-03-10';
       const filtered = await get(ledgerPath, { cookie });
@@ -196,22 +256,29 @@ describe('Postgres-backed worker: admin console (exercises the shortfall query)'
       const ledger = financeRows(html, 'Gifts');
       expect(ledger).toHaveLength(3);
       expect(ledger.find(row => row[1] === 'Smoke USD gift')).toEqual([
-        '2031-03-10', 'Smoke USD gift', 'Currency Alpha', 'Cash', '—', '$12.34 USD',
+        '2031-03-10', 'Smoke USD gift', 'Currency Alpha', 'Cash', '—', '—', '$12.34 USD',
       ]);
       expect(ledger.find(row => row[1] === 'Smoke EUR gift')?.at(-1)).toBe('EUR 45.67 EUR');
+      expect(ledger.find(row => row[1] === 'Smoke EUR gift')?.[3]).toBe('Card Test'); // test-mode Stripe row is labeled
       const refunded = ledger.find(row => row[1] === 'Smoke refunded gift');
       expect(refunded?.[3]).toBe('Card Refunded');
+      expect(refunded?.[4]).toBe('Refunded');
       expect(refunded?.at(-1)).toBe('$5.00 USD');
       expect(ledger.flat()).not.toContain('Smoke outside window');
       expect(ledger.flat()).not.toContain('Smoke other fund');
-      const expectedCounts = [['PG-CURRENCY-A', 'Currency Alpha', '2'], ['PG-CURRENCY-B', 'Currency Beta', '1']];
+      // Totals are net of refunds and grouped per currency (the refunded gift contributes nothing).
+      const expectedCounts = [
+        ['PG-CURRENCY-A', 'Currency Alpha', '1', 'EUR', 'EUR 45.67'],
+        ['PG-CURRENCY-A', 'Currency Alpha', '1', 'USD', '$12.34'],
+        ['PG-CURRENCY-B', 'Currency Beta', '1', 'EUR', 'EUR 20.00'],
+      ];
       expect(financeRows(html, 'Gifts by fund')).toEqual(expectedCounts);
-      expect(html).toContain('combined monetary totals are not shown');
+      expect(html).toContain('amounts in different currencies are never combined');
       expect(html).not.toContain('$58.01'); // 1234 USD + 4567 EUR is not a USD total.
 
       const entry = html.match(/<aside\b[^>]*id="finance-manual-entry"[^>]*>([\s\S]*?)<\/aside>/)?.[1];
       expect(entry).toBeDefined();
-      expect(entry).toContain('Record a received check or cash gift in USD');
+      expect(entry).toContain('Record a received check or cash gift in the giving currency');
       expect(entry).toContain('name="action" value="record"');
       for (const field of ['person_id', 'donor_name', 'fund_id', 'amount', 'method', 'check_number', 'received_on', 'note']) {
         expect(entry).toContain(`name="${field}"`);

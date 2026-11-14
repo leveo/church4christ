@@ -105,3 +105,21 @@ describe('utcToDatetimeLocal', () => {
     expect(utcToDatetimeLocal(utc)).toBe('2026-07-05T20:00');
   });
 });
+
+describe('formatDateWithWeekday', () => {
+  it('adds the weekday in both locales', async () => {
+    const { formatDateWithWeekday } = await import('../src/lib/dates');
+    expect(formatDateWithWeekday('2026-07-05', 'en')).toBe('Sunday, July 5, 2026');
+    expect(formatDateWithWeekday('2026-07-05', 'en', true)).toBe('Sun, Jul 5');
+    expect(formatDateWithWeekday('2026-07-05', 'zh')).toBe('2026年7月5日 星期日');
+    expect(formatDateWithWeekday('2026-07-05', 'zh', true)).toBe('7月5日 周日');
+  });
+});
+
+describe('weekdayShort', () => {
+  it('returns the short weekday', async () => {
+    const { weekdayShort } = await import('../src/lib/dates');
+    expect(weekdayShort('2026-07-05', 'en')).toBe('Sun');
+    expect(weekdayShort('2026-07-05', 'zh')).toBe('周日');
+  });
+});

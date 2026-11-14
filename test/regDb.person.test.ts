@@ -1,6 +1,7 @@
-// Person-scoped readers added on top of the (Supabase-only) regDb/givingDb
-// modules: a signed-in member's own registrations and their own gifts. Both new
-// functions are dialect-neutral SQL (no RETURNING/currval/PG-only ON CONFLICT),
+// Person-scoped reader added on top of the (Supabase-only) regDb module: a
+// signed-in member's own registrations. The own-gifts readers moved to
+// test/pg/givingDb.test.ts when givingDb adopted PostgreSQL time-zone SQL. This
+// function is dialect-neutral SQL (no RETURNING/currval/PG-only ON CONFLICT),
 // so — like groupDb.test.ts — they're exercised here against the live D1 unit
 // harness rather than test/pg's real-Postgres suite. reg_events/reg_event_i18n/
 // registrations and funds/fund_i18n/gifts have no D1 migration counterpart (the
@@ -12,7 +13,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { listRegistrationsForPerson } from '../src/lib/regDb';
-import { listPersonGifts, personYearTotals } from '../src/lib/givingDb';
 
 await env.DB.prepare(
   `CREATE TABLE IF NOT EXISTS reg_events (
@@ -157,72 +157,5 @@ describe('listRegistrationsForPerson', () => {
   it('returns [] for a person with no registrations', async () => {
     await seedEvent(1, 'Retreat', '2026-09-01 09:00:00');
     expect(await listRegistrationsForPerson(env.DB, 'en', 99, 'nobody@example.com')).toEqual([]);
-  });
-});
-
-describe('listPersonGifts / personYearTotals', () => {
-  async function seedFund(id: number, name: string): Promise<void> {
-    await env.DB.prepare(`INSERT INTO funds (id, fund_number) VALUES (?, ?)`).bind(id, `F${id}`).run();
-    await env.DB.prepare(`INSERT INTO fund_i18n (fund_id, locale, name) VALUES (?, 'en', ?)`).bind(id, name).run();
-  }
-  async function household(id: number, memberPersonIds: number[]): Promise<void> {
-    await env.DB.prepare(`INSERT INTO households (id, name) VALUES (?, 'Fam')`).bind(id).run();
-    for (const pid of memberPersonIds) {
-      await env.DB
-        .prepare(`INSERT INTO household_members (household_id, person_id, display_name) VALUES (?, ?, 'M')`)
-        .bind(id, pid)
-        .run();
-    }
-  }
-
-  it('is person-scoped: excludes a household member\'s gift even though they share a household', async () => {
-    await seedFund(1, 'General');
-    await household(1, [1, 2]);
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (1, 1, 1000, 'cash', 'succeeded', '2026-01-01')`)
-      .run();
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (2, 1, 2000, 'cash', 'succeeded', '2026-01-02')`)
-      .run();
-
-    const mine = await listPersonGifts(env.DB, 'en', 1);
-    expect(mine).toHaveLength(1);
-    expect(mine[0].amount_cents).toBe(1000);
-    expect(mine[0].person_id).toBe(1);
-  });
-
-  it('includes refunded gifts in the ledger and resolves fund_name/giver_name', async () => {
-    await seedFund(1, 'General');
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (1, 1, 500, 'card', 'refunded', '2026-01-01')`)
-      .run();
-    const mine = await listPersonGifts(env.DB, 'en', 1);
-    expect(mine).toHaveLength(1);
-    expect(mine[0].status).toBe('refunded');
-    expect(mine[0].fund_name).toBe('General');
-    expect(mine[0].giver_name).toBe('Person 1');
-  });
-
-  it('personYearTotals sums succeeded-only money per year, scoped to the person', async () => {
-    await seedFund(1, 'General');
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (1, 1, 1000, 'cash', 'succeeded', '2025-06-01')`)
-      .run();
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (1, 1, 2000, 'cash', 'succeeded', '2026-01-01')`)
-      .run();
-    // refunded — excluded from the total.
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (1, 1, 9999, 'card', 'refunded', '2026-02-01')`)
-      .run();
-    // another person's gift — must not bleed into this total.
-    await env.DB
-      .prepare(`INSERT INTO gifts (person_id, fund_id, amount_cents, method, status, received_on) VALUES (2, 1, 5000, 'cash', 'succeeded', '2026-01-01')`)
-      .run();
-
-    const totals = await personYearTotals(env.DB, 1);
-    const byYear = Object.fromEntries(totals.map((t) => [t.year, t.total_cents]));
-    expect(byYear['2025']).toBe(1000);
-    expect(byYear['2026']).toBe(2000);
   });
 });

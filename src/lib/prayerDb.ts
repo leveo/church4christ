@@ -1,9 +1,13 @@
 // Prayer-wall data layer (member portal fusion): posting, scoped tab reads, the
 // approver's moderation queue, decide/delete, and the event_admins helpers that
-// serve event-scoped moderation. Supabase-only module (schema in
-// migrations-supabase/0009_member_portal.sql) — reachable only when the portal
-// is on; the pg e2e suite covers the real Postgres DDL, while this module's
-// dialect-neutral SQL is unit-tested against the D1 harness like groupFiles.
+// serve event-scoped moderation. Runs on both backends (D1: migrations/0039,
+// Supabase: migrations-supabase/0009) — reachable only when the portal is on.
+// Event scope depends on Registration (reg_events / registrations / event_admins),
+// which is Supabase-only: every function that could touch those tables takes a
+// `registration` flag (default false, so a caller that forgets it never queries
+// Registration tables; the Supabase full install passes true). Callers
+// pass `modules.has('registration')`; when false, no query references reg_*,
+// registrations or event_admins and scope='event' is rejected.
 //
 // Fusion note: this adapts onto the public repo's existing groups module —
 // `prayer_items.group_id` references `groups(id)` (single-name, no i18n join),
@@ -56,19 +60,30 @@ export interface PrayerItem {
 // the single-column `groups.name` (no i18n), event_title uses the same
 // localized-with-en-fallback join as regDb's EVENT_SELECT, and both read null
 // when the row has no group_id / reg_event_id.
-const PRAYER_SELECT = `
+function prayerSelect(registration: boolean): string {
+  // With Registration off the event title is not joinable (no reg_event_i18n),
+  // so it is NULL; the CASE keeps ?1 (locale) referenced so the bind count still
+  // matches the statement's parameters.
+  return `
   SELECT p.id AS id, p.author_person_id AS author_person_id,
          COALESCE(ppl.display_name, ppl.first_name || ' ' || ppl.last_name) AS author_name,
          p.scope AS scope, p.group_id AS group_id,
          g.name AS group_name,
          p.reg_event_id AS reg_event_id,
-         COALESCE(el.title, ed.title) AS event_title,
+         ${registration ? 'COALESCE(el.title, ed.title)' : `CASE WHEN ?1 = '' THEN '' END`} AS event_title,
          p.body AS body, p.status AS status, p.created_at AS created_at
   FROM prayer_items p
   JOIN people ppl ON ppl.id = p.author_person_id
-  LEFT JOIN groups g ON g.id = p.group_id
+  LEFT JOIN groups g ON g.id = p.group_id${registration ? `
   LEFT JOIN reg_event_i18n el ON el.event_id = p.reg_event_id AND el.locale = ?1
-  LEFT JOIN reg_event_i18n ed ON ed.event_id = p.reg_event_id AND ed.locale = 'en'`;
+  LEFT JOIN reg_event_i18n ed ON ed.event_id = p.reg_event_id AND ed.locale = 'en'` : ''}`;
+}
+
+/** Registration-dependent behavior switch; omitted means enabled (Supabase). */
+export interface PrayerOptions {
+  registration?: boolean;
+}
+const regOn = (opts?: PrayerOptions): boolean => opts?.registration ?? false;
 
 const MAX_BODY = 2000;
 
@@ -119,11 +134,14 @@ export async function postPrayerItem(
     groupId?: number | null;
     regEventId?: number | null;
     body: string;
-  },
+  } & PrayerOptions,
 ): Promise<number> {
   const { authorPersonId, authorEmail, scope } = args;
   const groupId = args.groupId ?? null;
   const regEventId = args.regEventId ?? null;
+
+  // Event scope needs Registration; reject before any reg_* / event_admins read.
+  if (scope === 'event' && !regOn(args)) throw new Error('invalid');
 
   // Scope/id shape: exactly the matching FK, nothing else.
   if (scope === 'group') {
@@ -162,10 +180,10 @@ export async function postPrayerItem(
 }
 
 /** The church tab: approved church items, newest first. */
-export async function listChurchPrayers(db: AppDb, locale: Locale): Promise<PrayerItem[]> {
+export async function listChurchPrayers(db: AppDb, locale: Locale, opts?: PrayerOptions): Promise<PrayerItem[]> {
   const { results } = await db
     .prepare(
-      `${PRAYER_SELECT}
+      `${prayerSelect(regOn(opts))}
        WHERE p.scope = 'church' AND p.status = 'approved' AND p.deleted_at IS NULL
        ORDER BY p.created_at DESC, p.id DESC`,
     )
@@ -181,10 +199,11 @@ export async function listGroupPrayersForPerson(
   db: AppDb,
   personId: number,
   locale: Locale,
+  opts?: PrayerOptions,
 ): Promise<PrayerItem[]> {
   const { results } = await db
     .prepare(
-      `${PRAYER_SELECT}
+      `${prayerSelect(regOn(opts))}
        WHERE p.scope = 'group' AND p.status = 'approved' AND p.deleted_at IS NULL
          AND p.group_id IN (SELECT group_id FROM group_members WHERE person_id = ?2 AND removed_at IS NULL)
        ORDER BY p.created_at DESC, p.id DESC`,
@@ -202,10 +221,12 @@ export async function listEventPrayersForPerson(
   personId: number,
   email: string,
   locale: Locale,
+  opts?: PrayerOptions,
 ): Promise<PrayerItem[]> {
+  if (!regOn(opts)) return [];
   const { results } = await db
     .prepare(
-      `${PRAYER_SELECT}
+      `${prayerSelect(true)}
        WHERE p.scope = 'event' AND p.status = 'approved' AND p.deleted_at IS NULL
          AND (
            p.reg_event_id IN (
@@ -224,10 +245,15 @@ export async function listEventPrayersForPerson(
 /** The "my requests" view: all of the author's own items regardless of scope or
  *  status (private, pending, rejected included), newest first. Soft-deleted rows
  *  are excluded. */
-export async function listMyPrayerItems(db: AppDb, personId: number, locale: Locale): Promise<PrayerItem[]> {
+export async function listMyPrayerItems(
+  db: AppDb,
+  personId: number,
+  locale: Locale,
+  opts?: PrayerOptions,
+): Promise<PrayerItem[]> {
   const { results } = await db
     .prepare(
-      `${PRAYER_SELECT}
+      `${prayerSelect(regOn(opts))}
        WHERE p.author_person_id = ?2 AND p.deleted_at IS NULL
        ORDER BY p.created_at DESC, p.id DESC`,
     )
@@ -248,11 +274,13 @@ export async function listPendingForApprover(
   approverId: number,
   moderator: PrayerModerator,
   locale: Locale,
+  opts?: PrayerOptions,
 ): Promise<PrayerItem[]> {
+  const registration = regOn(opts);
   if (hasChurchWideModeration(moderator)) {
     const { results } = await db
       .prepare(
-        `${PRAYER_SELECT}
+        `${prayerSelect(registration)}
          WHERE p.status = 'pending' AND p.deleted_at IS NULL
          ORDER BY p.created_at ASC, p.id ASC`,
       )
@@ -262,13 +290,13 @@ export async function listPendingForApprover(
   }
   const { results } = await db
     .prepare(
-      `${PRAYER_SELECT}
+      `${prayerSelect(registration)}
        WHERE p.status = 'pending' AND p.deleted_at IS NULL
          AND (
            (p.scope = 'group' AND p.group_id IN (
-             SELECT group_id FROM group_members WHERE person_id = ?2 AND is_admin = 1 AND removed_at IS NULL))
+             SELECT group_id FROM group_members WHERE person_id = ?2 AND is_admin = 1 AND removed_at IS NULL))${registration ? `
            OR (p.scope = 'event' AND p.reg_event_id IN (
-             SELECT reg_event_id FROM event_admins WHERE person_id = ?2))
+             SELECT reg_event_id FROM event_admins WHERE person_id = ?2))` : ''}
          )
        ORDER BY p.created_at ASC, p.id ASC`,
     )
@@ -285,10 +313,11 @@ async function canModerate(
   item: { scope: PrayerScope; group_id: number | null; reg_event_id: number | null },
   approverId: number,
   moderator: PrayerModerator,
+  registration: boolean,
 ): Promise<boolean> {
   if (hasChurchWideModeration(moderator)) return true;
   if (item.scope === 'group' && item.group_id !== null) return isGroupAdmin(db, item.group_id, approverId);
-  if (item.scope === 'event' && item.reg_event_id !== null) return isEventAdmin(db, item.reg_event_id, approverId);
+  if (item.scope === 'event' && item.reg_event_id !== null && registration) return isEventAdmin(db, item.reg_event_id, approverId);
   return false;
 }
 
@@ -301,7 +330,7 @@ async function canModerate(
  */
 export async function decidePrayerItem(
   db: AppDb,
-  args: { itemId: number; approve: boolean; approverId: number; moderator: PrayerModerator },
+  args: { itemId: number; approve: boolean; approverId: number; moderator: PrayerModerator } & PrayerOptions,
 ): Promise<boolean> {
   const { itemId, approve, approverId, moderator } = args;
   const item = await db
@@ -317,7 +346,7 @@ export async function decidePrayerItem(
       deleted_at: string | null;
     }>();
   if (!item || item.deleted_at !== null) return false;
-  if (!(await canModerate(db, item, approverId, moderator))) throw new Error('not_authorized');
+  if (!(await canModerate(db, item, approverId, moderator, regOn(args)))) throw new Error('not_authorized');
   if (item.status !== 'pending') return false;
 
   const r = await db
@@ -339,7 +368,7 @@ export async function decidePrayerItem(
  */
 export async function deletePrayerItem(
   db: AppDb,
-  args: { itemId: number; actorId: number; moderator: PrayerModerator },
+  args: { itemId: number; actorId: number; moderator: PrayerModerator } & PrayerOptions,
 ): Promise<boolean> {
   const { itemId, actorId, moderator } = args;
   const item = await db
@@ -356,7 +385,7 @@ export async function deletePrayerItem(
     }>();
   if (!item || item.deleted_at !== null) return false;
 
-  const authorized = item.author_person_id === actorId || (await canModerate(db, item, actorId, moderator));
+  const authorized = item.author_person_id === actorId || (await canModerate(db, item, actorId, moderator, regOn(args)));
   if (!authorized) throw new Error('not_authorized');
 
   await db

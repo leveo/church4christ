@@ -105,8 +105,8 @@ const [members, joinRequests, events, upcoming] = await Promise.all([
 const upcomingByEvent = new Map<number, number>();
 for (const o of upcoming) upcomingByEvent.set(o.event_id, (upcomingByEvent.get(o.event_id) ?? 0) + 1);
 
-// Group files (portal module only — group_files is Supabase-backed; never
-// touched on a D1 request). Loaded once, pre-mutation, like the other sections.
+// Group files (portal module only — group_files exists on both backends; never
+// touched when the portal is off). Loaded once, pre-mutation, like the other sections.
 const hasPortal = Astro.locals.modules.has('portal');
 const media = (env as unknown as { MEDIA: GroupFileBucket }).MEDIA;
 let files: (GroupFileRow & { uploader_name: string })[] = [];

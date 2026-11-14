@@ -207,12 +207,12 @@ const copy = ministryCopy(locale);
                 </span>
               )}
               {canEdit && (
-                <span class="ml-auto flex gap-3">
+                <span class="ml-auto flex flex-wrap gap-x-3">
                   <form method="post">
                     <input type="hidden" name="_action" value="setLeader" />
                     <input type="hidden" name="person_id" value={m.person_id} />
                     <input type="hidden" name="leader" value={m.is_leader === 1 ? '0' : '1'} />
-                    <button type="submit" class="text-primary hover:underline">
+                    <button type="submit" class="inline-flex min-h-11 items-center px-1 text-primary hover:underline">
                       {m.is_leader === 1 ? t(locale, 'serve.teams.removeLeader') : t(locale, 'serve.teams.makeLeader')}
                     </button>
                   </form>
@@ -222,7 +222,7 @@ const copy = ministryCopy(locale);
                   >
                     <input type="hidden" name="_action" value="removeMember" />
                     <input type="hidden" name="person_id" value={m.person_id} />
-                    <button type="submit" class="text-danger hover:underline">
+                    <button type="submit" class="inline-flex min-h-11 items-center px-1 text-danger hover:underline">
                       {t(locale, 'serve.teams.remove')}
                     </button>
                   </form>
@@ -235,9 +235,9 @@ const copy = ministryCopy(locale);
       </ul>
       {
         canEdit && addablePeople.length > 0 && (
-          <form method="post" class="mt-3 flex items-center gap-2">
+          <form method="post" class="mt-3 flex flex-wrap items-center gap-2">
             <input type="hidden" name="_action" value="addMember" />
-            <select name="person_id" class={`${tin} max-w-60`}>
+            <select name="person_id" class={`${tin} min-w-0 flex-1 sm:max-w-60 sm:flex-none`}>
               {addablePeople.map((p) => (
                 <option value={p.id}>{p.display_name}</option>
               ))}
@@ -269,12 +269,12 @@ const copy = ministryCopy(locale);
                     {t(locale, 'serve.teams.viaInterest')}
                   </span>
                 )}
-                <span class="ml-auto flex items-center gap-3">
-                  <a href={localePath(locale, `/profile/${p.person_id}`)} class="text-primary hover:underline">
+                <span class="ml-auto flex flex-wrap items-center gap-x-3">
+                  <a href={localePath(locale, `/profile/${p.person_id}`)} class="inline-flex min-h-11 items-center text-primary hover:underline">
                     {t(locale, 'serve.teams.viewProfile')}
                   </a>
                   {p.email && (
-                    <a href={`mailto:${p.email}`} class="text-primary hover:underline">
+                    <a href={`mailto:${p.email}`} class="inline-flex min-h-11 items-center text-primary hover:underline">
                       {t(locale, 'serve.teams.contact')}
                     </a>
                   )}
@@ -282,7 +282,7 @@ const copy = ministryCopy(locale);
                     <form method="post">
                       <input type="hidden" name="_action" value="invite" />
                       <input type="hidden" name="person_id" value={p.person_id} />
-                      <button type="submit" class="font-semibold text-accent hover:underline">
+                      <button type="submit" class="inline-flex min-h-11 items-center font-semibold text-accent hover:underline">
                         {t(locale, 'invite.button')}
                       </button>
                     </form>

@@ -4,9 +4,9 @@
 
 It is intended for small and mid-size churches, fellowships, and nonprofits, especially bilingual and immigrant congregations, that have a technically comfortable person or partner to deploy and maintain it. It is source code you host, not a managed service.
 
-Implemented capabilities: public church website with three themes, sermons, bulletins, events, articles, testimonies, and a drag-and-drop page builder; people and households with CSV import and export; groups and fellowships; volunteer scheduling with email confirmation; children's check-in kiosk; service attendance; newcomer follow-up; prayer wall; community workflows with email reminders; multi-campus; activity scores; a Learning module connected to Google Classroom or Canvas; optional member portal, offline giving ledger, and free event registration (Supabase backend); optional read-only Planning Center People synchronization.
+Implemented capabilities: public church website with three themes, sermons, bulletins, events, articles, testimonies, and a drag-and-drop page builder; people and households with CSV import and export; groups and fellowships; volunteer scheduling with email confirmation; children's check-in kiosk; service attendance; newcomer follow-up; prayer wall; community workflows with email reminders; multi-campus; activity scores; a Learning module connected to Google Classroom or Canvas; optional member portal (D1 or Supabase), offline giving ledger, and free event registration (Supabase backend); optional read-only Planning Center People synchronization.
 
-Not included: native mobile apps, SMS messaging, and worship service or song planning. Online card giving and paid registration through Stripe are preview/test-only.
+Not included: native mobile apps, SMS messaging, and worship service or song planning. Online giving through Stripe (cards and bank debits) and paid registration run in test mode by default; live mode is an explicit opt-in after a go-live checklist, and giving produces annual giving statements.
 
 ## Docs
 

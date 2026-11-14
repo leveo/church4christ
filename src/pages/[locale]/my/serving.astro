@@ -9,7 +9,7 @@
 //
 // The accept/decline/claim POST handler is DELIBERATELY duplicated from
 // my/index.astro rather than shared: /my must stay self-sufficient (it also runs
-// standalone on the D1 backend, without the `portal` module), so its handler
+// standalone without the `portal` module), so its handler
 // can't depend on this portal-only page or vice versa. Keep the two in sync by
 // hand if the response/claim semantics ever change.
 import { env } from 'cloudflare:workers';
@@ -21,7 +21,7 @@ import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { claimOpenSlot, listOpenSlotsForPerson, respondToAssignment } from '../../../lib/planDb';
 import { listApplicationsByPerson, listPersonAssignments, listPersonServingHistory, listPersonTeams } from '../../../lib/myDb';
-import { formatDate, todayInTz } from '../../../lib/dates';
+import { formatDate, formatDateWithWeekday, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
 import { badge, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
@@ -33,6 +33,11 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = Astro.locals.db;
+// The nav already hides this page without Volunteer Scheduling; match it here.
+if (!Astro.locals.modules.has('serve')) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
 
 const idOf = (v: FormDataEntryValue | null): number | null =>
   /^\d+$/.test(String(v ?? '')) ? Number(v) : null;
@@ -99,7 +104,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
 
     {
       pending.length > 0 && (
-        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
+        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-4 sm:p-6">
           <h2 class="font-display text-lg font-semibold text-warn">
             {t(locale, 'my.pending')} ({pending.length})
           </h2>
@@ -107,24 +112,25 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
             {pending.map((a) => (
               <li class="rounded-md border border-border bg-surface-raised p-4">
                 <div class="flex flex-wrap items-center gap-2 text-sm">
-                  <span class="font-bold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                  <span class="font-bold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                   <span class="font-medium">{a.position_name}</span>
                   <span class="text-ink-muted">
                     {a.team_name} · {a.service_type_name}
                   </span>
                 </div>
-                <form method="post" class="mt-3 flex flex-wrap items-center gap-2">
+                <form method="post" class="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <input type="hidden" name="assignment_id" value={a.id} />
-                  <button type="submit" name="_action" value="accept" class={btn}>
-                    {t(locale, 'my.accept')}
-                  </button>
                   <input
                     name="reason"
+                    enterkeyhint="done"
                     placeholder={t(locale, 'my.declineReason')}
                     aria-label={t(locale, 'my.declineReason')}
-                    class={`${tin} max-w-56`}
+                    class={`${tin} col-span-2 sm:order-2 sm:max-w-56`}
                   />
-                  <button type="submit" name="_action" value="decline" class={btnSecondary}>
+                  <button type="submit" name="_action" value="accept" class={`${btn} sm:order-1`}>
+                    {t(locale, 'my.accept')}
+                  </button>
+                  <button type="submit" name="_action" value="decline" data-confirm={t(locale, 'my.confirmDecline')} class={`${btnSecondary} sm:order-3`}>
                     {t(locale, 'my.decline')}
                   </button>
                 </form>
@@ -144,12 +150,12 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {upcoming.map((a) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                 <span class="font-medium">{a.position_name}</span>
                 <span class="text-ink-muted">
                   {a.team_name} · {a.service_type_name}
                 </span>
-                <span class="ml-auto">
+                <span class="sm:ml-auto">
                   <StatusBadge status={a.status} locale={locale} />
                 </span>
               </li>
@@ -166,7 +172,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {openSlots.map((s) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(s.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(s.plan_date, locale)}</span>
                 <span class="font-medium">{s.position_name}</span>
                 <span class="text-ink-muted">
                   {s.team_name} · {s.service_type_name}
@@ -174,11 +180,11 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
                 <span class="text-xs text-ink-subtle">
                   {s.taken}/{s.needed}
                 </span>
-                <form method="post" class="ml-auto">
+                <form method="post" class="w-full sm:ml-auto sm:w-auto">
                   <input type="hidden" name="_action" value="claim" />
                   <input type="hidden" name="plan_id" value={s.plan_id} />
                   <input type="hidden" name="position_id" value={s.position_id} />
-                  <button type="submit" class={btn}>{t(locale, 'serve.plans.claim')}</button>
+                  <button type="submit" class={`${btn} w-full sm:w-auto`}>{t(locale, 'serve.plans.claim')}</button>
                 </form>
               </li>
             ))}
@@ -220,7 +226,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
                   {h.team_name} · {h.service_type_name}
                   {h.ministry_name && ` · ${h.ministry_name}`}
                 </span>
-                <span class="ml-auto">
+                <span class="sm:ml-auto">
                   <StatusBadge status={h.status} locale={locale} />
                 </span>
               </li>

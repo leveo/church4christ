@@ -19,7 +19,7 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
 }
 
 const EXPECTED_CI_WORKFLOW_SHA256 =
-  'ea78aa9ddd827a416e338d04854a629731ef0e085f06850439c38c81e3ba669d';
+  'dc45757536ddb4bdcf68b5214350c47f4d310014f8a0372f635a9d0475bd84e2';
 
 function normalizeWorkflowSource(source: string): string {
   return source.replaceAll('\r\n', '\n');
@@ -262,6 +262,12 @@ describe('test runner hardening', () => {
   it('limits the build-test job to thirty minutes', () => {
     expect(workflow).toContain(
       'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
+    );
+  });
+
+  it('gives the Postgres end-to-end step its own ten-minute limit', () => {
+    expect(workflow).toContain(
+      '      - name: End-to-end tests (Postgres worker)\n        # Normally about a minute; fail fast and name the step if a run ever stalls.\n        timeout-minutes: 10\n        run: npm run test:e2e:pg\n',
     );
   });
 

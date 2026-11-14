@@ -5,13 +5,13 @@
 // the calendar / giving / blockouts / profile pages. Ported from the reference
 // stack's src/pages/my/index.astro.
 //
-// Portal card row (member portal): when the `portal` module is on (supabase-only
+// Portal card row (member portal): when the `portal` module is on (D1 and Supabase
 // — see modules.ts), a card row above the schedule surfaces the viewer's
 // household, groups (via the public groups module's listGroupsForPerson), any
 // pending join requests for groups they administer, and — when `registration` is
 // also on — their next upcoming event registrations. Every read is gated on the
-// module check so the D1 backend (portal/registration always off there) never
-// touches those tables. The pending-approvals card is structured so a later task
+// module checks so a site with registration off (always the case on D1) never
+// touches the Registration tables. The pending-approvals card is structured so a later task
 // can fold prayer-item approvals into it.
 //
 // Authorization: respondToAssignment is called with the SESSION user's id — its
@@ -32,7 +32,7 @@ import { getPortalHousehold } from '../../../lib/portalDb';
 import { listGroupsForPerson, listJoinRequests } from '../../../lib/groupDb';
 import { listPendingForApprover } from '../../../lib/prayerDb';
 import { listRegistrationsForPerson } from '../../../lib/regDb';
-import { formatDate, todayInTz } from '../../../lib/dates';
+import { formatDate, formatDateWithWeekday, todayInTz } from '../../../lib/dates';
 import { sendDeclineNotice } from '../../../lib/notify';
 import { type EmailEnv } from '../../../lib/email';
 import { badge, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
@@ -84,9 +84,9 @@ if (Astro.request.method === 'POST') {
 
 const claimed = Astro.url.searchParams.get('claimed') === '1';
 const today = todayInTz();
-// The portal-gated card row below reads household/group/registration data that
-// lives only on the supabase backend — module gating keeps those queries off D1
-// (portal always off there, see modules.ts) so it never touches those tables.
+// The portal-gated card row below reads household/group data (both backends) and
+// registration data (Supabase-only: the `registration` module is always off on D1,
+// see modules.ts), so registration and event-admin queries are gated separately.
 const hasPortal = Astro.locals.modules.has('portal');
 const hasRegistration = hasPortal && Astro.locals.modules.has('registration');
 // listPendingForApprover receives the whole user so only a super admin gets
@@ -98,7 +98,7 @@ const [assignments, openSlots, applications, household, myGroups, upcomingRegist
   hasPortal ? getPortalHousehold(db, user.id) : Promise.resolve(null),
   hasPortal ? listGroupsForPerson(db, user.id) : Promise.resolve([]),
   hasRegistration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
-  hasPortal ? listPendingForApprover(db, user.id, user, locale) : Promise.resolve([]),
+  hasPortal ? listPendingForApprover(db, user.id, user, locale, { registration: hasRegistration }) : Promise.resolve([]),
 ]);
 const pending = assignments.filter((a) => a.status === 'U');
 const upcoming = assignments.filter((a) => a.status === 'C');
@@ -133,6 +133,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     <MemberPageHeader title={t(locale, 'my.welcome', { name: user.displayName })} description={memberCopy(locale).welcomeBody} eyebrow={memberCopy(locale).welcome}>
       <a href={localePath(locale, '/my/calendar')} class={btn}>{t(locale, 'my.calendar')}</a>
       <a href={localePath(locale, '/my/blockouts')} class={btnSecondary}>{t(locale, 'my.blockouts')}</a>
+      {Astro.locals.modules.has('planning') && <a href={localePath(locale, '/my/availability')} class={btnSecondary}>{t(locale, 'planning.availability.nav')}</a>}
     </MemberPageHeader>
     <dl class="member-summary">
       <div><dt>{t(locale, 'my.pending')}</dt><dd>{pending.length}</dd></div>
@@ -146,7 +147,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
     <div class="member-dashboard-grid"><div>
     {
       pending.length > 0 && (
-        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-6">
+        <section class="mt-8 rounded-lg border border-warn bg-warn-soft p-4 sm:p-6">
           <h2 class="font-display text-lg font-semibold text-warn">
             {t(locale, 'my.pending')} ({pending.length})
           </h2>
@@ -154,24 +155,25 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
             {pending.map((a) => (
               <li class="rounded-md border border-border bg-surface-raised p-4">
                 <div class="flex flex-wrap items-center gap-2 text-sm">
-                  <span class="font-bold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                  <span class="font-bold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                   <span class="font-medium">{a.position_name}</span>
                   <span class="text-ink-muted">
                     {a.team_name} · {a.service_type_name}
                   </span>
                 </div>
-                <form method="post" class="mt-3 flex flex-wrap items-center gap-2">
+                <form method="post" class="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <input type="hidden" name="assignment_id" value={a.id} />
-                  <button type="submit" name="_action" value="accept" class={btn}>
-                    {t(locale, 'my.accept')}
-                  </button>
                   <input
                     name="reason"
+                    enterkeyhint="done"
                     placeholder={t(locale, 'my.declineReason')}
                     aria-label={t(locale, 'my.declineReason')}
-                    class={`${tin} max-w-56`}
+                    class={`${tin} col-span-2 sm:order-2 sm:max-w-56`}
                   />
-                  <button type="submit" name="_action" value="decline" class={btnSecondary}>
+                  <button type="submit" name="_action" value="accept" class={`${btn} sm:order-1`}>
+                    {t(locale, 'my.accept')}
+                  </button>
+                  <button type="submit" name="_action" value="decline" data-confirm={t(locale, 'my.confirmDecline')} class={`${btnSecondary} sm:order-3`}>
                     {t(locale, 'my.decline')}
                   </button>
                 </form>
@@ -191,12 +193,12 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {upcoming.map((a) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(a.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(a.plan_date, locale)}</span>
                 <span class="font-medium">{a.position_name}</span>
                 <span class="text-ink-muted">
                   {a.team_name} · {a.service_type_name}
                 </span>
-                <span class="ml-auto">
+                <span class="sm:ml-auto">
                   <StatusBadge status={a.status} locale={locale} />
                 </span>
               </li>
@@ -213,7 +215,7 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
           <ul class="mt-3 divide-y divide-border rounded-lg border border-border bg-surface-raised">
             {openSlots.map((s) => (
               <li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <span class="font-semibold tabular-nums">{formatDate(s.plan_date, locale)}</span>
+                <span class="font-semibold tabular-nums">{formatDateWithWeekday(s.plan_date, locale)}</span>
                 <span class="font-medium">{s.position_name}</span>
                 <span class="text-ink-muted">
                   {s.team_name} · {s.service_type_name}
@@ -221,11 +223,11 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
                 <span class="text-xs text-ink-subtle">
                   {s.taken}/{s.needed}
                 </span>
-                <form method="post" class="ml-auto">
+                <form method="post" class="w-full sm:ml-auto sm:w-auto">
                   <input type="hidden" name="_action" value="claim" />
                   <input type="hidden" name="plan_id" value={s.plan_id} />
                   <input type="hidden" name="position_id" value={s.position_id} />
-                  <button type="submit" class={btn}>{t(locale, 'serve.plans.claim')}</button>
+                  <button type="submit" class={`${btn} w-full sm:w-auto`}>{t(locale, 'serve.plans.claim')}</button>
                 </form>
               </li>
             ))}
@@ -337,4 +339,5 @@ const appBadge: Record<'P' | 'A' | 'R', string> = {
   .member-dashboard-aside { margin-top: 2rem; }
   .member-community-photo { height: 200px; margin-top: 1.5rem; overflow: hidden; border-radius: var(--radius-lg); }
   @media (max-width: 767px) { .member-dashboard-grid { grid-template-columns: 1fr; } .member-dashboard-aside { margin-top: .5rem; } }
+  @media (max-width: 639px) { .member-community-photo { display: none; } }
 </style>

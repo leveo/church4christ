@@ -6,6 +6,7 @@ import {
   createOneTimeCheckout,
   createRecurringCheckout,
   StripeError,
+  stripeConfiguredMode,
   type StripeEnv,
 } from '../../../lib/stripe';
 import { newCheckoutRequestId, parseCheckoutRequestId } from '../../../lib/stripeCheckoutRequests';
@@ -55,6 +56,8 @@ const defaultDeps: GivingCheckoutDeps = {
 export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDeps): APIRoute {
   return async ({ request, locals }) => {
     if (!locals.modules.has('giving')) return new Response('Not found', { status: 404 });
+    const stripeMode = stripeConfiguredMode(deps.stripeEnv);
+    if (stripeMode === null) return back(locals.locale, 'unavailable');
     let form: FormData;
     try {
       form = await request.formData();
@@ -97,7 +100,7 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     personId = user.id;
     donorName = user.displayName;
     donorEmail = user.email;
-    customerId = await deps.getStripeCustomer(locals.db, user.id);
+    customerId = await deps.getStripeCustomer(locals.db, user.id, stripeMode === 'live');
 
     let normalized: ReturnType<typeof normalizeGivingCheckoutInput>;
     try {
@@ -146,6 +149,7 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
           donorName: normalized.donorName,
           donorEmail: normalized.donorEmail,
           customerId: normalized.customerId,
+          campusId,
         }, { requestId });
         return redirect(session.url);
       }
@@ -160,6 +164,7 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
         personId: normalized.personId!,
         email: normalized.donorEmail,
         customerId: normalized.customerId,
+        campusId,
       }, { requestId });
       return redirect(session.url);
     } catch (error) {

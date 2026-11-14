@@ -4,15 +4,18 @@
 export interface DayMark {
   statuses: ('U' | 'C' | 'D')[];
   blocked: boolean;
-  /** Portal event titles landing on this day (Member Portal Phase 4 — empty/absent on D1). */
+  /** Portal event titles landing on this day (Member Portal Phase 4 — empty/absent when the portal is off). */
   events?: string[];
   /** Portal group-meeting labels landing on this day (Member Portal Phase 4 — empty/absent on D1). */
   meetings?: string[];
+  /** Service Planning rehearsals and run-sheet duties landing on this day (empty/absent when the module is off). */
+  planning?: string[];
 }
 
 export interface CalendarMarksOptions {
   events?: { date: string; title: string }[];
   meetings?: { date: string; title: string }[];
+  planning?: { date: string; title: string }[];
 }
 
 /**
@@ -51,6 +54,11 @@ export function buildCalendarMarks(
     if (m.date.slice(0, 7) !== ym) continue;
     const mark = markOf(m.date);
     (mark.meetings ??= []).push(m.title);
+  }
+  for (const p of options.planning ?? []) {
+    if (p.date.slice(0, 7) !== ym) continue;
+    const mark = markOf(p.date);
+    (mark.planning ??= []).push(p.title);
   }
   return marks;
 }

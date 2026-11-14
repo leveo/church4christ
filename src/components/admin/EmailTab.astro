@@ -48,8 +48,10 @@ const logCls: Record<string, string> = {
               <form method="post">
                 <input type="hidden" name="rule_key" value={r.key} />
                 <input type="hidden" name="enabled" value={on ? '0' : '1'} />
-                <button name="_action" value="toggleRule" aria-pressed={on} aria-label={t(lang, r.label)} class:list={['relative w-11 h-6 rounded-full shrink-0 transition-colors', on ? 'bg-primary' : 'bg-border']}>
-                  <span class:list={['absolute top-0.5 h-5 w-5 rounded-full bg-surface shadow transition-all', on ? 'left-[22px]' : 'left-0.5']}></span>
+                <button name="_action" value="toggleRule" aria-pressed={on} aria-label={t(lang, r.label)} class="flex h-11 w-14 shrink-0 items-center justify-center">
+                  <span class:list={['relative block h-6 w-11 rounded-full transition-colors', on ? 'bg-primary' : 'bg-border']}>
+                    <span class:list={['absolute top-0.5 h-5 w-5 rounded-full bg-surface shadow transition-all', on ? 'left-[22px]' : 'left-0.5']}></span>
+                  </span>
                 </button>
               </form>
               <div class="flex-1">
@@ -67,7 +69,7 @@ const logCls: Record<string, string> = {
         <h2 class="font-display text-heading-sm font-bold">{t(lang, 'admin.console.email.template')}</h2>
         <div class="ml-auto flex gap-1 flex-wrap">
           {tplKeys.map((k) => (
-            <a href={`/admin/ministries?tab=email&tpl=${k}`} class:list={['px-3 py-1 rounded-full text-xs font-semibold', k === selectedKey ? 'bg-primary text-on-primary' : 'border border-border text-ink-muted hover:bg-surface-sunken']}>{t(lang, `admin.console.tpl.${k}`)}</a>
+            <a href={`/admin/ministries?tab=email&tpl=${k}`} class:list={['inline-flex min-h-11 items-center px-4 py-1 rounded-full text-xs font-semibold', k === selectedKey ? 'bg-primary text-on-primary' : 'border border-border text-ink-muted hover:bg-surface-sunken']}>{t(lang, `admin.console.tpl.${k}`)}</a>
           ))}
         </div>
       </div>

@@ -17,7 +17,7 @@ function rawOf(res: { raw: string } | { rateLimited: true } | { notEligible: tru
 }
 
 describe('/auth/[token] magic-link consume', () => {
-  it('GET peeks (no consume), POST signs in with a c4c_session cookie + 303 /en/my', async () => {
+  it('GET peeks (no consume), POST signs in with a c4c_session cookie + 303 /en/my/opportunities', async () => {
     // Seed person 3 is an active English-preferring member.
     const raw = rawOf(await createLoginToken(env.DB, 3));
 
@@ -36,7 +36,7 @@ describe('/auth/[token] magic-link consume', () => {
     expect(consumed.headers.get('cache-control')).toBe('no-store');
     expect(consumed.headers.get('referrer-policy')).toBe('no-referrer');
     expect(consumed.headers.get('x-content-type-options')).toBe('nosniff');
-    expect(consumed.headers.get('location')).toBe('/en/my');
+    expect(consumed.headers.get('location')).toBe('/en/my/opportunities');
     expect(consumed.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
 
     // Replaying the now-consumed token must NOT re-establish a session.
@@ -49,7 +49,7 @@ describe('/auth/[token] magic-link consume', () => {
     const raw = rawOf(await createLoginToken(env.DB, 4)); // person 4: lang zh
     const res = await post(`/auth/${raw}`, '');
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/zh/my');
+    expect(res.headers.get('location')).toBe('/zh/my/opportunities');
   });
 
   it('an expired token sets no session cookie', async () => {

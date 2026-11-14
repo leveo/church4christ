@@ -191,6 +191,6 @@ describe('Stripe operations module gate', () => {
       expect(guide).toContain('CHURCH_SETUP_STRIPE_SECRET_KEY');
       expect(guide).toContain('CHURCH_SETUP_STRIPE_WEBHOOK_SECRET');
     }
-    expect(supabaseGuideSource).toContain('exactly these eight events');
+    expect(supabaseGuideSource).toContain('exactly these twelve events');
   });
 });

@@ -32,7 +32,7 @@ if (Astro.request.method === 'POST') {
   const id = /^\d+$/.test(idRaw) ? Number(idRaw) : null;
 
   if (action === 'toggle' && id !== null) {
-    await toggleFundActive(db, id);
+    await toggleFundActive(db, id, user.id);
     return Astro.redirect('/admin/giving/funds?saved=1', 303);
   }
   if (action === 'save') {
@@ -47,8 +47,13 @@ if (Astro.request.method === 'POST') {
           fund_number: parsed.data.fund_number,
           name_en: parsed.data.name_en,
           name_zh: parsed.data.name_zh,
+          description_en: parsed.data.description_en,
+          description_zh: parsed.data.description_zh,
           active: parsed.data.active ? 1 : 0,
           sort: parsed.data.sort,
+          is_default: parsed.data.is_default,
+          tax_deductible: parsed.data.tax_deductible,
+          actorPersonId: user.id,
         });
         return Astro.redirect('/admin/giving/funds?saved=1', 303);
       } catch (e) {
@@ -71,10 +76,10 @@ const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) 
 const g = (n: string) => String(fd?.get(n) ?? '');
 const echoing = fd !== null && failedId !== null;
 const v = echoing
-  ? { fundNumber: g('fund_number'), nameEn: g('name_en'), nameZh: g('name_zh'), active: fd!.get('active') !== null, sort: g('sort') }
+  ? { fundNumber: g('fund_number'), nameEn: g('name_en'), nameZh: g('name_zh'), descEn: g('description_en'), descZh: g('description_zh'), active: fd!.get('active') !== null, isDefault: fd!.get('is_default') !== null, taxDeductible: fd!.get('tax_deductible') !== null, sort: g('sort') }
   : editingRow
-    ? { fundNumber: editingRow.fund_number, nameEn: editingRow.name_en, nameZh: editingRow.name_zh, active: editingRow.active === 1, sort: String(editingRow.sort) }
-    : { fundNumber: '', nameEn: '', nameZh: '', active: true, sort: '0' };
+    ? { fundNumber: editingRow.fund_number, nameEn: editingRow.name_en, nameZh: editingRow.name_zh, descEn: editingRow.description_en, descZh: editingRow.description_zh, active: editingRow.active === 1, isDefault: editingRow.is_default, taxDeductible: editingRow.tax_deductible, sort: String(editingRow.sort) }
+    : { fundNumber: '', nameEn: '', nameZh: '', descEn: '', descZh: '', active: true, isDefault: false, taxDeductible: true, sort: '0' };
 
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.giving.funds');
@@ -118,8 +123,9 @@ const copy = financeCopy(lang);
               <tr class="border-t border-border align-top">
                 <td class={`${td} font-medium tabular-nums`}>{r.fund_number}</td>
                 <td class={td}>
-                  <div class="font-medium">{r.name_en || '—'}</div>
+                  <div class="font-medium">{r.name_en || '—'}{r.is_default && <span class={`ml-2 ${badge} ${badgeActive}`}>{t(lang, 'admin.giving.fundDefaultBadge')}</span>}</div>
                   <div class="text-ink-muted">{r.name_zh || '—'}</div>
+                  {!r.tax_deductible && <div class="text-xs text-ink-muted">{t(lang, 'admin.giving.fundNotDeductible')}</div>}
                 </td>
                 <td class={td}>{r.sort}</td>
                 <td class={td}>
@@ -176,8 +182,24 @@ const copy = financeCopy(lang);
           <input name="name_zh" value={v.nameZh} class={tin} />
         </label>
       </div>
+      <div class="finance-entry-fields">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundDescriptionEn')}</span>
+          <textarea name="description_en" rows="2" maxlength="500" class={tin}>{v.descEn}</textarea>
+        </label>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.giving.fundDescriptionZh')}</span>
+          <textarea name="description_zh" rows="2" maxlength="500" class={tin}>{v.descZh}</textarea>
+        </label>
+      </div>
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="is_default" checked={v.isDefault} /> {t(lang, 'admin.giving.fundDefault')}
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="tax_deductible" checked={v.taxDeductible} /> {t(lang, 'admin.giving.fundTaxDeductible')}
       </label>
       <div class="flex items-center gap-4">
         <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>

@@ -18,6 +18,8 @@ export async function checkServices(options) {
   const stripeModeTest = rawPresence.stripeModeTest ?? options.manifest.database === 'supabase';
   const stripeClassificationVerifiable = rawPresence.stripeClassificationVerifiable ?? options.manifest.mode !== 'deploy';
   delete rawPresence.stripeClassification;
+  const stripeModeLive = rawPresence.stripeModeLive === true;
+  delete rawPresence.stripeModeLive;
   delete rawPresence.stripeModeTest;
   delete rawPresence.stripeClassificationVerifiable;
   const supplied = { d1: false, emailConfigured: false, identityVerificationSecretStatus: 'missing',
@@ -84,10 +86,19 @@ export async function checkServices(options) {
       checks.push(result('services.stripe-absent', required.has('stripe') ? 'error' : 'warning', 'Stripe is not configured; free registration and offline giving remain available without online payments.', 'Configure both Stripe secrets to enable payments.'));
     } else if (count === 1) {
       checks.push(result('services.stripe-partial', 'error', 'Stripe configuration is partial and cannot safely process payments.', 'Configure both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or remove both.'));
+    } else if (stripeModeLive) {
+      // Live mode was explicitly opted into (STRIPE_MODE=live and STRIPE_LIVE_CONFIRMED=1).
+      if (stripeClassification === 'live') {
+        checks.push(result('services.stripe-live-ok', 'info', 'Stripe live mode is configured with a live key and webhook secret.', 'Work through the go-live checklist in docs/supabase-setup.md; a configured key does not prove live delivery.'));
+      } else if (stripeClassification === 'unverifiable') {
+        checks.push(result('services.stripe-unverifiable', 'warning', 'Stripe live mode is configured, but the remote secret value classification is unverifiable.', 'Confirm the stored Worker secret is an sk_live_ or rk_live_ key; runtime validation remains authoritative.'));
+      } else {
+        checks.push(result('services.stripe-unknown', 'error', 'Stripe live mode is configured, but the credentials are not a complete live pair.', 'Store an sk_live_ or rk_live_ key and a whsec_ webhook secret, or return to test mode.'));
+      }
     } else if (!stripeModeTest) {
-      checks.push(result('services.stripe-mode', 'error', 'Stripe secrets are present, but the effective runtime mode is not test.', 'Remove local STRIPE_MODE overrides and regenerate wrangler.jsonc with STRIPE_MODE=test before processing payments.'));
+      checks.push(result('services.stripe-mode', 'error', 'Stripe secrets are present, but the effective runtime mode is not test.', 'Remove local STRIPE_MODE overrides and regenerate wrangler.jsonc with STRIPE_MODE=test, or follow the documented live opt-in, before processing payments.'));
     } else if (stripeClassification === 'live') {
-      checks.push(result('services.stripe-live', 'error', 'Live-mode Stripe credentials are disabled.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
+      checks.push(result('services.stripe-live', 'error', 'Live-mode Stripe credentials are present while the runtime mode is test.', 'Use an sk_test_ key and whsec_ webhook secret, or opt into live mode with STRIPE_MODE=live and STRIPE_LIVE_CONFIRMED=1.'));
     } else if (stripeClassification === 'unknown') {
       checks.push(result('services.stripe-unknown', 'error', 'Stripe credentials cannot be classified as a complete test-mode pair.', 'Replace the local Stripe values with an sk_test_ key and whsec_ webhook secret.'));
     } else if (!stripeClassificationVerifiable || stripeClassification === 'unverifiable') {

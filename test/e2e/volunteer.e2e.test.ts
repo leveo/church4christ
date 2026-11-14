@@ -382,7 +382,9 @@ describe('/en/serve/opportunities (public board)', () => {
     // their presence proves the open-signup aggregation returned rows rather than
     // an empty state.
     expect(body).toContain('Vocalist');
-    expect(body).toContain(sunday(0));
+    // Dates render with a weekday (e.g. "Sun, Nov 15") so people can place them at a glance.
+    const d = Number(sunday(0).split('-')[2]);
+    expect(body).toMatch(new RegExp(`Sun, [A-Z][a-z]{2} ${d}\\b`));
     expect(body).toContain('/en/serve/apply?team=1'); // Apply CTA carries the team
 
     // Following the CTA lands on the apply form with team 1 preselected.

@@ -336,6 +336,70 @@ It does not change an existing installation's brand, features, or data. Preserve
 `.church/preferences.json`, any uploaded logo, and `.church/branding.json` when moving a
 build to another machine.
 
+## Unreleased: Member Portal on D1
+
+The Member Portal now runs on the default Cloudflare D1 database. This adds one forward D1
+migration, `migrations/0039_member_portal_d1.sql`, which creates the `group_files` and
+`prayer_items` tables (each with `campus_id`). On an existing installation it also records
+`module.portal = 0` when no portal choice is saved yet, so upgrading does not turn the portal
+on by itself. It changes no other table or row.
+Supabase installations are unaffected: there is no PostgreSQL migration and their
+behavior does not change.
+
+For a D1 installation, back up as usual and apply the new migration with your normal D1
+migration step (`npm run db:migrate:remote`) **before** deploying the new build. Previously
+the portal was force-disabled on D1. After upgrading it stays off until an administrator
+turns on Member Portal in **Settings → Modules**. On D1 the
+event-scope prayers, event administrators, and My registrations stay unavailable because
+they depend on Registration, which remains Supabase-only.
+
+## Unreleased: Production Giving
+
+This adds one forward PostgreSQL migration, `migrations-supabase/0039_giving_production.sql`,
+for installations with Giving. D1 has no Giving tables and no new D1 migration is needed for it.
+
+1. Back up the Supabase database as usual (see section 2).
+2. Apply the migration with your normal Supabase migration step **before** deploying the new
+   build. It adds gift columns, widens the gift method/status and recurring interval checks, and
+   creates `stripe_customers`, `giving_statement_outbox`, and `giving_audit_events`. It marks
+   existing manual (check/cash) gifts as live, leaves existing Stripe gifts as test, and
+   backfills each Stripe gift's `paid_at` from its creation time.
+3. Deploy. The installation stays in **test mode**; nothing changes for donors until you opt
+   into live mode. `STRIPE_MODE` accepts `test` or `live`; live also requires
+   `STRIPE_LIVE_CONFIRMED=1`, a live key, and a live webhook secret.
+4. Update the Stripe webhook endpoint's events to the twelve listed in
+   [`supabase-setup.md`](supabase-setup.md#7c-the-webhook-endpoint), at API version
+   `2025-03-31.basil`. Run `npm run doctor`; it warns when stored events came from another API
+   version.
+5. Before going live, follow the go-live checklist in `supabase-setup.md` (it includes draining
+   Registration checkout requests that are still in `creating`).
+6. Re-running setup on a live installation preserves the live opt-in in `wrangler.jsonc`.
+
+There is no new cron trigger: annual statements are delivered by the existing five-minute job.
+To roll back the application, redeploy the previous build; the new columns and tables are
+additive and the previous build ignores them (it only reads the widened constraints' old values).
+## Unreleased: Service Planning
+
+Service Planning adds one forward migration on each backend, `migrations/0040_service_planning.sql`
+(D1) and `migrations-supabase/0040_service_planning.sql` (Supabase). It creates
+`planning_events`, `planning_event_coordinators`, `planning_items`, `planning_sessions`,
+`planning_session_people`, `availability_windows`, and `planning_notification_rules`, seeds the
+four default notification rules for the main campus, and adds five identity-merge reference keys.
+On an existing installation it also records `module.planning = 0` when module choices or people
+already exist, so upgrading does not switch the module on. It changes no other table or row.
+
+1. Back up as usual (see section 2).
+2. Apply the migration with your normal step, **before** deploying the new build:
+   `npm run db:migrate:remote` (D1) or `npm run db:migrate:supabase` (Supabase). On Supabase, `0039` is
+   Production Giving above; apply the files in order and do not renumber either.
+3. Deploy. The module is off until an administrator turns on **Service Planning** in
+   **Settings → Modules**. Grant the **Service planning** area on a person's page to let a limited
+   admin manage events; event coordinators need no admin access.
+4. Optional: open **Admin → Service planning** and review the notification rules. Reminders are sent
+   by the existing daily reminder job; no cron trigger, binding, or secret is added.
+
+No preset changes, so an installation's recorded module list stays valid.
+
 ## Upgrading 1.3.0 to 1.4.0
 
 Version 1.4.0 adds no database migration, binding, secret, cron trigger, or reseeding step.

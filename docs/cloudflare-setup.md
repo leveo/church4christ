@@ -60,8 +60,8 @@ and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing
 launch and during operation.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
-> default for 18 modules. **Member Portal**, **Giving**, and **Registration** need Postgres,
-> so setup selects **Supabase** when any of them is enabled. Local D1 needs no external
+> default for 20 modules. **Giving** and **Registration** need Postgres,
+> so setup selects **Supabase** when either is enabled. Local D1 needs no external
 > account; deployed D1 needs Cloudflare. Local Supabase needs a local or hosted Supabase
 > database; deployed Supabase needs both Cloudflare and Supabase. There is no automated
 > D1↔Supabase content migration yet, so choose before entering production content.
@@ -82,7 +82,7 @@ launch and during operation.
 
 ## Guided setup or manual reference
 
-![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe remains preview/test-only](./images/diagrams/setup-paths-overview.png)
+![Setup branches from local evaluation or deployment into D1-backed Website and Community presets or the Supabase-backed Full Church preset; production email is optional and Stripe starts in test mode](./images/diagrams/setup-paths-overview.png)
 
 ### Path A — Let an AI assistant do it (easiest)
 
@@ -135,9 +135,9 @@ troubleshooting; the exact manual commands live in [`deploy.md`](./deploy.md).
 Every one of these is spelled out, with the exact text to type, in
 [`deploy.md`](./deploy.md).
 
-**Stripe is test-only and Supabase-only.** D1 does not support Giving, Registration, or
-Stripe operations. If your selected Supabase features accept payments, keep Stripe in test
-mode and provide its credentials as one-shot inputs when you run setup:
+**Stripe is Supabase-only and starts in test mode.** D1 does not support Giving,
+Registration, or Stripe operations. If your selected Supabase features accept payments,
+provide test credentials as one-shot inputs when you run setup:
 
 ```bash
 CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
@@ -145,10 +145,13 @@ CHURCH_SETUP_STRIPE_WEBHOOK_SECRET="whsec_…" \
 npm run setup
 ```
 
-Setup stores the runtime secrets without printing them. It rejects live keys, and the site
-rejects signed live webhook events with `400 live_mode_disabled` without storing them. The
-Supabase configuration also installs the five-minute recovery schedule; D1 installs no
-Stripe schedule.
+Setup stores the runtime secrets without printing them and writes `STRIPE_MODE=test`; this
+setup input rejects live keys. Live mode is a separate opt-in (`STRIPE_MODE=live` plus
+`STRIPE_LIVE_CONFIRMED=1`) described in the go-live checklist in
+[`supabase-setup.md`](./supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration);
+the site rejects any event whose mode does not match the configured mode. The Supabase
+configuration also installs the five-minute recovery schedule; D1 installs no Stripe
+schedule.
 
 ## After you are live
 

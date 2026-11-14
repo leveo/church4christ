@@ -124,8 +124,8 @@ const occurrenceWhen = (o: UpcomingOccurrence) => {
   return `${formatDate(o.occurs_on, locale)} · ${time}`;
 };
 
-// Group files (portal module only — group_files is Supabase-backed, so never
-// queried on D1 where the portal is force-off). Shown to members and site admins
+// Group files (portal module only — group_files exists on both backends, but is only
+// queried when the portal is on). Shown to members and site admins
 // (canSeeRoster); the download links resolve through the auth-gated route, which
 // enforces the same ACL server-side.
 const hasPortal = Astro.locals.modules.has('portal');

@@ -32,18 +32,20 @@ describe('single-language emailed token pages', () => {
     }
   });
 
-  it.each(['en', 'zh'] as const)('keeps retired %s email-change requests behind the D1 portal module gate', async (locale) => {
-    // Portal is unavailable on D1. The public module gate must run before the
-    // retired route renderer, including on POST; locale rendering lives in PG.
+  it.each(['en', 'zh'] as const)('keeps retired %s email-change requests mutation-free on D1 with the portal on', async (locale) => {
+    // The portal module is available on D1, so the retired route renders its
+    // locale-appropriate "link retired" page for both GET and POST without
+    // setting a cookie or presenting a confirmation form.
     for (const response of [
       await get('/email-change/unknown-presentation-token', { 'accept-language': locale }),
       await post('/email-change/unknown-presentation-token', '', { 'accept-language': locale }),
     ]) {
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       expect(response.headers.get('set-cookie')).toBeNull();
       const html = await response.text();
       expect(html).not.toContain(t(locale, 'portal.emailChange.confirm.title'));
       expect(html).not.toContain('<form');
+      expect(html).toContain(locale === 'en' ? 'lang="en"' : 'lang="zh-Hans"');
     }
   });
 

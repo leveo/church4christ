@@ -43,12 +43,16 @@ if (!locale) {
 }
 const user = Astro.locals.user!;
 const db = Astro.locals.db;
+// Event-scoped prayers, "events I admin" and registrations belong to Registration,
+// which is Supabase-only; with it off no reg_* / event_admins query runs.
+const registration = Astro.locals.modules.has('registration');
 
 const str = (v: FormDataEntryValue | null): string => String(v ?? '').trim();
 const idOf = (v: FormDataEntryValue | null): number | null => (/^\d+$/.test(String(v ?? '')) ? Number(v) : null);
 
-const TABS = ['church', 'groups', 'events', 'mine', 'pending'] as const;
-type PrayerTab = (typeof TABS)[number];
+const ALL_TABS = ['church', 'groups', 'events', 'mine', 'pending'] as const;
+type PrayerTab = (typeof ALL_TABS)[number];
+const TABS: readonly PrayerTab[] = registration ? ALL_TABS : ALL_TABS.filter((tb) => tb !== 'events');
 const tabOf = (v: FormDataEntryValue | null): PrayerTab =>
   (TABS as readonly string[]).includes(String(v ?? '')) ? (v as PrayerTab) : 'church';
 
@@ -61,11 +65,10 @@ if (Astro.request.method === 'POST') {
 
   if (action === 'post') {
     const scopeRaw = str(fd.get('scope'));
-    const scope: PrayerScope | null = (['church', 'group', 'event', 'private'] as const).includes(
-      scopeRaw as PrayerScope,
-    )
-      ? (scopeRaw as PrayerScope)
-      : null;
+    const allowedScopes: readonly string[] = registration
+      ? ['church', 'group', 'event', 'private']
+      : ['church', 'group', 'private'];
+    const scope: PrayerScope | null = allowedScopes.includes(scopeRaw) ? (scopeRaw as PrayerScope) : null;
     if (scope === null) return fail('generic');
     const groupId = scope === 'group' ? idOf(fd.get('group_id')) : null;
     const regEventId = scope === 'event' ? idOf(fd.get('reg_event_id')) : null;
@@ -77,6 +80,7 @@ if (Astro.request.method === 'POST') {
         groupId,
         regEventId,
         body: str(fd.get('body')),
+        registration,
       });
       return done('posted');
     } catch (e) {
@@ -88,7 +92,7 @@ if (Astro.request.method === 'POST') {
     const itemId = idOf(fd.get('item_id'));
     if (itemId !== null) {
       try {
-        await decidePrayerItem(db, { itemId, approve: action === 'approve', approverId: user.id, moderator: user });
+        await decidePrayerItem(db, { itemId, approve: action === 'approve', approverId: user.id, moderator: user, registration });
       } catch {
         return fail('generic');
       }
@@ -99,7 +103,7 @@ if (Astro.request.method === 'POST') {
     const itemId = idOf(fd.get('item_id'));
     if (itemId !== null) {
       try {
-        await deletePrayerItem(db, { itemId, actorId: user.id, moderator: user });
+        await deletePrayerItem(db, { itemId, actorId: user.id, moderator: user, registration });
       } catch {
         return fail('generic');
       }
@@ -114,10 +118,12 @@ if (Astro.request.method === 'POST') {
 // exists to serve moderation, not this picker), so it's a small inline query
 // mirroring regDb's i18n-fallback title join.
 const [pendingForViewer, myGroups, myRegistrations, adminEventRows] = await Promise.all([
-  listPendingForApprover(db, user.id, user, locale),
+  listPendingForApprover(db, user.id, user, locale, { registration }),
   listGroupsForPerson(db, user.id),
-  listRegistrationsForPerson(db, locale, user.id, user.email),
-  db
+  registration ? listRegistrationsForPerson(db, locale, user.id, user.email) : Promise.resolve([]),
+  !registration
+    ? Promise.resolve([] as { id: number; title: string }[])
+    : db
     .prepare(
       `SELECT e.id AS id, COALESCE(el.title, ed.title, '') AS title
        FROM event_admins ea
@@ -147,10 +153,10 @@ const visibleTabs: PrayerTab[] = hasAuthority ? [...TABS] : TABS.filter((tb) => 
 const activeTab: PrayerTab = (visibleTabs as readonly string[]).includes(tabParam) ? (tabParam as PrayerTab) : 'church';
 
 let items: PrayerItem[];
-if (activeTab === 'church') items = await listChurchPrayers(db, locale);
-else if (activeTab === 'groups') items = await listGroupPrayersForPerson(db, user.id, locale);
-else if (activeTab === 'events') items = await listEventPrayersForPerson(db, user.id, user.email, locale);
-else if (activeTab === 'mine') items = await listMyPrayerItems(db, user.id, locale);
+if (activeTab === 'church') items = await listChurchPrayers(db, locale, { registration });
+else if (activeTab === 'groups') items = await listGroupPrayersForPerson(db, user.id, locale, { registration });
+else if (activeTab === 'events') items = await listEventPrayersForPerson(db, user.id, user.email, locale, { registration });
+else if (activeTab === 'mine') items = await listMyPrayerItems(db, user.id, locale, { registration });
 else items = pendingForViewer;
 
 const TAB_LABEL: Record<PrayerTab, string> = {
@@ -292,7 +298,7 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
           <select name="scope" required class={tin}>
             <option value="church">{t(locale, 'portal.prayer.scope.church')}</option>
             <option value="group">{t(locale, 'portal.prayer.scope.group')}</option>
-            <option value="event">{t(locale, 'portal.prayer.scope.event')}</option>
+            {registration && <option value="event">{t(locale, 'portal.prayer.scope.event')}</option>}
             <option value="private">{t(locale, 'portal.prayer.scope.private')}</option>
           </select>
         </label>
@@ -305,15 +311,17 @@ const errKey = errParam ? (ERR_MSG[errParam] ?? null) : null;
             ))}
           </select>
         </label>
-        <label class="block">
-          <span class={lab}>{t(locale, 'portal.prayer.event')}</span>
-          <select name="reg_event_id" class={tin}>
-            <option value="">{t(locale, 'portal.prayer.eventNone')}</option>
-            {eventOptionsList.map(([id, title]) => (
-              <option value={id}>{title}</option>
-            ))}
-          </select>
-        </label>
+        {registration && (
+          <label class="block">
+            <span class={lab}>{t(locale, 'portal.prayer.event')}</span>
+            <select name="reg_event_id" class={tin}>
+              <option value="">{t(locale, 'portal.prayer.eventNone')}</option>
+              {eventOptionsList.map(([id, title]) => (
+                <option value={id}>{title}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label class="block">
           <span class={lab}>{t(locale, 'portal.prayer.body')}</span>
           <textarea name="body" required maxlength="2000" rows="4" class={tin} />

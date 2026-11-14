@@ -12,6 +12,7 @@ import { i18nJoin } from '../../lib/db';
 import { addDays, todayInTz, utcToDatetimeLocal } from '../../lib/dates';
 import { listUpcomingOccurrencesForPerson } from '../../lib/groupEventDb';
 import { listRegistrationsForPerson } from '../../lib/regDb';
+import { dutyToICalEvent, listDutiesForPerson, listSessionsForPerson, sessionToICalEvent } from '../../lib/planningCalendar';
 
 export const GET: APIRoute = async ({ params, url, locals }) => {
   const token = params.token ?? '';
@@ -83,8 +84,8 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
   // Portal additions: group routine-event occurrences, and — when registration
   // is also on — the person's own event registrations. Gated on locals.modules,
   // which the middleware computes (and backend-filters) for EVERY request, this
-  // public feed route included, so a D1 church (portal force-disabled there)
-  // leaves the serving section above byte-identical. `from` (30 days of history)
+  // public feed route included, so a church without the portal module leaves
+  // the serving section above byte-identical. `from` (30 days of history)
   // doubles as both windows' lower bound; occurrences run to +180 days.
   if (locals.modules.has('portal')) {
     const to = addDays(todayInTz(), 180);
@@ -98,6 +99,19 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
     for (const r of registrations) {
       if (utcToDatetimeLocal(r.starts_at).slice(0, 10) >= from) events.push(regToICalEvent(r, host));
     }
+  }
+
+  // Service Planning: scheduled rehearsals the person is called to and run-sheet
+  // duties they (or one of their teams) own. Private notes and cue notes are
+  // never part of the feed. Gated on the module like the portal additions above.
+  if (locals.modules.has('planning')) {
+    const to = addDays(todayInTz(), 180);
+    const [sessions, duties] = await Promise.all([
+      listSessionsForPerson(db, person.id, from, to),
+      listDutiesForPerson(db, person.id, from, to),
+    ]);
+    for (const s of sessions) events.push(sessionToICalEvent(s, host));
+    for (const d of duties) events.push(dutyToICalEvent(d, host));
   }
 
   const now = new Date();

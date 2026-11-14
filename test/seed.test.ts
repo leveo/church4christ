@@ -564,3 +564,39 @@ describe('demo seed: referential integrity', () => {
     expect(results).toEqual([]);
   });
 });
+
+describe('demo seed: member portal prayer items on D1', () => {
+  it('seeds church, group, and private prayer items without event-scope rows', async () => {
+    const { results } = await env.DB
+      .prepare('SELECT scope, status, reg_event_id, campus_id FROM prayer_items ORDER BY id')
+      .all<{ scope: string; status: string; reg_event_id: number | null; campus_id: number }>();
+    expect(results.map((r) => r.scope)).toEqual(['church', 'group', 'private']);
+    expect(results.every((r) => r.reg_event_id === null && r.campus_id === 1)).toBe(true);
+    expect(results.find((r) => r.scope === 'group')?.status).toBe('pending');
+  });
+});
+
+describe('demo seed: service planning', () => {
+  it('seeds an upcoming published Christmas service with a run sheet and two rehearsals', async () => {
+    const event = await env.DB
+      .prepare("SELECT status, event_date, revision FROM planning_events WHERE title_en = 'Christmas Service'")
+      .first<{ status: string; event_date: string; revision: number }>();
+    expect(event?.status).toBe('published');
+    expect(event!.event_date >= new Date().toISOString().slice(0, 10)).toBe(true);
+    const items = await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_items WHERE event_id = 31000').first<{ n: number }>();
+    expect(items?.n).toBeGreaterThanOrEqual(8);
+    const sessions = await env.DB
+      .prepare('SELECT status FROM planning_sessions WHERE event_id = 31000 ORDER BY id')
+      .all<{ status: string }>();
+    expect(sessions.results.map((s) => s.status)).toEqual(['scheduled', 'draft']);
+  });
+
+  it('keeps demo availability, coordinators, and notification rules consistent', async () => {
+    const windows = await env.DB.prepare('SELECT COUNT(*) AS n FROM availability_windows').first<{ n: number }>();
+    expect(windows?.n).toBe(3);
+    const coordinator = await env.DB.prepare('SELECT person_id FROM planning_event_coordinators').first<{ person_id: number }>();
+    expect(coordinator?.person_id).toBe(3);
+    const rules = await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_notification_rules WHERE enabled = 1').first<{ n: number }>();
+    expect(rules?.n).toBe(4);
+  });
+});

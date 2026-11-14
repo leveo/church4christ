@@ -12,6 +12,7 @@ import Base from '../../../layouts/Base.astro';
 import SectionTitle from '../../../components/SectionTitle.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
+import { formatDateWithWeekday } from '../../../lib/dates';
 import {
   listApplicationTeams,
   listOpportunitySlots,
@@ -125,7 +126,7 @@ const copy = ministryCopy(locale);
                       <ul class="mt-1.5 flex flex-wrap gap-2">
                         {pos.dates.map((d) => (
                           <li class="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm">
-                            <span class="font-medium">{d.plan_date}</span>
+                            <span class="font-medium">{formatDateWithWeekday(d.plan_date, locale, true)}</span>
                             <span class="text-ink-muted">· {d.service_type_name}</span>
                             <span class="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-on-accent-soft">
                               {t(locale, 'opportunities.spotsOpen').replace('{count}', String(d.remaining))}
@@ -144,7 +145,7 @@ const copy = ministryCopy(locale);
     </section>
 
     <div class="mt-12">
-      <a href={localePath(locale, '/serve')} class="text-sm font-semibold text-accent hover:text-accent-hover">
+      <a href={localePath(locale, '/serve')} class="inline-flex min-h-11 items-center text-sm font-semibold text-accent hover:text-accent-hover">
         ← {t(locale, 'opportunities.backToServe')}
       </a>
     </div>

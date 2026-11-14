@@ -549,6 +549,15 @@ INSERT INTO group_members (id, group_id, person_id, display_name, phone, is_admi
 INSERT INTO group_join_requests (id, group_id, person_id, status) VALUES
   (1, 1, 4, 'pending');
 
+-- Member portal prayer items (church, group, private scopes; the event scope
+-- needs Registration and lives in portal-seed.sql). Approved items carry a named
+-- approver; the pending group item exercises the group leader's queue. The
+-- private item is auto-approved for the personal prayer list demo.
+INSERT INTO prayer_items (id, author_person_id, scope, group_id, reg_event_id, body, status, approved_by, approved_at) VALUES
+  (1, 3, 'church', NULL, NULL, 'Please pray that our church welcomes new neighbors with the love of Christ this month.', 'approved', 1, datetime('now','-2 days')),
+  (2, 5, 'group', 1, NULL, 'Please pray for wisdom as I begin a new season at work and keep joining the Friday study faithfully.', 'pending', NULL, NULL),
+  (4, 7, 'private', NULL, NULL, 'Thank you for God''s faithfulness in our family. Please give us patience and gratitude this week.', 'approved', 7, datetime('now','-1 day'));
+
 INSERT INTO group_events (id, group_id, title, description, location, recurrence, starts_on, start_time, duration_min, ends_on, track_attendance, active) VALUES
   (1, 1, 'Friday Bible Study', 'Weekly study in the Gospel of John with prayer and supper.', 'Fellowship Hall', 'weekly', date('now','weekday 5','-14 days'), '19:00', 90, NULL, 1, 1);
 
@@ -688,3 +697,46 @@ INSERT INTO learning_activity_events
   ('demo-genesis-assignment-zh', 21000, 'canvas', 'demo-genesis-assignment-zh', 'assignment_submitted', 4, 21304, 21304, 21000, 21105, 'assignment', replace(datetime('now','-2 days'),' ','T') || 'Z'),
   ('demo-genesis-returned-zh', 21000, 'canvas', 'demo-genesis-returned-zh', 'submission_returned', 4, 21304, 21304, 21000, 21105, 'assignment', replace(datetime('now','-1 day'),' ','T') || 'Z'),
   ('demo-genesis-quiz-zh', 21000, 'canvas', 'demo-genesis-quiz-zh', 'quiz_submitted', 4, 21304, 21304, 21000, 21106, 'quiz', replace(datetime('now','-12 hours'),' ','T') || 'Z');
+
+-- Service Planning (planning module): an upcoming fictional Christmas service with
+-- a run sheet, one coordinator, two rehearsals, and a few availability windows.
+-- Ids start at 31000 so they never collide with the other demo rows.
+INSERT INTO planning_events
+  (id, title_en, title_zh, event_date, start_time, end_time, location_en, location_zh, notes_en, notes_zh, status, revision, created_by) VALUES
+  (31000, 'Christmas Service', '圣诞崇拜', date('now','+21 days'), '10:00', '11:30', 'Main Sanctuary', '大堂',
+   'Doors open at 9:30. Candles are handed out by the hospitality team.', '九点半开门，招待组负责分发蜡烛。', 'published', 1, 1);
+
+INSERT INTO planning_event_coordinators (event_id, person_id) VALUES
+  (31000, 3);
+
+INSERT INTO planning_items
+  (id, event_id, sort, kind, duration_min, fixed_start_time, title_en, title_zh, details_en, details_zh, owner_team_id, owner_person_id, owner_label, cue_notes) VALUES
+  (31001, 31000, 10, 'heading', 0, NULL, 'Gathering', '聚集', '', '', NULL, NULL, NULL, ''),
+  (31002, 31000, 20, 'song', 5, NULL, 'Opening carol', '开场诗歌', 'Joy to the World', '普世欢腾', 1, NULL, NULL, 'Start with the piano intro only.'),
+  (31003, 31000, 30, 'segment', 5, NULL, 'Welcome and call to worship', '欢迎与宣召', '', '', NULL, 3, NULL, ''),
+  (31004, 31000, 40, 'song', 12, NULL, 'Congregational carols', '会众诗歌', 'Two carols with the candle moment', '两首诗歌与点烛时刻', 1, NULL, NULL, 'Lights down on the second verse of the last carol.'),
+  (31005, 31000, 50, 'segment', 4, NULL, 'Scripture reading', '读经', 'Luke 2:1-14', '路加福音 2:1-14', NULL, NULL, 'A reader from the congregation', ''),
+  (31006, 31000, 60, 'segment', 30, '10:30', 'Message', '信息', '', '', NULL, 2, NULL, 'Slides on the first and the closing point.'),
+  (31007, 31000, 70, 'segment', 8, NULL, 'Offering and prayer', '奉献与祷告', '', '', 3, NULL, NULL, ''),
+  (31008, 31000, 80, 'song', 6, NULL, 'Closing carol', '结束诗歌', 'Silent Night', '平安夜', 1, NULL, NULL, ''),
+  (31009, 31000, 90, 'note', 0, NULL, 'Fellowship after the service', '会后茶点', 'Coffee and snacks in the hall.', '在礼堂有咖啡与点心。', NULL, NULL, NULL, '');
+
+INSERT INTO planning_sessions
+  (id, event_id, title_en, title_zh, session_date, start_time, end_time, location_en, location_zh, note_en, note_zh, status, acknowledged_unknown) VALUES
+  (31100, 31000, 'Worship team rehearsal', '敬拜队彩排', date('now','+14 days'), '19:00', '20:30', 'Rehearsal Room', '排练室',
+   'Bring your charts.', '请带上谱子。', 'scheduled', 1),
+  (31101, 31000, 'Full run-through', '全场彩排', date('now','+19 days'), '19:00', '21:00', 'Main Sanctuary', '大堂',
+   '', '', 'draft', 0);
+
+INSERT INTO planning_session_people (session_id, person_id, call_time) VALUES
+  (31100, 3, '18:45'),
+  (31100, 5, '18:45'),
+  (31100, 7, NULL),
+  (31101, 3, NULL),
+  (31101, 8, NULL),
+  (31101, 2, NULL);
+
+INSERT INTO availability_windows (person_id, kind, starts_on, ends_on, weekdays, start_minute, end_minute, note) VALUES
+  (3, 'available', date('now','start of day'), date('now','+60 days'), '4,5', 1080, 1260, ''),
+  (5, 'available', date('now','start of day'), date('now','+60 days'), '', 1140, 1260, 'Prefers evenings'),
+  (8, 'available', date('now','+19 days'), date('now','+19 days'), '', 1080, 1320, '');

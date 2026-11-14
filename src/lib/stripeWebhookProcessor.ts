@@ -2,7 +2,7 @@ import type { DbEnv } from './dbProvider';
 import { openDb } from './dbProvider';
 import { handleStripeEvent } from './givingWebhook';
 import { getEnabledModules } from './modules';
-import { stripeTestModeConfigured, type StripeEnv } from './stripe';
+import { stripeConfiguredMode, type StripeEnv } from './stripe';
 import {
   STRIPE_ATTEMPT_MS,
   STRIPE_DRAIN_LIMIT,
@@ -168,7 +168,7 @@ export async function replayStripeWebhookEvent(
   actorId: number,
   deps: StripeWebhookAdminServiceDeps,
 ): Promise<ProcessAttemptResult> {
-  if (!stripeTestModeConfigured(deps.env) || !validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
+  if (stripeConfiguredMode(deps.env) === null || !validAdminEventId(eventId) || !Number.isSafeInteger(actorId) || actorId <= 0) {
     return { state: 'not_claimed' };
   }
   const opened = (deps.openDb ?? openDb)(deps.env);

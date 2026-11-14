@@ -10,6 +10,109 @@ than published to npm.
 
 ## [Unreleased]
 
+Upgrade notes: [Member Portal on D1](docs/upgrade.md#unreleased-member-portal-on-d1),
+[Production Giving](docs/upgrade.md#unreleased-production-giving),
+[Service Planning](docs/upgrade.md#unreleased-service-planning).
+
+### Added
+
+- Member Portal now runs on the default Cloudflare D1 database: households, groups and
+  protected group files, calendar, opportunity discovery, and church, group, and private
+  prayers. New D1 migration `0039_member_portal_d1.sql` adds the `group_files` and
+  `prayer_items` tables. Demo prayer items are part of the D1 demo seed.
+- Production Giving on Supabase and Stripe. Stripe now has an explicit live mode
+  (`STRIPE_MODE=live` plus `STRIPE_LIVE_CONFIRMED=1`) alongside the default test mode.
+  Checkout offers cards, wallets, and ACH bank debits (`us_bank_account`); Stripe emails
+  per-payment receipts; donors change or cancel recurring gifts in Stripe's Billing Portal;
+  yearly recurring gifts are supported. ACH gifts are recorded as pending and settle or fail
+  from Stripe events.
+- Giving ledger accuracy: each gift records live or test mode, the Stripe payment time
+  (`paid_at`), refunded amounts (partial refunds are netted out), the charge id, and
+  `disputed` status. Refunds and disputes are matched to gifts by the database, including
+  refunds of recurring payments. `invoice.payment_failed` marks a recurring gift past due
+  without any app email, and `customer.subscription.updated` syncs amount, interval, and fund.
+- Annual giving statements: a printable page at `/my/giving/statement/<year>` and an admin
+  page at `/admin/giving/statements` that queues a statement email for every donor, drained
+  in small batches by the existing five-minute job (no new schedule).
+- Giving admin: funds gain a description, a default flag, and a tax-deductible flag; manual
+  gifts use the `giving.currency` setting; totals are per currency and net of refunds; CSV
+  export of gifts; audit rows for manual gifts, fund edits, statement batches, and exports.
+- PostgreSQL migration `0039_giving_production.sql` (details under Operator impact).
+- **Service Planning** (`planning`, 服事流程): a timed run sheet for each service or event
+  (live start times, fixed starts, overrun and overlap warnings, leader-only cue notes, print
+  view, copy from a previous event), rehearsal sessions with called people and call times,
+  member availability windows, a "find a time" search that ranks slots by conflicts, a team
+  availability calendar, rehearsals and run-sheet duties in the member calendar and calendar
+  feed, and automatic email on schedule, change, cancel, and a reminder. It is a new module in
+  Volunteering that works on D1 and Supabase. See
+  [`docs/features/service-planning.md`](docs/features/service-planning.md).
+
+### Changed
+
+- Children's check-in and volunteer scheduling now work at phone width (375px): Today
+  check-ins are cards with a full-width Check out button, the scheduling matrix and the
+  availability grid become per-date and per-member cards, kiosk inputs open the right phone
+  keyboard, and buttons, inputs and the admin top bar meet touch-size targets with 16px
+  inputs. The Kiosk tab shows a QR code of the kiosk link, drawn on the server with the new
+  `qrcode-generator` dependency (MIT, no dependencies). Forms that carried a `data-confirm`
+  message (deleting a team or service type) now actually ask before submitting. The Accept or
+  Decline email shows a short button instead of the raw link. Installing the update needs
+  `npm ci` only; there are no migrations or settings to change.
+- `portal` no longer requires the Supabase backend; only Giving and Registration do. A
+  portal-only selection now resolves to D1, and a selection that also includes Giving or
+  Registration still resolves to Supabase.
+- Registration-dependent portal parts (event-scope prayers, event administrators, My
+  registrations) are hidden, and no Registration table is read, when the `registration`
+  module is off. `/my/serving` returns 404 when Volunteer Scheduling is off.
+- Stripe objects and events must now carry a `livemode` equal to the configured mode;
+  the previous hard `cs_test_` / `livemode: false` checks are gone. A mismatched event gets
+  `400 livemode_mismatch` and is not stored (it was `400 live_mode_disabled`). Every Stripe
+  request pins `Stripe-Version: 2025-03-31.basil`. Registration shares this client, so its
+  paid checkout also follows the configured mode.
+- The online give form is hidden, with a clear message, when Stripe is not configured for
+  the current mode. The Billing Portal return URL now comes from `APP_ORIGIN`.
+- Year totals on **My giving** bucket by the Stripe payment date in the church time zone and
+  are net of refunds; test-mode rows count only on test-mode installations.
+- The thank-you page says Stripe emails the receipt (the app never sent one).
+- `people.stripe_customer_id` is now a legacy test-mode read fallback; customers live in
+  `stripe_customers`, one per person per mode.
+
+### Operator impact
+
+- D1 installations: apply the new migration `0039_member_portal_d1.sql` with the normal D1
+  migration step before deploying. The migration keeps Member Portal off on an existing
+  installation by recording `module.portal = 0` unless a choice is already saved; an
+  administrator turns it on in **Settings → Modules**.
+- Supabase installations are unaffected by the portal change: it has no PostgreSQL migration.
+- **Supabase installations with Giving:** apply PostgreSQL migration
+  `0039_giving_production.sql` with the normal Supabase migration step before deploying. It
+  adds gift columns (`livemode`, `paid_at`, `refunded_cents`, `stripe_charge_id`), widens the
+  gift method and status and recurring interval checks, and adds `stripe_customers`,
+  `giving_statement_outbox`, `giving_audit_events`, and fund description / default /
+  tax-deductible columns. Existing manual gifts become live; existing Stripe gifts stay test
+  (they were test-only) and their `paid_at` is backfilled from `created_at`. Existing
+  installations remain in test mode: no behavior changes until you opt into live.
+- New variable `STRIPE_LIVE_CONFIRMED` (set to `1` together with `STRIPE_MODE=live`) is the
+  explicit live opt-in; `STRIPE_MODE` now accepts `test` or `live`. Setup still provisions test
+  mode and preserves a live opt-in when rerun. The webhook endpoint must be created at Stripe
+  API version `2025-03-31.basil`; the doctor warns on stored events from another version.
+- Update the Stripe webhook endpoint to the twelve events in the go-live checklist
+  (`invoice.payment_failed`, `charge.failed`, `charge.dispute.created`, and
+  `charge.dispute.closed` are new).
+- No new bindings, secrets, or cron triggers. Statement emails ride the existing
+  `*/5 * * * *` Supabase schedule.
+- Service Planning: apply the new migration `0040_service_planning.sql` with your normal
+  migration step before deploying: `npm run db:migrate:remote` on D1 and
+  `npm run db:migrate:supabase` on Supabase (numbered `0040` there as well, after Production Giving's
+  `0039`). It adds seven
+  `planning_*` / `availability_windows` tables with `campus_id`, four default notification
+  rules, and registers the new person references with the identity merge inventory. On an
+  existing installation it also records `module.planning = 0`, so the module stays off until
+  an administrator turns it on in **Settings → Modules**; a fresh installation follows the
+  setup choices, and no preset includes Service Planning.
+- Service Planning adds the `planning` administrator area, grantable on a person's page.
+  Reminder emails use the existing daily reminder cron (`0 13 * * *`).
+
 ## [1.4.0] - 2026-11-14
 
 Upgrade notes: [Upgrading 1.3.0 to 1.4.0](docs/upgrade.md#upgrading-130-to-140).

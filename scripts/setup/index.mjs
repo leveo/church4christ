@@ -22,7 +22,7 @@ import { openPostgresSetupDb } from './providers/postgres.mjs';
 import { createStateStore, identityVerificationAttestationIsFresh } from './state.mjs';
 import { acquireApprovedContentLease, classifyConfig, writeAtomic } from './files.mjs';
 import { manifestFromPlan, renderManifest, validateManifest } from './manifest.mjs';
-import { renderWrangler } from './render-wrangler.mjs';
+import { preservedStripeMode, renderWrangler } from './render-wrangler.mjs';
 import { collectStripeSetupRedactionValues, collectStripeTestSecrets, configureSecrets, listDeploySecrets,
   readLocalIdentityRecoveryKeyStatus, readLocalIdentitySourceKeyStatus, readLocalIdentityVerificationSecretStatus, readLocalSecretNames,
   readLocalSecretsStatus, readLocalStripeClassification, readLocalStripeModeOverride } from './secrets.mjs';
@@ -156,7 +156,7 @@ export async function preflightWranglerConfig(options) {
   let canonical;
   if (options.existingManifest) {
     const manifest = validateManifest(structuredClone(options.existingManifest), options.catalog);
-    canonical = renderWrangler(options.template, manifest);
+    canonical = renderWrangler(options.template, manifest, { stripeMode: preservedStripeMode(options.current) });
   }
   let classification = classifyConfig(options.current, options.baseline ?? '', canonical);
   if (options.baselineSha256 && createHash('sha256').update(options.current).digest('hex') === options.baselineSha256) {
@@ -337,6 +337,7 @@ export async function buildServicePresence(manifest, probeOptions = {}) {
       ? (stripeSecretKey || stripeWebhookSecret ? 'unverifiable' : 'missing')
       : localStripe.classification,
     stripeModeTest: probeOptions.stripeModeTest === true,
+    stripeModeLive: probeOptions.stripeModeLive === true,
     stripeClassificationVerifiable: manifest?.mode !== 'deploy',
     backup: Boolean(hostEnv.CF_ACCOUNT_ID && hostEnv.D1_DATABASE_ID && hostEnv.D1_EXPORT_TOKEN),
   };
@@ -427,7 +428,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       checkManifest: () => checkManifest({ catalog, manifest }),
       checkConfig: () => checkConfig({ manifest, template, config, workerSource, hostEnv: process.env }),
       checkDatabase: () => checkDatabase({ db, catalog, manifest, readDir: (path) => readdir(resolve(root, path)), ...(manifest.database === 'd1' ? { runner, wranglerBin, configPath } : {}), secrets: dbUrl ? [dbUrl] : [] }),
-      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localIdentityVerificationSecretValid: await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')), localIdentitySourceKeyValid: await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')), localIdentityRecoveryKeyValid: await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')), identityVerificationSecretAttestation, identityVerificationRuntimeStatus: runtime.status, localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: effectiveStripeTestMode(config, manifest.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) }),
+      checkServices: async () => checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner, wranglerBin, configPath, localSupabaseUrlAvailable: options.secretContext?.source === 'environment', localSecretsValid: await readLocalSecretsStatus(resolve(root, '.dev.vars'), activePlan.adminEmail), localIdentityVerificationSecretValid: await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')), localIdentitySourceKeyValid: await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')), localIdentityRecoveryKeyValid: await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')), identityVerificationSecretAttestation, identityVerificationRuntimeStatus: runtime.status, localSecretNames: await readLocalSecretNames(resolve(root, '.dev.vars')), localStripeClassification: await readLocalStripeClassification(resolve(root, '.dev.vars')), stripeModeTest: effectiveStripeTestMode(config, manifest.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined), stripeModeLive: preservedStripeMode(config) === 'live' }) }),
     }, { strict: false });
   };
 
@@ -452,7 +453,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       return await exists(manifestPath) === desiredManifest;
     }),
     'write-config': step(async ({ plan: activePlan }) => {
-      desiredConfig = renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
+      desiredConfig = renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)), { stripeMode: preservedStripeMode(options.approvedConfigContent) });
       const approved = options.approvedConfigContent;
       if (!configLease) throw new Error('Wrangler configuration ownership lease is unavailable');
       const result = await configLease.writeAtomic(desiredConfig, {
@@ -462,7 +463,7 @@ async function applyDefaultSetup(plan, options, catalog) {
       });
       return { changed: result.changed };
     }, async ({ plan: activePlan }) => {
-      desiredConfig ??= renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)));
+      desiredConfig ??= renderWrangler(template, JSON.parse(renderManifest(activePlan, catalog)), { stripeMode: preservedStripeMode(options.approvedConfigContent) });
       const verified = await exists(configPath) === desiredConfig;
       if (verified && configLease) {
         await configLease.release();
@@ -892,7 +893,7 @@ async function createDefaultDeps() {
           const runtime = manifest?.mode === 'deploy'
             ? await probeIdentityVerificationRuntime({ appOrigin: manifest.site?.appOrigin, fetch: globalThis.fetch })
             : { status: 'unverifiable' };
-          return checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localIdentityVerificationSecretValid: manifest?.mode === 'local' ? await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')) : false, localIdentitySourceKeyValid: manifest?.mode === 'local' ? await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')) : false, localIdentityRecoveryKeyValid: manifest?.mode === 'local' ? await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')) : false, identityVerificationRuntimeStatus: runtime.status, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: effectiveStripeTestMode(config, manifest?.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined) }) });
+          return checkServices({ catalog, manifest, presence: await buildServicePresence(manifest, { runner: runner ?? createCommandRunner({ secretValues: stripeRedactionValues }), wranglerBin, configPath, hostEnv: process.env, localSecretsValid: manifest?.mode === 'local' ? await readLocalSecretsStatus(resolve(root, '.dev.vars')) : false, localIdentityVerificationSecretValid: manifest?.mode === 'local' ? await readLocalIdentityVerificationSecretStatus(resolve(root, '.dev.vars')) : false, localIdentitySourceKeyValid: manifest?.mode === 'local' ? await readLocalIdentitySourceKeyStatus(resolve(root, '.dev.vars')) : false, localIdentityRecoveryKeyValid: manifest?.mode === 'local' ? await readLocalIdentityRecoveryKeyStatus(resolve(root, '.dev.vars')) : false, identityVerificationRuntimeStatus: runtime.status, localSecretNames: manifest?.mode === 'local' ? await readLocalSecretNames(resolve(root, '.dev.vars')) : [], localStripeClassification: manifest?.mode === 'local' ? await readLocalStripeClassification(resolve(root, '.dev.vars')) : undefined, stripeModeTest: effectiveStripeTestMode(config, manifest?.mode === 'local' ? await readLocalStripeModeOverride(resolve(root, '.dev.vars')) : undefined), stripeModeLive: preservedStripeMode(config) === 'live' }) });
         },
       }, { strict });
     } finally {

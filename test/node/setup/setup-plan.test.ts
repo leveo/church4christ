@@ -47,7 +47,9 @@ describe('buildSetupPlan', () => {
   it('turns Full Church into Supabase with every module enabled', () => {
     const plan = buildSetupPlan({ ...base, preset: 'full-church' }, raw);
     expect(plan.backend).toBe('supabase');
-    expect(new Set(Object.values(plan.moduleSettings))).toEqual(new Set(['1']));
+    // Service Planning is not part of any preset: it is switched on separately.
+    const off = Object.entries(plan.moduleSettings).filter(([, value]) => value === '0').map(([key]) => key);
+    expect(off).toEqual(['module.planning']);
     expect(plan.services).toEqual(['hyperdrive', 'r2', 'worker']);
   });
 
@@ -224,7 +226,7 @@ describe('buildSetupPlan', () => {
 
   it('refuses an existing D1 to Supabase switch because content migration is not implemented', () => {
     expect(() =>
-      buildSetupPlan({ ...base, modules: ['portal'] }, raw, { existingBackend: 'd1' }),
+      buildSetupPlan({ ...base, modules: ['giving'] }, raw, { existingBackend: 'd1' }),
     ).toThrow(/D1-to-Supabase content migration is not implemented/i);
   });
 

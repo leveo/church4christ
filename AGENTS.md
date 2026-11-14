@@ -19,7 +19,7 @@ do not invent a second provisioning path or replace setup with raw seed commands
   form or invent preferences for them. Use `--no-open` when a browser cannot open, and
   share the printed local URL. Re-running onboarding reloads saved answers.
 - Recommend Cloudflare D1 with `website-community` for a new local evaluation. The
-  application also uses Workers and R2. Full Church / Portal / Giving / Registration need
+  application also uses Workers and R2. Full Church / Giving / Registration need
   an explicit choice of Supabase-compatible PostgreSQL. Do not silently enable them.
 - Use `node scripts/setup/index.mjs --help` to verify supported flags. For automation,
   preview saved answers with `node scripts/setup/index.mjs --preferences .church/preferences.json

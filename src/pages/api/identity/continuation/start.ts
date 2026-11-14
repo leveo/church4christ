@@ -19,6 +19,7 @@ import {
 } from '../../../../lib/identityContinuationCookie';
 import { parseLocale, type Locale } from '../../../../lib/locales';
 import { getSetting } from '../../../../lib/settings';
+import { stripeConfiguredMode, type StripeEnv } from '../../../../lib/stripe';
 
 export const prerender = false;
 
@@ -45,6 +46,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const requestContext = identityTrustedRequestContext(request.headers, resolvedDevice.deviceId);
     if (flow === 'giving') {
       if (!locals.modules.has('giving') || String(form.get('frequency') ?? 'once') !== 'once') throw new Error('identity_continuation_invalid');
+      // No Stripe for the current mode means no checkout to continue into.
+      if (stripeConfiguredMode(env as unknown as StripeEnv) === null) throw new Error('identity_continuation_invalid');
       const fundId = Number(form.get('fund_id'));
       const amount = Number(form.get('amount'));
       const amountCents = Number.isFinite(amount) ? Math.round(amount * 100) : NaN;

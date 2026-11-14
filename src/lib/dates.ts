@@ -8,6 +8,8 @@ import type { Locale } from './locales';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_TZ = 'America/Chicago';
+/** The church's fixed reporting time zone (statements and year totals bucket here). */
+export const CHURCH_TZ = DEFAULT_TZ;
 
 /** Strict YYYY-MM-DD that is also a real calendar date. */
 export function isValidDateStr(s: string): boolean {
@@ -81,6 +83,34 @@ export function formatDate(dateStr: string, locale: Locale): string {
     month: 'long',
     day: 'numeric',
   }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+const ZH_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+/** Calendar date with weekday: en → 'Sunday, July 5, 2026', zh → '2026年7月5日 星期日'.
+ *  `short` gives en 'Sun, Jul 5' / zh '7月5日 周日' for tight spaces. Pure date math in UTC. */
+export function formatDateWithWeekday(dateStr: string, locale: Locale, short = false): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const when = new Date(Date.UTC(y, m - 1, d));
+  if (locale === 'zh') {
+    const wd = ZH_WEEKDAYS[when.getUTCDay()];
+    return short ? `${m}月${d}日 周${wd}` : `${y}年${m}月${d}日 星期${wd}`;
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: short ? 'short' : 'long',
+    ...(short ? {} : { year: 'numeric' }),
+    month: short ? 'short' : 'long',
+    day: 'numeric',
+  }).format(when);
+}
+
+/** Just the short weekday: en 'Sun', zh '周日'. */
+export function weekdayShort(dateStr: string, locale: Locale): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const when = new Date(Date.UTC(y, m - 1, d));
+  if (locale === 'zh') return `周${ZH_WEEKDAYS[when.getUTCDay()]}`;
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(when);
 }
 
 /** Inclusive date-string bounds for a 'YYYY-MM' month. The end is the '-31'

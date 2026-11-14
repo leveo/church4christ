@@ -88,7 +88,7 @@ const hasOpenCheckin = (c: { checkins: { checkedOutAt: string | null }[] }) =>
 const notCheckedIn = confirmation ? [] : household!.children.filter((c) => !hasOpenCheckin(c));
 const checkedIn = confirmation ? [] : household!.children.filter(hasOpenCheckin);
 
-const bigBtn = 'w-full rounded-2xl bg-primary px-8 py-4 text-2xl font-semibold text-on-primary hover:bg-primary-hover';
+const bigBtn = 'w-full rounded-2xl bg-primary px-8 py-4 text-2xl font-semibold text-on-primary hover:bg-primary-hover active:opacity-80';
 // Kiosk-scale notice: same danger tokens as admin's noticeErr, sized up for a
 // tablet read from arm's length.
 const kioskNotice =
@@ -120,7 +120,7 @@ const copy = gatheringsCopy(lang);
       <div class="flex w-full flex-col gap-8">
         <div class="gathering-heading">
           <div><p class="gathering-eyebrow">{t(lang, 'kiosk.title')}</p><h1>{household!.name}</h1></div>
-          <a href={backHref} class="text-lg font-semibold text-primary hover:underline">&larr; {t(lang, 'kiosk.backToStart')}</a>
+          <a href={backHref} class="inline-flex min-h-11 items-center text-lg font-semibold text-primary hover:underline active:bg-primary-soft">&larr; {t(lang, 'kiosk.backToStart')}</a>
         </div>
 
         {checkinError && events.length > 0 && <p class={kioskNotice}>{t(lang, 'kiosk.noEvents')}</p>}
@@ -191,11 +191,16 @@ const copy = gatheringsCopy(lang);
                         name="code"
                         aria-label={`${t(lang, 'kiosk.enterCode')}: ${c.name}`}
                         maxlength="4"
+                        pattern="[A-Za-z0-9]{4}"
+                        autocomplete="off"
+                        autocorrect="off"
+                        spellcheck="false"
+                        enterkeyhint="go"
                         autocapitalize="characters"
                         placeholder={t(lang, 'kiosk.enterCode')}
                         class="w-40 rounded-2xl border border-border bg-surface px-4 py-3 text-2xl uppercase focus:border-primary focus:outline-none"
                       />
-                      <button type="submit" class="rounded-2xl bg-primary px-6 py-3 text-xl font-semibold text-on-primary hover:bg-primary-hover">
+                      <button type="submit" class="rounded-2xl bg-primary px-6 py-3 text-xl font-semibold text-on-primary hover:bg-primary-hover active:opacity-80">
                         {t(lang, 'kiosk.checkOut')}
                       </button>
                     </form>

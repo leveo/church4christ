@@ -117,13 +117,14 @@ describe('parseAmountToCents', () => {
 });
 
 describe('parseFrequency', () => {
-  it('accepts the three cadences', () => {
+  it('accepts the four cadences', () => {
     expect(parseFrequency('once')).toBe('once');
     expect(parseFrequency('week')).toBe('week');
     expect(parseFrequency('month')).toBe('month');
+    expect(parseFrequency('year')).toBe('year');
   });
   it('rejects anything else (defaults handled by caller)', () => {
-    expect(parseFrequency('year')).toBeNull();
+    expect(parseFrequency('daily')).toBeNull();
     expect(parseFrequency('')).toBeNull();
     expect(parseFrequency(null)).toBeNull();
     expect(parseFrequency('ONCE')).toBeNull();
@@ -154,7 +155,7 @@ describe('stable giving Checkout browser identity', () => {
   } as never);
   const deps = (overrides: Record<string, unknown> = {}) => ({
     sessionSecret: SESSION_SECRET,
-    stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', APP_ORIGIN: 'https://church.example' },
+    stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', STRIPE_WEBHOOK_SECRET: 'whsec_route', APP_ORIGIN: 'https://church.example' },
     getFund: vi.fn(async () => ({ id: 7, name: 'General', active: 1 })),
     getSetting: vi.fn(async () => 'usd'),
     getStripeCustomer: vi.fn(async () => null),
@@ -163,6 +164,26 @@ describe('stable giving Checkout browser identity', () => {
     attachIdentitySource: vi.fn(async () => ({})),
     getSessionEpoch: vi.fn(async () => 0),
     ...overrides,
+  });
+
+  it('sends the donor back with a clear error when Stripe is not configured for the mode, before any Stripe work', async () => {
+    const dependencies = deps({ stripeEnv: { STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_x', STRIPE_WEBHOOK_SECRET: 'whsec_x', APP_ORIGIN: 'https://church.example' } });
+    const response = await createGivingCheckoutHandler(dependencies as never)(context(await signedForm()));
+    expect(response.headers.get('location')).toBe('/en/give?error=unavailable'); // live without STRIPE_LIVE_CONFIRMED
+    expect(dependencies.getFund).not.toHaveBeenCalled();
+    expect(dependencies.createOneTimeCheckout).not.toHaveBeenCalled();
+  });
+
+  it('looks up the Stripe customer for the configured mode and passes the campus and yearly cadence', async () => {
+    const dependencies = deps({
+      stripeEnv: { STRIPE_MODE: 'live', STRIPE_SECRET_KEY: 'sk_live_x', STRIPE_WEBHOOK_SECRET: 'whsec_x', STRIPE_LIVE_CONFIRMED: '1', APP_ORIGIN: 'https://church.example' },
+    });
+    const data = await signedForm();
+    data.set('frequency', 'year');
+    await createGivingCheckoutHandler(dependencies as never)(context(data));
+    expect(dependencies.getStripeCustomer).toHaveBeenCalledWith(expect.anything(), 9, true);
+    const call = dependencies.createRecurringCheckout.mock.calls[0] as unknown as unknown[];
+    expect(call[1]).toMatchObject({ interval: 'year', campusId: 1 });
   });
 
   it('rejects an anonymous direct POST before any business or Stripe work', async () => {

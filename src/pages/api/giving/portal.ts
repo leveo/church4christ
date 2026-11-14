@@ -1,12 +1,12 @@
 // Stripe Billing Portal launch (POST-only). A signed-in giver clicks "Manage" on
 // /my/giving; we resolve their saved Stripe customer and 303 to a portal session
-// where they can update the card / cancel a recurring gift. No customer on file
+// where Stripe lets them change the amount, update the payment method, or cancel. No customer on file
 // (they've only ever given one-time, or never) → back to /my/giving?error=noportal.
 // Owned by the `giving` module, so the middleware already 404s this when giving is
 // off; the endpoint only has to enforce the session.
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import { createPortalSession, type StripeEnv } from '../../../lib/stripe';
+import { createPortalSession, stripeAppOrigin, stripeConfiguredMode, type StripeEnv } from '../../../lib/stripe';
 import { getStripeCustomer } from '../../../lib/givingDb';
 import { parseLocale, type Locale } from '../../../lib/locales';
 
@@ -26,14 +26,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // No/!invalid form body — keep the fallback locale.
   }
 
-  const customerId = await getStripeCustomer(locals.db, user.id);
+  const stripeEnv = env as unknown as StripeEnv;
+  const mode = stripeConfiguredMode(stripeEnv);
+  if (mode === null) {
+    return new Response(null, { status: 303, headers: { location: `/${locale}/my/giving?error=portal` } });
+  }
+  const customerId = await getStripeCustomer(locals.db, user.id, mode === 'live');
   if (!customerId) {
     return new Response(null, { status: 303, headers: { location: `/${locale}/my/giving?error=noportal` } });
   }
 
-  const returnUrl = `${new URL(request.url).origin}/${locale}/my/giving`;
+  // The return URL comes from the configured APP_ORIGIN, never from request headers.
   try {
-    const { url } = await createPortalSession(env as unknown as StripeEnv, customerId, returnUrl);
+    const returnUrl = `${stripeAppOrigin(stripeEnv)}/${locale}/my/giving`;
+    const { url } = await createPortalSession(stripeEnv, customerId, returnUrl);
     return new Response(null, { status: 303, headers: { location: url } });
   } catch (e) {
     console.error('giving portal: Stripe portal session failed', e);

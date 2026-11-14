@@ -46,13 +46,16 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   ]),
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
-    'group_members', 'group_files',
-    'event_admins', 'prayer_items', 'households', 'household_members', 'reg_events', 'reg_event_i18n',
-    'registrations',
+    'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
   ]),
-  giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members', 'identity_giving_checkout_continuations']),
+  giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'stripe_customers', 'giving_statement_outbox', 'giving_audit_events', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
     'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'identity_registration_continuations',
+  ]),
+  planning: Object.freeze([
+    'planning_events', 'planning_event_coordinators', 'planning_items', 'planning_sessions',
+    'planning_session_people', 'availability_windows', 'planning_notification_rules',
+    'teams', 'team_members', 'people',
   ]),
   learning: Object.freeze([
     'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',
@@ -64,6 +67,8 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'learning_canvas_event_receipts', 'learning_canvas_cleanup_tasks',
   ]),
 });
+// Must equal STRIPE_API_VERSION in src/lib/stripe.ts (a source test keeps them in sync).
+const STRIPE_PINNED_API_VERSION = '2025-03-31.basil';
 const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
   giving: Object.freeze(['church_private.stripe_webhook_events']),
   registration: Object.freeze([
@@ -73,6 +78,8 @@ const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
 });
 const SUPABASE_TABLES_BY_CAPABILITY = Object.freeze({
   groups: Object.freeze(['group_reg_events']),
+  // Event-scope prayers and "My registrations" need Registration, which is Supabase-only.
+  portal: Object.freeze(['event_admins', 'reg_events', 'reg_event_i18n', 'registrations']),
 });
 
 function rows(value, label) {
@@ -285,6 +292,20 @@ export async function checkDatabase(options) {
       if (migration) checks.push(migration);
     } catch {
       checks.push(issue('database.migrations', 'D1 migration readiness could not be verified safely.', 'Verify the Wrangler version and apply all D1 migrations.'));
+    }
+  }
+
+  // Stripe events recorded at an API version other than the one this release pins
+  // mean the webhook endpoint was created at a different version: field shapes may
+  // differ from what the handlers read. Advisory only; never blocks readiness.
+  if (options.manifest.database === 'supabase' && options.manifest.modules.some((key) => key === 'giving' || key === 'registration')) {
+    try {
+      const versions = await queryAll(options.db, 'SELECT DISTINCT api_version FROM church_private.stripe_webhook_events WHERE api_version IS NOT NULL AND api_version <> ? ORDER BY api_version LIMIT 5', [STRIPE_PINNED_API_VERSION]);
+      if (versions.length > 0) {
+        checks.push(result('database.stripe-api-version', 'warning', `Stored Stripe webhook events use an API version other than the pinned ${STRIPE_PINNED_API_VERSION}.`, `Create or update the Stripe webhook endpoint at API version ${STRIPE_PINNED_API_VERSION} (see the go-live checklist in docs/supabase-setup.md).`));
+      }
+    } catch {
+      // The advisory probe is best-effort; a missing relation is reported by database.tables.
     }
   }
 

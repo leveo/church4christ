@@ -853,7 +853,7 @@ export async function attachRegistrationCheckoutRequest(
   input: AttachRegistrationCheckoutRequestInput,
 ): Promise<boolean> {
   const requestId = parseCheckoutRequestId(input.requestId);
-  if (!/^cs_test_[A-Za-z0-9_]{1,240}$/.test(input.sessionId)) return false;
+  if (!/^cs_(?:test|live)_[A-Za-z0-9_]{1,240}$/.test(input.sessionId)) return false;
   let url: URL;
   try {
     url = new URL(input.sessionUrl);

@@ -100,6 +100,7 @@ const ADMIN_ONLY = [
   '/admin/attendance',
   '/admin/activity-score',
   '/admin/learning',
+  '/admin/planning',
   '/admin/onboarding',
 ];
 
@@ -171,6 +172,10 @@ export function classifyRoute(pathname: string): RouteClass {
   if (p === '/reauth') return 'authed';
   if (under(p, '/manage')) return 'authed';
   if (under(p, '/learn')) return 'authed';
+  // Service Planning: the member run-sheet view and the event coordinator page do
+  // their own per-event check in-page (called person / owner / coordinator /
+  // planning admin); the route only requires a session.
+  if (under(p, '/planning')) return 'authed';
   if (p === '/profile') return 'authed';
   if (under(p, '/settings')) return 'authed';
   if (under(p, '/serve')) return 'team';

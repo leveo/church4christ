@@ -186,6 +186,10 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
   // count blocks the preview; no generic identifier or partial handler exists.
   { referenceKey: 'activity_score_config.updated_by_person_id', sql: () =>
     'SELECT COUNT(*) n FROM activity_score_config WHERE updated_by_person_id=?1' },
+  { referenceKey: 'availability_windows.person_id', sql: () => 'SELECT COUNT(*) n FROM availability_windows WHERE person_id=?1' },
+  { referenceKey: 'planning_event_coordinators.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_event_coordinators WHERE person_id=?1' },
+  { referenceKey: 'planning_items.owner_person_id', sql: () => 'SELECT COUNT(*) n FROM planning_items WHERE owner_person_id=?1' },
+  { referenceKey: 'planning_session_people.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_session_people WHERE person_id=?1' },
   { referenceKey: 'blockout_dates.person_id', sql: () => 'SELECT COUNT(*) n FROM blockout_dates WHERE person_id=?1' },
   { referenceKey: 'group_join_requests.person_id', sql: () => 'SELECT COUNT(*) n FROM group_join_requests WHERE person_id=?1' },
   { referenceKey: 'learning_activity_events.person_id', sql: () => 'SELECT COUNT(*) n FROM learning_activity_events WHERE person_id=?1' },
@@ -221,6 +225,7 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
     ? 'SELECT COUNT(*) n FROM gifts WHERE person_id=?1' : null },
   { referenceKey: 'registrations.person_id', sql: (backend) => backend === 'supabase'
     ? 'SELECT COUNT(*) n FROM registrations WHERE person_id=?1' : null },
+  { referenceKey: 'stripe_customers.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM stripe_customers WHERE person_id=?1' : null },
   { referenceKey: 'recurring_gifts.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM recurring_gifts WHERE person_id=?1' : null },
 ] as const;
 

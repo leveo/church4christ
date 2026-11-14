@@ -58,12 +58,12 @@ INSERT INTO gifts (id, person_id, donor_name, donor_email, fund_id, amount_cents
 -- Five manually recorded gifts (checks and cash), each entered by the admin
 -- (recorded_by 1) with a received_on date. Checks carry a check_number. These are
 -- the offline half of the ledger the finance team keys in by hand.
-INSERT INTO gifts (id, person_id, fund_id, amount_cents, currency, method, status, check_number, received_on, recorded_by, note) VALUES
-  (8, 2, 3, 15000, 'usd', 'check', 'succeeded', '1042', date('now','start of day','-60 days'), 1, 'Building pledge'),
-  (9, 7, 2, 4000, 'usd', 'cash', 'succeeded', NULL, date('now','start of day','-35 days'), 1, NULL),
-  (10, 4, 1, 12000, 'usd', 'check', 'succeeded', '2087', date('now','start of day','-90 days'), 1, 'Sunday tithe'),
-  (11, 5, 3, 2500, 'usd', 'cash', 'succeeded', NULL, date('now','start of day','-120 days'), 1, NULL),
-  (12, 8, 1, 25000, 'usd', 'check', 'succeeded', '3310', date('now','start of day','-200 days'), 1, 'Year-end gift');
+INSERT INTO gifts (id, person_id, fund_id, amount_cents, currency, method, status, check_number, received_on, recorded_by, note, livemode) VALUES
+  (8, 2, 3, 15000, 'usd', 'check', 'succeeded', '1042', date('now','start of day','-60 days'), 1, 'Building pledge', true),
+  (9, 7, 2, 4000, 'usd', 'cash', 'succeeded', NULL, date('now','start of day','-35 days'), 1, NULL, true),
+  (10, 4, 1, 12000, 'usd', 'check', 'succeeded', '2087', date('now','start of day','-90 days'), 1, 'Sunday tithe', true),
+  (11, 5, 3, 2500, 'usd', 'cash', 'succeeded', NULL, date('now','start of day','-120 days'), 1, NULL, true),
+  (12, 8, 1, 25000, 'usd', 'check', 'succeeded', '3310', date('now','start of day','-200 days'), 1, 'Year-end gift', true);
 
 -- One active recurring subscription: David gives $50/month to the General fund.
 -- Its stripe_subscription_id matches gift 7 above (one materialized invoice), so
