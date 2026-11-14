@@ -63,6 +63,33 @@ export function isChinese(locale: string | null | undefined): boolean {
   return locale === 'zh';
 }
 
+/** Han-script locales share CJK typography: full-width list marks and
+ *  parentheses, compact calendar labels. Driven by registry metadata. */
+export function isHanScript(locale: string): boolean {
+  return localeMeta(locale).script === 'han';
+}
+
+/** Look up per-locale copy along the fallback chain. `en` is required so a
+ *  lookup can never come back empty. */
+export function pickByLocale<T>(map: { en: T } & Partial<Record<SupportedLocale, T>>, locale: string): T {
+  for (const code of fallbackChain(locale)) {
+    const hit = map[code];
+    if (hit !== undefined) return hit;
+  }
+  return map.en;
+}
+
+/** Separator for an inline list of names: Han uses the enumeration comma. */
+export function listSeparator(locale: string): string {
+  return isHanScript(locale) ? '、' : ', ';
+}
+
+/** `Name (role)` with the locale's parenthesis style (full-width for Han). */
+export function nameWithRole(locale: string, name: string, role: string | null | undefined): string {
+  if (!role) return name;
+  return isHanScript(locale) ? `${name}（${role}）` : `${name} (${role})`;
+}
+
 /** Coerce arbitrary input to a supported locale, else null. */
 export function toSupportedLocale(value: unknown): SupportedLocale | null {
   return isSupportedLocale(value) ? value : null;

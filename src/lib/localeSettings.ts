@@ -105,3 +105,9 @@ export async function saveLocaleSettings(
   clearLocaleSettingsCache();
   return checked;
 }
+
+/** The language to render for a signed-in person: their saved `lang` when that
+ *  locale is enabled, otherwise the installation default. */
+export function userLocale(lang: string | null | undefined, settings: LocaleSettings): SupportedLocale {
+  return isSupportedLocale(lang) && settings.enabled.includes(lang) ? lang : settings.default;
+}

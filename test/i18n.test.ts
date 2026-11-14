@@ -504,9 +504,10 @@ describe('t() fallback chain and dictionary loading', () => {
   });
 
   it('escapes interpolated values but not dictionary text', () => {
-    const key = Object.keys(en).find((k) => /\{\w+\}/.test(en[k]));
+    const enDict: Record<string, string> = en;
+    const key = Object.keys(enDict).find((k) => /\{\w+\}/.test(enDict[k]));
     expect(key).toBeDefined();
-    const name = /\{(\w+)\}/.exec(en[key!])![1];
+    const name = /\{(\w+)\}/.exec(enDict[key!])![1];
     expect(t('en', key!, { [name]: '<b>' })).toContain('&lt;b&gt;');
   });
 });
