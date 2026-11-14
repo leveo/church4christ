@@ -50,6 +50,10 @@ Upgrade notes: [Upgrading 1.4.0 to 1.5.0](docs/upgrade.md#upgrading-140-to-150):
   Volunteering that works on D1 and Supabase. See
   [`docs/features/service-planning.md`](docs/features/service-planning.md).
 
+- The Supabase setup guide opens its Stripe section with a short, no-code overview for churches
+  and nonprofits, linking Stripe's official pages for account activation, the nonprofit fee
+  discount, receipts, the customer portal, ACH, keys, webhooks, and test cards.
+
 ### Changed
 
 - Children's check-in and volunteer scheduling now work at phone width (375px): Today
