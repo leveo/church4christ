@@ -18,10 +18,17 @@ do not create a second provisioning path or replace setup with raw seed commands
    it; do not invent their preferences or submit the form for them. If the browser cannot
    open, run `npm run onboard -- --no-open` and share the printed local URL. The optional
    `--port 4310` selects a port. Running onboarding again reloads the saved answers.
-4. Recommend **Website + Community / Cloudflare D1** to start. Workers and R2 are also
+4. Languages: onboarding offers a **Site languages** multi-select and a default; the installer
+   takes `--locales en,zh --default-locale en` (`--locale x` = `--locales x --default-locale x`).
+   Later changes go through **Settings → Languages**. Content and emails fall back requested →
+   default → English; disabling a language hides it and never deletes content. To add or review
+   a language follow [docs/i18n.md](docs/i18n.md#add-a-language-checklist): registry entry
+   (`src/lib/locales.ts` + `config/locales.json`), dictionary with parity tests, glossary, fonts.
+   Do not branch on `=== 'zh'`; use the registry helpers.
+5. Recommend **Website + Community / Cloudflare D1** to start. Workers and R2 are also
    used. **Giving and Registration** require an explicit decision to use
    Supabase-compatible PostgreSQL and its additional setup inputs.
-5. Preview and inspect the existing installer's plan, then apply the same preferences:
+6. Preview and inspect the existing installer's plan, then apply the same preferences:
 
    ```sh
    node scripts/setup/index.mjs --preferences .church/preferences.json --yes --dry-run --json
@@ -30,7 +37,7 @@ do not create a second provisioning path or replace setup with raw seed commands
 
    For unattended setup with complete user-supplied inputs, the explicit CLI alternatives
    in [docs/setup.md](docs/setup.md) remain supported. Check the CLI's `--help` before use.
-6. Follow the returned `handoff`, run doctor, and report the actual URL, administrator,
+7. Follow the returned `handoff`, run doctor, and report the actual URL, administrator,
    enabled features, completed automated checks, and remaining manual checks. Use saved
    brand preferences for further customization through the existing design-token system.
 

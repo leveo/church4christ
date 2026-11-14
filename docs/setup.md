@@ -58,6 +58,13 @@ without its Registration-dependent parts. Their provider setup and readiness
 requirements still apply. Choosing **campus** describes the organization; it does not add a campus to a
 previously installed site.
 
+The form's **Site languages** step is a multi-select: tick every language the site should
+offer and choose the default (it must be one of the ticked languages). Only supported
+languages (`en`, `zh` today, listed from `config/locales.json`) are offered. Preferences are
+stored as `schemaVersion: 2` with `setup.locales[]` and `setup.defaultLocale`; an older
+version 1 file (one `setup.locale`) is still read, treated as English and Chinese enabled with
+that default, and upgraded the next time you save.
+
 Save the form to write `.church/preferences.json` and the optional logo to the local,
 Git-ignored `.church/` directory. Stop the onboarding server with Ctrl+C when finished.
 Saving preferences does not install, provision, or deploy anything. Re-run
@@ -162,7 +169,7 @@ The example values are for a disposable local evaluation, not a production organ
 | --- | --- |
 | Mode and features | `local`, `website-community` |
 | Site identity | `demo-church`, `Demo Church` |
-| Default language | `en` or `zh` |
+| Languages | `--locales en,zh` enables languages (first listed is the default unless `--default-locale` is given); `--locale x` is shorthand for `--locales x --default-locale x`. Supported: `en`, `zh` |
 | First administrator | `First Admin`, `admin@example.com` |
 | Local origin and sender | `http://localhost:4321`, `admin@example.com` |
 | Initial content | Explicitly choose `--demo-data` or `--no-demo-data` |
@@ -170,14 +177,14 @@ The example values are for a disposable local evaluation, not a production organ
 After `npm ci`, preview the plan. This single-line command works in Bash and PowerShell:
 
 ```sh
-node scripts/setup/index.mjs --mode local --preset website-community --site-slug demo-church --church-name "Demo Church" --locale en --admin-email admin@example.com --admin-name "First Admin" --app-origin http://localhost:4321 --email-from admin@example.com --demo-data --yes --dry-run --json
+node scripts/setup/index.mjs --mode local --preset website-community --site-slug demo-church --church-name "Demo Church" --locales en,zh --default-locale en --admin-email admin@example.com --admin-name "First Admin" --app-origin http://localhost:4321 --email-from admin@example.com --demo-data --yes --dry-run --json
 ```
 
 Expect a JSON object with `schemaVersion: 1`, `kind: "setup-plan"`, and `plan`.
 Check its backend, modules, content choice, and proposed steps. Then apply the same inputs:
 
 ```sh
-node scripts/setup/index.mjs --mode local --preset website-community --site-slug demo-church --church-name "Demo Church" --locale en --admin-email admin@example.com --admin-name "First Admin" --app-origin http://localhost:4321 --email-from admin@example.com --demo-data --yes --json
+node scripts/setup/index.mjs --mode local --preset website-community --site-slug demo-church --church-name "Demo Church" --locales en,zh --default-locale en --admin-email admin@example.com --admin-name "First Admin" --app-origin http://localhost:4321 --email-from admin@example.com --demo-data --yes --json
 ```
 
 Use the direct Node entry point for JSON stdout; npm's equivalent is
@@ -224,7 +231,7 @@ route, scheduled-job, backup, and restore verification. Use the
 | `.church/preferences.json` | Local onboarding choices for the installer and future agent sessions; ignored by Git |
 | `.church/onboarding-logo-<sha256>.png`, `.jpg`, or `.webp` | Local uploaded logo referenced by the preferences; ignored by Git |
 | `.church/branding.json` | Applied brand colors used by token generation and builds; preserve for this organization's builds |
-| `church.config.json` | Non-secret installation manifest and chosen resources |
+| `church.config.json` | Non-secret installation manifest and chosen resources (`schemaVersion: 2` records `site.locales`; version 1 manifests stay valid and mean English and Chinese with their default) |
 | `wrangler.jsonc` | Generated Worker and resource bindings |
 | `.church/setup-state.json` | Local resumable setup progress |
 | `.dev.vars` | Local secrets and development settings; ignored by Git |
