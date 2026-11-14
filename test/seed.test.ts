@@ -575,3 +575,28 @@ describe('demo seed: member portal prayer items on D1', () => {
     expect(results.find((r) => r.scope === 'group')?.status).toBe('pending');
   });
 });
+
+describe('demo seed: service planning', () => {
+  it('seeds an upcoming published Christmas service with a run sheet and two rehearsals', async () => {
+    const event = await env.DB
+      .prepare("SELECT status, event_date, revision FROM planning_events WHERE title_en = 'Christmas Service'")
+      .first<{ status: string; event_date: string; revision: number }>();
+    expect(event?.status).toBe('published');
+    expect(event!.event_date >= new Date().toISOString().slice(0, 10)).toBe(true);
+    const items = await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_items WHERE event_id = 31000').first<{ n: number }>();
+    expect(items?.n).toBeGreaterThanOrEqual(8);
+    const sessions = await env.DB
+      .prepare('SELECT status FROM planning_sessions WHERE event_id = 31000 ORDER BY id')
+      .all<{ status: string }>();
+    expect(sessions.results.map((s) => s.status)).toEqual(['scheduled', 'draft']);
+  });
+
+  it('keeps demo availability, coordinators, and notification rules consistent', async () => {
+    const windows = await env.DB.prepare('SELECT COUNT(*) AS n FROM availability_windows').first<{ n: number }>();
+    expect(windows?.n).toBe(3);
+    const coordinator = await env.DB.prepare('SELECT person_id FROM planning_event_coordinators').first<{ person_id: number }>();
+    expect(coordinator?.person_id).toBe(3);
+    const rules = await env.DB.prepare('SELECT COUNT(*) AS n FROM planning_notification_rules WHERE enabled = 1').first<{ n: number }>();
+    expect(rules?.n).toBe(4);
+  });
+});
