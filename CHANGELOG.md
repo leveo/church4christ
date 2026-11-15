@@ -38,6 +38,10 @@ Upgrading from 1.5.0: see [Upgrading 1.5.0 to 1.6.0](docs/upgrade.md#upgrading-1
   translation toolkit ships with it: `scripts/i18n/export-keys.mjs`, `scripts/i18n/check.mjs`, a
   church glossary in `docs/i18n/glossary.md`, and per-language capability and readiness copy in
   `src/i18n/catalog/<code>.json`. See [docs/i18n.md](docs/i18n.md).
+- The README is available in all twelve languages (`README.<code>.md`, AI-assisted) with a
+  language bar at the top; `README.md` stays English and authoritative. The short Chinese summary
+  section in the English README is replaced by the full Chinese README. See
+  [README translations](docs/i18n.md#readme-translations).
 - Admin editors for ministries, teams, service types, custom pages, events, announcements,
   navigation links, and the site identity settings (name, tagline, service times) now read and
   write every enabled language, not only English and Chinese.

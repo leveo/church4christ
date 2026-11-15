@@ -204,7 +204,7 @@ language, and let it do the editing. Some real examples you could paste in:
 > "Read `docs/features/public-site-and-themes.md`, then change our primary color to
 > royal blue and show me the home page."
 
-> "Add a Spanish (`es`) locale following `docs/i18n.md`."
+> "Add an Italian (`it`) locale following `docs/i18n.md`."
 
 > "Follow docs/setup.md to configure our church with no demo content. Show the setup
 > plan and readiness results, then prepare deployment using docs/deploy.md."
