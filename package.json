@@ -1,8 +1,8 @@
 {
   "name": "church4christ",
   "type": "module",
-  "version": "1.5.0",
-  "description": "Open-source church management software (ChMS) and bilingual church website: a self-hosted church CMS and Planning Center alternative built on Astro and Cloudflare Workers.",
+  "version": "1.6.0",
+  "description": "Open-source church management software (ChMS) and multilingual church website: a self-hosted church CMS and Planning Center alternative built on Astro and Cloudflare Workers.",
   "keywords": [
     "church-management",
     "church-management-software",
@@ -16,7 +16,7 @@
     "volunteer-scheduling",
     "children-check-in",
     "small-groups",
-    "bilingual",
+    "multilingual",
     "chinese-church",
     "astro",
     "cloudflare-workers",

@@ -1,6 +1,6 @@
 import { hasAreaAccess } from './adminAreas';
 import { ministryCopy } from '../i18n/designMinistry';
-import { localePath, type Locale } from './locales';
+import { localePath, pathWithoutLocale, type Locale } from './locales';
 import { moduleForPath } from './modules';
 import { canAccess, classifyRoute } from './routePolicy';
 import type { SessionUser } from './types';
@@ -33,5 +33,6 @@ export function ministryNavigation(modules: ReadonlySet<string>, locale: Locale,
 
 export function ministryLinkActive(href: string, pathname: string): boolean {
   const path = pathname.replace(/\/$/, '');
-  return path === href || (!/^\/(en|zh)\/serve$/.test(href) && path.startsWith(`${href}/`));
+  const { locale, rest } = pathWithoutLocale(href);
+  return path === href || (!(locale && rest === '/serve') && path.startsWith(`${href}/`));
 }

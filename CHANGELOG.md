@@ -10,6 +10,10 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-14
+
+Upgrading from 1.5.0: see [Upgrading 1.5.0 to 1.6.0](docs/upgrade.md#upgrading-150-to-160).
+
 ### Added
 
 - Language infrastructure (no operator action required for the language settings themselves). A registry of
@@ -34,6 +38,10 @@ than published to npm.
   translation toolkit ships with it: `scripts/i18n/export-keys.mjs`, `scripts/i18n/check.mjs`, a
   church glossary in `docs/i18n/glossary.md`, and per-language capability and readiness copy in
   `src/i18n/catalog/<code>.json`. See [docs/i18n.md](docs/i18n.md).
+- The README is available in all twelve languages (`README.<code>.md`, AI-assisted) with a
+  language bar at the top; `README.md` stays English and authoritative. The short Chinese summary
+  section in the English README is replaced by the full Chinese README. See
+  [README translations](docs/i18n.md#readme-translations).
 - Admin editors for ministries, teams, service types, custom pages, events, announcements,
   navigation links, and the site identity settings (name, tagline, service times) now read and
   write every enabled language, not only English and Chinese.
@@ -49,14 +57,22 @@ than published to npm.
   change. Operator impact: apply the new forward migrations before deploying. D1 gets
   `0041`-`0049` (the lookup table, then rebuilds of the translation and related tables; back up
   first, rebuild time grows with table size), and Supabase/PostgreSQL gets `0041`. No data
-  changes and no behavior changes; the application still offers English and Chinese until a
-  language is added. See [Unreleased: language lookup migrations](docs/upgrade.md#unreleased-language-lookup-migrations).
+  changes and no behavior changes; an upgraded installation still offers English and Chinese until an
+  administrator enables more languages. See [Language lookup migrations](docs/upgrade.md#language-lookup-migrations).
 
 - New Church4Christ logo: a teal church and cross sheltering an orange figure that forms a
   "4". The browser favicon, the onboarding page, the README header, and the 1280×640
   social preview use it, and the demo seed sets it as the demo church's logo
   (`site.logo_image_key`). Source files and colors are in `docs/images/brand/`. Existing
   installations keep their own uploaded logo; only the favicon changes for them.
+
+### Fixed
+
+- In the ten newer languages the public header put every link under **More**; built-in links
+  now sort into Welcome, Explore, Connect, and Get Involved in every supported language.
+- A paid Registration checkout started from a page in one of the ten newer languages failed its
+  stored-request check during Stripe recovery; any supported language now passes.
+- The serving menu's "Serve" link highlights correctly in every supported language.
 
 ## [1.5.0] - 2026-11-14
 

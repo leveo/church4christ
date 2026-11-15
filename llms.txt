@@ -1,8 +1,8 @@
 # Church4Christ
 
-> Church4Christ is open-source church management software (ChMS) and a church CMS with a bilingual English/Chinese church website. It is a self-hosted, modular alternative to hosted church platforms such as Planning Center, built with Astro on Cloudflare Workers, Cloudflare D1 or Supabase/PostgreSQL, and Cloudflare R2. License: GPL-3.0. Source: https://github.com/leveo/church4christ. Website: https://church4christ.org. Demo: https://demo.church4christ.org.
+> Church4Christ is open-source church management software (ChMS) and a church CMS with a multilingual church website in 12 interface languages, including English and Chinese. It is a self-hosted, modular alternative to hosted church platforms such as Planning Center, built with Astro on Cloudflare Workers, Cloudflare D1 or Supabase/PostgreSQL, and Cloudflare R2. License: GPL-3.0. Source: https://github.com/leveo/church4christ. Website: https://church4christ.org. Demo: https://demo.church4christ.org.
 
-It is intended for small and mid-size churches, fellowships, and nonprofits, especially bilingual and immigrant congregations, that have a technically comfortable person or partner to deploy and maintain it. It is source code you host, not a managed service.
+It is intended for small and mid-size churches, fellowships, and nonprofits, especially multilingual and immigrant congregations, that have a technically comfortable person or partner to deploy and maintain it. It is source code you host, not a managed service.
 
 Implemented capabilities: public church website with three themes, sermons, bulletins, events, articles, testimonies, and a drag-and-drop page builder; people and households with CSV import and export; groups and fellowships; volunteer scheduling with email confirmation; children's check-in kiosk; service attendance; newcomer follow-up; prayer wall; community workflows with email reminders; multi-campus; activity scores; a Learning module connected to Google Classroom or Canvas; optional member portal (D1 or Supabase), offline giving ledger, and free event registration (Supabase backend); optional read-only Planning Center People synchronization.
 
@@ -26,7 +26,7 @@ Not included: native mobile apps, SMS messaging, and worship service or song pla
 - [Children's check-in](https://github.com/leveo/church4christ/blob/main/docs/features/children-checkin.md)
 - [Member portal](https://github.com/leveo/church4christ/blob/main/docs/features/member-portal.md)
 - [Giving](https://github.com/leveo/church4christ/blob/main/docs/features/giving.md)
-- [Two languages](https://github.com/leveo/church4christ/blob/main/docs/features/i18n.md)
+- [Twelve languages](https://github.com/leveo/church4christ/blob/main/docs/features/i18n.md)
 
 ## Optional
 

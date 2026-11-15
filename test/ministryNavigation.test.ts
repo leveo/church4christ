@@ -33,6 +33,8 @@ describe('ministry workspace navigation', () => {
 
   it('marks only the current section active, including detail pages', () => {
     expect(ministryLinkActive('/en/serve', '/en/serve/gifts')).toBe(false);
+    expect(ministryLinkActive('/ja/serve', '/ja/serve/gifts')).toBe(false);
+    expect(ministryLinkActive('/hi/serve/plans', '/hi/serve/plans/9')).toBe(true);
     expect(ministryLinkActive('/en/serve/plans', '/en/serve/plans/9')).toBe(true);
     expect(ministryLinkActive('/en/serve/plans', '/en/serve/plans-extra')).toBe(false);
     expect(ministryLinkActive('/en/manage', '/en/manage/ministries/1')).toBe(true);

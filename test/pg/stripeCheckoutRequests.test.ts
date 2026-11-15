@@ -373,6 +373,14 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     }
   });
 
+  it('replays a stored request created from any supported language, not only English and Chinese', async () => {
+    const eventId = await event();
+    const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId, { locale: 'ja' }));
+    if (created.kind !== 'create') throw new Error('expected create');
+    expect(created.requestJson.success_url).toBe('http://localhost:4321/ja/register/done?ok=1&paid=1');
+    expect(await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId, { locale: 'ja' }))).toEqual(created);
+  });
+
   it('applies the exact pending reuse matrix without a second registration', async () => {
     const eventId = await event();
     const created = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
