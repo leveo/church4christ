@@ -30,7 +30,7 @@ export interface LocaleMeta {
   readonly cjk: boolean;
 }
 
-export const SUPPORTED_LOCALES = ['en', 'zh'] as const;
+export const SUPPORTED_LOCALES = ['en', 'zh', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'ms', 'id', 'vi', 'hi'] as const;
 /** A language the code base ships support for (registry member). */
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 /** Application-wide alias kept for the many call sites that predate the registry. */
@@ -41,6 +41,16 @@ export const LOCALES = SUPPORTED_LOCALES;
 export const LOCALE_REGISTRY: Readonly<Record<SupportedLocale, LocaleMeta>> = {
   en: { code: 'en', bcp47: 'en', hreflang: 'en', intl: 'en-US', ogLocale: 'en_US', nativeName: 'English', script: 'latin', cjk: false },
   zh: { code: 'zh', bcp47: 'zh-Hans', hreflang: 'zh-Hans', intl: 'zh-CN', ogLocale: 'zh_CN', nativeName: '中文', script: 'han', cjk: true },
+  es: { code: 'es', bcp47: 'es', hreflang: 'es', intl: 'es-ES', ogLocale: 'es_ES', nativeName: 'Español', script: 'latin', cjk: false },
+  pt: { code: 'pt', bcp47: 'pt-BR', hreflang: 'pt-BR', intl: 'pt-BR', ogLocale: 'pt_BR', nativeName: 'Português (Brasil)', script: 'latin', cjk: false },
+  fr: { code: 'fr', bcp47: 'fr', hreflang: 'fr', intl: 'fr-FR', ogLocale: 'fr_FR', nativeName: 'Français', script: 'latin', cjk: false },
+  de: { code: 'de', bcp47: 'de', hreflang: 'de', intl: 'de-DE', ogLocale: 'de_DE', nativeName: 'Deutsch', script: 'latin', cjk: false },
+  ja: { code: 'ja', bcp47: 'ja', hreflang: 'ja', intl: 'ja-JP', ogLocale: 'ja_JP', nativeName: '日本語', script: 'kana', cjk: true },
+  ko: { code: 'ko', bcp47: 'ko', hreflang: 'ko', intl: 'ko-KR', ogLocale: 'ko_KR', nativeName: '한국어', script: 'hangul', cjk: true },
+  ms: { code: 'ms', bcp47: 'ms', hreflang: 'ms', intl: 'ms-MY', ogLocale: 'ms_MY', nativeName: 'Bahasa Melayu', script: 'latin', cjk: false },
+  id: { code: 'id', bcp47: 'id', hreflang: 'id', intl: 'id-ID', ogLocale: 'id_ID', nativeName: 'Bahasa Indonesia', script: 'latin', cjk: false },
+  vi: { code: 'vi', bcp47: 'vi', hreflang: 'vi', intl: 'vi-VN', ogLocale: 'vi_VN', nativeName: 'Tiếng Việt', script: 'latin', cjk: false },
+  hi: { code: 'hi', bcp47: 'hi', hreflang: 'hi', intl: 'hi-IN', ogLocale: 'hi_IN', nativeName: 'हिन्दी', script: 'devanagari', cjk: false },
 };
 
 /** The fixed final fallback: its dictionary is always loaded. */

@@ -1,4 +1,5 @@
-import { type Locale, pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 const en = {
   about: 'Life together', beliefs: 'What we believe', visit: 'Your first Sunday',
   people: 'People & community', fellowships: 'Find your community', ministries: 'Serve with purpose',
@@ -19,4 +20,6 @@ const zh: typeof en = {
   readBio: '阅读介绍', explore: '进一步了解', signin: '欢迎回来', signup: '开始你的旅程',
   accountBody: '与教会连接，彼此关怀，一起迈出下一步。',
 };
-export const frontdoorCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);
+export const frontdoorCopy = (locale: Locale) => designCopy('frontdoor', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const frontdoorSource = { en, zh };

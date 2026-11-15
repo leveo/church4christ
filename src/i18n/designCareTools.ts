@@ -1,4 +1,5 @@
-import { type Locale, pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 
 const en = {
   intake: 'RECORD A VISIT',
@@ -84,4 +85,6 @@ const zh: Record<keyof typeof en, string> = {
   notesNext: '确认后下载',
 };
 
-export const careToolsCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);
+export const careToolsCopy = (locale: Locale) => designCopy('careTools', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const careToolsSource = { en, zh };

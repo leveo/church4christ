@@ -15,7 +15,7 @@ const answers = (flags: string[]) => parseSetupArgs([...base, ...flags], catalog
 describe('registry parity with setup scripts', () => {
   it('config/locales.json mirrors the runtime registry codes and native names', () => {
     expect(SUPPORTED_LOCALE_CODES).toEqual([...SUPPORTED_LOCALES]);
-    for (const entry of SCRIPT_LOCALES) expect(entry.nativeName).toBe(LOCALE_REGISTRY[entry.code as 'en' | 'zh'].nativeName);
+    for (const entry of SCRIPT_LOCALES) expect(entry.nativeName).toBe(LOCALE_REGISTRY[entry.code as keyof typeof LOCALE_REGISTRY].nativeName);
     expect(JSON.parse(readFileSync('config/locales.json', 'utf8')).defaultLocale).toBe('en');
   });
 });
@@ -45,8 +45,9 @@ describe('--locales / --default-locale / --locale', () => {
   });
 
   it('rejects unsupported languages, a default outside the list, and mixed forms', () => {
-    expect(() => answers(['--locales', 'en,fr'])).toThrow(/unsupported languages: fr/);
-    expect(() => answers(['--locale', 'fr'])).toThrow(/locale must be one of/);
+    expect(() => answers(['--locales', 'en,xx'])).toThrow(/unsupported languages: xx/);
+    expect(() => answers(['--locale', 'xx'])).toThrow(/locale must be one of/);
+    expect(() => answers(['--locale', 'fr'])).toThrow(/locale must be one of: en, zh/);
     expect(() => answers(['--locales', 'en', '--default-locale', 'zh'])).toThrow(/one of the enabled/);
     expect(() => answers(['--locale', 'en', '--locales', 'zh'])).toThrow(/must be one of the enabled/);
     expect(() => answers(['--locale', 'en', '--default-locale', 'zh'])).toThrow(/different --default-locale/);

@@ -1,4 +1,5 @@
-import { type Locale, pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 const en = {
   eyebrow: 'Finance workspace', ledgerIntro: 'Review gifts, keep donor records clear, and record the checks and cash received by your church.',
   fundsIntro: 'Give every gift a clear purpose. Manage fund names, numbers, and availability for new gifts.',
@@ -51,4 +52,6 @@ const zh: typeof en = {
   minorUnits: '最小货币单位', unitScope: '下方金额为原始记录的最小货币单位数值。此核对数据不含币种，请通过会话或奉献记录核实币种。',
   noRecovery: '此事件目前没有可用的恢复操作。',
 };
-export const financeCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);
+export const financeCopy = (locale: Locale) => designCopy('finance', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const financeSource = { en, zh };

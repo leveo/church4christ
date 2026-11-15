@@ -8,7 +8,7 @@
 import ContentPage from '../../../components/ContentPage.astro';
 import Base from '../../../layouts/Base.astro';
 import PageBlocks from '../../../components/blocks/PageBlocks.astro';
-import { parseLocale } from '../../../lib/locales';
+import { isChinese, parseLocale } from '../../../lib/locales';
 import { getCustomPageBySlug } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
 import { validateLayout } from '../../../lib/pageLayout';
@@ -29,7 +29,8 @@ if (!page || (!page.published && !canPreview)) {
   return Astro.rewrite('/404');
 }
 
-const loc = page.i18n[locale];
+// Custom pages keep an en/zh pair; other languages read en (then zh), like pickPair.
+const loc = isChinese(locale) ? page.i18n.zh : page.i18n.en;
 const fallback = page.i18n.en;
 const title = loc.title || fallback.title;
 

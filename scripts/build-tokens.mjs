@@ -154,6 +154,13 @@ function fontStack({ family, fallback }) {
   return `${quoted}, ${fallback}`;
 }
 
+/** Same stack with a script's system fonts between the theme family and its fallback. */
+function scriptFontStack({ family, fallback }, scriptFonts) {
+  const quoted = family.includes(' ') ? `'${family}'` : family;
+  const kind = /\bsans-serif\s*$/.test(fallback) ? 'sans' : 'serif';
+  return `${quoted}, ${scriptFonts[kind]}, ${fallback}`;
+}
+
 function decls(entries) {
   return entries.map(([prop, value]) => `  ${prop}: ${value};`);
 }
@@ -194,6 +201,16 @@ export function generateCss(foundation, themes) {
       ...colorDecls(theme.modes[otherMode]),
       '}',
     );
+    // Per-script font stacks (Japanese, Korean, Devanagari) keyed on <html lang>.
+    for (const [lang, scriptFonts] of Object.entries(foundation.type.scriptFonts ?? {})) {
+      if (lang.startsWith('$')) continue;
+      out.push(
+        '',
+        `:root[data-theme="${theme.name}"]:lang(${lang}) {`,
+        ...decls(['display', 'body'].map((role) => [`--font-${role}`, scriptFontStack(theme.fonts[role], scriptFonts)])),
+        '}',
+      );
+    }
   }
 
   return out.join('\n') + '\n';

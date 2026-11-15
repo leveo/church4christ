@@ -1,4 +1,4 @@
-import { isSupportedLocale, toSupportedLocale } from './locales';
+import { isSupportedLocale, toSupportedLocale, type SupportedLocale } from './locales';
 import { readSnapshotBatch, type AppDb, type AppDbResult, type SnapshotBackend } from './appDb';
 import { hasAreaAccess } from './adminAreas';
 import { isValidDateStr } from './dates';
@@ -214,7 +214,7 @@ function timestamp(value: unknown, nullable = false): string | null {
     : null;
 }
 
-function locale(value: unknown): 'en' | 'zh' | null {
+function locale(value: unknown): SupportedLocale | null {
   return toSupportedLocale(value);
 }
 
@@ -222,7 +222,7 @@ function validUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 }
 
-function assertLocale(value: unknown): asserts value is 'en' | 'zh' {
+function assertLocale(value: unknown): asserts value is SupportedLocale {
   if (!isSupportedLocale(value)) throw new NewcomerInvalidError();
 }
 
@@ -307,7 +307,7 @@ export interface NewcomerFormDefinition {
   }>;
 }
 
-function configStatements(db: AppDb, requested: 'en' | 'zh', activeOnly: boolean) {
+function configStatements(db: AppDb, requested: SupportedLocale, activeOnly: boolean) {
   const statusWhere = activeOnly ? 'WHERE status.active=1' : '';
   const fieldWhere = activeOnly ? 'WHERE field.active=1 AND field.id>7' : '';
   const optionWhere = activeOnly ? 'WHERE option.active=1 AND field.active=1 AND field.id>7' : '';
@@ -509,7 +509,7 @@ function decodeConfiguration(resultsValue: unknown, activeOnly: boolean): Newcom
 async function readConfiguration(
   db: AppDb,
   backend: SnapshotBackend,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
   activeOnly: boolean,
 ): Promise<NewcomerAdminConfiguration> {
   try {
@@ -523,7 +523,7 @@ async function readConfiguration(
 export async function listNewcomerFormDefinition(
   db: AppDb,
   backend: SnapshotBackend,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
 ): Promise<NewcomerFormDefinition> {
   assertLocale(requested);
   const config = await readConfiguration(db, backend, requested, true);
@@ -545,7 +545,7 @@ export async function listNewcomerAdminConfiguration(
   db: AppDb,
   backend: SnapshotBackend,
   user: SessionUser | null,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
 ): Promise<NewcomerAdminConfiguration> {
   assertSuperAdmin(user);
   assertLocale(requested);
@@ -556,7 +556,7 @@ export async function listNewcomerStaffStatuses(
   db: AppDb,
   backend: SnapshotBackend,
   user: SessionUser | null,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
 ): Promise<NewcomerConfigurationStatus[]> {
   assertPrivateAccess(user);
   assertLocale(requested);
@@ -568,7 +568,7 @@ export interface NewcomerQueueRow {
   name: string;
   email: string | null;
   phone: string | null;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   visitDate: string;
   serviceTypeId: number | null;
   serviceLabel: string | null;
@@ -640,7 +640,7 @@ export interface NewcomerQueuePage {
 export async function listNewcomerQueue(
   db: AppDb,
   user: SessionUser | null,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
   filters: NewcomerQueueFilters,
   today: string,
 ): Promise<NewcomerQueuePage> {
@@ -877,7 +877,7 @@ export async function getNewcomerDetail(
   backend: SnapshotBackend,
   user: SessionUser | null,
   submissionId: string,
-  requested: 'en' | 'zh',
+  requested: SupportedLocale,
   history?: NewcomerHistoryInput,
 ): Promise<NewcomerDetail | null> {
   assertPrivateAccess(user);

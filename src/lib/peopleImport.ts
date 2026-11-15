@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 import { parseUtf8CsvWithRowNumbers, type CsvParseErrorCode } from './csvParse';
 import { isValidDateStr } from './dates';
 import { isEmail, MEMBERSHIP_STATUSES, type MembershipStatus } from './validate';
@@ -85,7 +85,7 @@ export interface PeopleImportPerson {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
-  language: 'en' | 'zh' | null;
+  language: SupportedLocale | null;
   membershipStatus: MembershipStatus;
   birthday: string | null;
   joinedOn: string | null;

@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 import { csvCell } from './csv';
 import {
   PEOPLE_IMPORT_HEADERS,
@@ -39,7 +39,7 @@ export interface CanonicalPeopleExportPerson {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
-  language: 'en' | 'zh' | null;
+  language: SupportedLocale | null;
   membershipStatus: MembershipStatus;
   birthday: string | null;
   joinedOn: string | null;
@@ -505,7 +505,7 @@ function snapshotPerson(value: unknown): SnapshotValue<CanonicalPeopleExportPers
       firstName: firstName as string | null,
       lastName: lastName as string | null,
       phone: phone as string | null,
-      language: language as 'en' | 'zh' | null,
+      language: language as SupportedLocale | null,
       membershipStatus: membershipStatus as MembershipStatus,
       birthday: birthday as string | null,
       joinedOn: joinedOn as string | null,

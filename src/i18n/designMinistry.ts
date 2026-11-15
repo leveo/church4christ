@@ -1,4 +1,5 @@
-import { pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 const en = {
   navigation: 'Serving and ministry', overview: 'Discover serving', opportunities: 'Opportunities', gifts: 'Discover your gifts', stories: 'Stories',
   plans: 'Service plans', matrix: 'Schedule matrix', teams: 'Teams', manage: 'Leader workspace',
@@ -57,4 +58,6 @@ const zh: typeof en = {
   consoleIntro: '支持团队、回应申请，一起预备下一次聚会。',
   reviewFirst: '审核申请', teamDirectory: '浏览团队', nextStep: '下一步',
 };
-export const ministryCopy = (locale: 'en' | 'zh') => pickByLocale({ en, zh }, locale);
+export const ministryCopy = (locale: Locale) => designCopy('ministry', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const ministrySource = { en, zh };

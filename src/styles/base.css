@@ -112,7 +112,9 @@
   }
 
   /* CJK text needs more breathing room than Latin. */
-  body:lang(zh) {
+  body:lang(zh),
+  body:lang(ja),
+  body:lang(ko) {
     line-height: var(--leading-cjk);
   }
 
@@ -186,7 +188,11 @@
   /* CJK prose needs the roomier leading — without this, .prose's relaxed
    * line-height would override the body:lang(zh) CJK rule above. */
   .prose:lang(zh),
-  :lang(zh) .prose {
+  .prose:lang(ja),
+  .prose:lang(ko),
+  :lang(zh) .prose,
+  :lang(ja) .prose,
+  :lang(ko) .prose {
     line-height: var(--leading-cjk);
   }
   .prose > :first-child {

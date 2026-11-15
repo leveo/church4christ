@@ -1,4 +1,5 @@
-import { type Locale, pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 
 const en = {
   eyebrow: 'LIFE TOGETHER',
@@ -102,4 +103,6 @@ const zh: Record<keyof typeof en, string> = {
   chartDescription: '已记录的成人出席人数，准确数据请见历史记录表。',
 };
 
-export const gatheringsCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);
+export const gatheringsCopy = (locale: Locale) => designCopy('gatherings', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const gatheringsSource = { en, zh };

@@ -22,7 +22,7 @@ export function bootstrapFirstAdmin(
   input: {
     email: string;
     displayName: string;
-    locale: 'en' | 'zh';
+    locale: string;
     promoteExisting?: boolean;
   },
 ): Promise<{ status: BootstrapStatus; email: string }>;

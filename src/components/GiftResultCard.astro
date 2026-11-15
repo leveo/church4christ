@@ -4,7 +4,7 @@
 // as chips that link to the matching ministry page when one exists. Token-styled
 // only. `links` are resolved by the page from the gift's ministry categories.
 import { t } from '../lib/i18n';
-import type { Locale } from '../lib/locales';
+import { pickByLocale, type Locale } from '../lib/locales';
 import type { GiftMeta } from '../lib/giftQuiz';
 
 interface Props {
@@ -21,10 +21,10 @@ const { gift, rank, locale, links } = Astro.props;
     <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-hover font-display text-lg font-bold">
       {rank}
     </span>
-    <h3 class="font-display text-xl font-bold">{gift.label[locale]}</h3>
+    <h3 class="font-display text-xl font-bold">{pickByLocale(gift.label, locale)}</h3>
   </div>
   <div class="p-6">
-    <p class="leading-relaxed text-ink-muted">{gift.definition[locale]}</p>
+    <p class="leading-relaxed text-ink-muted">{pickByLocale(gift.definition, locale)}</p>
     {
       links.length > 0 && (
         <div class="mt-5">

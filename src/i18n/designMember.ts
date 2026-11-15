@@ -1,4 +1,5 @@
-import { pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 const en = {
   welcome: 'Your week, together.',
   welcomeBody: 'Respond to invitations, see what is coming up, and stay connected with your church community.',
@@ -29,4 +30,6 @@ const zh: typeof en = {
   givingIntro: '清楚查看奉献记录与定期奉献安排。',
   privacy: '隐私政策',
 };
-export const memberCopy = (locale: 'en' | 'zh') => pickByLocale({ en, zh }, locale);
+export const memberCopy = (locale: Locale) => designCopy('member', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const memberSource = { en, zh };

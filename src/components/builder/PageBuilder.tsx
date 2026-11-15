@@ -6,6 +6,7 @@ import { useMemo, useReducer, useRef, useState, useEffect, useCallback } from 'r
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import type { AnyNode, PageLayout } from '../../lib/pageLayout';
+import type { SupportedLocale } from '../../lib/locales';
 import { builderReducer, canDrop, findNode, initialState, type ContainerRef } from './model';
 import { newBlock } from './newBlock';
 import Canvas from './Canvas';
@@ -23,14 +24,14 @@ export interface PageBuilderProps {
   layoutJson: string;
   media: { path: string; filename: string }[];
   strings: Record<string, string>;
-  uiLang: 'en' | 'zh';
+  uiLang: SupportedLocale;
 }
 
 export default function PageBuilder(props: PageBuilderProps) {
   const [state, dispatch] = useReducer(builderReducer, JSON.parse(props.layoutJson) as PageLayout, initialState);
   const [meta, setMeta] = useState({ slug: props.slug, titleEn: props.titleEn, titleZh: props.titleZh, published: props.published });
   const [pageId, setPageId] = useState(props.pageId);
-  const [editLocale, setEditLocale] = useState<'en' | 'zh'>(props.uiLang);
+  const [editLocale, setEditLocale] = useState<'en' | 'zh'>(props.uiLang === 'zh' ? 'zh' : 'en');
   const [draggingType, setDraggingType] = useState<AnyNode['type'] | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);

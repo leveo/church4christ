@@ -14,7 +14,7 @@ import { parseCustomPageForm } from '../../../lib/validate';
 import { listCustomPages, getCustomPage, saveCustomPage, deleteCustomPage, toggleCustomPagePublished } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import { localePath, type Locale } from '../../../lib/locales';
+import { isChinese, localePath, type Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -156,7 +156,7 @@ const editingBuilderPage = editingPage?.format === 'builder';
       <section class={`${card} content-saved-preview mt-6`}>
         <h2 class={h2}>{contentCopy(lang).savedPreview}</h2>
         <p class="mt-2 mb-6 text-sm text-ink-muted">{contentCopy(lang).savedPreviewHint}</p>
-        <div class="prose" set:html={renderMarkdown(editingPage.i18n[lang].body_md)} />
+        <div class="prose" set:html={renderMarkdown((isChinese(lang) ? editingPage.i18n.zh : editingPage.i18n.en).body_md)} />
       </section>
     )
   }
