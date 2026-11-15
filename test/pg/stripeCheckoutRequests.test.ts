@@ -320,7 +320,7 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     const eventId = await event(1);
     const otherSql = pgClient();
     const otherDb = new PgAdapter(otherSql);
-    const gateSql = postgres(DATABASE_URL, { max: 1, fetch_types: false, onnotice: () => {} });
+    const gateSql = postgres(DATABASE_URL, { max: 1, fetch_types: false, onnotice: () => {}, connection: { TimeZone: 'UTC' } });
     try {
       await sql.unsafe(`
         CREATE FUNCTION test_checkout_capacity_barrier() RETURNS trigger

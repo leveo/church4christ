@@ -73,7 +73,7 @@ jobs:
         run: npx vitest run --project node test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts
 
       - name: Prove clean Supabase setup
-        run: npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json
+        run: npx vitest run --project node test/setup/clean-room-pg.test.ts --reporter=default --reporter=json --outputFile.json=.tmp/setup-pg.json
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
@@ -128,7 +128,7 @@ jobs:
           SUPABASE_DB_URL: postgres://postgres:postgres@localhost:5432/postgres
 
       - name: Postgres backend tests (pg project)
-        run: npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json
+        run: npx vitest run --project pg --reporter=default --reporter=json --outputFile.json=.tmp/pg.json
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
