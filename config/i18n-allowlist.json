@@ -1,0 +1,43 @@
+{
+  "$comment": "Copy that may legitimately equal the English source in a COMPLETE translation (product names, codes, cognates). `common` applies to every language; add language-specific cognates under `locales.<code>`. `keys` are dictionary keys (design copy is `design.<section>.<key>`, catalog copy is `catalog.<kind>.<id>.<field>`); `values` are exact English strings. Text with no letters left after removing placeholders, tags, entities, and URLs is always allowed.",
+  "common": {
+    "keys": [
+      "learning.provider.google",
+      "learning.provider.canvas",
+      "learning.fileMeta",
+      "signup.emailPlaceholder",
+      "signin.emailPlaceholder",
+      "locale.en",
+      "admin.builder.localeEn",
+      "admin.teams.noMinistry",
+      "kiosk.langToggle"
+    ],
+    "values": [
+      "Church4Christ",
+      "Stripe",
+      "Cloudflare",
+      "Google",
+      "Google Classroom",
+      "Canvas",
+      "Supabase",
+      "CSV",
+      "PDF",
+      "URL",
+      "iCal",
+      "QR",
+      "OK"
+    ]
+  },
+  "locales": {
+    "es": { "keys": [], "values": [] },
+    "pt": { "keys": [], "values": [] },
+    "fr": { "keys": [], "values": [] },
+    "de": { "keys": [], "values": [] },
+    "ja": { "keys": [], "values": [] },
+    "ko": { "keys": [], "values": [] },
+    "ms": { "keys": [], "values": [] },
+    "id": { "keys": [], "values": [] },
+    "vi": { "keys": [], "values": [] },
+    "hi": { "keys": [], "values": [] }
+  }
+}
