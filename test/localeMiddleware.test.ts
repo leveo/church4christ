@@ -69,7 +69,7 @@ describe('language routing middleware', () => {
   });
 
   it('falls back to the default when nothing matches', async () => {
-    const { res } = await run('/', { acceptLanguage: 'fr-FR' });
+    const { res } = await run('/', { acceptLanguage: 'sw-KE' });
     expect(loc(res)).toBe('/en/');
   });
 
@@ -99,7 +99,7 @@ describe('language routing middleware', () => {
   });
 
   it('keeps unknown locale codes as ordinary 404-able paths and Learning strict', async () => {
-    const unknown = await run('/fr/about');
+    const unknown = await run('/xx/about');
     expect(unknown.res.status).toBe(200); // not a locale segment: the router (not this redirect) 404s it
     expect(unknown.ctx.locals.locale).toBe('en');
     const learn = await run('/ZH/learn');

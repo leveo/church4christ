@@ -51,9 +51,9 @@ describe('validateLocaleSettings', () => {
   it('requires a non-empty supported subset containing the default', () => {
     expect(validateLocaleSettings(['zh', 'en'], 'zh')).toEqual({ ok: true, value: { enabled: ['en', 'zh'], default: 'zh' } });
     expect(validateLocaleSettings([], 'en')).toEqual({ ok: false, error: 'locale_none_enabled' });
-    expect(validateLocaleSettings(['en', 'fr'], 'en')).toEqual({ ok: false, error: 'locale_unsupported' });
+    expect(validateLocaleSettings(['en', 'xx'], 'en')).toEqual({ ok: false, error: 'locale_unsupported' });
     expect(validateLocaleSettings(['en'], 'zh')).toEqual({ ok: false, error: 'locale_default_not_enabled' });
-    expect(validateLocaleSettings(['en'], 'fr')).toEqual({ ok: false, error: 'locale_default_not_enabled' });
+    expect(validateLocaleSettings(['en'], 'xx')).toEqual({ ok: false, error: 'locale_default_not_enabled' });
   });
 });
 

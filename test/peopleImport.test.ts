@@ -304,7 +304,7 @@ describe('parsePeopleImport person fields', () => {
   });
 
   it.each([
-    ['language', 'fr'],
+    ['language', 'xx'],
     ['membership_status', 'prospect'],
     ['active', 'yes'],
   ] as const)('rejects an unsupported %s option', (field, value) => {

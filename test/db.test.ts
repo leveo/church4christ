@@ -46,7 +46,7 @@ describe('i18nJoin', () => {
     const three = i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['en', 'zh', 'en']);
     expect(three.select).toBe('COALESCE(m_l.name, m_d.name, m_e.name) AS name');
     expect(three.joins).toContain("m_e.locale = 'en'");
-    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['zh', 'fr'])).toThrow();
+    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], ['zh', 'xx'])).toThrow();
     expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], [])).toThrow();
   });
 
@@ -62,7 +62,7 @@ describe('i18nJoin', () => {
   });
 
   it('throws on a locale outside LOCALES', () => {
-    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], 'fr' as Locale)).toThrow();
+    expect(() => i18nJoin('ministry_i18n', 'm', 'ministry_id', ['name'], 'xx' as Locale)).toThrow();
   });
 
   it('accepts digit-bearing table names (e.g. ministry_i18n) but rejects unsafe identifiers', () => {

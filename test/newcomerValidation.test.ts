@@ -147,7 +147,7 @@ describe('shared newcomer intake validation', () => {
   it.each([
     [{ ...validRaw(), name: '' }, 'newcomer_name_required'],
     [{ ...validRaw(), email: '', phone: '' }, 'newcomer_contact_required'],
-    [{ ...validRaw(), locale: 'fr' }, 'newcomer_locale_invalid'],
+    [{ ...validRaw(), locale: 'xx' }, 'newcomer_locale_invalid'],
     [{ ...validRaw(), visitDate: '2026-02-30' }, 'newcomer_visit_date_invalid'],
     [{ ...validRaw(), serviceTypeId: 999 }, 'newcomer_service_invalid'],
     [{ ...validRaw(), answers: [{ fieldId: 999, value: 'unknown' }] }, 'newcomer_answer_unknown'],

@@ -69,6 +69,7 @@ describe.skipIf(!hasPg)('custom pages parity (Postgres)', () => {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
       },
+      extra: {},
     });
     expect(await getCustomPage(db, id)).toEqual(await getCustomPageBySlug(db, 'about'));
 

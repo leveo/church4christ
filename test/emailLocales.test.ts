@@ -17,7 +17,7 @@ describe('emailLanguages policy', () => {
 
   it('stacks zh then en for an unknown recipient when exactly en+zh are enabled (legacy)', () => {
     expect(emailLanguages(null, both)).toEqual(['zh', 'en']);
-    expect(emailLanguages('fr', both)).toEqual(['zh', 'en']);
+    expect(emailLanguages('xx', both)).toEqual(['zh', 'en']);
   });
 
   it('leads with the viewed language for sign-in style mail', () => {
