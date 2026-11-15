@@ -2,6 +2,8 @@
 
 <p align="center"><img src="docs/images/brand/church4christ-logo.png" alt="Church4Christ logo: a church with a cross sheltering a person whose raised arm forms a 4" width="280"></p>
 
+<p align="center"><b>English</b> · <a href="README.zh.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.pt.md">Português (Brasil)</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.ms.md">Bahasa Melayu</a> · <a href="README.id.md">Bahasa Indonesia</a> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.hi.md">हिन्दी</a></p>
+
 [![CI](https://github.com/leveo/church4christ/actions/workflows/ci.yml/badge.svg)](https://github.com/leveo/church4christ/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/leveo/church4christ?label=release)](https://github.com/leveo/church4christ/releases)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -17,7 +19,7 @@ and Cloudflare Workers.**
 People and households, groups, volunteer scheduling, children's check-in, attendance,
 newcomer follow-up, prayer care, sermons, bulletins, events, and an optional member
 portal, giving ledger, and event registration, in one codebase you can read, change,
-and host yourself. [中文简介](#中文简介)
+and host yourself.
 
 **Website: [church4christ.org](https://church4christ.org) · Live demo: [demo.church4christ.org](https://demo.church4christ.org).**
 
@@ -576,24 +578,6 @@ but someone still has to review changes, back up data, and deploy.
 **What is it built with?**
 Astro on Cloudflare Workers, with Cloudflare D1 or Supabase/PostgreSQL for data and
 Cloudflare R2 for media. Public pages ship no client-side framework.
-
----
-
-## 中文简介
-
-**Church4Christ 是一套开源的教会管理系统（ChMS）和教会网站（教会 CMS），支持 12 种界面语言（含中英文），
-可以自己部署，是 Planning Center 等托管服务之外的一个开源选择。** 适合中小型教会、
-团契和非营利机构，尤其是多语言和移民教会。
-
-- **公开网站**：首页、讲道、周报、活动、见证、文章，三套主题，12 种界面语言可选，简繁一键转换。
-- **教会管理**：会友与家庭、小组、团契、服事排班、儿童报到、崇拜出席、新朋友跟进、祷告墙、
-  工作流程提醒、多堂点（multi-campus）。
-- **可选模块**：会友平台、奉献记账、活动报名（需要 Supabase/PostgreSQL）。
-- **Planning Center**：可选的只读 People 同步，方便两套系统并行、逐步迁移；会友资料用 CSV 导入。
-- **技术栈**：Astro + Cloudflare Workers，数据库用 D1 或 Supabase，媒体存 R2，GPL-3.0 许可。
-
-快速开始：`npm ci`，再运行 `npm run onboard`，在浏览器里填写教会名称、颜色、Logo 和要启用的功能。
-详细步骤见 [安装指南](docs/setup.md)，多语言配置说明见 [docs/i18n.md](docs/i18n.md)。
 
 ---
 
