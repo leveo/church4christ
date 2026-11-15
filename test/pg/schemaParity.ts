@@ -734,6 +734,30 @@ export function parseFinalD1Schema(sources: string[]): D1Schema {
       continue;
     }
 
+    // Scratch copies used by SQLite table rebuilds (0042+). They are dropped again
+    // in the same migration, so they never reach the final schema being modelled.
+    if (/^CREATE\s+TABLE\s+_locale_bak_\w+\s+AS\s+SELECT\b/i.test(statement)) continue;
+
+    const dropColumn = statement.match(/^ALTER\s+TABLE\s+(\S+)\s+DROP\s+COLUMN\s+(\S+)$/i);
+    if (dropColumn) {
+      const tableName = identifier(dropColumn[1]);
+      const columnName = identifier(dropColumn[2]);
+      const table = schema.tables.get(tableName);
+      if (!table?.columns.delete(columnName)) throw new Error(`cannot drop missing column ${tableName}.${columnName}`);
+      // SQLite refuses to drop a key column, so the model does too; only a plain or
+      // foreign-key column (with its own CHECK) can go.
+      if (table.constraints.some((c) => c.kind !== 'foreign' && c.columns.includes(columnName))) {
+        throw new Error(`cannot drop key column ${tableName}.${columnName}`);
+      }
+      table.constraints = table.constraints.filter((constraint) => !constraint.columns.includes(columnName));
+      for (const [name, index] of schema.indexes) {
+        if (index.table === tableName && index.columns.includes(columnName)) {
+          throw new Error(`cannot drop indexed column ${tableName}.${columnName} (${name})`);
+        }
+      }
+      continue;
+    }
+
     const createTable = statement.match(
       /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(\S+)\s*\(([\s\S]*)\)(?:\s+(WITHOUT\s+ROWID))?$/i,
     );
