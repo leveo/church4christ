@@ -23,7 +23,7 @@ const messages = {
     address: 'Address (optional)', addressPlaceholder: 'Street, city, region', timezone: 'Planning time zone',
     timezoneHint: 'Saved for your coding assistant to configure scheduling. Use an IANA time zone, such as America/Chicago or Asia/Shanghai.', timezoneInvalid: 'Enter a valid IANA time zone, such as America/Chicago.',
     siteSlug: 'Site identifier', slugHint: 'Lowercase letters, numbers, and hyphens. Used for local setup and deployment names.',
-    locale: 'Default site language', locales: 'Site languages', localesHint: 'Visitors can switch between the languages you enable. At least one is required; you can change this later in Settings.',
+    locale: 'Default site language', localeInProgress: 'translation in progress', locales: 'Site languages', localesHint: 'Visitors can switch between the languages you enable. At least one is required; you can change this later in Settings.',
     primaryColor: 'Primary color', secondaryColor: 'Secondary color', colorPicker: '{label} picker',
     primaryHint: 'Your main brand color for links and actions.', secondaryHint: 'A supporting color for accents and details.',
     logo: 'Organization logo (optional)', logoHint: 'PNG, JPEG, or WebP · up to 2 MiB. Choose a file from your computer.',
@@ -75,7 +75,7 @@ const messages = {
     address: '地址（选填）', addressPlaceholder: '街道、城市、地区', timezone: '计划使用的时区',
     timezoneHint: '保存后供编程助手配置日程。使用 IANA 时区，例如 America/Chicago 或 Asia/Shanghai。', timezoneInvalid: '请输入有效的 IANA 时区，例如 Asia/Shanghai。',
     siteSlug: '站点标识', slugHint: '使用小写英文字母、数字与连字符，供本地安装与部署命名使用。',
-    locale: '网站默认语言', locales: '网站语言', localesHint: '访客可以在你启用的语言之间切换。至少选择一种，之后可在“设置”中修改。',
+    locale: '网站默认语言', localeInProgress: '翻译进行中', locales: '网站语言', localesHint: '访客可以在你启用的语言之间切换。至少选择一种，之后可在“设置”中修改。',
     primaryColor: '主色调', secondaryColor: '辅色调', colorPicker: '{label}选择器',
     primaryHint: '用于链接与操作按钮的主要品牌颜色。', secondaryHint: '用于装饰与细节的辅助颜色。',
     logo: '组织标志（选填）', logoHint: 'PNG、JPEG 或 WebP · 最大 2 MiB。请选择电脑上的图片。',
@@ -236,7 +236,11 @@ function field({ key, label, value, onInput, type = 'text', required = false, hi
 }
 
 // Languages come from the registry the server sends (state.locales), so adding a
-// supported language needs no change here. Multi-select checkboxes plus a default
+// supported language needs no change here. This page's OWN wording stays English and
+// Chinese (the messages tables above): the wizard is a one-time local tool, and the
+// languages listed here are the ones the SITE can serve, shown by their native names.
+// A language still being translated (config/i18n-status.json) is flagged, because the
+// site would show English text in its place until the translation lands. Multi-select checkboxes plus a default
 // that must be one of the checked languages.
 function languageFields() {
   const supported = state.locales || [];
@@ -276,6 +280,7 @@ function languageFields() {
     const name = el('span', '', entry.nativeName);
     name.lang = entry.code;
     label.append(input, name);
+    if (entry.inProgress) label.append(el('small', 'field-hint', t('localeInProgress')));
     options.append(label);
   });
   defaultSelect.addEventListener('change', () => { draft.setup.defaultLocale = defaultSelect.value; });

@@ -107,7 +107,7 @@ describe('onboarding web form languages', () => {
   const server = readFileSync('scripts/onboard/server.mjs', 'utf8');
 
   it('renders a registry-driven multi-select with a default chosen among the checked languages', () => {
-    expect(server).toContain('locales: SUPPORTED_LOCALES');
+    expect(server).toContain('locales: WIZARD_LOCALES');
     expect(app).toContain("input.type = 'checkbox'");
     expect(app).toContain('state.locales');
     expect(app).toContain('draft.setup.defaultLocale');

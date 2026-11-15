@@ -9,7 +9,7 @@ const SAFE_CAPABILITY_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  *  a supported language code with a nonblank string. Translations of the remaining
  *  languages normally live in src/i18n/catalog/<code>.json instead (docs/i18n.md). */
 function localizedProblems(value, name) {
-  if (!isObject(value)) return [`${name} must be an object`];
+  if (!isObject(value)) return [`${name}.en is required`, `${name}.zh is required`];
   const problems = [];
   for (const locale of ['en', 'zh']) {
     if (!isNonblank(value[locale])) problems.push(`${name}.${locale} is required`);

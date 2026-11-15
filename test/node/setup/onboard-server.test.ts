@@ -34,6 +34,15 @@ describe('onboarding local HTTP boundary', () => {
     expect(await readdir(s.root)).toEqual([]);
   });
 
+  it('offers every supported language by native name and flags unfinished translations', async () => {
+    const s = await session();
+    const state = await (await fetch(`${s.origin}/api/state`, { headers: s.headers })).json() as { locales: { code: string; nativeName: string; inProgress: boolean }[] };
+    expect(state.locales.map((entry) => entry.code)).toEqual(['en', 'zh', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'ms', 'id', 'vi', 'hi']);
+    expect(state.locales.find((entry) => entry.code === 'ja')).toMatchObject({ nativeName: '日本語', inProgress: true });
+    expect(state.locales.find((entry) => entry.code === 'en')?.inProgress).toBe(false);
+    expect(state.locales.find((entry) => entry.code === 'zh')?.inProgress).toBe(false);
+  });
+
   it('saves a validated plan, reopens it, and never starts provisioning', async () => {
     const s = await session();
     s.draft.setup.modules = [' learning '];
