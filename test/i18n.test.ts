@@ -493,10 +493,11 @@ describe('in-progress registry', () => {
     }
   });
 
-  it('falls back to English while a language has no translation yet', async () => {
+  it('uses a completed language once loaded and falls back to English for keys it lacks', async () => {
     await loadDict('es');
-    expect(t('es', 'site.name')).toBe(en['site.name']);
-    expect(t('es', 'nav.sermons')).toBe(t('en', 'nav.sermons'));
+    expect(t('es', 'nav.sermons')).not.toBe(t('en', 'nav.sermons'));
+    // A key the Spanish dictionary does not carry still resolves along the chain.
+    expect(t('es', '__missing_test_key__' as never)).toBe('__missing_test_key__');
   });
 });
 

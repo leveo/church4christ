@@ -72,11 +72,12 @@ Admin → Navigation is preserved inside each group, and empty groups disappear.
 
 ![The Connect menu with its own links and community image](docs/images/public/grouped-navigation.png)
 
-Two languages are included out of the box (English and Chinese), along with three
-ready-made looks and a modular starting point for further customization. The code and
-setup now support twelve languages (adding Spanish, Brazilian Portuguese, French, German,
-Japanese, Korean, Malay, Indonesian, Vietnamese, and Hindi); those ten translations are
-still in progress and fall back to English until they are complete.
+Twelve interface languages are included: English and Chinese, plus Spanish, Brazilian
+Portuguese, French, German, Japanese, Korean, Malay, Indonesian, Vietnamese, and Hindi. Each
+church picks which languages its site offers and a default during setup or later in
+Settings → Languages. The ten newer translations are AI-assisted; corrections from native
+speakers are welcome. Three ready-made looks and a modular starting point for further
+customization are included too.
 
 ---
 

@@ -57,7 +57,7 @@ do not invent a second provisioning path or replace setup with raw seed commands
 | Generated deployment config template | `config/wrangler.template.jsonc` |
 | Feature behavior and visuals | `docs/features/` |
 | D1 / PostgreSQL forward migrations | `migrations/` / `migrations-supabase/` |
-| UI copy per language | `src/i18n/<code>.ts` (12 languages; ten still in progress, see `config/i18n-status.json`) |
+| UI copy per language | `src/i18n/<code>.ts` (12 languages; status in `config/i18n-status.json`) |
 | Language registry and settings | `src/lib/locales.ts`, `src/lib/localeSettings.ts`, `config/locales.json` |
 | Design tokens | `design/`; see `docs/design-system.md` |
 

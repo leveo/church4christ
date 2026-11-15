@@ -27,9 +27,9 @@ than published to npm.
 - Language support for ten more languages: Spanish (`es`), Brazilian Portuguese (`pt`, BCP-47
   `pt-BR`), French, German, Japanese, Korean, Malay (`ms`), Indonesian (`id`), Vietnamese, and
   Hindi are registered and selectable in Settings and onboarding, each with its own lazily loaded
-  dictionary file. The translations themselves are still in progress, so these languages show
-  English text until they land (a language flagged this way is marked "translation in progress"
-  in onboarding). Upgraded installations still enable only English and Chinese. Japanese, Korean,
+  dictionary file. All ten are fully translated (AI-assisted, glossary-guided, and checked by
+  `scripts/i18n/check.mjs` for keys, placeholders, HTML tags, script, and untranslated copy;
+  community review welcome). Upgraded installations still enable only English and Chinese. Japanese, Korean,
   and Devanagari get system font stacks and Japanese and Korean the CJK line height. A
   translation toolkit ships with it: `scripts/i18n/export-keys.mjs`, `scripts/i18n/check.mjs`, a
   church glossary in `docs/i18n/glossary.md`, and per-language capability and readiness copy in
