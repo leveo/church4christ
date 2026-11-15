@@ -12,7 +12,7 @@ than published to npm.
 
 ### Added
 
-- Language infrastructure (no operator action required; no database migration). A registry of
+- Language infrastructure (no operator action required for the language settings themselves). A registry of
   supported languages, installation-wide `locale.enabled` / `locale.default` settings editable
   under **Settings → Languages**, a requested → default → English fallback chain, language
   negotiation at `/` (cookie from the switcher, `Accept-Language`, default), a switcher that
@@ -25,6 +25,14 @@ than published to npm.
   earlier meaning (English and Chinese enabled, x the default); `--locales` narrows or widens the set. See [docs/i18n.md](docs/i18n.md).
 
 ### Changed
+
+- Locale columns now reference a `supported_locales` lookup table instead of a hard-coded
+  `CHECK (locale IN ('en','zh'))`, so adding a language later is an `INSERT`, not a schema
+  change. Operator impact: apply the new forward migrations before deploying. D1 gets
+  `0041`-`0049` (the lookup table, then rebuilds of the translation and related tables; back up
+  first, rebuild time grows with table size), and Supabase/PostgreSQL gets `0041`. No data
+  changes and no behavior changes; the application still offers English and Chinese until a
+  language is added. See [Unreleased: language lookup migrations](docs/upgrade.md#unreleased-language-lookup-migrations).
 
 - New Church4Christ logo: a teal church and cross sheltering an orange figure that forms a
   "4". The browser favicon, the onboarding page, the README header, and the 1280×640
