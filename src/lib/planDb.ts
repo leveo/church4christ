@@ -14,9 +14,9 @@
 
 import type { AppDb } from './appDb';
 import { i18nJoin } from './db';
-import { isEnglishEditorialText } from './editorialLocale';
+import { editorialEligible } from './editorialLocale';
 import { addDays, nextWeekday, todayInTz } from './dates';
-import { type Locale, isChinese } from './locales';
+import type { Locale } from './locales';
 import type { SessionUser } from './types';
 
 const TZ = 'America/Chicago';
@@ -549,8 +549,8 @@ interface PlanEditorialDisplay {
 
 function planEditorialDisplay(plan: { title: string | null; series: string | null }, locale: Locale): PlanEditorialDisplay {
   return {
-    display_title: isChinese(locale) || isEnglishEditorialText(plan.title) ? plan.title : null,
-    display_series: isChinese(locale) || isEnglishEditorialText(plan.series) ? plan.series : null,
+    display_title: editorialEligible(locale, plan.title) ? plan.title : null,
+    display_series: editorialEligible(locale, plan.series) ? plan.series : null,
   };
 }
 

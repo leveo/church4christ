@@ -135,6 +135,23 @@ describe('latestPublishedSermon', () => {
     expect(s?.scripture).toBe('John 2');
   });
 
+  it('does not hide Han-bearing sermons from Japanese pages (Han is not proof of Chinese)', async () => {
+    const db = env.DB;
+    await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
+    await db
+      .prepare(
+        `INSERT INTO sermons (id, service_type_id, sermon_date, title, speaker, scripture, youtube_id, series, status) VALUES
+          (1, 1, '2026-06-21', 'Grace', 'A', 'John 1', 'y1', 'S', 'published'),
+          (2, 1, '2026-06-28', '恵みの福音', 'B', 'ヨハネ 2', 'y2', 'S', 'published')`,
+      )
+      .run();
+    expect((await latestPublishedSermon(db, 'ja'))?.title).toBe('恵みの福音');
+    expect((await latestPublishedSermon(db, 'ko'))?.title).toBe('恵みの福音');
+    expect((await latestPublishedSermon(db, 'zh'))?.title).toBe('恵みの福音');
+    expect((await latestPublishedSermon(db, 'en'))?.title).toBe('Grace');
+    expect((await latestPublishedSermon(db, 'es'))?.title).toBe('Grace');
+  });
+
   it('returns null when nothing is published', async () => {
     const db = env.DB;
     await db.prepare('INSERT INTO service_types (id) VALUES (1)').run();
@@ -430,6 +447,18 @@ describe('prayer sheets', () => {
     expect(await listPrayerSheetDates(env.DB, 'zh')).toEqual(['2026-06-15', '2026-06-08', '2026-06-01']);
     expect((await getPrayerSheet(env.DB, '2026-06-08', 'zh'))?.id).toBe(2);
     expect((await getPrayerSheet(env.DB, '2026-06-01', 'zh'))?.id).toBe(1);
+  });
+
+  it('matches other languages by explicit sheet locale along the fallback chain, not by script', async () => {
+    await env.DB.prepare(`INSERT INTO prayer_sheets (id, sheet_date, locale, sections_json, status) VALUES
+      (1, '2026-06-01', 'en', '[]', 'published'),
+      (2, '2026-06-08', 'ja', '[]', 'published'),
+      (3, '2026-06-15', 'zh', '[]', 'published'),
+      (4, '2026-06-22', 'es', '[]', 'published')`).run();
+    expect(await listPrayerSheetDates(env.DB, 'ja')).toEqual(['2026-06-08', '2026-06-01']);
+    expect(await listPrayerSheetDates(env.DB, 'es')).toEqual(['2026-06-22', '2026-06-01']);
+    expect((await getPrayerSheet(env.DB, '2026-06-15', 'ja'))).toBeNull(); // zh sheets are not shown to ja
+    expect((await latestPrayerSheet(env.DB, 'es'))?.id).toBe(4);
   });
 
   it('returns an empty English prayer archive when there are only Chinese or unlabelled sheets', async () => {

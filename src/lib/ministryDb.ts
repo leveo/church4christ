@@ -15,7 +15,7 @@ import { i18nJoin, type Locale } from './db';
 import { addDays, nextWeekday, todayInTz } from './dates';
 import { ensureWeeklyPlans, setPlanPosition } from './planDb';
 import type { SessionUser } from './types';
-import type { SupportedLocale } from './locales';
+import { fallbackChain, type SupportedLocale } from './locales';
 import { EXTRA_LOCALES, loadExtraI18n, saveExtraI18n, type ExtraTexts } from './i18nExtras';
 
 /** Names and introductions for the languages beyond the en/zh pair (es, ja, ...). A key
@@ -196,9 +196,10 @@ export interface TestimonyCardRow {
 }
 
 /**
- * Approved (status='A'), non-deleted testimonies for the serve strip. English
- * pages include English submissions only; Chinese pages include both languages,
- * with Chinese first. Within each group the newest published_at wins.
+ * Approved (status='A'), non-deleted testimonies for the serve strip. Chinese pages
+ * include every language, Chinese first; any other language includes submissions written
+ * in a language along its fallback chain (requested, default, en), its own first.
+ * Within each group the newest published_at wins.
  */
 export async function listPublishedTestimonies(
   db: AppDb,
@@ -209,7 +210,7 @@ export async function listPublishedTestimonies(
     .prepare(
       `SELECT author_name AS "authorName", title, body, locale, published_at AS "publishedAt"
        FROM testimonies
-       WHERE status = 'A' AND deleted_at IS NULL AND (?1 = 'zh' OR locale = 'en')
+       WHERE status = 'A' AND deleted_at IS NULL AND (?1 = 'zh' OR locale IN (${fallbackChain(locale).map((code) => `'${code}'`).join(', ')}))
        ORDER BY (CASE WHEN locale = ?1 THEN 0 ELSE 1 END), published_at DESC, id DESC
        LIMIT ?2`,
     )
