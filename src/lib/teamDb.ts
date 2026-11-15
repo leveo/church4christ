@@ -16,6 +16,8 @@
 import type { AppDb, SnapshotBackend } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { todayInTz } from './dates';
+import type { SupportedLocale } from './locales';
+import { loadExtraI18n, saveExtraI18n, type ExtraTexts } from './i18nExtras';
 import { listPlans, type PlanListRow } from './planDb';
 
 const TZ = 'America/Chicago';
@@ -48,6 +50,8 @@ export interface ServiceTypeAdminRow extends ServiceTypeRow {
   name_en: string;
   name_zh: string | null;
   sort: number;
+  /** Names in the other supported languages (es, ja, ...): `{ code: { name } }`. */
+  extra: ExtraTexts;
 }
 
 /** Non-deleted service types with BOTH locale names + sort, for the admin CRUD table. */
@@ -62,13 +66,16 @@ export async function listServiceTypesAdmin(db: AppDb): Promise<ServiceTypeAdmin
        WHERE st.deleted_at IS NULL
        ORDER BY st.sort, st.id`,
     )
-    .all<ServiceTypeAdminRow>();
-  return results;
+    .all<Omit<ServiceTypeAdminRow, 'extra'>>();
+  const extras = await loadExtraI18n(db, 'service_type_i18n', 'service_type_id', ['name']);
+  return results.map((row) => ({ ...row, extra: extras.get(String(row.id)) ?? {} }));
 }
 
 export interface ServiceTypeInput {
   nameEn: string;
   nameZh: string | null;
+  /** Names in the other supported languages; a blank value removes that language's row. */
+  extraNames?: Partial<Record<SupportedLocale, string>>;
   startTime: string | null;
   endTime: string | null;
   sort: number;
@@ -101,6 +108,14 @@ export async function saveServiceType(db: AppDb, id: number | null, input: Servi
   }
   await upsertServiceTypeI18n(db, stId, 'en', input.nameEn);
   if (input.nameZh) await upsertServiceTypeI18n(db, stId, 'zh', input.nameZh);
+  await saveExtraI18n(
+    db,
+    'service_type_i18n',
+    'service_type_id',
+    stId,
+    Object.fromEntries(Object.entries(input.extraNames ?? {}).map(([code, name]) => [code, { name }])),
+    'name',
+  );
   return stId;
 }
 
@@ -253,6 +268,8 @@ export interface CreateTeamArgs {
   ministryId: number | null;
   nameEn: string;
   nameZh?: string | null;
+  /** Names in the other supported languages (es, ja, ...). */
+  extraNames?: Partial<Record<SupportedLocale, string>>;
   sort?: number;
 }
 
@@ -271,6 +288,14 @@ export async function createTeam(db: AppDb, args: CreateTeamArgs): Promise<numbe
     stmts.push(db.prepare(`INSERT INTO team_i18n (team_id, locale, name) VALUES (?, 'zh', ?)`).bind(teamId, nameZh));
   }
   await db.batch(stmts);
+  await saveExtraI18n(
+    db,
+    'team_i18n',
+    'team_id',
+    teamId,
+    Object.fromEntries(Object.entries(args.extraNames ?? {}).filter(([, name]) => name).map(([code, name]) => [code, { name }])),
+    'name',
+  );
   return teamId;
 }
 

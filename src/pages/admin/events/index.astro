@@ -20,6 +20,7 @@ import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadKey, registerMedia } from '
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
+import { extraLocaleTexts, loadExtraI18n, localeValues } from '../../../lib/i18nExtras';
 
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || hasAreaAccess(user, 'events'))) return new Response(null, { status: 403 });
@@ -104,6 +105,15 @@ const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) 
 
 const g = (n: string) => String(fd?.get(n) ?? '');
 const echoing = fd !== null && failedId !== null;
+// Languages beyond the en/zh columns live only in event_i18n: load them so the tabs show them.
+const extras = await loadExtraI18n(db, 'event_i18n', 'event_id', ['title', 'blurb']);
+const rowExtras = editingRow ? extras.get(String(editingRow.id)) : undefined;
+const titleValues = echoing
+  ? { en: g('title_en'), zh: g('title_zh'), ...extraLocaleTexts(g, 'title') }
+  : localeValues({ en: editingRow?.title_en, zh: editingRow?.title_zh }, rowExtras, 'title');
+const blurbValues = echoing
+  ? { en: g('blurb_en'), zh: g('blurb_zh'), ...extraLocaleTexts(g, 'blurb') }
+  : localeValues({ en: editingRow?.blurb_en, zh: editingRow?.blurb_zh }, rowExtras, 'blurb');
 const v = echoing
   ? {
       titleEn: g('title_en'), titleZh: g('title_zh'), blurbEn: g('blurb_en'), blurbZh: g('blurb_zh'),
@@ -210,10 +220,10 @@ const h2 = 'font-display text-heading-sm font-bold';
       <input type="hidden" name="image_key" value={v.imageKey} />
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <LocaleFields name="title" label={t(lang, 'admin.events.titleEn')} values={{ en: v.titleEn, zh: v.titleZh }} lang={lang} />
+      <LocaleFields name="title" label={t(lang, 'admin.events.titleEn')} values={titleValues} lang={lang} />
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.events.hint')}</p>
-      <LocaleFields name="blurb" label={t(lang, 'admin.events.blurbEn')} values={{ en: v.blurbEn, zh: v.blurbZh }} lang={lang} multiline rows={2} />
+      <LocaleFields name="blurb" label={t(lang, 'admin.events.blurbEn')} values={blurbValues} lang={lang} multiline rows={2} />
       <label class="block">
         <span class={lab}>{t(lang, 'admin.events.url')}</span>
         <input name="url" value={v.url} class={tin} />

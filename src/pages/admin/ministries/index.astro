@@ -17,6 +17,7 @@ import NewMinistryTab from '../../../components/admin/NewMinistryTab.astro';
 import EmailTab from '../../../components/admin/EmailTab.astro';
 import AvailabilityTab from '../../../components/admin/AvailabilityTab.astro';
 import { t } from '../../../lib/i18n';
+import { extraLocalePosted, extraLocaleTextsFromForm } from '../../../lib/i18nExtras';
 import { type Locale, isSupportedLocale } from '../../../lib/locales';
 import { addDays, todayInTz } from '../../../lib/dates';
 import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
@@ -118,6 +119,7 @@ if (Astro.request.method === 'POST') {
         intro_en: null,
         intro_zh: null,
         leader_person_id: canAdmin ? idOf(fd.get('leader_person_id')) : user.id,
+        extra: { names: extraLocalePosted(fd, 'name') },
       });
     }
     return to('ministries');
@@ -144,7 +146,8 @@ if (Astro.request.method === 'POST') {
   if (action === 'createMinistry') {
     const name_en = String(fd.get('name_en') ?? '').trim();
     const name_zh = String(fd.get('name_zh') ?? '').trim();
-    if (!name_en && !name_zh) return to('new', '&err=needName');
+    const extraNames = extraLocaleTextsFromForm(fd, 'name');
+    if (!name_en && !name_zh && !Object.keys(extraNames).length) return to('new', '&err=needName');
     const namesEn = fd.getAll('pos_name_en').map((v) => String(v).trim());
     const namesZh = fd.getAll('pos_name_zh').map((v) => String(v).trim());
     const needs = fd.getAll('pos_needed').map((v) => Number(String(v)) || 1);
@@ -159,7 +162,8 @@ if (Astro.request.method === 'POST') {
       category: String(fd.get('category') ?? '').trim(),
       icon: String(fd.get('icon') ?? '').trim(),
       intro_en: String(fd.get('intro_en') ?? '').trim() || null,
-      intro_zh: null,
+      intro_zh: String(fd.get('intro_zh') ?? '').trim() || null,
+      extra: { names: extraNames, intros: extraLocaleTextsFromForm(fd, 'intro') },
       // A non-admin leader can only make THEMSELVES the ministry leader.
       leader_person_id: canAdmin ? idOf(fd.get('leader_person_id')) : user.id,
       meeting_time: String(fd.get('meeting_time') ?? '').trim() || null,
@@ -168,7 +172,7 @@ if (Astro.request.method === 'POST') {
       autoGenerate: fd.get('auto_generate') === '1',
     };
     await createMinistryFromWizard(db, input);
-    return to('new', '&created=' + encodeURIComponent(name_en || name_zh));
+    return to('new', '&created=' + encodeURIComponent(name_en || name_zh || Object.values(extraNames)[0] || ''));
   }
 
   if (action === 'toggleRule' && canAdmin) {

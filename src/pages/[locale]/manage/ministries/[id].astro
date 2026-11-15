@@ -1,11 +1,13 @@
 ---
 import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
 import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
+import LocaleFields from '../../../../components/admin/LocaleFields.astro';
 import { ministryCopy } from '../../../../i18n/designMinistry';
 import Base from '../../../../layouts/Base.astro';
 import { btn, btnSecondary, card, lab, noticeErr, noticeOk, tin } from '../../../../lib/adminUi';
 import { hasAreaAccess } from '../../../../lib/adminAreas';
 import { t } from '../../../../lib/i18n';
+import { extraLocalePosted, extraLocaleTextsFromForm, localeValues } from '../../../../lib/i18nExtras';
 import { localePath, parseLocale, pickLocalizedText } from '../../../../lib/locales';
 import { MINISTRY_CATEGORIES } from '../../../../lib/ministryMeta';
 import { canManageMinistry, listMinistryEditRows, updateMinistryBasics } from '../../../../lib/ministryDb';
@@ -36,7 +38,7 @@ if (Astro.request.method === 'POST') {
   const nameEn = String(fd.get('name_en') ?? '').trim();
   const nameZh = String(fd.get('name_zh') ?? '').trim();
   const category = String(fd.get('category') ?? '').trim();
-  if ((!nameEn && !nameZh) || !(MINISTRY_CATEGORIES as readonly string[]).includes(category)) {
+  if ((!nameEn && !nameZh && !Object.values(extraLocaleTextsFromForm(fd, 'name')).some(Boolean)) || !(MINISTRY_CATEGORIES as readonly string[]).includes(category)) {
     errorKey = 'manage.invalid';
   } else {
     await updateMinistryBasics(db, ministryId, {
@@ -47,6 +49,7 @@ if (Astro.request.method === 'POST') {
       intro_en: String(fd.get('intro_en') ?? '').trim() || null,
       intro_zh: String(fd.get('intro_zh') ?? '').trim() || null,
       leader_person_id: ministry.leader_person_id,
+      extra: { names: extraLocalePosted(fd, 'name'), intros: extraLocalePosted(fd, 'intro') },
     });
     return Astro.redirect(localePath(locale, `/manage/ministries/${ministryId}?saved=1`), 303);
   }
@@ -69,14 +72,9 @@ const copy = ministryCopy(locale);
     {errorKey && <p class={`mt-5 ${noticeErr}`}>{t(locale, errorKey)}</p>}
 
     <form method="post" class="mw-panel grid gap-5 sm:grid-cols-2">
-      <label class="block">
-        <span class={lab}>{t(locale, 'manage.nameEn')}</span>
-        <input name="name_en" value={ministry.name_en ?? ''} class={tin} />
-      </label>
-      <label class="block">
-        <span class={lab}>{t(locale, 'manage.nameZh')}</span>
-        <input name="name_zh" lang="zh" value={ministry.name_zh ?? ''} class={tin} />
-      </label>
+      <div class="sm:col-span-2">
+        <LocaleFields name="name" label={t(locale, 'manage.nameEn')} values={localeValues({ en: ministry.name_en, zh: ministry.name_zh }, ministry.extra, 'name')} lang={locale} />
+      </div>
       <label class="block">
         <span class={lab}>{t(locale, 'manage.icon')}</span>
         <input name="icon" value={ministry.icon} class={tin} maxlength="16" />
@@ -91,14 +89,9 @@ const copy = ministryCopy(locale);
           ))}
         </select>
       </label>
-      <label class="block sm:col-span-2">
-        <span class={lab}>{t(locale, 'manage.introEn')}</span>
-        <textarea name="intro_en" rows="4" class={tin}>{ministry.intro_en ?? ''}</textarea>
-      </label>
-      <label class="block sm:col-span-2">
-        <span class={lab}>{t(locale, 'manage.introZh')}</span>
-        <textarea name="intro_zh" lang="zh" rows="4" class={tin}>{ministry.intro_zh ?? ''}</textarea>
-      </label>
+      <div class="sm:col-span-2">
+        <LocaleFields name="intro" label={t(locale, 'manage.introEn')} values={localeValues({ en: ministry.intro_en, zh: ministry.intro_zh }, ministry.extra, 'intro')} lang={locale} multiline rows={4} />
+      </div>
       <div class="sm:col-span-2 flex flex-wrap gap-3">
         <button type="submit" class={btn}>{t(locale, 'manage.save')}</button>
         <a href={localePath(locale, '/manage')} class={btnSecondary}>{t(locale, 'manage.cancel')}</a>

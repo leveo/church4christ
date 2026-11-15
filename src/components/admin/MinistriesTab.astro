@@ -6,6 +6,8 @@ import type { Locale } from '../../lib/locales';
 import type { MinistrySummary, MinistryEditRow } from '../../lib/ministryDb';
 import { card, th, td, tin, lab, btn, btnSecondary, badge, badgeActive, badgeInactive } from '../../lib/adminUi';
 import { mediaPath } from '../../lib/mediaRef';
+import LocaleFields from './LocaleFields.astro';
+import { localeValues } from '../../lib/i18nExtras';
 
 interface Props {
   lang: Locale;
@@ -101,8 +103,7 @@ const editOf = (id: number) => editRows.find((r) => r.id === id);
             <summary class="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-primary">{t(lang, 'admin.console.editBasics')} · {m.icon} {m.name}</summary>
             <form method="post" class="mt-3 grid sm:grid-cols-2 gap-3">
               <input type="hidden" name="ministry_id" value={m.id} />
-              <label><span class={lab}>{t(lang, 'admin.console.wiz.nameEn')}</span><input name="name_en" value={e.name_en ?? ''} class={tin} /></label>
-              <label><span class={lab}>{t(lang, 'admin.console.wiz.nameZh')}</span><input name="name_zh" value={e.name_zh ?? ''} class={tin} /></label>
+              <div class="sm:col-span-2"><LocaleFields name="name" label={t(lang, 'admin.console.wiz.nameEn')} values={localeValues({ en: e.name_en, zh: e.name_zh }, e.extra, 'name')} lang={lang} /></div>
               <label><span class={lab}>{t(lang, 'admin.console.wiz.category')}</span>
                 <select name="category" class={tin}>
                   {categories.map((c) => <option value={c.value} selected={c.value === e.category}>{c.label}</option>)}

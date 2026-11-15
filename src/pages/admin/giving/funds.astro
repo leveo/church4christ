@@ -13,7 +13,7 @@ import { t } from '../../../lib/i18n';
 import { parseFundForm } from '../../../lib/validate';
 import { listFundsAdmin, saveFund, toggleFundActive } from '../../../lib/fundDb';
 import { tin, lab, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import type { Locale } from '../../../lib/locales';
+import { PAIR_LOCALES, type Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -172,8 +172,8 @@ const copy = financeCopy(lang);
           {errors.sort && <span class={errorText}>{t(lang, errors.sort)}</span>}
         </label>
       </div>
-      <LocaleFields name="name" label={t(lang, 'admin.giving.fundNameEn')} values={{ en: v.nameEn, zh: v.nameZh }} lang={lang} error={errors.name_en} />
-      <LocaleFields name="description" label={t(lang, 'admin.giving.fundDescriptionEn')} values={{ en: v.descEn, zh: v.descZh }} lang={lang} multiline rows={2} maxlength={500} />
+      <LocaleFields name="name" only={PAIR_LOCALES} label={t(lang, 'admin.giving.fundNameEn')} values={{ en: v.nameEn, zh: v.nameZh }} lang={lang} error={errors.name_en} />
+      <LocaleFields name="description" only={PAIR_LOCALES} label={t(lang, 'admin.giving.fundDescriptionEn')} values={{ en: v.descEn, zh: v.descZh }} lang={lang} multiline rows={2} maxlength={500} />
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" name="active" checked={v.active} /> {t(lang, 'admin.giving.active')}
       </label>

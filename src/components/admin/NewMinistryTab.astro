@@ -8,6 +8,7 @@ import { operationsCopy } from '../../i18n/designOperations';
 import { isEnglishEditorialText } from '../../lib/editorialLocale';
 import { type Locale, isChinese } from '../../lib/locales';
 import { tin, lab, btn, btnSecondary, rowBtn, card } from '../../lib/adminUi';
+import LocaleFields from './LocaleFields.astro';
 
 interface Props {
   lang: Locale;
@@ -57,8 +58,7 @@ const freqs = [
 
     <div class={`mt-5 ${card}`}>
       <div data-step-panel="1" tabindex="-1" role="region" aria-label={steps[0].label} class="grid sm:grid-cols-2 gap-4">
-        <label><span class={lab}>{t(lang, 'admin.console.wiz.nameEn')} *</span><input name="name_en" class={tin} /></label>
-        <label><span class={lab}>{t(lang, 'admin.console.wiz.nameZh')}</span><input name="name_zh" class={tin} /></label>
+        <div class="sm:col-span-2"><LocaleFields name="name" label={t(lang, 'admin.console.wiz.nameEn')} lang={lang} /></div>
         <label><span class={lab}>{t(lang, 'admin.console.wiz.category')}</span>
           <select name="category" class={tin}>{categories.map((c) => <option value={c.value}>{c.label}</option>)}</select>
         </label>
@@ -69,7 +69,7 @@ const freqs = [
             {leaders.map((l) => <option value={l.id}>{l.name}</option>)}
           </select>
         </label>
-        <label class="sm:col-span-2"><span class={lab}>{t(lang, 'admin.console.wiz.intro')}</span><textarea name="intro_en" rows="2" class={`${tin} resize-y`}></textarea></label>
+        <div class="sm:col-span-2"><LocaleFields name="intro" label={t(lang, 'admin.console.wiz.intro')} lang={lang} multiline rows={2} controlClass="resize-y" /></div>
       </div>
 
       <div data-step-panel="2" tabindex="-1" role="region" aria-label={steps[1].label}>

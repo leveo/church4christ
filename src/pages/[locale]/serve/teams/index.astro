@@ -2,6 +2,8 @@
 import MinistryWorkspace from '../../../../components/ministry/MinistryWorkspace.astro';
 import MinistryHeader from '../../../../components/ministry/MinistryHeader.astro';
 import MinistrySearch from '../../../../components/ministry/MinistrySearch.astro';
+import LocaleFields from '../../../../components/admin/LocaleFields.astro';
+import { extraLocaleTextsFromForm } from '../../../../lib/i18nExtras';
 import { ministryCopy } from '../../../../i18n/designMinistry';
 // Team directory (team class via route policy): every serving team with its
 // localized name, ministry link, member/leader counts, and an open-slot badge.
@@ -30,10 +32,12 @@ if (Astro.request.method === 'POST') {
     const ministryId = /^\d+$/.test(String(fd.get('ministry_id') ?? '')) ? Number(fd.get('ministry_id')) : null;
     const nameEn = String(fd.get('name_en') ?? '').trim();
     const nameZh = String(fd.get('name_zh') ?? '').trim();
-    if (!nameEn) {
+    const extraNames = extraLocaleTextsFromForm(fd, 'name');
+    const anyName = nameEn || nameZh || Object.values(extraNames)[0] || '';
+    if (!anyName) {
       errorKey = 'errors.required';
     } else {
-      const id = await createTeam(db, { ministryId, nameEn, nameZh: nameZh || null });
+      const id = await createTeam(db, { ministryId, nameEn: nameEn || anyName, nameZh: nameZh || null, extraNames });
       return Astro.redirect(localePath(locale, `/serve/teams/${id}`), 303);
     }
   }
@@ -100,14 +104,9 @@ const copy = ministryCopy(locale);
           {errorKey && <p class={`mb-3 ${noticeErr}`}>{t(locale, errorKey)}</p>}
           <form method="post" class="flex flex-wrap items-end gap-3">
             <input type="hidden" name="_action" value="create" />
-            <label class="block min-w-44 flex-1">
-              <span class={lab}>{t(locale, 'serve.teams.nameEn')}</span>
-              <input name="name_en" required class={tin} />
-            </label>
-            <label class="block min-w-44 flex-1">
-              <span class={lab}>{t(locale, 'serve.teams.nameZh')}</span>
-              <input name="name_zh" class={tin} />
-            </label>
+            <div class="block min-w-60 flex-1">
+              <LocaleFields name="name" label={t(locale, 'serve.teams.nameEn')} lang={locale} />
+            </div>
             <label class="block">
               <span class={lab}>{t(locale, 'serve.teams.ministry')}</span>
               <select name="ministry_id" class={`${tin} w-52`}>

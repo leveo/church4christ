@@ -180,7 +180,7 @@ describe('parsePrayerSheetForm', () => {
     expect(r.errors.section_heading_0).toBe('errors.required');
   });
   it('requires a valid sheet_date and rejects an unknown locale', () => {
-    const r = parsePrayerSheetForm(fdOf({ sheet_date: 'not-a-date', locale: 'fr', status: 'draft' }));
+    const r = parsePrayerSheetForm(fdOf({ sheet_date: 'not-a-date', locale: 'xx', status: 'draft' }));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.errors.sheet_date).toBe('errors.dateFormat');
@@ -259,7 +259,19 @@ describe('parseCustomPageForm', () => {
       id: null, slug: 'about-us', published: false,
       title_en: 'About Us', title_zh: '关于我们',
       body_en: 'We are a **church**.', body_zh: '我们是一间**教会**。',
+      extra: {},
     });
+  });
+
+  it('keeps text for any other supported language and rejects an oversized body', () => {
+    const r = parseCustomPageForm(fdOf({
+      slug: 'about-us', title_en: 'About', body_en: 'x', title_es: 'Acerca', body_es: 'Hola', title_fr: '', body_fr: '',
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.extra).toEqual({ es: { title: 'Acerca', body_md: 'Hola' } });
+    const big = parseCustomPageForm(fdOf({ slug: 'a', title_en: 'A', body_ja: 'x'.repeat(100_001) }));
+    expect(big.ok).toBe(false);
+    if (!big.ok) expect(big.errors.body_ja).toBe('errors.tooLong');
   });
 
   it('carries a non-empty id through and reads the published checkbox', () => {
@@ -438,7 +450,7 @@ describe('parsePersonForm', () => {
     expect(r.errors.email).toBe('errors.emailInvalid');
   });
   it('flags an empty email as required and rejects bad role/lang enums', () => {
-    const r = parsePersonForm(fdOf({ display_name: 'X', email: '', role: 'superuser', lang: 'fr' }));
+    const r = parsePersonForm(fdOf({ display_name: 'X', email: '', role: 'superuser', lang: 'xx' }));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.errors.email).toBe('errors.required');
@@ -585,7 +597,7 @@ describe('parseSettingsForm', () => {
   it('validates url, email, and enum keys', () => {
     const r = parseSettingsForm(fdOf({
       'site.giving_url': 'javascript:alert(1)', 'site.email': 'bad', 'theme.name': 'neon',
-      'theme.default_mode': 'sepia', 'locale.default': 'fr',
+      'theme.default_mode': 'sepia', 'locale.default': 'xx',
     }));
     expect(r.ok).toBe(false);
     if (r.ok) return;

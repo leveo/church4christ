@@ -8,7 +8,7 @@
 import ContentPage from '../../../components/ContentPage.astro';
 import Base from '../../../layouts/Base.astro';
 import PageBlocks from '../../../components/blocks/PageBlocks.astro';
-import { isChinese, parseLocale } from '../../../lib/locales';
+import { fallbackChain, isSupportedLocale, parseLocale } from '../../../lib/locales';
 import { getCustomPageBySlug } from '../../../lib/pagesDb';
 import { renderMarkdown } from '../../../lib/markdown';
 import { validateLayout } from '../../../lib/pageLayout';
@@ -29,8 +29,9 @@ if (!page || (!page.published && !canPreview)) {
   return Astro.rewrite('/404');
 }
 
-// Custom pages keep an en/zh pair; other languages read en (then zh), like pickPair.
-const loc = isChinese(locale) ? page.i18n.zh : page.i18n.en;
+// First language along the fallback chain (requested, default, en) that has text for the page.
+const pageText = (code: string) => (code === 'en' || code === 'zh' ? page.i18n[code] : isSupportedLocale(code) ? page.extra[code] : undefined);
+const loc = fallbackChain(locale).map(pageText).find((text) => text && (text.title || text.body_md)) ?? page.i18n.en;
 const fallback = page.i18n.en;
 const title = loc.title || fallback.title;
 

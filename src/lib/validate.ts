@@ -402,6 +402,8 @@ export interface CustomPageFormInput {
   title_zh: string;
   body_en: string;
   body_zh: string;
+  /** Other supported languages that carry a title or body (es, ja, ...). */
+  extra: Partial<Record<Locale, { title: string; body_md: string }>>;
 }
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -433,8 +435,18 @@ export function parseCustomPageForm(fd: FormData): FormResult<CustomPageFormInpu
   const body_zh = str(fd, 'body_zh');
   if (body_zh.length > MAX_BODY_LENGTH) errors.body_zh = ERR.tooLong;
 
+  // Every other supported language posts `title_<code>` / `body_<code>`; keep those with text.
+  const extra: CustomPageFormInput['extra'] = {};
+  for (const loc of LOCALES) {
+    if (loc === 'en' || loc === 'zh') continue;
+    const title = str(fd, `title_${loc}`);
+    const body_md = str(fd, `body_${loc}`);
+    if (body_md.length > MAX_BODY_LENGTH) errors[`body_${loc}`] = ERR.tooLong;
+    if (title || body_md) extra[loc] = { title, body_md };
+  }
+
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, data: { id, slug, published, title_en, title_zh, body_en, body_zh } };
+  return { ok: true, data: { id, slug, published, title_en, title_zh, body_en, body_zh, extra } };
 }
 
 export interface BuilderSaveInput {
@@ -690,11 +702,11 @@ export function parseApplicationForm(fd: FormData, signedIn: boolean): FormResul
 // ---------------------------------------------------------------------------
 // Settings (fixed allowlist of dotted keys)
 // ---------------------------------------------------------------------------
+/** Identity settings that exist once per supported language: `site.<field>.<code>`. */
+const LOCALIZED_SETTING_FIELDS = ['name', 'tagline', 'service_times'] as const;
+const LOCALIZED_SETTING_KEYS = LOCALIZED_SETTING_FIELDS.flatMap((field) => LOCALES.map((loc) => `site.${field}.${loc}`));
 const SETTINGS_KEYS = [
-  'site.name.en',
-  'site.name.zh',
-  'site.tagline.en',
-  'site.tagline.zh',
+  ...LOCALIZED_SETTING_KEYS,
   'site.address',
   'site.email',
   'site.phone',
@@ -703,12 +715,10 @@ const SETTINGS_KEYS = [
   'site.youtube_url',
   'site.hero_image_key',
   'site.logo_image_key',
-  'site.service_times.en',
-  'site.service_times.zh',
   'theme.name',
   'theme.default_mode',
   'locale.default',
-] as const;
+];
 // The enabled-languages checkbox group posts one `locale.enabled` per checked box
 // plus this marker (an all-unchecked group posts nothing, which must read as
 // "none enabled", not "field absent").

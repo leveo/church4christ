@@ -56,6 +56,10 @@ export const LOCALE_REGISTRY: Readonly<Record<SupportedLocale, LocaleMeta>> = {
 /** The fixed final fallback: its dictionary is always loaded. */
 export const FALLBACK_LOCALE: SupportedLocale = 'en';
 export const DEFAULT_LOCALE: Locale = 'en';
+/** Languages stored in legacy `*_en` / `*_zh` column pairs (Service Planning, funds, registration
+ *  events and questions). Editors for those columns show only these tabs: a third language has
+ *  nowhere to be saved until the pair is migrated to an `*_i18n` table (recorded debt). */
+export const PAIR_LOCALES: readonly SupportedLocale[] = ['en', 'zh'];
 /** Installations that never saved language settings keep exactly these. */
 export const LEGACY_ENABLED_LOCALES: readonly SupportedLocale[] = ['en', 'zh'];
 
