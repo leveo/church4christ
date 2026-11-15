@@ -23,6 +23,18 @@ describe('shared readiness catalog', () => {
     ]));
   });
 
+  it('accepts optional supported-language copy but still requires en and zh', () => {
+    const extended = structuredClone(catalog);
+    extended.checks[0].title.es = 'Identidad';
+    expect(() => validateReadinessCatalog(extended)).not.toThrow();
+    const unsupported = structuredClone(catalog);
+    unsupported.checks[0].title.xx = 'Nope';
+    expect(() => validateReadinessCatalog(unsupported)).toThrow(/bilingual copy/);
+    const missing = structuredClone(catalog);
+    delete missing.checks[0].description.zh;
+    expect(() => validateReadinessCatalog(missing)).toThrow(/bilingual copy/);
+  });
+
   it('catalogs every literal production adapter outcome including reserved exceptions', () => {
     const codes = new Set(catalog.checks.flatMap((entry: { legacyCodes: string[] }) => entry.legacyCodes));
     expect([...productionReadinessCodes(process.cwd())].filter((code) => !codes.has(code))).toEqual([]);
