@@ -14,7 +14,7 @@ import { env } from 'cloudflare:workers';
 import AvatarInitials from '../../components/AvatarInitials.astro';
 import ServingHistory from '../../components/ServingHistory.astro';
 import GroupActivity from '../../components/GroupActivity.astro';
-import { localePath, parseLocale, LOCALES } from '../../lib/locales';
+import { localePath, parseLocale } from '../../lib/locales';
 import { t } from '../../lib/i18n';
 import { getPerson, savePerson, setPersonAvatar } from '../../lib/adminDb';
 import { listPersonGroupActivity, type PersonGroupActivity } from '../../lib/groupDb';
@@ -291,8 +291,8 @@ if (hasGroups) {
         <span class={lab}>{t(locale, 'profile.lang')}</span>
         <select name="lang" class={tin}>
           <option value="" selected={person.lang === null}>{t(locale, 'profile.langNone')}</option>
-          {LOCALES.map((l) => (
-            <option value={l} selected={person.lang === l}>{t(locale, `admin.settings.locale${l === 'en' ? 'En' : 'Zh'}`)}</option>
+          {Astro.locals.locales.enabled.map((l) => (
+            <option value={l} selected={person.lang === l}>{t(locale, `admin.settings.locale${l[0].toUpperCase()}${l.slice(1)}`)}</option>
           ))}
         </select>
       </label>

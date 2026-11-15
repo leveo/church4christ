@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 // Admin navigation editor (adminOnly — routePolicy covers /admin/navigation; this
 // page re-checks isSuperAdmin and 403s anyone else — super admin only, grant
 // management lives here). Edits the ordered `nav.items`
@@ -285,14 +286,7 @@ const h2 = 'font-display text-heading-sm font-bold';
           <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.navigation.linkUrlHint')}</p>
           {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
         </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.navigation.linkLabelEn')}</span>
-          <input name="label_en" value={g('label_en')} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.navigation.linkLabelZh')}</span>
-          <input name="label_zh" value={g('label_zh')} class={tin} />
-        </label>
+        <LocaleFields name="label" label={t(lang, 'admin.navigation.linkLabelEn')} values={{ en: g('label_en'), zh: g('label_zh') }} lang={lang} />
         {errors.label && <p class={`sm:col-span-3 ${errorText}`}>{t(lang, errors.label)}</p>}
         <div class="sm:col-span-3">
           <button type="submit" class={btn}>

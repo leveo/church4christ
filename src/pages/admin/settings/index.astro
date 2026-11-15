@@ -23,7 +23,8 @@ import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
-import type { Locale } from '../../../lib/locales';
+import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
+import { LOCALE_DEFAULT_KEY, LOCALE_ENABLED_KEY, getLocaleSettings, saveLocaleSettings } from '../../../lib/localeSettings';
 
 export const prerender = false;
 
@@ -38,7 +39,7 @@ const KEYS = [
   'site.service_times.en', 'site.service_times.zh',
   'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url', 'site.hero_image_key',
   'site.logo_image_key',
-  'theme.name', 'theme.default_mode', 'locale.default',
+  'theme.name', 'theme.default_mode',
 ];
 
 let errors: Record<string, string> = {};
@@ -71,9 +72,21 @@ if (Astro.request.method === 'POST') {
       // toggles while busting the wrong (theme) cache, so strip them here.
       const data = Object.fromEntries(
         Object.entries(parsed.data).filter(
-          ([k]) => !k.startsWith('module.') && k !== 'site.hero_image_key' && k !== 'site.logo_image_key',
+          ([k]) => !k.startsWith('module.') && k !== 'site.hero_image_key' && k !== 'site.logo_image_key'
+            && k !== LOCALE_ENABLED_KEY && k !== LOCALE_DEFAULT_KEY,
         ),
       );
+      // Languages are installation-wide, so they go to the unscoped database. A
+      // bare default (no checkbox group) is checked against the stored enabled set.
+      const localeEnabled = parsed.data[LOCALE_ENABLED_KEY];
+      const localeDefault = parsed.data[LOCALE_DEFAULT_KEY];
+      if (localeDefault !== undefined) {
+        const enabledList: string[] = localeEnabled !== undefined
+          ? JSON.parse(localeEnabled)
+          : [...(await getLocaleSettings(Astro.locals.rawDb)).enabled];
+        const saveResult = await saveLocaleSettings(Astro.locals.rawDb, enabledList, localeDefault);
+        if (!saveResult.ok) errors['locale.default'] = 'admin.settings.localeDefaultNotEnabled';
+      }
       const heroFile = fd.get('hero_image');
       if (heroFile instanceof File && heroFile.size > 0) {
         try {
@@ -118,6 +131,14 @@ if (Astro.request.method === 'POST') {
 }
 
 const cur = await getSettings(db, KEYS);
+const localeSettings = await getLocaleSettings(Astro.locals.rawDb);
+const localeLabel = (code: string): string => {
+  const key = `admin.settings.locale${code[0].toUpperCase()}${code.slice(1)}`;
+  const label = t(lang, key);
+  return label === key ? localeMeta(code).nativeName : label;
+};
+const postedEnabled = fd?.has('locale.enabled_form') ? fd.getAll('locale.enabled').map(String) : null;
+const enabledNow: string[] = postedEnabled ?? [...localeSettings.enabled];
 const saved = Astro.url.searchParams.get('saved') === '1';
 const badRequest = Astro.url.searchParams.get('err') === '1';
 
@@ -125,7 +146,7 @@ const badRequest = Astro.url.searchParams.get('err') === '1';
 const g = (key: string): string => (fd ? String(fd.get(key) ?? '') : (cur[key] ?? ''));
 const selectedTheme = g('theme.name') || 'sanctuary';
 const selectedMode = g('theme.default_mode') || 'light';
-const selectedLocale = g('locale.default') || 'en';
+const selectedLocale = (fd ? String(fd.get('locale.default') ?? '') : '') || localeSettings.default;
 const heroImageKey = cur['site.hero_image_key'] ?? '';
 const heroImage = mediaPath(heroImageKey);
 const logoImageKey = cur['site.logo_image_key'] ?? '';
@@ -150,7 +171,7 @@ const moduleGroups = MODULE_GROUPS;
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
   <div class="settings-workspace">
-  <nav class="settings-sections" aria-label={t(lang, 'admin.settings.title')}>{['identity','contact','links','appearance','modules'].map(key => <a href={`#settings-${key}`}>{t(lang, `admin.settings.${key}Title`)}</a>)}</nav>
+  <nav class="settings-sections" aria-label={t(lang, 'admin.settings.title')}>{['identity','contact','links','appearance','languages','modules'].map(key => <a href={`#settings-${key}`}>{t(lang, `admin.settings.${key}Title`)}</a>)}</nav>
   <div><form method="post" enctype="multipart/form-data" class="space-y-6">
 
     <section id="settings-identity" class={`${card} space-y-4`}>
@@ -290,15 +311,34 @@ const moduleGroups = MODULE_GROUPS;
           </select>
           {errors['theme.default_mode'] && <span class={errorText}>{t(lang, errors['theme.default_mode'])}</span>}
         </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.settings.localeDefault')}</span>
-          <select name="locale.default" class={tin}>
-            <option value="en" selected={selectedLocale === 'en'}>{t(lang, 'admin.settings.localeEn')}</option>
-            <option value="zh" selected={selectedLocale === 'zh'}>{t(lang, 'admin.settings.localeZh')}</option>
-          </select>
-          {errors['locale.default'] && <span class={errorText}>{t(lang, errors['locale.default'])}</span>}
-        </label>
       </div>
+    </section>
+
+    <section id="settings-languages" class={`${card} space-y-4`}>
+      <h2 class={h2}>{t(lang, 'admin.settings.languagesTitle')}</h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.settings.languagesIntro')}</p>
+      <input type="hidden" name="locale.enabled_form" value="1" />
+      <fieldset>
+        <legend class={lab}>{t(lang, 'admin.settings.localeEnabled')}</legend>
+        <div class="grid gap-2 sm:grid-cols-2">
+          {SUPPORTED_LOCALES.map((code) => (
+            <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-border p-3">
+              <input type="checkbox" name="locale.enabled" value={code} checked={enabledNow.includes(code)} class="h-4 w-4 shrink-0" />
+              <span class="text-sm font-semibold text-ink">{localeLabel(code)}</span>
+            </label>
+          ))}
+        </div>
+        {errors['locale.enabled'] && <span class={errorText}>{t(lang, errors['locale.enabled'])}</span>}
+      </fieldset>
+      <label class="block sm:max-w-xs">
+        <span class={lab}>{t(lang, 'admin.settings.localeDefault')}</span>
+        <select name="locale.default" class={tin}>
+          {SUPPORTED_LOCALES.map((code) => (
+            <option value={code} selected={selectedLocale === code}>{localeLabel(code)}</option>
+          ))}
+        </select>
+        {errors['locale.default'] && <span class={errorText}>{t(lang, errors['locale.default'])}</span>}
+      </label>
     </section>
 
     <div class="settings-save flex items-center gap-4">

@@ -4,7 +4,7 @@
 // are ever added or subtracted. datetime-local <-> UTC conversion is DST-aware
 // and returns SQL-comparable strings (space separator, no 'Z') matching D1's
 // datetime('now').
-import type { Locale } from './locales';
+import { isHanScript, localeMeta, type Locale } from './locales';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_TZ = 'America/Chicago';
@@ -73,30 +73,37 @@ export function toUtcSql(now: Date = new Date()): string {
   return now.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-/** Human-readable date: en → 'July 5, 2026', zh → '2026年7月5日'. */
-export function formatDate(dateStr: string, locale: Locale): string {
+// Han locales keep the numeric-unit style ("2026年7月5日 星期日") that ICU renders
+// with different spacing and weekday words; every other locale goes through Intl
+// with the registry's Intl tag.
+const HAN_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+function utcDate(dateStr: string): { y: number; m: number; d: number; when: Date } {
   const [y, m, d] = dateStr.split('-').map(Number);
-  if (locale === 'zh') return `${y}年${m}月${d}日`;
-  return new Intl.DateTimeFormat('en-US', {
+  return { y, m, d, when: new Date(Date.UTC(y, m - 1, d)) };
+}
+
+/** Human-readable date: en -> 'July 5, 2026', zh -> '2026年7月5日'. */
+export function formatDate(dateStr: string, locale: Locale): string {
+  const { y, m, d, when } = utcDate(dateStr);
+  if (isHanScript(locale)) return `${y}年${m}月${d}日`;
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, {
     timeZone: 'UTC',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-  }).format(new Date(Date.UTC(y, m - 1, d)));
+  }).format(when);
 }
 
-const ZH_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
-
-/** Calendar date with weekday: en → 'Sunday, July 5, 2026', zh → '2026年7月5日 星期日'.
+/** Calendar date with weekday: en -> 'Sunday, July 5, 2026', zh -> '2026年7月5日 星期日'.
  *  `short` gives en 'Sun, Jul 5' / zh '7月5日 周日' for tight spaces. Pure date math in UTC. */
 export function formatDateWithWeekday(dateStr: string, locale: Locale, short = false): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const when = new Date(Date.UTC(y, m - 1, d));
-  if (locale === 'zh') {
-    const wd = ZH_WEEKDAYS[when.getUTCDay()];
+  const { y, m, d, when } = utcDate(dateStr);
+  if (isHanScript(locale)) {
+    const wd = HAN_WEEKDAYS[when.getUTCDay()];
     return short ? `${m}月${d}日 周${wd}` : `${y}年${m}月${d}日 星期${wd}`;
   }
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, {
     timeZone: 'UTC',
     weekday: short ? 'short' : 'long',
     ...(short ? {} : { year: 'numeric' }),
@@ -107,10 +114,24 @@ export function formatDateWithWeekday(dateStr: string, locale: Locale, short = f
 
 /** Just the short weekday: en 'Sun', zh '周日'. */
 export function weekdayShort(dateStr: string, locale: Locale): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const when = new Date(Date.UTC(y, m - 1, d));
-  if (locale === 'zh') return `周${ZH_WEEKDAYS[when.getUTCDay()]}`;
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(when);
+  const { when } = utcDate(dateStr);
+  if (isHanScript(locale)) return `周${HAN_WEEKDAYS[when.getUTCDay()]}`;
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, { timeZone: 'UTC', weekday: 'short' }).format(when);
+}
+
+/** Sunday-first column headings for a month grid: en 'Sun'..'Sat', zh '日'..'六'. */
+export function weekdayHeadings(locale: Locale): string[] {
+  if (isHanScript(locale)) return [...HAN_WEEKDAYS];
+  const fmt = new Intl.DateTimeFormat(localeMeta(locale).intl, { timeZone: 'UTC', weekday: 'short' });
+  // 2026-01-04 is a Sunday.
+  return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2026, 0, 4 + i))));
+}
+
+/** Short month name for a badge: en 'Jul', zh '7月'. */
+export function monthShort(dateStr: string, locale: Locale): string {
+  const { m, when } = utcDate(dateStr);
+  if (isHanScript(locale)) return `${m}月`;
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, { month: 'short', timeZone: 'UTC' }).format(when);
 }
 
 /** Inclusive date-string bounds for a 'YYYY-MM' month. The end is the '-31'
@@ -123,8 +144,8 @@ export function monthRange(ym: string): { start: string; end: string } {
 /** Month heading from a 'YYYY-MM' key: en → 'July 2026', zh → '2026年7月'. */
 export function formatMonth(yearMonth: string, locale: Locale): string {
   const [y, m] = yearMonth.split('-').map(Number);
-  if (locale === 'zh') return `${y}年${m}月`;
-  return new Intl.DateTimeFormat('en-US', {
+  if (isHanScript(locale)) return `${y}年${m}月`;
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, {
     timeZone: 'UTC',
     year: 'numeric',
     month: 'long',

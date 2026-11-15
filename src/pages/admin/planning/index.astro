@@ -1,11 +1,12 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 // Service Planning admin: every planning event, creating a new one, and the
 // notification rules (publish / change / cancel / reminder lead time). Gated by
 // the `planning` admin area (middleware). Event editing lives on the coordinator
 // page /planning/[id]/manage so admins and coordinators share one editor.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import { localePath, pickLocalizedText, type Locale } from '../../../lib/locales';
+import { localePath, pickPair, type Locale } from '../../../lib/locales';
 import { formatDate, todayInTz } from '../../../lib/dates';
 import { badge, badgeActive, badgeInactive, badgeScheduled, btn, card, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
 import {
@@ -68,7 +69,7 @@ const ruleOf = (key: RuleKey) => rules.find((r) => r.rule_key === key)!;
           {list.map((e) => (
             <li class={`${card} !p-4`}>
               <div class="flex flex-wrap items-center gap-3">
-                <a class="min-w-0 flex-1 basis-48 font-semibold text-primary hover:underline" href={localePath(lang, `/planning/${e.id}/manage`)}>{pickLocalizedText({ en: e.title_en, zh: e.title_zh }, lang)}</a>
+                <a class="min-w-0 flex-1 basis-48 font-semibold text-primary hover:underline" href={localePath(lang, `/planning/${e.id}/manage`)}>{pickPair(lang, e.title_en, e.title_zh)}</a>
                 <span class={`${badge} ${statusCls[e.status]}`}>{t(lang, `planning.status.${e.status}`)}</span>
               </div>
               <p class="mt-1 text-sm text-ink-muted">{formatDate(e.event_date, lang)} · {e.start_time}{e.end_time ? `–${e.end_time}` : ''}</p>
@@ -83,15 +84,13 @@ const ruleOf = (key: RuleKey) => rules.find((r) => r.rule_key === key)!;
       <h2 class="mb-3 font-display text-lg font-semibold">{t(lang, 'planning.admin.create')}</h2>
       <form method="post" class="grid gap-3 sm:grid-cols-2">
         <input type="hidden" name="_action" value="create" />
-        <label class="block"><span class={lab}>{t(lang, 'planning.f.titleEn')}</span><input name="title_en" value={echo.title_en ?? ''} class={tin} />{err('title_en') && <p class="mt-1 text-sm text-danger">{err('title_en')}</p>}</label>
-        <label class="block"><span class={lab}>{t(lang, 'planning.f.titleZh')}</span><input name="title_zh" value={echo.title_zh ?? ''} class={tin} /></label>
+        <div class="sm:col-span-2"><LocaleFields name="title" label={t(lang, 'planning.f.titleEn')} values={{ en: echo.title_en, zh: echo.title_zh }} lang={lang} error={err('title_en') ?? undefined} /></div>
         <label class="block"><span class={lab}>{t(lang, 'planning.f.date')}</span><input type="date" name="event_date" required value={echo.event_date ?? ''} class={tin} />{err('event_date') && <p class="mt-1 text-sm text-danger">{err('event_date')}</p>}</label>
         <div class="grid grid-cols-2 gap-3">
           <label class="block"><span class={lab}>{t(lang, 'planning.f.start')}</span><input type="time" name="start_time" required value={echo.start_time ?? '10:00'} class={tin} /></label>
           <label class="block"><span class={lab}>{t(lang, 'planning.f.end')}</span><input type="time" name="end_time" value={echo.end_time ?? ''} class={tin} />{err('end_time') && <p class="mt-1 text-sm text-danger">{err('end_time')}</p>}</label>
         </div>
-        <label class="block"><span class={lab}>{t(lang, 'planning.f.locationEn')}</span><input name="location_en" value={echo.location_en ?? ''} class={tin} /></label>
-        <label class="block"><span class={lab}>{t(lang, 'planning.f.locationZh')}</span><input name="location_zh" value={echo.location_zh ?? ''} class={tin} /></label>
+        <div class="sm:col-span-2"><LocaleFields name="location" label={t(lang, 'planning.f.locationEn')} values={{ en: echo.location_en, zh: echo.location_zh }} lang={lang} /></div>
         <label class="block sm:col-span-2"><span class={lab}>{t(lang, 'planning.f.plan')}</span>
           <select name="plan_id" class={tin}><option value="">{t(lang, 'planning.f.planNone')}</option>{plans.map((p) => <option value={p.id}>{p.plan_date} {p.title ?? ''}</option>)}</select>
         </label>

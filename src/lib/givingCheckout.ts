@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 // Pure checkout-form parsing for the giving checkout endpoint — no Astro, no DB,
 // so it unit-tests without a request lifecycle. The endpoint stays thin: it reads
 // the raw form fields, runs them through here, and turns a rejection into a 303
@@ -67,7 +68,7 @@ export function normalizeGivingCheckoutInput(input: GivingCheckoutDigestInput): 
   const currency = normalizeProofText(input.currency).toLowerCase();
   if (!/^[a-z]{3}$/.test(currency)) throw new Error('giving_currency_invalid');
   if (!parseFrequency(input.frequency)) throw new Error('giving_frequency_invalid');
-  if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('giving_locale_invalid');
+  if (!isSupportedLocale(input.locale)) throw new Error('giving_locale_invalid');
 
   const fundName = normalizeProofText(input.fundName);
   const donorName = normalizeProofText(input.donorName);

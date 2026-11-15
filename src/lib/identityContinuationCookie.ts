@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import { hmacIdentityValue } from './identityAuth';
 
 export const IDENTITY_CONTINUATION_COOKIE = 'c4_identity_continuation';
@@ -38,7 +39,7 @@ function same(left: string, right: string): boolean {
 
 export async function sealIdentityContinuationCookie(secret: string, value: ContinuationCookie): Promise<string> {
   if (!UUID.test(value.intentId) || !UUID.test(value.operationId) || !UUID.test(value.publicId)
-    || (value.kind !== 'giving' && value.kind !== 'registration') || (value.locale !== 'en' && value.locale !== 'zh')
+    || (value.kind !== 'giving' && value.kind !== 'registration') || !isSupportedLocale(value.locale)
     || !SAFE_PATH.test(value.returnPath)) throw new Error('identity_continuation_cookie_invalid');
   const payload = base64url(JSON.stringify(value));
   return `${payload}.${await hmacIdentityValue(secret, 'identity-continuation-cookie', payload)}`;
@@ -55,7 +56,7 @@ export async function openIdentityContinuationCookie(secret: string, value: stri
   try {
     const value = JSON.parse(parsed) as ContinuationCookie;
     if (!UUID.test(value.intentId) || !UUID.test(value.operationId) || !UUID.test(value.publicId)
-      || (value.kind !== 'giving' && value.kind !== 'registration') || (value.locale !== 'en' && value.locale !== 'zh')
+      || (value.kind !== 'giving' && value.kind !== 'registration') || !isSupportedLocale(value.locale)
       || !SAFE_PATH.test(value.returnPath)) return null;
     return Object.freeze(value);
   } catch { return null; }

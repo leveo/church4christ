@@ -1,6 +1,18 @@
 import { defineMiddleware } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
-import { DEFAULT_LOCALE, parseLocale, pathWithoutLocale, pickLocaleFromHeader } from './lib/locales';
+import {
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE,
+  isSupportedLocale,
+  localeMeta,
+  localePath,
+  negotiateLocale,
+  parseLocale,
+  pathWithoutLocale,
+} from './lib/locales';
+import { LEGACY_LOCALE_SETTINGS, getLocaleSettings, type LocaleSettings } from './lib/localeSettings';
+import { loadDict } from './lib/i18n';
+import { sameOriginTarget } from './lib/safeRedirect';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
 import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
 import { applySecurityHeaders } from './lib/securityHeaders';
@@ -33,7 +45,7 @@ type AuthEnv = { SESSION_SECRET?: string; AUTH_DEV_BYPASS_EMAIL?: string };
  *  (this branch can be reached with a user attached — insufficient role). */
 function forbidden(locale: string): Response {
   const html = `<!doctype html>
-<html lang="${locale}">
+<html lang="${localeMeta(locale).bcp47}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>403 Forbidden</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; text-align: center;"> <!-- /* tokens-ok */ intentional system-font fallback: this minimal 403 renders without the token CSS bundle -->
@@ -57,6 +69,15 @@ function hasInvalidLearningLocale(rawPathname: string): boolean {
   return match !== null && parseLocale(match[1]) === null;
 }
 
+function badRequest(): Response {
+  const res = new Response('Bad Request', {
+    status: 400,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  });
+  applySecurityHeaders(res.headers);
+  return res;
+}
+
 function opaqueNotFound(): Response {
   const res = new Response('Not Found', {
     status: 404,
@@ -73,20 +94,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return opaqueNotFound();
   }
 
-  // Bare root: content-negotiate a locale and 302 to its localized home. The
-  // redirect carries the security headers too, so no response leaves unhardened.
-  if (pathname === '/') {
-    const locale = pickLocaleFromHeader(context.request.headers.get('accept-language'));
-    const redirect = context.redirect(`/${locale}/`, 302);
-    applySecurityHeaders(redirect.headers);
-    return redirect;
-  }
-
   // Locale comes from the leading path segment when it is a known locale;
   // otherwise fall back to the default so unmatched paths still 404 in a real
   // locale. `rest` is the locale-stripped path the route policy classifies.
   const { locale, rest } = pathWithoutLocale(pathname);
   context.locals.locale = locale ?? DEFAULT_LOCALE;
+  context.locals.locales = LEGACY_LOCALE_SETTINGS;
   context.locals.user = null;
   context.locals.assurance = null;
 
@@ -152,6 +165,68 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // theme, and campus work, but deliberately receives the request-scoped DB so
     // the route can verify the pinned identity-source and recovery-key records.
     if (pathname === '/api/health/identity-verification') return finish(await next());
+
+    // Installation-wide language settings (enabled set + default), memoized per
+    // isolate for 60s. Read from the unscoped database: languages are not
+    // campus-local. A missing table or read failure fails safe to the legacy
+    // state (en + zh, default en) rather than 500ing every page.
+    let localeSettings: LocaleSettings;
+    try {
+      localeSettings = await getLocaleSettings(db);
+    } catch {
+      localeSettings = LEGACY_LOCALE_SETTINGS;
+    }
+    context.locals.locales = localeSettings;
+    const readsLocale = context.request.method === 'GET' || context.request.method === 'HEAD';
+
+    // Bare root: negotiate a locale (cookie from the switcher, then
+    // Accept-Language over the ENABLED set, then the default) and 302 to its
+    // home. The redirect carries the security headers and Vary so a shared cache
+    // never serves one visitor's language to another.
+    if (pathname === '/') {
+      const target = negotiateLocale(
+        { cookie: context.cookies.get(LOCALE_COOKIE)?.value, acceptLanguage: context.request.headers.get('accept-language') },
+        localeSettings.enabled,
+        localeSettings.default,
+      );
+      const redirect = context.redirect(sameOriginTarget(context.url.origin, `/${target}/`) ?? `/${target}/`, 302);
+      redirect.headers.set('vary', 'Accept-Language, Cookie');
+      applySecurityHeaders(redirect.headers);
+      return finish(redirect);
+    }
+
+    // The switcher links carry ?setlang=<code>: remember the explicit choice in
+    // a cookie (the ONLY place it is set) and redirect to the clean URL.
+    const requestedLang = context.url.searchParams.get('setlang');
+    if (readsLocale && requestedLang !== null) {
+      const clean = new URL(context.url);
+      clean.searchParams.delete('setlang');
+      const cleanTarget = sameOriginTarget(context.url.origin, `${clean.pathname}${clean.search}`);
+      if (!cleanTarget) return finish(badRequest());
+      const redirect = context.redirect(cleanTarget, 302);
+      if (isSupportedLocale(requestedLang) && localeSettings.enabled.includes(requestedLang)) {
+        redirect.headers.append(
+          'set-cookie',
+          `${LOCALE_COOKIE}=${requestedLang}; Path=/; Max-Age=31536000; SameSite=Lax${context.url.protocol === 'https:' ? '; Secure' : ''}`,
+        );
+      }
+      applySecurityHeaders(redirect.headers);
+      return finish(redirect);
+    }
+
+    // A supported-but-disabled locale prefix redirects to the same path in the
+    // default locale; an unknown code never reaches here (it is not a locale
+    // segment, so the router 404s it as before).
+    if (locale && !localeSettings.enabled.includes(locale) && readsLocale) {
+      const localeTarget = sameOriginTarget(context.url.origin, `${localePath(localeSettings.default, rest)}${context.url.search}`);
+      if (!localeTarget) return finish(badRequest());
+      const redirect = context.redirect(localeTarget, 302);
+      applySecurityHeaders(redirect.headers);
+      return finish(redirect);
+    }
+    if (!locale) context.locals.locale = localeSettings.default;
+    // t() is synchronous: make sure the request language's dictionary is resident.
+    await loadDict(context.locals.locale);
 
     // Active theme from the `theme.name` setting, cached per-isolate (60s) in
     // ./lib/theme. Guarded: an empty DB or a missing settings table (fresh install)

@@ -6,7 +6,7 @@
 import { t } from '../../lib/i18n';
 import { operationsCopy } from '../../i18n/designOperations';
 import { isEnglishEditorialText } from '../../lib/editorialLocale';
-import type { Locale } from '../../lib/locales';
+import { type Locale, isChinese } from '../../lib/locales';
 import { tin, lab, btn, btnSecondary, rowBtn, card } from '../../lib/adminUi';
 
 interface Props {
@@ -107,7 +107,7 @@ const freqs = [
         <h3 class="font-display text-heading-sm font-semibold">{t(lang, 'admin.console.wiz.reviewTitle')}</h3>
         <p class="mt-2 text-sm text-ink-muted">{t(lang, 'admin.console.wiz.reviewNote')}</p>
         <dl class="wizard-review" data-wizard-review hidden>
-          <div><dt>{t(lang, lang === 'zh' ? 'admin.console.wiz.nameZh' : 'admin.console.wiz.nameEn')}</dt><dd data-review-name></dd></div>
+          <div><dt>{t(lang, isChinese(lang) ? 'admin.console.wiz.nameZh' : 'admin.console.wiz.nameEn')}</dt><dd data-review-name></dd></div>
           <div><dt>{t(lang, 'admin.console.wiz.time')}</dt><dd data-review-time></dd></div>
           <div><dt>{t(lang, 'admin.console.wiz.roles')}</dt><dd><ul data-review-roles></ul></dd></div>
         </dl>

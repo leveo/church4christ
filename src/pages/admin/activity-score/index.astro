@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
@@ -29,7 +30,7 @@ if (method !== 'GET' && method !== 'POST') {
   return new Response(null, { status: 405, headers: { ...SAFE_HEADERS, Allow: 'GET, POST' } });
 }
 
-const lang: Locale = user!.lang === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(user!.lang, Astro.locals.locales);
 const sourceModules: Record<ActivityDimensionKey, string> = {
   group_attendance: 'groups',
   serving: 'serve',

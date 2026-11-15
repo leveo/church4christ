@@ -1,0 +1,7 @@
+{
+  "defaultLocale": "en",
+  "supported": [
+    { "code": "en", "nativeName": "English" },
+    { "code": "zh", "nativeName": "中文" }
+  ]
+}

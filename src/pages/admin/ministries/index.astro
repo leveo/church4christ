@@ -17,7 +17,7 @@ import NewMinistryTab from '../../../components/admin/NewMinistryTab.astro';
 import EmailTab from '../../../components/admin/EmailTab.astro';
 import AvailabilityTab from '../../../components/admin/AvailabilityTab.astro';
 import { t } from '../../../lib/i18n';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, isSupportedLocale } from '../../../lib/locales';
 import { addDays, todayInTz } from '../../../lib/dates';
 import { MINISTRY_CATEGORIES } from '../../../lib/ministryMeta';
 import { getStats, getNeedsAttention, type Scope } from '../../../lib/adminOverviewDb';
@@ -180,7 +180,7 @@ if (Astro.request.method === 'POST') {
   if (action === 'saveTemplate' && canAdmin) {
     const key = String(fd.get('template_key') ?? '');
     const locale = String(fd.get('locale') ?? '');
-    if (key && (locale === 'en' || locale === 'zh')) {
+    if (key && isSupportedLocale(locale)) {
       await saveTemplate(db, key, locale, String(fd.get('subject') ?? ''), String(fd.get('body') ?? ''));
     }
     return to('email', `&tpl=${key}&flash=templateSaved`);

@@ -20,7 +20,7 @@ import { listPeople } from '../../../lib/adminDb';
 import { isValidDateStr, todayInTz, monthRange, formatMonth } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, errorText, btn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, pickPair } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -108,7 +108,7 @@ const donorOf = (gift: { person_id: number | null; donor_name: string | null }) 
   const member = gift.person_id !== null ? personById.get(gift.person_id) : undefined;
   return member ?? (gift.donor_name || '—');
 };
-const fundLabel = (f: { name_en: string; name_zh: string }) => (lang === 'zh' ? f.name_zh || f.name_en : f.name_en);
+const fundLabel = (f: { name_en: string; name_zh: string }) => pickPair(lang, f.name_en, f.name_zh);
 
 const exportParams = new URLSearchParams();
 if (filterFundId !== undefined) exportParams.set('fund', String(filterFundId));

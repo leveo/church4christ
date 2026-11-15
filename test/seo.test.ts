@@ -90,3 +90,41 @@ describe('robots.txt', () => {
     }
   });
 });
+
+import { pageAlternates } from '../src/lib/seo';
+
+describe('pageAlternates + enabled locales', () => {
+  const site = new URL('https://church.example.org');
+
+  it('emits hreflang for every enabled locale with x-default at the default', () => {
+    const r = pageAlternates(site, '/about', 'zh', ['en', 'zh'], 'en');
+    expect(r.canonical).toBe('https://church.example.org/zh/about');
+    expect(r.alternates).toEqual([
+      { hreflang: 'en', href: 'https://church.example.org/en/about' },
+      { hreflang: 'zh-Hans', href: 'https://church.example.org/zh/about' },
+      { hreflang: 'x-default', href: 'https://church.example.org/en/about' },
+    ]);
+  });
+
+  it('lists only enabled locales and points x-default at a non-en default', () => {
+    const r = pageAlternates(site, '/', 'zh', ['zh'], 'zh');
+    expect(r.alternates).toEqual([
+      { hreflang: 'zh-Hans', href: 'https://church.example.org/zh/' },
+      { hreflang: 'x-default', href: 'https://church.example.org/zh/' },
+    ]);
+  });
+
+  it('canonicalises a fallback copy to the original and drops it from hreflang', () => {
+    const r = pageAlternates(site, '/about', 'zh', ['en', 'zh'], 'en', 'en');
+    expect(r.canonical).toBe('https://church.example.org/en/about');
+    expect(r.alternates.map((a) => a.hreflang)).toEqual(['en', 'x-default']);
+  });
+
+  it('renders the sitemap over the enabled set only', () => {
+    const xml = renderSitemap('https://church.example.org', [{ path: '/about' }], ['zh'], 'zh');
+    expect(xml).toContain('<loc>https://church.example.org/zh/about</loc>');
+    expect(xml).not.toContain('/en/about');
+    expect(xml).toContain('hreflang="x-default" href="https://church.example.org/zh/about"');
+    expect(xml.match(/<url>/gu)).toHaveLength(1);
+  });
+});

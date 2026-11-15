@@ -133,3 +133,23 @@ describe('demo content visibility', () => {
     expect(listLocalizedFrom(content, 'en')).toHaveLength(4);
   });
 });
+
+describe('fallback chain', () => {
+  const chainEntries: Fixture[] = [{ id: 'zh/only-zh' }, { id: 'en/only-en' }, { id: 'zh/both' }, { id: 'en/both' }];
+
+  it('walks requested, then the installation default, then en', () => {
+    // zh is the default: an English-less page requested in en is served from zh.
+    const viaDefault = getLocalizedFrom(chainEntries, 'only-zh', 'en', true, ['en', 'zh']);
+    expect(viaDefault).toMatchObject({ translated: false, contentLocale: 'zh' });
+    expect(viaDefault?.entry.id).toBe('zh/only-zh');
+    expect(getLocalizedFrom(chainEntries, 'only-en', 'zh', true, ['zh', 'en'])).toMatchObject({ translated: false, contentLocale: 'en' });
+    expect(getLocalizedFrom(chainEntries, 'both', 'zh', true, ['zh', 'en'])).toMatchObject({ translated: true, contentLocale: 'zh' });
+    expect(getLocalizedFrom(chainEntries, 'nope', 'zh', true, ['zh', 'en'])).toBeNull();
+  });
+
+  it('defaults to the built-in chain and carries the chain into list resolution', () => {
+    expect(getLocalizedFrom(chainEntries, 'only-en', 'zh')?.contentLocale).toBe('en');
+    const listed = listLocalizedFrom(chainEntries, 'en', true, ['en', 'zh']);
+    expect(listed.find((r) => r.slug === 'only-zh')).toMatchObject({ translated: false, contentLocale: 'zh' });
+  });
+});

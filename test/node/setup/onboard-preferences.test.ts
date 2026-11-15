@@ -29,7 +29,7 @@ describe('local onboarding preferences', () => {
   });
 
   it.each([
-    (p: any) => { p.schemaVersion = 2; },
+    (p: any) => { p.schemaVersion = 3; },
     (p: any) => { p.organization.type = 'unknown'; },
     (p: any) => { p.organization.name = ''; },
     (p: any) => { p.organization.timezone = 'Invalid/Timezone'; },

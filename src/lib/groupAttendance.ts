@@ -3,6 +3,7 @@
 // in SQLite), the hourly cron that mails group admins a link once a tracked
 // occurrence ends, the attendance upsert, and the session-auth check. Emails are
 // best-effort (email_log records the attempt) and module-gated on 'groups'.
+import { emailLanguagesFor } from './emailLocales';
 import type { AppDb } from './appDb';
 import { hasAreaAccess } from './adminAreas';
 import { sha256Hex } from './auth';
@@ -23,11 +24,6 @@ const TOPUP_DAYS = 35;
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-}
-
-/** Narrow a stored `lang` to a Locale, or null (→ send both stacked). */
-function toLang(lang: string | null): Locale | null {
-  return lang === 'en' || lang === 'zh' ? lang : null;
 }
 
 // ── Tokens ─────────────────────────────────────────────────────────────────
@@ -183,9 +179,11 @@ function buildAttendanceEmail(args: {
   title: string;
   date: string;
   link: string;
-  only: Locale | null;
+  /** Languages from emailLanguagesFor; `only` stays for direct (test) callers. */
+  langs?: Locale[];
+  only?: Locale | null;
 }): { subject: string; html: string; text: string } {
-  const langs: Locale[] = args.only ? [args.only] : ['zh', 'en'];
+  const langs: Locale[] = args.langs ?? (args.only ? [args.only] : ['zh', 'en']);
   const vars = { name: args.name, group: args.group, title: args.title, date: args.date };
   const subject = langs.map((l) => t(l, 'attendance.email.subject', vars)).join(' · ');
   const intro = langs.map((l) => t(l, 'attendance.email.intro', vars));
@@ -248,7 +246,7 @@ export async function sendAttendanceEmails(env: EmailEnv, db: AppDb, now: Date =
           title: occ.title,
           date: occ.occurs_on,
           link,
-          only: toLang(admin.lang),
+          langs: await emailLanguagesFor(db, admin.lang),
         });
         await sendEmail(env, db, {
           to: admin.email,

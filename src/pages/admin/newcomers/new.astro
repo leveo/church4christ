@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 import Admin from '../../../layouts/Admin.astro';
 import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
 import { careToolsCopy } from '../../../i18n/designCareTools';
@@ -16,7 +17,7 @@ const modules = Astro.locals.modules;
 if (!modules.has('newcomers')) return new Response(null, { status: 404 });
 const user = Astro.locals.user;
 if (!hasAreaAccess(user, 'newcomers')) return new Response(null, { status: 403 });
-const lang: Locale = user?.lang === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(user?.lang, Astro.locals.locales);
 const definition = await listNewcomerFormDefinition(Astro.locals.db, Astro.locals.dbBackend, lang);
 const fieldName = (id: number) => `answer_${id}`;
 const allowed = ['name', 'email', 'phone', 'locale', 'visit_date', 'service_type_id', 'contact_consent', ...definition.fields.map((field) => fieldName(field.id))];
@@ -63,7 +64,7 @@ const services = new Map((await listServiceTypes(Astro.locals.db, lang)).map((se
           <label class="care-field-wide"><span class={lab}>{t(lang, 'newcomers.name')}</span><input class={tin} name="name" autocomplete="name" required /></label>
           <label><span class={lab}>{t(lang, 'newcomers.email')}</span><input class={tin} type="email" name="email" autocomplete="email" /></label>
           <label><span class={lab}>{t(lang, 'newcomers.phone')}</span><input class={tin} type="tel" name="phone" autocomplete="tel" /></label>
-          <label class="care-field-wide"><span class={lab}>{t(lang, 'newcomers.language')}</span><select class={tin} name="locale"><option value="en" selected={lang === 'en'}>{t(lang, 'locale.en')}</option><option value="zh" selected={lang === 'zh'}>{t(lang, 'locale.zh')}</option></select></label>
+          <label class="care-field-wide"><span class={lab}>{t(lang, 'newcomers.language')}</span><select class={tin} name="locale">{Astro.locals.locales.enabled.map((code) => <option value={code} selected={lang === code}>{t(lang, `locale.${code}`)}</option>)}</select></label>
         </div></fieldset>
         <fieldset class="care-panel"><legend>{copy.visit}</legend><div class="care-form-grid">
           <label><span class={lab}>{t(lang, 'newcomers.visitDate')}</span><input class={tin} type="date" name="visit_date" value={today} required /></label>

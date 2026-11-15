@@ -18,6 +18,13 @@ do not invent a second provisioning path or replace setup with raw seed commands
   and feature checkboxes. Wait for the person to save actual answers; do not complete the
   form or invent preferences for them. Use `--no-open` when a browser cannot open, and
   share the printed local URL. Re-running onboarding reloads saved answers.
+- Languages: the onboarding form has a **Site languages** multi-select plus a default. For
+  unattended setup pass `--locales en,zh --default-locale en` (`--locale x` alone means en+zh
+  enabled with default x; `--locales` narrows or widens the set and wins when both are given); only languages in `config/locales.json` are accepted. After
+  installation, administrators change them under **Settings → Languages**. Content and emails
+  fall back requested → default → English, and disabling a language only hides it: never
+  delete content or rows to "remove" a language. Upgraded installations keep English and
+  Chinese with English as default until the settings are saved.
 - Recommend Cloudflare D1 with `website-community` for a new local evaluation. The
   application also uses Workers and R2. Full Church / Giving / Registration need
   an explicit choice of Supabase-compatible PostgreSQL. Do not silently enable them.
@@ -50,8 +57,20 @@ do not invent a second provisioning path or replace setup with raw seed commands
 | Generated deployment config template | `config/wrangler.template.jsonc` |
 | Feature behavior and visuals | `docs/features/` |
 | D1 / PostgreSQL forward migrations | `migrations/` / `migrations-supabase/` |
-| Bilingual UI copy | `src/i18n/en.ts` / `src/i18n/zh.ts` |
+| UI copy per language | `src/i18n/<code>.ts` (today `en`, `zh`) |
+| Language registry and settings | `src/lib/locales.ts`, `src/lib/localeSettings.ts`, `config/locales.json` |
 | Design tokens | `design/`; see `docs/design-system.md` |
+
+## Adding or reviewing a language
+
+Follow the checklist in [docs/i18n.md](docs/i18n.md#add-a-language-checklist): a registry
+entry (`src/lib/locales.ts` and `config/locales.json`), a dictionary file with the same keys
+and `{placeholders}` as `en.ts` (including every `design*` dictionary), a checked-in church
+glossary, the `supported_locales` row once the database lookup lands, and fonts for scripts
+the system fonts miss. Do not branch on `=== 'zh'` for general localization; use the registry
+and helpers (`localeMeta`, `pickByLocale`, `pickPair`, `fallbackChain`). Reviewers run the parity
+tests, check that new copy is not left in English, and label non-English/Chinese translations
+AI-assisted, community review welcome.
 
 ## Validation and handoff
 

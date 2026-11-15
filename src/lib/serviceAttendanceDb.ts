@@ -1,6 +1,6 @@
 import type { AppDb } from './appDb';
 import { isValidDateStr } from './dates';
-import type { Locale } from './locales';
+import { type Locale, isSupportedLocale } from './locales';
 import { SERVICE_ATTENDANCE_LIMITS, type AdultCountInput, type AttendanceWindow } from './serviceAttendanceForms';
 
 export const MAX_SERVICE_ATTENDANCE_REPORT_ROWS = 5_000;
@@ -463,7 +463,7 @@ export async function listServiceAttendanceReport(
   locale: Locale,
   window: Pick<AttendanceWindow, 'from' | 'to'>,
 ): Promise<ServiceAttendanceReportRow[]> {
-  if (locale !== 'en' && locale !== 'zh') throw new ServiceAttendanceInvalidError();
+  if (!isSupportedLocale(locale)) throw new ServiceAttendanceInvalidError();
   validateWindow({ ...window, days: 0 });
   try {
     const queryResult = await db.prepare(`

@@ -1,0 +1,107 @@
+---
+// Per-locale tabbed field group for admin content editors. One tab per ENABLED
+// locale (the installation default first); every field posts as `<name>_<code>`,
+// so the existing server handlers and their form field names are unchanged
+// (`title_en` / `title_zh`, ...). Disabled-but-supported locales render as hidden
+// inputs carrying their stored text, so saving never deletes translations.
+// Tabs are radio inputs + sibling CSS: no JavaScript, 44px targets, wraps on
+// narrow screens (no horizontal scrolling). Radios carry a `form` id that matches
+// no form, so they are never submitted. The server owns required-ness (the form
+// handler validates the default/English field); no `required` attribute is used
+// because a browser cannot focus a field inside a hidden tab.
+import { SUPPORTED_LOCALES, localeMeta, type SupportedLocale } from '../../lib/locales';
+import { t } from '../../lib/i18n';
+import { tin, lab, errorText } from '../../lib/adminUi';
+
+interface Props {
+  /** Field name stem: fields post as `${name}_${code}`. */
+  name: string;
+  /** Group label; a trailing "(English)"-style language suffix is dropped. */
+  label: string;
+  values?: Partial<Record<SupportedLocale, string | null | undefined>>;
+  multiline?: boolean;
+  rows?: number;
+  maxlength?: number;
+  /** Extra classes for the control (e.g. monospace for markdown bodies). */
+  controlClass?: string;
+  error?: string;
+  /** Admin UI language, for the tab hints and error text. */
+  lang: SupportedLocale;
+}
+const { name, label, values = {}, multiline = false, rows = 3, maxlength, controlClass = '', error, lang } = Astro.props;
+const { enabled, default: defaultLocale } = Astro.locals.locales;
+const ordered = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)];
+const hidden = SUPPORTED_LOCALES.filter((code) => !enabled.includes(code));
+const groupLabel = label.replace(/\s*[（(][^）)]*[）)]\s*$/u, '');
+const uid = `lf-${name.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<fieldset class="lf" data-locale-fields={name}>
+  <legend class={lab}>{groupLabel}</legend>
+  {ordered.map((code, i) => (
+    <input type="radio" class="lf-radio" id={`${uid}-${code}`} form="locale-fields-ui" checked={i === 0} aria-label={`${groupLabel} · ${localeMeta(code).nativeName}`} />
+  ))}
+  <div class="lf-tabs" role="presentation">
+    {ordered.map((code) => (
+      <label class="lf-tab" for={`${uid}-${code}`}>
+        {localeMeta(code).nativeName}{code === defaultLocale ? ` · ${t(lang, 'admin.localeFields.default')}` : ''}
+      </label>
+    ))}
+  </div>
+  <div class="lf-panels">
+    {ordered.map((code) => (
+      <div class="lf-panel" data-locale={code}>
+        {multiline
+          ? <textarea name={`${name}_${code}`} rows={rows} maxlength={maxlength} lang={localeMeta(code).bcp47} class={`${tin} ${controlClass}`}>{values[code] ?? ''}</textarea>
+          : <input name={`${name}_${code}`} value={values[code] ?? ''} maxlength={maxlength} lang={localeMeta(code).bcp47} class={`${tin} ${controlClass}`} />}
+      </div>
+    ))}
+  </div>
+  {hidden.map((code) => <input type="hidden" name={`${name}_${code}`} value={values[code] ?? ''} />)}
+  {error && <span class={errorText}>{t(lang, error)}</span>}
+</fieldset>
+
+<style is:global>
+.lf { border: 0; padding: 0; margin: 0; min-width: 0; position: relative; }
+.lf-radio { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.lf-tabs { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: .5rem; }
+.lf-tab { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .875rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: .875rem; font-weight: 600; cursor: pointer; color: var(--color-ink-muted); }
+.lf-tab:hover { background: var(--color-surface-raised); }
+.lf-panel { display: none; }
+.lf-radio:nth-of-type(1):checked ~ .lf-tabs .lf-tab:nth-child(1) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(1):checked ~ .lf-panels .lf-panel:nth-child(1) { display: block; }
+.lf-radio:nth-of-type(1):focus-visible ~ .lf-tabs .lf-tab:nth-child(1) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(2):checked ~ .lf-tabs .lf-tab:nth-child(2) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(2):checked ~ .lf-panels .lf-panel:nth-child(2) { display: block; }
+.lf-radio:nth-of-type(2):focus-visible ~ .lf-tabs .lf-tab:nth-child(2) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(3):checked ~ .lf-tabs .lf-tab:nth-child(3) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(3):checked ~ .lf-panels .lf-panel:nth-child(3) { display: block; }
+.lf-radio:nth-of-type(3):focus-visible ~ .lf-tabs .lf-tab:nth-child(3) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(4):checked ~ .lf-tabs .lf-tab:nth-child(4) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(4):checked ~ .lf-panels .lf-panel:nth-child(4) { display: block; }
+.lf-radio:nth-of-type(4):focus-visible ~ .lf-tabs .lf-tab:nth-child(4) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(5):checked ~ .lf-tabs .lf-tab:nth-child(5) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(5):checked ~ .lf-panels .lf-panel:nth-child(5) { display: block; }
+.lf-radio:nth-of-type(5):focus-visible ~ .lf-tabs .lf-tab:nth-child(5) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(6):checked ~ .lf-tabs .lf-tab:nth-child(6) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(6):checked ~ .lf-panels .lf-panel:nth-child(6) { display: block; }
+.lf-radio:nth-of-type(6):focus-visible ~ .lf-tabs .lf-tab:nth-child(6) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(7):checked ~ .lf-tabs .lf-tab:nth-child(7) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(7):checked ~ .lf-panels .lf-panel:nth-child(7) { display: block; }
+.lf-radio:nth-of-type(7):focus-visible ~ .lf-tabs .lf-tab:nth-child(7) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(8):checked ~ .lf-tabs .lf-tab:nth-child(8) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(8):checked ~ .lf-panels .lf-panel:nth-child(8) { display: block; }
+.lf-radio:nth-of-type(8):focus-visible ~ .lf-tabs .lf-tab:nth-child(8) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(9):checked ~ .lf-tabs .lf-tab:nth-child(9) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(9):checked ~ .lf-panels .lf-panel:nth-child(9) { display: block; }
+.lf-radio:nth-of-type(9):focus-visible ~ .lf-tabs .lf-tab:nth-child(9) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(10):checked ~ .lf-tabs .lf-tab:nth-child(10) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(10):checked ~ .lf-panels .lf-panel:nth-child(10) { display: block; }
+.lf-radio:nth-of-type(10):focus-visible ~ .lf-tabs .lf-tab:nth-child(10) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(11):checked ~ .lf-tabs .lf-tab:nth-child(11) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(11):checked ~ .lf-panels .lf-panel:nth-child(11) { display: block; }
+.lf-radio:nth-of-type(11):focus-visible ~ .lf-tabs .lf-tab:nth-child(11) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.lf-radio:nth-of-type(12):checked ~ .lf-tabs .lf-tab:nth-child(12) { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+.lf-radio:nth-of-type(12):checked ~ .lf-panels .lf-panel:nth-child(12) { display: block; }
+.lf-radio:nth-of-type(12):focus-visible ~ .lf-tabs .lf-tab:nth-child(12) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+</style>

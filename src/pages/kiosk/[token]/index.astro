@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
 import { gatheringsCopy } from '../../../i18n/designGatherings';
 import { DESIGN_IMAGES } from '../../../lib/designAssets';
@@ -19,8 +20,8 @@ const db = Astro.locals.db;
 const token = await getKioskToken(db);
 if (!token || Astro.params.token !== token) return new Response(null, { status: 404 });
 
-const lang: Locale = Astro.url.searchParams.get('lang') === 'zh' ? 'zh' : 'en';
-const otherLang: Locale = lang === 'zh' ? 'en' : 'zh';
+const lang: Locale = userLocale(Astro.url.searchParams.get('lang'), Astro.locals.locales);
+const otherLang: Locale = Astro.locals.locales.enabled.find((l) => l !== lang) ?? lang;
 
 const date = todayInTz();
 const weekday = new Date(date + 'T00:00:00Z').getUTCDay();

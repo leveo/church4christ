@@ -5,7 +5,7 @@ import LibraryHeading from '../../../components/public/LibraryHeading.astro';
 import DesignImage from '../../../components/ui/DesignImage.astro';
 import { frontdoorCopy } from '../../../i18n/designFrontdoor';
 import Base from '../../../layouts/Base.astro';
-import { localePath, parseLocale } from '../../../lib/locales';
+import { localePath, parseLocale, listSeparator } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { listLocalized } from '../../../lib/content';
 
@@ -20,7 +20,7 @@ const fellowships = (await listLocalized('fellowships', locale, Astro.locals.db)
 );
 
 // Name-list separator is locale-specific: zh uses the enumeration comma 、.
-const sep = locale === 'zh' ? '、' : ', ';
+const sep = listSeparator(locale);
 ---
 
 <Base title={t(locale, 'fellowships.title')} locale={locale}>

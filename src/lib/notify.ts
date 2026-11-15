@@ -12,6 +12,7 @@ import { i18nJoin } from './db';
 import { escapeHtml, sendEmail, type EmailEnv } from './email';
 import { t } from './i18n';
 import { type Locale } from './locales';
+import { emailLanguagesFor } from './emailLocales';
 
 /** The person fields sendMagicLink needs (subset of the people row). */
 interface MagicLinkPerson {
@@ -38,12 +39,7 @@ export async function sendMagicLink(
   if ('rateLimited' in token || 'notEligible' in token) return false;
 
   const link = `${env.APP_ORIGIN ?? ''}/auth/${token.raw}`;
-  const langs: Locale[] =
-    person.lang === 'en' || person.lang === 'zh'
-      ? [person.lang]
-      : locale === 'zh'
-        ? ['zh', 'en']
-        : ['en', 'zh'];
+  const langs: Locale[] = await emailLanguagesFor(db, person.lang, locale);
 
   const subject = langs.map((l) => t(l, 'auth.email.subject', { site: t(l, 'site.name') })).join(' · ');
   const text = `${langs.map((l) => t(l, 'auth.email.body')).join('\n\n')}\n\n${link}\n`;
@@ -74,12 +70,7 @@ export async function sendEmailChangeLink(
   locale: Locale,
 ): Promise<boolean> {
   const link = `${env.APP_ORIGIN ?? ''}/email-change/${raw}`;
-  const langs: Locale[] =
-    person.lang === 'en' || person.lang === 'zh'
-      ? [person.lang]
-      : locale === 'zh'
-        ? ['zh', 'en']
-        : ['en', 'zh'];
+  const langs: Locale[] = await emailLanguagesFor(db, person.lang, locale);
 
   const subject = langs
     .map((l) => t(l, 'portal.emailChange.email.subject', { site: t(l, 'site.name') }))
@@ -108,12 +99,11 @@ export async function sendEmailChangedNotice(
   args: { oldEmail: string; newEmail: string; name: string; lang: string | null },
 ): Promise<void> {
   try {
-    const only = toLang(args.lang);
     const built = bilingualEmail({
       subjectKey: 'portal.emailChange.notice.subject',
       bodyKey: 'portal.emailChange.notice.body',
       vars: { name: args.name, email: args.newEmail },
-      only,
+      langs: await emailLanguagesFor(db, args.lang),
     });
     await sendEmail(env, db, {
       to: args.oldEmail,
@@ -127,12 +117,14 @@ export async function sendEmailChangedNotice(
   }
 }
 
-// ── Bilingual message builder (shared by every scheduling touchpoint) ──
-
-/** Narrow a stored `lang` value to a Locale, or null (→ send both stacked). */
-function toLang(lang: string | null): Locale | null {
-  return lang === 'en' || lang === 'zh' ? lang : null;
+/** Languages for one recipient plus the single language when exactly one applies
+ *  (used for links and name lookups; null when two are stacked). */
+async function resolveLang(db: AppDb, lang: string | null): Promise<{ langs: Locale[]; only: Locale | null }> {
+  const langs = await emailLanguagesFor(db, lang);
+  return { langs, only: langs.length === 1 ? langs[0] : null };
 }
+
+// ── Bilingual message builder (shared by every scheduling touchpoint) ──
 
 interface BilingualArgs {
   subjectKey: string;
@@ -141,6 +133,8 @@ interface BilingualArgs {
   link?: string;
   /** Dictionary key for a short button label; when set the HTML shows a styled button instead of the raw URL. */
   linkLabelKey?: string;
+  /** Explicit languages (from emailLanguagesFor); wins over `only`. */
+  langs?: Locale[];
   /** When set, emit only that locale; otherwise stack zh then en. */
   only?: Locale | null;
 }
@@ -154,12 +148,12 @@ const EMAIL_BUTTON_STYLE = 'display:inline-block;padding:12px 24px;border-radius
  * (zh then en). Interpolated `vars` are HTML-escaped by `t()`; the trailing link
  * is appended once (escaped in the HTML anchor).
  */
-export function bilingualEmail({ subjectKey, bodyKey, vars, link, linkLabelKey, only }: BilingualArgs): {
+export function bilingualEmail({ subjectKey, bodyKey, vars, link, linkLabelKey, only, langs: explicit }: BilingualArgs): {
   subject: string;
   html: string;
   text: string;
 } {
-  const langs: Locale[] = only ? [only] : ['zh', 'en'];
+  const langs: Locale[] = explicit ?? (only ? [only] : ['zh', 'en']);
   const subject = langs.map((l) => t(l, subjectKey, vars)).join(' · ');
   const bodyText = langs.map((l) => t(l, bodyKey, vars)).join('\n\n');
   const text = link ? `${bodyText}\n\n${link}\n` : `${bodyText}\n`;
@@ -283,7 +277,7 @@ export async function sendSchedulingRequest(env: EmailEnv, db: AppDb, assignment
       vars: { name: d.person_name, position: d.position_name, team: d.team_name, date: d.plan_date, service: d.service_type_name },
       link,
       linkLabelKey: 'email.requestButton',
-      only: toLang(d.person_lang),
+      langs: await emailLanguagesFor(db, d.person_lang),
     });
     await sendEmail(env, db, { to: d.person_email, toName: d.person_name, kind: 'request', detail: `${d.plan_date} ${d.position_name}`, ...built });
     await db.prepare(`UPDATE roster_assignments SET notified_at = datetime('now') WHERE id = ?`).bind(assignmentId).run();
@@ -309,7 +303,7 @@ export async function sendDeclineNotice(
     const leaders = await listTeamLeaders(db, d.team_id);
     const origin = env.APP_ORIGIN ?? '';
     for (const ldr of leaders) {
-      const only = toLang(ldr.lang);
+      const { langs, only } = await resolveLang(db, ldr.lang);
       const link = `${origin}/${only ?? 'en'}/serve/plans/${d.plan_id}`;
       const built = bilingualEmail({
         subjectKey: 'email.declineSubject',
@@ -317,6 +311,7 @@ export async function sendDeclineNotice(
         vars: { name: d.person_name, position: d.position_name, team: d.team_name, date: d.plan_date, service: d.service_type_name, reason: reason ?? '—' },
         link,
         only,
+        langs,
       });
       await sendEmail(env, db, { to: ldr.email, toName: ldr.name, kind: 'decline', detail: `${d.plan_date} ${d.position_name}`, ...built });
     }
@@ -333,7 +328,7 @@ export async function sendApplicationReceived(env: EmailEnv, db: AppDb, applicat
     const leaders = await listTeamLeaders(db, a.team_id);
     const origin = env.APP_ORIGIN ?? '';
     for (const ldr of leaders) {
-      const only = toLang(ldr.lang);
+      const { langs, only } = await resolveLang(db, ldr.lang);
       const link = `${origin}/${only ?? 'en'}/serve/teams/${a.team_id}`;
       const built = bilingualEmail({
         subjectKey: 'email.appReceivedSubject',
@@ -341,6 +336,7 @@ export async function sendApplicationReceived(env: EmailEnv, db: AppDb, applicat
         vars: { name: a.applicant_name, team: a.team_name },
         link,
         only,
+        langs,
       });
       await sendEmail(env, db, { to: ldr.email, toName: ldr.name, kind: 'appReceived', detail: a.team_name, ...built });
     }
@@ -387,7 +383,7 @@ export async function sendServeInvite(
     // Resolve the team name in the RECIPIENT's language (i18nJoin COALESCEs to
     // en when no localized row exists); no saved lang → en name inside the
     // bilingual stacked body.
-    const only = toLang(person.lang);
+    const { langs, only } = await resolveLang(db, person.lang);
     const tmJ = i18nJoin('team_i18n', 'tm', 'team_id', ['name'], only ?? 'en');
     const team = await db
       .prepare(
@@ -405,6 +401,7 @@ export async function sendServeInvite(
       vars: { name: person.name, team: team.name },
       link,
       only,
+      langs,
     });
     return await sendEmail(env, db, {
       to: person.email,
@@ -429,7 +426,7 @@ export async function sendApplicationResult(
   try {
     const a = await getApplicationDetail(db, applicationId);
     if (!a?.applicant_email) return;
-    const only = toLang(a.applicant_lang);
+    const { langs, only } = await resolveLang(db, a.applicant_lang);
     const link = `${env.APP_ORIGIN ?? ''}/${only ?? 'en'}/my`;
     const built = bilingualEmail({
       subjectKey: approved ? 'email.appApprovedSubject' : 'email.appRejectedSubject',
@@ -437,6 +434,7 @@ export async function sendApplicationResult(
       vars: { name: a.applicant_name, team: a.team_name },
       link,
       only,
+      langs,
     });
     await sendEmail(env, db, { to: a.applicant_email, toName: a.applicant_name, kind: 'appResult', detail: a.team_name, ...built });
   } catch (e) {

@@ -10,6 +10,20 @@ than published to npm.
 
 ## [Unreleased]
 
+### Added
+
+- Language infrastructure (no operator action required; no database migration). A registry of
+  supported languages, installation-wide `locale.enabled` / `locale.default` settings editable
+  under **Settings → Languages**, a requested → default → English fallback chain, language
+  negotiation at `/` (cookie from the switcher, `Accept-Language`, default), a switcher that
+  becomes a dropdown above three languages, a reusable per-language tabbed editor in admin
+  forms, and `--locales` / `--default-locale` setup flags with a multi-select in onboarding.
+  Upgraded installations keep exactly English and Chinese with English as the default; nothing
+  changes until an administrator saves new language settings. Disabling a language hides it and
+  never deletes content. Setup manifests are `schemaVersion: 2` (version 1 still reads) and
+  onboarding preferences are `schemaVersion: 2` (version 1 still reads). `--locale x` alone keeps its
+  earlier meaning (English and Chinese enabled, x the default); `--locales` narrows or widens the set. See [docs/i18n.md](docs/i18n.md).
+
 ### Changed
 
 - New Church4Christ logo: a teal church and cross sheltering an orange figure that forms a

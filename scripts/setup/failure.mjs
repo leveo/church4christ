@@ -22,7 +22,7 @@ export function buildSetupRerunCommand(plan, controls = {}) {
     '--mode', plan.mode, ...featureArgs,
     '--site-slug', plan.site.slug,
     '--church-name', plan.site.name,
-    '--locale', plan.site.locale,
+    ...(plan.site.locales ? ['--locales', plan.site.locales.join(','), '--default-locale', plan.site.locale] : ['--locale', plan.site.locale]),
     '--admin-email', plan.adminEmail,
     '--admin-name', plan.adminName,
   ];

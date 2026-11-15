@@ -23,7 +23,7 @@ const messages = {
     address: 'Address (optional)', addressPlaceholder: 'Street, city, region', timezone: 'Planning time zone',
     timezoneHint: 'Saved for your coding assistant to configure scheduling. Use an IANA time zone, such as America/Chicago or Asia/Shanghai.', timezoneInvalid: 'Enter a valid IANA time zone, such as America/Chicago.',
     siteSlug: 'Site identifier', slugHint: 'Lowercase letters, numbers, and hyphens. Used for local setup and deployment names.',
-    locale: 'Default site language', languageEn: 'English', languageZh: '中文',
+    locale: 'Default site language', locales: 'Site languages', localesHint: 'Visitors can switch between the languages you enable. At least one is required; you can change this later in Settings.',
     primaryColor: 'Primary color', secondaryColor: 'Secondary color', colorPicker: '{label} picker',
     primaryHint: 'Your main brand color for links and actions.', secondaryHint: 'A supporting color for accents and details.',
     logo: 'Organization logo (optional)', logoHint: 'PNG, JPEG, or WebP · up to 2 MiB. Choose a file from your computer.',
@@ -75,7 +75,7 @@ const messages = {
     address: '地址（选填）', addressPlaceholder: '街道、城市、地区', timezone: '计划使用的时区',
     timezoneHint: '保存后供编程助手配置日程。使用 IANA 时区，例如 America/Chicago 或 Asia/Shanghai。', timezoneInvalid: '请输入有效的 IANA 时区，例如 Asia/Shanghai。',
     siteSlug: '站点标识', slugHint: '使用小写英文字母、数字与连字符，供本地安装与部署命名使用。',
-    locale: '网站默认语言', languageEn: 'English', languageZh: '中文',
+    locale: '网站默认语言', locales: '网站语言', localesHint: '访客可以在你启用的语言之间切换。至少选择一种，之后可在“设置”中修改。',
     primaryColor: '主色调', secondaryColor: '辅色调', colorPicker: '{label}选择器',
     primaryHint: '用于链接与操作按钮的主要品牌颜色。', secondaryHint: '用于装饰与细节的辅助颜色。',
     logo: '组织标志（选填）', logoHint: 'PNG、JPEG 或 WebP · 最大 2 MiB。请选择电脑上的图片。',
@@ -235,6 +235,57 @@ function field({ key, label, value, onInput, type = 'text', required = false, hi
   return wrapper;
 }
 
+// Languages come from the registry the server sends (state.locales), so adding a
+// supported language needs no change here. Multi-select checkboxes plus a default
+// that must be one of the checked languages.
+function languageFields() {
+  const supported = state.locales || [];
+  const box = el('fieldset', 'language-fields');
+  box.append(el('legend', '', t('locales')));
+  const options = el('div', 'type-options');
+  const defaultField = el('div', 'field');
+  const defaultLabel = el('label', '', t('locale'));
+  defaultLabel.htmlFor = 'defaultLocale';
+  const defaultSelect = el('select');
+  defaultSelect.id = 'defaultLocale';
+  defaultSelect.name = 'defaultLocale';
+  const syncDefault = () => {
+    defaultSelect.replaceChildren();
+    supported.filter((entry) => draft.setup.locales.includes(entry.code)).forEach((entry) => {
+      const option = el('option', '', entry.nativeName);
+      option.value = entry.code;
+      option.lang = entry.code;
+      defaultSelect.append(option);
+    });
+    if (!draft.setup.locales.includes(draft.setup.defaultLocale)) draft.setup.defaultLocale = draft.setup.locales[0];
+    defaultSelect.value = draft.setup.defaultLocale;
+  };
+  supported.forEach((entry) => {
+    const label = el('label', 'type-card');
+    const input = el('input');
+    input.type = 'checkbox';
+    input.name = 'locales';
+    input.value = entry.code;
+    input.checked = draft.setup.locales.includes(entry.code);
+    input.addEventListener('change', () => {
+      const next = supported.map((item) => item.code).filter((code) => (code === entry.code ? input.checked : draft.setup.locales.includes(code)));
+      if (next.length === 0) { input.checked = true; return; }
+      draft.setup.locales = next;
+      syncDefault();
+    });
+    const name = el('span', '', entry.nativeName);
+    name.lang = entry.code;
+    label.append(input, name);
+    options.append(label);
+  });
+  defaultSelect.addEventListener('change', () => { draft.setup.defaultLocale = defaultSelect.value; });
+  syncDefault();
+  const help = el('p', 'field-hint', t('localesHint'));
+  defaultField.append(defaultLabel, defaultSelect);
+  box.append(options, help, defaultField);
+  return box;
+}
+
 function renderIdentity() {
   const content = $('step-content');
   const types = el('fieldset');
@@ -259,9 +310,8 @@ function renderIdentity() {
     field({ key: 'address', label: 'address', value: draft.organization.address, maxLength: 500, wide: true, placeholder: 'addressPlaceholder', autocomplete: 'street-address', onInput: (value) => { draft.organization.address = value; } }),
     field({ key: 'timezone', label: 'timezone', value: draft.organization.timezone, required: true, maxLength: 100, hint: 'timezoneHint', onInput: (value) => { draft.organization.timezone = value; } }),
     field({ key: 'siteSlug', label: 'siteSlug', value: draft.setup.siteSlug, required: true, maxLength: 57, pattern: '[a-z0-9]+(-[a-z0-9]+)*', hint: 'slugHint', onInput: (value) => { draft.setup.siteSlug = value; } }),
-    field({ key: 'locale', label: 'locale', value: draft.setup.locale, options: [['en', t('languageEn')], ['zh', t('languageZh')]], onInput: (value) => { draft.setup.locale = value; } }),
   );
-  content.append(types, grid);
+  content.append(types, grid, languageFields());
 }
 
 function colorField(key, label, hint) {
@@ -510,7 +560,7 @@ function renderReview() {
   const rows = [
     ['reviewOrganization', `${draft.organization.name} · ${t(draft.organization.type)}`],
     ['reviewDatabase', postgresRequired() ? 'Supabase PostgreSQL' : 'Cloudflare D1'],
-    ['reviewLanguage', draft.setup.locale === 'zh' ? t('languageZh') : t('languageEn')],
+    ['reviewLanguage', (state.locales || []).filter((entry) => draft.setup.locales.includes(entry.code)).map((entry) => (entry.code === draft.setup.defaultLocale ? `${entry.nativeName} *` : entry.nativeName)).join(' · ')],
     ['reviewFeatures', draft.setup.modules.map(featureName).join(' · ')],
   ];
   rows.forEach(([label, value]) => {

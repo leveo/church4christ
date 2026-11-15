@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import { csvCell } from './csv';
 import {
   PEOPLE_IMPORT_HEADERS,
@@ -480,7 +481,7 @@ function snapshotPerson(value: unknown): SnapshotValue<CanonicalPeopleExportPers
   if (!isNullableString(firstName)) issues += 1;
   if (!isNullableString(lastName)) issues += 1;
   if (!isNullableString(phone)) issues += 1;
-  if (language !== null && language !== 'en' && language !== 'zh') issues += 1;
+  if (language !== null && !isSupportedLocale(language)) issues += 1;
   if (!(MEMBERSHIP_STATUSES as readonly unknown[]).includes(membershipStatus)) issues += 1;
   if (!isNullableString(birthday)) issues += 1;
   if (!isNullableString(joinedOn)) issues += 1;

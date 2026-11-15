@@ -1,3 +1,4 @@
+import { LEGACY_ENABLED_LOCALES } from './locales.mjs';
 import { fingerprintPlan } from './state.mjs';
 import { bootstrapFirstAdmin, initializeModuleSettings, isBootstrapAdminReady } from '../../src/lib/setupDb.mjs';
 import { ensureD1Database, ensureR2Bucket } from './providers/d1.mjs';
@@ -45,6 +46,17 @@ function commonDatabaseSteps(options) {
           await options.db.prepare(
             'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
           ).bind('site.demo_content', String(Boolean(plan?.demoData))).run();
+          // First initialization also records the chosen languages (never overwrites
+          // an existing choice, so an established installation keeps its settings).
+          const languageRows = [
+            ['locale.enabled', JSON.stringify(plan?.site?.locales ?? LEGACY_ENABLED_LOCALES)],
+            ['locale.default', String(plan?.site?.locale)],
+          ];
+          for (const [languageKey, languageValue] of languageRows) {
+            await options.db.prepare(
+              'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
+            ).bind(languageKey, languageValue).run();
+          }
         }
       }
       await initializeModuleSettings(options.db, options.moduleKeys, plan?.modules ?? []);

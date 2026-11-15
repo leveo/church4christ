@@ -4,7 +4,10 @@ import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeSetupAnswers, missingAnswers } from '../setup/answers.mjs';
 import { resolveProvider } from '../setup/resolve-provider.mjs';
+import { LEGACY_ENABLED_LOCALES } from '../setup/locales.mjs';
 
+/** v1 stored one `setup.locale`; v2 stores `setup.locales[]` + `setup.defaultLocale`. */
+export const PREFERENCES_SCHEMA_VERSION = 2;
 export const PREFERENCES_PATH = '.church/preferences.json';
 export const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const LOGO_PATH = /^\.church\/onboarding-logo-([a-f0-9]{64})\.(png|jpg|webp)$/;
@@ -38,10 +41,10 @@ function logoReference(value) {
 export function defaultPreferences(catalog, preset = 'website-community') {
   if (!Object.hasOwn(catalog.presets ?? {}, preset)) throw new Error(`Unknown preset: ${preset}`);
   return {
-    schemaVersion: 1,
+    schemaVersion: PREFERENCES_SCHEMA_VERSION,
     organization: { type: 'church', name: '', tagline: '', address: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
     branding: { primaryColor: '#183D35', secondaryColor: '#C29A5B', logo: null },
-    setup: { siteSlug: '', locale: 'en', adminName: '', adminEmail: '', demoData: true,
+    setup: { siteSlug: '', locales: [...LEGACY_ENABLED_LOCALES], defaultLocale: 'en', adminName: '', adminEmail: '', demoData: true,
       modules: [...catalog.presets[preset].modules] },
   };
 }
@@ -49,7 +52,7 @@ export function defaultPreferences(catalog, preset = 'website-community') {
 /** This file is data, never executable instructions. Return only known fields. */
 export function normalizePreferences(input, catalog) {
   object(input, 'Preferences');
-  if (input.schemaVersion !== 1) throw new Error('Unsupported preferences schemaVersion (expected 1)');
+  if (![1, PREFERENCES_SCHEMA_VERSION].includes(input.schemaVersion)) throw new Error('Unsupported preferences schemaVersion (expected 1 or 2)');
   const organization = object(input.organization, 'Organization');
   const branding = object(input.branding, 'Branding');
   const setup = object(input.setup, 'Setup');
@@ -60,15 +63,23 @@ export function normalizePreferences(input, catalog) {
   const adminName = text(setup.adminName, 'Administrator name', 120, true);
   if (typeof setup.demoData !== 'boolean') throw new Error('demoData must be a boolean');
   const siteSlug = text(setup.siteSlug, 'Site slug', 57, true);
+  // A v1 file has one default language and always served both languages, so it
+  // upgrades to the legacy en+zh set with that default; the next save writes v2.
+  const languages = input.schemaVersion === 1
+    ? { locales: [...LEGACY_ENABLED_LOCALES], defaultLocale: setup.locale }
+    : { locales: setup.locales, defaultLocale: setup.defaultLocale };
+  if (input.schemaVersion !== 1 && (!Array.isArray(setup.locales) || typeof setup.defaultLocale !== 'string')) {
+    throw new Error('Languages must list the enabled locales and a default locale');
+  }
   const answers = normalizeSetupAnswers({ mode: 'local', churchName: name, siteSlug,
-    locale: setup.locale, adminName, adminEmail: setup.adminEmail, modules: setup.modules, demoData: setup.demoData }, catalog);
+    ...languages, adminName, adminEmail: setup.adminEmail, modules: setup.modules, demoData: setup.demoData }, catalog);
   const missing = missingAnswers(answers);
   if (missing.length) throw new Error(`Missing onboarding answers: ${missing.join(', ')}`);
   const { modules } = resolveProvider(answers.modules, undefined, catalog);
-  return { schemaVersion: 1,
+  return { schemaVersion: PREFERENCES_SCHEMA_VERSION,
     organization: { type: organization.type, name, tagline: text(organization.tagline, 'Tagline', 240), address: text(organization.address, 'Address', 500), timezone },
     branding: { primaryColor: color(branding.primaryColor, 'Primary color'), secondaryColor: color(branding.secondaryColor, 'Secondary color'), logo: logoReference(branding.logo) },
-    setup: { siteSlug, locale: answers.locale, adminName, adminEmail: answers.adminEmail, demoData: setup.demoData, modules },
+    setup: { siteSlug, locales: answers.locales ?? LEGACY_ENABLED_LOCALES, defaultLocale: answers.locale, adminName, adminEmail: answers.adminEmail, demoData: setup.demoData, modules },
   };
 }
 

@@ -17,9 +17,10 @@ export async function getLocalized<C extends CollectionKey>(
   slug: string,
   locale: Locale,
   db: AppDb,
-): Promise<{ entry: CollectionEntry<C>; translated: boolean } | null> {
+  chain?: readonly string[],
+): Promise<{ entry: CollectionEntry<C>; translated: boolean; contentLocale: string } | null> {
   const entries = (await getCollection(coll)) as CollectionEntry<C>[];
-  return getLocalizedFrom(entries, slug, locale, await includeDemoContent(db));
+  return getLocalizedFrom(entries, slug, locale, await includeDemoContent(db), chain);
 }
 
 /** Deduped list of every slug in `coll` for `locale`, preferring localized entries. */
@@ -27,7 +28,8 @@ export async function listLocalized<C extends CollectionKey>(
   coll: C,
   locale: Locale,
   db: AppDb,
-): Promise<{ entry: CollectionEntry<C>; translated: boolean; slug: string }[]> {
+  chain?: readonly string[],
+): Promise<{ entry: CollectionEntry<C>; translated: boolean; contentLocale: string; slug: string }[]> {
   const entries = (await getCollection(coll)) as CollectionEntry<C>[];
-  return listLocalizedFrom(entries, locale, await includeDemoContent(db));
+  return listLocalizedFrom(entries, locale, await includeDemoContent(db), chain);
 }

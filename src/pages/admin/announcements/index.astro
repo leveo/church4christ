@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 // Announcements admin (console class — re-checks editor∪admin, 403s a bare team
 // leader). Inline management: a single add/edit form (driven by ?edit=<id>) over
 // a list of every announcement (active and hidden). Three no-JS POST actions on
@@ -95,16 +96,7 @@ const h2 = 'font-display text-heading-sm font-bold';
       <input type="hidden" name="action" value="save" />
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.announcements.titleEn')}</span>
-          <input name="title_en" value={v.titleEn} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.announcements.titleZh')}</span>
-          <input name="title_zh" value={v.titleZh} class={tin} />
-        </label>
-      </div>
+      <LocaleFields name="title" label={t(lang, 'admin.announcements.titleEn')} values={{ en: v.titleEn, zh: v.titleZh }} lang={lang} />
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.announcements.hint')}</p>
       <label class="block">

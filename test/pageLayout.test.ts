@@ -89,3 +89,41 @@ describe('validateLayout', () => {
     expect(validateLayout(wrap([many]))).toEqual({ ok: false, error: 'too_many_nodes' });
   });
 });
+
+describe('{[locale]: text} label maps', () => {
+  const withText = (text: unknown) => wrap([section('s1', [{ id: 'h1', type: 'heading', props: { level: 2, text, align: 'left', size: 'md' } }])]);
+
+  it('validates legacy {en, zh} data unchanged and preserves it', () => {
+    const res = validateLayout(withText({ en: 'Hi', zh: '你好' }));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(JSON.stringify(res.layout)).toContain('"text":{"en":"Hi","zh":"你好"}');
+  });
+
+  it('rejects a text map with an unsupported locale key', () => {
+    expect(validateLayout(withText({ en: 'Hi', zh: '', xx: 'Hola' })).ok).toBe(false);
+  });
+
+  it('rejects non-string values and arrays', () => {
+    expect(validateLayout(withText({ en: 'Hi', zh: 3 })).ok).toBe(false);
+    expect(validateLayout(withText(['Hi'])).ok).toBe(false);
+  });
+
+  it('still requires en and zh (legacy shape)', () => {
+    expect(validateLayout(withText({ en: 'Hi' })).ok).toBe(false);
+  });
+});
+
+import { parseLocaleText, pickLocaleText } from '../src/lib/locales';
+
+describe('parseLocaleText / pickLocaleText', () => {
+  it('rejects unknown keys and over-long values, copies the rest', () => {
+    expect(parseLocaleText({ en: 'a', zh: 'b' }, 5)).toEqual({ en: 'a', zh: 'b' });
+    expect(parseLocaleText({ en: 'abcdef' }, 5)).toBeNull();
+    expect(parseLocaleText({ fr: 'x' }, 5)).toBeNull();
+    expect(parseLocaleText(null, 5)).toBeNull();
+  });
+  it('falls back along the chain and skips empty values', () => {
+    expect(pickLocaleText({ en: 'Hi', zh: '' }, 'zh')).toBe('Hi');
+    expect(pickLocaleText({ en: '', zh: '你好' }, 'en')).toBe('');
+  });
+});

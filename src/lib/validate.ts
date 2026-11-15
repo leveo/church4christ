@@ -9,6 +9,7 @@
 import { isValidDateStr, datetimeLocalToUtc, todayInTz } from './dates';
 import { extractYouTubeId } from './youtube';
 import { LOCALES, type Locale } from './locales';
+import { validateLocaleSettings } from './localeSettings';
 import { THEMES } from './theme';
 import { MODULE_KEYS } from './modules';
 import { parseAmountToCents } from './givingCheckout';
@@ -708,6 +709,10 @@ const SETTINGS_KEYS = [
   'theme.default_mode',
   'locale.default',
 ] as const;
+// The enabled-languages checkbox group posts one `locale.enabled` per checked box
+// plus this marker (an all-unchecked group posts nothing, which must read as
+// "none enabled", not "field absent").
+const LOCALE_GROUP_MARKER = 'locale.enabled_form';
 const SETTINGS_URL_KEYS = new Set(['site.map_url', 'site.giving_url', 'site.youtube_url']);
 const THEME_MODES = ['light', 'dark'];
 // `module.<key>` toggles ('0' | '1') — the Modules panel checkboxes. Present in
@@ -741,6 +746,25 @@ export function parseSettingsForm(fd: FormData): FormResult<Record<string, strin
       if (!(LOCALES as readonly string[]).includes(value)) errors[key] = ERR.option;
     }
     data[key] = value;
+  }
+  // Language group: enabled set + default are validated together (default must be
+  // enabled, enabled a non-empty subset of the supported locales) and stored as
+  // `locale.enabled` JSON. A bare `locale.default` (no group) keeps its legacy
+  // meaning: validated against the supported list only; the page checks it
+  // against the stored enabled set.
+  if (fd.has(LOCALE_GROUP_MARKER)) {
+    const enabled = fd.getAll('locale.enabled').map((v) => String(v).trim()).filter(Boolean);
+    const checked = validateLocaleSettings(enabled, str(fd, 'locale.default'));
+    if (checked.ok) {
+      data['locale.enabled'] = JSON.stringify(checked.value.enabled);
+      data['locale.default'] = checked.value.default;
+    } else if (checked.error === 'locale_none_enabled') {
+      errors['locale.enabled'] = 'admin.settings.localesNoneEnabled';
+    } else if (checked.error === 'locale_unsupported') {
+      errors['locale.enabled'] = ERR.option;
+    } else {
+      errors['locale.default'] = 'admin.settings.localeDefaultNotEnabled';
+    }
   }
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, data };

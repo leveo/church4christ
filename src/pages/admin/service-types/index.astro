@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 import MinistryWorkspace from '../../../components/ministry/MinistryWorkspace.astro';
 import MinistryHeader from '../../../components/ministry/MinistryHeader.astro';
 import { ministryCopy } from '../../../i18n/designMinistry';
@@ -7,7 +8,7 @@ import { ministryCopy } from '../../../i18n/designMinistry';
 // they are created and retired (soft delete). Ported from the reference stack.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import { pickLocalizedText, type Locale } from '../../../lib/locales';
+import { pickPair, type Locale } from '../../../lib/locales';
 import { listServiceTypesAdmin, saveServiceType, softDeleteServiceType } from '../../../lib/teamDb';
 import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
 
@@ -57,11 +58,10 @@ const copy = ministryCopy(lang);
     {types.length === 0 && <p class="text-sm text-ink-muted">{t(lang, 'admin.serviceTypes.none')}</p>}
     {types.map((st) => (
       <details class="mw-disclosure" open={errKey !== null}>
-      <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickLocalizedText({ en: st.name_en, zh: st.name_zh }, lang) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
+      <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickPair(lang, st.name_en, st.name_zh) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
       <form method="post" class="mw-disclosure-content flex flex-wrap items-end gap-3">
         <input type="hidden" name="id" value={st.id} />
-        <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required value={st.name_en ?? ''} class={tin} /></label>
-        <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" value={st.name_zh ?? ''} class={tin} /></label>
+        <div class="flex-1 basis-60 min-w-40"><LocaleFields name="name" label={t(lang, 'admin.serviceTypes.nameEn')} values={{ en: st.name_en, zh: st.name_zh }} lang={lang} /></div>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" value={st.start_time ?? ''} class={tin} /></label>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" value={st.end_time ?? ''} class={tin} /></label>
         <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" type="number" inputmode="numeric" value={st.sort} class={tin} /></label>
@@ -76,8 +76,7 @@ const copy = ministryCopy(lang);
     <h2 class="font-display text-heading-sm font-bold mb-4">{t(lang, 'admin.serviceTypes.create')}</h2>
     <form method="post" class="flex flex-wrap items-end gap-3">
       <input type="hidden" name="_action" value="create" />
-      <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameEn')}</span><input name="name_en" required class={tin} /></label>
-      <label class="flex-1 min-w-40"><span class={lab}>{t(lang, 'admin.serviceTypes.nameZh')}</span><input name="name_zh" class={tin} /></label>
+      <div class="flex-1 basis-60 min-w-40"><LocaleFields name="name" label={t(lang, 'admin.serviceTypes.nameEn')} lang={lang} /></div>
       <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" class={tin} /></label>
       <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" class={tin} /></label>
       <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" type="number" inputmode="numeric" value="0" class={tin} /></label>

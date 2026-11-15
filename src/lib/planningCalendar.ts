@@ -14,7 +14,7 @@ import {
   type PlanningItem,
 } from './planningDb';
 import { computeRunSheet, dayAvailability, type DayAvailability, EMPTY_FACTS } from './planningModel';
-import { pickLocalizedText } from './locales';
+import { pickPair } from './locales';
 
 export interface MemberSession {
   session_id: number;
@@ -119,7 +119,7 @@ async function teamIdsOfPerson(db: AppDb, personId: number): Promise<number[]> {
   return results.map((r) => r.team_id);
 }
 
-const label = (en: string, zh: string, locale: Locale) => pickLocalizedText({ en, zh }, locale);
+const label = (en: string, zh: string, locale: Locale) => pickPair(locale, en, zh);
 
 /** Calendar mark label for a session (month grid and agenda). */
 export function sessionLabel(s: MemberSession, locale: Locale): string {

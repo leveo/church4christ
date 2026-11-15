@@ -1,3 +1,4 @@
+import { toSupportedLocale } from './locales';
 // Loads the request's SessionUser from D1: the person row plus their team
 // memberships, mapped to the shape middleware attaches as `Astro.locals.user`.
 // The person row is re-read on every request so deactivation (active=0),
@@ -59,7 +60,7 @@ function toSessionUser(
     finance: person.finance,
     memberTeamIds: teams.memberTeamIds,
     leaderTeamIds: teams.leaderTeamIds,
-    lang: person.lang === 'en' || person.lang === 'zh' ? person.lang : null,
+    lang: toSupportedLocale(person.lang),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { Locale } from './locales';
+import { localeMeta, pickByLocale, type Locale } from './locales';
 
 export const LEARNING_LEARNER_CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -20,7 +20,7 @@ export function applyLearningLearnerResponseHeaders(headers: Headers): void {
 }
 
 export function formatLearningDateTime(timestamp: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  return new Intl.DateTimeFormat(localeMeta(locale).intl, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -32,8 +32,8 @@ export function formatLearningDateTime(timestamp: string, locale: Locale): strin
 }
 
 export function formatLearningFileSize(bytes: number | null, locale: Locale): string {
-  if (bytes === null) return locale === 'zh' ? '大小未知' : 'Size unavailable';
-  return new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  if (bytes === null) return pickByLocale({ en: 'Size unavailable', zh: '大小未知' }, locale);
+  return new Intl.NumberFormat(localeMeta(locale).intl, {
     style: 'unit',
     unit: bytes >= 1_048_576 ? 'megabyte' : 'kilobyte',
     unitDisplay: 'short',

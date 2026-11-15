@@ -3,7 +3,7 @@
 // quick links, and a 7-day automation summary. Ported from the reference stack's
 // OverviewTab, restyled against church-cms tokens.
 import { t } from '../../lib/i18n';
-import type { Locale } from '../../lib/locales';
+import { type Locale, isChinese } from '../../lib/locales';
 import type { StatCard, AttentionItem } from '../../lib/adminOverviewDb';
 import { card } from '../../lib/adminUi';
 
@@ -35,7 +35,7 @@ const { lang, scope, stats, attention, sent } = Astro.props;
         {attention.map((a) => (
           <a href={a.href} class="flex items-center gap-3 py-3 text-[0.9375rem] text-ink hover:text-primary">
             <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-sunken">{a.icon}</span>
-            <span class="flex-1">{lang === 'zh' ? a.zh : a.en}</span>
+            <span class="flex-1">{isChinese(lang) ? a.zh : a.en}</span>
             <span class="text-ink-subtle">→</span>
           </a>
         ))}

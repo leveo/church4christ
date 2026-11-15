@@ -1,4 +1,5 @@
 ---
+import { userLocale } from '../../../lib/localeSettings';
 import Admin from '../../../layouts/Admin.astro';
 import CareWorkspace from '../../../components/admin/care/CareWorkspace.astro';
 import { careToolsCopy } from '../../../i18n/designCareTools';
@@ -9,14 +10,14 @@ import {
 } from '../../../lib/newcomerDb';
 import { readNewcomerUrlencodedForm } from '../../../lib/newcomerHttp';
 import { t } from '../../../lib/i18n';
-import type { Locale } from '../../../lib/locales';
+import { type Locale, isChinese } from '../../../lib/locales';
 import type { NewcomerFieldType } from '../../../lib/newcomerValidation';
 
 const modules = Astro.locals.modules;
 if (!modules.has('newcomers')) return new Response(null, { status: 404 });
 const user = Astro.locals.user;
 if (!user?.isSuperAdmin) return new Response(null, { status: 403 });
-const lang: Locale = user.lang === 'zh' ? 'zh' : 'en';
+const lang: Locale = userLocale(user.lang, Astro.locals.locales);
 const allowed = ['action', 'id', 'key', 'category', 'type', 'sort', 'active', 'required', 'initial_status_id', 'label_en', 'label_zh', 'help_en', 'help_zh', 'options_json'];
 let saved = Astro.url.searchParams.get('saved') === '1';
 let error = false;
@@ -69,10 +70,10 @@ const copy = careToolsCopy(lang);
       <div class="care-panel-heading"><div><h2>{copy.stages}</h2><p class="care-intro">{copy.stagesIntro}</p></div><a class={btnSecondary} href="#create-welcome-stage">+ {copy.addStage}</a></div>
       <div class="care-config-list">
         {english.statuses.map((status) => <details class="care-config-item" open={error}>
-          <summary><span class="care-config-name">{lang === 'zh' ? zhStatus.get(status.id)?.label || status.label : status.label}<small>{status.category === 'open' ? copy.open : copy.closed}{status.initial ? ` · ${t(lang, 'admin.newcomers.initial')}` : ''}</small></span><span class="care-state" data-active={status.active}>{status.active ? copy.active : copy.inactive}</span></summary>
+          <summary><span class="care-config-name">{isChinese(lang) ? zhStatus.get(status.id)?.label || status.label : status.label}<small>{status.category === 'open' ? copy.open : copy.closed}{status.initial ? ` · ${t(lang, 'admin.newcomers.initial')}` : ''}</small></span><span class="care-state" data-active={status.active}>{status.active ? copy.active : copy.inactive}</span></summary>
           <form method="post" class="care-config-form"><input type="hidden" name="action" value="update-status" /><input type="hidden" name="id" value={status.id} />
             <fieldset><legend>{copy.labels}</legend><div class="care-form-grid"><label><span class={lab}>{t(lang, 'locale.en')}</span><input class={tin} name="label_en" value={status.label} lang="en" required /></label><label><span class={lab}>{t(lang, 'locale.zh')}</span><input class={tin} name="label_zh" value={zhStatus.get(status.id)?.label ?? status.label} lang="zh-Hans" required /></label></div></fieldset>
-            <fieldset><legend>{copy.behavior}</legend><div class="care-form-grid care-form-three"><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value={status.sort} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.initial')}</span><select class={tin} name="initial_status_id">{english.statuses.filter((item) => item.active && item.category === 'open').map((item) => <option value={item.id} selected={item.id === initialStatusId}>{lang === 'zh' ? zhStatus.get(item.id)?.label || item.label : item.label}</option>)}</select></label><label><span class={lab}>{t(lang, 'admin.newcomers.active')}</span><select class={tin} name="active"><option value="true" selected={status.active}>{t(lang, 'admin.newcomers.yes')}</option><option value="false" selected={!status.active}>{t(lang, 'admin.newcomers.no')}</option></select></label></div></fieldset>
+            <fieldset><legend>{copy.behavior}</legend><div class="care-form-grid care-form-three"><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value={status.sort} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.initial')}</span><select class={tin} name="initial_status_id">{english.statuses.filter((item) => item.active && item.category === 'open').map((item) => <option value={item.id} selected={item.id === initialStatusId}>{isChinese(lang) ? zhStatus.get(item.id)?.label || item.label : item.label}</option>)}</select></label><label><span class={lab}>{t(lang, 'admin.newcomers.active')}</span><select class={tin} name="active"><option value="true" selected={status.active}>{t(lang, 'admin.newcomers.yes')}</option><option value="false" selected={!status.active}>{t(lang, 'admin.newcomers.no')}</option></select></label></div></fieldset>
             <div class="care-form-actions"><button class={btnSecondary} type="submit">{t(lang, 'admin.newcomers.save')}</button></div>
           </form>
         </details>)}
@@ -91,7 +92,7 @@ const copy = careToolsCopy(lang);
       <div class="care-panel-heading"><div><h2>{copy.fields}</h2><p class="care-intro">{copy.fieldsIntro}</p></div><a class={btnSecondary} href="#create-welcome-field">+ {copy.addField}</a></div>
       <div class="care-config-list">
         {english.fields.map((field) => <details class="care-config-item" open={error}>
-          <summary><span class="care-config-name">{lang === 'zh' ? zhField.get(field.id)?.label || field.label : field.label}<small>{copy[field.type]}{field.required ? ` · ${t(lang, 'admin.newcomers.required')}` : ''}</small></span><span class="care-state" data-active={field.active}>{field.active ? copy.active : copy.inactive}</span></summary>
+          <summary><span class="care-config-name">{isChinese(lang) ? zhField.get(field.id)?.label || field.label : field.label}<small>{copy[field.type]}{field.required ? ` · ${t(lang, 'admin.newcomers.required')}` : ''}</small></span><span class="care-state" data-active={field.active}>{field.active ? copy.active : copy.inactive}</span></summary>
           <form method="post" class="care-config-form"><input type="hidden" name="action" value="update-field" /><input type="hidden" name="id" value={field.id} />
             <fieldset><legend>{copy.labels}</legend><div class="care-form-grid"><label><span class={lab}>{t(lang, 'locale.en')}</span><input class={tin} name="label_en" value={field.label} lang="en" required /></label><label><span class={lab}>{t(lang, 'locale.zh')}</span><input class={tin} name="label_zh" value={zhField.get(field.id)?.label ?? field.label} lang="zh-Hans" required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpEn')}</span><input class={tin} name="help_en" value={field.help ?? ''} lang="en" /></label><label><span class={lab}>{t(lang, 'admin.newcomers.helpZh')}</span><input class={tin} name="help_zh" value={zhField.get(field.id)?.help ?? ''} lang="zh-Hans" /></label></div></fieldset>
             <fieldset><legend>{copy.behavior}</legend><div class="care-form-grid care-form-three"><label><span class={lab}>{t(lang, 'admin.newcomers.sort')}</span><input class={tin} type="number" name="sort" value={field.sort} required /></label><label><span class={lab}>{t(lang, 'admin.newcomers.required')}</span><select class={tin} name="required"><option value="false" selected={!field.required}>{t(lang, 'admin.newcomers.no')}</option><option value="true" selected={field.required}>{t(lang, 'admin.newcomers.yes')}</option></select></label><label><span class={lab}>{t(lang, 'admin.newcomers.active')}</span><select class={tin} name="active"><option value="true" selected={field.active}>{t(lang, 'admin.newcomers.yes')}</option><option value="false" selected={!field.active}>{t(lang, 'admin.newcomers.no')}</option></select></label></div></fieldset>

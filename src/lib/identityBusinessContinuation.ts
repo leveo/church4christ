@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import type { AppDb } from './appDb';
 import { getFund } from './fundDb';
 import {
@@ -106,7 +107,7 @@ export async function normalizeGivingContinuationInput(input: RawGivingContinuat
   if (input.frequency !== 'once') throw new Error('identity_continuation_frequency_invalid');
   const currency = text(input.currency, 'identity_continuation_currency_invalid', 16).toLowerCase();
   if (!/^[a-z]{3}$/u.test(currency)) throw new Error('identity_continuation_currency_invalid');
-  if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('identity_continuation_locale_invalid');
+  if (!isSupportedLocale(input.locale)) throw new Error('identity_continuation_locale_invalid');
   const donorName = text(input.name, 'identity_continuation_name_invalid');
   const donorEmail = text(input.email, 'identity_continuation_email_invalid', 320).toLowerCase();
   if (!EMAIL.test(donorEmail)) throw new Error('identity_continuation_email_invalid');
@@ -126,7 +127,7 @@ export async function normalizeRegistrationContinuationInput(input: {
   const email = text(input.email, 'identity_continuation_email_invalid', 320).toLowerCase();
   if (!EMAIL.test(email)) throw new Error('identity_continuation_email_invalid');
   const currency = text(input.currency, 'identity_continuation_currency_invalid', 16).toLowerCase();
-  if (!/^[a-z]{3}$/u.test(currency) || (input.locale !== 'en' && input.locale !== 'zh')) throw new Error('identity_continuation_registration_invalid');
+  if (!/^[a-z]{3}$/u.test(currency) || !isSupportedLocale(input.locale)) throw new Error('identity_continuation_registration_invalid');
   if (!Array.isArray(input.answers) || input.answers.length > 200) throw new Error('identity_continuation_answers_invalid');
   const answers = input.answers.map(([questionId, answer]) => {
     if (!validId(questionId)) throw new Error('identity_continuation_answers_invalid');

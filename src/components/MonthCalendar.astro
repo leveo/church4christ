@@ -1,4 +1,5 @@
 ---
+import { weekdayHeadings } from '../lib/dates';
 // Server-rendered month grid for /my and /my/calendar: assignment status dots
 // (U warn / C success / D danger) and blockout shading per day, plus a legend.
 // Ported from the reference stack's src/components/MonthCalendar.astro, restyled with
@@ -25,8 +26,7 @@ const cells: (number | null)[] = [
 ];
 while (cells.length % 7 !== 0) cells.push(null);
 
-const dayNames =
-  locale === 'zh' ? ['日', '一', '二', '三', '四', '五', '六'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayNames = weekdayHeadings(locale);
 const dateStr = (d: number) => `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const dot = { U: 'bg-warn', C: 'bg-success', D: 'bg-danger' } as const;
 ---

@@ -6,6 +6,7 @@
 // per-locale email_templates table (migration 0002).
 
 import type { AppDb } from './appDb';
+import { fallbackChain } from './locales';
 
 export type RuleKey = 'remind7' | 'remind3' | 'digestAM';
 export type TemplateKey = 'remind' | 'request' | 'appResult' | 'digestAM';
@@ -54,6 +55,16 @@ export async function getTemplate(db: AppDb, key: TemplateKey, locale: string): 
     .prepare(`SELECT template_key, locale, subject, body FROM email_templates WHERE template_key = ? AND locale = ?`)
     .bind(key, locale)
     .first<EmailTemplate>();
+}
+
+/** The template for `locale`, falling through the chain (requested, installation
+ *  default, en) when that locale has no row; null when none in the chain has one. */
+export async function getTemplateWithFallback(db: AppDb, key: TemplateKey, locale: string): Promise<EmailTemplate | null> {
+  for (const code of fallbackChain(locale)) {
+    const row = await getTemplate(db, key, code);
+    if (row) return row;
+  }
+  return null;
 }
 
 /** Every template row, template_key then locale, for the editor grid. */

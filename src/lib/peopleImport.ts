@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import { parseUtf8CsvWithRowNumbers, type CsvParseErrorCode } from './csvParse';
 import { isValidDateStr } from './dates';
 import { isEmail, MEMBERSHIP_STATUSES, type MembershipStatus } from './validate';
@@ -286,7 +287,7 @@ function normalizePerson(
 
   const languageValue = record.language.toLowerCase();
   let language: PeopleImportPerson['language'] = null;
-  if (languageValue === 'en' || languageValue === 'zh') language = languageValue;
+  if (isSupportedLocale(languageValue)) language = languageValue;
   else if (languageValue !== '') invalid('invalid_option', 'language');
 
   const membershipValue = record.membership_status.toLowerCase();

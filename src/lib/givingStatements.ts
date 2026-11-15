@@ -13,8 +13,9 @@ import type { EmailEnv } from './email';
 import { sendEmail } from './email';
 import { toUtcSql } from './dates';
 import { openDb, type DbEnv } from './dbProvider';
-import { parseLocale, type Locale } from './locales';
+import { getRuntimeDefaultLocale, isSupportedLocale, type Locale } from './locales';
 import { bilingualEmail } from './notify';
+import { emailLanguagesFor } from './emailLocales';
 import { isHouseholdOwner } from './portalDb';
 import { getSiteIdentity } from './settings';
 
@@ -174,7 +175,9 @@ async function deliver(
     .bind(row.person_id)
     .first<{ display_name: string; email: string | null; lang: string | null }>();
   if (!person?.email) return { kind: 'failed', error: 'no_recipient' };
-  const lang: Locale = parseLocale(person.lang ?? '') ?? 'en';
+  const enabledForPerson = await emailLanguagesFor(db, person.lang);
+  // Statements are single-language: the person's enabled language, else the default.
+  const lang: Locale = isSupportedLocale(person.lang) && enabledForPerson.includes(person.lang) ? person.lang : getRuntimeDefaultLocale();
   const owner = await isHouseholdOwner(db, row.person_id);
   const lines = await statementTotals(db, lang, { personId: row.person_id, household: owner }, row.year);
   if (lines.length === 0) return { kind: 'failed', error: 'nothing_to_report' };
@@ -186,7 +189,7 @@ async function deliver(
     bodyKey: 'giving.statementEmail.body',
     vars: { name: person.display_name, year: row.year, church: identity.name },
     link,
-    only: lang,
+    langs: [lang],
   });
   const sent = await sendEmail(env, db, {
     to: person.email,

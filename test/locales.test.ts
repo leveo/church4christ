@@ -83,3 +83,80 @@ describe('pickLocaleFromHeader', () => {
     expect(pickLocaleFromHeader(null)).toBe('en');
   });
 });
+
+import {
+  FALLBACK_LOCALE,
+  LOCALE_COOKIE,
+  LOCALE_REGISTRY,
+  SUPPORTED_LOCALES,
+  fallbackChain,
+  isChinese,
+  isSupportedLocale,
+  localeMeta,
+  negotiateLocale,
+  pickPair,
+} from '../src/lib/locales';
+
+describe('locale registry', () => {
+  it('describes en and zh with BCP-47, hreflang, Intl and script metadata', () => {
+    expect(SUPPORTED_LOCALES).toEqual(['en', 'zh']);
+    expect(LOCALE_REGISTRY.en).toMatchObject({ bcp47: 'en', hreflang: 'en', intl: 'en-US', script: 'latin', cjk: false });
+    expect(LOCALE_REGISTRY.zh).toMatchObject({ bcp47: 'zh-Hans', hreflang: 'zh-Hans', intl: 'zh-CN', script: 'han', cjk: true });
+    for (const code of SUPPORTED_LOCALES) {
+      expect(LOCALE_REGISTRY[code].code).toBe(code);
+      expect(LOCALE_REGISTRY[code].nativeName.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('narrows unknown codes without throwing', () => {
+    expect(isSupportedLocale('zh')).toBe(true);
+    expect(isSupportedLocale('fr')).toBe(false);
+    expect(isSupportedLocale(null)).toBe(false);
+    expect(localeMeta('fr').code).toBe(FALLBACK_LOCALE);
+    expect(isChinese('zh')).toBe(true);
+    expect(isChinese('en')).toBe(false);
+  });
+});
+
+describe('fallbackChain', () => {
+  it('walks requested, then default, then en without duplicates', () => {
+    expect(fallbackChain('zh', 'en')).toEqual(['zh', 'en']);
+    expect(fallbackChain('en', 'en')).toEqual(['en']);
+    expect(fallbackChain('en', 'zh')).toEqual(['en', 'zh']);
+    expect(fallbackChain('zh', 'zh')).toEqual(['zh', 'en']);
+  });
+
+  it('drops unsupported codes and always ends in en', () => {
+    expect(fallbackChain('fr', 'zh')).toEqual(['zh', 'en']);
+    expect(fallbackChain('fr', 'de')).toEqual(['en']);
+  });
+});
+
+describe('pickPair', () => {
+  it('prefers zh for zh readers and en for everyone else, each falling back to the other', () => {
+    expect(pickPair('zh', 'Hello', '你好')).toBe('你好');
+    expect(pickPair('zh', 'Hello', '')).toBe('Hello');
+    expect(pickPair('en', 'Hello', '你好')).toBe('Hello');
+    expect(pickPair('en', '', '你好')).toBe('你好');
+    expect(pickPair('en', null, undefined)).toBe('');
+    expect(pickPair('xx', 'Hello', '你好')).toBe('Hello');
+  });
+});
+
+describe('negotiateLocale', () => {
+  const both = ['en', 'zh'] as const;
+  it('prefers a valid cookie over Accept-Language', () => {
+    expect(negotiateLocale({ cookie: 'zh', acceptLanguage: 'en-US' }, both, 'en')).toBe('zh');
+    expect(LOCALE_COOKIE).toBe('c4c_locale');
+  });
+  it('ignores a cookie for a disabled or unknown locale', () => {
+    expect(negotiateLocale({ cookie: 'zh', acceptLanguage: 'zh-CN' }, ['en'], 'en')).toBe('en');
+    expect(negotiateLocale({ cookie: 'xx', acceptLanguage: 'zh-CN' }, both, 'en')).toBe('zh');
+  });
+  it('matches Accept-Language over the enabled set only, else the default', () => {
+    expect(negotiateLocale({ acceptLanguage: 'zh-TW,zh;q=0.9' }, both, 'en')).toBe('zh');
+    expect(negotiateLocale({ acceptLanguage: 'zh-TW' }, ['en'], 'en')).toBe('en');
+    expect(negotiateLocale({ acceptLanguage: 'fr' }, both, 'zh')).toBe('zh');
+    expect(negotiateLocale({ acceptLanguage: null }, both, 'zh')).toBe('zh');
+  });
+});

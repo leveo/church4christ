@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import type { AppDb, AppStatement } from './appDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
 
@@ -240,7 +241,7 @@ export function buildRegistrationCheckoutParams(
   if (!Number.isSafeInteger(input.registrationId) || input.registrationId <= 0) {
     throw new Error('checkout_registration_invalid');
   }
-  if (input.locale !== 'en' && input.locale !== 'zh') throw new Error('checkout_locale_invalid');
+  if (!isSupportedLocale(input.locale)) throw new Error('checkout_locale_invalid');
   const origin = canonicalAppOrigin(input.appOrigin);
   const metadata: RegistrationCheckoutMetadata = {
     kind: 'registration',

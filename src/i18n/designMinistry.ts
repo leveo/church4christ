@@ -1,3 +1,4 @@
+import { pickByLocale } from '../lib/locales';
 const en = {
   navigation: 'Serving and ministry', overview: 'Discover serving', opportunities: 'Opportunities', gifts: 'Discover your gifts', stories: 'Stories',
   plans: 'Service plans', matrix: 'Schedule matrix', teams: 'Teams', manage: 'Leader workspace',
@@ -56,4 +57,4 @@ const zh: typeof en = {
   consoleIntro: '支持团队、回应申请，一起预备下一次聚会。',
   reviewFirst: '审核申请', teamDirectory: '浏览团队', nextStep: '下一步',
 };
-export const ministryCopy = (locale: 'en' | 'zh') => locale === 'zh' ? zh : en;
+export const ministryCopy = (locale: 'en' | 'zh') => pickByLocale({ en, zh }, locale);

@@ -1,4 +1,4 @@
-import type { Locale } from '../lib/locales';
+import { type Locale, pickByLocale } from '../lib/locales';
 
 const en = {
   peopleEyebrow: 'PEOPLE & CONNECTIONS',
@@ -84,4 +84,4 @@ const zh: Record<keyof typeof en, string> = {
   prayerStages: '跳转到关怀阶段',
 };
 
-export const careCopy = (locale: Locale) => locale === 'zh' ? zh : en;
+export const careCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);

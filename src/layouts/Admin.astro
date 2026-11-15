@@ -1,4 +1,5 @@
 ---
+import { localeMeta } from '../lib/locales';
 // Admin shell: shared theme/mode wiring, a role-gated dark sidebar nav (top bar
 // + checkbox-hack disclosure on mobile), a repeat-row editor island
 // (progressive enhancement for the content forms), and a sidebar-bottom block
@@ -187,7 +188,7 @@ const navigationGroups = groupAdminLinks(sections.flatMap(section => section.chi
 
 <!doctype html>
 <html
-  lang={lang === 'zh' ? 'zh-Hans' : 'en'}
+  lang={localeMeta(lang).bcp47}
   data-theme={theme}
   data-mode={defaultMode}
   data-mode-default={defaultMode}

@@ -225,3 +225,16 @@ describe('resolveNav', () => {
     ]);
   });
 });
+
+describe('{[locale]: text} link labels', () => {
+  it('keeps every supported locale key and trims values', () => {
+    const items = parseNavItems(JSON.stringify([{ type: 'link', url: '/x', label: { en: ' Hi ', zh: '' } }]));
+    expect(items).toEqual([{ type: 'link', url: '/x', label: { en: 'Hi', zh: '' } }]);
+  });
+
+  it('drops a link whose label has an unknown locale key or a non-string value', () => {
+    expect(parseNavItems(JSON.stringify([{ type: 'link', url: '/x', label: { en: 'Hi', xx: 'Hola' } }]))).toEqual([]);
+    expect(parseNavItems(JSON.stringify([{ type: 'link', url: '/x', label: { en: 5 } }]))).toEqual([]);
+    expect(parseNavItems(JSON.stringify([{ type: 'link', url: '/x', label: ['Hi'] }]))).toEqual([]);
+  });
+});

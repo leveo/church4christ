@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 // Custom pages admin (console class — re-checks editor∪admin, 403s a bare team
 // leader). Same inline add/edit model as events (?edit=<id>, save/toggle/delete):
 // pages are admin-authored static Markdown content (src/lib/markdown.ts,
@@ -114,16 +115,7 @@ const editingBuilderPage = editingPage?.format === 'builder';
       <input type="hidden" name="action" value="save" />
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.pages.titleEn')}</span>
-          <input name="title_en" value={v.titleEn} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.pages.titleZh')}</span>
-          <input name="title_zh" value={v.titleZh} class={tin} />
-        </label>
-      </div>
+      <LocaleFields name="title" label={t(lang, 'admin.pages.titleEn')} values={{ en: v.titleEn, zh: v.titleZh }} lang={lang} />
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.hint')}</p>
       {editingBuilderPage ? (
@@ -135,18 +127,7 @@ const editingBuilderPage = editingPage?.format === 'builder';
         </p>
       ) : (
         <>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label class="block">
-              <span class={lab}>{t(lang, 'admin.pages.bodyEn')}</span>
-              <textarea name="body_en" rows="14" class={`${tin} font-mono`}>{v.bodyEn}</textarea>
-              {errors.body_en && <span class={errorText}>{t(lang, errors.body_en)}</span>}
-            </label>
-            <label class="block">
-              <span class={lab}>{t(lang, 'admin.pages.bodyZh')}</span>
-              <textarea name="body_zh" rows="14" class={`${tin} font-mono`}>{v.bodyZh}</textarea>
-              {errors.body_zh && <span class={errorText}>{t(lang, errors.body_zh)}</span>}
-            </label>
-          </div>
+          <LocaleFields name="body" label={t(lang, 'admin.pages.bodyEn')} values={{ en: v.bodyEn, zh: v.bodyZh }} lang={lang} multiline rows={14} controlClass="font-mono" error={errors.body_en} />
           <p class="text-xs text-ink-subtle">{t(lang, 'admin.pages.markdownHint')}</p>
         </>
       )}

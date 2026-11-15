@@ -1,4 +1,5 @@
 ---
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
 import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
 import { gatheringsCopy } from '../../../i18n/designGatherings';
 import { DESIGN_IMAGES } from '../../../lib/designAssets';
@@ -209,28 +210,10 @@ const h2 = 'font-display text-heading-sm font-bold';
       <input type="hidden" name="image_key" value={v.imageKey} />
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.events.titleEn')}</span>
-          <input name="title_en" value={v.titleEn} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.events.titleZh')}</span>
-          <input name="title_zh" value={v.titleZh} class={tin} />
-        </label>
-      </div>
+      <LocaleFields name="title" label={t(lang, 'admin.events.titleEn')} values={{ en: v.titleEn, zh: v.titleZh }} lang={lang} />
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.events.hint')}</p>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.events.blurbEn')}</span>
-          <textarea name="blurb_en" rows="2" class={tin}>{v.blurbEn}</textarea>
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.events.blurbZh')}</span>
-          <textarea name="blurb_zh" rows="2" class={tin}>{v.blurbZh}</textarea>
-        </label>
-      </div>
+      <LocaleFields name="blurb" label={t(lang, 'admin.events.blurbEn')} values={{ en: v.blurbEn, zh: v.blurbZh }} lang={lang} multiline rows={2} />
       <label class="block">
         <span class={lab}>{t(lang, 'admin.events.url')}</span>
         <input name="url" value={v.url} class={tin} />

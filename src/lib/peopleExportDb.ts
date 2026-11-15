@@ -1,3 +1,4 @@
+import { isSupportedLocale } from './locales';
 import { assertSnapshotBatchSupport, readSnapshotBatch, type AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import type {
@@ -310,7 +311,7 @@ function safePerson(row: DbRow): SafePerson | null {
     || typeof row.email !== 'string'
     || !nullableString(row.phone)
     || !zeroOrOne(row.active)
-    || (row.lang !== null && row.lang !== 'en' && row.lang !== 'zh')
+    || (row.lang !== null && !isSupportedLocale(row.lang))
     || !nullableString(row.birthday)
     || !nullableString(row.address)
     || !membershipStatus(row.membership_status)

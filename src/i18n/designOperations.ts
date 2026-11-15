@@ -1,4 +1,4 @@
-import type { Locale } from '../lib/locales';
+import { type Locale, pickByLocale } from '../lib/locales';
 const en = {
   settings: 'Shape your church website', settingsIntro: 'Manage your identity, visual style, contact details, and enabled features.',
   navigation: 'A clear path through your site', navigationIntro: 'Arrange the menu, add destinations, and review both languages.',
@@ -19,4 +19,4 @@ const zh: typeof en = {
   connections: '课堂连接', courses: '课程', addProvider: '添加课堂', inactive: '未启用',
   reportWindow: '统计时段（月）', apply: '应用', ministryCreated: '事工已就绪', missingName: '未填写名称',
 };
-export const operationsCopy = (locale: Locale) => locale === 'zh' ? zh : en;
+export const operationsCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);

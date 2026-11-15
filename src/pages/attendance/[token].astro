@@ -4,7 +4,7 @@ import ConfirmationPanel from '../../components/ui/ConfirmationPanel.astro';
 import { tokenPagePresentation } from '../../lib/tokenPagePresentation';
 import AttendanceSheet from '../../components/AttendanceSheet.astro';
 import { t } from '../../lib/i18n';
-import { DEFAULT_LOCALE, type Locale } from '../../lib/locales';
+import { DEFAULT_LOCALE, type Locale, toSupportedLocale } from '../../lib/locales';
 import { getPersonById } from '../../lib/db';
 import { getOccurrenceWithEvent } from '../../lib/groupEventDb';
 import { listMembers } from '../../lib/groupDb';
@@ -21,7 +21,7 @@ import { verifyAttendanceToken, saveAttendance, getAttendanceMap } from '../../l
 const raw = Astro.params.token ?? '';
 const db = Astro.locals.db;
 
-const langOf = (lang: string | null | undefined): Locale => (lang === 'zh' ? 'zh' : 'en');
+const langOf = (lang: string | null | undefined): Locale => toSupportedLocale(lang) ?? DEFAULT_LOCALE;
 
 let valid = false;
 let saved = false;

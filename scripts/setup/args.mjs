@@ -9,7 +9,9 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
   --modules key,key,... (repeatable)
   --site-slug slug
   --church-name name
-  --locale en|zh
+  --locales en,zh (languages to enable; first listed is the default unless --default-locale)
+  --default-locale en
+  --locale en|zh   (alias for --locales x --default-locale x)
   --admin-email email
   --admin-name name
   --app-origin https://church.example
@@ -40,6 +42,8 @@ export function parseSetupArgs(argv, catalog) {
       'site-slug': { type: 'string' },
       'church-name': { type: 'string' },
       locale: { type: 'string' },
+      locales: { type: 'string', multiple: true },
+      'default-locale': { type: 'string' },
       'admin-email': { type: 'string' },
       'admin-name': { type: 'string' },
       'app-origin': { type: 'string' },
@@ -91,6 +95,8 @@ export function parseSetupArgs(argv, catalog) {
     siteSlug: values['site-slug'],
     churchName: values['church-name'],
     locale: values.locale,
+    locales: values.locales ? values.locales.flatMap((value) => value.split(',')) : undefined,
+    defaultLocale: values['default-locale'],
     adminEmail: values['admin-email'],
     adminName: values['admin-name'],
     appOrigin: values['app-origin'],

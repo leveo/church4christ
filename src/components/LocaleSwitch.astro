@@ -1,24 +1,52 @@
 ---
-// Language switch: keeps the current path, swapping only the locale prefix.
-import { LOCALES, localePath, pathWithoutLocale, type Locale } from '../lib/locales';
+// Language switch: keeps the current path, swapping only the locale prefix, over
+// the installation's ENABLED languages. Each link carries ?setlang=<code>, which
+// the middleware turns into the `c4c_locale` cookie (the only place it is set).
+// Up to three languages render inline; more collapse into a native <details>
+// dropdown (no JavaScript, 44px targets).
+import { localeMeta, localePath, pathWithoutLocale } from '../lib/locales';
 import { t } from '../lib/i18n';
 
+const MAX_INLINE = 3;
 const current = Astro.locals.locale;
+const enabled = Astro.locals.locales.enabled;
 const { rest } = pathWithoutLocale(Astro.url.pathname);
-const labelKey: Record<Locale, string> = { en: 'locale.en', zh: 'locale.zh' };
+
+const labelFor = (code: string): string => {
+  const key = `locale.${code}`;
+  const translated = t(current, key);
+  return translated === key ? localeMeta(code).nativeName : translated;
+};
+const hrefFor = (code: string): string => {
+  const params = new URLSearchParams(Astro.url.search);
+  params.set('setlang', code);
+  return `${localePath(code as typeof current, rest)}?${params.toString()}`;
+};
+const links = enabled.map((code) => ({ code, label: labelFor(code), href: hrefFor(code), hreflang: localeMeta(code).hreflang }));
+const dropdown = links.length > MAX_INLINE;
+const linkClass = 'px-2 py-1 rounded-md hover:bg-surface-raised aria-[current]:font-semibold aria-[current]:underline';
 ---
 
-<nav class="flex items-center gap-1 text-sm" aria-label={t(current, 'common.language')}>
-  {
-    LOCALES.map((loc) => (
-      <a
-        href={localePath(loc, rest)}
-        hreflang={loc === 'zh' ? 'zh-Hans' : 'en'}
-        aria-current={loc === current ? 'true' : undefined}
-        class="px-2 py-1 rounded-md hover:bg-surface-raised aria-[current]:font-semibold aria-[current]:underline"
-      >
-        {t(current, labelKey[loc])}
-      </a>
-    ))
-  }
-</nav>
+{
+  links.length > 1 && (dropdown ? (
+    <details class="relative text-sm" data-locale-dropdown>
+      <summary class="flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-md px-3 hover:bg-surface-raised [&::-webkit-details-marker]:hidden" aria-label={t(current, 'common.language')}>
+        {labelFor(current)}
+        <span aria-hidden="true" class="text-xs text-ink-muted">⌄</span>
+      </summary>
+      <ul class="absolute end-0 z-20 mt-1 min-w-40 rounded-md border border-border bg-surface-raised p-1 shadow-md">
+        {links.map((l) => (
+          <li>
+            <a href={l.href} hreflang={l.hreflang} aria-current={l.code === current ? 'true' : undefined} class={`flex min-h-11 items-center ${linkClass}`}>{l.label}</a>
+          </li>
+        ))}
+      </ul>
+    </details>
+  ) : (
+    <nav class="flex items-center gap-1 text-sm" aria-label={t(current, 'common.language')}>
+      {links.map((l) => (
+        <a href={l.href} hreflang={l.hreflang} aria-current={l.code === current ? 'true' : undefined} class={linkClass}>{l.label}</a>
+      ))}
+    </nav>
+  ))
+}
