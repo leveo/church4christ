@@ -1,5 +1,49 @@
 {
-  "capabilities": {},
-  "presets": {},
-  "readiness": {}
+  "capabilities": {
+    "bulletins": { "label": "Bulletins", "description": "Créez et publiez les bulletins hebdomadaires des cultes." },
+    "sermons": { "label": "Prédications", "description": "Publiez des archives de prédications où l'on peut effectuer des recherches." },
+    "prayer-sheets": { "label": "Feuilles de prière", "description": "Préparez et publiez des feuilles de prière." },
+    "prayer-wall": { "label": "Mur de prière", "description": "Recevez les sujets de prière et prenez-en soin." },
+    "events": { "label": "Événements", "description": "Publiez des événements et des annonces." },
+    "serve": { "label": "Planning des bénévoles", "description": "Coordonnez les ministères, les équipes, les plannings et les rappels." },
+    "gifts": { "label": "Dons spirituels", "description": "Aidez chacun à découvrir ses dons et les services qui lui correspondent." },
+    "testimonies": { "label": "Témoignages", "description": "Recueillez et publiez des témoignages de service." },
+    "articles": { "label": "Articles", "description": "Publiez des articles bilingues." },
+    "fellowships": { "label": "Communautés fraternelles", "description": "Publiez l'annuaire des communautés fraternelles." },
+    "groups": { "label": "Groupes", "description": "Gérez les membres, les événements, les inscriptions et la présence des groupes." },
+    "people": { "label": "Personnes et foyers", "description": "Gérez les personnes, les foyers et les notes pastorales." },
+    "children": { "label": "Enregistrement des enfants", "description": "Assurez un enregistrement et un suivi de présence sécurisés pour les enfants." },
+    "attendance": { "label": "Présence aux cultes", "description": "Enregistrez les totaux de présence des adultes aux cultes et consultez les enregistrements des enfants." },
+    "newcomers": { "label": "Suivi des nouveaux venus", "description": "Recevez les fiches des nouveaux venus et coordonnez un suivi personnel." },
+    "activity-score": { "label": "Score d'activité", "description": "Suivez l'activité explicable des membres et l'engagement de l'ensemble de l'église." },
+    "page-builder": { "label": "Éditeur de pages", "description": "Créez des pages bilingues personnalisées avec des blocs." },
+    "portal": { "label": "Espace membre", "description": "Offrez aux membres des outils pour leur foyer, leurs groupes, leur calendrier, la prière et la découverte d'occasions de servir." },
+    "giving": { "label": "Dons", "description": "Enregistrez les dons et acceptez éventuellement les paiements Stripe." },
+    "registration": { "label": "Inscriptions", "description": "Gérez des inscriptions gratuites ou payantes aux événements." },
+    "learning": { "label": "Formation", "description": "Poursuivez les cours de ministère au-delà du temps de classe." },
+    "planning": { "label": "Planification des cultes", "description": "Planifiez les déroulés, les répétitions, les disponibilités et les calendriers des cultes et des événements." }
+  },
+  "presets": {
+    "website": { "label": "Site web", "description": "Un site public ciblé et une boîte à outils de publication." },
+    "website-community": { "label": "Site web + Communauté", "description": "Publication du site web, plus des outils pour la communauté et les bénévoles." },
+    "full-church": { "label": "Église complète", "description": "Toutes les fonctionnalités de site web, de communauté, d'espace membre, de dons et d'inscriptions." },
+    "checkin": { "label": "Enregistrement des enfants", "description": "Foyers, borne d'enregistrement en libre-service et console du ministère des enfants." },
+    "volunteer-scheduling": { "label": "Planning des bénévoles", "description": "Ministères, équipes, plannings de service, rappels et questionnaire des dons spirituels." },
+    "small-groups": { "label": "Petits groupes", "description": "Petits groupes avec adhésions, événements et présence, plus un annuaire des communautés fraternelles." }
+  },
+  "readiness": {
+    "identity": { "title": "Identité de l'église", "description": "Confirmez le manifeste d'installation et l'identité publique de l'église.", "remediation": "Terminez la configuration et vérifiez les paramètres d'identité." },
+    "locales": { "title": "Textes en anglais et en chinois", "description": "Vérifiez les textes publics dans les deux langues prises en charge.", "remediation": "Vérifiez les paramètres et les pages en anglais et en chinois." },
+    "service-times": { "title": "Horaires des cultes", "description": "Confirmez que les horaires des cultes sont à jour dans les deux langues.", "remediation": "Mettez à jour les horaires des cultes dans les Paramètres." },
+    "admin-grants": { "title": "Droits du personnel", "description": "Vérifiez les accès des administrateurs limités et du personnel à périmètre restreint.", "remediation": "Vérifiez les droits de rôle et de domaine dans Personnes." },
+    "people-migration": { "title": "Décision de migration des personnes", "description": "Indiquez si les données des personnes ont été importées ou si elles démarrent volontairement vides.", "remediation": "Terminez l'import ou confirmez la décision de ne pas importer." },
+    "newcomer-owner": { "title": "Responsable des nouveaux venus", "description": "Désignez la personne responsable de la file des nouveaux venus.", "remediation": "Choisissez un responsable et vérifiez le processus de la file." },
+    "attendance-checkin-mapping": { "title": "Correspondance entre présence et enregistrement", "description": "Confirmez que la présence aux cultes correspond aux événements d'enregistrement.", "remediation": "Vérifiez les types de culte et les liens d'enregistrement." },
+    "origin-domain-email": { "title": "Origine, domaine et envoi", "description": "Vérifiez les liaisons d'exécution et l'envoi en production en dehors de l'application.", "remediation": "Vérifiez le domaine, les liaisons, l'e-mail, le stockage et le mode de paiement Stripe (test, ou production après la liste de contrôle de mise en service)." },
+    "routes-jobs": { "title": "Routes et tâches planifiées", "description": "La configuration ne prouve pas que les routes ou les tâches se sont exécutées avec succès.", "remediation": "Testez les routes publiques et vérifiez chaque tâche planifiée." },
+    "learning-provider-operations": { "title": "Exploitation du fournisseur de formation", "description": "Vérifiez OAuth et les portées de Google Classroom ou de Canvas, les notifications authentifiées, la synchronisation manuelle, la maintenance à :15, le rapprochement à :45, la rotation des identifiants, la suppression à la déconnexion, la conservation et la restauration correspondante.", "remediation": "Suivez le guide d'exploitation de la Formation et consignez les preuves de correspondance et de synchronisation du fournisseur, de Pub/Sub ou des Live Events signés, de nettoyage, de conservation et de suppression, et de restauration." },
+    "database-schema": { "title": "Schéma de la base de données", "description": "Vérifiez la connectivité, les migrations et les tables requises.", "remediation": "Appliquez les migrations ascendantes et relancez doctor." },
+    "backups": { "title": "Sauvegardes", "description": "Des identifiants configurés ne prouvent pas qu'une sauvegarde utilisable existe.", "remediation": "Lancez une sauvegarde et vérifiez sa destination protégée." },
+    "restore-drill": { "title": "Exercice de restauration", "description": "Un exercice de restauration doit être répété tous les 90 jours.", "remediation": "Restaurez une sauvegarde de façon isolée, vérifiez-la, puis confirmez cette vérification." }
+  }
 }

@@ -1,5 +1,185 @@
 {
-  "capabilities": {},
-  "presets": {},
-  "readiness": {}
+  "capabilities": {
+    "bulletins": {
+      "label": "週報",
+      "description": "毎週の礼拝の週報を作成して公開します。"
+    },
+    "sermons": {
+      "label": "説教",
+      "description": "検索できる説教のアーカイブを公開します。"
+    },
+    "prayer-sheets": {
+      "label": "祈り会シート",
+      "description": "祈り会シートを準備して公開します。"
+    },
+    "prayer-wall": {
+      "label": "祈りの壁",
+      "description": "祈りの課題を受け付け、ケアします。"
+    },
+    "events": {
+      "label": "イベント",
+      "description": "イベントとお知らせを公開します。"
+    },
+    "serve": {
+      "label": "ボランティアのスケジュール",
+      "description": "ミニストリー、チーム、プラン、リマインダーを調整します。"
+    },
+    "gifts": {
+      "label": "霊的賜物",
+      "description": "賜物の発見と、奉仕とのマッチングをサポートします。"
+    },
+    "testimonies": {
+      "label": "証し",
+      "description": "奉仕の証しを集めて公開します。"
+    },
+    "articles": {
+      "label": "記事",
+      "description": "バイリンガルの記事を公開します。"
+    },
+    "fellowships": {
+      "label": "フェローシップ",
+      "description": "フェローシップの一覧を公開します。"
+    },
+    "groups": {
+      "label": "グループ",
+      "description": "グループのメンバー、イベント、申込、出席を管理します。"
+    },
+    "people": {
+      "label": "人と家庭",
+      "description": "人、家庭、牧会ノートを管理します。"
+    },
+    "children": {
+      "label": "子どものチェックイン",
+      "description": "安全な子どものチェックインと出席を運用します。"
+    },
+    "attendance": {
+      "label": "礼拝の出席",
+      "description": "大人の礼拝出席の合計を記録し、子どものチェックインを報告します。"
+    },
+    "newcomers": {
+      "label": "新来者のフォローアップ",
+      "description": "新来者カードを受け付け、一人ひとりへのフォローアップを調整します。"
+    },
+    "activity-score": {
+      "label": "活動スコア",
+      "description": "説明可能な教会員の活動と、教会全体の関わりを監視します。"
+    },
+    "page-builder": {
+      "label": "ページビルダー",
+      "description": "ブロックを使って、バイリンガルのカスタムページを作成します。"
+    },
+    "portal": {
+      "label": "メンバーポータル",
+      "description": "教会員に、家庭、グループ、カレンダー、祈り、奉仕の機会を見つけるツールを提供します。"
+    },
+    "giving": {
+      "label": "献金",
+      "description": "献金を記録し、必要に応じてStripeでの支払いを受け付けます。"
+    },
+    "registration": {
+      "label": "イベント申込",
+      "description": "無料または有料のイベント申込を運用します。"
+    },
+    "learning": {
+      "label": "学び",
+      "description": "授業時間以外にも、ミニストリーのコースを継続します。"
+    },
+    "planning": {
+      "label": "礼拝の計画",
+      "description": "礼拝やイベントの進行表、リハーサル、奉仕可能日、カレンダーを計画します。"
+    }
+  },
+  "presets": {
+    "website": {
+      "label": "ウェブサイト",
+      "description": "公開ウェブサイトと、情報発信のためのツールに絞った構成です。"
+    },
+    "website-community": {
+      "label": "ウェブサイト + コミュニティ",
+      "description": "ウェブサイトの公開に加え、コミュニティとボランティアのためのツールを備えています。"
+    },
+    "full-church": {
+      "label": "教会のすべて",
+      "description": "ウェブサイト、コミュニティ、ポータル、献金、イベント申込のすべての機能を備えています。"
+    },
+    "checkin": {
+      "label": "子どものチェックイン",
+      "description": "家庭、セルフサービスのチェックイン受付端末、子どもミニストリーのコンソールを備えています。"
+    },
+    "volunteer-scheduling": {
+      "label": "ボランティアのスケジュール",
+      "description": "ミニストリー、チーム、奉仕スケジュール、リマインダー、霊的賜物診断を備えています。"
+    },
+    "small-groups": {
+      "label": "小グループ",
+      "description": "メンバー、イベント、出席を管理できる小グループと、フェローシップの一覧を備えています。"
+    }
+  },
+  "readiness": {
+    "identity": {
+      "title": "教会の基本情報",
+      "description": "インストールのマニフェストと、公開される教会の基本情報を確認します。",
+      "remediation": "セットアップを完了し、基本情報の設定を確認してください。"
+    },
+    "locales": {
+      "title": "英語と中国語の文面",
+      "description": "サポートされている両方の言語で、公開向けの文面を確認します。",
+      "remediation": "英語と中国語の設定とページを確認してください。"
+    },
+    "service-times": {
+      "title": "礼拝時間",
+      "description": "両方の言語で、礼拝時間が最新であることを確認します。",
+      "remediation": "設定で礼拝時間を更新してください。"
+    },
+    "admin-grants": {
+      "title": "スタッフの権限",
+      "description": "限定管理者と範囲限定のスタッフのアクセスを確認します。",
+      "remediation": "「人」で、ロールと分野ごとの権限を確認してください。"
+    },
+    "people-migration": {
+      "title": "人のデータ移行の判断",
+      "description": "「人」のデータをインポートしたか、意図的に空の状態で始めるかを記録します。",
+      "remediation": "インポートを完了するか、インポートしないという判断を確認済みにしてください。"
+    },
+    "newcomer-owner": {
+      "title": "新来者の担当者",
+      "description": "新来者キューの責任者を割り当てます。",
+      "remediation": "担当者を選び、キューのワークフローを確認してください。"
+    },
+    "attendance-checkin-mapping": {
+      "title": "出席とチェックインの対応付け",
+      "description": "礼拝の出席が、チェックインのイベントに対応付けられていることを確認します。",
+      "remediation": "礼拝の種類とチェックインの紐づけを確認してください。"
+    },
+    "origin-domain-email": {
+      "title": "オリジン、ドメイン、配信",
+      "description": "ランタイムのバインディングと本番環境での配信を、アプリケーションの外部で確認します。",
+      "remediation": "ドメイン、バインディング、メール、ストレージ、およびStripeの決済モード(テスト、または公開前チェックリスト後の本番)を確認してください。"
+    },
+    "routes-jobs": {
+      "title": "ルートと定期ジョブ",
+      "description": "設定だけでは、ルートやジョブが正常に実行されたことは証明できません。",
+      "remediation": "公開ルートを実際に動かし、すべての定期ジョブを確認してください。"
+    },
+    "learning-provider-operations": {
+      "title": "学びのプロバイダーの運用",
+      "description": "Google ClassroomまたはCanvasのOAuthとスコープ、認証済みの通知、手動同期、15分のメンテナンス、45分の照合、認証情報のローテーション、切断時の削除、保持、対応するリストアを確認します。",
+      "remediation": "「学び」の運用手順書に従い、プロバイダーの対応付けと同期、Pub/Subまたは署名付きのLive Events、クリーンアップ、保持と削除、リストアの証跡を記録してください。"
+    },
+    "database-schema": {
+      "title": "データベーススキーマ",
+      "description": "接続、マイグレーション、必須のテーブルを確認します。",
+      "remediation": "前進方向のマイグレーションを適用し、doctorを再実行してください。"
+    },
+    "backups": {
+      "title": "バックアップ",
+      "description": "認証情報が設定されていても、使用可能なバックアップが存在することの証明にはなりません。",
+      "remediation": "バックアップを実行し、保護された保存先を確認してください。"
+    },
+    "restore-drill": {
+      "title": "リストアの訓練",
+      "description": "リストアの訓練は、90日ごとに繰り返す必要があります。",
+      "remediation": "バックアップを分離された環境でリストアして確認し、このチェックを確認済みにしてください。"
+    }
+  }
 }

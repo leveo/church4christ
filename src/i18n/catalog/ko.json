@@ -1,5 +1,185 @@
 {
-  "capabilities": {},
-  "presets": {},
-  "readiness": {}
+  "capabilities": {
+    "bulletins": {
+      "label": "주보",
+      "description": "주간 예배 주보를 만들고 게시해요."
+    },
+    "sermons": {
+      "label": "설교",
+      "description": "검색할 수 있는 설교 보관함을 게시해요."
+    },
+    "prayer-sheets": {
+      "label": "기도 자료",
+      "description": "기도 자료를 준비하고 게시해요."
+    },
+    "prayer-wall": {
+      "label": "기도 게시판",
+      "description": "기도 제목을 받고 돌봐요."
+    },
+    "events": {
+      "label": "행사",
+      "description": "행사와 공지를 게시해요."
+    },
+    "serve": {
+      "label": "봉사 일정",
+      "description": "사역, 팀, 계획, 알림을 조율해요."
+    },
+    "gifts": {
+      "label": "은사",
+      "description": "은사를 발견하고 맞는 봉사를 찾도록 도와줘요."
+    },
+    "testimonies": {
+      "label": "간증",
+      "description": "봉사 간증을 모으고 게시해요."
+    },
+    "articles": {
+      "label": "글",
+      "description": "두 언어로 글을 게시해요."
+    },
+    "fellowships": {
+      "label": "교제 모임",
+      "description": "교제 모임 목록을 게시해요."
+    },
+    "groups": {
+      "label": "그룹",
+      "description": "그룹 구성원, 모임, 등록, 출석을 관리해요."
+    },
+    "people": {
+      "label": "사람·가정",
+      "description": "사람, 가정, 목양 메모를 관리해요."
+    },
+    "children": {
+      "label": "어린이 체크인",
+      "description": "안전한 어린이 체크인과 출석을 운영해요."
+    },
+    "attendance": {
+      "label": "예배 출석",
+      "description": "성인 예배 출석 합계를 기록하고 어린이 체크인을 보고해요."
+    },
+    "newcomers": {
+      "label": "새가족 후속 돌봄",
+      "description": "새가족 카드를 받고 개별 후속 연락을 조율해요."
+    },
+    "activity-score": {
+      "label": "활동 점수",
+      "description": "설명 가능한 교인 활동과 교회 전체의 참여도를 살펴봐요."
+    },
+    "page-builder": {
+      "label": "페이지 빌더",
+      "description": "블록으로 두 언어의 맞춤 페이지를 만들어요."
+    },
+    "portal": {
+      "label": "교인 포털",
+      "description": "교인에게 가정, 그룹, 캘린더, 기도, 봉사 기회 탐색 도구를 제공해요."
+    },
+    "giving": {
+      "label": "헌금",
+      "description": "헌금을 기록하고, 원하면 Stripe 결제를 받아요."
+    },
+    "registration": {
+      "label": "행사 등록",
+      "description": "무료 또는 유료 행사 등록을 운영해요."
+    },
+    "learning": {
+      "label": "학습",
+      "description": "수업 시간 밖에서도 사역 과정을 이어 가요."
+    },
+    "planning": {
+      "label": "예배 계획",
+      "description": "예배와 행사의 순서지, 리허설, 가능 시간, 캘린더를 계획해요."
+    }
+  },
+  "presets": {
+    "website": {
+      "label": "웹사이트",
+      "description": "공개 웹사이트와 게시 도구에 집중한 구성이에요."
+    },
+    "website-community": {
+      "label": "웹사이트 + 공동체",
+      "description": "웹사이트 게시에 공동체와 봉사 도구를 더한 구성이에요."
+    },
+    "full-church": {
+      "label": "교회 전체",
+      "description": "웹사이트, 공동체, 포털, 헌금, 등록 기능을 모두 갖춘 구성이에요."
+    },
+    "checkin": {
+      "label": "어린이 체크인",
+      "description": "가정, 셀프 체크인 키오스크, 어린이 사역 콘솔을 제공해요."
+    },
+    "volunteer-scheduling": {
+      "label": "봉사 일정",
+      "description": "사역, 팀, 봉사 일정, 알림, 은사 테스트를 제공해요."
+    },
+    "small-groups": {
+      "label": "소그룹",
+      "description": "구성원, 모임, 출석을 갖춘 소그룹과 교제 모임 목록을 제공해요."
+    }
+  },
+  "readiness": {
+    "identity": {
+      "title": "교회 정보",
+      "description": "설치 매니페스트와 공개 교회 정보를 확인하세요.",
+      "remediation": "초기 설정을 마치고 교회 정보 설정을 검토하세요."
+    },
+    "locales": {
+      "title": "영어·중국어 문구",
+      "description": "지원하는 두 언어의 공개 문구를 검토하세요.",
+      "remediation": "영어와 중국어 설정 및 페이지를 검토하세요."
+    },
+    "service-times": {
+      "title": "예배 시간",
+      "description": "두 언어 모두에서 예배 시간이 최신인지 확인하세요.",
+      "remediation": "설정에서 예배 시간을 업데이트하세요."
+    },
+    "admin-grants": {
+      "title": "교역자 권한",
+      "description": "제한된 관리자와 범위가 지정된 교역자의 접근 권한을 검토하세요.",
+      "remediation": "사람 메뉴에서 역할과 영역 권한을 검토하세요."
+    },
+    "people-migration": {
+      "title": "사람 데이터 이전 결정",
+      "description": "사람 데이터를 가져왔는지, 아니면 의도적으로 비어 있는 상태로 시작하는지 기록하세요.",
+      "remediation": "가져오기를 마치거나 가져오지 않기로 한 결정을 확인하세요."
+    },
+    "newcomer-owner": {
+      "title": "새가족 담당자",
+      "description": "새가족 대기열의 담당자를 지정하세요.",
+      "remediation": "담당자를 선택하고 대기열 업무 흐름을 검토하세요."
+    },
+    "attendance-checkin-mapping": {
+      "title": "출석·체크인 연결",
+      "description": "예배 출석이 체크인 행사와 연결되어 있는지 확인하세요.",
+      "remediation": "예배 유형과 체크인 연결을 검토하세요."
+    },
+    "origin-domain-email": {
+      "title": "도메인·메일 발송",
+      "description": "런타임 바인딩과 운영 환경의 메일 발송을 애플리케이션 밖에서 확인하세요.",
+      "remediation": "도메인, 바인딩, 이메일, 저장소, Stripe 결제 모드(테스트 또는 운영 전환 체크리스트 이후의 라이브)를 확인하세요."
+    },
+    "routes-jobs": {
+      "title": "경로·예약 작업",
+      "description": "설정만으로는 경로나 작업이 성공적으로 실행되었는지 알 수 없어요.",
+      "remediation": "공개 경로를 직접 확인하고 모든 예약 작업을 점검하세요."
+    },
+    "learning-provider-operations": {
+      "title": "학습 제공 서비스 운영",
+      "description": "Google Classroom 또는 Canvas OAuth와 권한 범위, 인증된 알림, 수동 동기화, :15 정비, :45 대조, 자격 증명 교체, 연결 해제 시 삭제, 보존 기간, 일치하는 복원을 확인하세요.",
+      "remediation": "학습 운영 가이드를 따르고, 제공 서비스 매핑·동기화, Pub/Sub 또는 서명된 Live Events, 정리, 보존·삭제, 복원 증거를 기록하세요."
+    },
+    "database-schema": {
+      "title": "데이터베이스 스키마",
+      "description": "연결, 마이그레이션, 필수 테이블을 확인하세요.",
+      "remediation": "순방향 마이그레이션을 적용한 뒤 doctor를 다시 실행하세요."
+    },
+    "backups": {
+      "title": "백업",
+      "description": "자격 증명이 설정되어 있어도 사용 가능한 백업이 있다는 뜻은 아니에요.",
+      "remediation": "백업을 실행하고 보호된 저장 위치를 확인하세요."
+    },
+    "restore-drill": {
+      "title": "복원 훈련",
+      "description": "복원 훈련은 90일마다 반복해야 해요.",
+      "remediation": "백업을 격리된 환경에 복원해 확인한 뒤 이 점검을 확인 완료로 표시하세요."
+    }
+  }
 }

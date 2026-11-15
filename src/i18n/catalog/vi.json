@@ -1,5 +1,49 @@
 {
-  "capabilities": {},
-  "presets": {},
-  "readiness": {}
+  "capabilities": {
+    "bulletins": { "label": "Bản tin", "description": "Soạn và đăng bản tin thờ phượng hằng tuần." },
+    "sermons": { "label": "Bài giảng", "description": "Đăng kho bài giảng có thể tìm kiếm." },
+    "prayer-sheets": { "label": "Phiếu cầu nguyện", "description": "Chuẩn bị và đăng các phiếu cầu nguyện." },
+    "prayer-wall": { "label": "Bảng cầu nguyện", "description": "Tiếp nhận và chăm sóc các nhu cầu cầu nguyện." },
+    "events": { "label": "Sự kiện", "description": "Đăng sự kiện và thông báo." },
+    "serve": { "label": "Xếp lịch tình nguyện viên", "description": "Điều phối các mục vụ, đội, kế hoạch và nhắc nhở." },
+    "gifts": { "label": "Ân tứ thuộc linh", "description": "Giúp mọi người khám phá ân tứ và những nơi hầu việc phù hợp." },
+    "testimonies": { "label": "Lời chứng", "description": "Thu thập và đăng các lời chứng hầu việc." },
+    "articles": { "label": "Bài viết", "description": "Đăng các bài viết song ngữ." },
+    "fellowships": { "label": "Các đoàn thể", "description": "Đăng danh bạ các đoàn thể." },
+    "groups": { "label": "Các nhóm", "description": "Quản lý thành viên nhóm, sự kiện, đăng ký và sự tham dự." },
+    "people": { "label": "Con người & Gia đình", "description": "Quản lý con người, gia đình và ghi chú mục vụ." },
+    "children": { "label": "Điểm danh thiếu nhi", "description": "Vận hành điểm danh và theo dõi sự tham dự của trẻ em một cách an toàn." },
+    "attendance": { "label": "Sự tham dự buổi thờ phượng", "description": "Ghi tổng số người lớn tham dự buổi thờ phượng và báo cáo lượt điểm danh thiếu nhi." },
+    "newcomers": { "label": "Theo dõi người mới", "description": "Tiếp nhận thẻ người mới và điều phối việc theo dõi cá nhân." },
+    "activity-score": { "label": "Điểm hoạt động", "description": "Theo dõi hoạt động của thành viên một cách có thể giải thích và mức độ tham gia toàn Hội Thánh." },
+    "page-builder": { "label": "Trình tạo trang", "description": "Tạo các trang song ngữ tùy chỉnh bằng các khối." },
+    "portal": { "label": "Cổng thông tin thành viên", "description": "Cung cấp cho thành viên các công cụ về gia đình, nhóm, lịch, cầu nguyện và khám phá cơ hội." },
+    "giving": { "label": "Dâng hiến", "description": "Ghi nhận các khoản dâng hiến và tùy chọn nhận thanh toán qua Stripe." },
+    "registration": { "label": "Đăng ký", "description": "Vận hành đăng ký sự kiện miễn phí hoặc có phí." },
+    "learning": { "label": "Học tập", "description": "Tiếp tục các khóa học mục vụ ngoài giờ lên lớp." },
+    "planning": { "label": "Lên kế hoạch thờ phượng", "description": "Lên kế hoạch chương trình chi tiết, tập dượt, thời gian có thể phục vụ và lịch cho các buổi thờ phượng và sự kiện." }
+  },
+  "presets": {
+    "website": { "label": "Trang web", "description": "Một trang web công khai tập trung và bộ công cụ đăng nội dung." },
+    "website-community": { "label": "Trang web + Cộng đồng", "description": "Đăng nội dung trang web cùng các công cụ cộng đồng và tình nguyện viên." },
+    "full-church": { "label": "Hội Thánh đầy đủ", "description": "Mọi khả năng về trang web, cộng đồng, cổng thông tin, dâng hiến và đăng ký." },
+    "checkin": { "label": "Điểm danh thiếu nhi", "description": "Các gia đình, máy điểm danh tự phục vụ và bảng điều khiển mục vụ thiếu nhi." },
+    "volunteer-scheduling": { "label": "Xếp lịch tình nguyện viên", "description": "Các mục vụ, đội, lịch hầu việc, nhắc nhở và bài trắc nghiệm ân tứ thuộc linh." },
+    "small-groups": { "label": "Nhóm nhỏ", "description": "Các nhóm nhỏ với thành viên, sự kiện và sự tham dự, cùng danh bạ các đoàn thể." }
+  },
+  "readiness": {
+    "identity": { "title": "Nhận diện Hội Thánh", "description": "Xác nhận tệp kê khai cài đặt và nhận diện công khai của Hội Thánh.", "remediation": "Hoàn tất thiết lập và xem lại các cài đặt nhận diện." },
+    "locales": { "title": "Nội dung tiếng Anh và tiếng Trung", "description": "Xem lại nội dung công khai trong cả hai ngôn ngữ được hỗ trợ.", "remediation": "Xem lại các cài đặt và trang tiếng Anh và tiếng Trung." },
+    "service-times": { "title": "Giờ thờ phượng", "description": "Xác nhận giờ thờ phượng đã được cập nhật trong cả hai ngôn ngữ.", "remediation": "Cập nhật giờ thờ phượng trong Cài đặt." },
+    "admin-grants": { "title": "Quyền của đồng công", "description": "Xem lại quyền truy cập của quản trị viên giới hạn và đồng công theo phạm vi.", "remediation": "Xem lại các quyền theo vai trò và khu vực trong Con người." },
+    "people-migration": { "title": "Quyết định chuyển dữ liệu Con người", "description": "Ghi lại việc dữ liệu Con người đã được nhập hay cố ý bắt đầu trống.", "remediation": "Hoàn tất việc nhập hoặc xác nhận quyết định không nhập." },
+    "newcomer-owner": { "title": "Người phụ trách người mới", "description": "Giao trách nhiệm cho hàng chờ người mới.", "remediation": "Chọn một người phụ trách và xem lại quy trình hàng chờ." },
+    "attendance-checkin-mapping": { "title": "Ánh xạ sự tham dự và điểm danh", "description": "Xác nhận sự tham dự buổi thờ phượng được ánh xạ với các sự kiện điểm danh.", "remediation": "Xem lại các loại buổi thờ phượng và liên kết điểm danh." },
+    "origin-domain-email": { "title": "Nguồn gốc, tên miền và gửi thư", "description": "Xác minh các liên kết runtime và việc gửi thư trong môi trường chính thức bên ngoài ứng dụng.", "remediation": "Xác minh tên miền, các liên kết, email, lưu trữ và chế độ thanh toán Stripe (thử nghiệm, hoặc thật sau danh sách kiểm tra đi vào hoạt động)." },
+    "routes-jobs": { "title": "Tuyến và tác vụ theo lịch", "description": "Cấu hình không chứng minh các tuyến hay tác vụ đã chạy thành công.", "remediation": "Thử các tuyến công khai và xác minh mọi tác vụ theo lịch." },
+    "learning-provider-operations": { "title": "Vận hành nhà cung cấp Học tập", "description": "Xác minh OAuth và phạm vi của Google Classroom hoặc Canvas, thông báo đã xác thực, đồng bộ hóa thủ công, bảo trì phút :15, đối soát phút :45, xoay vòng thông tin xác thực, xóa khi ngắt kết nối, lưu giữ và khôi phục khớp.", "remediation": "Làm theo sổ tay vận hành Học tập và ghi lại bằng chứng về ánh xạ/đồng bộ hóa nhà cung cấp, Pub/Sub hoặc Live Events có ký, dọn dẹp, lưu giữ/xóa và khôi phục." },
+    "database-schema": { "title": "Lược đồ cơ sở dữ liệu", "description": "Xác minh kết nối, các bản di chuyển và các bảng bắt buộc.", "remediation": "Áp dụng các bản di chuyển tiến và chạy lại doctor." },
+    "backups": { "title": "Sao lưu", "description": "Thông tin xác thực đã cấu hình không chứng minh có bản sao lưu dùng được.", "remediation": "Chạy một bản sao lưu và xác minh đích lưu được bảo vệ của nó." },
+    "restore-drill": { "title": "Diễn tập khôi phục", "description": "Phải lặp lại diễn tập khôi phục mỗi 90 ngày.", "remediation": "Khôi phục một bản sao lưu trong môi trường cô lập, xác minh, rồi xác nhận mục kiểm tra này." }
+  }
 }
