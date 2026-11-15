@@ -10,6 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
+### Fixed
+
+- Maintainers: CI now prints the Vitest results for the Postgres steps as well as writing the
+  JSON report, so a failing test is named in the log. Postgres tests pin their session to UTC, so
+  identity-merge step-up checks no longer fail on a local server whose time zone is not UTC.
+
 ## [1.6.0] - 2026-11-14
 
 Upgrading from 1.5.0: see [Upgrading 1.5.0 to 1.6.0](docs/upgrade.md#upgrading-150-to-160).

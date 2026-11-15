@@ -19,7 +19,7 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
 }
 
 const EXPECTED_CI_WORKFLOW_SHA256 =
-  'dc45757536ddb4bdcf68b5214350c47f4d310014f8a0372f635a9d0475bd84e2';
+  '391ee0f59abc648878f79f4767e5fc9375863e1eb2bea19583ce69b3a790ef1e';
 
 function normalizeWorkflowSource(source: string): string {
   return source.replaceAll('\r\n', '\n');
@@ -215,9 +215,9 @@ describe('test runner hardening', () => {
   it('makes documentation and both non-skipping Postgres reports mandatory in CI', () => {
     expect(workflow).toContain('npm run docs:check');
     expect(workflow).toContain('test/setup/dry-run.test.ts test/setup/clean-room-d1.test.ts');
-    expect(workflow).toContain('test/setup/clean-room-pg.test.ts --reporter=json --outputFile=.tmp/setup-pg.json');
+    expect(workflow).toContain('test/setup/clean-room-pg.test.ts --reporter=default --reporter=json --outputFile.json=.tmp/setup-pg.json');
     expect(workflow).toContain('node scripts/ci/assert-vitest-json.mjs .tmp/setup-pg.json 1');
-    expect(workflow).toContain('npx vitest run --project pg --reporter=json --outputFile=.tmp/pg.json');
+    expect(workflow).toContain('npx vitest run --project pg --reporter=default --reporter=json --outputFile.json=.tmp/pg.json');
     expect(workflow).toContain('node scripts/ci/assert-vitest-json.mjs .tmp/pg.json 1');
     expect(workflow).toMatch(/mkdirSync\('\.tmp', \{ recursive: true \}\)/);
   });

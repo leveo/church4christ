@@ -14,6 +14,10 @@ export function pgClient() {
     max: 2,
     fetch_types: false,
     onnotice: () => {},
+    // Pin the session to UTC like CI and Supabase: SQL guards compare UTC
+    // datetime('now') text with clock_timestamp(), which a local non-UTC
+    // server time zone would shift by hours.
+    connection: { TimeZone: 'UTC' },
     types: { int8AsNumber: { to: 20, from: [20], serialize: String, parse: Number } },
   });
 }
