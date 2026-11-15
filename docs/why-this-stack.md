@@ -10,8 +10,8 @@ claim this is right for everyone.
 
 - **Small and mid-size churches, Christian fellowships, and small nonprofits** — especially
   ones without a professional web team or a line item for software.
-- **Bilingual and immigrant congregations.** English + Chinese (Simplified and Traditional)
-  is a first-class feature here, not a paid add-on or an afterthought. Adding another
+- **Multilingual and immigrant congregations.** Twelve interface languages, including English
+  and Chinese (Simplified and Traditional), are a first-class feature here, not a paid add-on or an afterthought. Adding another
   language is a documented checklist, not a rebuild.
 - **Ministries that want to own their content and their members' data** — in plain,
   exportable formats, on infrastructure they control.
@@ -33,7 +33,7 @@ and are fine with some setup and ongoing operation**.
 | **Recurring cost** | WordPress hosting, Wix subscriptions, or per-seat/per-module SaaS fees that grow as you grow. | The base Worker, D1, and R2 resources can start within free allowances. Email to arbitrary recipients currently needs Workers Paid, and usage, a domain, Supabase, or operational services can add cost. |
 | **Vendor lock-in** | Your content and member data sit on a vendor's servers under their terms. | Your data lives in **your own account**, in open formats (a SQL database, Markdown files, plain image files) you can export anytime. |
 | **The maintenance treadmill** | WordPress needs constant plugin and security updates; a self-run server needs OS patches and monitoring. | A small, self-contained, **heavily tested** codebase with no plugin ecosystem to keep patched. Update on your schedule. |
-| **Bilingual is hard** | Multi-language is a bolt-on, a paid plugin, or two separate sites. | **Built in** from the ground up: per-field translation, a Simplified→Traditional toggle, and graceful fallback. |
+| **Multiple languages are hard** | Multi-language is a bolt-on, a paid plugin, or two separate sites. | **Built in** from the ground up: per-field translation, a Simplified→Traditional toggle, and graceful fallback. |
 | **Volunteer scheduling is a separate tool** | A second subscription (rosters, sign-ups, reminders). | **Integrated in the codebase**: ministries, teams, plans, sign-ups, conflict checks, reminder emails, and an iCal feed. Email delivery follows the provider's plan rules. |
 | **"The volunteer who built it left"** | The site becomes unmaintainable when its one technical person moves on. | The code and docs are written to be **read and changed by an AI assistant**, so the next person can maintain it by asking, in plain language. |
 
@@ -141,8 +141,8 @@ difference is in what you optimize for:
   public site, which brings back exactly the cost and upkeep this project avoids. This
   project unifies the **public site + content CMS + volunteer scheduling** in one
   self-controlled codebase.
-- **Language and customization.** Bilingual and immigrant-church needs (English + Chinese,
-  Simplified and Traditional) are often poorly served by template-based SaaS. Here they are
+- **Language and customization.** Multilingual and immigrant-church needs (twelve interface
+  languages, including Simplified and Traditional Chinese) are often poorly served by template-based SaaS. Here they are
   a core, fully-customizable feature.
 
 **Choose the mature SaaS when:** you want no technical involvement at all, you need deep
@@ -150,7 +150,7 @@ church-management features (online giving, check-in kiosks, a full membership da
 owning the code is not a priority.
 
 **Choose this project when:** you want control of your content and data, a low-cost path for
-smaller workloads, a fast bilingual public site, and you are prepared for setup plus
+smaller workloads, a fast multilingual public site, and you are prepared for setup plus
 ongoing dependency, security, backup, and monitoring work.
 
 ---

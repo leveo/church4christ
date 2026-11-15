@@ -8,8 +8,8 @@
       "preset": "checkin",
       "title": "Open-source church check-in",
       "tagline": "A kids check-in kiosk for your church. Parents check children in on a tablet and get a pickup code; your children's ministry team sees who is in the room right now.",
-      "description": "Open-source church check-in: a kids check-in kiosk with pickup codes, a live roster, and attendance charts. Self-hosted on Cloudflare, English and Chinese. A Church4Christ edition.",
-      "topics": ["church", "church-checkin", "kids-checkin", "child-check-in", "childrens-ministry", "kiosk", "check-in", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "description": "Open-source church check-in: a kids check-in kiosk with pickup codes, a live roster, and attendance charts. Self-hosted on Cloudflare, 12 interface languages. A Church4Christ edition.",
+      "topics": ["church", "church-checkin", "kids-checkin", "child-check-in", "childrens-ministry", "kiosk", "check-in", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "multilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
       "features": [
         "**Self-serve kiosk on any tablet browser.** A parent searches by a child's name or their own phone number, taps the children they are dropping off, and checks in.",
         "**Pickup codes instead of badge printers.** Each check-in gets a 4-character code shown on screen; siblings checked in together share one code, and the code guards checkout.",
@@ -18,7 +18,7 @@
         "**Your classes, your schedule.** Add a class or service, optionally tied to a weekday; retiring one removes it from the kiosk and keeps its history.",
         "**Lost tablet? Regenerate the link.** The kiosk runs from a private URL; regenerating it shuts the old device out immediately.",
         "**Families come from People & Households.** Every child recorded under a household can check in; CSV import brings your existing family list in.",
-        "**English and Chinese.** The kiosk switches language with one tap."
+        "**12 interface languages**, including English and Chinese; each church picks the ones it offers."
       ],
       "limits": [
         "There is no label printing; the pickup code is shown on screen.",
@@ -45,7 +45,7 @@
           "同工管理台：今日实时名单、12 周出席图表、班级管理。",
           "平板丢失可一键重新生成报到链接，旧设备立即失效。",
           "家庭资料来自「会友与家庭」，可用 CSV 导入现有名单。",
-          "中英文界面，报到机一键切换语言。"
+          "支持 12 种界面语言（含中英文），教会自选要开启的语言。"
         ]
       }
     },
@@ -54,8 +54,8 @@
       "preset": "volunteer-scheduling",
       "title": "Open-source church volunteer scheduling",
       "tagline": "Schedule worship, kids, hospitality, and tech teams. Volunteers confirm or decline from an email link, block out dates, and subscribe to their serving calendar.",
-      "description": "Open-source church volunteer scheduling: teams, positions, a monthly scheduling matrix, confirm/decline emails, blockout dates, and a spiritual gifts quiz. Self-hosted, English and Chinese. A Church4Christ edition.",
-      "topics": ["church", "volunteer-scheduling", "volunteer-management", "church-volunteers", "scheduling", "worship-team", "rota", "spiritual-gifts", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "description": "Open-source church volunteer scheduling: teams, positions, a monthly scheduling matrix, confirm/decline emails, blockout dates, and a spiritual gifts quiz. Self-hosted, 12 interface languages. A Church4Christ edition.",
+      "topics": ["church", "volunteer-scheduling", "volunteer-management", "church-volunteers", "scheduling", "worship-team", "rota", "spiritual-gifts", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "multilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
       "features": [
         "**Ministries, teams, positions, and plans.** A ministry holds teams, a team defines its positions, and a plan is one dated service. A new-ministry wizard sets up a whole area in a few minutes.",
         "**A scheduling matrix.** Fill a month at a glance; the site warns when someone is already booked that day or has a blockout.",
@@ -65,7 +65,7 @@
         "**Reminders and a weekly digest.** Unconfirmed volunteers get a reminder before their service, and everyone gets a weekly list of their serving.",
         "**Personal schedule and calendar feed.** Each volunteer has a schedule page and a private subscribe link for Apple Calendar, Google Calendar, or Outlook.",
         "**Apply to serve and a spiritual gifts quiz.** An opportunity board, team applications that leaders approve, and a 40-statement gifts quiz that recommends ministries.",
-        "**English and Chinese** throughout."
+        "**12 interface languages** throughout, including English and Chinese."
       ],
       "limits": [
         "Reminder, digest, and confirm/decline emails need an email provider when deployed; on your own computer, emails print to the terminal instead of being sent.",
@@ -101,8 +101,8 @@
       "preset": "small-groups",
       "title": "Open-source small group management for churches",
       "tagline": "A home for your church's small groups: a public directory, join requests, recurring meetings, and attendance taken from an emailed checklist.",
-      "description": "Open-source small group management for churches: public and private groups, join requests, group leaders, recurring meetings, and attendance tracking. Self-hosted, English and Chinese. A Church4Christ edition.",
-      "topics": ["church", "small-groups", "small-group-management", "church-groups", "bible-study", "group-management", "attendance-tracking", "fellowship", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "bilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
+      "description": "Open-source small group management for churches: public and private groups, join requests, group leaders, recurring meetings, and attendance tracking. Self-hosted, 12 interface languages. A Church4Christ edition.",
+      "topics": ["church", "small-groups", "small-group-management", "church-groups", "bible-study", "group-management", "attendance-tracking", "fellowship", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "multilingual", "cloudflare-workers", "cloudflare-d1", "astro", "planning-center-alternative"],
       "features": [
         "**Public and private groups.** Public groups appear in the directory; private groups are invisible to anyone who is not a member.",
         "**Join requests.** A visitor signs in with just a name and email (magic link, no password) and taps Request to join; a group leader approves or declines.",
@@ -112,7 +112,7 @@
         "**Attendance without homework.** After a tracked meeting, leaders get an email link to a simple checklist; tick who came and save.",
         "**Involvement history.** Each person's profile shows their groups and attendance.",
         "**A fellowship directory** for larger fellowships alongside small groups.",
-        "**English and Chinese** throughout."
+        "**12 interface languages** throughout, including English and Chinese."
       ],
       "limits": [
         "Paid or open sign-up events for a group use the Registration feature, which needs the optional Supabase database. This edition runs on the default Cloudflare D1 database, where that section simply does not appear.",
@@ -139,7 +139,7 @@
           "没有邮箱的成员也能只用姓名加入。",
           "每周、隔周或每月的定期聚会自动排进日历。",
           "聚会结束后组长收到点名清单链接，勾选即可。",
-          "附带团契目录；中英文界面。"
+          "附带团契目录；支持 12 种界面语言。"
         ]
       }
     },
@@ -147,9 +147,9 @@
       "repo": "church-website-cms",
       "preset": "website",
       "title": "Open-source church website CMS",
-      "tagline": "A bilingual church website your staff can update without a developer: sermons, events, bulletins, articles, prayer requests, and a block page builder.",
-      "description": "Open-source church website CMS: sermon archive, events, weekly bulletins, articles, prayer wall, and a block page builder. English and Chinese, three themes, self-hosted on Cloudflare. A Church4Christ edition.",
-      "topics": ["church", "church-website", "church-cms", "cms", "sermons", "sermon-archive", "church-bulletin", "events", "page-builder", "website-builder", "church4christ", "self-hosted", "nonprofit", "bilingual", "i18n", "cloudflare-workers", "cloudflare-d1", "astro"],
+      "tagline": "A multilingual church website your staff can update without a developer: sermons, events, bulletins, articles, prayer requests, and a block page builder.",
+      "description": "Open-source church website CMS: sermon archive, events, weekly bulletins, articles, prayer wall, and a block page builder. 12 interface languages, three themes, self-hosted on Cloudflare. A Church4Christ edition.",
+      "topics": ["church", "church-website", "church-cms", "cms", "sermons", "sermon-archive", "church-bulletin", "events", "page-builder", "website-builder", "church4christ", "self-hosted", "nonprofit", "multilingual", "i18n", "cloudflare-workers", "cloudflare-d1", "astro"],
       "features": [
         "**Sermon archive** with search, speakers, and series.",
         "**Events and announcements** on a public calendar.",
@@ -158,7 +158,7 @@
         "**Prayer wall.** Visitors send prayer requests; staff receive and care for them in the admin area.",
         "**Fellowship directory.**",
         "**Block page builder** for custom pages, with images stored in Cloudflare R2.",
-        "**English, Simplified Chinese, and Traditional Chinese.** Each page has an English and Chinese version, and readers can switch Chinese text to Traditional with one tap.",
+        "**12 interface languages**, including English and Simplified Chinese; each church turns on the ones it needs, and readers can switch Chinese text to Traditional with one tap.",
         "**Three themes with light and dark modes,** all from design tokens, so your colors stay consistent.",
         "**Staff sign in by magic link,** with no passwords to manage."
       ],
@@ -182,13 +182,13 @@
       "demo": "Choose **Visit the church website** to browse the public pages, or choose **Content editor** to try updating content.",
       "zh": {
         "title": "开源教会网站内容管理系统",
-        "summary": "同工不用写代码就能更新的双语教会网站：讲道、活动、周报、文章、祷告事项和区块页面编辑器。",
+        "summary": "同工不用写代码就能更新的多语言教会网站：讲道、活动、周报、文章、祷告事项和区块页面编辑器。",
         "features": [
           "可搜索的讲道资料库，活动日历与公告。",
           "每周周报、双语文章、祷告单。",
           "祷告墙：访客提交代祷事项，同工在后台跟进。",
           "区块页面编辑器，自由建立页面。",
-          "英文、简体、繁体中文；三套主题，支持深色模式。",
+          "12 种界面语言，中文可一键切换繁体；三套主题，支持深色模式。",
           "同工用邮件链接登录，无需密码。"
         ]
       }

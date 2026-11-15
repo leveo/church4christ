@@ -418,11 +418,19 @@ already exist, so upgrading does not switch the module on. It changes no other t
 
 No preset changes, so an installation's recorded module list stays valid.
 
-## Unreleased: language settings
+## Upgrading 1.5.0 to 1.6.0
+
+Version 1.6.0 adds twelve interface languages. Apply the new forward migrations before
+deploying: on D1, `0041` through `0049`; on Supabase, `0041_supported_locales.sql`. There is no
+new binding, secret, cron trigger, or dependency. Upgraded installations keep exactly English and
+Chinese, with English as the default, until an administrator turns on more languages in
+**Settings → Languages**. The sections below give the details.
+
+### Language settings
 
 - **No migration for the settings themselves.** Choosing languages stores two settings rows; the
   database change that lets more languages be stored is described in
-  [Unreleased: language lookup migrations](#unreleased-language-lookup-migrations).
+  [Language lookup migrations](#language-lookup-migrations).
 - **Upgraded installations keep English and Chinese, with English as the default,** until an
   administrator saves **Settings → Languages**. Nothing new appears and no behavior changes
   before then.
@@ -436,13 +444,13 @@ No preset changes, so an installation's recorded module list stays valid.
 - **Disabling a language never deletes content.** It only hides the language; translations stay
   stored and reappear when it is enabled again.
 
-## Unreleased: language lookup migrations
+### Language lookup migrations
 
 Every locale column used a hard-coded `CHECK (locale IN ('en','zh'))`. A new `supported_locales`
 table now holds the allowed language codes (seeded with `en`, `zh`, `es`, `pt`, `fr`, `de`, `ja`,
 `ko`, `ms`, `id`, `vi`, `hi`) and the locale columns reference it, so adding a language later is
-an `INSERT`, not a schema change. The application still offers only English and Chinese until a
-language is added to the registry (see [docs/i18n.md](i18n.md)). **No data changes, no new
+an `INSERT`, not a schema change. An upgraded installation still offers only English and Chinese
+until an administrator enables more languages (see [docs/i18n.md](i18n.md)). **No data changes, no new
 binding or secret, and no behavior changes** for existing content.
 
 - **D1: nine forward migrations, `0041` to `0049`.** `0041_supported_locales.sql` creates and

@@ -202,7 +202,7 @@ config is absent, so the demo deploy runs all its crons without backups configur
 
 - **Design tokens** (`design/*.json`) compile into CSS variables and three themes — see
   [`docs/design-system.md`](design-system.md).
-- **Two languages** (English + Chinese) share one codebase — see [`docs/i18n.md`](i18n.md).
+- **Twelve interface languages** share one codebase; each site enables its own set — see [`docs/i18n.md`](i18n.md).
 
 ## Testing
 

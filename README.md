@@ -7,10 +7,10 @@
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Built with Astro](https://img.shields.io/badge/built%20with-Astro-ff5d01.svg)](https://astro.build/)
 [![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020.svg)](https://workers.cloudflare.com/)
-[![English | 中文](https://img.shields.io/badge/i18n-English%20%7C%20%E4%B8%AD%E6%96%87-2b7a4b.svg)](docs/i18n.md)
+[![12 languages](https://img.shields.io/badge/i18n-12%20languages-2b7a4b.svg)](docs/i18n.md)
 
 **An AI-native, open-source church management system (ChMS) and church CMS with a
-bilingual (English/Chinese) church website. A self-hosted, modular Planning Center
+multilingual church website in 12 interface languages, including English and Chinese. A self-hosted, modular Planning Center
 alternative for small and mid-size churches, fellowships, and nonprofits, built on Astro
 and Cloudflare Workers.**
 
@@ -31,13 +31,13 @@ to choose your organization's identity, colors, logo, and first features in a lo
 page, then pass the saved preferences to the existing installer. Coding agents begin with
 [AGENTS.md](AGENTS.md); Claude also reads [CLAUDE.md](CLAUDE.md).
 
-Church4Christ combines a bilingual public site with an admin system for content,
+Church4Christ combines a multilingual public site with an admin system for content,
 prayer care, volunteer scheduling, people, and households. Optional modules add a
 member portal and other church-management workflows. The project aims to lower the
 startup and ongoing maintenance cost of a customized implementation while keeping the
 code and deployment configuration available to its operators.
 
-The **current source release is 1.5**. Church4Christ is an open-source foundation,
+The **current source release is 1.6**. Church4Christ is an open-source foundation,
 not a turnkey managed service. Local evaluation is free, and some deployments
 can fit within provider free allowances, but production
 hosting, email, databases, domains, backups, and other services may charge based on
@@ -84,7 +84,7 @@ customization are included too.
 ## Who is this for?
 
 Church4Christ is intended for small and mid-size churches, fellowships, and nonprofits —
-especially bilingual and immigrant congregations — that need a public website and a
+especially multilingual and immigrant congregations — that need a public website and a
 customizable church-management base. It fits best when a technically comfortable staff
 member, volunteer, or implementation partner can own deployment and maintenance. A
 managed platform may be a better fit when the organization prefers vendor-operated setup,
@@ -98,12 +98,12 @@ rights.
 
 | | **Church4Christ** | **Self-managed plugin CMS** | **Hosted site builder** | **Managed church platform** |
 |---|---|---|---|---|
-| **Primary fit** | Customized bilingual website plus modular church workflows | Extensible content website assembled from plugins | Provider-managed public website | Provider-managed church workflows |
+| **Primary fit** | Customized multilingual website plus modular church workflows | Extensible content website assembled from plugins | Provider-managed public website | Provider-managed church workflows |
 | **Cost model** | Infrastructure and service usage; some profiles may fit free allowances | Hosting, extensions, and maintenance | Subscription and add-ons | Subscription, often by tier or module |
 | **Customization** | Source-level changes and optional modules | Themes, plugins, and source changes where available | Provider-supported templates and extensions | Provider-supported configuration and integrations |
 | **Operations** | Your team or implementation partner deploys, updates, monitors, and backs up | Your team or host manages core and plugin upkeep | Provider manages most platform operations | Provider manages most platform operations |
 | **Portability** | Code and database access support migration, but migration is manual | Depends on hosting, plugins, and formats | Depends on provider exports and terms | Depends on provider exports, APIs, and terms |
-| **Bilingual starting point** | English and Chinese included | Depends on selected extensions | Depends on the service and plan | Depends on the service and plan |
+| **Language starting point** | Twelve interface languages included; each church picks its own set | Depends on selected extensions | Depends on the service and plan | Depends on the service and plan |
 
 **The trade-offs.** Church4Christ is optimized for Cloudflare Workers and its bindings;
 moving to another hosting stack is possible source work, not a supported one-click path.
@@ -216,7 +216,7 @@ does not replace security decisions, backups, production testing, or operational
 ## Our mission
 
 **To lower the cost and effort of starting a customized church-management system and
-bilingual website.** Church4Christ provides a tested, modular foundation that a church or
+multilingual website.** Church4Christ provides a tested, modular foundation that a church or
 implementation partner can adapt instead of starting from zero. It does not promise a
 zero-subscription or zero-budget production service: infrastructure, email, database,
 domain, support, and maintenance choices determine the real operating cost.
@@ -249,11 +249,11 @@ Every feature has its own plain-English guide. Start with any of these:
 |  | **[Service planning](docs/features/service-planning.md)** | Plan a timed run sheet, rehearsals with the people called, member availability, a find-a-time search, calendars, and automatic email. |
 |  | **[Activity score](docs/features/activity-score.md)** | Combine selected person-linked activities into explainable member scores and a church-wide engagement summary. |
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Learning](docs/features/learning.md)** | Continue Sunday school and discipleship between meetings with bilingual videos, files, assignments, quizzes, and provider-synchronized status. |
-| [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — bilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
+| [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — multilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export, plus paid Stripe checkout in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
-| [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Two languages](docs/features/i18n.md)** | Every page in English and Chinese, with one-click Simplified-to-Traditional. |
+| [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Twelve languages](docs/features/i18n.md)** | Choose from 12 interface languages per site, with an English fallback and one-click Simplified-to-Traditional Chinese. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[Modules](docs/features/modules.md)** | Switch off the features you don't use; nothing is deleted, flip back anytime. |
 
@@ -545,8 +545,8 @@ better operating model are laid out in
 ## FAQ
 
 **What is Church4Christ?**
-An open-source church management system (ChMS) and church CMS. It combines a bilingual
-English/Chinese church website with staff tools for people and households, groups,
+An open-source church management system (ChMS) and church CMS. It combines a multilingual
+church website (12 interface languages) with staff tools for people and households, groups,
 volunteer scheduling, children's check-in, attendance, newcomer follow-up, and prayer care.
 
 **Is there a free, open-source alternative to Planning Center?**
@@ -562,9 +562,11 @@ The software is free. Hosting, email, database, and domain services may cost mon
 depending on your setup and usage; some small deployments fit within provider free
 allowances. See [Deployment profiles and costs](#deployment-profiles-and-costs).
 
-**Does it support Chinese or bilingual churches?**
-Yes. Every page is available in English and Chinese, with one-click Simplified-to-Traditional
-conversion. Other languages can be added; see [docs/i18n.md](docs/i18n.md).
+**Which languages does it support?**
+Twelve interface languages: English, Chinese, Spanish, Brazilian Portuguese, French, German,
+Japanese, Korean, Malay, Indonesian, Vietnamese, and Hindi. Each church chooses which ones its
+site offers and a default; Chinese pages also get one-click Simplified-to-Traditional
+conversion. More languages can be added; see [docs/i18n.md](docs/i18n.md).
 
 **Can a small church without a developer run it?**
 It works best when a technically comfortable staff member, volunteer, or partner owns
@@ -579,11 +581,11 @@ Cloudflare R2 for media. Public pages ship no client-side framework.
 
 ## 中文简介
 
-**Church4Christ 是一套开源的教会管理系统（ChMS）和教会网站（教会 CMS），中英双语，
+**Church4Christ 是一套开源的教会管理系统（ChMS）和教会网站（教会 CMS），支持 12 种界面语言（含中英文），
 可以自己部署，是 Planning Center 等托管服务之外的一个开源选择。** 适合中小型教会、
-团契和非营利机构，尤其是双语和移民教会。
+团契和非营利机构，尤其是多语言和移民教会。
 
-- **公开网站**：首页、讲道、周报、活动、见证、文章，三套主题，简繁一键转换。
+- **公开网站**：首页、讲道、周报、活动、见证、文章，三套主题，12 种界面语言可选，简繁一键转换。
 - **教会管理**：会友与家庭、小组、团契、服事排班、儿童报到、崇拜出席、新朋友跟进、祷告墙、
   工作流程提醒、多堂点（multi-campus）。
 - **可选模块**：会友平台、奉献记账、活动报名（需要 Supabase/PostgreSQL）。
@@ -591,7 +593,7 @@ Cloudflare R2 for media. Public pages ship no client-side framework.
 - **技术栈**：Astro + Cloudflare Workers，数据库用 D1 或 Supabase，媒体存 R2，GPL-3.0 许可。
 
 快速开始：`npm ci`，再运行 `npm run onboard`，在浏览器里填写教会名称、颜色、Logo 和要启用的功能。
-详细步骤见 [安装指南](docs/setup.md)，中英文界面说明见 [docs/i18n.md](docs/i18n.md)。
+详细步骤见 [安装指南](docs/setup.md)，多语言配置说明见 [docs/i18n.md](docs/i18n.md)。
 
 ---
 
