@@ -1,6 +1,6 @@
 // Supported languages for setup and onboarding. The runtime registry lives in
 // src/lib/locales.ts; config/locales.json mirrors its codes and native names for
-// these plain-Node scripts, and test/node/setup/locales-parity.test.ts keeps the
+// these plain-Node scripts, and test/node/setup/locales.test.ts keeps the
 // two in lockstep. Adding a language means adding it to both.
 import config from '../../config/locales.json' with { type: 'json' };
 

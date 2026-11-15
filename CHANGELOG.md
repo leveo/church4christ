@@ -24,8 +24,26 @@ than published to npm.
   onboarding preferences are `schemaVersion: 2` (version 1 still reads). `--locale x` alone keeps its
   earlier meaning (English and Chinese enabled, x the default); `--locales` narrows or widens the set. See [docs/i18n.md](docs/i18n.md).
 
+- Language support for ten more languages: Spanish (`es`), Brazilian Portuguese (`pt`, BCP-47
+  `pt-BR`), French, German, Japanese, Korean, Malay (`ms`), Indonesian (`id`), Vietnamese, and
+  Hindi are registered and selectable in Settings and onboarding, each with its own lazily loaded
+  dictionary file. The translations themselves are still in progress, so these languages show
+  English text until they land (a language flagged this way is marked "translation in progress"
+  in onboarding). Upgraded installations still enable only English and Chinese. Japanese, Korean,
+  and Devanagari get system font stacks and Japanese and Korean the CJK line height. A
+  translation toolkit ships with it: `scripts/i18n/export-keys.mjs`, `scripts/i18n/check.mjs`, a
+  church glossary in `docs/i18n/glossary.md`, and per-language capability and readiness copy in
+  `src/i18n/catalog/<code>.json`. See [docs/i18n.md](docs/i18n.md).
+- Admin editors for ministries, teams, service types, custom pages, events, announcements,
+  navigation links, and the site identity settings (name, tagline, service times) now read and
+  write every enabled language, not only English and Chinese.
+
 ### Changed
 
+- The "Han text means Chinese" display heuristic for legacy sermons, bulletins, and plan
+  subtitles now applies only to Latin-script languages. Japanese, Korean, and Hindi pages no
+  longer hide rows because they contain Han characters. Prayer sheets and testimonies are matched
+  by their explicit language along the fallback chain.
 - Locale columns now reference a `supported_locales` lookup table instead of a hard-coded
   `CHECK (locale IN ('en','zh'))`, so adding a language later is an `INSERT`, not a schema
   change. Operator impact: apply the new forward migrations before deploying. D1 gets
